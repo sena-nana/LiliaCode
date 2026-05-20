@@ -11,8 +11,9 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import { Paperclip, ShieldCheck, GitBranch, Sparkles, ArrowUp } from "lucide-vue-next";
+import { Paperclip, ShieldCheck, GitBranch, Sparkles, ArrowUp, Bot } from "lucide-vue-next";
 import type {
+  ChatBackendKind,
   ChatBranchOption,
   ChatComposerState,
   ChatModelOption,
@@ -44,6 +45,11 @@ const permissionOptions = [
   { value: "readonly" as PermissionMode, label: "只读", hint: "禁止写操作" },
 ];
 
+const backendOptions = [
+  { value: "claude" as ChatBackendKind, label: "Claude", hint: "Claude Agent SDK" },
+  { value: "codex" as ChatBackendKind, label: "Codex", hint: "OpenAI Codex SDK" },
+];
+
 const modelOptions = computed(() =>
   props.models.map((m) => ({ value: m.id, label: m.label })),
 );
@@ -62,6 +68,11 @@ function patch(next: Partial<ChatComposerState>) {
 function setModel(v: string) { patch({ model: v }); }
 function setBranch(v: string) { patch({ branch: v }); }
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
+function setBackend(v: ChatBackendKind) {
+  // 切 backend 时父层会监听 state.backend 变化重新拉 models，
+  // model 字段交由父层在新 models 到位后修正——这里只发 backend 变更。
+  patch({ backend: v });
+}
 
 function send() {
   const value = text.value.trim();
@@ -102,7 +113,7 @@ watch(text, async () => {
       v-model="text"
       class="chat-composer__input"
       rows="1"
-      placeholder="可向 Claude 询问任何事，输入 @ 使用插件或提及文件"
+      placeholder="可向 agent 询问任何事，输入 @ 使用插件或提及文件"
       @keydown="onKeydown"
       @input="resize"
     />
@@ -133,6 +144,12 @@ watch(text, async () => {
       </div>
 
       <div class="chat-composer__group">
+        <Dropdown
+          :model-value="state.backend"
+          :options="backendOptions"
+          :icon="Bot"
+          @update:model-value="setBackend"
+        />
         <Dropdown
           :model-value="state.model"
           :options="modelOptions"

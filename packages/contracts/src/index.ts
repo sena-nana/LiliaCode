@@ -79,9 +79,17 @@ export interface ChatMessage {
 
 export type PermissionMode = "full" | "ask" | "readonly";
 
+/**
+ * 当前支持的对话后端：
+ * - claude：通过 @anthropic-ai/claude-agent-sdk
+ * - codex：通过 @openai/codex-sdk（内部 spawn 本地 codex CLI）
+ */
+export type ChatBackendKind = "claude" | "codex";
+
 export interface ChatComposerState {
   taskId: string;
-  /** 例如 "claude-sonnet-4-6"，由 chat_list_models 返回值约束。 */
+  backend: ChatBackendKind;
+  /** 模型 id 的语义由 backend 决定（claude-* / gpt-5-codex 等）。 */
   model: string;
   /** 当前 git 分支名。 */
   branch: string;
@@ -91,9 +99,67 @@ export interface ChatComposerState {
 export interface ChatModelOption {
   id: string;
   label: string;
+  backend: ChatBackendKind;
 }
 
 export interface ChatBranchOption {
   name: string;
   current: boolean;
+}
+
+/**
+ * 单个 backend 的路由模式。两选一：
+ * - cc-switch：经下方 CCSwitchConfig 的代理 URL 转发
+ * - direct：用 ProviderConfig 里的 baseUrl + apiKey 直连真实 API
+ *
+ * 每个 backend 独立选择——Claude 和 Codex 可以分别用不同的路由。
+ */
+export type RouterMode = "cc-switch" | "direct";
+
+/**
+ * 单 backend 的直连配置：仅在该 backend 的 router 为 "direct" 时被读取。
+ * apiKey / baseUrl 为 null 时视为未配置。
+ */
+export interface ProviderConfig {
+  backend: ChatBackendKind;
+  baseUrl: string | null;
+  apiKey: string | null;
+}
+
+/**
+ * CC-Switch 代理层配置：所有走 cc-switch 路由的 backend 共用一个代理 URL。
+ * 这里假定 CC-Switch 在同一个端口同时承载 Anthropic 和 OpenAI 兼容流量
+ * （或上层网关已合并），需要分离时再回到 per-backend 字段。
+ * 默认 http://127.0.0.1:15721。
+ */
+export interface CCSwitchConfig {
+  baseUrl: string | null;
+}
+
+export type ConnectionMode = "cc-switch" | "custom" | "direct" | "unconfigured";
+
+export interface BackendEnvStatus {
+  backend: ChatBackendKind;
+  hasApiKey: boolean;
+  /** 当前实际走的路由（由 routerMode 决定 + 配置是否完整）。 */
+  connectionMode: ConnectionMode;
+  /** 兜底说明用的目标 URL；unconfigured 时为 null。 */
+  effectiveUrl: string | null;
+}
+
+/** CC-Switch 代理层的全局健康信息。 */
+export interface CCSwitchStatus {
+  /** 单一代理 URL 是否能 TCP 拨通；URL 为空时为 false。 */
+  reachable: boolean;
+  baseUrl: string | null;
+}
+
+export interface EnvStatusReport {
+  nodeAvailable: boolean;
+  /** codex CLI 是否能在 PATH 找到（@openai/codex-sdk 是 wrapper）。 */
+  codexCliAvailable: boolean;
+  ccSwitch: CCSwitchStatus;
+  /** 每个 backend 当前生效的路由模式。 */
+  routerModes: Record<ChatBackendKind, RouterMode>;
+  backends: Record<ChatBackendKind, BackendEnvStatus>;
 }

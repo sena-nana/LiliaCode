@@ -25,20 +25,40 @@ const route = useRoute();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
-const { status: connStatus } = useConnectionStatus();
+const { statusFor } = useConnectionStatus();
 
-/** 侧栏底部那枚徽章上要显示的提供商名。
- *  - cc-switch / direct 给固定友好名；
- *  - custom 从 effectiveUrl 摘 host，便于一眼分辨连到哪里去了；
- *  - unconfigured 不进徽章，会渲染警告小标志。 */
+/** 侧栏没有「当前活跃 backend」的概念，按以下规则挑一个显示：
+ *  - Claude 配好 → 显示 Claude（与改造前一致）
+ *  - Claude 未配但 Codex 配好 → 显示 Codex
+ *  - 两者都未配 → 警告未连接
+ *  这样不论用户主用哪个 backend 都能在侧栏看到至少一个绿灯。 */
+const primaryStatus = computed(() => {
+  const claude = statusFor("claude");
+  const codex = statusFor("codex");
+  if (claude && claude.connectionMode !== "unconfigured") {
+    return { backend: "claude" as const, status: claude };
+  }
+  if (codex && codex.connectionMode !== "unconfigured") {
+    return { backend: "codex" as const, status: codex };
+  }
+  return claude || codex
+    ? { backend: "claude" as const, status: claude ?? codex! }
+    : null;
+});
+
+const backendLabel = computed(() =>
+  primaryStatus.value?.backend === "codex" ? "Codex" : "Claude",
+);
+
+/** 徽章上显示的提供商名（连到哪去了）。 */
 const providerLabel = computed(() => {
-  const s = connStatus.value;
+  const s = primaryStatus.value?.status;
   if (!s) return null;
   switch (s.connectionMode) {
     case "cc-switch":
       return "CC-Switch";
     case "direct":
-      return "Anthropic";
+      return primaryStatus.value?.backend === "codex" ? "OpenAI" : "Anthropic";
     case "custom": {
       const url = s.effectiveUrl || "";
       try { return new URL(url).host || "Custom"; }
@@ -50,16 +70,18 @@ const providerLabel = computed(() => {
 });
 
 const isUnconfigured = computed(
-  () => connStatus.value?.connectionMode === "unconfigured",
+  () => primaryStatus.value?.status.connectionMode === "unconfigured" ||
+        primaryStatus.value === null,
 );
 
 const connectionTooltip = computed(() => {
-  const s = connStatus.value;
-  if (!s) return "正在检测 Claude 连接…";
+  const ps = primaryStatus.value;
+  if (!ps) return "正在检测 agent 连接…";
+  const s = ps.status;
   if (s.connectionMode === "unconfigured") {
-    return "未检测到 Claude 连接：未发现 CC-Switch 本地代理也没有 ANTHROPIC_API_KEY。点击进入设置。";
+    return "未检测到任何 agent 连接：CC-Switch / ANTHROPIC_API_KEY / OPENAI_API_KEY 均未发现。点击进入设置。";
   }
-  return `Claude · ${providerLabel.value}（${s.effectiveUrl ?? "—"}）`;
+  return `${backendLabel.value} · ${providerLabel.value}（${s.effectiveUrl ?? "—"}）`;
 });
 
 /** 项目树的展开状态，默认展开所有项目（数据少，先粗糙做）。 */
@@ -221,7 +243,7 @@ function noop() {
         </template>
         <template v-else-if="providerLabel">
           <Sparkles :size="12" aria-hidden="true" />
-          <span class="sb-conn__label">Claude · {{ providerLabel }}</span>
+          <span class="sb-conn__label">{{ backendLabel }} · {{ providerLabel }}</span>
         </template>
         <template v-else>
           <span class="sb-conn__label sb-conn__label--probing">检测中…</span>

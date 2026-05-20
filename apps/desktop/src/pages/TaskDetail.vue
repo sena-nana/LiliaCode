@@ -47,6 +47,7 @@ const project = computed(() => getProject(props.projectId));
 const messages = ref<LocalMessage[]>([]);
 const composer = ref<ChatComposerState>({
   taskId: props.taskId,
+  backend: "claude",
   model: "claude-sonnet-4-6",
   branch: "main",
   permission: "ask",
@@ -181,22 +182,40 @@ function pushSystemMessage(text: string) {
 }
 
 async function onComposerUpdate(next: ChatComposerState) {
+  const backendChanged = next.backend !== composer.value.backend;
   composer.value = next;
-  try { await setComposerState(next); }
+  if (backendChanged) {
+    // 切 backend → 重拉模型清单，并把 model 修正到新清单首项。
+    await reloadModelsForBackend(next.backend);
+  }
+  try { await setComposerState(composer.value); }
   catch (err) { console.error("[chat] setComposerState failed", err); }
 }
 
+async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
+  try {
+    const mdls = await listModels(backend);
+    models.value = mdls;
+    // 当前 model 不在新清单 → 回退首项；空清单则保留原值（仍发得出去，让后端报错）。
+    if (mdls.length && !mdls.some((m) => m.id === composer.value.model)) {
+      composer.value = { ...composer.value, model: mdls[0].id };
+    }
+  } catch (err) {
+    console.error("[chat] listModels failed", err);
+  }
+}
+
 async function loadAll() {
-  const [msgs, comp, mdls, brs] = await Promise.all([
+  const [msgs, comp, brs] = await Promise.all([
     listMessages(props.taskId),
     getComposerState(props.taskId),
-    listModels(),
     listBranches(props.projectId),
   ]);
   messages.value = msgs;
   composer.value = comp;
-  models.value = mdls;
   branches.value = brs;
+  // models 依赖 backend，单独拉以保证一致性。
+  await reloadModelsForBackend(comp.backend);
 }
 
 onMounted(async () => {
@@ -212,7 +231,7 @@ onMounted(async () => {
     await onTool((e) => {
       if (e.taskId !== props.taskId) return;
       // 第一阶段只展示工具名；input 摘要等后续做。
-      pushSystemMessage(`Claude 正在使用工具：${e.name}`);
+      pushSystemMessage(`agent 正在使用工具：${e.name}`);
     }),
   );
   unlisteners.push(
@@ -226,7 +245,7 @@ onMounted(async () => {
     await onError((e) => {
       if (e.taskId !== props.taskId) return;
       abortStream();
-      pushSystemMessage(`Claude 报错：${e.message}`);
+      pushSystemMessage(`agent 报错：${e.message}`);
     }),
   );
   await Promise.all([loadAll()]);

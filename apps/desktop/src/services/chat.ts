@@ -11,30 +11,40 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  BackendEnvStatus,
+  CCSwitchConfig,
+  CCSwitchStatus,
+  ChatBackendKind,
   ChatBranchOption,
   ChatComposerState,
   ChatMessage,
   ChatModelOption,
+  ConnectionMode,
+  EnvStatusReport,
+  ProviderConfig,
+  RouterMode,
 } from "@lilia/contracts";
+
+export type {
+  ConnectionMode,
+  BackendEnvStatus,
+  CCSwitchConfig,
+  CCSwitchStatus,
+  EnvStatusReport,
+  ProviderConfig,
+  RouterMode,
+};
 
 export interface ChunkEvent { taskId: string; text: string; }
 export interface ToolEvent { taskId: string; name: string; input: unknown; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
 export interface ErrorEvent { taskId: string; message: string; }
 
-/** 当前对 Claude 的连接方式（与 Rust 端 ConnectionMode::as_str 对齐）。 */
-export type ConnectionMode = "cc-switch" | "custom" | "direct" | "unconfigured";
-
-export interface EnvStatus {
-  hasApiKey: boolean;
-  nodeAvailable: boolean;
-  ccSwitchReachable: boolean;
-  connectionMode: ConnectionMode;
-  /** 实际请求会发往的 URL（兜底说明用），unconfigured 时为 null。 */
-  effectiveUrl: string | null;
-  /** 用户显式设的 ANTHROPIC_BASE_URL，没设为 null。 */
-  envBaseUrl: string | null;
-}
+/**
+ * @deprecated 用 BackendEnvStatus（per-backend）+ EnvStatusReport（顶层报告）替代。
+ * 留作旧代码迁移期的形状别名。
+ */
+export type EnvStatus = BackendEnvStatus;
 
 export function listMessages(taskId: string): Promise<ChatMessage[]> {
   return invoke<ChatMessage[]>("chat_list_messages", { taskId });
@@ -44,7 +54,7 @@ export function listMessages(taskId: string): Promise<ChatMessage[]> {
  * 发起一轮对话。返回值是 user 那条消息本身（用于 reconcile 乐观渲染）；
  * assistant 的回复通过 onChunk/onDone/onError 事件异步推回。
  *
- * projectCwd 是 SDK 跑 agent loop 的工作目录——它决定 Claude 能看到的文件树。
+ * projectCwd 是 SDK 跑 agent loop 的工作目录——它决定 agent 能看到的文件树。
  */
 export function sendMessage(
   taskId: string,
@@ -60,8 +70,8 @@ export function sendMessage(
   });
 }
 
-export function listModels(): Promise<ChatModelOption[]> {
-  return invoke<ChatModelOption[]>("chat_list_models");
+export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {
+  return invoke<ChatModelOption[]>("chat_list_models", { backend });
 }
 
 export function listBranches(projectId: string): Promise<ChatBranchOption[]> {
@@ -81,9 +91,33 @@ export function resetSession(taskId: string): Promise<void> {
   return invoke<void>("chat_reset_session", { taskId });
 }
 
-/** 健康检查：API key 是否在环境变量里、node 是否能跑。 */
-export function checkEnv(): Promise<EnvStatus> {
-  return invoke<EnvStatus>("chat_check_env");
+/** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式各是什么。 */
+export function checkEnv(): Promise<EnvStatusReport> {
+  return invoke<EnvStatusReport>("chat_check_env");
+}
+
+export function getProviderConfig(backend: ChatBackendKind): Promise<ProviderConfig> {
+  return invoke<ProviderConfig>("provider_get_config", { backend });
+}
+
+export function setProviderConfig(config: ProviderConfig): Promise<void> {
+  return invoke<void>("provider_set_config", { config });
+}
+
+export function getCCSwitchConfig(): Promise<CCSwitchConfig> {
+  return invoke<CCSwitchConfig>("cc_switch_get_config");
+}
+
+export function setCCSwitchConfig(config: CCSwitchConfig): Promise<void> {
+  return invoke<void>("cc_switch_set_config", { config });
+}
+
+export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {
+  return invoke<RouterMode>("router_get_mode", { backend });
+}
+
+export function setRouterMode(backend: ChatBackendKind, mode: RouterMode): Promise<void> {
+  return invoke<void>("router_set_mode", { backend, mode });
 }
 
 // ---- 事件订阅 ----
