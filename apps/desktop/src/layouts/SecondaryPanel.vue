@@ -11,17 +11,56 @@ import {
   ArrowUpDown,
   MoreHorizontal,
   Folder,
+  Sparkles,
+  AlertTriangle,
 } from "lucide-vue-next";
 import {
   listProjects,
   listProjectConversations,
   listOrphanConversations,
 } from "../data/projectsStub";
+import { useConnectionStatus } from "../composables/useConnectionStatus";
 
 const route = useRoute();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
+const { status: connStatus } = useConnectionStatus();
+
+/** 侧栏底部那枚徽章上要显示的提供商名。
+ *  - cc-switch / direct 给固定友好名；
+ *  - custom 从 effectiveUrl 摘 host，便于一眼分辨连到哪里去了；
+ *  - unconfigured 不进徽章，会渲染警告小标志。 */
+const providerLabel = computed(() => {
+  const s = connStatus.value;
+  if (!s) return null;
+  switch (s.connectionMode) {
+    case "cc-switch":
+      return "CC-Switch";
+    case "direct":
+      return "Anthropic";
+    case "custom": {
+      const url = s.effectiveUrl || "";
+      try { return new URL(url).host || "Custom"; }
+      catch { return "Custom"; }
+    }
+    default:
+      return null;
+  }
+});
+
+const isUnconfigured = computed(
+  () => connStatus.value?.connectionMode === "unconfigured",
+);
+
+const connectionTooltip = computed(() => {
+  const s = connStatus.value;
+  if (!s) return "正在检测 Claude 连接…";
+  if (s.connectionMode === "unconfigured") {
+    return "未检测到 Claude 连接：未发现 CC-Switch 本地代理也没有 ANTHROPIC_API_KEY。点击进入设置。";
+  }
+  return `Claude · ${providerLabel.value}（${s.effectiveUrl ?? "—"}）`;
+});
 
 /** 项目树的展开状态，默认展开所有项目（数据少，先粗糙做）。 */
 const expanded = reactive<Record<string, boolean>>(
@@ -157,7 +196,7 @@ function noop() {
       </div>
     </div>
 
-    <!-- 底部：设置入口 -->
+    <!-- 底部：设置入口 + 连接状态徽章 -->
     <div class="sb-footer">
       <RouterLink
         to="/settings"
@@ -167,6 +206,26 @@ function noop() {
         aria-label="设置"
       >
         <Settings :size="16" aria-hidden="true" />
+      </RouterLink>
+
+      <RouterLink
+        to="/settings"
+        class="sb-conn"
+        :class="isUnconfigured ? 'sb-conn--warn' : 'sb-conn--ok'"
+        :title="connectionTooltip"
+        :aria-label="connectionTooltip"
+      >
+        <template v-if="isUnconfigured">
+          <AlertTriangle :size="12" aria-hidden="true" />
+          <span class="sb-conn__label">未连接</span>
+        </template>
+        <template v-else-if="providerLabel">
+          <Sparkles :size="12" aria-hidden="true" />
+          <span class="sb-conn__label">Claude · {{ providerLabel }}</span>
+        </template>
+        <template v-else>
+          <span class="sb-conn__label sb-conn__label--probing">检测中…</span>
+        </template>
       </RouterLink>
     </div>
   </aside>

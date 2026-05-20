@@ -505,6 +505,8 @@ pre code {
   padding: 0 0 0px;
   display: flex;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .sb-footer__btn {
@@ -517,6 +519,7 @@ pre code {
   color: var(--text-muted);
   text-decoration: none;
   transition: background-color 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
 }
 
 .sb-footer__btn:hover {
@@ -527,6 +530,53 @@ pre code {
 .sb-footer__btn.is-active {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* 连接状态徽章：紧贴设置齿轮右边。
+ * - OK 状态显示 ✨ + 「Claude · 提供商」，accent 弱底色，整条可点直接跳设置。
+ * - 未配置时退化成一颗小黄色警告灯——窄侧栏下不挤占空间，hover/聚焦能看到完整 tooltip。 */
+.sb-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  min-width: 0;
+  transition: background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
+}
+
+.sb-conn--ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sb-conn--ok:hover {
+  filter: brightness(1.1);
+}
+
+.sb-conn--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.sb-conn--warn:hover {
+  filter: brightness(1.1);
+}
+
+.sb-conn__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-conn__label--probing {
+  color: var(--text-faint);
 }
 
 /* ---------------- View tabs（主内容区顶部项目级视图切换） ---------------- *
@@ -988,6 +1038,100 @@ button.ghost:hover {
   filter: none;
 }
 
+/* 设置页里的状态徽章——「已设置 / 未设置 / 检查中」三态。 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.status-pill--ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.status-pill--err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.status-pill--probing {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.status-pill--muted {
+  background: var(--bg-subtle);
+  color: var(--text-faint);
+  border-color: var(--border);
+}
+
+.status-pill__spin {
+  animation: status-pill-spin 0.9s linear infinite;
+}
+
+@keyframes status-pill-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 设置页连接模式横幅——挂在「Claude 连接」卡片顶部。 */
+.conn-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border: 1px solid transparent;
+}
+
+.conn-banner__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.conn-banner__hint {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.conn-banner--ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.conn-banner--ok .conn-banner__hint {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.conn-banner--err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.conn-banner--err .conn-banner__hint {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.conn-banner--probing {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
 /* ---------------- Chat ---------------- *
  * 主面板的「Session ↔ AI 对话」视图。布局上半区是消息流（vertical flex 容器，
  * 单独滚动），下半区是 composer（固定高度，气泡式卡片）。chat-page 让自身吃满
@@ -1072,6 +1216,22 @@ button.ghost:hover {
   border: 1px dashed var(--border-strong);
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* 流式打字的小光标——assistant 气泡在 streaming 中尾部跟一个闪烁块。 */
+.chat-bubble__cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: chat-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes chat-cursor-blink {
+  to { visibility: hidden; }
 }
 
 /* ----- Composer ----- */

@@ -24,6 +24,8 @@ const props = defineProps<{
   state: ChatComposerState;
   models: ChatModelOption[];
   branches: ChatBranchOption[];
+  /** 上一轮还在 streaming 时为 true，禁用发送按钮避免并发请求。 */
+  sending?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +36,7 @@ const emit = defineEmits<{
 const text = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
 
-const canSend = computed(() => text.value.trim().length > 0);
+const canSend = computed(() => !props.sending && text.value.trim().length > 0);
 
 const permissionOptions = [
   { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },

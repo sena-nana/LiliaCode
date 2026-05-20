@@ -11,13 +11,17 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.145",
+    "@anthropic-ai/sdk": "^0.97.1",
     "@lilia/contracts": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2",
     "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.34",
-    "vue-router": "^5.0.7"
+    "vue-router": "^5.0.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

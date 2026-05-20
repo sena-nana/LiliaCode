@@ -12,8 +12,10 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { ChatMessage } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
 
+type StreamableMessage = ChatMessage & { streaming?: boolean };
+
 const props = defineProps<{
-  messages: ChatMessage[];
+  messages: StreamableMessage[];
   projectName: string;
 }>();
 
