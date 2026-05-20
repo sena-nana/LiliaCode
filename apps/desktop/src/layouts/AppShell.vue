@@ -1,29 +1,94 @@
 <script setup lang="ts">
-import { RouterView, useRoute, useRouter } from "vue-router";
-import { computed } from "vue";
+import { onBeforeUnmount, ref } from "vue";
+import { RouterView } from "vue-router";
 import TitleBar from "../components/TitleBar.vue";
-import ActivityBar from "./ActivityBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 
-const route = useRoute();
-const router = useRouter();
+/** 侧栏宽度的硬约束：太窄项目名会糊成一团，太宽主区就被挤掉。 */
+const MIN_WIDTH = 180;
+const MAX_WIDTH = 480;
+const DEFAULT_WIDTH = 220;
+const STORAGE_KEY = "lilia.sidebarWidth";
 
-const activeSection = computed<"projects" | "settings">(() => {
-  if (route.path.startsWith("/settings")) return "settings";
-  return "projects";
-});
-
-function go(section: "projects" | "settings") {
-  if (section === "projects") router.push("/");
-  else router.push("/settings");
+function clamp(n: number) {
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
 }
+
+function loadInitial(): number {
+  const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
+  const n = raw ? Number.parseFloat(raw) : NaN;
+  return Number.isFinite(n) ? clamp(n) : DEFAULT_WIDTH;
+}
+
+const sidebarWidth = ref<number>(loadInitial());
+const isResizing = ref(false);
+
+let startX = 0;
+let startWidth = 0;
+
+function onPointerMove(e: PointerEvent) {
+  const next = clamp(startWidth + (e.clientX - startX));
+  sidebarWidth.value = next;
+}
+
+function onPointerUp(e: PointerEvent) {
+  isResizing.value = false;
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+  (e.target as Element | null)?.releasePointerCapture?.(e.pointerId);
+  try {
+    localStorage.setItem(STORAGE_KEY, String(sidebarWidth.value));
+  } catch {
+    /* 隐私模式 / 配额满：忽略，下次启动回到默认值即可。 */
+  }
+}
+
+function startResize(e: PointerEvent) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  isResizing.value = true;
+  startX = e.clientX;
+  startWidth = sidebarWidth.value;
+  (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+}
+
+/** 双击拖拽条重置到默认宽度——VSCode/IntelliJ 的通用快捷动作。 */
+function resetWidth() {
+  sidebarWidth.value = DEFAULT_WIDTH;
+  try {
+    localStorage.setItem(STORAGE_KEY, String(DEFAULT_WIDTH));
+  } catch {
+    /* 同上。 */
+  }
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+});
 </script>
 
 <template>
-  <div class="shell">
+  <div
+    class="shell"
+    :class="{ 'is-resizing': isResizing }"
+    :style="{ '--sidebar-width': sidebarWidth + 'px' }"
+  >
     <TitleBar />
-    <ActivityBar :active="activeSection" @navigate="go" />
-    <SecondaryPanel :section="activeSection" />
+    <SecondaryPanel />
+    <div
+      class="shell__resizer"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-valuenow="sidebarWidth"
+      :aria-valuemin="MIN_WIDTH"
+      :aria-valuemax="MAX_WIDTH"
+      title="拖动调整侧栏宽度（双击恢复默认）"
+      @pointerdown="startResize"
+      @dblclick="resetWidth"
+    />
     <main class="shell__main">
       <RouterView />
     </main>
