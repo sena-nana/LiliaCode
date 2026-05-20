@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowLeft } from "lucide-vue-next";
 import { getProject, getTask, listTasks } from "../data/projectsStub";
+import ViewTabs from "../components/ViewTabs.vue";
 
 const props = defineProps<{ projectId: string; taskId: string }>();
 const router = useRouter();
@@ -32,6 +33,7 @@ function back() {
 
 <template>
   <section v-if="task && project">
+    <ViewTabs :project-id="projectId" active="sessions" />
     <div class="page-header">
       <div class="row" style="flex-wrap: nowrap; gap: 10px; align-items: center">
         <button type="button" class="ghost" @click="back" aria-label="返回">
