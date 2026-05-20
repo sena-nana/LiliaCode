@@ -3,11 +3,22 @@ import {
   createWebHistory,
   type RouterHistory,
 } from "vue-router";
+import { defineComponent, h } from "vue";
 import AppShell from "./layouts/AppShell.vue";
-import Projects from "./pages/Projects.vue";
-import ProjectDetail from "./pages/ProjectDetail.vue";
 import TaskDetail from "./pages/TaskDetail.vue";
 import Settings from "./pages/Settings.vue";
+
+const Home = defineComponent({
+  name: "LiliaHome",
+  setup() {
+    return () =>
+      h(
+        "section",
+        { class: "empty-state" },
+        h("p", null, "从左侧选择一个对话开始，或者新建一个对话。"),
+      );
+  },
+});
 
 export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
   return createRouter({
@@ -17,13 +28,7 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
         path: "/",
         component: AppShell,
         children: [
-          { path: "", redirect: "/projects" },
-          { path: "projects", component: Projects },
-          {
-            path: "projects/:projectId",
-            component: ProjectDetail,
-            props: true,
-          },
+          { path: "", component: Home },
           {
             path: "projects/:projectId/tasks/:taskId",
             component: TaskDetail,
@@ -32,7 +37,7 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
           { path: "settings", component: Settings },
         ],
       },
-      { path: "/:pathMatch(.*)*", redirect: "/projects" },
+      { path: "/:pathMatch(.*)*", redirect: "/" },
     ],
   });
 }

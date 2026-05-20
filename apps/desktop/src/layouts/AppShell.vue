@@ -14,7 +14,7 @@ const activeSection = computed<"projects" | "settings">(() => {
 });
 
 function go(section: "projects" | "settings") {
-  if (section === "projects") router.push("/projects");
+  if (section === "projects") router.push("/");
   else router.push("/settings");
 }
 </script>

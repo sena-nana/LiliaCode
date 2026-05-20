@@ -52,6 +52,32 @@ const TASKS: Record<string, Task[]> = {
   ],
 };
 
+/**
+ * 侧边栏第三区域用的「零散对话」：还没绑定到任何项目的 Session/Task。
+ * 数据形状沿用 Task，只是 projectId 为 null —— 用单独的视图类型表示。
+ */
+export interface OrphanConversation {
+  id: string;
+  sessionId: string;
+  title: string;
+  createdAt: number;
+}
+
+const ORPHAN_CONVERSATIONS: OrphanConversation[] = [
+  {
+    id: "o-001",
+    sessionId: "0192-zzzz-0001",
+    title: "随手问问 Claude：tsconfig paths",
+    createdAt: Date.now() - 1000 * 60 * 12,
+  },
+  {
+    id: "o-002",
+    sessionId: "0192-zzzz-0002",
+    title: "整理 Yarn 4 workspaces 笔记",
+    createdAt: Date.now() - 1000 * 60 * 60 * 6,
+  },
+];
+
 export function listProjects(): Project[] {
   return PROJECTS;
 }
@@ -66,4 +92,14 @@ export function listTasks(projectId: string): Task[] {
 
 export function getTask(projectId: string, taskId: string): Task | undefined {
   return (TASKS[projectId] ?? []).find((t) => t.id === taskId);
+}
+
+/** 侧边栏项目树里，挂在每个 Project 下面的对话节点。 */
+export function listProjectConversations(projectId: string): Task[] {
+  return TASKS[projectId] ?? [];
+}
+
+/** 侧边栏第三区域的零散对话。 */
+export function listOrphanConversations(): OrphanConversation[] {
+  return ORPHAN_CONVERSATIONS;
 }

@@ -26,7 +26,7 @@ const subtasks = computed(() => {
 });
 
 function back() {
-  router.push(`/projects/${props.projectId}`);
+  router.push("/");
 }
 </script>
 
