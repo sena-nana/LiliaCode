@@ -1,109 +1,135 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useRouter } from "vue-router";
-import { ArrowLeft } from "lucide-vue-next";
-import { getProject, getTask, listTasks } from "../data/projectsStub";
+/**
+ * Task 详情 = 聊天面板。
+ *
+ * 之前这里有「任务信息 / 前置任务 / 子任务」三张卡，已全部移除——任务元数据
+ * 后续会做成右侧抽屉/弹层独立呈现，本页只承担「人和 AI 对话」一件事。
+ *
+ * 数据完全走 services/chat，组件不再碰任何 stub。
+ */
+
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getProject } from "../data/projectsStub";
 import ViewTabs from "../components/ViewTabs.vue";
+import ChatTranscript from "../components/chat/ChatTranscript.vue";
+import ChatComposer from "../components/chat/ChatComposer.vue";
+import {
+  getComposerState,
+  listBranches,
+  listMessages,
+  listModels,
+  onAssistantMessage,
+  sendMessage,
+  setComposerState,
+} from "../services/chat";
+import type {
+  ChatBranchOption,
+  ChatComposerState,
+  ChatMessage,
+  ChatModelOption,
+} from "@lilia/contracts";
 
 const props = defineProps<{ projectId: string; taskId: string }>();
-const router = useRouter();
 
 const project = computed(() => getProject(props.projectId));
-const task = computed(() => getTask(props.projectId, props.taskId));
-const siblings = computed(() => listTasks(props.projectId));
 
-const prerequisites = computed(() => {
-  const t = task.value;
-  if (!t) return [];
-  return t.dependsOn
-    .map((id) => siblings.value.find((s) => s.id === id))
-    .filter((x): x is NonNullable<typeof x> => Boolean(x));
+const messages = ref<ChatMessage[]>([]);
+const composer = ref<ChatComposerState>({
+  taskId: props.taskId,
+  model: "claude-sonnet-4-6",
+  branch: "main",
+  permission: "ask",
 });
+const models = ref<ChatModelOption[]>([]);
+const branches = ref<ChatBranchOption[]>([]);
 
-const subtasks = computed(() => {
-  const t = task.value;
-  if (!t) return [];
-  return siblings.value.filter((s) => s.parentId === t.id);
-});
+let unlisten: UnlistenFn | null = null;
 
-function back() {
-  router.push("/");
+async function loadAll() {
+  const [msgs, comp, mdls, brs] = await Promise.all([
+    listMessages(props.taskId),
+    getComposerState(props.taskId),
+    listModels(),
+    listBranches(props.projectId),
+  ]);
+  messages.value = msgs;
+  composer.value = comp;
+  models.value = mdls;
+  branches.value = brs;
 }
+
+async function onSend(content: string) {
+  // 乐观渲染：先把 user 消息追加到本地，等命令返回拿到真实 id 再 reconcile。
+  const optimistic: ChatMessage = {
+    id: `pending-${Date.now()}`,
+    taskId: props.taskId,
+    role: "user",
+    content,
+    createdAt: Date.now(),
+  };
+  messages.value = [...messages.value, optimistic];
+  try {
+    const real = await sendMessage(props.taskId, content, composer.value);
+    messages.value = messages.value.map((m) =>
+      m.id === optimistic.id ? real : m,
+    );
+  } catch (err) {
+    // 失败回滚 + 简单提示——日后接 toast 系统统一处理。
+    messages.value = messages.value.filter((m) => m.id !== optimistic.id);
+    console.error("[chat] sendMessage failed", err);
+  }
+}
+
+async function onComposerUpdate(next: ChatComposerState) {
+  composer.value = next;
+  try {
+    await setComposerState(next);
+  } catch (err) {
+    console.error("[chat] setComposerState failed", err);
+  }
+}
+
+onMounted(async () => {
+  unlisten = await onAssistantMessage((msg) => {
+    // 只接受属于当前 task 的回复；切到别的 task 后老订阅未取消的极短窗口里
+    // 不会把消息错误地塞进新会话。
+    if (msg.taskId !== props.taskId) return;
+    messages.value = [...messages.value, msg];
+  });
+  await loadAll();
+});
+
+onUnmounted(async () => {
+  if (unlisten) {
+    const fn = unlisten;
+    unlisten = null;
+    try { await fn(); } catch { /* ignore */ }
+  }
+});
+
+/** 切换 task（侧栏点击另一个会话）时重拉数据并重置 composer。 */
+watch(
+  () => [props.projectId, props.taskId] as const,
+  async () => {
+    messages.value = [];
+    await loadAll();
+  },
+);
 </script>
 
 <template>
-  <section v-if="task && project">
+  <section v-if="project" class="chat-page">
     <ViewTabs :project-id="projectId" active="sessions" />
-    <div class="page-header">
-      <div class="row" style="flex-wrap: nowrap; gap: 10px; align-items: center">
-        <button type="button" class="ghost" @click="back" aria-label="返回">
-          <ArrowLeft :size="14" />
-          返回
-        </button>
-        <div>
-          <h1>{{ task.title }}</h1>
-          <p>{{ project.name }} · 会话 {{ task.sessionId }}</p>
-        </div>
-      </div>
-      <span :class="`task-row__status task-row__status--${task.status}`">
-        {{ task.status }}
-      </span>
-    </div>
-
-    <div class="detail-grid">
-      <div class="card">
-        <h2>对话占位</h2>
-        <p class="muted">
-          这里之后会渲染 Claude Code 会话的真实消息流。当前阶段仅占位。
-        </p>
-      </div>
-
-      <aside class="detail-grid__side">
-        <div class="card">
-          <h2>任务信息</h2>
-          <ul class="kv">
-            <li><span>状态</span><span>{{ task.status }}</span></li>
-            <li><span>会话 ID</span><span>{{ task.sessionId }}</span></li>
-            <li>
-              <span>创建于</span>
-              <span>{{ new Date(task.createdAt).toLocaleString() }}</span>
-            </li>
-            <li v-if="task.parentId">
-              <span>父任务</span><span>{{ task.parentId }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>前置任务</h2>
-          <p class="muted" v-if="prerequisites.length === 0">无</p>
-          <ul class="task-list" v-else>
-            <li v-for="p in prerequisites" :key="p.id" class="task-row">
-              <div class="task-row__main">
-                <div class="task-row__title">{{ p.title }}</div>
-              </div>
-              <span :class="`task-row__status task-row__status--${p.status}`">
-                {{ p.status }}
-              </span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>子任务</h2>
-          <p class="muted" v-if="subtasks.length === 0">无</p>
-          <ul class="task-list" v-else>
-            <li v-for="s in subtasks" :key="s.id" class="task-row">
-              <div class="task-row__main">
-                <div class="task-row__title">{{ s.title }}</div>
-              </div>
-              <span :class="`task-row__status task-row__status--${s.status}`">
-                {{ s.status }}
-              </span>
-            </li>
-          </ul>
-        </div>
-      </aside>
+    <div class="chat">
+      <ChatTranscript :messages="messages" :project-name="project.name" />
+      <ChatComposer
+        :state="composer"
+        :models="models"
+        :branches="branches"
+        @send="onSend"
+        @update:state="onComposerUpdate"
+      />
     </div>
   </section>
 

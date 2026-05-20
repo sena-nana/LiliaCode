@@ -882,24 +882,6 @@ button.ghost:hover {
 
 /* ---------------- 详情面板 ---------------- */
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 16px;
-}
-
-.detail-grid__side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-@media (max-width: 980px) {
-  .detail-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .kv {
   list-style: none;
   padding: 0;
@@ -1004,4 +986,286 @@ button.ghost:hover {
   background: var(--bg-active);
   color: var(--text);
   filter: none;
+}
+
+/* ---------------- Chat ---------------- *
+ * 主面板的「Session ↔ AI 对话」视图。布局上半区是消息流（vertical flex 容器，
+ * 单独滚动），下半区是 composer（固定高度，气泡式卡片）。chat-page 让自身吃满
+ * 主区高度并扣掉 ViewTabs 的占位，避免双滚动条同时出现。
+ */
+
+.chat-page {
+  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 在 grid 里
+   * 自适应自己的高度，剩下交给 .chat。 */
+  height: calc(100vh - 36px - 40px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  min-height: 0;
+}
+
+.chat {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 12px;
+  min-height: 0;
+  /* 让 composer 居中且不要顶到极宽屏的两边——和 ChatGPT/Codex 一致 */
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.chat-transcript {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 4px;
+  min-height: 0;
+}
+
+.chat-transcript.is-empty {
+  /* 空状态：把唯一的标题居中 */
+  justify-content: center;
+  align-items: center;
+}
+
+.chat-empty {
+  color: var(--text);
+  font-size: 24px;
+  font-weight: 500;
+  text-align: center;
+  /* 不贴居中，往上偏一点更符合截图的视觉重心 */
+  margin-bottom: 12vh;
+  letter-spacing: 0.2px;
+}
+
+/* ----- 气泡 ----- */
+.chat-bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-bubble--user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  color: var(--text);
+  border-bottom-right-radius: 4px;
+}
+
+.chat-bubble--assistant {
+  align-self: flex-start;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-bubble--system {
+  align-self: center;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ----- Composer ----- */
+.chat-composer {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 阴影让卡片从主区底浮起来一点；强度参考 macOS 系统弹层 */
+  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
+}
+
+.chat-composer__input {
+  /* 复用 input/button 的基础样式会带 height:32px，所以这里全量覆盖 */
+  width: 100%;
+  min-height: 22px;
+  max-height: 176px;
+  padding: 4px 6px;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  line-height: 22px;
+  resize: none;
+  overflow-y: hidden;
+}
+
+.chat-composer__input::placeholder {
+  color: var(--text-faint);
+}
+
+.chat-composer__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-composer__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-composer__send {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.12s ease, opacity 0.12s ease, filter 0.12s ease;
+}
+
+.chat-composer__send:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.chat-composer__send:disabled {
+  background: var(--bg-active);
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+/* ----- 下拉 chip + popover ----- */
+.chat-chip {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.chat-chip:hover:not(.is-disabled):not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.chat-chip.is-open {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chat-chip:disabled,
+.chat-chip.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: none;
+}
+
+.chat-chip--icon {
+  padding: 0;
+  width: 28px;
+  justify-content: center;
+}
+
+.chat-chip__label {
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-chip__caret {
+  opacity: 0.65;
+}
+
+.dd {
+  position: relative;
+  display: inline-flex;
+}
+
+.dd__menu {
+  position: absolute;
+  left: 0;
+  min-width: 180px;
+  max-width: 280px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.dd__menu--top {
+  bottom: calc(100% + 6px);
+}
+
+.dd__menu--bottom {
+  top: calc(100% + 6px);
+}
+
+.dd__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  height: auto;
+  font-weight: 500;
+  transition: background-color 0.12s ease;
+}
+
+.dd__item:hover {
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.dd__item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dd__item-label {
+  font-size: 13px;
+}
+
+.dd__item-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.dd__item.is-active .dd__item-hint {
+  color: var(--accent);
+  opacity: 0.75;
 }
