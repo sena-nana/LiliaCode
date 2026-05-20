@@ -1,24 +1,10 @@
-use tauri::{
-    utils::config::Color, Manager, Theme, WebviewWindow, WindowEvent,
-};
+use tauri::{utils::config::Color, Manager};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
-// 与前端 CSS 变量保持一致：light=#f4f5f7、dark=#1c1c1e。
-// 把窗口背景色刷子调成这两个色，避免 Windows 拉伸时露出白底。
-const BG_LIGHT: Color = Color(0xF4, 0xF5, 0xF7, 0xFF);
-const BG_DARK: Color = Color(0x1C, 0x1C, 0x1E, 0xFF);
-
-fn background_for(theme: Theme) -> Color {
-    match theme {
-        Theme::Dark => BG_DARK,
-        _ => BG_LIGHT,
-    }
-}
-
-fn apply_background(window: &WebviewWindow, theme: Theme) {
-    let _ = window.set_background_color(Some(background_for(theme)));
-}
+// 始终使用暗色：与前端 CSS 变量 --bg = #181818 保持一致，避免 Windows 拉伸/还原时
+// 露出 WebView 之外的默认白底。
+const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 #[tauri::command]
 fn ping() -> &'static str {
@@ -32,14 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-                let initial_theme = window.theme().unwrap_or(Theme::Light);
-                apply_background(&window, initial_theme);
-                let follow = window.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::ThemeChanged(theme) = event {
-                        apply_background(&follow, *theme);
-                    }
-                });
+                let _ = window.set_background_color(Some(BG));
             }
             Ok(())
         })
