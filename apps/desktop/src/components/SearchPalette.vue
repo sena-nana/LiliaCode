@@ -109,92 +109,94 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
 
 <template>
   <Teleport to="body">
-    <div
-      v-if="open"
-      class="search-palette"
-      role="dialog"
-      aria-modal="true"
-      aria-label="搜索会话"
-      @click.self="close"
-      @keydown="onKeydown"
-    >
-      <div class="search-palette__card">
-        <div class="search-palette__header">
-          <Search :size="16" aria-hidden="true" />
-          <input
-            ref="inputEl"
-            v-model="query"
-            type="text"
-            class="search-palette__input"
-            placeholder="搜索会话标题…"
-            spellcheck="false"
-            @keydown="onKeydown"
-          />
-          <div class="search-palette__modes" role="tablist">
+    <Transition name="search-palette">
+      <div
+        v-if="open"
+        class="search-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="搜索会话"
+        @click.self="close"
+        @keydown="onKeydown"
+      >
+        <div class="search-palette__card">
+          <div class="search-palette__header">
+            <Search :size="16" aria-hidden="true" />
+            <input
+              ref="inputEl"
+              v-model="query"
+              type="text"
+              class="search-palette__input"
+              placeholder="搜索会话标题…"
+              spellcheck="false"
+              @keydown="onKeydown"
+            />
+            <div class="search-palette__modes" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="mode === 'text'"
+                :class="{ 'is-active': mode === 'text' }"
+                title="子串匹配"
+                @click="mode = 'text'"
+              >
+                <FileText :size="12" aria-hidden="true" /> 文本
+              </button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="mode === 'vector'"
+                :class="{ 'is-active': mode === 'vector' }"
+                title="字符 bigram TF-IDF 余弦相似度"
+                @click="mode = 'vector'"
+              >
+                <Sparkles :size="12" aria-hidden="true" /> 向量
+              </button>
+            </div>
             <button
               type="button"
-              role="tab"
-              :aria-selected="mode === 'text'"
-              :class="{ 'is-active': mode === 'text' }"
-              title="子串匹配"
-              @click="mode = 'text'"
+              class="search-palette__close"
+              title="关闭（Esc）"
+              aria-label="关闭"
+              @click="close"
             >
-              <FileText :size="12" aria-hidden="true" /> 文本
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="mode === 'vector'"
-              :class="{ 'is-active': mode === 'vector' }"
-              title="字符 bigram TF-IDF 余弦相似度"
-              @click="mode = 'vector'"
-            >
-              <Sparkles :size="12" aria-hidden="true" /> 向量
+              <X :size="14" aria-hidden="true" />
             </button>
           </div>
-          <button
-            type="button"
-            class="search-palette__close"
-            title="关闭（Esc）"
-            aria-label="关闭"
-            @click="close"
-          >
-            <X :size="14" aria-hidden="true" />
-          </button>
+
+          <ul v-if="results.length" class="search-palette__list" role="listbox">
+            <li
+              v-for="(r, i) in results"
+              :key="r.route"
+              class="search-palette__item"
+              :class="{ 'is-active': i === selectedIdx }"
+              role="option"
+              :aria-selected="i === selectedIdx"
+              @mouseenter="selectedIdx = i"
+              @click="openResult(r)"
+            >
+              <div class="search-palette__title">
+                <template
+                  v-for="(seg, j) in highlightSegments(r.title, r.highlights)"
+                  :key="j"
+                >
+                  <mark v-if="seg.mark">{{ seg.text }}</mark>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
+              </div>
+              <div class="search-palette__meta">
+                <span class="search-palette__scope">{{
+                  r.projectName ?? "零散对话"
+                }}</span>
+                <span class="search-palette__score">{{ r.score.toFixed(2) }}</span>
+              </div>
+            </li>
+          </ul>
+
+          <p v-else-if="query.trim()" class="search-palette__empty">没有匹配</p>
+          <p v-else class="search-palette__hint">输入关键词搜索会话标题</p>
         </div>
-
-        <ul v-if="results.length" class="search-palette__list" role="listbox">
-          <li
-            v-for="(r, i) in results"
-            :key="r.route"
-            class="search-palette__item"
-            :class="{ 'is-active': i === selectedIdx }"
-            role="option"
-            :aria-selected="i === selectedIdx"
-            @mouseenter="selectedIdx = i"
-            @click="openResult(r)"
-          >
-            <div class="search-palette__title">
-              <template
-                v-for="(seg, j) in highlightSegments(r.title, r.highlights)"
-                :key="j"
-              >
-                <mark v-if="seg.mark">{{ seg.text }}</mark>
-                <template v-else>{{ seg.text }}</template>
-              </template>
-            </div>
-            <div class="search-palette__meta">
-              <span class="search-palette__scope">{{
-                r.projectName ?? "零散对话"
-              }}</span>
-              <span class="search-palette__score">{{ r.score.toFixed(2) }}</span>
-            </div>
-          </li>
-        </ul>
-
-        <p v-else-if="query.trim()" class="search-palette__empty">没有匹配</p>
-        <p v-else class="search-palette__hint">输入关键词搜索会话标题</p>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>

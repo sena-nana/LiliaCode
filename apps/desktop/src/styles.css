@@ -1645,3 +1645,38 @@ button.ghost:hover {
   text-align: center;
   font-size: 12px;
 }
+
+/* 进出过渡：背板淡入淡出，卡片轻微下落 + 缩放。
+ * 给 backdrop 单独的过渡曲线，避免与卡片同步起来显得突兀。 */
+.search-palette-enter-active,
+.search-palette-leave-active {
+  transition: opacity 0.16s ease;
+}
+.search-palette-enter-active .search-palette__card,
+.search-palette-leave-active .search-palette__card {
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.16s ease;
+}
+
+.search-palette-enter-from,
+.search-palette-leave-to {
+  opacity: 0;
+}
+.search-palette-enter-from .search-palette__card,
+.search-palette-leave-to .search-palette__card {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-palette-enter-active,
+  .search-palette-leave-active,
+  .search-palette-enter-active .search-palette__card,
+  .search-palette-leave-active .search-palette__card {
+    transition: none;
+  }
+  .search-palette-enter-from .search-palette__card,
+  .search-palette-leave-to .search-palette__card {
+    transform: none;
+  }
+}
