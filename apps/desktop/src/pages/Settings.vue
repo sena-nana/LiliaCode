@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import {
   Moon, Sun, Loader2,
-  Plug, AlertTriangle, Save, Network,
+  Plug, AlertTriangle, Save, Network, FolderOpen, FolderTree,
 } from "lucide-vue-next";
 import { useTheme } from "../composables/useTheme";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
@@ -11,7 +11,12 @@ import {
   setCCSwitchConfig,
   setRouterMode,
 } from "../services/chat";
-import type { CCSwitchConfig, ChatBackendKind } from "@lilia/contracts";
+import {
+  getProjectSettings,
+  pickFolder,
+  setProjectSettings,
+} from "../services/projects";
+import type { CCSwitchConfig, ChatBackendKind, ProjectSettings } from "@lilia/contracts";
 
 const { theme, setTheme } = useTheme();
 const {
@@ -78,9 +83,53 @@ async function saveCCSwitch() {
 
 async function probe() { await refresh(); }
 
+// ---- 项目偏好（添加项目时的默认 clone 父目录） ----
+const projectSettings = ref<ProjectSettings>({ cloneParentDir: null });
+const savingProject = ref(false);
+const projectError = ref<string | null>(null);
+
+async function loadProjectSettings() {
+  try {
+    projectSettings.value = await getProjectSettings();
+  } catch (err) {
+    projectError.value = `读取项目偏好失败：${String(err)}`;
+  }
+}
+
+async function pickCloneParent() {
+  projectError.value = null;
+  try {
+    const picked = await pickFolder({
+      title: "选择默认 clone 父目录",
+      defaultPath: projectSettings.value.cloneParentDir,
+    });
+    if (!picked) return;
+    projectSettings.value = { ...projectSettings.value, cloneParentDir: picked };
+    await persistProjectSettings();
+  } catch (err) {
+    projectError.value = `选择文件夹失败：${String(err)}`;
+  }
+}
+
+async function clearCloneParent() {
+  projectSettings.value = { ...projectSettings.value, cloneParentDir: null };
+  await persistProjectSettings();
+}
+
+async function persistProjectSettings() {
+  savingProject.value = true;
+  try {
+    await setProjectSettings(projectSettings.value);
+  } catch (err) {
+    projectError.value = `保存项目偏好失败：${String(err)}`;
+  } finally {
+    savingProject.value = false;
+  }
+}
+
 onMounted(async () => {
   await lockRouters();
-  await Promise.all([loadConfig(), refresh()]);
+  await Promise.all([loadConfig(), loadProjectSettings(), refresh()]);
 });
 </script>
 
@@ -203,6 +252,45 @@ onMounted(async () => {
         <div>
           <div class="conn-banner__title">{{ selectedOk ? "已连接" : "未连接" }}</div>
           <div class="conn-banner__hint">{{ selectedHint }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>
+        <span class="card-h2__title">
+          <FolderTree :size="14" aria-hidden="true" />
+          项目
+        </span>
+      </h2>
+
+      <div class="settings-row">
+        <div class="settings-row__label">
+          <div>Clone 默认父目录</div>
+          <div class="settings-row__hint">
+            侧栏「添加项目 → 从 GitHub clone」时使用。未设置时兜底到用户家目录。
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
+          <span class="muted" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {{ projectSettings.cloneParentDir || "未设置（用家目录）" }}
+          </span>
+          <button type="button" class="ghost" :disabled="savingProject" @click="pickCloneParent">
+            <FolderOpen :size="12" aria-hidden="true" />
+            选择
+          </button>
+          <button v-if="projectSettings.cloneParentDir" type="button" class="ghost" :disabled="savingProject"
+            @click="clearCloneParent">
+            清除
+          </button>
+        </div>
+      </div>
+
+      <div v-if="projectError" class="conn-banner conn-banner--err">
+        <AlertTriangle :size="16" aria-hidden="true" />
+        <div>
+          <div class="conn-banner__title">项目偏好</div>
+          <div class="conn-banner__hint">{{ projectError }}</div>
         </div>
       </div>
     </div>

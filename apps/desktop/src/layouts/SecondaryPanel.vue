@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
@@ -10,19 +10,30 @@ import {
   ArrowUpDown,
   MoreHorizontal,
   Folder,
+  FolderOpen,
+  FolderPlus,
+  Github,
   Sparkles,
   AlertTriangle,
   FileText,
   X,
 } from "lucide-vue-next";
+import { homeDir } from "@tauri-apps/api/path";
 import {
   createDraftOrphan,
+  createProject,
+  deriveProjectName,
   listProjects,
   listProjectConversations,
   listOrphanConversations,
 } from "../data/projectsStub";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { searchSessions, type SearchResult } from "../services/sessionSearch";
+import {
+  getProjectSettings,
+  gitCloneRepo,
+  pickFolder,
+} from "../services/projects";
 
 const route = useRoute();
 const router = useRouter();
@@ -184,6 +195,195 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
   if (cur < text.length) out.push({ text: text.slice(cur), mark: false });
   return out;
 }
+
+// ---------------- 添加项目 ---------------- *
+// 「+」按钮点开下拉小菜单：本地文件夹 / GitHub clone / 空分类。
+// - 本地文件夹：直接走 tauri-plugin-dialog 弹系统选择器，选完落项目；
+// - clone：弹一个仅含 URL 输入框的轻量 dialog，clone 目标父目录从 Settings 读，
+//   未设置时兜底到家目录。clone 完用克隆出的实际路径建项目；
+// - 空分类：弹一个 name 输入框，落一个 cwd=null 的项目。
+//
+// 菜单走「鼠标右下角」原生 contextmenu 模式：Teleport 到 body、position:fixed，
+// 锚点取触发点的 clientX/clientY，再 clamp 在视口内避免穿底/穿右。
+
+const addMenuOpen = ref(false);
+const menuPos = ref<{ x: number; y: number }>({ x: 0, y: 0 });
+const MENU_W = 200;
+const MENU_H_EST = 132; // 3 行 × ~40px + padding；菜单内容固定，估算值够用。
+
+function openAddMenu(e: MouseEvent) {
+  // 鼠标位置作菜单左上角；clamp 防穿出视口。
+  const x = Math.min(e.clientX, window.innerWidth - MENU_W - 4);
+  const y = Math.min(e.clientY, window.innerHeight - MENU_H_EST - 4);
+  menuPos.value = { x: Math.max(4, x), y: Math.max(4, y) };
+  addMenuOpen.value = true;
+}
+
+function closeAddMenu() {
+  addMenuOpen.value = false;
+}
+
+function onDocPointer(e: PointerEvent) {
+  // Teleport 走 body，菜单 DOM 在外面，不能再用「不在按钮内」判定；
+  // 直接看点中元素有没有 .sb-menu 祖先即可。
+  const target = e.target as HTMLElement | null;
+  if (target && target.closest && target.closest(".sb-menu")) return;
+  closeAddMenu();
+}
+
+function onDocKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && addMenuOpen.value) {
+    closeAddMenu();
+    e.stopPropagation();
+  }
+}
+
+watch(addMenuOpen, async (v) => {
+  if (v) {
+    await nextTick();
+    document.addEventListener("pointerdown", onDocPointer, true);
+    document.addEventListener("keydown", onDocKey);
+  } else {
+    document.removeEventListener("pointerdown", onDocPointer, true);
+    document.removeEventListener("keydown", onDocKey);
+  }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocPointer, true);
+  document.removeEventListener("keydown", onDocKey);
+});
+
+const projectError = ref<string | null>(null);
+
+function dismissError() {
+  projectError.value = null;
+}
+
+async function pickLocalFolder() {
+  closeAddMenu();
+  projectError.value = null;
+  try {
+    const picked = await pickFolder({ title: "选择项目根目录" });
+    if (!picked) return;
+    const project = createProject({
+      name: deriveProjectName(picked) || "新项目",
+      cwd: picked,
+    });
+    expanded[project.id] = true;
+  } catch (err) {
+    projectError.value = `选择文件夹失败：${String(err)}`;
+  }
+}
+
+// ----- GitHub clone dialog -----
+const cloneOpen = ref(false);
+const cloneUrl = ref("");
+const cloneParent = ref<string>("");
+const cloneInput = ref<HTMLInputElement | null>(null);
+const cloneBusy = ref(false);
+const cloneError = ref<string | null>(null);
+
+async function openClone() {
+  closeAddMenu();
+  cloneUrl.value = "";
+  cloneError.value = null;
+  cloneBusy.value = false;
+  // 父目录：先看 Settings 里的偏好；没设过就兜底到 home。两者都拿不到留空，
+  // 让用户在「目标位置」那里看到提示并补一次。
+  try {
+    const s = await getProjectSettings();
+    if (s.cloneParentDir && s.cloneParentDir.trim()) {
+      cloneParent.value = s.cloneParentDir.trim();
+    } else {
+      cloneParent.value = await safeHomeDir();
+    }
+  } catch {
+    cloneParent.value = await safeHomeDir();
+  }
+  cloneOpen.value = true;
+  await nextTick();
+  cloneInput.value?.focus();
+}
+
+async function safeHomeDir(): Promise<string> {
+  try { return await homeDir(); }
+  catch { return ""; }
+}
+
+async function pickCloneParent() {
+  try {
+    const picked = await pickFolder({
+      title: "选择 clone 目标父目录",
+      defaultPath: cloneParent.value || null,
+    });
+    if (picked) cloneParent.value = picked;
+  } catch (err) {
+    cloneError.value = `选择文件夹失败：${String(err)}`;
+  }
+}
+
+/** 仅用于在 dialog 里给用户看一眼「最终会克隆到哪里」，与 Rust 端的推断保持一致。 */
+const cloneTargetPreview = computed(() => {
+  const url = cloneUrl.value.trim();
+  const parent = cloneParent.value.trim();
+  if (!url || !parent) return "";
+  const cleaned = url.replace(/\.git$/i, "").replace(/\/+$/, "");
+  const base = cleaned.split(/[/:]/).pop()?.trim() || "repo";
+  const sep = parent.includes("\\") ? "\\" : "/";
+  const normalizedParent = parent.replace(/[\\/]+$/, "");
+  return `${normalizedParent}${sep}${base}`;
+});
+
+async function confirmClone() {
+  if (cloneBusy.value) return;
+  cloneError.value = null;
+  const url = cloneUrl.value.trim();
+  const parent = cloneParent.value.trim();
+  if (!url) {
+    cloneError.value = "请填写仓库 URL";
+    return;
+  }
+  if (!parent) {
+    cloneError.value = "请选择 clone 目标父目录";
+    return;
+  }
+  cloneBusy.value = true;
+  try {
+    const cloned = await gitCloneRepo(url, parent);
+    const project = createProject({
+      name: deriveProjectName(cloned) || "新项目",
+      cwd: cloned,
+    });
+    expanded[project.id] = true;
+    cloneOpen.value = false;
+  } catch (err) {
+    cloneError.value = String(err);
+  } finally {
+    cloneBusy.value = false;
+  }
+}
+
+// ----- 空分类 dialog -----
+const categoryOpen = ref(false);
+const categoryName = ref("");
+const categoryInput = ref<HTMLInputElement | null>(null);
+
+async function openCategory() {
+  closeAddMenu();
+  categoryName.value = "";
+  categoryOpen.value = true;
+  await nextTick();
+  categoryInput.value?.focus();
+}
+
+function confirmCategory() {
+  const name = categoryName.value.trim();
+  if (!name) return;
+  const project = createProject({ name, cwd: null });
+  expanded[project.id] = true;
+  categoryOpen.value = false;
+}
 </script>
 
 <template>
@@ -239,13 +439,23 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
       <div class="sb-section__header">
         <span class="sb-section__title">项目</span>
         <div class="sb-section__tools">
-          <button type="button" class="sb-icon-btn" title="添加项目" aria-label="添加项目" @click="noop">
+          <button type="button" class="sb-icon-btn" title="添加项目" aria-label="添加项目"
+            :aria-expanded="addMenuOpen" :aria-haspopup="true"
+            @click="openAddMenu">
             <Plus :size="14" aria-hidden="true" />
           </button>
           <button type="button" class="sb-icon-btn" title="整理 / 排序" aria-label="整理 / 排序" @click="noop">
             <ArrowUpDown :size="14" aria-hidden="true" />
           </button>
         </div>
+      </div>
+
+      <div v-if="projectError" class="sb-banner sb-banner--err">
+        <AlertTriangle :size="12" aria-hidden="true" />
+        <span class="sb-banner__msg">{{ projectError }}</span>
+        <button type="button" class="sb-icon-btn" @click="dismissError" aria-label="忽略错误">
+          <X :size="12" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="sb-tree">
@@ -328,5 +538,101 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
         </template>
       </RouterLink>
     </div>
+
+    <!-- ===== 添加项目 contextmenu ===== *
+         Teleport 到 body + position:fixed，相对鼠标点击点定位（右下角铺开）。
+         没做进出动画——contextmenu 类菜单瞬时出现是行业惯例（macOS / VSCode 都如此）。 -->
+    <Teleport to="body">
+      <div v-if="addMenuOpen" class="sb-menu" role="menu"
+        :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }">
+        <button type="button" class="sb-menu__item" role="menuitem" @click="pickLocalFolder">
+          <FolderOpen :size="13" aria-hidden="true" />
+          <span class="sb-menu__label">使用本地文件夹</span>
+        </button>
+        <button type="button" class="sb-menu__item" role="menuitem" @click="openClone">
+          <Github :size="13" aria-hidden="true" />
+          <span class="sb-menu__label">从 GitHub clone</span>
+        </button>
+        <button type="button" class="sb-menu__item" role="menuitem" @click="openCategory">
+          <FolderPlus :size="13" aria-hidden="true" />
+          <span class="sb-menu__label">创建空分类</span>
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- ===== Clone 弹层 ===== -->
+    <Teleport to="body">
+      <Transition name="search-palette">
+        <div v-if="cloneOpen" class="search-palette" role="dialog" aria-modal="true" aria-label="从 GitHub clone"
+          @click.self="cloneOpen = false">
+          <div class="search-palette__card dialog__card">
+            <div class="dialog__header">
+              <Github :size="14" aria-hidden="true" />
+              <span>从 Git 仓库克隆</span>
+            </div>
+            <div class="dialog__body">
+              <label>
+                <span>仓库 URL</span>
+                <input ref="cloneInput" v-model="cloneUrl" type="text" class="text-input"
+                  placeholder="https://github.com/owner/repo.git"
+                  @keydown.enter.prevent="confirmClone" />
+              </label>
+              <label>
+                <span>目标父目录</span>
+                <div class="dialog__field-row">
+                  <input :value="cloneParent" type="text" class="text-input"
+                    placeholder="选择克隆到哪个目录下" readonly />
+                  <button type="button" class="ghost" :disabled="cloneBusy" @click="pickCloneParent">
+                    <FolderOpen :size="12" aria-hidden="true" /> 选择
+                  </button>
+                </div>
+              </label>
+              <p v-if="cloneTargetPreview" class="plugins-create__hint">
+                将克隆到 <code>{{ cloneTargetPreview }}</code>
+              </p>
+              <p v-if="cloneError" class="plugins-create__error">{{ cloneError }}</p>
+            </div>
+            <div class="dialog__actions">
+              <button type="button" class="ghost" :disabled="cloneBusy" @click="cloneOpen = false">取消</button>
+              <button type="button" class="primary" :disabled="cloneBusy" @click="confirmClone">
+                {{ cloneBusy ? "克隆中…" : "克隆并添加" }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== 空分类弹层 ===== -->
+    <Teleport to="body">
+      <Transition name="search-palette">
+        <div v-if="categoryOpen" class="search-palette" role="dialog" aria-modal="true" aria-label="创建空分类"
+          @click.self="categoryOpen = false">
+          <div class="search-palette__card dialog__card">
+            <div class="dialog__header">
+              <FolderPlus :size="14" aria-hidden="true" />
+              <span>创建空分类</span>
+            </div>
+            <div class="dialog__body">
+              <label>
+                <span>分类名称</span>
+                <input ref="categoryInput" v-model="categoryName" type="text" class="text-input"
+                  placeholder="例如：实验、归档…"
+                  @keydown.enter.prevent="confirmCategory" />
+              </label>
+              <p class="plugins-create__hint">
+                空分类不绑定本地目录，只用来在侧栏里把零散对话归到一起。
+              </p>
+            </div>
+            <div class="dialog__actions">
+              <button type="button" class="ghost" @click="categoryOpen = false">取消</button>
+              <button type="button" class="primary" :disabled="!categoryName.trim()" @click="confirmCategory">
+                创建
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </aside>
 </template>

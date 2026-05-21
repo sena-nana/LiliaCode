@@ -11,8 +11,8 @@
 export interface Project {
   id: string;
   name: string;
-  /** Claude Code 工作目录的绝对路径。 */
-  cwd: string;
+  /** Claude Code 工作目录的绝对路径；分类型项目（仅做归类用）为 null。 */
+  cwd: string | null;
   /** 该项目下的会话数量（用于侧边栏角标）。 */
   sessionCount: number;
 }
@@ -124,6 +124,15 @@ export interface ProviderConfig {
   backend: ChatBackendKind;
   baseUrl: string | null;
   apiKey: string | null;
+}
+
+/**
+ * 项目相关偏好。一期只放 git clone 的默认父目录；后续 UI 里其它「项目级」
+ * 偏好都可以挂在这里，避免给每个开关都开一个新的 invoke。
+ */
+export interface ProjectSettings {
+  /** 「添加项目 → 从 GitHub clone」时默认 clone 到的父目录；为空表示未设置，UI 兜底用用户家目录。 */
+  cloneParentDir: string | null;
 }
 
 /**

@@ -562,6 +562,79 @@ pre code {
   filter: none;
 }
 
+/* 「+ 添加项目」contextmenu：相对鼠标点击点的右下角铺开（fixed + 内联 left/top）。
+ * Teleport 到 body 后跟侧栏 DOM 完全解耦，z-index 抬到搜索下拉之上。 */
+.sb-menu {
+  position: fixed;
+  z-index: 1100;
+  min-width: 180px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
+}
+
+.sb-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* 单行：固定 28px 高 + ellipsis 兜底，跟搜索下拉条目同款几何。 */
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background-color 0.12s ease;
+}
+
+.sb-menu__item:hover {
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.sb-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 侧栏区域内的内联报错条；占一行、不抢主区，X 按钮关闭。 */
+.sb-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sb-banner--err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.sb-banner__msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 树状容器：项目区域和零散对话共用，保证滚动只发生在内层 */
 .sb-tree {
   display: flex;
@@ -2011,6 +2084,19 @@ button.ghost.danger:hover {
   gap: 4px;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* 输入框 + 旁边的辅助按钮（例如「选择目标父目录」）。
+ * 配合 label 的 column 布局：input/button 在同一行而 label 仍在上方。 */
+.dialog__field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dialog__field-row .text-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .dialog__body textarea.text-input {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -41,6 +41,8 @@ const PROVIDER_KEY_CODEX: &str = "provider.codex";
 const CC_SWITCH_KEY: &str = "cc-switch.config";
 const ROUTER_KEY_CLAUDE: &str = "router.claude";
 const ROUTER_KEY_CODEX: &str = "router.codex";
+/// 「添加项目 → 从 GitHub clone」时默认 clone 到的父目录。空字符串/缺失 → 用 home。
+const PROJECT_CLONE_PARENT_KEY: &str = "project.cloneParentDir";
 
 const ROUTER_CC_SWITCH: &str = "cc-switch";
 const ROUTER_DIRECT: &str = "direct";
@@ -93,6 +95,14 @@ struct ProviderConfig {
     backend: String,
     base_url: Option<String>,
     api_key: Option<String>,
+}
+
+/// 项目相关偏好。当前只有 git clone 的默认父目录；后续添加新偏好时往这里加字段即可。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSettings {
+    /// 用户在设置里指定的 clone 默认父目录；为空表示未设置。
+    clone_parent_dir: Option<String>,
 }
 
 /// CC-Switch 代理层配置。Claude 与 Codex 共用同一个 baseUrl。
@@ -950,6 +960,111 @@ fn router_set_mode(app: AppHandle, backend: String, mode: String) -> Result<(), 
     Ok(())
 }
 
+// ---------- Project / Git ----------
+
+fn load_project_settings(app: &AppHandle) -> ProjectSettings {
+    let read = || -> Option<ProjectSettings> {
+        let store = app.store(PROVIDER_STORE_FILE).ok()?;
+        let raw = store.get(PROJECT_CLONE_PARENT_KEY)?;
+        // 兼容历史可能存的字符串：直接是 path 字符串时也认。
+        if let Some(s) = raw.as_str() {
+            return Some(ProjectSettings {
+                clone_parent_dir: Some(s.to_string()),
+            });
+        }
+        serde_json::from_value::<ProjectSettings>(raw).ok()
+    };
+    read().unwrap_or_default()
+}
+
+#[tauri::command]
+fn project_get_settings(app: AppHandle) -> ProjectSettings {
+    load_project_settings(&app)
+}
+
+#[tauri::command]
+fn project_set_settings(app: AppHandle, settings: ProjectSettings) -> Result<(), String> {
+    let store = app
+        .store(PROVIDER_STORE_FILE)
+        .map_err(|e| format!("打开配置存储失败：{e}"))?;
+    let value = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
+    store.set(PROJECT_CLONE_PARENT_KEY, value);
+    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
+    Ok(())
+}
+
+/// 从 git URL 推断仓库目录名。`https://github.com/foo/bar.git` → `bar`；
+/// 末尾去掉 `.git`、再去掉 `/`，最后兜底返回 `repo` 避免空字符串。
+fn derive_repo_dir_name(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let stripped = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let last = stripped
+        .rsplit(|c| c == '/' || c == ':')
+        .next()
+        .unwrap_or("");
+    let cleaned = last.trim().trim_end_matches('/');
+    if cleaned.is_empty() {
+        "repo".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// 在已有的同级目录里挑一个不冲突的名字：`bar`、`bar-2`、`bar-3`…
+fn unique_target_path(parent: &Path, base_name: &str) -> PathBuf {
+    let candidate = parent.join(base_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    for i in 2..1024 {
+        let p = parent.join(format!("{base_name}-{i}"));
+        if !p.exists() {
+            return p;
+        }
+    }
+    parent.join(base_name)
+}
+
+/// 同步调用 `git clone <url> <target>`；成功后返回 target 绝对路径。
+/// 子进程 stderr 用于错误诊断；Tauri 调用方拿到的是字符串 Err。
+#[tauri::command]
+fn git_clone_repo(url: String, parent_dir: String) -> Result<String, String> {
+    let url_trim = url.trim();
+    if url_trim.is_empty() {
+        return Err("仓库 URL 不能为空".to_string());
+    }
+    let parent_path = Path::new(parent_dir.trim());
+    if !parent_path.is_dir() {
+        return Err(format!("目标父目录不存在：{}", parent_path.display()));
+    }
+    let base = derive_repo_dir_name(url_trim);
+    let target = unique_target_path(parent_path, &base);
+
+    let output = Command::new("git")
+        .arg("clone")
+        .arg("--progress")
+        .arg(url_trim)
+        .arg(&target)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("无法启动 git（请确认 git 在 PATH 中）：{e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!(
+            "git clone 失败：{}",
+            if stderr.trim().is_empty() {
+                format!("exit {}", output.status.code().unwrap_or(-1))
+            } else {
+                stderr.trim().to_string()
+            }
+        ));
+    }
+
+    Ok(target.to_string_lossy().to_string())
+}
+
 // ---------- Plugins / Skills ----------
 //
 // 全部委托给 `plugins.rs`。这里只做参数转译 + Tauri 错误包装，避免 lib.rs 继续膨胀。
@@ -1037,6 +1152,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ChatStore::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
@@ -1060,6 +1176,9 @@ pub fn run() {
             cc_switch_set_config,
             router_get_mode,
             router_set_mode,
+            project_get_settings,
+            project_set_settings,
+            git_clone_repo,
             plugins_overview,
             plugins_list_claude_skills,
             plugins_create_claude_skill,

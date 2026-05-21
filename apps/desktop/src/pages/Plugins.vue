@@ -36,9 +36,13 @@ const tab = ref<Tab>("claude-skills");
 const scope = ref<PluginScope>("user");
 
 const projects = computed(() => listProjects());
-const projectCwd = ref<string | null>(projects.value[0]?.cwd ?? null);
+/** 「项目级 skill」只对真的有 cwd 的项目可用，分类型项目（cwd=null）排除。 */
+const projectsWithCwd = computed(() =>
+  projects.value.filter((p): p is typeof p & { cwd: string } => !!p.cwd),
+);
+const projectCwd = ref<string | null>(projectsWithCwd.value[0]?.cwd ?? null);
 const projectOptions = computed(() =>
-  projects.value.map((p) => ({ value: p.cwd, label: p.name, hint: p.cwd })),
+  projectsWithCwd.value.map((p) => ({ value: p.cwd, label: p.name, hint: p.cwd })),
 );
 
 function onProjectChange(cwd: string) {

@@ -1,7 +1,12 @@
 import { ref } from "vue";
 import type { Project, Task } from "@lilia/contracts";
 
-const PROJECTS: Project[] = [
+/**
+ * Project 列表是 ref + 浅 watcher 友好：computed 在组件里读 `listProjects()` 时
+ * 会拿到 `.value` 引用的数组本身，所以新增/删除一个项目能让侧栏立即重渲染。
+ * 后续接持久化时，把 ref 的初值换成异步加载结果即可。
+ */
+const PROJECTS = ref<Project[]>([
   {
     id: "lilia",
     name: "Lilia",
@@ -14,7 +19,7 @@ const PROJECTS: Project[] = [
     cwd: "c:\\Files\\workspace\\Momo",
     sessionCount: 5,
   },
-];
+]);
 
 const TASKS: Record<string, Task[]> = {
   lilia: [
@@ -90,11 +95,11 @@ function makeId(prefix: string): string {
 }
 
 export function listProjects(): Project[] {
-  return PROJECTS;
+  return PROJECTS.value;
 }
 
 export function getProject(id: string): Project | undefined {
-  return PROJECTS.find((p) => p.id === id);
+  return PROJECTS.value.find((p) => p.id === id);
 }
 
 export function listTasks(projectId: string): Task[] {
@@ -153,4 +158,29 @@ export function promoteDraftOrphan(id: string, title: string): void {
     },
     ...ORPHAN_LIST.value,
   ];
+}
+
+/**
+ * 侧栏「添加项目」入口：本地文件夹 / clone / 空分类三类都进这里。
+ * cwd 传 null 表示是「分类型」项目，不绑定本地工作目录，仅做侧栏归类用。
+ * 返回新建项目本身，方便调用方拿到 id 做 router 跳转。
+ */
+export function createProject(input: { name: string; cwd: string | null }): Project {
+  const trimmedName = input.name.trim();
+  const project: Project = {
+    id: makeId("p"),
+    name: trimmedName || "未命名项目",
+    cwd: input.cwd && input.cwd.trim() ? input.cwd.trim() : null,
+    sessionCount: 0,
+  };
+  PROJECTS.value = [...PROJECTS.value, project];
+  return project;
+}
+
+/** 从绝对路径取末尾段作为项目名候选；Windows / Unix 分隔符都吃。 */
+export function deriveProjectName(absPath: string): string {
+  const cleaned = absPath.trim().replace(/[\\/]+$/, "");
+  if (!cleaned) return "";
+  const parts = cleaned.split(/[\\/]/);
+  return parts[parts.length - 1] ?? cleaned;
 }
