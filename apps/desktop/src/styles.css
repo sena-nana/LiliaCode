@@ -2184,3 +2184,25 @@ button.ghost.danger:hover {
   font-size: 12px;
   color: var(--err);
 }
+
+/* 全局右键菜单：复用 .sb-menu 的浮层壳，z-index 抬到最上，再补 disabled / danger 两个状态。 */
+.ctx-menu {
+  z-index: 2000;
+}
+
+.ctx-menu__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ctx-menu__item:disabled:hover {
+  background: transparent;
+}
+
+.ctx-menu__item--danger {
+  color: var(--err);
+}
+
+.ctx-menu__item--danger:hover {
+  background: var(--err-soft);
+}
