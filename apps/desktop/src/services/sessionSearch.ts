@@ -1,12 +1,15 @@
 /**
  * 会话搜索：按会话「标题」搜，覆盖项目下任务 + 零散对话。
  *
- * 两种模式：
+ * 三种模式：
  * - text   纯子串匹配（大小写不敏感）。一次性把命中区间也算出来给 UI 高亮。
  * - vector 字符 bigram TF-IDF + 余弦相似度。是「真的」向量运算，只是底层
  *          token 不是神经网络 embedding —— 中英文混排都能给出有意义的相似度
  *          排序，且零依赖。后续接 Anthropic/OpenAI embedding 时，只需要把
  *          `vectorize` 那块替换成调真服务即可，外层接口不变。
+ * - hybrid 同时跑 text + vector，按 route 合并：两路都命中的条目分数相加并标
+ *          source="both"；只命中一路则照常返回，标 "text" 或 "vector"。
+ *          归一化方式见 `searchHybrid` 注释。
  *
  * 当前作用域：只搜标题。消息体还存在内存 HashMap 里、重启就丢，没法可靠
  * 索引；等持久化落盘后再扩到 message content。
@@ -18,9 +21,12 @@ import {
   listProjects,
 } from "../data/projectsStub";
 
-export type SearchMode = "text" | "vector";
+export type SearchMode = "text" | "vector" | "hybrid";
 
 export type SearchKind = "project-task" | "orphan";
+
+/** 标识结果在 hybrid 模式下来自哪一路：纯文本子串、向量相似度，或同时被两边命中。 */
+export type SearchSource = "text" | "vector" | "both";
 
 export interface SearchResult {
   kind: SearchKind;
@@ -32,10 +38,12 @@ export interface SearchResult {
   title: string;
   /** 直接可以 router.push 的路径。 */
   route: string;
-  /** 越大越相关。两种模式的量纲不同，UI 只用来排序。 */
+  /** 越大越相关。不同模式的量纲不同，UI 只用来排序。 */
   score: number;
-  /** title 上需要高亮的 [start, end) 区间。vector 模式恒为空。 */
+  /** title 上需要高亮的 [start, end) 区间。纯向量命中时为空。 */
   highlights: Array<[number, number]>;
+  /** 命中来源；text/vector 模式恒等于自身，hybrid 模式按实际命中路决定。 */
+  source: SearchSource;
 }
 
 interface Doc {
@@ -108,7 +116,7 @@ function searchText(query: string, corpus: Doc[]): SearchResult[] {
     // 越多命中 / 越靠前命中得分越高；常数 10 让命中数主导，位置加成只是平滑。
     const score =
       ranges.length * 10 + (1 - earliest / Math.max(d.title.length, 1));
-    out.push({ ...d, score, highlights: ranges });
+    out.push({ ...d, score, highlights: ranges, source: "text" });
   }
   return out.sort((a, b) => b.score - a.score);
 }
@@ -188,14 +196,63 @@ function searchVector(query: string, corpus: Doc[]): SearchResult[] {
     const dVec = tfidfVec(bigrams(d.title), idf);
     const score = cosine(qVec, dVec);
     if (score <= 0) continue;
-    out.push({ ...d, score, highlights: [] });
+    out.push({ ...d, score, highlights: [], source: "vector" });
   }
   return out.sort((a, b) => b.score - a.score);
+}
+
+// ---------------- hybrid mode ----------------
+
+/** 把两路结果按 route 合并：同时命中则相加，并升级 source 为 both，并保留文本高亮区间。
+ *  量纲处理：text 分数除以「该次搜索的最高 text 分」归一到 [0,1]，与 cosine 同档；
+ *  权重 0.6 / 0.4 略偏向文本——子串命中通常意图更明确，向量是兜底召回。 */
+function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
+  const q = query.trim();
+  if (!q) return [];
+  const textHits = searchText(q, corpus);
+  const vectorHits = searchVector(q, corpus);
+
+  const TEXT_WEIGHT = 0.6;
+  const VECTOR_WEIGHT = 0.4;
+
+  const textMax = textHits.length ? textHits[0].score : 0;
+  const norm = (s: number) => (textMax > 0 ? s / textMax : 0);
+
+  const merged = new Map<string, SearchResult>();
+
+  for (const r of textHits) {
+    merged.set(r.route, {
+      ...r,
+      score: norm(r.score) * TEXT_WEIGHT,
+      source: "text",
+    });
+  }
+
+  for (const r of vectorHits) {
+    const prev = merged.get(r.route);
+    if (prev) {
+      merged.set(r.route, {
+        ...prev,
+        score: prev.score + r.score * VECTOR_WEIGHT,
+        source: "both",
+      });
+    } else {
+      merged.set(r.route, {
+        ...r,
+        score: r.score * VECTOR_WEIGHT,
+        source: "vector",
+      });
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => b.score - a.score);
 }
 
 // ---------------- public ----------------
 
 export function searchSessions(query: string, mode: SearchMode): SearchResult[] {
   const corpus = buildCorpus();
-  return mode === "vector" ? searchVector(query, corpus) : searchText(query, corpus);
+  if (mode === "vector") return searchVector(query, corpus);
+  if (mode === "hybrid") return searchHybrid(query, corpus);
+  return searchText(query, corpus);
 }

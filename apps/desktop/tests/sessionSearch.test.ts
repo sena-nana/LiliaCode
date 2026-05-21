@@ -37,4 +37,25 @@ describe("sessionSearch", () => {
     expect(task?.route.startsWith("/projects/")).toBe(true);
     expect(orphan?.route.startsWith("/chats/")).toBe(true);
   });
+
+  it("hybrid 模式合并文本 + 向量结果并按 source 标注来源", () => {
+    const res = searchSessions("Claude", "hybrid");
+    expect(res.length).toBeGreaterThan(0);
+
+    // route 不应重复（合并去重）
+    const routes = res.map((r) => r.route);
+    expect(new Set(routes).size).toBe(routes.length);
+
+    // source 一定是三态之一
+    for (const r of res) {
+      expect(["text", "vector", "both"]).toContain(r.source);
+    }
+
+    // 排序应从高到低
+    const scores = res.map((r) => r.score);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+
+    // 至少存在一条来自 "both"（"Claude" 必然在 text 与 vector 两路都命中）
+    expect(res.some((r) => r.source === "both")).toBe(true);
+  });
 });

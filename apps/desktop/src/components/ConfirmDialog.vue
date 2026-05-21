@@ -2,8 +2,9 @@
 /**
  * 通用确认弹层。
  *
- * 视觉上复用 SearchPalette 的 backdrop / 进出过渡（`search-palette` 类名），
- * 内部用 `.dialog__*` 一套通用 class 摆 header / body / actions。
+ * 视觉上复用全局命令面板风格的 backdrop / 进出过渡（`search-palette` 类名是
+ * 历史命名，仅保留过渡 + 卡片几何）；内部用 `.dialog__*` 一套通用 class 摆
+ * header / body / actions。
  * 删除类操作传 `danger=true`，主按钮换成红色 ghost.danger。
  *
  * 不做嵌套堆叠管理：调用方自己保证同一时刻只有一个 confirm 在弹。

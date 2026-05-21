@@ -291,9 +291,203 @@ pre code {
 .sb-section--actions {
   flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 2px 2px 0;
+  /* 内联搜索下拉以本容器为锚点向下浮出，必须 relative */
+  position: relative;
 }
+
+/* 第一区域主按钮：「新对话」。flex:1 占满搜索按钮以外的全部宽度，
+ * 文字和图标左对齐，遵循 chip / sb-action 的悬停反馈。 */
+.sb-primary-btn {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  /* 反转 input/button 全局默认的 1px 边框；保持 nav-icon 一样的纯净外观 */
+  border: 0;
+}
+
+.sb-primary-btn:hover {
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.sb-primary-btn__label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第一区域的右侧图标按钮（搜索 / 关闭搜索）。30x30 方块、纯图标。 */
+.sb-icon-action {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.sb-icon-action:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+/* 内联搜索框：占据原本「新对话」按钮的位置。视觉上仍然像一颗按钮——
+ * 浅一档底色 + focus-within 时高亮 accent 边线。 */
+.sb-search {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.sb-search:focus-within {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.sb-search__leading {
+  flex: 0 0 auto;
+}
+
+.sb-search__input {
+  flex: 1;
+  min-width: 0;
+  /* 覆盖全局 input 的高度/边框/背景 */
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  outline: 0;
+}
+
+.sb-search__input::placeholder {
+  color: var(--text-faint);
+}
+
+/* 搜索下拉：浮在项目树之上的浮层，相对 sb-section--actions 定位。
+ * 不使用 Teleport：限制在侧栏宽度内，不会影响主区点击 / 滚动。 */
+.sb-search-dd {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  /* 项目内部强制 ellipsis，绝不让侧栏出现横向滚动条 */
+  overflow-x: hidden;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sb-search-dd__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-weight: 500;
+  /* 单行紧凑，覆盖全局 button 的 32px 默认高度 */
+  height: 28px;
+  /* 项目内不允许出现横向滚动条；超长用 ellipsis 处理 */
+  overflow: hidden;
+}
+
+.sb-search-dd__item.is-active {
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.sb-search-dd__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-search-dd__title mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* 右侧项目名：单行、靠右、不抢标题位置——给上限宽并 ellipsis。
+ * orphan 类型没有 projectName，模板里直接不渲染本节点。 */
+.sb-search-dd__scope {
+  flex: 0 1 auto;
+  max-width: 45%;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-search-dd__empty,
+.sb-search-dd__hint {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 
 .sb-section__header {
   display: flex;
@@ -502,17 +696,17 @@ pre code {
 /* 侧栏底部：设置入口（用 margin-top: auto 推到底） */
 .sb-footer {
   margin-top: auto;
-  padding: 0 0 0px;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
 }
 
 .sb-footer__btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -538,9 +732,10 @@ pre code {
 .sb-conn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 8px;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  margin-left: 4px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
@@ -1494,8 +1689,10 @@ button.ghost:hover {
 }
 
 /* ---------------- Search palette ---------------- *
- * 命令面板风格的浮层，Teleport 到 body 之外，所以这里只能写全局选择器。
- * 视觉上沿用 chip / dropdown 的圆角节奏，分值用 tabular-nums 对齐。
+ * 命令面板风格的浮层 backdrop + 进出过渡。
+ * 历史上「搜索」走 modal 浮窗时这是主入口；现在搜索已经下沉到侧栏内联下拉
+ * （见 .sb-search-dd），所以这里只保留供 ConfirmDialog 等通用弹层复用的
+ * backdrop / 卡片几何 / 过渡曲线。
  */
 
 .search-palette {
@@ -1520,140 +1717,6 @@ button.ghost:hover {
   border-radius: 12px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
   overflow: hidden;
-}
-
-.search-palette__header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-}
-
-.search-palette__input {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: 0;
-  outline: 0;
-  color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
-}
-
-.search-palette__input::placeholder {
-  color: var(--text-faint);
-}
-
-.search-palette__modes {
-  display: flex;
-  gap: 4px;
-}
-
-.search-palette__modes button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-.search-palette__modes button:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.search-palette__modes button.is-active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.search-palette__close {
-  background: transparent;
-  border: 0;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.search-palette__close:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.search-palette__list {
-  list-style: none;
-  margin: 0;
-  padding: 6px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.search-palette__item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.search-palette__item.is-active {
-  background: var(--bg-hover);
-}
-
-.search-palette__title {
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.search-palette__title mark {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 3px;
-  padding: 0 2px;
-}
-
-.search-palette__meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.search-palette__scope {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-palette__score {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
-}
-
-.search-palette__empty,
-.search-palette__hint {
-  padding: 18px 14px;
-  color: var(--text-muted);
-  text-align: center;
-  font-size: 12px;
 }
 
 /* 进出过渡：背板淡入淡出，卡片轻微下落 + 缩放。

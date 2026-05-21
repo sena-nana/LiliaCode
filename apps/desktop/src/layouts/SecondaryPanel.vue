@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
   MessageSquarePlus,
   Search,
   Puzzle,
-  Zap,
   Plus,
   ArrowUpDown,
   MoreHorizontal,
   Folder,
   Sparkles,
   AlertTriangle,
+  FileText,
+  X,
 } from "lucide-vue-next";
 import {
   createDraftOrphan,
@@ -21,7 +22,7 @@ import {
   listOrphanConversations,
 } from "../data/projectsStub";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
-import SearchPalette from "../components/SearchPalette.vue";
+import { searchSessions, type SearchResult } from "../services/sessionSearch";
 
 const route = useRoute();
 const router = useRouter();
@@ -55,7 +56,7 @@ const backendLabel = computed(() =>
 
 const isUnconfigured = computed(
   () => primaryStatus.value?.status.connectionMode === "unconfigured" ||
-        primaryStatus.value === null,
+    primaryStatus.value === null,
 );
 
 const connectionTooltip = computed(() => {
@@ -92,45 +93,145 @@ function newChat() {
   router.push(`/chats/${draft.id}`);
 }
 
-const searchOpen = ref(false);
-function openSearch() {
-  searchOpen.value = true;
-}
-function closeSearch() {
-  searchOpen.value = false;
-}
-
-const globalActions = [
-  { key: "new-chat", label: "新对话", icon: MessageSquarePlus, handler: newChat },
-  { key: "search", label: "搜索", icon: Search, handler: openSearch },
-  { key: "plugins", label: "插件 / 技能", icon: Puzzle, handler: openPlugins },
-  { key: "automation", label: "自动化", icon: Zap, handler: noop },
-];
-
-function openPlugins() {
-  router.push("/plugins");
-}
-
 function noop() {
   /* 占位：后续接 store / 命令 */
+}
+
+// ---------------- 内联搜索 ---------------- *
+// 「新对话」按钮和「搜索」按钮独占第一行；点击搜索后这两个按钮原位变成一个
+// 搜索输入框 + 关闭按钮，下方挂下拉。下拉里的结果走 hybrid 模式（文本子串
+// 命中优先，向量相似度兜底召回）。键盘：↑↓ 选项，Enter 打开，Esc 关闭。
+
+const searchActive = ref(false);
+const searchQuery = ref("");
+const searchInput = ref<HTMLInputElement | null>(null);
+const selectedIdx = ref(0);
+
+const searchResults = computed<SearchResult[]>(() =>
+  searchSessions(searchQuery.value, "hybrid").slice(0, 12),
+);
+
+watch(searchResults, () => {
+  selectedIdx.value = 0;
+});
+
+async function openSearch() {
+  searchActive.value = true;
+  searchQuery.value = "";
+  selectedIdx.value = 0;
+  await nextTick();
+  searchInput.value?.focus();
+}
+
+function closeSearch() {
+  searchActive.value = false;
+  searchQuery.value = "";
+  selectedIdx.value = 0;
+}
+
+function openResult(r: SearchResult) {
+  router.push(r.route);
+  closeSearch();
+}
+
+function onSearchKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeSearch();
+    return;
+  }
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (searchResults.value.length) {
+      selectedIdx.value = (selectedIdx.value + 1) % searchResults.value.length;
+    }
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (searchResults.value.length) {
+      selectedIdx.value =
+        (selectedIdx.value - 1 + searchResults.value.length) %
+        searchResults.value.length;
+    }
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    const r = searchResults.value[selectedIdx.value];
+    if (r) openResult(r);
+  }
+}
+
+interface Segment {
+  text: string;
+  mark: boolean;
+}
+
+/** 把高亮 ranges 转成「文本段 + 是否高亮」的扁平数组，方便模板渲染。 */
+function highlightSegments(text: string, ranges: Array<[number, number]>): Segment[] {
+  if (!ranges.length) return [{ text, mark: false }];
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const [s, e] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  const out: Segment[] = [];
+  let cur = 0;
+  for (const [s, e] of merged) {
+    if (cur < s) out.push({ text: text.slice(cur, s), mark: false });
+    out.push({ text: text.slice(s, e), mark: true });
+    cur = e;
+  }
+  if (cur < text.length) out.push({ text: text.slice(cur), mark: false });
+  return out;
 }
 </script>
 
 <template>
   <aside class="secondary-panel">
-    <!-- 区域 1：全局动作 -->
+    <!-- 区域 1：第一行 = 新对话（宽）+ 搜索（图标）。点击搜索后整行变输入框。
+         搜索下拉作为 actions 的子元素，absolute 浮在项目树之上，不挤占布局。 -->
     <div class="sb-section sb-section--actions">
-      <button
-        v-for="a in globalActions"
-        :key="a.key"
-        type="button"
-        class="sb-action"
-        :title="a.label"
-        :aria-label="a.label"
-        @click="a.handler"
-      >
-        <component :is="a.icon" :size="16" aria-hidden="true" />
-      </button>
+      <template v-if="!searchActive">
+        <button type="button" class="sb-primary-btn" title="新对话" aria-label="新对话" @click="newChat">
+          <MessageSquarePlus :size="15" aria-hidden="true" />
+          <span class="sb-primary-btn__label">新对话</span>
+        </button>
+        <button type="button" class="sb-icon-action" title="搜索会话" aria-label="搜索会话" @click="openSearch">
+          <Search :size="15" aria-hidden="true" />
+        </button>
+      </template>
+
+      <template v-else>
+        <div class="sb-search">
+          <Search :size="14" aria-hidden="true" class="sb-search__leading" />
+          <input ref="searchInput" v-model="searchQuery" type="text" class="sb-search__input" placeholder="搜索会话…"
+            spellcheck="false" @keydown="onSearchKeydown" />
+        </div>
+        <button type="button" class="sb-icon-action" title="关闭搜索 (Esc)" aria-label="关闭搜索" @click="closeSearch">
+          <X :size="15" aria-hidden="true" />
+        </button>
+
+        <div class="sb-search-dd" role="listbox">
+          <template v-if="searchResults.length">
+            <button v-for="(r, i) in searchResults" :key="r.route" type="button" class="sb-search-dd__item"
+              :class="{ 'is-active': i === selectedIdx }" role="option" :aria-selected="i === selectedIdx"
+              @mouseenter="selectedIdx = i" @click="openResult(r)">
+              <span class="sb-search-dd__title">
+                <template v-for="(seg, j) in highlightSegments(r.title, r.highlights)" :key="j">
+                  <mark v-if="seg.mark">{{ seg.text }}</mark>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
+              </span>
+              <span v-if="r.projectName" class="sb-search-dd__scope">{{ r.projectName }}</span>
+            </button>
+          </template>
+          <p v-else-if="searchQuery.trim()" class="sb-search-dd__empty">没有匹配</p>
+          <p v-else class="sb-search-dd__hint">
+            <FileText :size="11" aria-hidden="true" />
+            输入关键词
+          </p>
+        </div>
+      </template>
     </div>
 
     <!-- 区域 2：项目（树状） -->
@@ -149,16 +250,9 @@ function noop() {
 
       <div class="sb-tree">
         <div v-for="p in projects" :key="p.id" class="sb-tree__group">
-          <div
-            class="sb-tree__row sb-tree__row--project"
-            :class="{ 'is-open': expanded[p.id] }"
-            role="button"
-            tabindex="0"
-            :aria-expanded="expanded[p.id]"
-            @click="toggle(p.id)"
-            @keydown.enter.prevent="toggle(p.id)"
-            @keydown.space.prevent="toggle(p.id)"
-          >
+          <div class="sb-tree__row sb-tree__row--project" :class="{ 'is-open': expanded[p.id] }" role="button"
+            tabindex="0" :aria-expanded="expanded[p.id]" @click="toggle(p.id)" @keydown.enter.prevent="toggle(p.id)"
+            @keydown.space.prevent="toggle(p.id)">
             <Folder :size="14" aria-hidden="true" />
             <span class="sb-tree__name">{{ p.name }}</span>
             <div class="sb-tree__hover-tools" @click.stop>
@@ -171,25 +265,14 @@ function noop() {
             </div>
           </div>
 
-          <div
-            class="sb-collapse"
-            :class="{ 'is-open': expanded[p.id] }"
-            :aria-hidden="!expanded[p.id]"
-          >
+          <div class="sb-collapse" :class="{ 'is-open': expanded[p.id] }" :aria-hidden="!expanded[p.id]">
             <div class="sb-collapse__inner">
-              <RouterLink
-                v-for="c in listProjectConversations(p.id)"
-                :key="c.id"
-                :to="`/projects/${p.id}/tasks/${c.id}`"
-                class="sb-tree__row sb-tree__row--child"
-                :class="{ 'is-active': isActiveTask(p.id, c.id) }"
-              >
+              <RouterLink v-for="c in listProjectConversations(p.id)" :key="c.id"
+                :to="`/projects/${p.id}/tasks/${c.id}`" class="sb-tree__row sb-tree__row--child"
+                :class="{ 'is-active': isActiveTask(p.id, c.id) }">
                 <span class="sb-tree__name">{{ c.title }}</span>
               </RouterLink>
-              <p
-                v-if="listProjectConversations(p.id).length === 0"
-                class="sb-tree__empty"
-              >
+              <p v-if="listProjectConversations(p.id).length === 0" class="sb-tree__empty">
                 还没有对话
               </p>
             </div>
@@ -212,38 +295,26 @@ function noop() {
       </div>
 
       <div class="sb-tree">
-        <RouterLink
-          v-for="o in orphans"
-          :key="o.id"
-          :to="`/chats/${o.id}`"
-          class="sb-tree__row sb-tree__row--orphan"
-          :class="{ 'is-active': isActiveOrphan(o.id) }"
-        >
+        <RouterLink v-for="o in orphans" :key="o.id" :to="`/chats/${o.id}`" class="sb-tree__row sb-tree__row--orphan"
+          :class="{ 'is-active': isActiveOrphan(o.id) }">
           <span class="sb-tree__name">{{ o.title }}</span>
         </RouterLink>
         <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
       </div>
     </div>
 
-    <!-- 底部：设置入口 + 连接状态徽章 -->
+    <!-- 底部：设置 + 插件 + 连接状态徽章 -->
     <div class="sb-footer">
-      <RouterLink
-        to="/settings"
-        class="sb-footer__btn"
-        active-class="is-active"
-        title="设置"
-        aria-label="设置"
-      >
-        <Settings :size="16" aria-hidden="true" />
+      <RouterLink to="/settings" class="sb-footer__btn" active-class="is-active" title="设置" aria-label="设置">
+        <Settings :size="14" aria-hidden="true" />
       </RouterLink>
 
-      <RouterLink
-        to="/settings"
-        class="sb-conn"
-        :class="isUnconfigured ? 'sb-conn--warn' : 'sb-conn--ok'"
-        :title="connectionTooltip"
-        :aria-label="connectionTooltip"
-      >
+      <RouterLink to="/plugins" class="sb-footer__btn" active-class="is-active" title="插件 / 技能" aria-label="插件 / 技能">
+        <Puzzle :size="14" aria-hidden="true" />
+      </RouterLink>
+
+      <RouterLink to="/settings" class="sb-conn" :class="isUnconfigured ? 'sb-conn--warn' : 'sb-conn--ok'"
+        :title="connectionTooltip" :aria-label="connectionTooltip">
         <template v-if="isUnconfigured">
           <AlertTriangle :size="12" aria-hidden="true" />
           <span class="sb-conn__label">未连接</span>
@@ -258,6 +329,4 @@ function noop() {
       </RouterLink>
     </div>
   </aside>
-
-  <SearchPalette :open="searchOpen" @close="closeSearch" />
 </template>
