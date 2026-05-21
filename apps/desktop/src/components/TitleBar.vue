@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { Minus, Square, Copy, X, ChevronRight } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import ViewTabs from "./ViewTabs.vue";
 import {
   getOrphanConversation,
   getProject,
@@ -162,12 +161,6 @@ async function onClose() {
     </div>
 
     <div class="titlebar__spacer" data-tauri-drag-region></div>
-
-    <Transition name="tb-tabs">
-      <div v-if="projectId" class="titlebar__tabs">
-        <ViewTabs :project-id="projectId" active="sessions" />
-      </div>
-    </Transition>
 
     <div class="titlebar__controls">
       <button

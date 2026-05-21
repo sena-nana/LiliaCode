@@ -26,6 +26,7 @@ import {
   promoteDraftOrphan,
 } from "../data/projectsStub";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
+import ViewTabs from "../components/ViewTabs.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
 import {
   getComposerState,
@@ -102,6 +103,25 @@ let streamFinalized = false;
 let revealTimer: number | null = null;
 
 const unlisteners: UnlistenFn[] = [];
+
+/**
+ * 主区顶部 ViewTabs 的自动隐藏：默认不显示，鼠标 Y 距 chat-page 顶部小于
+ * THRESHOLD 时浮现，离开 chat-page 或下移时淡出。绝对定位让 tabs 不占
+ * chat 高度、也不挡下方气泡的点击/选择 —— 是 macOS 全屏菜单栏的同款做法。
+ */
+const VIEW_TABS_REVEAL_THRESHOLD = 56;
+const chatPageEl = ref<HTMLElement | null>(null);
+const showViewTabs = ref(false);
+
+function onChatPagePointerMove(e: PointerEvent) {
+  if (!chatPageEl.value) return;
+  const top = chatPageEl.value.getBoundingClientRect().top;
+  showViewTabs.value = e.clientY - top < VIEW_TABS_REVEAL_THRESHOLD;
+}
+
+function onChatPagePointerLeave() {
+  showViewTabs.value = false;
+}
 
 function startStreamBubble() {
   // 在历史尾部加一条空的 assistant 气泡，后续 chunk 都 reveal 到它的 content 上。
@@ -331,7 +351,20 @@ watch(
 </script>
 
 <template>
-  <section v-if="hasContext" class="chat-page">
+  <section
+    v-if="hasContext"
+    ref="chatPageEl"
+    class="chat-page"
+    @pointermove="onChatPagePointerMove"
+    @pointerleave="onChatPagePointerLeave"
+  >
+    <div
+      v-if="projectId"
+      class="view-tabs-zone"
+      :class="{ 'is-visible': showViewTabs }"
+    >
+      <ViewTabs :project-id="projectId" active="sessions" />
+    </div>
     <div class="chat">
       <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
       <ChatComposer

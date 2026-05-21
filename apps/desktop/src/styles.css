@@ -868,32 +868,52 @@ pre code {
   color: var(--text-faint);
 }
 
-/* ---------------- View tabs（标题栏内嵌的项目级视图切换） ---------------- *
- * 原本挂在主区顶部，现在搬进 titlebar 居中位。Sessions 之外的 tab 暂时
- * disabled，只占位；未来加 Kanban / 架构图 / Todo 视图时把对应 tab 的
- * disabled 去掉并加路由即可，不动布局骨架。
+/* ---------------- View tabs（主区顶部，自动隐藏的浮层） ---------------- *
+ * 之前试过塞进 36px 标题栏当 chrome，但和窗控、面包屑挨太近视觉太挤；现在
+ * 搬回主区顶部，但默认隐身——鼠标靠近主区顶端时浮现，离开就淡出，最大化
+ * chat 视觉呼吸空间。Sessions 之外的 tab 暂时 disabled，只占位；未来加
+ * Kanban / 架构图 / Todo 时去掉 disabled + 接路由即可。
  *
- * 视觉走 segmented 风格而非 underline tab —— 标题栏只有 36px 高，
- * underline 配合下边线在 chrome 内会显得头重脚轻；segmented 是和窗控
- * 按钮、面包屑共存最舒服的形态。
+ * 视觉走 segmented 风格而非 underline tab —— 现在 tabs 是浮在 chat 上方的
+ * "工具条"，胶囊形比贴边 underline 更轻、不会跟下方内容粘连。
  */
+
+/* 浮层定位：绝对挂在 .chat-page 顶部居中，不占布局空间，不挡气泡点击。 */
+.view-tabs-zone {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  z-index: 5;
+  /* 默认隐藏：透明 + 微微上移 + 关掉指针事件，不会拦下方鼠标 hover。
+   * is-visible 时复位。 */
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.view-tabs-zone.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
 .view-tabs {
   display: inline-flex;
-  align-self: center;
   align-items: center;
-  height: 24px;
+  height: 28px;
   padding: 2px;
-  background: var(--bg-subtle);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 8px;
   gap: 1px;
-  /* 标题栏整体是 drag region，按钮要可点必须显式 no-drag。 */
-  -webkit-app-region: no-drag;
+  /* 浮层效果：给一层弱阴影让它从 chat 上"浮起来"。 */
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
 }
 
 .view-tabs__tab {
-  height: 20px;
-  padding: 0 8px;
+  height: 22px;
+  padding: 0 10px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -901,7 +921,7 @@ pre code {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 12px;
   font-weight: 500;
   transition: background-color 0.12s ease, color 0.12s ease;
@@ -925,10 +945,15 @@ pre code {
   filter: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .view-tabs-zone {
+    transition: none;
+  }
+}
+
 /* ---------------- Titlebar ---------------- *
- * 横通栏 36px。布局从左到右：[面包屑] [drag spacer] [ViewTabs 居中] [drag spacer]
- * [窗控按钮]。两侧 spacer 都吃 flex:1，让 ViewTabs 真正落在标题栏中央；缺位时
- * 两侧 spacer 自然合并成一整片拖拽区。
+ * 横通栏 36px。布局从左到右：[面包屑] [drag spacer] [窗控按钮]。spacer 吃 flex:1
+ * 充当大块拖拽区，面包屑长短全靠它兜底。
  */
 
 .titlebar {
@@ -938,10 +963,6 @@ pre code {
   background: var(--bg-elev);
   user-select: none;
   -webkit-user-select: none;
-  /* ViewTabs 用 absolute 锚定到容器中心，需要 titlebar 当包含块。
-   * 不脱流的话 ViewTabs 是 flex item，左右 spacer 均分"剩余"——剩余=总宽
-   * 减面包屑宽，面包屑一长 ViewTabs 就被往右挤。要"始终窗口中央"必须脱流。 */
-  position: relative;
 }
 
 /* 面包屑容器：占自然宽度，可收缩，单行 ellipsis。整条仍然是 drag region，
@@ -998,18 +1019,6 @@ pre code {
   min-width: 0;
 }
 
-/* ViewTabs 锚定层：absolute 钉死在 titlebar 几何中心，跟左右内容宽度解耦。
- * 内层 .view-tabs 仍然是 inline-flex 的 segmented，保持组件自洽不被这层污染。 */
-.titlebar__tabs {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  -webkit-app-region: no-drag;
-  /* 避免极窄窗口下 ViewTabs 撞到面包屑或窗控：超出范围隐形即可，靠面包屑顶替。 */
-  max-width: calc(100% - 320px);
-}
-
 .titlebar__controls {
   display: flex;
   align-items: stretch;
@@ -1042,13 +1051,12 @@ pre code {
   color: #ffffff;
 }
 
-/* ---- 标题栏内容过渡 ---- *
- * 路由切换 / projectId 进出会让面包屑文字、ViewTabs 显隐——直接换 DOM 会"啪"
- * 一下跳。两块都只做纯 opacity 渐隐渐显，不带位移/缩放：
- *  - tb-crumbs：mode="out-in" 防止新旧文字短暂重叠在同一 flex 槽里。
- *  - tb-tabs：单元素 v-if，注意保留 translate(-50%, -50%) 作为居中基准。
- * 时长 0.22s——比 hover (0.12s) 慢一档，让眼睛跟得上"内容换了"；mode="out-in"
- * 的 crumbs 实际总时长翻倍约 0.44s，仍在常见路由切换节奏内。
+/* ---- 标题栏面包屑过渡 ---- *
+ * 路由切换会让面包屑文字变化——直接换 DOM 会"啪"一下跳，给前缀段和叶子段
+ * 各套一层 <Transition mode="out-in"> 做纯 opacity 渐隐渐显：mode="out-in"
+ * 防止新旧文字短暂重叠在同一 flex 槽里。两个 Transition 并行，互不阻塞。
+ * 时长 0.22s——比 hover (0.12s) 慢一档，让眼睛跟得上"内容换了"；out-in 总时
+ * 长翻倍约 0.44s，仍在常见路由切换节奏内。
  */
 .tb-crumbs-enter-active,
 .tb-crumbs-leave-active {
@@ -1059,23 +1067,9 @@ pre code {
   opacity: 0;
 }
 
-.tb-tabs-enter-active,
-.tb-tabs-leave-active {
-  transition: opacity 0.22s ease;
-}
-.tb-tabs-enter-from,
-.tb-tabs-leave-to {
-  opacity: 0;
-  /* 必须显式重声明居中 transform，否则浏览器会用元素当前 transform 作起点，
-   * 而 enter-from 默认状态没有这条规则——会从"左上角(0,0)"出现一下。 */
-  transform: translate(-50%, -50%);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .tb-crumbs-enter-active,
-  .tb-crumbs-leave-active,
-  .tb-tabs-enter-active,
-  .tb-tabs-leave-active {
+  .tb-crumbs-leave-active {
     transition: none;
   }
 }
@@ -1593,13 +1587,15 @@ button.ghost:hover {
  */
 
 .chat-page {
-  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 在 flex 里
-   * 取自身 auto 高度，剩下交给 .chat；orphan 模式没有 ViewTabs 也照样吃满。 */
+  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 是 absolute 浮层
+   * 不占布局，全部高度交给 .chat。 */
   height: calc(100vh - 36px - 40px);
   display: flex;
   flex-direction: column;
   gap: 0;
   min-height: 0;
+  /* 给 .view-tabs-zone 当 absolute 包含块——它要钉在 chat-page 顶部居中。 */
+  position: relative;
 }
 
 .chat {
