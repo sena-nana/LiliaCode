@@ -1166,6 +1166,16 @@ button.ghost:hover {
   border-color: var(--border);
 }
 
+.conn-banner--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.conn-banner--warn .conn-banner__hint {
+  color: var(--text);
+  opacity: 0.85;
+}
+
 /* banner 里的内联链接式按钮，给「重新检测」一类的低强度动作。 */
 .inline-link {
   background: none;
@@ -1680,3 +1690,300 @@ button.ghost:hover {
     transform: none;
   }
 }
+
+/* ================ 插件 / 技能管理 ================ */
+
+/* .card 默认 overflow:hidden 会裁掉内部 Dropdown 的绝对定位菜单。
+ * 凡是卡片里需要弹出层（dropdown / popover）的，加这个修饰类放开溢出。 */
+.card.card--allow-overflow {
+  overflow: visible;
+}
+
+/* 默认 button 已经是 accent 主色；显式 .primary 是为了让模板里意图更清晰，
+ * 实际上不需要重新声明颜色（保留为别名）。 */
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* 危险动作复用 .ghost 的几何参数，仅替换强调色为 --err。 */
+button.ghost.danger {
+  color: var(--err);
+  border-color: rgba(244, 113, 116, 0.45);
+}
+button.ghost.danger:hover {
+  background: var(--err-soft);
+}
+
+/* 刷新图标的旋转，给「刷新中…」时的 indicator 用。 */
+.is-spinning {
+  animation: lilia-spin 0.9s linear infinite;
+}
+@keyframes lilia-spin {
+  to { transform: rotate(360deg); }
+}
+
+.page-header__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---- Tabs ---- */
+.plugins-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.plugins-tabs > button {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.plugins-tabs > button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.plugins-tabs > button.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.plugins-tabs__count {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Toolbar 顶部一行 ---- */
+.plugins-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.plugins-toolbar__hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.plugins-toolbar__hint code,
+.plugins-section-hint code,
+.plugins-create__hint code {
+  background: var(--bg-subtle);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.plugins-section-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+/* ---- List items ---- */
+.plugins-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plugins-list__item {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "head    actions"
+    "desc    actions"
+    "meta    actions";
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.plugins-list__item.is-disabled {
+  opacity: 0.6;
+}
+
+.plugins-list__head {
+  grid-area: head;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.plugins-list__name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plugins-list__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-weight: 500;
+}
+
+.plugins-list__badge--ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.plugins-list__badge--mute {
+  background: var(--bg);
+  color: var(--text-muted);
+}
+
+.plugins-list__desc {
+  grid-area: desc;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.plugins-list__meta {
+  grid-area: meta;
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugins-list__meta code {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.plugins-list__actions {
+  grid-area: actions;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.plugins-empty {
+  padding: 24px 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.plugins-warning-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---- 通用 dialog 框：弹层 backdrop 复用 .search-palette，
+ *      内容卡片用 .search-palette__card 的视觉 + 这里这套通用 header/body/actions。 ---- */
+.dialog__card {
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-weight: 600;
+}
+
+.dialog__header--danger {
+  color: var(--err);
+}
+
+.dialog__body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog__body p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.dialog__body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dialog__body textarea.text-input {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text);
+  resize: vertical;
+  min-height: 56px;
+  transition: border-color 0.12s ease;
+}
+.dialog__body textarea.text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---- 新建 Skill 弹层内部专有内容（提示 / 报错） ---- */
+.plugins-create__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.plugins-create__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--err);
+}
+

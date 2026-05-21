@@ -103,9 +103,13 @@ function closeSearch() {
 const globalActions = [
   { key: "new-chat", label: "新对话", icon: MessageSquarePlus, handler: newChat },
   { key: "search", label: "搜索", icon: Search, handler: openSearch },
-  { key: "plugins", label: "插件 / 技能", icon: Puzzle, handler: noop },
+  { key: "plugins", label: "插件 / 技能", icon: Puzzle, handler: openPlugins },
   { key: "automation", label: "自动化", icon: Zap, handler: noop },
 ];
+
+function openPlugins() {
+  router.push("/plugins");
+}
 
 function noop() {
   /* 占位：后续接 store / 命令 */

@@ -12,7 +12,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
+
+mod plugins;
+use plugins::{
+    ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview,
+};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -944,6 +950,88 @@ fn router_set_mode(app: AppHandle, backend: String, mode: String) -> Result<(), 
     Ok(())
 }
 
+// ---------- Plugins / Skills ----------
+//
+// 全部委托给 `plugins.rs`。这里只做参数转译 + Tauri 错误包装，避免 lib.rs 继续膨胀。
+
+#[tauri::command]
+fn plugins_overview(app: AppHandle, project_cwd: Option<String>) -> PluginsOverview {
+    plugins::overview(&app, project_cwd.as_deref())
+}
+
+#[tauri::command]
+fn plugins_list_claude_skills(
+    app: AppHandle,
+    scope: String,
+    project_cwd: Option<String>,
+) -> Vec<ClaudeSkill> {
+    plugins::list_claude_skills(&app, &scope, project_cwd.as_deref()).0
+}
+
+#[tauri::command]
+fn plugins_create_claude_skill(
+    app: AppHandle,
+    scope: String,
+    project_cwd: Option<String>,
+    name: String,
+    description: String,
+) -> Result<ClaudeSkill, String> {
+    plugins::create_claude_skill(&app, &scope, project_cwd.as_deref(), &name, &description)
+}
+
+#[tauri::command]
+fn plugins_delete_claude_skill(
+    app: AppHandle,
+    scope: String,
+    project_cwd: Option<String>,
+    name: String,
+) -> Result<(), String> {
+    plugins::delete_claude_skill(&app, &scope, project_cwd.as_deref(), &name)
+}
+
+#[tauri::command]
+fn plugins_set_claude_skill_enabled(
+    app: AppHandle,
+    scope: String,
+    project_cwd: Option<String>,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    plugins::set_claude_skill_enabled(&app, &scope, project_cwd.as_deref(), &name, enabled)
+}
+
+#[tauri::command]
+fn plugins_list_claude_plugins(app: AppHandle, scope: String) -> Vec<ClaudePlugin> {
+    plugins::list_claude_plugins(&app, &scope).0
+}
+
+#[tauri::command]
+fn plugins_list_codex_mcp_servers(app: AppHandle) -> Vec<CodexMcpServer> {
+    plugins::list_codex_mcp_servers(&app).0
+}
+
+/// 用系统默认编辑器打开 `~/.codex/config.toml`，文件不存在时先建一个空文件。
+/// Codex 这边没有运行时启停接口，直接给用户一个改 toml 的捷径。
+#[tauri::command]
+fn plugins_open_codex_config(app: AppHandle) -> Result<(), String> {
+    let path = plugins::codex_config_path(&app)?;
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建 .codex 目录失败：{e}"))?;
+        }
+    }
+    if !path.exists() {
+        std::fs::write(&path, b"")
+            .map_err(|e| format!("初始化 config.toml 失败：{e}"))?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    app.opener()
+        .open_path(path_str, None::<&str>)
+        .map_err(|e| format!("打开 config.toml 失败：{e}"))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -972,6 +1060,14 @@ pub fn run() {
             cc_switch_set_config,
             router_get_mode,
             router_set_mode,
+            plugins_overview,
+            plugins_list_claude_skills,
+            plugins_create_claude_skill,
+            plugins_delete_claude_skill,
+            plugins_set_claude_skill_enabled,
+            plugins_list_claude_plugins,
+            plugins_list_codex_mcp_servers,
+            plugins_open_codex_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

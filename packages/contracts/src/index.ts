@@ -163,3 +163,72 @@ export interface EnvStatusReport {
   routerModes: Record<ChatBackendKind, RouterMode>;
   backends: Record<ChatBackendKind, BackendEnvStatus>;
 }
+
+/**
+ * 插件 / 技能管理相关契约。
+ *
+ * 两个 backend 的扩展机制并不对称：
+ * - Claude Code 把扩展拆成 skills (markdown 文件夹) 和 plugins (marketplace bundle)。
+ *   两者目录都遵循 `~/.claude/<kind>/<name>/` 或 `<cwd>/.claude/<kind>/<name>/`。
+ *   Lilia 这一期只直接管理 skill；plugin marketplace 接口预留，列出已安装的 plugin。
+ * - Codex 没有 skill 概念，扩展集中在 `~/.codex/config.toml` 的 `[mcp_servers.*]` 节。
+ *   Lilia 这一期做只读展示 + 一键打开配置文件；后续可以加运行时启停。
+ *
+ * 字段命名向 Claude 这边对齐 —— Lilia 自身的「Skill / Plugin」概念是 Claude 那套
+ * 的超集，Codex MCP 看作平级的另一个扩展源。
+ */
+
+/** Skill 存放层级：用户级（跨项目共享）/ 项目级（绑定某个 cwd）。 */
+export type PluginScope = "user" | "project";
+
+export type PluginBackendKind = "claude" | "codex";
+
+export interface ClaudeSkill {
+  scope: PluginScope;
+  /** 目录名 / SKILL.md frontmatter 里的 name。 */
+  name: string;
+  /** SKILL.md frontmatter 里的 description；缺失时是空串。 */
+  description: string;
+  /**
+   * 是否对 Agent SDK 生效。
+   * 我们把 frontmatter 里自定义的 `disabled: true` 视为关闭；空缺即视为启用。
+   * Claude 官方不读这个字段，但 Lilia 在启动 agent 子进程时会按它来决定 pluginRoots。
+   */
+  enabled: boolean;
+  /** SKILL.md 的绝对路径，便于 UI 跳转 / 提示用户用编辑器打开。 */
+  path: string;
+}
+
+export interface ClaudePlugin {
+  scope: PluginScope;
+  /** 插件目录名。 */
+  name: string;
+  /** plugin.json 里的 description（缺失留空）。 */
+  description: string;
+  /** plugin.json 里的 version（缺失留空）。 */
+  version: string;
+  enabled: boolean;
+  /** 插件根目录绝对路径。 */
+  path: string;
+}
+
+export interface CodexMcpServer {
+  name: string;
+  command: string;
+  args: string[];
+  /**
+   * Codex 本身没有 disabled 字段；只要节存在就视为启用。
+   * UI 仍然展示一个 enabled = true 的角标，保持与 Claude 同构。
+   */
+  enabled: boolean;
+}
+
+/** 一次拉全数据的便利接口：UI 启动时一次性 invoke，省一轮 round trip。 */
+export interface PluginsOverview {
+  claudeUserSkills: ClaudeSkill[];
+  claudeProjectSkills: ClaudeSkill[];
+  claudeUserPlugins: ClaudePlugin[];
+  codexMcpServers: CodexMcpServer[];
+  /** 解析期发生的非致命错误，UI 用来提示「读取 .codex/config.toml 时第 N 行有误」。 */
+  warnings: string[];
+}
