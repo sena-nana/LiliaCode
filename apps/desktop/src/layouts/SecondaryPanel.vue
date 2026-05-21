@@ -7,7 +7,6 @@ import {
   Search,
   Puzzle,
   Plus,
-  ArrowUpDown,
   ChevronsDownUp,
   ChevronsUpDown,
   MoreHorizontal,
@@ -95,6 +94,12 @@ const allExpanded = computed(
 function toggleAll() {
   const target = !allExpanded.value;
   for (const p of projects.value) expanded[p.id] = target;
+}
+
+/** 收集箱整段展开/折叠：展开就显示孤儿列表，折叠就只留标题栏。 */
+const orphansExpanded = ref(true);
+function toggleOrphans() {
+  orphansExpanded.value = !orphansExpanded.value;
 }
 
 function isActiveTask(projectId: string, taskId: string) {
@@ -467,11 +472,11 @@ function confirmCategory() {
             <Folder :size="14" aria-hidden="true" />
             <span class="sb-tree__name">{{ p.name }}</span>
             <div class="sb-tree__hover-tools" @click.stop>
-              <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="noop">
-                <Plus :size="13" aria-hidden="true" />
-              </button>
               <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="noop">
                 <MoreHorizontal :size="13" aria-hidden="true" />
+              </button>
+              <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="noop">
+                <Plus :size="13" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -499,18 +504,29 @@ function confirmCategory() {
       <div class="sb-section__header">
         <span class="sb-section__title">收集箱</span>
         <div class="sb-section__tools">
-          <button type="button" class="sb-icon-btn" title="整理 / 排序" aria-label="整理 / 排序" @click="noop">
-            <ArrowUpDown :size="14" aria-hidden="true" />
+          <button type="button" class="sb-icon-btn"
+            :title="orphansExpanded ? '折叠收集箱' : '展开收集箱'"
+            :aria-label="orphansExpanded ? '折叠收集箱' : '展开收集箱'"
+            @click="toggleOrphans">
+            <ChevronsDownUp v-if="orphansExpanded" :size="14" aria-hidden="true" />
+            <ChevronsUpDown v-else :size="14" aria-hidden="true" />
+          </button>
+          <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="newChat">
+            <Plus :size="14" aria-hidden="true" />
           </button>
         </div>
       </div>
 
-      <div class="sb-tree">
-        <RouterLink v-for="o in orphans" :key="o.id" :to="`/chats/${o.id}`" class="sb-tree__row sb-tree__row--orphan"
-          :class="{ 'is-active': isActiveOrphan(o.id) }">
-          <span class="sb-tree__name">{{ o.title }}</span>
-        </RouterLink>
-        <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
+      <div class="sb-collapse" :class="{ 'is-open': orphansExpanded }" :aria-hidden="!orphansExpanded">
+        <div class="sb-collapse__inner">
+          <div class="sb-tree">
+            <RouterLink v-for="o in orphans" :key="o.id" :to="`/chats/${o.id}`" class="sb-tree__row sb-tree__row--orphan"
+              :class="{ 'is-active': isActiveOrphan(o.id) }">
+              <span class="sb-tree__name">{{ o.title }}</span>
+            </RouterLink>
+            <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
+          </div>
+        </div>
       </div>
     </div>
 
