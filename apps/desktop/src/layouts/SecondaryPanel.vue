@@ -98,7 +98,7 @@ function isActiveOrphan(taskId: string) {
 }
 
 /** 点「新对话」：开一条不绑项目的草稿会话，跳到 /chats/:id；
- *  在发出第一条消息之前不会出现在侧栏「零散对话」里。 */
+ *  在发出第一条消息之前不会出现在侧栏「收集箱」里。 */
 function newChat() {
   const draft = createDraftOrphan();
   router.push(`/chats/${draft.id}`);
@@ -493,10 +493,10 @@ function confirmCategory() {
       </div>
     </div>
 
-    <!-- 区域 3：零散对话 -->
+    <!-- 区域 3：收集箱 -->
     <div class="sb-section">
       <div class="sb-section__header">
-        <span class="sb-section__title">零散对话</span>
+        <span class="sb-section__title">收集箱</span>
         <div class="sb-section__tools">
           <button type="button" class="sb-icon-btn" title="整理 / 排序" aria-label="整理 / 排序" @click="noop">
             <ArrowUpDown :size="14" aria-hidden="true" />
@@ -621,7 +621,7 @@ function confirmCategory() {
                   @keydown.enter.prevent="confirmCategory" />
               </label>
               <p class="plugins-create__hint">
-                空分类不绑定本地目录，只用来在侧栏里把零散对话归到一起。
+                空分类不绑定本地目录，只用来在侧栏里把收集箱里的对话归到一起。
               </p>
             </div>
             <div class="dialog__actions">

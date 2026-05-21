@@ -16,7 +16,7 @@ type StreamableMessage = ChatMessage & { streaming?: boolean };
 
 const props = defineProps<{
   messages: StreamableMessage[];
-  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 零散对话」自行决定文案。 */
+  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」自行决定文案。 */
   emptyHeadline: string;
 }>();
 

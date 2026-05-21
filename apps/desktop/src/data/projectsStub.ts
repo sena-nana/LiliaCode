@@ -59,7 +59,7 @@ const TASKS: Record<string, Task[]> = {
 };
 
 /**
- * 侧边栏第三区域用的「零散对话」：还没绑定到任何项目的 Session/Task。
+ * 侧边栏第三区域用的「收集箱」：还没绑定到任何项目的 Session/Task。
  * 数据形状沿用 Task，只是 projectId 为 null —— 用单独的视图类型表示。
  */
 export interface OrphanConversation {
@@ -115,7 +115,7 @@ export function listProjectConversations(projectId: string): Task[] {
   return TASKS[projectId] ?? [];
 }
 
-/** 侧边栏第三区域的零散对话。 */
+/** 侧边栏第三区域的收集箱对话。 */
 export function listOrphanConversations(): OrphanConversation[] {
   return ORPHAN_LIST.value;
 }

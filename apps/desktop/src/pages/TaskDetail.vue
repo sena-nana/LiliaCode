@@ -11,9 +11,9 @@
  *
  * 该组件同时承载两种入口：
  *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
- *   /chats/:taskId                     —— 不绑定项目的零散/草稿对话
+ *   /chats/:taskId                     —— 不绑定项目的收集箱/草稿对话
  * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送后把
- * 草稿 promote 到侧栏的「零散对话」。
+ * 草稿 promote 到侧栏的「收集箱」。
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -25,7 +25,6 @@ import {
   isDraftOrphan,
   promoteDraftOrphan,
 } from "../data/projectsStub";
-import ViewTabs from "../components/ViewTabs.vue";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
 import {
@@ -191,7 +190,7 @@ async function onSend(content: string) {
     return;
   }
 
-  // 草稿在第一条消息发出去之前先入库到「零散对话」，这样侧栏立刻能看到；
+  // 草稿在第一条消息发出去之前先入库到「收集箱」，这样侧栏立刻能看到；
   // 即使后端报错也不撤回——按用户预期这就是「我发起了一次对话」。
   const wasDraft = !props.projectId && isDraftOrphan(props.taskId);
   if (wasDraft) {
@@ -333,7 +332,6 @@ watch(
 
 <template>
   <section v-if="hasContext" class="chat-page">
-    <ViewTabs v-if="projectId" :project-id="projectId" active="sessions" />
     <div class="chat">
       <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
       <ChatComposer

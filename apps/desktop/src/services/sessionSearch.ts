@@ -1,5 +1,5 @@
 /**
- * 会话搜索：按会话「标题」搜，覆盖项目下任务 + 零散对话。
+ * 会话搜索：按会话「标题」搜，覆盖项目下任务 + 收集箱对话。
  *
  * 三种模式：
  * - text   纯子串匹配（大小写不敏感）。一次性把命中区间也算出来给 UI 高亮。
@@ -32,7 +32,7 @@ export interface SearchResult {
   kind: SearchKind;
   /** 项目任务才有；orphan 时为 undefined。 */
   projectId?: string;
-  /** 项目展示名；orphan 时为 undefined（UI 显示「零散对话」标签）。 */
+  /** 项目展示名；orphan 时为 undefined（UI 显示「收集箱」标签）。 */
   projectName?: string;
   taskId: string;
   title: string;
