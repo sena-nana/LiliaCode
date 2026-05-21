@@ -50,25 +50,6 @@ const backendLabel = computed(() =>
   primaryStatus.value?.backend === "codex" ? "Codex" : "Claude",
 );
 
-/** 徽章上显示的提供商名（连到哪去了）。 */
-const providerLabel = computed(() => {
-  const s = primaryStatus.value?.status;
-  if (!s) return null;
-  switch (s.connectionMode) {
-    case "cc-switch":
-      return "CC-Switch";
-    case "direct":
-      return primaryStatus.value?.backend === "codex" ? "OpenAI" : "Anthropic";
-    case "custom": {
-      const url = s.effectiveUrl || "";
-      try { return new URL(url).host || "Custom"; }
-      catch { return "Custom"; }
-    }
-    default:
-      return null;
-  }
-});
-
 const isUnconfigured = computed(
   () => primaryStatus.value?.status.connectionMode === "unconfigured" ||
         primaryStatus.value === null,
@@ -79,9 +60,9 @@ const connectionTooltip = computed(() => {
   if (!ps) return "正在检测 agent 连接…";
   const s = ps.status;
   if (s.connectionMode === "unconfigured") {
-    return "未检测到任何 agent 连接：CC-Switch / ANTHROPIC_API_KEY / OPENAI_API_KEY 均未发现。点击进入设置。";
+    return "CC-Switch 代理不可达。点击进入设置。";
   }
-  return `${backendLabel.value} · ${providerLabel.value}（${s.effectiveUrl ?? "—"}）`;
+  return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
 
 /** 项目树的展开状态，默认展开所有项目（数据少，先粗糙做）。 */
@@ -241,9 +222,9 @@ function noop() {
           <AlertTriangle :size="12" aria-hidden="true" />
           <span class="sb-conn__label">未连接</span>
         </template>
-        <template v-else-if="providerLabel">
+        <template v-else-if="primaryStatus">
           <Sparkles :size="12" aria-hidden="true" />
-          <span class="sb-conn__label">{{ backendLabel }} · {{ providerLabel }}</span>
+          <span class="sb-conn__label">{{ backendLabel }}</span>
         </template>
         <template v-else>
           <span class="sb-conn__label sb-conn__label--probing">检测中…</span>
