@@ -789,8 +789,17 @@ pre code {
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  /* 默认隐身，光标在侧栏内 / 内部聚焦 / 路由命中时才淡入。
+     opacity 用 0.35s 慢淡入避免「闪一下」，hover/颜色保持 0.12s 维持手感。 */
+  opacity: 0;
+  transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease;
   flex-shrink: 0;
+}
+
+.secondary-panel:hover .sb-footer__btn,
+.secondary-panel:focus-within .sb-footer__btn,
+.sb-footer__btn.is-active {
+  opacity: 1;
 }
 
 .sb-footer__btn:hover {
@@ -819,7 +828,15 @@ pre code {
   letter-spacing: 0.2px;
   text-decoration: none;
   min-width: 0;
-  transition: background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
+  /* 跟 .sb-footer__btn 一样：默认隐身，光标在侧栏内 / 内部聚焦时淡入。
+     opacity 0.35s 慢淡入，状态色 0.12s 保持手感。 */
+  opacity: 0;
+  transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
+}
+
+.secondary-panel:hover .sb-conn,
+.secondary-panel:focus-within .sb-conn {
+  opacity: 1;
 }
 
 .sb-conn--ok {
