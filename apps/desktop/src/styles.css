@@ -655,6 +655,10 @@ pre code {
   font-size: 12px;
 }
 
+.sb-collapse__inner .sb-tree__empty {
+  margin-left: 30px;
+}
+
 .sb-tree__row {
   display: flex;
   align-items: center;
@@ -2135,4 +2139,3 @@ button.ghost.danger:hover {
   font-size: 12px;
   color: var(--err);
 }
-
