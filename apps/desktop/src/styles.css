@@ -1041,8 +1041,12 @@ pre code {
 }
 
 .titlebar__controls {
+  /* 不再让窗控贴满整条 titlebar 高度——改成中间垂直居中的圆角浮岛按钮，
+   * 跟 sb-action / sb-icon-btn 的语汇对齐，避免再出现 Windows 原生那种直角条。 */
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
   /* 控件天然在第三列里靠左 —— 用 justify-self 顶到右边贴边。 */
   justify-self: end;
   -webkit-app-region: no-drag;
@@ -1052,12 +1056,12 @@ pre code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
-  height: 100%;
+  width: 28px;
+  height: 28px;
   padding: 0;
   margin: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1069,9 +1073,11 @@ pre code {
   color: var(--text);
 }
 
+/* 关闭键 hover 走柔性红：--err-soft 底 + --err 图标，跟全局语义色一致，
+ * 比原本的实红底白图标更收敛，也能跟暗/亮主题一起换色。 */
 .titlebar__btn--danger:hover {
-  background: #c93c3c;
-  color: #ffffff;
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 /* ---- 标题栏面包屑过渡 ---- *
