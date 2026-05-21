@@ -770,7 +770,12 @@ pre code {
   opacity: 1;
 }
 
-/* 侧栏底部：设置入口（用 margin-top: auto 推到底） */
+/* 侧栏底部：设置入口（用 margin-top: auto 推到底）。
+ *
+ * 触发热区刻意压成「贴左下角的小矩形」：
+ * - footer 自身用 width: max-content 收到内容宽度，hover 不会横跨整条侧栏；
+ * - ::before 再向上抠 16px 透明缓冲，避免精确瞄一条 26px 的矮带很别扭。
+ * 比起原来用 .secondary-panel:hover 作触发，光标只要不靠近左下角就不会触发淡入。 */
 .sb-footer {
   margin-top: auto;
   padding: 0;
@@ -778,6 +783,18 @@ pre code {
   align-items: center;
   gap: 2px;
   min-width: 0;
+  width: max-content;
+  max-width: 100%;
+  position: relative;
+}
+
+.sb-footer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -16px;
+  height: 16px;
 }
 
 .sb-footer__btn {
@@ -789,15 +806,15 @@ pre code {
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
-  /* 默认隐身，光标在侧栏内 / 内部聚焦 / 路由命中时才淡入。
+  /* 默认隐身，光标贴近左下角 / 内部聚焦 / 路由命中时才淡入。
      opacity 用 0.35s 慢淡入避免「闪一下」，hover/颜色保持 0.12s 维持手感。 */
   opacity: 0;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease;
   flex-shrink: 0;
 }
 
-.secondary-panel:hover .sb-footer__btn,
-.secondary-panel:focus-within .sb-footer__btn,
+.sb-footer:hover .sb-footer__btn,
+.sb-footer:focus-within .sb-footer__btn,
 .sb-footer__btn.is-active {
   opacity: 1;
 }
@@ -828,14 +845,14 @@ pre code {
   letter-spacing: 0.2px;
   text-decoration: none;
   min-width: 0;
-  /* 跟 .sb-footer__btn 一样：默认隐身，光标在侧栏内 / 内部聚焦时淡入。
+  /* 跟 .sb-footer__btn 一样：默认隐身，光标贴近左下角 / 内部聚焦时淡入。
      opacity 0.35s 慢淡入，状态色 0.12s 保持手感。 */
   opacity: 0;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
 }
 
-.secondary-panel:hover .sb-conn,
-.secondary-panel:focus-within .sb-conn {
+.sb-footer:hover .sb-conn,
+.sb-footer:focus-within .sb-conn {
   opacity: 1;
 }
 
