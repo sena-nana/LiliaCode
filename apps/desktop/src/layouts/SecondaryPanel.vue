@@ -22,6 +22,7 @@ import {
 import { homeDir } from "@tauri-apps/api/path";
 import {
   createDraftOrphan,
+  createDraftTask,
   createProject,
   deriveProjectName,
   listProjects,
@@ -114,6 +115,14 @@ function isActiveOrphan(taskId: string) {
 function newChat() {
   const draft = createDraftOrphan();
   router.push(`/chats/${draft.id}`);
+}
+
+/** 点项目行右侧 + ：在该项目下开一条草稿任务，首条消息发出前不进项目子树。 */
+function newProjectChat(projectId: string) {
+  const draft = createDraftTask(projectId);
+  if (!draft) return;
+  expanded[projectId] = true;
+  router.push(`/projects/${projectId}/tasks/${draft.id}`);
 }
 
 function noop() {
@@ -475,7 +484,7 @@ function confirmCategory() {
               <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="noop">
                 <MoreHorizontal :size="13" aria-hidden="true" />
               </button>
-              <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="noop">
+              <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="newProjectChat(p.id)">
                 <Plus :size="13" aria-hidden="true" />
               </button>
             </div>

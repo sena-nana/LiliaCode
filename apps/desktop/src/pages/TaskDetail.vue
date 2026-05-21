@@ -16,7 +16,9 @@ import {
   getOrphanConversation,
   getProject,
   isDraftOrphan,
+  isDraftTask,
   promoteDraftOrphan,
+  promoteDraftTask,
 } from "../data/projectsStub";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ViewTabs from "../components/ViewTabs.vue";
@@ -201,9 +203,11 @@ async function onSend(content: string) {
     return;
   }
 
-  // 草稿在第一条消息发出去之前先入库到「收集箱」，即使后端报错也不撤回。
-  const wasDraft = !props.projectId && isDraftOrphan(props.taskId);
-  if (wasDraft) {
+  // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
+  // 项目内草稿进对应项目的 TASKS；孤儿草稿进收集箱。
+  if (props.projectId && isDraftTask(props.taskId)) {
+    promoteDraftTask(props.taskId, summarizeTitle(content));
+  } else if (!props.projectId && isDraftOrphan(props.taskId)) {
     promoteDraftOrphan(props.taskId, summarizeTitle(content));
   }
 

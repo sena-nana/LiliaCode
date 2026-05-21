@@ -16,7 +16,7 @@ const PROJECTS = ref<Project[]>([
   },
 ]);
 
-const TASKS: Record<string, Task[]> = {
+const TASKS = ref<Record<string, Task[]>>({
   lilia: [
     {
       id: "t-001",
@@ -51,7 +51,7 @@ const TASKS: Record<string, Task[]> = {
       dependsOn: [],
     },
   ],
-};
+});
 
 /**
  * 「收集箱」：还没绑定到任何项目的 Session/Task。形状沿用 Task，projectId 为 null。
@@ -83,6 +83,11 @@ const ORPHAN_LIST = ref<OrphanConversation[]>([
  */
 const DRAFTS = new Map<string, OrphanConversation>();
 
+/**
+ * 项目内草稿：点了项目行的「+」按钮创建的会话。同样首条发送前不进 TASKS。
+ */
+const DRAFT_TASKS = new Map<string, Task>();
+
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -96,16 +101,18 @@ export function getProject(id: string): Project | undefined {
 }
 
 export function listTasks(projectId: string): Task[] {
-  return TASKS[projectId] ?? [];
+  return TASKS.value[projectId] ?? [];
 }
 
 export function getTask(projectId: string, taskId: string): Task | undefined {
-  return (TASKS[projectId] ?? []).find((t) => t.id === taskId);
+  const draft = DRAFT_TASKS.get(taskId);
+  if (draft && draft.projectId === projectId) return draft;
+  return (TASKS.value[projectId] ?? []).find((t) => t.id === taskId);
 }
 
 /** 侧边栏项目树里挂在每个 Project 下面的对话节点。 */
 export function listProjectConversations(projectId: string): Task[] {
-  return TASKS[projectId] ?? [];
+  return TASKS.value[projectId] ?? [];
 }
 
 /** 侧边栏第三区域的收集箱对话。 */
@@ -134,6 +141,28 @@ export function createDraftOrphan(): OrphanConversation {
   return draft;
 }
 
+/** 点项目行「+」时调用：产出一条绑定到该项目的草稿任务，首条消息发出前不进 TASKS。 */
+export function createDraftTask(projectId: string): Task | undefined {
+  if (!PROJECTS.value.some((p) => p.id === projectId)) return undefined;
+  const id = makeId("t-draft");
+  const draft: Task = {
+    id,
+    projectId,
+    sessionId: id,
+    title: "新对话",
+    status: "draft",
+    createdAt: Date.now(),
+    parentId: null,
+    dependsOn: [],
+  };
+  DRAFT_TASKS.set(id, draft);
+  return draft;
+}
+
+export function isDraftTask(id: string): boolean {
+  return DRAFT_TASKS.has(id);
+}
+
 /**
  * 草稿发出第一条消息后调用：从 DRAFTS 移到 ORPHAN_LIST，title 用首条消息预览代替占位。
  */
@@ -150,6 +179,29 @@ export function promoteDraftOrphan(id: string, title: string): void {
     },
     ...ORPHAN_LIST.value,
   ];
+}
+
+/**
+ * 项目内草稿发出第一条消息后调用：从 DRAFT_TASKS 移到对应项目的 TASKS 头部。
+ */
+export function promoteDraftTask(id: string, title: string): void {
+  const draft = DRAFT_TASKS.get(id);
+  if (!draft) return;
+  DRAFT_TASKS.delete(id);
+  const existing = TASKS.value[draft.projectId] ?? [];
+  if (existing.some((t) => t.id === id)) return;
+  TASKS.value = {
+    ...TASKS.value,
+    [draft.projectId]: [
+      {
+        ...draft,
+        title: title || draft.title,
+        status: "running",
+        createdAt: Date.now(),
+      },
+      ...existing,
+    ],
+  };
 }
 
 /**
