@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
   MessageSquarePlus,
@@ -15,6 +15,7 @@ import {
   AlertTriangle,
 } from "lucide-vue-next";
 import {
+  createDraftOrphan,
   listProjects,
   listProjectConversations,
   listOrphanConversations,
@@ -22,6 +23,7 @@ import {
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 
 const route = useRoute();
+const router = useRouter();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
@@ -78,11 +80,22 @@ function isActiveTask(projectId: string, taskId: string) {
   return route.path === `/projects/${projectId}/tasks/${taskId}`;
 }
 
+function isActiveOrphan(taskId: string) {
+  return route.path === `/chats/${taskId}`;
+}
+
+/** 点「新对话」：开一条不绑项目的草稿会话，跳到 /chats/:id；
+ *  在发出第一条消息之前不会出现在侧栏「零散对话」里。 */
+function newChat() {
+  const draft = createDraftOrphan();
+  router.push(`/chats/${draft.id}`);
+}
+
 const globalActions = [
-  { key: "new-chat", label: "新对话", icon: MessageSquarePlus },
-  { key: "search", label: "搜索", icon: Search },
-  { key: "plugins", label: "插件 / 技能", icon: Puzzle },
-  { key: "automation", label: "自动化", icon: Zap },
+  { key: "new-chat", label: "新对话", icon: MessageSquarePlus, handler: newChat },
+  { key: "search", label: "搜索", icon: Search, handler: noop },
+  { key: "plugins", label: "插件 / 技能", icon: Puzzle, handler: noop },
+  { key: "automation", label: "自动化", icon: Zap, handler: noop },
 ];
 
 function noop() {
@@ -101,7 +114,7 @@ function noop() {
         class="sb-action"
         :title="a.label"
         :aria-label="a.label"
-        @click="noop"
+        @click="a.handler"
       >
         <component :is="a.icon" :size="16" aria-hidden="true" />
       </button>
@@ -186,15 +199,15 @@ function noop() {
       </div>
 
       <div class="sb-tree">
-        <a
+        <RouterLink
           v-for="o in orphans"
           :key="o.id"
-          href="#"
+          :to="`/chats/${o.id}`"
           class="sb-tree__row sb-tree__row--orphan"
-          @click.prevent="noop"
+          :class="{ 'is-active': isActiveOrphan(o.id) }"
         >
           <span class="sb-tree__name">{{ o.title }}</span>
-        </a>
+        </RouterLink>
         <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
       </div>
     </div>

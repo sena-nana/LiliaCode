@@ -34,6 +34,11 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
             component: TaskDetail,
             props: true,
           },
+          {
+            path: "chats/:taskId",
+            component: TaskDetail,
+            props: true,
+          },
           { path: "settings", component: Settings },
         ],
       },

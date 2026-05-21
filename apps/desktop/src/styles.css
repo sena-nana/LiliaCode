@@ -1190,11 +1190,11 @@ button.ghost:hover {
  */
 
 .chat-page {
-  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 在 grid 里
-   * 自适应自己的高度，剩下交给 .chat。 */
+  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 在 flex 里
+   * 取自身 auto 高度，剩下交给 .chat；orphan 模式没有 ViewTabs 也照样吃满。 */
   height: calc(100vh - 36px - 40px);
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   min-height: 0;
 }
@@ -1204,6 +1204,8 @@ button.ghost:hover {
   grid-template-rows: 1fr auto;
   gap: 12px;
   min-height: 0;
+  /* flex 容器里要显式拉伸到剩余高度，否则 grid 内部会塌成内容高度。 */
+  flex: 1 1 auto;
   /* 让 composer 居中且不要顶到极宽屏的两边——和 ChatGPT/Codex 一致 */
   max-width: 860px;
   width: 100%;

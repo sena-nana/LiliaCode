@@ -8,11 +8,23 @@
  * 流式呈现：维护一个 streamBuffer 把后端来的文本缓冲起来，一个 rAF 节奏的
  * tick 把它逐字 reveal 到当前 streaming 气泡的 content 上——无论 SDK 发的
  * 是字符级 delta 还是整段 block，最终呈现都是「打字机」节奏。
+ *
+ * 该组件同时承载两种入口：
+ *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
+ *   /chats/:taskId                     —— 不绑定项目的零散/草稿对话
+ * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送后把
+ * 草稿 promote 到侧栏的「零散对话」。
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getProject } from "../data/projectsStub";
+import { homeDir } from "@tauri-apps/api/path";
+import {
+  getOrphanConversation,
+  getProject,
+  isDraftOrphan,
+  promoteDraftOrphan,
+} from "../data/projectsStub";
 import ViewTabs from "../components/ViewTabs.vue";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
@@ -40,9 +52,24 @@ type LocalMessage = ChatMessage & {
   streaming?: boolean;
 };
 
-const props = defineProps<{ projectId: string; taskId: string }>();
+const props = defineProps<{ projectId?: string; taskId: string }>();
 
-const project = computed(() => getProject(props.projectId));
+const project = computed(() =>
+  props.projectId ? getProject(props.projectId) : undefined,
+);
+const orphan = computed(() =>
+  props.projectId ? undefined : getOrphanConversation(props.taskId),
+);
+
+/** 该路由是否已经能找到承载对话的「项目」或「孤儿/草稿」。两者皆无 → 显示未找到。 */
+const hasContext = computed(() => !!project.value || !!orphan.value);
+
+/** 空状态标题。绑了项目就用项目名补全；orphan 模式只说「今天想做什么？」。 */
+const emptyHeadline = computed(() =>
+  project.value
+    ? `要在 ${project.value.name} 中构建什么？`
+    : "今天想做什么？",
+);
 
 const messages = ref<LocalMessage[]>([]);
 const composer = ref<ChatComposerState>({
@@ -54,6 +81,20 @@ const composer = ref<ChatComposerState>({
 });
 const models = ref<ChatModelOption[]>([]);
 const branches = ref<ChatBranchOption[]>([]);
+
+/** orphan 模式下的 fallback cwd——延迟解析，避免每次发送都查询。 */
+const orphanCwd = ref<string | null>(null);
+
+async function ensureOrphanCwd(): Promise<string> {
+  if (orphanCwd.value) return orphanCwd.value;
+  try {
+    orphanCwd.value = await homeDir();
+  } catch {
+    // 拿不到家目录就回退到空串，Node 子进程会用自身 cwd。
+    orphanCwd.value = "";
+  }
+  return orphanCwd.value;
+}
 
 // 流式状态——所有 timer / buffer 都按 taskId 隔离，切 task 时一并清。
 const streamBuffer = ref("");
@@ -136,12 +177,29 @@ function abortStream() {
   stopRevealLoop();
 }
 
+/** 用户首条消息预览：截到 30 字，再加省略号——给草稿 promote 用的标题。 */
+function summarizeTitle(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 30) return normalized;
+  return normalized.slice(0, 30) + "…";
+}
+
 async function onSend(content: string) {
-  if (!project.value) return;
+  if (!hasContext.value) return;
   if (streamingId.value) {
     // 上一轮还没结束，禁止并发请求——后续可以做「中断 + 重发」。
     return;
   }
+
+  // 草稿在第一条消息发出去之前先入库到「零散对话」，这样侧栏立刻能看到；
+  // 即使后端报错也不撤回——按用户预期这就是「我发起了一次对话」。
+  const wasDraft = !props.projectId && isDraftOrphan(props.taskId);
+  if (wasDraft) {
+    promoteDraftOrphan(props.taskId, summarizeTitle(content));
+  }
+
+  const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
+
   const optimistic: LocalMessage = {
     id: `pending-${Date.now()}`,
     taskId: props.taskId,
@@ -156,7 +214,7 @@ async function onSend(content: string) {
       props.taskId,
       content,
       composer.value,
-      project.value.cwd,
+      cwd,
     );
     messages.value = messages.value.map((m) =>
       m.id === optimistic.id ? { ...real } : m,
@@ -206,10 +264,14 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
 }
 
 async function loadAll() {
+  // orphan 模式没有项目分支概念，给 branches 一个空数组就行；其它两路照常拉。
+  const branchesPromise = props.projectId
+    ? listBranches(props.projectId)
+    : Promise.resolve<ChatBranchOption[]>([]);
   const [msgs, comp, brs] = await Promise.all([
     listMessages(props.taskId),
     getComposerState(props.taskId),
-    listBranches(props.projectId),
+    branchesPromise,
   ]);
   messages.value = msgs;
   composer.value = comp;
@@ -270,10 +332,10 @@ watch(
 </script>
 
 <template>
-  <section v-if="project" class="chat-page">
-    <ViewTabs :project-id="projectId" active="sessions" />
+  <section v-if="hasContext" class="chat-page">
+    <ViewTabs v-if="projectId" :project-id="projectId" active="sessions" />
     <div class="chat">
-      <ChatTranscript :messages="messages" :project-name="project.name" />
+      <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
       <ChatComposer
         :state="composer"
         :models="models"

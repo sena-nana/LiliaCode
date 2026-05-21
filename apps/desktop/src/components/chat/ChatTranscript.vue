@@ -16,7 +16,8 @@ type StreamableMessage = ChatMessage & { streaming?: boolean };
 
 const props = defineProps<{
   messages: StreamableMessage[];
-  projectName: string;
+  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 零散对话」自行决定文案。 */
+  emptyHeadline: string;
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -54,7 +55,7 @@ const isEmpty = computed(() => props.messages.length === 0);
     @scroll="checkPinned"
   >
     <div v-if="isEmpty" class="chat-empty">
-      要在 {{ projectName }} 中构建什么？
+      {{ emptyHeadline }}
     </div>
     <template v-else>
       <ChatBubble v-for="m in messages" :key="m.id" :message="m" />
