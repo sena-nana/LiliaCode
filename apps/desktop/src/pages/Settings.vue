@@ -109,11 +109,6 @@ async function pickCloneParent() {
   }
 }
 
-async function clearCloneParent() {
-  projectSettings.value = { ...projectSettings.value, cloneParentDir: null };
-  await persistProjectSettings();
-}
-
 async function persistProjectSettings() {
   savingProject.value = true;
   try {
@@ -265,9 +260,6 @@ onMounted(async () => {
       <div class="settings-row">
         <div class="settings-row__label">
           <div>Clone 默认父目录</div>
-          <div class="settings-row__hint">
-            侧栏「添加项目 → 从 GitHub clone」时使用。未设置时兜底到用户家目录。
-          </div>
         </div>
         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
           <span class="muted" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -276,10 +268,6 @@ onMounted(async () => {
           <button type="button" class="ghost" :disabled="savingProject" @click="pickCloneParent">
             <FolderOpen :size="12" aria-hidden="true" />
             选择
-          </button>
-          <button v-if="projectSettings.cloneParentDir" type="button" class="ghost" :disabled="savingProject"
-            @click="clearCloneParent">
-            清除
           </button>
         </div>
       </div>
