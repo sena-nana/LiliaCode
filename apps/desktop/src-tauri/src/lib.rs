@@ -26,22 +26,19 @@ const MAIN_WINDOW_LABEL: &str = "main";
 // 露出 WebView 之外的默认白底。
 const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
-// CC-Switch 桌面端在 127.0.0.1 上启的本地代理端口（见 cc-switch 的
-// src-tauri/src/proxy/types.rs：`listen_port: 15721`）。Claude 与 Codex 共用同一个
-// 代理 URL——上游网关负责协议路由。
+// CC-Switch 桌面端的本地代理端口（cc-switch src-tauri/src/proxy/types.rs: listen_port: 15721）。
 const CC_SWITCH_DEFAULT_URL: &str = "http://127.0.0.1:15721";
 
-/// 真实 key 由 CC-Switch 注入；我们这边只需要任意非空字符串让 SDK 通过本地校验。
+/// 真实 key 由 CC-Switch 注入；这里只需要任意非空字符串让 SDK 通过本地校验。
 const CC_SWITCH_PLACEHOLDER_KEY: &str = "sk-cc-switch-proxy";
 
-/// tauri_plugin_store 文件名 + key 命名约定。
 const PROVIDER_STORE_FILE: &str = "provider-config.json";
 const PROVIDER_KEY_CLAUDE: &str = "provider.claude";
 const PROVIDER_KEY_CODEX: &str = "provider.codex";
 const CC_SWITCH_KEY: &str = "cc-switch.config";
 const ROUTER_KEY_CLAUDE: &str = "router.claude";
 const ROUTER_KEY_CODEX: &str = "router.codex";
-/// 「添加项目 → 从 GitHub clone」时默认 clone 到的父目录。空字符串/缺失 → 用 home。
+/// 「添加项目 → 从 GitHub clone」时默认 clone 到的父目录。
 const PROJECT_CLONE_PARENT_KEY: &str = "project.cloneParentDir";
 
 const ROUTER_CC_SWITCH: &str = "cc-switch";
@@ -97,11 +94,10 @@ struct ProviderConfig {
     api_key: Option<String>,
 }
 
-/// 项目相关偏好。当前只有 git clone 的默认父目录；后续添加新偏好时往这里加字段即可。
+/// 项目相关偏好。当前只有 git clone 的默认父目录。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ProjectSettings {
-    /// 用户在设置里指定的 clone 默认父目录；为空表示未设置。
     clone_parent_dir: Option<String>,
 }
 
@@ -184,14 +180,10 @@ struct ErrorEvent {
 
 #[derive(Default)]
 struct ChatStore {
-    /// 每个 task 一条独立的消息流；锁粒度做到整张表即可，量级很小。
     messages: Mutex<HashMap<String, Vec<ChatMessage>>>,
-    /// composer 偏好（backend / 模型 / 分支 / 权限），按 task 隔离。
     composers: Mutex<HashMap<String, ChatComposerState>>,
-    /// 各 SDK 自己的会话 id：key = "{backend}:{task_id}"，避免命名空间冲突。
-    /// 第一次发送时为空；done 事件回来后写入，下次发送带上。
+    /// SDK session id：key = "{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
     sdk_sessions: Mutex<HashMap<String, String>>,
-    /// 单调自增 id 生成器；避免引入 uuid 依赖。
     next_id: AtomicU64,
 }
 
@@ -248,14 +240,11 @@ impl ConnectionMode {
 #[derive(Debug, Clone)]
 struct BackendConnectionPlan {
     mode: ConnectionMode,
-    /// 子进程要 export 的 base url；None 表示用进程已有值。
     base_url: Option<String>,
-    /// 子进程要 export 的 api key；None 表示用进程已有值。
     api_key: Option<String>,
 }
 
-/// 探测一个 base URL 是否可拨通。失败/解析失败/空串都视为不可达。
-/// 短超时——拨不通就当它不存在，不阻塞主流程。
+/// 探测一个 base URL 是否可拨通。短超时——拨不通就当它不存在，不阻塞主流程。
 fn url_reachable(url: Option<&str>) -> bool {
     let Some(url) = url else { return false };
     let trimmed = url.trim();
@@ -280,7 +269,6 @@ fn parse_host_port(url: &str) -> Option<String> {
     } else if let Some(r) = url.strip_prefix("https://") {
         ("https", r)
     } else {
-        // 没协议的话，按 host[:port] 直接用
         ("http", url)
     };
     let authority = rest.split('/').next().unwrap_or("");
@@ -295,14 +283,14 @@ fn parse_host_port(url: &str) -> Option<String> {
     }
 }
 
-/// 从 tauri_plugin_store 读 ProviderConfig；读不到或文件不存在返回 None。
+/// 从 tauri_plugin_store 读 ProviderConfig。
 fn load_provider_config(app: &AppHandle, key: &str) -> Option<ProviderConfig> {
     let store = app.store(PROVIDER_STORE_FILE).ok()?;
     let value = store.get(key)?;
     serde_json::from_value::<ProviderConfig>(value).ok()
 }
 
-/// 从 store 读 CC-Switch 配置；读不到回 Default。
+/// 读 CC-Switch 配置；读不到回 Default。
 fn load_cc_switch_config(app: &AppHandle) -> CCSwitchConfig {
     let read = || -> Option<CCSwitchConfig> {
         let store = app.store(PROVIDER_STORE_FILE).ok()?;
@@ -373,8 +361,7 @@ fn try_direct_for_backend(
     }
 }
 
-/// 入口：按 per-backend 路由模式分发。选了哪个就只走哪个，失败即 unconfigured
-/// （让 SDK 调用直接报错而不是悄悄回退到别处）。
+/// 入口：按 per-backend 路由模式分发。选了哪个就只走哪个，失败即 unconfigured。
 fn resolve_connection_for(app: &AppHandle, backend_str: &str) -> BackendConnectionPlan {
     let backend: &'static str = if backend_str == BACKEND_CODEX {
         BACKEND_CODEX
@@ -396,11 +383,9 @@ fn resolve_connection_for(app: &AppHandle, backend_str: &str) -> BackendConnecti
 
 /// 找到 agent-runner.mjs 的实际路径。
 ///
-/// - 开发态：cargo 编出来的二进制位于 `apps/desktop/src-tauri/target/{debug|release}/`，
-///   而脚本位于 `apps/desktop/agent-runner.mjs`，相对路径需要回退 3 层。
-/// - 生产态（后续接 Tauri resources 时再加）：从 `resource_dir()` 查。
-///
-/// 这里按候选顺序找第一个存在的文件；找不到就返回最后一个候选让上层报错更直观。
+/// 开发态：cargo 编出来的二进制位于 `apps/desktop/src-tauri/target/{debug|release}/`，
+/// 而脚本位于 `apps/desktop/agent-runner.mjs`，相对路径回退 3 层。
+/// 按候选顺序找第一个存在的文件；找不到就返回最后一个候选让上层报错更直观。
 fn locate_agent_runner(app: &AppHandle) -> PathBuf {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
@@ -470,7 +455,7 @@ fn chat_send_message(
             .or_default()
             .push(user_msg.clone());
     }
-    // 同步 composer 偏好——发送时选的下拉值就是用户「最新偏好」。
+    // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
     store
         .composers
         .lock()
@@ -511,7 +496,6 @@ fn chat_send_message(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // 按 backend 选择要注入的 env 键名：claude→ANTHROPIC_*，codex→OPENAI_*。
-        // 父进程已有的 env 会自动继承，这里只是对相关键做覆盖；显式空字符串不能用。
         let (base_key, key_key) = match backend_for_thread.as_str() {
             BACKEND_CODEX => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
             _ => ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"),
@@ -592,8 +576,7 @@ fn chat_send_message(
                         );
                     }
                     "assistant_done" => {
-                        // 兜底：如果某轮的文本只来自 assistant 消息没走 delta，
-                        // 这里把它补到累计缓冲，避免最终 done 写入空消息。
+                        // 兜底：如果某轮文本只来自 assistant 消息没走 delta，把它补到累计缓冲。
                         if assistant_buf.is_empty() {
                             if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
                                 assistant_buf.push_str(text);
@@ -634,7 +617,7 @@ fn chat_send_message(
             }
         }
 
-        // 等待子进程退出并收集 stderr——用于诊断 API key 缺失等问题。
+        // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
         let exit_status = child.wait();
         let stderr_text = child
             .stderr
@@ -676,7 +659,7 @@ fn chat_send_message(
                 .push(reply);
         }
 
-        // 记下 session id 供下一轮 resume，按 backend 隔离 key。
+        // 记下 session id 供下一轮 resume。
         if let Some(sid) = last_session_id.clone() {
             let store = app_handle.state::<ChatStore>();
             store.sdk_sessions.lock().unwrap().insert(
@@ -740,7 +723,7 @@ fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
 
 #[tauri::command]
 fn chat_list_branches(_project_id: String) -> Vec<ChatBranchOption> {
-    // 第一阶段不读真实 git；后续接 git2 / 命令行时签名不变。
+    // 第一阶段不读真实 git。
     vec![
         ChatBranchOption {
             name: "main".to_string(),
@@ -778,7 +761,6 @@ fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatStore>
 
 #[tauri::command]
 fn chat_reset_session(task_id: String, store: State<'_, ChatStore>) {
-    // 「开始新对话」：清掉两个 backend 的 SDK session id 和消息历史。
     let mut sessions = store.sdk_sessions.lock().unwrap();
     sessions.remove(&session_key(BACKEND_CLAUDE, &task_id));
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
@@ -789,9 +771,7 @@ fn chat_reset_session(task_id: String, store: State<'_, ChatStore>) {
 fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {
     let plan = resolve_connection_for(app, backend);
 
-    // 「已配置」综合三处来源：当前 plan 里有 key、env 里有 key、direct 配置里有 key。
-    // RouterMode 决定 plan 实际走哪条；但 has_api_key 反映「用户在某处配过」，
-    // 帮 UI 区分「没配置过」和「配置了但当前路由没用上」。
+    // has_api_key 综合 plan / env / direct 配置三处；让 UI 区分「没配过」和「配了但当前路由没用上」。
     let key_env = match backend {
         BACKEND_CODEX => "OPENAI_API_KEY",
         _ => "ANTHROPIC_API_KEY",
@@ -966,7 +946,7 @@ fn load_project_settings(app: &AppHandle) -> ProjectSettings {
     let read = || -> Option<ProjectSettings> {
         let store = app.store(PROVIDER_STORE_FILE).ok()?;
         let raw = store.get(PROJECT_CLONE_PARENT_KEY)?;
-        // 兼容历史可能存的字符串：直接是 path 字符串时也认。
+        // 兼容历史可能存的纯字符串。
         if let Some(s) = raw.as_str() {
             return Some(ProjectSettings {
                 clone_parent_dir: Some(s.to_string()),
@@ -993,8 +973,7 @@ fn project_set_settings(app: AppHandle, settings: ProjectSettings) -> Result<(),
     Ok(())
 }
 
-/// 从 git URL 推断仓库目录名。`https://github.com/foo/bar.git` → `bar`；
-/// 末尾去掉 `.git`、再去掉 `/`，最后兜底返回 `repo` 避免空字符串。
+/// 从 git URL 推断仓库目录名。`https://github.com/foo/bar.git` → `bar`。
 fn derive_repo_dir_name(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
     let stripped = trimmed.strip_suffix(".git").unwrap_or(trimmed);
@@ -1026,7 +1005,6 @@ fn unique_target_path(parent: &Path, base_name: &str) -> PathBuf {
 }
 
 /// 同步调用 `git clone <url> <target>`；成功后返回 target 绝对路径。
-/// 子进程 stderr 用于错误诊断；Tauri 调用方拿到的是字符串 Err。
 #[tauri::command]
 fn git_clone_repo(url: String, parent_dir: String) -> Result<String, String> {
     let url_trim = url.trim();
@@ -1066,8 +1044,7 @@ fn git_clone_repo(url: String, parent_dir: String) -> Result<String, String> {
 }
 
 // ---------- Plugins / Skills ----------
-//
-// 全部委托给 `plugins.rs`。这里只做参数转译 + Tauri 错误包装，避免 lib.rs 继续膨胀。
+// 委托给 `plugins.rs`，这里只做参数转译 + Tauri 错误包装。
 
 #[tauri::command]
 fn plugins_overview(app: AppHandle, project_cwd: Option<String>) -> PluginsOverview {
@@ -1126,7 +1103,6 @@ fn plugins_list_codex_mcp_servers(app: AppHandle) -> Vec<CodexMcpServer> {
 }
 
 /// 用系统默认编辑器打开 `~/.codex/config.toml`，文件不存在时先建一个空文件。
-/// Codex 这边没有运行时启停接口，直接给用户一个改 toml 的捷径。
 #[tauri::command]
 fn plugins_open_codex_config(app: AppHandle) -> Result<(), String> {
     let path = plugins::codex_config_path(&app)?;

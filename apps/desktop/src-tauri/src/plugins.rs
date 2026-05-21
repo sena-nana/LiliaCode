@@ -1,19 +1,16 @@
 //! Lilia · 插件 / 技能管理。
 //!
-//! 这里桥接两套不一样的扩展机制：
+//! 桥接两套不一样的扩展机制：
 //!
 //! - **Claude Code**
-//!   - Skills：`<root>/.claude/skills/<name>/SKILL.md`，frontmatter 至少有 `name`
-//!     和 `description`。Lilia 额外承认一个自定义字段 `disabled: true` 表示关闭——
-//!     Claude 官方现在不读这个字段，但我们在启动 agent 子进程时按它决定 pluginRoots。
-//!   - Plugins (marketplace beta)：`<root>/.claude/plugins/<name>/plugin.json`。
-//!     一期只做只读列出（version / description），安装功能等接 marketplace。
-//! - **Codex**
-//!   - `~/.codex/config.toml` 的 `[mcp_servers.<name>]` 节。Codex 不区分启用/禁用，
-//!     一期做只读 + 「打开配置文件」按钮。
+//!   - Skills：`<root>/.claude/skills/<name>/SKILL.md`，frontmatter 至少有 `name` 和 `description`。
+//!     Lilia 额外承认自定义字段 `disabled: true` 表示关闭——Claude 官方不读这个字段，
+//!     但 Lilia 在启动 agent 子进程时按它决定 pluginRoots。
+//!   - Plugins (marketplace beta)：`<root>/.claude/plugins/<name>/plugin.json`，一期只读列出。
+//! - **Codex**：`~/.codex/config.toml` 的 `[mcp_servers.<name>]` 节，一期做只读 + 「打开配置」。
 //!
-//! 文件解析全部手写（极小子集），避免引入 yaml / toml 依赖让 Cargo.toml 膨胀。
-//! 解析失败按「跳过该条目 + 记一条 warning」处理，不让单个坏文件阻塞整个面板。
+//! 文件解析全部手写极小子集（避免引入 yaml / toml 依赖）。解析失败按「跳过 + 记 warning」
+//! 处理，不让单个坏文件阻塞整个面板。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -108,8 +105,7 @@ fn ensure_dir(p: &Path) -> Result<(), String> {
 
 // ---------- Claude Skill ----------
 
-/// 把扫描某个目录下所有子文件夹这件事抽出来：每个子目录返回 (name, full_path)，
-/// 跳过隐藏目录和非目录条目。
+/// 扫描某个目录下所有子文件夹，跳过隐藏目录和非目录条目。
 fn list_subdirs(root: &Path) -> Vec<(String, PathBuf)> {
     let Ok(rd) = fs::read_dir(root) else {
         return Vec::new();
@@ -130,11 +126,9 @@ fn list_subdirs(root: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// 解析 SKILL.md：读 frontmatter（YAML 风格的 `key: value`，不支持嵌套）。
-/// 解析失败或 frontmatter 缺失返回 None；上层会附一条 warning。
+/// 解析 SKILL.md frontmatter（YAML 风格的 `key: value`，不支持嵌套）。
 fn parse_skill_frontmatter(text: &str) -> Option<SkillFrontmatter> {
     let mut lines = text.lines();
-    // 必须以 --- 开头
     if lines.next()?.trim() != "---" {
         return None;
     }
@@ -184,7 +178,7 @@ pub fn list_claude_skills(
     for (dir_name, dir_path) in list_subdirs(&root) {
         let skill_file = dir_path.join(SKILL_FILE);
         if !skill_file.exists() {
-            // 子目录里没有 SKILL.md：不是 skill，跳过（可能是用户放的素材）。
+            // 子目录里没有 SKILL.md：不是 skill，跳过。
             continue;
         }
         let text = match fs::read_to_string(&skill_file) {
@@ -217,7 +211,7 @@ fn sanitize_skill_name(raw: &str) -> Result<String, String> {
     if trimmed.len() > 64 {
         return Err("skill 名称太长（>64 字符）".to_string());
     }
-    // 只允许字母 / 数字 / - / _；避免穿目录或写非法字符到 frontmatter。
+    // 避免穿目录或写非法字符到 frontmatter。
     if !trimmed
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -278,7 +272,6 @@ pub fn delete_claude_skill(
 }
 
 /// 切 `disabled` 字段：保留原有 frontmatter 其它键 + body 原样。
-/// 缺失时往 frontmatter 末尾追加；存在时改值或删行（enabled=true 时删行更整洁）。
 pub fn set_claude_skill_enabled(
     app: &AppHandle,
     scope: &str,
@@ -298,11 +291,10 @@ pub fn set_claude_skill_enabled(
 }
 
 /// 在 frontmatter 段内更新 `disabled` 字段。
-/// - want_disabled = true：插入或改成 `disabled: true`
-/// - want_disabled = false：删除现有的 `disabled` 行（让文件回到「无该字段」原态）
+/// - want_disabled=true：插入或改成 `disabled: true`
+/// - want_disabled=false：删除现有的 `disabled` 行
 fn rewrite_disabled_field(text: &str, want_disabled: bool) -> String {
     let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
-    // 找到首尾 ---
     let mut start = None;
     let mut end = None;
     for (i, line) in lines.iter().enumerate() {
@@ -317,7 +309,7 @@ fn rewrite_disabled_field(text: &str, want_disabled: bool) -> String {
         }
     }
     let (Some(s), Some(e)) = (start, end) else {
-        // 没有有效 frontmatter，重新加一段，仅为了承载 disabled 状态。
+        // 没有有效 frontmatter，重新加一段。
         let mut head = String::from("---\n");
         if want_disabled {
             head.push_str("disabled: true\n");
@@ -344,7 +336,7 @@ fn rewrite_disabled_field(text: &str, want_disabled: bool) -> String {
         (None, false) => {}
     }
     let mut out = lines.join("\n");
-    // 保留末尾换行（原文有的话）。
+    // 保留末尾换行。
     if text.ends_with('\n') && !out.ends_with('\n') {
         out.push('\n');
     }
@@ -361,8 +353,7 @@ struct PluginManifest {
     disabled: bool,
 }
 
-/// 极简 JSON 字段抽取：只读顶层字符串/布尔字段，避免引入 serde_json 解析未知 schema。
-/// 借用 serde_json 已经在依赖里这件事，直接走 Value -> as_str() 风格。
+/// 极简 JSON 字段抽取：只读顶层字符串/布尔字段。
 fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
     let v: serde_json::Value = serde_json::from_str(text).ok()?;
     let obj = v.as_object()?;
@@ -384,7 +375,7 @@ fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
 
 pub fn list_claude_plugins(app: &AppHandle, scope: &str) -> (Vec<ClaudePlugin>, Vec<String>) {
     let mut warnings = Vec::new();
-    // 第一期 plugin 只看 user scope。项目级 plugin 等 marketplace 接好再加。
+    // 一期 plugin 只看 user scope。
     if scope != SCOPE_USER {
         return (Vec::new(), warnings);
     }
@@ -431,7 +422,6 @@ pub fn codex_config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// 极简 TOML 解析：只抽 `[mcp_servers.<name>]` 节里 `command` / `args` 两个字段。
-/// 不处理多行字符串、表数组、内联表等高级语法；遇到不认识的就保留原样跳过。
 pub fn parse_codex_mcp_servers(text: &str) -> (Vec<CodexMcpServer>, Vec<String>) {
     let mut servers: Vec<CodexMcpServer> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
@@ -449,7 +439,6 @@ pub fn parse_codex_mcp_servers(text: &str) -> (Vec<CodexMcpServer>, Vec<String>)
             continue;
         }
         if let Some(rest) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            // 节头
             flush(&mut current, &mut servers);
             if let Some(name) = rest.strip_prefix("mcp_servers.") {
                 let name = name.trim().trim_matches('"');
@@ -518,7 +507,7 @@ fn parse_toml_string_array(raw: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
-/// 按 `,` 拆分但忽略引号内的逗号。只够应付 `["a", "b,c", "d"]` 这种简单数组。
+/// 按 `,` 拆分但忽略引号内的逗号。只够应付简单字符串数组。
 fn split_top_level_commas(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();

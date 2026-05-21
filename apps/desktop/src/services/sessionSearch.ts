@@ -1,18 +1,13 @@
 /**
- * 会话搜索：按会话「标题」搜，覆盖项目下任务 + 收集箱对话。
+ * 会话搜索：按标题搜，覆盖项目下任务 + 收集箱对话。
  *
  * 三种模式：
- * - text   纯子串匹配（大小写不敏感）。一次性把命中区间也算出来给 UI 高亮。
- * - vector 字符 bigram TF-IDF + 余弦相似度。是「真的」向量运算，只是底层
- *          token 不是神经网络 embedding —— 中英文混排都能给出有意义的相似度
- *          排序，且零依赖。后续接 Anthropic/OpenAI embedding 时，只需要把
- *          `vectorize` 那块替换成调真服务即可，外层接口不变。
- * - hybrid 同时跑 text + vector，按 route 合并：两路都命中的条目分数相加并标
- *          source="both"；只命中一路则照常返回，标 "text" 或 "vector"。
- *          归一化方式见 `searchHybrid` 注释。
+ * - text   纯子串匹配（大小写不敏感），顺便算出命中区间给 UI 高亮。
+ * - vector 字符 bigram TF-IDF + 余弦相似度。中英混排都能给有意义的相似度排序，
+ *          零依赖。后续接 Anthropic/OpenAI embedding 时只需替换 `vectorize` 内部。
+ * - hybrid 同时跑 text + vector，按 route 合并；归一化方式见 `searchHybrid`。
  *
- * 当前作用域：只搜标题。消息体还存在内存 HashMap 里、重启就丢，没法可靠
- * 索引；等持久化落盘后再扩到 message content。
+ * 当前只搜标题——消息体存在内存 HashMap 重启就丢，等持久化落盘后再扩到 content。
  */
 
 import {
@@ -94,7 +89,7 @@ function findRanges(title: string, query: string): Array<[number, number]> {
     idx += q.length;
   }
   if (ranges.length > 0) return ranges;
-  // 整串搜不到 → 按 whitespace 拆 token 再分别找，命中部分关键词也算。
+  // 整串搜不到 → 按 whitespace 拆 token 再分别找。
   for (const tok of q.split(/\s+/).filter(Boolean)) {
     let i = 0;
     while ((i = t.indexOf(tok, i)) !== -1) {
@@ -113,7 +108,7 @@ function searchText(query: string, corpus: Doc[]): SearchResult[] {
     const ranges = findRanges(d.title, q);
     if (ranges.length === 0) continue;
     const earliest = Math.min(...ranges.map((r) => r[0]));
-    // 越多命中 / 越靠前命中得分越高；常数 10 让命中数主导，位置加成只是平滑。
+    // 越多命中 / 越靠前得分越高；常数 10 让命中数主导。
     const score =
       ranges.length * 10 + (1 - earliest / Math.max(d.title.length, 1));
     out.push({ ...d, score, highlights: ranges, source: "text" });
@@ -168,7 +163,6 @@ function tfidfVec(tokens: string[], idf: Map<string, number>): Map<string, numbe
 }
 
 function cosine(a: Map<string, number>, b: Map<string, number>): number {
-  // 取小的那个迭代，常数因子小一点。
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];
   let dot = 0;
   for (const [k, va] of small) {
@@ -203,9 +197,7 @@ function searchVector(query: string, corpus: Doc[]): SearchResult[] {
 
 // ---------------- hybrid mode ----------------
 
-/** 把两路结果按 route 合并：同时命中则相加，并升级 source 为 both，并保留文本高亮区间。
- *  量纲处理：text 分数除以「该次搜索的最高 text 分」归一到 [0,1]，与 cosine 同档；
- *  权重 0.6 / 0.4 略偏向文本——子串命中通常意图更明确，向量是兜底召回。 */
+/** 合并两路结果：text 分数除以最高 text 分归一到 [0,1]；权重 0.6/0.4 略偏向文本。 */
 function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
   const q = query.trim();
   if (!q) return [];

@@ -4,7 +4,6 @@ import { MessagesSquare, LayoutDashboard, GitBranch, CheckSquare } from "lucide-
 type ViewKey = "sessions" | "kanban" | "architecture" | "todo";
 
 interface Props {
-  /** 当前项目 id，未来扩展到 Kanban 等视图时需要用它构建路由。 */
   projectId: string;
   /** 当前激活的 tab。目前只有 sessions 可用。 */
   active: ViewKey;

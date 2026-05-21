@@ -1,9 +1,7 @@
 <script setup lang="ts" generic="T extends string | number">
 /**
- * 轻量级下拉：trigger（默认渲染 chip）+ popover（options 列表）。
- * - 不引第三方 popover 库，靠 absolute + 简单点击/Esc/外部点击关闭。
- * - 仅做 click 触发；hover 触发不是 desktop chat 这边的需求。
- * - popover 默认向 trigger 上方展开（composer 在底，向上更自然）。
+ * 轻量级下拉：trigger（默认渲染 chip）+ popover。popover 默认向上展开
+ * （composer 在底，向上更自然）。
  */
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
@@ -18,9 +16,7 @@ interface Option {
 const props = defineProps<{
   modelValue: T;
   options: Option[];
-  /** trigger 左边的小图标，可选；不传就只显示文字 + 箭头。 */
   icon?: any;
-  /** 当前没有选中项时显示的占位文案。 */
   placeholder?: string;
   /** popover 展开方向，默认向上。 */
   placement?: "top" | "bottom";

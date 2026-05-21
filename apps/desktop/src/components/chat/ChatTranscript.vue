@@ -1,11 +1,7 @@
 <script setup lang="ts">
 /**
- * Transcript：消息滚动容器。
- *
- * 关键行为：
- * - 空状态时居中显示「要在 {project} 中构建什么？」，参考截图。
- * - auto-scroll：用户已经贴底时新消息进来自动跟到底；如果用户向上翻了，不打断阅读。
- *   判定阈值取 24px，给 macOS 弹性滚动留点余地。
+ * Transcript：消息滚动容器。auto-scroll 阈值 24px，给 macOS 弹性滚动留余地——
+ * 用户贴底时新消息进来自动跟到底，向上翻了就不打断阅读。
  */
 
 import { computed, nextTick, ref, watch } from "vue";
@@ -16,7 +12,7 @@ type StreamableMessage = ChatMessage & { streaming?: boolean };
 
 const props = defineProps<{
   messages: StreamableMessage[];
-  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」自行决定文案。 */
+  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」决定文案。 */
   emptyHeadline: string;
 }>();
 

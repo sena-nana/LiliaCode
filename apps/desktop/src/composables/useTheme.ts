@@ -10,7 +10,7 @@ function loadInitial(): Theme {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
-    // localStorage 不可用（隐私模式 / 早期 SSR），落到默认值。
+    /* localStorage 不可用：落到默认值。 */
   }
   return DEFAULT_THEME;
 }
@@ -19,7 +19,7 @@ function apply(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
 }
 
-// 模块级单例：所有 useTheme() 调用共享同一个 ref，组件之间自动同步。
+// 模块级单例：所有 useTheme() 调用共享同一个 ref。
 const theme = ref<Theme>(loadInitial());
 apply(theme.value);
 

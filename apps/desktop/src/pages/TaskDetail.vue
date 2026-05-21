@@ -1,19 +1,12 @@
 <script setup lang="ts">
 /**
- * Task 详情 = 聊天面板。
- *
- * 数据全程走 services/chat：用户消息走 invoke 直接落盘到后端历史，
- * assistant 回复通过 chat:chunk / chat:done / chat:error 流式推回。
- *
- * 流式呈现：维护一个 streamBuffer 把后端来的文本缓冲起来，一个 rAF 节奏的
- * tick 把它逐字 reveal 到当前 streaming 气泡的 content 上——无论 SDK 发的
- * 是字符级 delta 还是整段 block，最终呈现都是「打字机」节奏。
- *
- * 该组件同时承载两种入口：
+ * Task 详情 = 聊天面板。承载两种入口：
  *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
  *   /chats/:taskId                     —— 不绑定项目的收集箱/草稿对话
- * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送后把
- * 草稿 promote 到侧栏的「收集箱」。
+ *
+ * 流式呈现：streamBuffer 缓冲 chunk，rAF 节奏的 tick 逐字 reveal 到 streaming
+ * 气泡——无论 SDK 发字符级 delta 还是整段 block 最终都是「打字机」节奏。
+ * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送把草稿 promote 到收集箱。
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -61,10 +54,10 @@ const orphan = computed(() =>
   props.projectId ? undefined : getOrphanConversation(props.taskId),
 );
 
-/** 该路由是否已经能找到承载对话的「项目」或「孤儿/草稿」。两者皆无 → 显示未找到。 */
+/** 路由是否已找到承载对话的项目或孤儿；都没有 → 显示未找到。 */
 const hasContext = computed(() => !!project.value || !!orphan.value);
 
-/** 空状态标题。绑了项目就用项目名补全；orphan 模式只说「今天想做什么？」。 */
+/** 空状态标题：绑了项目就用项目名补全。 */
 const emptyHeadline = computed(() =>
   project.value
     ? `要在 ${project.value.name} 中构建什么？`
@@ -82,7 +75,7 @@ const composer = ref<ChatComposerState>({
 const models = ref<ChatModelOption[]>([]);
 const branches = ref<ChatBranchOption[]>([]);
 
-/** orphan 模式下的 fallback cwd——延迟解析，避免每次发送都查询。 */
+/** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
 
 async function ensureOrphanCwd(): Promise<string> {
@@ -96,7 +89,7 @@ async function ensureOrphanCwd(): Promise<string> {
   return orphanCwd.value;
 }
 
-// 流式状态——所有 timer / buffer 都按 taskId 隔离，切 task 时一并清。
+// 所有 timer / buffer 都按 taskId 隔离，切 task 时一并清。
 const streamBuffer = ref("");
 const streamingId = ref<string | null>(null);
 let streamFinalized = false;
@@ -105,9 +98,8 @@ let revealTimer: number | null = null;
 const unlisteners: UnlistenFn[] = [];
 
 /**
- * 主区顶部 ViewTabs 的自动隐藏：默认不显示，鼠标 Y 距 chat-page 顶部小于
- * THRESHOLD 时浮现，离开 chat-page 或下移时淡出。绝对定位让 tabs 不占
- * chat 高度、也不挡下方气泡的点击/选择 —— 是 macOS 全屏菜单栏的同款做法。
+ * 主区顶部 ViewTabs 自动隐藏：默认不显示，鼠标 Y 距 chat-page 顶部 < THRESHOLD
+ * 时浮现。绝对定位让 tabs 不占 chat 高度、也不挡气泡点击 / 选择。
  */
 const VIEW_TABS_REVEAL_THRESHOLD = 56;
 const chatPageEl = ref<HTMLElement | null>(null);
@@ -124,7 +116,6 @@ function onChatPagePointerLeave() {
 }
 
 function startStreamBubble() {
-  // 在历史尾部加一条空的 assistant 气泡，后续 chunk 都 reveal 到它的 content 上。
   const bubble: LocalMessage = {
     id: `stream-${Date.now()}`,
     taskId: props.taskId,
@@ -161,7 +152,7 @@ function tickReveal() {
     if (streamFinalized) finalizeStream();
     return;
   }
-  // 一次 reveal 多少：随缓冲规模放大，避免长回复看起来像便秘。
+  // 一次 reveal 量随缓冲规模放大，避免长回复看起来像便秘。
   const n = Math.max(
     1,
     Math.min(streamBuffer.value.length, Math.ceil(streamBuffer.value.length / 20)),
@@ -186,7 +177,7 @@ function finalizeStream() {
 }
 
 function abortStream() {
-  // 切 task 时遗留的流式气泡也清掉——避免下个会话里看到上一个会话的半截回复。
+  // 切 task 时遗留的流式气泡也清掉，避免下个会话看到上一个会话的半截回复。
   if (streamingId.value) {
     messages.value = messages.value.filter((m) => m.id !== streamingId.value);
   }
@@ -196,7 +187,7 @@ function abortStream() {
   stopRevealLoop();
 }
 
-/** 用户首条消息预览：截到 30 字，再加省略号——给草稿 promote 用的标题。 */
+/** 用户首条消息预览：截到 30 字，给草稿 promote 用的标题。 */
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
@@ -206,12 +197,11 @@ function summarizeTitle(text: string): string {
 async function onSend(content: string) {
   if (!hasContext.value) return;
   if (streamingId.value) {
-    // 上一轮还没结束，禁止并发请求——后续可以做「中断 + 重发」。
+    // 上一轮还没结束，禁止并发请求。
     return;
   }
 
-  // 草稿在第一条消息发出去之前先入库到「收集箱」，这样侧栏立刻能看到；
-  // 即使后端报错也不撤回——按用户预期这就是「我发起了一次对话」。
+  // 草稿在第一条消息发出去之前先入库到「收集箱」，即使后端报错也不撤回。
   const wasDraft = !props.projectId && isDraftOrphan(props.taskId);
   if (wasDraft) {
     promoteDraftOrphan(props.taskId, summarizeTitle(content));
@@ -273,7 +263,7 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
   try {
     const mdls = await listModels(backend);
     models.value = mdls;
-    // 当前 model 不在新清单 → 回退首项；空清单则保留原值（仍发得出去，让后端报错）。
+    // 当前 model 不在新清单 → 回退首项；空清单则保留原值让后端报错。
     if (mdls.length && !mdls.some((m) => m.id === composer.value.model)) {
       composer.value = { ...composer.value, model: mdls[0].id };
     }
@@ -283,7 +273,7 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
 }
 
 async function loadAll() {
-  // orphan 模式没有项目分支概念，给 branches 一个空数组就行；其它两路照常拉。
+  // orphan 模式没有项目分支概念，给 branches 一个空数组。
   const branchesPromise = props.projectId
     ? listBranches(props.projectId)
     : Promise.resolve<ChatBranchOption[]>([]);
@@ -295,7 +285,7 @@ async function loadAll() {
   messages.value = msgs;
   composer.value = comp;
   branches.value = brs;
-  // models 依赖 backend，单独拉以保证一致性。
+  // models 依赖 backend，单独拉。
   await reloadModelsForBackend(comp.backend);
 }
 
@@ -303,7 +293,6 @@ onMounted(async () => {
   unlisteners.push(
     await onChunk((e) => {
       if (e.taskId !== props.taskId) return;
-      // 收到的文本进缓冲池，由 tickReveal 慢慢吐到气泡上。
       streamBuffer.value += e.text;
       ensureRevealLoop();
     }),

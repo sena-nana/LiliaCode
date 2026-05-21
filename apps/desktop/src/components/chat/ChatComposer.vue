@@ -1,13 +1,7 @@
 <script setup lang="ts">
 /**
- * Composer：参考截图布局。
- * - 上排：自动撑高的 textarea（最多 8 行，再多就内部滚动）
- * - 下排左：附件 + 权限 ▼ + 分支 ▼
- * - 下排右：模型 ▼ + 圆形发送按钮
- *
+ * Composer：textarea 自动撑高（最多 8 行）+ 一排 chip。
  * 键位：Enter 发送，Shift+Enter 换行，输入框为空时禁用发送。
- * 数据：所有下拉的选项来自 props（页面层拿 service 拉好），composer state
- * 是双向 v-model 风格，但用了细粒度 emit 让父层精准控制持久化时机。
  */
 
 import { computed, nextTick, ref, watch } from "vue";
@@ -69,8 +63,7 @@ function setModel(v: string) { patch({ model: v }); }
 function setBranch(v: string) { patch({ branch: v }); }
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function setBackend(v: ChatBackendKind) {
-  // 切 backend 时父层会监听 state.backend 变化重新拉 models，
-  // model 字段交由父层在新 models 到位后修正——这里只发 backend 变更。
+  // 父层会监听 state.backend 变化重新拉 models 并修正 model 字段。
   patch({ backend: v });
 }
 
@@ -89,7 +82,7 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/** textarea 自动撑高：scrollHeight 直接量；max 8 行后换内部滚动。 */
+/** textarea 自动撑高，超 8 行换内部滚动。 */
 function resize() {
   const el = textarea.value;
   if (!el) return;

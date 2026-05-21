@@ -1,13 +1,6 @@
 /**
  * 插件 / 技能服务：包装 plugins_* 系列 Tauri command。
- *
- * 命名规范：
- * - listClaudeSkills(scope, projectCwd) —— 单 scope 拉，scope=project 时必传 cwd
- * - overview(projectCwd) —— UI 启动时一次拉全
- * - createClaudeSkill / deleteClaudeSkill / setClaudeSkillEnabled —— 写操作
- * - listCodexMcpServers / openCodexConfig —— Codex 这一期只读 + 跳编辑器
- *
- * Rust 侧字段命名走 camelCase（serde rename_all），所以前端不需要做 key 映射。
+ * Rust 侧字段命名走 camelCase（serde rename_all），前端不需 key 映射。
  */
 
 import { invoke } from "@tauri-apps/api/core";

@@ -23,8 +23,7 @@ const {
   statusFor, probing, refresh, nodeAvailable, codexCliAvailable, ccSwitch,
 } = useConnectionStatus();
 
-// UI-only：决定卡片里 banner 展示哪个 backend 的状态。
-// 实际对话用哪个 backend 仍由各 task 的 composer 决定。
+// UI-only：决定卡片里 banner 展示哪个 backend 的状态；实际对话用哪个仍由各 task 的 composer 决定。
 const selectedBackend = ref<ChatBackendKind>("claude");
 const backendOptions: { value: ChatBackendKind; label: string }[] = [
   { value: "claude", label: "Claude" },
@@ -58,8 +57,7 @@ async function loadConfig() {
   catch (err) { console.error("[settings] load cc-switch config failed", err); }
 }
 
-// 旧版本曾允许 direct 路由；UI 已收回，挂载时把两个 backend 的 router
-// 强制对齐到 cc-switch，避免历史 direct 状态污染 banner 显示。
+// 历史 direct 模式 UI 已收回，挂载时把两个 backend 的 router 强制对齐到 cc-switch。
 async function lockRouters() {
   try {
     await Promise.all([
@@ -83,7 +81,7 @@ async function saveCCSwitch() {
 
 async function probe() { await refresh(); }
 
-// ---- 项目偏好（添加项目时的默认 clone 父目录） ----
+// ---- 项目偏好 ----
 const projectSettings = ref<ProjectSettings>({ cloneParentDir: null });
 const savingProject = ref(false);
 const projectError = ref<string | null>(null);

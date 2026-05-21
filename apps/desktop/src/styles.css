@@ -2,10 +2,7 @@
   color-scheme: dark;
 
   /* ---- 字体 ---- *
-   * 全部走系统字体栈，避免网络加载与首屏闪烁；不同平台优先挑选当下「最好看」
-   * 的原生字体（Win11 用 Segoe UI Variable、macOS 用 SF Pro / 苹方、Linux 用
-   * Inter / Source Han Sans），中文跟在英文后面以避免英文走到中文字体里发虚。
-   */
+   * 中文跟在英文后面以避免英文走到中文字体里发虚。 */
   --font-sans:
     -apple-system, BlinkMacSystemFont,
     "Segoe UI Variable Text", "Segoe UI",
@@ -25,15 +22,10 @@
 
   /* ---- 表面 ---- */
   --bg: #181818;
-  /* 主内容区 */
   --bg-elev: #202020;
-  /* 侧边 / titlebar / 卡片 */
   --bg-subtle: #1c1c1c;
-  /* 主区里的轻分层（表头、空状态背景等） */
   --bg-hover: #2d2d2d;
-  /* 悬浮 */
   --bg-active: #353535;
-  /* 按下 / 选中 */
 
   /* ---- 边线 ---- */
   --border: #2a2a2a;
@@ -45,7 +37,7 @@
   --text-muted: #8a8a8a;
   --text-faint: #5a5a5a;
 
-  /* ---- 品牌色（与图标一致：浅蓝） ---- */
+  /* ---- 品牌色 ---- */
   --accent: #7bb9f0;
   --accent-strong: #4991d7;
   --accent-soft: rgba(123, 185, 240, 0.14);
@@ -64,31 +56,22 @@
   line-height: 1.55;
   font-weight: 600;
   font-feature-settings: "cv11", "ss01", "ss03";
-  /* 注意：不要再设 -webkit-font-smoothing: antialiased
-   * Chromium 在 Windows 上若被强制 antialiased，会绕开 ClearType 改用灰阶抗
-   * 锯齿，中文笔画立刻变细变虚。让浏览器自己挑（macOS 仍是灰阶、Windows 走
-   * ClearType）才是中英两边都不失真的安全默认。 */
+  /* 不要再设 -webkit-font-smoothing: antialiased — Chromium 在 Windows 上若被
+   * 强制 antialiased 会绕开 ClearType 改用灰阶抗锯齿，中文笔画立刻变细变虚。 */
   text-rendering: optimizeLegibility;
 }
 
 /* ---------------- 浅色主题 ---------------- *
- * 主区纯白、侧边灰：和暗色翻向相反（暗色里 chrome 更亮，浅色里 chrome 更暗），
- * 这样左上角圆角"啃"出去的永远是侧边色——暗色露出更亮、浅色露出更暗，过渡逻辑一致。
- * hover / active 在两套主题都遵循「更高视觉权重」方向（暗→更亮，浅→更暗）。
+ * 主区纯白、侧边灰：和暗色翻向相反，这样左上角圆角"啃"出去的永远是侧边色。
  */
 :root[data-theme="light"] {
   color-scheme: light;
 
   --bg: #ffffff;
-  /* 主区，纯白 */
   --bg-elev: #f3f4f6;
-  /* 侧边 / titlebar / 卡片，浅灰"框" */
   --bg-subtle: #f7f8fa;
-  /* 主区内的微弱分层 */
   --bg-hover: #ebedf0;
-  /* 比 chrome 更深一档 */
   --bg-active: #dfe2e7;
-  /* 选中 / 按下 */
 
   --border: #e3e5e8;
   --border-soft: #eef0f3;
@@ -127,10 +110,7 @@ body {
   color: var(--text);
 }
 
-/* ---- 代码 / 等宽 ---- *
- * 主字体走 var(--font-sans)，code/pre/kbd/samp 切到 var(--font-mono)；
- * inline code 用一层 bg-subtle 让它和正文有视觉分层。
- */
+/* ---- 代码 / 等宽 ---- */
 code,
 kbd,
 pre,
@@ -195,8 +175,7 @@ pre code {
 /* ---------------- Shell ---------------- */
 
 .shell {
-  /* --sidebar-width 由 AppShell.vue 注入到 inline style，默认 220px 作为兜底，
-   * 这样即便 JS 还没执行（首屏闪烁的极短窗口）布局也不会塌成 0 宽。 */
+  /* --sidebar-width 由 AppShell.vue 注入；这里给个兜底避免首屏闪烁时塌成 0 宽。 */
   --sidebar-width: 220px;
 
   display: grid;
@@ -223,36 +202,28 @@ pre code {
 }
 
 /* ---------------- Sidebar resizer ---------------- *
- * 让出 1px 视觉宽度，但通过 ::before 把命中区扩到 ~8px——细线"难抓"是用户最
- * 常吐槽的点，加宽热区是行业惯例（VSCode/IDEA 都这么做）。位置用 absolute 而
- * 非新增一列，避免主区/侧栏 grid 区域名变动，且 titlebar 行不应该被拖拽条覆盖。
- */
+ * 视觉只占 1px，但 ::before 把命中区扩到 ~8px——细线难抓是用户最常吐槽的点。 */
 .shell__resizer {
   position: absolute;
   top: 36px;
-  /* 与 titlebar 行的高度对齐 */
   bottom: 0;
   left: var(--sidebar-width);
   width: 1px;
-  /* 视觉细线 */
   margin-left: -0.5px;
-  /* 让 1px 视觉线骑在边界上 */
   background: transparent;
   cursor: col-resize;
   z-index: 5;
   touch-action: none;
-  /* 防止触摸设备把横向拖拽认成滚动 */
   user-select: none;
 }
 
 .shell__resizer::before {
-  /* 加宽不可见命中区：左右各 4px */
   content: "";
   position: absolute;
   inset: 0 -4px;
 }
 
-/* 拖拽期间禁止主区内的文字选中和指针事件，避免选中文字 / 触发悬浮态 */
+/* 拖拽期间禁止主区文字选中和指针事件，避免选中文字 / 触发悬浮态 */
 .shell.is-resizing {
   cursor: col-resize;
   user-select: none;
@@ -277,9 +248,7 @@ pre code {
 }
 
 /* ---------------- Sidebar 三区域结构 ---------------- *
- * 区域之间没有分隔线，仅靠父容器的 gap 留白；中间的项目树区域
- * 可以无限增长并独占滚动条，第一/第三区域保持自然高度。
- */
+ * 区域之间无分隔线，仅靠 gap 留白；中间的项目树独占滚动条。 */
 
 .sb-section {
   display: flex;
@@ -293,18 +262,16 @@ pre code {
   align-items: center;
   gap: 6px;
   padding: 2px 2px 0;
-  /* 内联搜索下拉以本容器为锚点向下浮出，必须 relative */
+  /* 搜索下拉以本容器为锚点向下浮出 */
   position: relative;
 }
 
-/* 第一区域主按钮：「新对话」。flex:1 占满搜索按钮以外的全部宽度，
- * 文字和图标左对齐，遵循 chip / sb-action 的悬停反馈。 */
+/* 第一区域主按钮：「新对话」。flex:1 占满搜索按钮以外的全部宽度。 */
 .sb-primary-btn {
   flex: 1;
   min-width: 0;
   height: 30px;
   padding: 0 10px;
-  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
@@ -315,7 +282,7 @@ pre code {
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.12s ease, color 0.12s ease;
-  /* 反转 input/button 全局默认的 1px 边框；保持 nav-icon 一样的纯净外观 */
+  /* 反转 input/button 全局默认的 1px 边框 */
   border: 0;
 }
 
@@ -333,7 +300,7 @@ pre code {
   white-space: nowrap;
 }
 
-/* 第一区域的右侧图标按钮（搜索 / 关闭搜索）。30x30 方块、纯图标。 */
+/* 第一区域的右侧图标按钮（搜索 / 关闭搜索） */
 .sb-icon-action {
   flex: 0 0 auto;
   width: 30px;
@@ -356,8 +323,7 @@ pre code {
   filter: none;
 }
 
-/* 内联搜索框：占据原本「新对话」按钮的位置。视觉上仍然像一颗按钮——
- * 浅一档底色 + focus-within 时高亮 accent 边线。 */
+/* 内联搜索框：占据原本「新对话」按钮的位置，focus-within 时高亮 accent 边线。 */
 .sb-search {
   flex: 1;
   min-width: 0;
@@ -401,8 +367,7 @@ pre code {
   color: var(--text-faint);
 }
 
-/* 搜索下拉：浮在项目树之上的浮层，相对 sb-section--actions 定位。
- * 不使用 Teleport：限制在侧栏宽度内，不会影响主区点击 / 滚动。 */
+/* 搜索下拉：浮在项目树之上的浮层，限制在侧栏宽度内不影响主区。 */
 .sb-search-dd {
   position: absolute;
   top: calc(100% + 6px);
@@ -435,9 +400,8 @@ pre code {
   cursor: pointer;
   text-align: left;
   font-weight: 500;
-  /* 单行紧凑，覆盖全局 button 的 32px 默认高度 */
+  /* 覆盖全局 button 的 32px 默认高度 */
   height: 28px;
-  /* 项目内不允许出现横向滚动条；超长用 ellipsis 处理 */
   overflow: hidden;
 }
 
@@ -463,8 +427,7 @@ pre code {
   padding: 0 2px;
 }
 
-/* 右侧项目名：单行、靠右、不抢标题位置——给上限宽并 ellipsis。
- * orphan 类型没有 projectName，模板里直接不渲染本节点。 */
+/* 右侧项目名：orphan 类型没有 projectName，模板里直接不渲染本节点。 */
 .sb-search-dd__scope {
   flex: 0 1 auto;
   max-width: 45%;
@@ -562,8 +525,7 @@ pre code {
   filter: none;
 }
 
-/* 「+ 添加项目」contextmenu：相对鼠标点击点的右下角铺开（fixed + 内联 left/top）。
- * Teleport 到 body 后跟侧栏 DOM 完全解耦，z-index 抬到搜索下拉之上。 */
+/* 「+ 添加项目」contextmenu：Teleport 到 body 后 z-index 抬到搜索下拉之上。 */
 .sb-menu {
   position: fixed;
   z-index: 1100;
@@ -582,7 +544,6 @@ pre code {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 单行：固定 28px 高 + ellipsis 兜底，跟搜索下拉条目同款几何。 */
   height: 28px;
   padding: 0 10px;
   border: 0;
@@ -683,7 +644,6 @@ pre code {
 }
 
 .sb-tree__row--child {
-  /* 项目子对话相对项目名向右缩进一档，体现层级 */
   padding-left: 30px;
   color: var(--text-muted);
 }
@@ -693,7 +653,6 @@ pre code {
 }
 
 .sb-tree__row--orphan {
-  /* 收集箱对话没有父项目，不需要再缩进；加个图标和文字呼吸 */
   padding-left: 8px;
   color: var(--text-muted);
 }
@@ -740,12 +699,8 @@ pre code {
   gap: 1px;
 }
 
-/* 项目子树展开 / 折叠的缓入缓出过渡：
- * 用 grid-template-rows 在 0fr ↔ 1fr 之间过渡——这是少数能让浏览器把
- * "0 ↔ 内容自适应高度" 视为可补间变化的方式，不需要 JS 测量 scrollHeight，
- * 也不会因为 reflow / paint 时序错过起点。inner 设 overflow:hidden + min-height:0
- * 让超出的子项不溢出且能被压到 0。opacity 同步缓入缓出，避免空高度时还能看到子项。
- */
+/* 项目子树展开 / 折叠：grid-template-rows 在 0fr ↔ 1fr 之间过渡——
+ * 少数能让浏览器把「0 ↔ 内容自适应高度」视为可补间变化的方式，不需要 JS 测量 scrollHeight。 */
 .sb-collapse {
   display: grid;
   grid-template-rows: 0fr;
@@ -770,12 +725,8 @@ pre code {
   opacity: 1;
 }
 
-/* 侧栏底部：设置入口（用 margin-top: auto 推到底）。
- *
- * 触发热区刻意压成「贴左下角的小矩形」：
- * - footer 自身用 width: max-content 收到内容宽度，hover 不会横跨整条侧栏；
- * - ::before 再向上抠 16px 透明缓冲，避免精确瞄一条 26px 的矮带很别扭。
- * 比起原来用 .secondary-panel:hover 作触发，光标只要不靠近左下角就不会触发淡入。 */
+/* 侧栏底部触发热区压成「贴左下角的小矩形」：footer 用 width: max-content
+ * 收到内容宽度，::before 向上抠 16px 透明缓冲补足太矮的瞄准区。 */
 .sb-footer {
   margin-top: auto;
   padding: 0;
@@ -806,8 +757,7 @@ pre code {
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
-  /* 默认隐身，光标贴近左下角 / 内部聚焦 / 路由命中时才淡入。
-     opacity 用 0.35s 慢淡入避免「闪一下」，hover/颜色保持 0.12s 维持手感。 */
+  /* opacity 用 0.35s 慢淡入避免「闪一下」，hover/颜色保持 0.12s 维持手感。 */
   opacity: 0;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease;
   flex-shrink: 0;
@@ -829,9 +779,7 @@ pre code {
   color: var(--accent);
 }
 
-/* 连接状态徽章：紧贴设置齿轮右边。
- * - OK 状态显示 ✨ + 「Claude · 提供商」，accent 弱底色，整条可点直接跳设置。
- * - 未配置时退化成一颗小黄色警告灯——窄侧栏下不挤占空间，hover/聚焦能看到完整 tooltip。 */
+/* 连接状态徽章：紧贴设置齿轮右边。未配置时退化成黄色警告灯。 */
 .sb-conn {
   display: inline-flex;
   align-items: center;
@@ -845,8 +793,6 @@ pre code {
   letter-spacing: 0.2px;
   text-decoration: none;
   min-width: 0;
-  /* 跟 .sb-footer__btn 一样：默认隐身，光标贴近左下角 / 内部聚焦时淡入。
-     opacity 0.35s 慢淡入，状态色 0.12s 保持手感。 */
   opacity: 0;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
 }
@@ -886,23 +832,14 @@ pre code {
 }
 
 /* ---------------- View tabs（主区顶部，自动隐藏的浮层） ---------------- *
- * 之前试过塞进 36px 标题栏当 chrome，但和窗控、面包屑挨太近视觉太挤；现在
- * 搬回主区顶部，但默认隐身——鼠标靠近主区顶端时浮现，离开就淡出，最大化
- * chat 视觉呼吸空间。Sessions 之外的 tab 暂时 disabled，只占位；未来加
- * Kanban / 架构图 / Todo 时去掉 disabled + 接路由即可。
- *
- * 视觉走 segmented 风格而非 underline tab —— 现在 tabs 是浮在 chat 上方的
- * "工具条"，胶囊形比贴边 underline 更轻、不会跟下方内容粘连。
- */
+ * 默认隐身，鼠标靠近主区顶端时浮现，最大化 chat 视觉呼吸空间。 */
 
-/* 浮层定位：绝对挂在 .chat-page 顶部居中，不占布局空间，不挡气泡点击。 */
+/* 浮层定位：绝对挂在 .chat-page 顶部居中，不占布局空间。 */
 .view-tabs-zone {
   position: absolute;
   top: 4px;
   left: 50%;
   z-index: 5;
-  /* 默认隐藏：透明 + 微微上移 + 关掉指针事件，不会拦下方鼠标 hover。
-   * is-visible 时复位。 */
   opacity: 0;
   transform: translate(-50%, -4px);
   pointer-events: none;
@@ -924,7 +861,6 @@ pre code {
   border: 1px solid var(--border);
   border-radius: 8px;
   gap: 1px;
-  /* 浮层效果：给一层弱阴影让它从 chat 上"浮起来"。 */
   box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
 }
 
@@ -969,15 +905,10 @@ pre code {
 }
 
 /* ---------------- Titlebar ---------------- *
- * 横通栏 36px。布局从左到右：[面包屑] [drag spacer] [窗控按钮]。spacer 吃 flex:1
- * 充当大块拖拽区，面包屑长短全靠它兜底。
- */
+ * 横通栏 36px。[面包屑] [drag spacer] [窗控按钮]。 */
 
 .titlebar {
-  /* 用 1fr auto 1fr 三列 grid 把面包屑相对窗口居中：
-   * 左占位列和右窗控列共享 1fr，对称把中间 auto 列推到窗口中线。
-   * 窗口窄到右列不够装窗控时，grid 会让右列就地撑开，面包屑会被挤偏一些——
-   * 比硬居中失衡或压住窗控温和，可接受。 */
+  /* 1fr auto 1fr 三列 grid 把面包屑相对窗口中线居中。 */
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: stretch;
@@ -987,9 +918,7 @@ pre code {
   -webkit-user-select: none;
 }
 
-/* 面包屑容器：占自然宽度，可收缩，单行 ellipsis。整条仍然是 drag region，
- * 文字本身不可点 —— 后续如果要把"项目名"段做成可点回项目主页，再在该段
- * 上独立标 no-drag 并换成 button 即可。 */
+/* 面包屑容器：占自然宽度，可收缩，单行 ellipsis；整条仍是 drag region。 */
 .titlebar__crumbs {
   display: flex;
   align-items: center;
@@ -1036,18 +965,14 @@ pre code {
 }
 
 .titlebar__spacer {
-  /* 左占位列：只为对称把面包屑列推到窗口中心；右侧也是 1fr 但承载窗控。 */
   min-width: 0;
 }
 
 .titlebar__controls {
-  /* 不再让窗控贴满整条 titlebar 高度——改成中间垂直居中的圆角浮岛按钮，
-   * 跟 sb-action / sb-icon-btn 的语汇对齐，避免再出现 Windows 原生那种直角条。 */
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 6px;
-  /* 控件天然在第三列里靠左 —— 用 justify-self 顶到右边贴边。 */
   justify-self: end;
   -webkit-app-region: no-drag;
 }
@@ -1073,20 +998,15 @@ pre code {
   color: var(--text);
 }
 
-/* 关闭键 hover 走柔性红：--err-soft 底 + --err 图标，跟全局语义色一致，
- * 比原本的实红底白图标更收敛，也能跟暗/亮主题一起换色。 */
+/* 关闭键 hover 走柔性红，跟全局语义色一致。 */
 .titlebar__btn--danger:hover {
   background: var(--err-soft);
   color: var(--err);
 }
 
 /* ---- 标题栏面包屑过渡 ---- *
- * 路由切换会让面包屑文字变化——直接换 DOM 会"啪"一下跳，给前缀段和叶子段
- * 各套一层 <Transition mode="out-in"> 做纯 opacity 渐隐渐显：mode="out-in"
- * 防止新旧文字短暂重叠在同一 flex 槽里。两个 Transition 并行，互不阻塞。
- * 时长 0.22s——比 hover (0.12s) 慢一档，让眼睛跟得上"内容换了"；out-in 总时
- * 长翻倍约 0.44s，仍在常见路由切换节奏内。
- */
+ * 路由切换让面包屑文字变化——给前缀段和叶子段各套一层 <Transition mode="out-in">
+ * 做 opacity 渐隐渐显，防止新旧文字短暂重叠在同一 flex 槽里。 */
 .tb-crumbs-enter-active,
 .tb-crumbs-leave-active {
   transition: opacity 0.22s ease;
@@ -1126,7 +1046,6 @@ pre code {
   gap: 10px;
 }
 
-/* 卡片标题左侧的文字+icon 簇；右侧空间让给状态点。 */
 .card-h2__title {
   display: inline-flex;
   align-items: center;
@@ -1141,9 +1060,7 @@ pre code {
   transition: opacity 0.45s ease-out;
 }
 
-/* 环境正常时（ok）默认收起标题旁的状态点，hover/focus 卡片再缓慢淡入，
-   颜色压到 --text-faint，避免「全绿」时持续吸睛、也避免冒出来时跳眼。
-   异常态与检查中始终可见。 */
+/* 环境正常时默认收起标题旁的状态点，hover/focus 卡片再缓慢淡入，避免「全绿」时持续吸睛。 */
 .card h2 .status-pill--ok {
   opacity: 0;
   background: transparent;
@@ -1609,21 +1526,16 @@ button.ghost:hover {
   cursor: progress;
 }
 
-/* ---------------- Chat ---------------- *
- * 主面板的「Session ↔ AI 对话」视图。布局上半区是消息流（vertical flex 容器，
- * 单独滚动），下半区是 composer（固定高度，气泡式卡片）。chat-page 让自身吃满
- * 主区高度并扣掉 ViewTabs 的占位，避免双滚动条同时出现。
- */
+/* ---------------- Chat ---------------- */
 
 .chat-page {
-  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。ViewTabs 是 absolute 浮层
-   * 不占布局，全部高度交给 .chat。 */
+  /* 100vh 减 titlebar(36) 减主区上下 padding(20+20)。 */
   height: calc(100vh - 36px - 40px);
   display: flex;
   flex-direction: column;
   gap: 0;
   min-height: 0;
-  /* 给 .view-tabs-zone 当 absolute 包含块——它要钉在 chat-page 顶部居中。 */
+  /* 给 .view-tabs-zone 当 absolute 包含块。 */
   position: relative;
 }
 
@@ -1634,7 +1546,6 @@ button.ghost:hover {
   min-height: 0;
   /* flex 容器里要显式拉伸到剩余高度，否则 grid 内部会塌成内容高度。 */
   flex: 1 1 auto;
-  /* 让 composer 居中且不要顶到极宽屏的两边——和 ChatGPT/Codex 一致 */
   max-width: 860px;
   width: 100%;
   margin: 0 auto;
@@ -1650,7 +1561,6 @@ button.ghost:hover {
 }
 
 .chat-transcript.is-empty {
-  /* 空状态：把唯一的标题居中 */
   justify-content: center;
   align-items: center;
 }
@@ -1660,7 +1570,7 @@ button.ghost:hover {
   font-size: 24px;
   font-weight: 500;
   text-align: center;
-  /* 不贴居中，往上偏一点更符合截图的视觉重心 */
+  /* 不贴居中，往上偏一点更符合视觉重心 */
   margin-bottom: 12vh;
   letter-spacing: 0.2px;
 }
@@ -1724,12 +1634,11 @@ button.ghost:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 阴影让卡片从主区底浮起来一点；强度参考 macOS 系统弹层 */
   box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
 }
 
 .chat-composer__input {
-  /* 复用 input/button 的基础样式会带 height:32px，所以这里全量覆盖 */
+  /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;
   min-height: 22px;
   max-height: 176px;
@@ -1912,11 +1821,8 @@ button.ghost:hover {
 }
 
 /* ---------------- Search palette ---------------- *
- * 命令面板风格的浮层 backdrop + 进出过渡。
- * 历史上「搜索」走 modal 浮窗时这是主入口；现在搜索已经下沉到侧栏内联下拉
- * （见 .sb-search-dd），所以这里只保留供 ConfirmDialog 等通用弹层复用的
- * backdrop / 卡片几何 / 过渡曲线。
- */
+ * 命令面板风格的浮层 backdrop + 进出过渡，被 ConfirmDialog 等通用弹层复用。
+ * 类名是历史命名，仅作为 backdrop / 卡片几何 / 过渡曲线的载体。 */
 
 .search-palette {
   position: fixed;
@@ -1942,8 +1848,7 @@ button.ghost:hover {
   overflow: hidden;
 }
 
-/* 进出过渡：背板淡入淡出，卡片轻微下落 + 缩放。
- * 给 backdrop 单独的过渡曲线，避免与卡片同步起来显得突兀。 */
+/* 进出过渡：背板淡入淡出，卡片轻微下落 + 缩放。 */
 .search-palette-enter-active,
 .search-palette-leave-active {
   transition: opacity 0.16s ease;
@@ -1979,14 +1884,11 @@ button.ghost:hover {
 
 /* ================ 插件 / 技能管理 ================ */
 
-/* .card 默认 overflow:hidden 会裁掉内部 Dropdown 的绝对定位菜单。
- * 凡是卡片里需要弹出层（dropdown / popover）的，加这个修饰类放开溢出。 */
+/* .card 默认 overflow:hidden 会裁掉内部 Dropdown 的绝对定位菜单。 */
 .card.card--allow-overflow {
   overflow: visible;
 }
 
-/* 默认 button 已经是 accent 主色；显式 .primary 是为了让模板里意图更清晰，
- * 实际上不需要重新声明颜色（保留为别名）。 */
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
@@ -2001,7 +1903,6 @@ button.ghost.danger:hover {
   background: var(--err-soft);
 }
 
-/* 刷新图标的旋转，给「刷新中…」时的 indicator 用。 */
 .is-spinning {
   animation: lilia-spin 0.9s linear infinite;
 }
@@ -2194,8 +2095,7 @@ button.ghost.danger:hover {
   color: var(--text-muted);
 }
 
-/* ---- 通用 dialog 框：弹层 backdrop 复用 .search-palette，
- *      内容卡片用 .search-palette__card 的视觉 + 这里这套通用 header/body/actions。 ---- */
+/* ---- 通用 dialog 框（backdrop/卡片复用 .search-palette） ---- */
 .dialog__card {
   display: flex;
   flex-direction: column;
@@ -2236,8 +2136,7 @@ button.ghost.danger:hover {
   color: var(--text-muted);
 }
 
-/* 输入框 + 旁边的辅助按钮（例如「选择目标父目录」）。
- * 配合 label 的 column 布局：input/button 在同一行而 label 仍在上方。 */
+/* 输入框 + 同行的辅助按钮（label 仍在上方）。 */
 .dialog__field-row {
   display: flex;
   align-items: center;

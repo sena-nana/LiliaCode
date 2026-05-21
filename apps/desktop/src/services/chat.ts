@@ -1,11 +1,7 @@
 /**
- * Chat 服务层：把 Tauri command/event 包成 typed 函数，Vue 组件不直接碰
- * @tauri-apps/api。
- *
- * - 输入/输出形状全部走 @lilia/contracts，跨端共享。
- * - Rust 那侧用 `#[serde(rename_all = "camelCase")]`，所以这里不需要再做 key 映射。
- * - 流事件：assistant 的回复通过 chat:chunk 分片推回；done / error 用各自通道。
- *   组件订阅时把回调挂上去，离开页面时 await unlisten。
+ * Chat 服务层：把 Tauri command/event 包成 typed 函数。
+ * 输入/输出形状走 @lilia/contracts，跨端共享；Rust 侧 `#[serde(rename_all = "camelCase")]`
+ * 已对齐字段名，前端不需再做 key 映射。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -42,7 +38,6 @@ export interface ErrorEvent { taskId: string; message: string; }
 
 /**
  * @deprecated 用 BackendEnvStatus（per-backend）+ EnvStatusReport（顶层报告）替代。
- * 留作旧代码迁移期的形状别名。
  */
 export type EnvStatus = BackendEnvStatus;
 
@@ -51,10 +46,9 @@ export function listMessages(taskId: string): Promise<ChatMessage[]> {
 }
 
 /**
- * 发起一轮对话。返回值是 user 那条消息本身（用于 reconcile 乐观渲染）；
+ * 发起一轮对话。返回值是 user 那条消息本身（用于乐观渲染）；
  * assistant 的回复通过 onChunk/onDone/onError 事件异步推回。
- *
- * projectCwd 是 SDK 跑 agent loop 的工作目录——它决定 agent 能看到的文件树。
+ * projectCwd 决定 agent 能看到的文件树。
  */
 export function sendMessage(
   taskId: string,
@@ -91,7 +85,7 @@ export function resetSession(taskId: string): Promise<void> {
   return invoke<void>("chat_reset_session", { taskId });
 }
 
-/** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式各是什么。 */
+/** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式。 */
 export function checkEnv(): Promise<EnvStatusReport> {
   return invoke<EnvStatusReport>("chat_check_env");
 }
@@ -121,8 +115,7 @@ export function setRouterMode(backend: ChatBackendKind, mode: RouterMode): Promi
 }
 
 // ---- 事件订阅 ----
-//
-// 注意：每个 listen 各自返回 unlisten；调用方在 onUnmounted 里需要全部 await。
+// 每个 listen 各自返回 unlisten；调用方在 onUnmounted 里需要全部 await。
 
 export function onChunk(handler: (e: ChunkEvent) => void): Promise<UnlistenFn> {
   return listen<ChunkEvent>("chat:chunk", (event) => handler(event.payload));

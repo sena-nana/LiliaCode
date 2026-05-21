@@ -1,14 +1,9 @@
 <script setup lang="ts">
 /**
- * 插件 / 技能管理面板。
- *
- * 两块 backend 的扩展机制不对称，UI 用 tab 切：
- * - Claude Skills（user / project scope 二级切换）
+ * 插件 / 技能管理面板。两块 backend 的扩展机制不对称，用 tab 切：
+ * - Claude Skills（user / project scope）
  * - Claude Plugins（marketplace beta，仅只读列出）
  * - Codex MCP servers（来自 ~/.codex/config.toml，只读 + 打开文件按钮）
- *
- * 没接真的 marketplace；「安装插件」按钮先给个 placeholder 弹层占位。
- * Codex 那边不做运行时启停，把它的复杂性留给用户和文本编辑器。
  */
 import { computed, onMounted, ref } from "vue";
 import {
@@ -36,7 +31,7 @@ const tab = ref<Tab>("claude-skills");
 const scope = ref<PluginScope>("user");
 
 const projects = computed(() => listProjects());
-/** 「项目级 skill」只对真的有 cwd 的项目可用，分类型项目（cwd=null）排除。 */
+/** 「项目级 skill」只对真的有 cwd 的项目可用，分类型项目排除。 */
 const projectsWithCwd = computed(() =>
   projects.value.filter((p): p is typeof p & { cwd: string } => !!p.cwd),
 );
@@ -316,8 +311,7 @@ async function openCodex() {
     <!-- ===== Claude Plugins ===== -->
     <div v-else-if="tab === 'claude-plugins'" class="card">
       <p class="plugins-section-hint">
-        来自 <code>~/.claude/plugins/</code> 的 marketplace 插件（beta）。一期仅展示，
-        后续接入安装 / 升级 接口时这里会出现操作按钮。
+        来自 <code>~/.claude/plugins/</code> 的 marketplace 插件（beta），一期仅展示。
       </p>
       <ul v-if="claudePlugins.length" class="plugins-list">
         <li v-for="p in claudePlugins" :key="p.path" class="plugins-list__item">

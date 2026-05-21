@@ -25,13 +25,8 @@ interface Crumb {
 }
 
 /**
- * 面包屑：根据当前路由生成 1-2 段文字，标题栏永远有"我在哪"的语义。
- * - 项目内任务：[项目名(muted)] / [任务标题]
- * - 收集箱对话：[收集箱(muted)] / [对话标题]——形态跟项目内一致，不再单段。
- * - 设置 / 插件 / 首页：单段顶级标题
- *
- * 收集箱被当成"虚拟项目"，让项目对话与收集箱对话在标题栏走同一套两段结构，
- * prefixKey 在两者之间切换时自然触发过渡，模板里不必再为 orphan 留差异分支。
+ * 面包屑：根据路由生成 1-2 段。收集箱被当成「虚拟项目」，让项目对话和收集箱
+ * 对话走同一套两段结构，prefixKey 在两者之间切换时自然触发过渡。
  */
 const crumbs = computed<Crumb[]>(() => {
   const pid = projectId.value;
@@ -68,11 +63,8 @@ const leafCrumb = computed<Crumb | null>(() => {
 const nonLeafCrumbs = computed<Crumb[]>(() => crumbs.value.slice(0, -1));
 
 /**
- * 两段独立 Transition 的 key：
- * - prefixKey：非叶子段（项目名等）拼接。同项目内切 session 时 key 不变，
- *   前缀 Transition 不触发；跨项目切换 key 变，触发淡入淡出。
- * - leafKey：包含前缀 + 叶子，避免不同项目同名 task 误判为同一段。同项目内
- *   切 session 时前缀部分相同、叶子文本变，仍能触发叶子的过渡。
+ * 前缀 key 同项目内切 session 时不变；叶子 key 含前缀，避免不同项目同名 task
+ * 误判为同一段，仍能触发叶子段的过渡。
  */
 const prefixKey = computed(() =>
   nonLeafCrumbs.value.map((c) => c.text).join("|"),
@@ -121,12 +113,10 @@ async function onClose() {
 
 <template>
   <header class="titlebar" data-tauri-drag-region>
-    <!-- 左侧占位列：和右侧窗控列同为 1fr，对称把中间面包屑列推到窗口中心。 -->
     <div class="titlebar__spacer" data-tauri-drag-region></div>
 
     <div class="titlebar__crumbs" data-tauri-drag-region>
-      <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。
-           wrapper span 是单根 DOM，让 <Transition> 能正确捕获进出元素。 -->
+      <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。 -->
       <Transition name="tb-crumbs" mode="out-in">
         <span
           v-if="nonLeafCrumbs.length > 0"

@@ -1,11 +1,6 @@
 import { ref } from "vue";
 import type { Project, Task } from "@lilia/contracts";
 
-/**
- * Project 列表是 ref + 浅 watcher 友好：computed 在组件里读 `listProjects()` 时
- * 会拿到 `.value` 引用的数组本身，所以新增/删除一个项目能让侧栏立即重渲染。
- * 后续接持久化时，把 ref 的初值换成异步加载结果即可。
- */
 const PROJECTS = ref<Project[]>([
   {
     id: "lilia",
@@ -59,8 +54,7 @@ const TASKS: Record<string, Task[]> = {
 };
 
 /**
- * 侧边栏第三区域用的「收集箱」：还没绑定到任何项目的 Session/Task。
- * 数据形状沿用 Task，只是 projectId 为 null —— 用单独的视图类型表示。
+ * 「收集箱」：还没绑定到任何项目的 Session/Task。形状沿用 Task，projectId 为 null。
  */
 export interface OrphanConversation {
   id: string;
@@ -85,8 +79,7 @@ const ORPHAN_LIST = ref<OrphanConversation[]>([
 ]);
 
 /**
- * 草稿对话：点了「新对话」但还没发出第一条消息的会话。
- * 不进侧栏，只在内存里活着；首条发送成功后会被 promote 进 ORPHAN_LIST。
+ * 草稿：点了「新对话」但还没发出第一条消息的会话。不进侧栏，首条发送成功后 promote 进 ORPHAN_LIST。
  */
 const DRAFTS = new Map<string, OrphanConversation>();
 
@@ -110,7 +103,7 @@ export function getTask(projectId: string, taskId: string): Task | undefined {
   return (TASKS[projectId] ?? []).find((t) => t.id === taskId);
 }
 
-/** 侧边栏项目树里，挂在每个 Project 下面的对话节点。 */
+/** 侧边栏项目树里挂在每个 Project 下面的对话节点。 */
 export function listProjectConversations(projectId: string): Task[] {
   return TASKS[projectId] ?? [];
 }
@@ -128,7 +121,7 @@ export function isDraftOrphan(id: string): boolean {
   return DRAFTS.has(id);
 }
 
-/** 点「新对话」按钮时调用：产出一条只活在内存里的草稿。 */
+/** 点「新对话」时调用：产出一条只活在内存里的草稿。 */
 export function createDraftOrphan(): OrphanConversation {
   const id = makeId("o-draft");
   const draft: OrphanConversation = {
@@ -142,8 +135,7 @@ export function createDraftOrphan(): OrphanConversation {
 }
 
 /**
- * 草稿发出第一条消息后调用：把它从 DRAFTS 移到 ORPHAN_LIST，
- * title 用首条消息预览代替占位。若同 id 已经在列表里则忽略。
+ * 草稿发出第一条消息后调用：从 DRAFTS 移到 ORPHAN_LIST，title 用首条消息预览代替占位。
  */
 export function promoteDraftOrphan(id: string, title: string): void {
   const draft = DRAFTS.get(id);
@@ -162,8 +154,7 @@ export function promoteDraftOrphan(id: string, title: string): void {
 
 /**
  * 侧栏「添加项目」入口：本地文件夹 / clone / 空分类三类都进这里。
- * cwd 传 null 表示是「分类型」项目，不绑定本地工作目录，仅做侧栏归类用。
- * 返回新建项目本身，方便调用方拿到 id 做 router 跳转。
+ * cwd 传 null 表示「分类型」项目，仅做侧栏归类用。
  */
 export function createProject(input: { name: string; cwd: string | null }): Project {
   const trimmedName = input.name.trim();

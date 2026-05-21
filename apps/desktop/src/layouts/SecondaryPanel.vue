@@ -42,11 +42,7 @@ const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
 const { statusFor } = useConnectionStatus();
 
-/** 侧栏没有「当前活跃 backend」的概念，按以下规则挑一个显示：
- *  - Claude 配好 → 显示 Claude（与改造前一致）
- *  - Claude 未配但 Codex 配好 → 显示 Codex
- *  - 两者都未配 → 警告未连接
- *  这样不论用户主用哪个 backend 都能在侧栏看到至少一个绿灯。 */
+/** 侧栏挑一个 backend 显示连接状态：Claude 优先，Codex 兜底，都未配则警告。 */
 const primaryStatus = computed(() => {
   const claude = statusFor("claude");
   const codex = statusFor("codex");
@@ -80,7 +76,7 @@ const connectionTooltip = computed(() => {
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
 
-/** 项目树的展开状态，默认展开所有项目（数据少，先粗糙做）。 */
+/** 项目树展开状态，默认全部展开。 */
 const expanded = reactive<Record<string, boolean>>(
   Object.fromEntries(projects.value.map((p) => [p.id, true])),
 );
@@ -97,8 +93,7 @@ function isActiveOrphan(taskId: string) {
   return route.path === `/chats/${taskId}`;
 }
 
-/** 点「新对话」：开一条不绑项目的草稿会话，跳到 /chats/:id；
- *  在发出第一条消息之前不会出现在侧栏「收集箱」里。 */
+/** 点「新对话」：开一条不绑项目的草稿会话；第一条消息发出去之前不进侧栏。 */
 function newChat() {
   const draft = createDraftOrphan();
   router.push(`/chats/${draft.id}`);
@@ -109,9 +104,8 @@ function noop() {
 }
 
 // ---------------- 内联搜索 ---------------- *
-// 「新对话」按钮和「搜索」按钮独占第一行；点击搜索后这两个按钮原位变成一个
-// 搜索输入框 + 关闭按钮，下方挂下拉。下拉里的结果走 hybrid 模式（文本子串
-// 命中优先，向量相似度兜底召回）。键盘：↑↓ 选项，Enter 打开，Esc 关闭。
+// 点击搜索后「新对话 + 搜索」按钮原位变成「输入框 + 关闭按钮」，下方挂下拉。
+// 下拉走 hybrid 模式（文本子串命中优先，向量相似度兜底召回）。键盘：↑↓ 选项，Enter 打开，Esc 关闭。
 
 const searchActive = ref(false);
 const searchQuery = ref("");
@@ -198,21 +192,15 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
 
 // ---------------- 添加项目 ---------------- *
 // 「+」按钮点开下拉小菜单：本地文件夹 / GitHub clone / 空分类。
-// - 本地文件夹：直接走 tauri-plugin-dialog 弹系统选择器，选完落项目；
-// - clone：弹一个仅含 URL 输入框的轻量 dialog，clone 目标父目录从 Settings 读，
-//   未设置时兜底到家目录。clone 完用克隆出的实际路径建项目；
-// - 空分类：弹一个 name 输入框，落一个 cwd=null 的项目。
-//
 // 菜单走「鼠标右下角」原生 contextmenu 模式：Teleport 到 body、position:fixed，
 // 锚点取触发点的 clientX/clientY，再 clamp 在视口内避免穿底/穿右。
 
 const addMenuOpen = ref(false);
 const menuPos = ref<{ x: number; y: number }>({ x: 0, y: 0 });
 const MENU_W = 200;
-const MENU_H_EST = 132; // 3 行 × ~40px + padding；菜单内容固定，估算值够用。
+const MENU_H_EST = 132;
 
 function openAddMenu(e: MouseEvent) {
-  // 鼠标位置作菜单左上角；clamp 防穿出视口。
   const x = Math.min(e.clientX, window.innerWidth - MENU_W - 4);
   const y = Math.min(e.clientY, window.innerHeight - MENU_H_EST - 4);
   menuPos.value = { x: Math.max(4, x), y: Math.max(4, y) };
@@ -224,8 +212,7 @@ function closeAddMenu() {
 }
 
 function onDocPointer(e: PointerEvent) {
-  // Teleport 走 body，菜单 DOM 在外面，不能再用「不在按钮内」判定；
-  // 直接看点中元素有没有 .sb-menu 祖先即可。
+  // Teleport 到 body 后菜单 DOM 在外面，直接看点中元素有没有 .sb-menu 祖先。
   const target = e.target as HTMLElement | null;
   if (target && target.closest && target.closest(".sb-menu")) return;
   closeAddMenu();
@@ -289,8 +276,7 @@ async function openClone() {
   cloneUrl.value = "";
   cloneError.value = null;
   cloneBusy.value = false;
-  // 父目录：先看 Settings 里的偏好；没设过就兜底到 home。两者都拿不到留空，
-  // 让用户在「目标位置」那里看到提示并补一次。
+  // 父目录：Settings 里的偏好 → home 兜底。
   try {
     const s = await getProjectSettings();
     if (s.cloneParentDir && s.cloneParentDir.trim()) {
@@ -323,7 +309,7 @@ async function pickCloneParent() {
   }
 }
 
-/** 仅用于在 dialog 里给用户看一眼「最终会克隆到哪里」，与 Rust 端的推断保持一致。 */
+/** 给用户预览「最终会克隆到哪里」，与 Rust 端的推断保持一致。 */
 const cloneTargetPreview = computed(() => {
   const url = cloneUrl.value.trim();
   const parent = cloneParent.value.trim();
@@ -388,8 +374,7 @@ function confirmCategory() {
 
 <template>
   <aside class="secondary-panel">
-    <!-- 区域 1：第一行 = 新对话（宽）+ 搜索（图标）。点击搜索后整行变输入框。
-         搜索下拉作为 actions 的子元素，absolute 浮在项目树之上，不挤占布局。 -->
+    <!-- 区域 1：新对话（宽）+ 搜索（图标）。点击搜索后整行变输入框，下拉浮在树之上。 -->
     <div class="sb-section sb-section--actions">
       <template v-if="!searchActive">
         <button type="button" class="sb-primary-btn" title="新对话" aria-label="新对话" @click="newChat">
@@ -539,9 +524,8 @@ function confirmCategory() {
       </RouterLink>
     </div>
 
-    <!-- ===== 添加项目 contextmenu ===== *
-         Teleport 到 body + position:fixed，相对鼠标点击点定位（右下角铺开）。
-         没做进出动画——contextmenu 类菜单瞬时出现是行业惯例（macOS / VSCode 都如此）。 -->
+    <!-- ===== 添加项目 contextmenu =====
+         Teleport 到 body + position:fixed，相对鼠标点击点定位。 -->
     <Teleport to="body">
       <div v-if="addMenuOpen" class="sb-menu" role="menu"
         :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }">

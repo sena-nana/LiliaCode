@@ -4,7 +4,7 @@ import { RouterView } from "vue-router";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 
-/** 侧栏宽度的硬约束：太窄项目名会糊成一团，太宽主区就被挤掉。 */
+/** 侧栏宽度的硬约束：太窄项目名糊成一团，太宽主区被挤掉。 */
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 220;
@@ -39,7 +39,7 @@ function onPointerUp(e: PointerEvent) {
   try {
     localStorage.setItem(STORAGE_KEY, String(sidebarWidth.value));
   } catch {
-    /* 隐私模式 / 配额满：忽略，下次启动回到默认值即可。 */
+    /* 隐私模式 / 配额满：忽略。 */
   }
 }
 
@@ -54,13 +54,13 @@ function startResize(e: PointerEvent) {
   window.addEventListener("pointerup", onPointerUp);
 }
 
-/** 双击拖拽条重置到默认宽度——VSCode/IntelliJ 的通用快捷动作。 */
+/** 双击拖拽条重置到默认宽度。 */
 function resetWidth() {
   sidebarWidth.value = DEFAULT_WIDTH;
   try {
     localStorage.setItem(STORAGE_KEY, String(DEFAULT_WIDTH));
   } catch {
-    /* 同上。 */
+    /* ignore */
   }
 }
 
