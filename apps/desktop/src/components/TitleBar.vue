@@ -121,6 +121,9 @@ async function onClose() {
 
 <template>
   <header class="titlebar" data-tauri-drag-region>
+    <!-- 左侧占位列：和右侧窗控列同为 1fr，对称把中间面包屑列推到窗口中心。 -->
+    <div class="titlebar__spacer" data-tauri-drag-region></div>
+
     <div class="titlebar__crumbs" data-tauri-drag-region>
       <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。
            wrapper span 是单根 DOM，让 <Transition> 能正确捕获进出元素。 -->
@@ -159,8 +162,6 @@ async function onClose() {
         >{{ leafCrumb.text }}</span>
       </Transition>
     </div>
-
-    <div class="titlebar__spacer" data-tauri-drag-region></div>
 
     <div class="titlebar__controls">
       <button

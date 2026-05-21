@@ -974,7 +974,12 @@ pre code {
  */
 
 .titlebar {
-  display: flex;
+  /* 用 1fr auto 1fr 三列 grid 把面包屑相对窗口居中：
+   * 左占位列和右窗控列共享 1fr，对称把中间 auto 列推到窗口中线。
+   * 窗口窄到右列不够装窗控时，grid 会让右列就地撑开，面包屑会被挤偏一些——
+   * 比硬居中失衡或压住窗控温和，可接受。 */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: stretch;
   height: 36px;
   background: var(--bg-elev);
@@ -988,10 +993,10 @@ pre code {
 .titlebar__crumbs {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 0 14px;
   min-width: 0;
-  flex: 0 1 auto;
   overflow: hidden;
   color: var(--text);
   font-size: 13px;
@@ -1031,14 +1036,15 @@ pre code {
 }
 
 .titlebar__spacer {
-  flex: 1;
-  /* 关键：min-width 0 让 spacer 在窄窗下能收缩到 0，避免把窗控挤掉。 */
+  /* 左占位列：只为对称把面包屑列推到窗口中心；右侧也是 1fr 但承载窗控。 */
   min-width: 0;
 }
 
 .titlebar__controls {
   display: flex;
   align-items: stretch;
+  /* 控件天然在第三列里靠左 —— 用 justify-self 顶到右边贴边。 */
+  justify-self: end;
   -webkit-app-region: no-drag;
 }
 
