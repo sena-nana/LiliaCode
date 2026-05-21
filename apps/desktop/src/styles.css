@@ -705,6 +705,40 @@ pre code {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 卡片标题左侧的文字+icon 簇；右侧空间让给状态点。 */
+.card-h2__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 标题里的状态点：右对齐，并取消标题的大写/字距，避免拉伸中文 pill。 */
+.card h2 .status-pill {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: normal;
+  transition: opacity 0.45s ease-out;
+}
+
+/* 环境正常时（ok）默认收起标题旁的状态点，hover/focus 卡片再缓慢淡入，
+   颜色压到 --text-faint，避免「全绿」时持续吸睛、也避免冒出来时跳眼。
+   异常态与检查中始终可见。 */
+.card h2 .status-pill--ok {
+  opacity: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-faint);
+  padding: 0;
+}
+.card:hover h2 .status-pill--ok,
+.card:focus-within h2 .status-pill--ok {
+  opacity: 0.7;
+  transition-delay: 0.12s;
 }
 
 .card.empty {
@@ -1130,6 +1164,23 @@ button.ghost:hover {
   background: var(--bg-subtle);
   color: var(--text-muted);
   border-color: var(--border);
+}
+
+/* banner 里的内联链接式按钮，给「重新检测」一类的低强度动作。 */
+.inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline-link:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 /* ---------------- Chat ---------------- *
