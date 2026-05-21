@@ -1482,3 +1482,166 @@ button.ghost:hover {
   color: var(--accent);
   opacity: 0.75;
 }
+
+/* ---------------- Search palette ---------------- *
+ * 命令面板风格的浮层，Teleport 到 body 之外，所以这里只能写全局选择器。
+ * 视觉上沿用 chip / dropdown 的圆角节奏，分值用 tabular-nums 对齐。
+ */
+
+.search-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.search-palette__card {
+  width: min(640px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.search-palette__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.search-palette__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.search-palette__input::placeholder {
+  color: var(--text-faint);
+}
+
+.search-palette__modes {
+  display: flex;
+  gap: 4px;
+}
+
+.search-palette__modes button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.search-palette__modes button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.search-palette__modes button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.search-palette__close {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-palette__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.search-palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.search-palette__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-palette__item.is-active {
+  background: var(--bg-hover);
+}
+
+.search-palette__title {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.search-palette__title mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.search-palette__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.search-palette__scope {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-palette__score {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.search-palette__empty,
+.search-palette__hint {
+  padding: 18px 14px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, reactive, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
@@ -21,6 +21,7 @@ import {
   listOrphanConversations,
 } from "../data/projectsStub";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
+import SearchPalette from "../components/SearchPalette.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -91,9 +92,17 @@ function newChat() {
   router.push(`/chats/${draft.id}`);
 }
 
+const searchOpen = ref(false);
+function openSearch() {
+  searchOpen.value = true;
+}
+function closeSearch() {
+  searchOpen.value = false;
+}
+
 const globalActions = [
   { key: "new-chat", label: "新对话", icon: MessageSquarePlus, handler: newChat },
-  { key: "search", label: "搜索", icon: Search, handler: noop },
+  { key: "search", label: "搜索", icon: Search, handler: openSearch },
   { key: "plugins", label: "插件 / 技能", icon: Puzzle, handler: noop },
   { key: "automation", label: "自动化", icon: Zap, handler: noop },
 ];
@@ -245,4 +254,6 @@ function noop() {
       </RouterLink>
     </div>
   </aside>
+
+  <SearchPalette :open="searchOpen" @close="closeSearch" />
 </template>
