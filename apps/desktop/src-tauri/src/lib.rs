@@ -820,23 +820,32 @@ fn build_cc_switch_status(app: &AppHandle) -> CCSwitchStatus {
     }
 }
 
+fn cli_available(name: &str) -> bool {
+    let candidates: &[&str] = if cfg!(windows) {
+        &["", ".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
+    for ext in candidates {
+        let candidate = format!("{name}{ext}");
+        let ok = Command::new(&candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return true;
+        }
+    }
+    false
+}
+
 #[tauri::command]
 fn chat_check_env(app: AppHandle) -> EnvStatusReport {
-    let node_available = Command::new("node")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    let codex_cli_available = Command::new("codex")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let node_available = cli_available("node");
+    let codex_cli_available = cli_available("codex");
 
     let mut backends = HashMap::new();
     backends.insert(
