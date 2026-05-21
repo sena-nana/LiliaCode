@@ -8,6 +8,8 @@ import {
   Puzzle,
   Plus,
   ArrowUpDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   MoreHorizontal,
   Folder,
   FolderOpen,
@@ -83,6 +85,16 @@ const expanded = reactive<Record<string, boolean>>(
 
 function toggle(projectId: string) {
   expanded[projectId] = !expanded[projectId];
+}
+
+/** 是否全部展开：空列表时返回 false，让按钮以「展开」状态登场。 */
+const allExpanded = computed(
+  () => projects.value.length > 0 && projects.value.every((p) => expanded[p.id]),
+);
+
+function toggleAll() {
+  const target = !allExpanded.value;
+  for (const p of projects.value) expanded[p.id] = target;
 }
 
 function isActiveTask(projectId: string, taskId: string) {
@@ -424,13 +436,17 @@ function confirmCategory() {
       <div class="sb-section__header">
         <span class="sb-section__title">项目</span>
         <div class="sb-section__tools">
+          <button type="button" class="sb-icon-btn"
+            :title="allExpanded ? '全部折叠' : '全部展开'"
+            :aria-label="allExpanded ? '全部折叠' : '全部展开'"
+            @click="toggleAll">
+            <ChevronsDownUp v-if="allExpanded" :size="14" aria-hidden="true" />
+            <ChevronsUpDown v-else :size="14" aria-hidden="true" />
+          </button>
           <button type="button" class="sb-icon-btn" title="添加项目" aria-label="添加项目"
             :aria-expanded="addMenuOpen" :aria-haspopup="true"
             @click="openAddMenu">
             <Plus :size="14" aria-hidden="true" />
-          </button>
-          <button type="button" class="sb-icon-btn" title="整理 / 排序" aria-label="整理 / 排序" @click="noop">
-            <ArrowUpDown :size="14" aria-hidden="true" />
           </button>
         </div>
       </div>
