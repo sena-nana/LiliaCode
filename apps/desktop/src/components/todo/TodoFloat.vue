@@ -69,7 +69,6 @@ function toggle() {
 
 const totalCount = computed(() => todos.value.length);
 const doneCount = computed(() => todos.value.filter((t) => t.done).length);
-/** SVG 圆环：半径 7，周长 ≈ 43.98。 */
 const RING_CIRC = 2 * Math.PI * 7;
 const ringDash = computed(() => {
   if (totalCount.value === 0) return `0 ${RING_CIRC}`;

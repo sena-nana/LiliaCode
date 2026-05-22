@@ -82,7 +82,6 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/** textarea 自动撑高，超 8 行换内部滚动。 */
 function resize() {
   const el = textarea.value;
   if (!el) return;

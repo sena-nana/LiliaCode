@@ -54,7 +54,6 @@ function startResize(e: PointerEvent) {
   window.addEventListener("pointerup", onPointerUp);
 }
 
-/** 双击拖拽条重置到默认宽度。 */
 function resetWidth() {
   sidebarWidth.value = DEFAULT_WIDTH;
   try {

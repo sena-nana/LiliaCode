@@ -1,8 +1,5 @@
 <script setup lang="ts">
-/**
- * 项目下默认 tab：列出该项目的所有非草稿 Task，点击进入 TaskDetail。
- * 短期复用 projectsStub 的 listProjectConversations；后续接 SQLite 时换 service。
- */
+/** 项目下默认 tab：列出该项目的所有非草稿 Task，点击进入 TaskDetail。 */
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { listProjectConversations } from "../../services/tasksStore";

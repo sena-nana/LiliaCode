@@ -171,7 +171,6 @@ function abortStream() {
   stopRevealLoop();
 }
 
-/** 用户首条消息预览：截到 30 字，给草稿 promote 用的标题。 */
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
@@ -186,7 +185,6 @@ async function onSend(content: string) {
   }
 
   // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
-  // 项目内草稿进对应项目的 TASKS；孤儿草稿进收集箱。
   if (props.projectId && isDraftTask(props.taskId)) {
     promoteDraftTask(props.taskId, summarizeTitle(content));
   } else if (!props.projectId && isDraftOrphan(props.taskId)) {
@@ -286,7 +284,6 @@ onMounted(async () => {
   unlisteners.push(
     await onTool((e) => {
       if (e.taskId !== props.taskId) return;
-      // 第一阶段只展示工具名；input 摘要等后续做。
       pushSystemMessage(`agent 正在使用工具：${e.name}`);
     }),
   );

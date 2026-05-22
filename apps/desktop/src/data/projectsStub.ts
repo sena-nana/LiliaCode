@@ -110,12 +110,10 @@ export function getTask(projectId: string, taskId: string): Task | undefined {
   return (TASKS.value[projectId] ?? []).find((t) => t.id === taskId);
 }
 
-/** 侧边栏项目树里挂在每个 Project 下面的对话节点。 */
 export function listProjectConversations(projectId: string): Task[] {
   return TASKS.value[projectId] ?? [];
 }
 
-/** 侧边栏第三区域的收集箱对话。 */
 export function listOrphanConversations(): OrphanConversation[] {
   return ORPHAN_LIST.value;
 }

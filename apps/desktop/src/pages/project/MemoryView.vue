@@ -1,8 +1,5 @@
 <script setup lang="ts">
-/**
- * Memory 占位视图。
- * 实施 Team #2 时在此挂用户级 / 项目级两段列表 + 详情编辑 + 启用开关。
- */
+/** Memory 占位视图。 */
 defineProps<{ projectId: string }>();
 </script>
 

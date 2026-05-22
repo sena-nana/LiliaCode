@@ -18,7 +18,6 @@ const props = defineProps<{
   options: Option[];
   icon?: any;
   placeholder?: string;
-  /** popover 展开方向，默认向上。 */
   placement?: "top" | "bottom";
   disabled?: boolean;
 }>();

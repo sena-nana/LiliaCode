@@ -1,8 +1,5 @@
 <script setup lang="ts">
-/**
- * 通用确认弹层。复用 .search-palette 的 backdrop / 过渡 + .dialog__* 内部布局。
- * 调用方自己保证同一时刻只有一个 confirm 在弹（不做嵌套堆叠管理）。
- */
+/** 通用确认弹层。同一时刻只允许一个 confirm 在弹——不做嵌套堆叠管理。 */
 import { AlertTriangle } from "lucide-vue-next";
 
 defineProps<{

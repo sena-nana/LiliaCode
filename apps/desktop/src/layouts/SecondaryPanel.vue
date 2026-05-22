@@ -208,7 +208,6 @@ interface Segment {
   mark: boolean;
 }
 
-/** 把高亮 ranges 转成「文本段 + 是否高亮」的扁平数组，方便模板渲染。 */
 function highlightSegments(text: string, ranges: Array<[number, number]>): Segment[] {
   if (!ranges.length) return [{ text, mark: false }];
   const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
@@ -414,12 +413,10 @@ function confirmCategory() {
 // 同一组菜单服务两种入口：右键走 v-context-menu 指令；左键点 ⋯ 走 openContextMenuAt。
 // 菜单项里两条「文件管理器 / VSCode」对仅作分类用的项目（cwd === null）禁用。
 
-/** 行内重命名：editingId 指向当前正在改名的项目；同一时刻只允许一行处于编辑态。 */
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 
-/** 操作错误用 banner 复用，已有 dismissError；这里集中收口。 */
 function reportError(msg: string) {
   projectError.value = msg;
 }

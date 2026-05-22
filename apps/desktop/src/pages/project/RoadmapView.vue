@@ -1,8 +1,5 @@
 <script setup lang="ts">
-/**
- * Roadmap 占位视图。
- * 实施 Team #3 时在此挂垂直时间线 + Milestone CRUD + 「未归类」分组。
- */
+/** Roadmap 占位视图。 */
 defineProps<{ projectId: string }>();
 </script>
 
