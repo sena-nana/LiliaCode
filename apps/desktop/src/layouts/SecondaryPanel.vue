@@ -53,7 +53,6 @@ import {
   openInVSCode,
   pickFolder,
 } from "../services/projects";
-import ConfirmDialog from "../components/ConfirmDialog.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -420,12 +419,6 @@ const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 
-const archiveOpen = ref(false);
-const archiveTarget = ref<Project | null>(null);
-
-const removeOpen = ref(false);
-const removeTarget = ref<Project | null>(null);
-
 /** 操作错误用 banner 复用，已有 dismissError；这里集中收口。 */
 function reportError(msg: string) {
   projectError.value = msg;
@@ -488,45 +481,27 @@ function bindEditingInput(el: unknown) {
   editingInput.value = (el as HTMLInputElement | null) ?? null;
 }
 
-function openArchiveConfirm(p: Project) {
-  archiveTarget.value = p;
-  archiveOpen.value = true;
-}
-
-function confirmArchive() {
-  const target = archiveTarget.value;
-  if (!target) return;
-  archiveProjectConversations(target.id);
+function archiveAllConversations(p: Project) {
+  archiveProjectConversations(p.id);
   // 当前活动路由如果就在被归档的项目下，跳回主页（router.push("/")），免得停在不存在的 task。
   if (
     route.params.projectId &&
-    String(route.params.projectId) === target.id
+    String(route.params.projectId) === p.id
   ) {
     router.push("/");
   }
-  archiveOpen.value = false;
-  archiveTarget.value = null;
 }
 
-function openRemoveConfirm(p: Project) {
-  removeTarget.value = p;
-  removeOpen.value = true;
-}
-
-function confirmRemove() {
-  const target = removeTarget.value;
-  if (!target) return;
-  removeProject(target.id);
+function deleteProject(p: Project) {
+  removeProject(p.id);
   if (
     route.params.projectId &&
-    String(route.params.projectId) === target.id
+    String(route.params.projectId) === p.id
   ) {
     router.push("/");
   }
   // 顺手清掉 expanded 里的孤儿条目，免得日后同 id 复用拿到旧状态。
-  delete expanded[target.id];
-  removeOpen.value = false;
-  removeTarget.value = null;
+  delete expanded[p.id];
 }
 
 function buildProjectMenu(p: Project): ContextMenuItem[] {
@@ -556,14 +531,16 @@ function buildProjectMenu(p: Project): ContextMenuItem[] {
       id: "archive",
       label: "归档所有对话",
       icon: Archive,
-      onSelect: () => openArchiveConfirm(p),
+      confirmLabel: "确认归档？再点一次",
+      onSelect: () => archiveAllConversations(p),
     },
     {
       id: "remove",
       label: "移除项目",
       icon: Trash2,
       danger: true,
-      onSelect: () => openRemoveConfirm(p),
+      confirmLabel: "确认移除？再点一次",
+      onSelect: () => deleteProject(p),
     },
   ];
 }
@@ -860,26 +837,5 @@ function onMoreClick(e: MouseEvent, p: Project) {
         </div>
       </Transition>
     </Teleport>
-
-    <!-- ===== 归档对话确认 ===== -->
-    <ConfirmDialog
-      :open="archiveOpen"
-      title="归档所有对话"
-      :message="`将清空「${archiveTarget?.name ?? ''}」下的所有对话与草稿（不会删除磁盘上的项目目录）。继续吗？`"
-      confirm-text="归档"
-      @cancel="archiveOpen = false"
-      @confirm="confirmArchive"
-    />
-
-    <!-- ===== 移除项目确认 ===== -->
-    <ConfirmDialog
-      :open="removeOpen"
-      title="移除项目"
-      :message="`将从侧栏移除「${removeTarget?.name ?? ''}」及其全部对话记录（不会删除磁盘上的项目目录）。继续吗？`"
-      confirm-text="移除"
-      danger
-      @cancel="removeOpen = false"
-      @confirm="confirmRemove"
-    />
   </aside>
 </template>

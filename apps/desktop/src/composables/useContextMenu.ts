@@ -9,6 +9,7 @@ export interface ContextMenuItem {
   disabled?: boolean;
   /** 红色危险项（删除之类）。 */
   danger?: boolean;
+  confirmLabel?: string;
   onSelect: () => void;
 }
 
@@ -24,6 +25,8 @@ interface MenuState {
   x: number;
   y: number;
   items: ContextMenuItem[];
+  /** 当前正等待二次确认的菜单项 key（item.id ?? ""）。 */
+  pendingConfirmId: string | null;
 }
 
 const state = reactive<MenuState>({
@@ -31,6 +34,7 @@ const state = reactive<MenuState>({
   x: 0,
   y: 0,
   items: [],
+  pendingConfirmId: null,
 });
 
 const providers = new WeakMap<Element, ContextMenuProvider>();
@@ -45,6 +49,7 @@ function openMenu(x: number, y: number, items: ContextMenuItem[]) {
   state.x = x;
   state.y = y;
   state.open = true;
+  state.pendingConfirmId = null;
 }
 
 /**
@@ -65,10 +70,22 @@ export function closeContextMenu() {
   if (!state.open) return;
   state.open = false;
   state.items = [];
+  state.pendingConfirmId = null;
+}
+
+export function isContextMenuItemPending(item: ContextMenuItem): boolean {
+  if (!item.confirmLabel) return false;
+  return state.pendingConfirmId === (item.id ?? "");
 }
 
 export function selectContextMenuItem(item: ContextMenuItem) {
   if (item.disabled) return;
+  const key = item.id ?? "";
+  if (item.confirmLabel && state.pendingConfirmId !== key) {
+    // 首次点选 / 切到另一个确认项：进入 pending，不关菜单也不执行。
+    state.pendingConfirmId = key;
+    return;
+  }
   closeContextMenu();
   item.onSelect();
 }

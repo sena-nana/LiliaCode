@@ -2493,3 +2493,13 @@ button.ghost.danger:hover {
 .ctx-menu__item--danger:hover {
   background: var(--err-soft);
 }
+
+/* 二次确认 pending：底色填一下让用户清楚「这次再点就执行了」。 */
+.ctx-menu__item--pending {
+  background: var(--err-soft);
+  font-weight: 600;
+}
+
+.ctx-menu__item--pending:hover {
+  background: var(--err-soft);
+}

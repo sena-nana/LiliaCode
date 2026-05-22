@@ -4,12 +4,25 @@
  * 渲染前测一次尺寸，clamp 在视口内避免穿底/穿右。
  */
 import { nextTick, ref, watch } from "vue";
-import { selectContextMenuItem, useContextMenu } from "../composables/useContextMenu";
+import {
+  isContextMenuItemPending,
+  selectContextMenuItem,
+  useContextMenu,
+  type ContextMenuItem,
+} from "../composables/useContextMenu";
 
 const { state } = useContextMenu();
 
 const menuEl = ref<HTMLElement | null>(null);
 const pos = ref<{ x: number; y: number }>({ x: 0, y: 0 });
+
+function displayLabel(item: ContextMenuItem) {
+  return isContextMenuItemPending(item) ? item.confirmLabel : item.label;
+}
+
+function isDanger(item: ContextMenuItem) {
+  return item.danger || isContextMenuItemPending(item);
+}
 
 watch(
   () => state.open,
@@ -43,13 +56,16 @@ watch(
         :key="item.id ?? i"
         type="button"
         class="sb-menu__item ctx-menu__item"
-        :class="{ 'ctx-menu__item--danger': item.danger }"
+        :class="{
+          'ctx-menu__item--danger': isDanger(item),
+          'ctx-menu__item--pending': isContextMenuItemPending(item),
+        }"
         :disabled="item.disabled"
         role="menuitem"
         @click="selectContextMenuItem(item)"
       >
         <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
-        <span class="sb-menu__label">{{ item.label }}</span>
+        <span class="sb-menu__label">{{ displayLabel(item) }}</span>
       </button>
     </div>
   </Teleport>
