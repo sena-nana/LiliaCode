@@ -135,16 +135,16 @@ async function runClaude(cmd) {
 // ---------- Codex ----------
 
 function mapCodexPermission(p) {
-  // Lilia 三档 → Codex SDK 的 sandbox / approvalMode。
-  // 首版近似映射；canUseTool 等价的人机交互通道留待后续接。
+  // Lilia 三档 → Codex SDK 的 sandboxMode（0.47 起：字段从 sandbox 改名为
+  // sandboxMode，approvalMode 已从 ThreadOptions 移除，交由 codex CLI 自身策略）。
   switch (p) {
     case "full":
-      return { sandbox: "danger-full-access", approvalMode: "never" };
+      return { sandboxMode: "danger-full-access" };
     case "readonly":
-      return { sandbox: "read-only", approvalMode: "never" };
+      return { sandboxMode: "read-only" };
     case "ask":
     default:
-      return { sandbox: "workspace-write", approvalMode: "on-request" };
+      return { sandboxMode: "workspace-write" };
   }
 }
 
@@ -155,35 +155,56 @@ function mapCodexPermission(p) {
 function mapCodexEventToNdjson(ev, ctx) {
   if (!ev || typeof ev !== "object") return;
 
-  // 几乎所有事件都带 thread_id / threadId；持续刷新 ctx 里的最新值。
   const tid = ev.thread_id || ev.threadId;
   if (tid && typeof tid === "string") ctx.lastThreadId = tid;
 
   const type = ev.type || "";
 
-  // thread.started / turn.started 只用于内部记账。
   if (type === "thread.started" || type === "turn.started") return;
 
-  // 文本增量：item.updated 上的 assistant_message delta。
-  if (type === "item.updated" || type === "item.delta") {
+  // 文本增量：0.47 的 item.updated 给的是累积后的 ThreadItem.text（不是 delta），
+  // 用 itemTextSeen 按 item.id 跟踪已发长度提取增量。若上游 SDK 改回发 delta
+  // （total < seen），按 raw 直发兜底。
+  if (type === "item.updated") {
+    const item = ev.item || ev;
+    const kind = item?.type || item?.item_type;
+    if (
+      (kind === "agent_message" || kind === "assistant_message") &&
+      typeof item?.text === "string" &&
+      item?.id
+    ) {
+      const seen = ctx.itemTextSeen.get(item.id) || 0;
+      const total = item.text.length;
+      if (total > seen) {
+        emit({ type: "chunk", text: item.text.slice(seen) });
+        ctx.itemTextSeen.set(item.id, total);
+      } else if (total < seen) {
+        emit({ type: "chunk", text: item.text });
+      }
+      return;
+    }
+    // 老 SDK / 未识别 item 类型走 picker 兜底。
     const text = pickCodexDeltaText(ev);
     if (text) emit({ type: "chunk", text });
     return;
   }
 
-  // 完成的 item：可能是 assistant_message / command_execution / file_change /
-  // mcp_tool_call 等。assistant_message 走 assistant_done，其它当 tool_use。
+  // 完成的 item：agent_message 走 assistant_done，其它当 tool_use。
   if (type === "item.completed" || type === "item.started") {
     const item = ev.item || ev;
     const kind = item?.item_type || item?.type;
-    if (kind === "assistant_message" || kind === "message") {
+    if (
+      kind === "agent_message" ||
+      kind === "assistant_message" ||
+      kind === "message"
+    ) {
       const text = pickCodexAssistantText(item);
       if (text && type === "item.completed") {
         emit({ type: "assistant_done", text, sessionId: ctx.lastThreadId });
+        if (item?.id) ctx.itemTextSeen.delete(item.id);
       }
       return;
     }
-    // 工具类 item（命令执行 / 文件改动 / MCP 调用）。
     if (type === "item.started") {
       const name = String(kind || "tool");
       const { item_type: _ignore, type: _ignore2, ...rest } = item || {};
@@ -208,7 +229,6 @@ function mapCodexEventToNdjson(ev, ctx) {
 }
 
 function pickCodexDeltaText(ev) {
-  // 已知候选字段：ev.delta / ev.text / ev.item.delta / ev.item.text。
   if (typeof ev.delta === "string") return ev.delta;
   if (typeof ev.text === "string") return ev.text;
   const item = ev.item;
@@ -243,7 +263,7 @@ async function runCodex(cmd) {
     emit({
       type: "error",
       message:
-        "未安装 @openai/codex-sdk，请到 apps/desktop 下 `pnpm add @openai/codex-sdk` 并确保已全局安装 codex CLI。",
+        "未安装 @openai/codex-sdk，请在仓库根目录 `yarn install`，并确保已全局安装 codex CLI。",
     });
     process.exit(1);
     return;
@@ -263,13 +283,15 @@ async function runCodex(cmd) {
         ...permOpts,
       });
 
-  const ctx = { lastThreadId: thread?.id ?? resumeSessionId ?? null };
+  const ctx = {
+    lastThreadId: thread?.id ?? resumeSessionId ?? null,
+    itemTextSeen: new Map(),
+  };
 
-  const run = thread.run(prompt);
-  // events 可能是 AsyncIterable 或 { events }，先做一次形状归一化。
-  const events = run?.events ?? run;
+  // 0.47 起 thread.run() 返回完整 Turn（非流式），要拿事件流必须用 runStreamed。
+  const turn = await thread.runStreamed(prompt);
 
-  for await (const ev of events) {
+  for await (const ev of turn.events) {
     mapCodexEventToNdjson(ev, ctx);
   }
 

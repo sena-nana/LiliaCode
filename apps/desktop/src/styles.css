@@ -1,23 +1,55 @@
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("/fonts/noto-sans-sc-chinese-simplified-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
 
-  /* ---- 字体 ---- *
-   * 中文跟在英文后面以避免英文走到中文字体里发虚。 */
+  /* ---- 字体 ---- */
   --font-sans:
-    -apple-system, BlinkMacSystemFont,
+    "Noto Sans SC",
     "Segoe UI Variable Text", "Segoe UI",
-    Inter, Roboto, "Helvetica Neue", Arial,
-    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
-    "Source Han Sans SC", "Noto Sans SC",
+    "Microsoft YaHei UI", "Microsoft YaHei",
+    system-ui, -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Source Han Sans SC",
+    Roboto, "Helvetica Neue", Arial,
     sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    "Segoe UI Emoji", "Apple Color Emoji", "Segoe UI Symbol";
 
   --font-mono:
-    ui-monospace,
-    "SF Mono", "Cascadia Mono", "Cascadia Code",
-    "JetBrains Mono", "Source Code Pro", "Fira Code",
-    Menlo, Consolas, "Liberation Mono", "Roboto Mono",
-    "PingFang SC", "Microsoft YaHei UI",
+    "Cascadia Code", "Cascadia Mono",
+    "JetBrains Mono", "Fira Code", "Source Code Pro",
+    Consolas, "Roboto Mono",
+    ui-monospace, "SF Mono", Menlo, "Liberation Mono",
+    "Microsoft YaHei UI",
     monospace;
 
   /* ---- 表面 ---- */
@@ -54,7 +86,8 @@
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
-  font-weight: 600;
+  font-weight: 400;
+  font-synthesis: none;
   font-feature-settings: "cv11", "ss01", "ss03";
   /* 不要再设 -webkit-font-smoothing: antialiased — Chromium 在 Windows 上若被
    * 强制 antialiased 会绕开 ClearType 改用灰阶抗锯齿，中文笔画立刻变细变虚。 */

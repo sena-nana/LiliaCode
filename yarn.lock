@@ -691,6 +691,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@openai/codex-sdk@npm:^0.47.0":
+  version: 0.47.0
+  resolution: "@openai/codex-sdk@npm:0.47.0"
+  checksum: 10c0/8db3b4185ab1b609900dc0125eb3576348a1500178bd684a7b21dc929d2a4fffa0646cf149ea4381eca60a771ee7647d2adf02d0817fbb333bb56b8dbb65ad82
+  languageName: node
+  linkType: hard
+
 "@oxc-project/types@npm:=0.130.0":
   version: 0.130.0
   resolution: "@oxc-project/types@npm:0.130.0"
@@ -2114,6 +2121,7 @@ __metadata:
     "@anthropic-ai/sdk": "npm:^0.97.1"
     "@lilia/contracts": "workspace:*"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
+    "@openai/codex-sdk": "npm:^0.47.0"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
     "@tauri-apps/plugin-opener": "npm:^2"
