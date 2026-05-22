@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  listProjects,
-  getProject,
-  listTasks,
-  getTask,
-} from "../src/data/projectsStub";
+import { listProjects, getProject } from "../src/data/projects";
+import { listTasks, getTask } from "../src/data/tasks";
 
-describe("projectsStub", () => {
+describe("projects (data layer)", () => {
   it("列出所有项目", () => {
     expect(listProjects().length).toBeGreaterThan(0);
   });

@@ -38,14 +38,9 @@ import {
 import type {
   ChatBranchOption,
   ChatComposerState,
-  ChatMessage,
   ChatModelOption,
 } from "@lilia/contracts";
-
-type LocalMessage = ChatMessage & {
-  /** 还在打字，最后一个 assistant 气泡才会是 true。 */
-  streaming?: boolean;
-};
+import { useStreamReveal, type LocalMessage } from "../composables/useStreamReveal";
 
 const props = defineProps<{ projectId?: string; taskId: string }>();
 
@@ -85,91 +80,20 @@ async function ensureOrphanCwd(): Promise<string> {
   try {
     orphanCwd.value = await homeDir();
   } catch {
-    // 拿不到家目录就回退到空串，Node 子进程会用自身 cwd。
     orphanCwd.value = "";
   }
   return orphanCwd.value;
 }
 
-// 所有 timer / buffer 都按 taskId 隔离，切 task 时一并清。
-const streamBuffer = ref("");
-const streamingId = ref<string | null>(null);
-let streamFinalized = false;
-let revealTimer: number | null = null;
-
-const unlisteners: UnlistenFn[] = [];
-
-function startStreamBubble() {
-  const bubble: LocalMessage = {
-    id: `stream-${Date.now()}`,
-    taskId: props.taskId,
-    role: "assistant",
-    content: "",
-    createdAt: Date.now(),
-    streaming: true,
-  };
-  messages.value = [...messages.value, bubble];
-  streamingId.value = bubble.id;
-  streamBuffer.value = "";
-  streamFinalized = false;
-  ensureRevealLoop();
-}
-
-function ensureRevealLoop() {
-  if (revealTimer !== null) return;
-  revealTimer = window.setInterval(tickReveal, 24);
-}
-
-function stopRevealLoop() {
-  if (revealTimer !== null) {
-    window.clearInterval(revealTimer);
-    revealTimer = null;
-  }
-}
-
-function tickReveal() {
-  if (!streamingId.value) {
-    stopRevealLoop();
-    return;
-  }
-  if (streamBuffer.value.length === 0) {
-    if (streamFinalized) finalizeStream();
-    return;
-  }
-  // 一次 reveal 量随缓冲规模放大，避免长回复看起来像便秘。
-  const n = Math.max(
-    1,
-    Math.min(streamBuffer.value.length, Math.ceil(streamBuffer.value.length / 20)),
-  );
-  const slice = streamBuffer.value.slice(0, n);
-  streamBuffer.value = streamBuffer.value.slice(n);
-  const idx = messages.value.findIndex((m) => m.id === streamingId.value);
-  if (idx >= 0) {
-    const m = messages.value[idx];
-    messages.value[idx] = { ...m, content: m.content + slice };
-  }
-}
-
-function finalizeStream() {
-  const idx = messages.value.findIndex((m) => m.id === streamingId.value);
-  if (idx >= 0) {
-    messages.value[idx] = { ...messages.value[idx], streaming: false };
-  }
-  streamingId.value = null;
-  streamFinalized = false;
-  stopRevealLoop();
-}
-
-function abortStream() {
-  // 切 task 时遗留的流式气泡也清掉，避免下个会话看到上一个会话的半截回复。
-  if (streamingId.value) {
-    messages.value = messages.value.filter((m) => m.id !== streamingId.value);
-  }
-  streamingId.value = null;
-  streamBuffer.value = "";
-  streamFinalized = false;
-  stopRevealLoop();
-}
+// 流式渲染逻辑
+const {
+  streamingId,
+  startStreamBubble,
+  abortStream,
+  markStreamDone,
+  appendChunk,
+  stopRevealLoop,
+} = useStreamReveal(messages, () => props.taskId);
 
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -273,12 +197,13 @@ async function loadAll() {
   await reloadModelsForBackend(comp.backend);
 }
 
+const unlisteners: UnlistenFn[] = [];
+
 onMounted(async () => {
   unlisteners.push(
     await onChunk((e) => {
       if (e.taskId !== props.taskId) return;
-      streamBuffer.value += e.text;
-      ensureRevealLoop();
+      appendChunk(e.text);
     }),
   );
   unlisteners.push(
@@ -290,8 +215,7 @@ onMounted(async () => {
   unlisteners.push(
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
-      streamFinalized = true;
-      ensureRevealLoop();
+      markStreamDone();
     }),
   );
   unlisteners.push(
