@@ -50,9 +50,20 @@ Claude Code 原生只把对话存成扁平 JSONL；Lilia 让每个 session **1:1
 
 实现入口：[apps/desktop/src-tauri/src/todos.rs](apps/desktop/src-tauri/src/todos.rs)。
 
-### 让项目记得自己的偏好与决定（Memory）
+### 让项目记得自己的偏好与决定（Memory · v1 规划中）
 
-跨会话的知识沉淀，**只有用户级 + 项目级两层**——刻意不做更细粒度。发送消息时自动拼成 `<memory scope="...">` 前缀注入到 prompt。允许从草稿对话保存（草稿比会话长寿）——记忆的载体可以游离于结构之外。
+> **状态：尚未实现，下述为已确定的设计方向，TODO。**
+
+跨会话的知识沉淀，**只有用户级 + 项目级两层**——刻意不做更细粒度。允许从草稿对话保存（`sourceTaskId: "draft:<id>"`），因为记忆比会话长寿、载体可以游离于结构之外。
+
+实现上**不走"全部记忆拼前缀注入到 prompt"的老路**,而是 agent 旁路的「记忆助理」:
+
+- **VCC 算法**把对话整理为"对话链"持久化——基本不做压缩，但保证每次 grep 命中的最小单元是一次完整对话(user ↔ assistant 一来一回),不会出现断章上下文
+- **一个低成本外置模型**持续观察 agent 当前的执行思路(thinking + tool calls),并行触发检索,与 agent 推理互不阻塞
+- 命中后**不直接塞进上下文**,而是把"有相关记忆"的引导消息回送到 agent 对话,由 agent 自行决定是否通过 grep 拉取完整内容
+- 这是 inference-time speculative retrieval 范式,目的是在"agent 偷懒不主动查记忆"与"全量注入稀释注意力"之间找到平衡;前置任务上下文走的也是同构思路
+
+详细设计、注入时机分层、风险与未决问题见 [docs/design/memory.md](docs/design/memory.md)。
 
 ### 把跨周的进展讲成一个故事（Roadmap / Milestone）
 
