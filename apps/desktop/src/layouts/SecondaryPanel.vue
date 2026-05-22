@@ -21,14 +21,16 @@ import {
 } from "lucide-vue-next";
 import { homeDir } from "@tauri-apps/api/path";
 import {
-  createDraftOrphan,
-  createDraftTask,
   createProject,
   deriveProjectName,
   listProjects,
+} from "../services/projectsStore";
+import {
+  createDraftOrphan,
+  createDraftTask,
   listProjectConversations,
   listOrphanConversations,
-} from "../data/projectsStub";
+} from "../services/tasksStore";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { searchSessions, type SearchResult } from "../services/sessionSearch";
 import {

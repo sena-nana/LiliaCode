@@ -14,15 +14,15 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import {
   getOrphanConversation,
-  getProject,
   isDraftOrphan,
   isDraftTask,
   promoteDraftOrphan,
   promoteDraftTask,
-} from "../data/projectsStub";
+} from "../services/tasksStore";
+import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
-import ViewTabs from "../components/ViewTabs.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
+import TodoDrawer from "../components/todo/TodoDrawer.vue";
 import {
   getComposerState,
   listBranches,
@@ -98,24 +98,6 @@ let streamFinalized = false;
 let revealTimer: number | null = null;
 
 const unlisteners: UnlistenFn[] = [];
-
-/**
- * 主区顶部 ViewTabs 自动隐藏：默认不显示，鼠标 Y 距 chat-page 顶部 < THRESHOLD
- * 时浮现。绝对定位让 tabs 不占 chat 高度、也不挡气泡点击 / 选择。
- */
-const VIEW_TABS_REVEAL_THRESHOLD = 56;
-const chatPageEl = ref<HTMLElement | null>(null);
-const showViewTabs = ref(false);
-
-function onChatPagePointerMove(e: PointerEvent) {
-  if (!chatPageEl.value) return;
-  const top = chatPageEl.value.getBoundingClientRect().top;
-  showViewTabs.value = e.clientY - top < VIEW_TABS_REVEAL_THRESHOLD;
-}
-
-function onChatPagePointerLeave() {
-  showViewTabs.value = false;
-}
 
 function startStreamBubble() {
   const bubble: LocalMessage = {
@@ -346,28 +328,21 @@ watch(
 <template>
   <section
     v-if="hasContext"
-    ref="chatPageEl"
     class="chat-page"
-    @pointermove="onChatPagePointerMove"
-    @pointerleave="onChatPagePointerLeave"
   >
-    <div
-      v-if="projectId"
-      class="view-tabs-zone"
-      :class="{ 'is-visible': showViewTabs }"
-    >
-      <ViewTabs :project-id="projectId" active="sessions" />
-    </div>
-    <div class="chat">
-      <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
-      <ChatComposer
-        :state="composer"
-        :models="models"
-        :branches="branches"
-        :sending="streamingId !== null"
-        @send="onSend"
-        @update:state="onComposerUpdate"
-      />
+    <div class="chat-page__row">
+      <div class="chat">
+        <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
+        <ChatComposer
+          :state="composer"
+          :models="models"
+          :branches="branches"
+          :sending="streamingId !== null"
+          @send="onSend"
+          @update:state="onComposerUpdate"
+        />
+      </div>
+      <TodoDrawer v-if="taskId" :task-id="taskId" />
     </div>
   </section>
 
@@ -375,3 +350,15 @@ watch(
     <div class="empty-state">未找到任务 <code>{{ taskId }}</code></div>
   </section>
 </template>
+
+<style scoped>
+/* TaskDetail 内的横向布局：中间聊天 + 右侧 TodoDrawer。
+ * `.chat-page` 已在全局 CSS 设 flex-direction: column；这里再加一层横向 row。 */
+.chat-page__row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+  width: 100%;
+}
+</style>

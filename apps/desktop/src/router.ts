@@ -8,6 +8,10 @@ import AppShell from "./layouts/AppShell.vue";
 import TaskDetail from "./pages/TaskDetail.vue";
 import Settings from "./pages/Settings.vue";
 import Plugins from "./pages/Plugins.vue";
+import ProjectShell from "./pages/project/ProjectShell.vue";
+import SessionsView from "./pages/project/SessionsView.vue";
+import RoadmapView from "./pages/project/RoadmapView.vue";
+import MemoryView from "./pages/project/MemoryView.vue";
 
 const Home = defineComponent({
   name: "LiliaHome",
@@ -30,6 +34,18 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
         component: AppShell,
         children: [
           { path: "", component: Home },
+          // 项目主区：ViewTabs 在这里渲染；子路由互斥呈现 sessions / roadmap / memory。
+          {
+            path: "projects/:projectId",
+            component: ProjectShell,
+            props: true,
+            children: [
+              { path: "", component: SessionsView, props: true },
+              { path: "roadmap", component: RoadmapView, props: true },
+              { path: "memory", component: MemoryView, props: true },
+            ],
+          },
+          // 任务详情是 ProjectShell 的兄弟路由，进入聊天时 ViewTabs 不渲染。
           {
             path: "projects/:projectId/tasks/:taskId",
             component: TaskDetail,

@@ -16,9 +16,14 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
 mod plugins;
+mod store;
+mod todos;
+mod util;
 use plugins::{
     ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview,
 };
+use store::LiliaStore;
+use todos::AgentTodoItem;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -566,6 +571,42 @@ fn chat_send_message(
                             .unwrap_or("")
                             .to_string();
                         let input = value.get("input").cloned().unwrap_or(JsonValue::Null);
+
+                        // 自动通道：SDK 的 TodoWrite 工具事件 → 同步到 task_todos 表。
+                        // 失败仅 log，不影响后续 tool 事件 emit（fall back 到普通 tool 通知）。
+                        if name == "TodoWrite" {
+                            if let Some(arr) = input.get("todos").and_then(|v| v.as_array()) {
+                                let parsed: Vec<AgentTodoItem> = arr
+                                    .iter()
+                                    .filter_map(|v| {
+                                        serde_json::from_value::<AgentTodoItem>(v.clone()).ok()
+                                    })
+                                    .collect();
+                                let store = app_handle.state::<LiliaStore>();
+                                match store.conn().and_then(|conn| {
+                                    todos::apply_agent_event_impl(
+                                        &conn,
+                                        &task_id_for_thread,
+                                        &parsed,
+                                    )
+                                }) {
+                                    Ok(_) => {
+                                        let _ = app_handle.emit(
+                                            "todo-changed",
+                                            serde_json::json!({
+                                                "taskId": task_id_for_thread,
+                                            }),
+                                        );
+                                    }
+                                    Err(err) => {
+                                        eprintln!(
+                                            "[todo] apply_agent_event failed: {err}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
                         let _ = app_handle.emit(
                             "chat:tool",
                             ToolEvent {
@@ -1134,6 +1175,18 @@ pub fn run() {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = window.set_background_color(Some(BG));
             }
+            // 初始化 lilia-store（SQLite）。失败时打印到 stderr 并继续运行——
+            // 让 Tauri 窗口先出来，后续 Todo / Memory / Roadmap 命令会因取不到
+            // State 而报错，但聊天主流程仍可用。
+            let home = store::resolve_lilia_home();
+            match LiliaStore::new(&home) {
+                Ok(s) => {
+                    app.manage(s);
+                }
+                Err(err) => {
+                    eprintln!("[lilia-store] init failed at {}: {err}", home.display());
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1163,6 +1216,11 @@ pub fn run() {
             plugins_list_claude_plugins,
             plugins_list_codex_mcp_servers,
             plugins_open_codex_config,
+            todos::todo_list,
+            todos::todo_create,
+            todos::todo_update,
+            todos::todo_delete,
+            todos::todo_apply_agent_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

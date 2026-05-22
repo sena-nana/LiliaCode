@@ -21,7 +21,7 @@ import {
   type CodexMcpServer,
   type PluginScope,
 } from "../services/plugins";
-import { listProjects } from "../data/projectsStub";
+import { listProjects } from "../services/projectsStore";
 import Dropdown from "../components/Dropdown.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 

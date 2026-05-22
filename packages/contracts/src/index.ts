@@ -58,6 +58,86 @@ export interface TaskGraph {
 }
 
 /**
+ * Lilia v1 在 Task / Session 之上叠加的三组结构化资产，对应
+ * 颗粒度金字塔 Milestone → Task → Todo → Message 与横向 Memory：
+ *
+ * - TaskTodo：任务内的 checklist，定位为「AI 思考过程可视化」，
+ *   主要由 Claude SDK 的 TodoWrite 工具事件自动 upsert（source = "agent"）。
+ * - Memory：跨会话沉淀，user / project 两层，发送时拼为 system 前缀注入。
+ * - Milestone + TaskMilestoneLink：项目长跨度叙事；不嵌套，Task 可游离。
+ *
+ * 设计原则见 [[lilia-v1-feature-architecture]]。
+ */
+
+export type TaskTodoSource = "user" | "agent";
+
+export interface TaskTodo {
+  id: string;
+  taskId: string;
+  text: string;
+  done: boolean;
+  /** 列表内排序，越小越靠前。 */
+  order: number;
+  /** "agent" 表示来自 Claude SDK TodoWrite；"user" 是手动维护。 */
+  source: TaskTodoSource;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type MemoryScope = "user" | "project";
+
+export interface Memory {
+  id: string;
+  scope: MemoryScope;
+  /** scope = "user" 时为 null。 */
+  projectId: string | null;
+  title: string;
+  /** Markdown 主体。 */
+  body: string;
+  tags: string[];
+  /** 是否参与对话发送时的 prompt 注入。 */
+  enabled: boolean;
+  /**
+   * 起源任务的 id；手动添加时为 null。
+   * 草稿期保存的记忆用 `"draft:<draftId>"` 字符串记录来源，
+   * 与正式 task id 区分但保持可追溯。
+   */
+  sourceTaskId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type MilestoneStatus =
+  | "upcoming"
+  | "in-progress"
+  | "done"
+  | "abandoned";
+
+export interface Milestone {
+  id: string;
+  projectId: string;
+  /** 例如 "v1.0 公测"。 */
+  title: string;
+  /** Markdown 描述，可为空字符串。 */
+  description: string;
+  status: MilestoneStatus;
+  /** 截止日期；长期愿景型里程碑可为 null。 */
+  dueDate: number | null;
+  /** 路线图上的纵向排序，越小越靠前。 */
+  order: number;
+  createdAt: number;
+}
+
+/**
+ * Task ↔ Milestone 多对多关联。Task 可游离（无任何 link），
+ * 路线图视图把游离任务收进底部「未归类」分组。
+ */
+export interface TaskMilestoneLink {
+  taskId: string;
+  milestoneId: string;
+}
+
+/**
  * 聊天面板契约。ChatMessage 只覆盖纯文本，引入 tool_use / 图像时改成 discriminated union。
  * ChatComposerState 按 taskId 持久化，切换会话不会污染彼此的偏好。
  */

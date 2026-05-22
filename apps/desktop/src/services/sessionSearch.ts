@@ -10,11 +10,11 @@
  * 当前只搜标题——消息体存在内存 HashMap 重启就丢，等持久化落盘后再扩到 content。
  */
 
+import { listProjects } from "./projectsStore";
 import {
   listOrphanConversations,
   listProjectConversations,
-  listProjects,
-} from "../data/projectsStub";
+} from "./tasksStore";
 
 export type SearchMode = "text" | "vector" | "hybrid";
 

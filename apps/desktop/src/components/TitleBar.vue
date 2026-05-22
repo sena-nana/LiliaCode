@@ -5,9 +5,9 @@ import { Minus, Square, Copy, X, ChevronRight } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
-  getProject,
   getTask,
-} from "../data/projectsStub";
+} from "../services/tasksStore";
+import { getProject } from "../services/projectsStore";
 
 const route = useRoute();
 

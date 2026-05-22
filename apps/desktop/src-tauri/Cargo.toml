@@ -19,3 +19,10 @@ tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# lilia-store：SQLite 持久化层。bundled 让 rusqlite 自带 SQLite，
+# 不依赖系统库，Windows 上免去 vcpkg/sqlite3 安装步骤。
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+dirs = "5"
+uuid = { version = "1", features = ["v4"] }
