@@ -110,9 +110,9 @@ async function onSend(content: string) {
 
   // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
   if (props.projectId && isDraftTask(props.taskId)) {
-    promoteDraftTask(props.taskId, summarizeTitle(content));
+    await promoteDraftTask(props.taskId, summarizeTitle(content));
   } else if (!props.projectId && isDraftOrphan(props.taskId)) {
-    promoteDraftOrphan(props.taskId, summarizeTitle(content));
+    await promoteDraftOrphan(props.taskId, summarizeTitle(content));
   }
 
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());

@@ -19,10 +19,10 @@ async function init() {
   categoryInput.value?.focus();
 }
 
-function confirm() {
+async function confirm() {
   const name = categoryName.value.trim();
   if (!name) return;
-  const project = createProject({ name, cwd: null });
+  const project = await createProject({ name, cwd: null });
   emit("created", project);
   emit("close");
 }
