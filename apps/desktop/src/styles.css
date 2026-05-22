@@ -1541,7 +1541,7 @@ button.ghost:hover {
 
 .chat {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr auto auto;
   gap: 12px;
   min-height: 0;
   /* flex 容器里要显式拉伸到剩余高度，否则 grid 内部会塌成内容高度。 */
@@ -1695,6 +1695,267 @@ button.ghost:hover {
   color: var(--text-faint);
   cursor: not-allowed;
   opacity: 0.85;
+}
+
+/* ----- Todo float（贴附 composer 顶边的 chip / 卡片） ----- */
+.todo-float {
+  /* 展开态：与 composer 同视觉语言的卡片 */
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.todo-float.is-collapsed {
+  /* 折叠态：右对齐 chip，背景/边框/阴影全去掉 */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  align-self: end;
+  justify-self: end;
+  width: auto;
+  max-width: max-content;
+  max-height: none;
+  overflow: visible;
+}
+
+.todo-float__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.todo-float__chip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.todo-float__ring {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  /* SVG 默认 baseline align，强制居中 */
+  display: block;
+}
+
+.todo-float__ring-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.todo-float__ring-done {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  /* 从 12 点方向开始，顺时针 */
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dasharray 0.18s ease;
+}
+
+.todo-float__chip-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-float__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+.todo-float__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.todo-float__count {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-float__collapse {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-float__collapse:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.todo-float__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.todo-float__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.todo-float__row:hover {
+  background: var(--bg-hover);
+}
+
+.todo-float__row.is-done .todo-float__text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.todo-float__check {
+  /* 覆盖全局 input 默认 32px 高度。 */
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.todo-float__source {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.todo-float__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.todo-float__del {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+  flex: 0 0 auto;
+}
+
+.todo-float__row:hover .todo-float__del,
+.todo-float__row:focus-within .todo-float__del {
+  opacity: 1;
+}
+
+.todo-float__del:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.todo-float__add {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+.todo-float__input {
+  flex: 1;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.todo-float__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.todo-float__add-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-float__add-btn:disabled {
+  background: var(--bg-active);
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.todo-float__error {
+  margin: 0 12px 10px;
+  font-size: 11px;
+  color: var(--err);
 }
 
 /* ----- 下拉 chip + popover ----- */

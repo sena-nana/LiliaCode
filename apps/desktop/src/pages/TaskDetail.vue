@@ -22,7 +22,7 @@ import {
 import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
-import TodoDrawer from "../components/todo/TodoDrawer.vue";
+import TodoFloat from "../components/todo/TodoFloat.vue";
 import {
   getComposerState,
   listBranches,
@@ -330,19 +330,17 @@ watch(
     v-if="hasContext"
     class="chat-page"
   >
-    <div class="chat-page__row">
-      <div class="chat">
-        <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
-        <ChatComposer
-          :state="composer"
-          :models="models"
-          :branches="branches"
-          :sending="streamingId !== null"
-          @send="onSend"
-          @update:state="onComposerUpdate"
-        />
-      </div>
-      <TodoDrawer v-if="taskId" :task-id="taskId" />
+    <div class="chat">
+      <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
+      <TodoFloat v-if="taskId" :task-id="taskId" />
+      <ChatComposer
+        :state="composer"
+        :models="models"
+        :branches="branches"
+        :sending="streamingId !== null"
+        @send="onSend"
+        @update:state="onComposerUpdate"
+      />
     </div>
   </section>
 
@@ -351,14 +349,3 @@ watch(
   </section>
 </template>
 
-<style scoped>
-/* TaskDetail 内的横向布局：中间聊天 + 右侧 TodoDrawer。
- * `.chat-page` 已在全局 CSS 设 flex-direction: column；这里再加一层横向 row。 */
-.chat-page__row {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  gap: 0;
-  width: 100%;
-}
-</style>

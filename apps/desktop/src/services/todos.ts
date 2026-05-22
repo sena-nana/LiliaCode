@@ -46,7 +46,7 @@ export interface TodoChangedEvent {
 
 /**
  * 后端在 SDK 的 TodoWrite 工具事件落库后会 emit `todo-changed`，
- * 这里订阅以让 TodoDrawer 自动 refresh。
+ * 这里订阅以让 TodoFloat 自动 refresh。
  */
 export function onTodoChanged(
   handler: (e: TodoChangedEvent) => void,
