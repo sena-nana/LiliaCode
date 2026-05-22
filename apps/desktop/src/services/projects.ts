@@ -49,3 +49,13 @@ export function getProjectSettings(): Promise<ProjectSettings> {
 export function setProjectSettings(settings: ProjectSettings): Promise<void> {
   return invoke<void>("project_set_settings", { settings });
 }
+
+/** 用系统默认文件管理器打开目录 / 文件。 */
+export function openInFileManager(path: string): Promise<void> {
+  return invoke<void>("system_open_path", { path });
+}
+
+/** 用 VSCode 打开目录 / 文件；PATH 里没 `code` 时 Rust 端会返回错误。 */
+export function openInVSCode(path: string): Promise<void> {
+  return invoke<void>("system_open_in_vscode", { path });
+}

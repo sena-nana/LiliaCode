@@ -1166,6 +1166,59 @@ fn unique_target_path(parent: &Path, base_name: &str) -> PathBuf {
     parent.join(base_name)
 }
 
+/// 用系统默认文件管理器打开 `path` 指向的目录/文件。
+/// Windows: 资源管理器；macOS: Finder；Linux: xdg-open。
+#[tauri::command]
+fn system_open_path(app: AppHandle, path: String) -> Result<(), String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("路径为空".to_string());
+    }
+    if !Path::new(p).exists() {
+        return Err(format!("路径不存在：{p}"));
+    }
+    app.opener()
+        .open_path(p.to_string(), None::<&str>)
+        .map_err(|e| format!("打开路径失败：{e}"))
+}
+
+/// 尝试用 VSCode 打开 `path`。
+/// PATH 里依次找 `code` / `code.cmd` / `code.exe`；都找不到时返回友好错误。
+#[tauri::command]
+fn system_open_in_vscode(path: String) -> Result<(), String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("路径为空".to_string());
+    }
+    if !Path::new(p).exists() {
+        return Err(format!("路径不存在：{p}"));
+    }
+    let candidates: &[&str] = if cfg!(windows) {
+        &["code.cmd", "code.exe", "code"]
+    } else {
+        &["code"]
+    };
+    let mut last_err: Option<String> = None;
+    for cmd_name in candidates {
+        match Command::new(cmd_name)
+            .arg(p)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e.to_string());
+                continue;
+            }
+        }
+    }
+    Err(format!(
+        "未能启动 VSCode（请确认 `code` 命令在 PATH 中；可在 VSCode 内执行 Shell Command: Install 'code' command in PATH）：{}",
+        last_err.unwrap_or_else(|| "unknown".to_string())
+    ))
+}
+
 /// 同步调用 `git clone <url> <target>`；成功后返回 target 绝对路径。
 #[tauri::command]
 fn git_clone_repo(url: String, parent_dir: String) -> Result<String, String> {
@@ -1332,6 +1385,8 @@ pub fn run() {
             project_get_settings,
             project_set_settings,
             git_clone_repo,
+            system_open_path,
+            system_open_in_vscode,
             plugins_overview,
             plugins_list_claude_skills,
             plugins_create_claude_skill,

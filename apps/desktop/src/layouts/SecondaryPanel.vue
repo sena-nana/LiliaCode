@@ -18,12 +18,25 @@ import {
   AlertTriangle,
   FileText,
   X,
+  Pencil,
+  Archive,
+  Trash2,
+  Code2,
 } from "lucide-vue-next";
+import type { Project } from "@lilia/contracts";
+import { vContextMenu } from "../directives/contextMenu";
+import {
+  openContextMenuAt,
+  type ContextMenuItem,
+} from "../composables/useContextMenu";
 import { homeDir } from "@tauri-apps/api/path";
 import {
+  archiveProjectConversations,
   createProject,
   deriveProjectName,
   listProjects,
+  removeProject,
+  renameProject,
 } from "../services/projectsStore";
 import {
   createDraftOrphan,
@@ -36,8 +49,11 @@ import { searchSessions, type SearchResult } from "../services/sessionSearch";
 import {
   getProjectSettings,
   gitCloneRepo,
+  openInFileManager,
+  openInVSCode,
   pickFolder,
 } from "../services/projects";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -125,10 +141,6 @@ function newProjectChat(projectId: string) {
   if (!draft) return;
   expanded[projectId] = true;
   router.push(`/projects/${projectId}/tasks/${draft.id}`);
-}
-
-function noop() {
-  /* 占位：后续接 store / 命令 */
 }
 
 // ---------------- 内联搜索 ---------------- *
@@ -398,6 +410,175 @@ function confirmCategory() {
   expanded[project.id] = true;
   categoryOpen.value = false;
 }
+
+// ---------------- 项目行：更多按钮 / 右键菜单 ---------------- *
+// 同一组菜单服务两种入口：右键走 v-context-menu 指令；左键点 ⋯ 走 openContextMenuAt。
+// 菜单项里两条「文件管理器 / VSCode」对仅作分类用的项目（cwd === null）禁用。
+
+/** 行内重命名：editingId 指向当前正在改名的项目；同一时刻只允许一行处于编辑态。 */
+const editingId = ref<string | null>(null);
+const editingValue = ref("");
+const editingInput = ref<HTMLInputElement | null>(null);
+
+const archiveOpen = ref(false);
+const archiveTarget = ref<Project | null>(null);
+
+const removeOpen = ref(false);
+const removeTarget = ref<Project | null>(null);
+
+/** 操作错误用 banner 复用，已有 dismissError；这里集中收口。 */
+function reportError(msg: string) {
+  projectError.value = msg;
+}
+
+async function openInExplorer(p: Project) {
+  if (!p.cwd) return;
+  try {
+    await openInFileManager(p.cwd);
+  } catch (err) {
+    reportError(`在资源管理器中打开失败：${String(err)}`);
+  }
+}
+
+async function openWithVSCode(p: Project) {
+  if (!p.cwd) return;
+  try {
+    await openInVSCode(p.cwd);
+  } catch (err) {
+    reportError(`用 VSCode 打开失败：${String(err)}`);
+  }
+}
+
+async function startRename(p: Project) {
+  editingId.value = p.id;
+  editingValue.value = p.name;
+  await nextTick();
+  editingInput.value?.focus();
+  editingInput.value?.select();
+}
+
+function commitRename() {
+  const id = editingId.value;
+  if (!id) return;
+  const next = editingValue.value.trim();
+  if (next) renameProject(id, next);
+  editingId.value = null;
+  editingValue.value = "";
+}
+
+function cancelRename() {
+  editingId.value = null;
+  editingValue.value = "";
+}
+
+/** 编辑态键盘：Enter 提交、Esc 取消，其它键都 stop 一下避免冒泡触发行级 toggle。 */
+function onEditingKeydown(e: KeyboardEvent) {
+  e.stopPropagation();
+  if (e.key === "Enter") {
+    e.preventDefault();
+    commitRename();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    cancelRename();
+  }
+}
+
+/** 函数 ref：input 在 v-for 里，普通 ref 会被收集成数组；用函数 ref 直接绑到模块 ref 上。 */
+function bindEditingInput(el: unknown) {
+  editingInput.value = (el as HTMLInputElement | null) ?? null;
+}
+
+function openArchiveConfirm(p: Project) {
+  archiveTarget.value = p;
+  archiveOpen.value = true;
+}
+
+function confirmArchive() {
+  const target = archiveTarget.value;
+  if (!target) return;
+  archiveProjectConversations(target.id);
+  // 当前活动路由如果就在被归档的项目下，跳回主页（router.push("/")），免得停在不存在的 task。
+  if (
+    route.params.projectId &&
+    String(route.params.projectId) === target.id
+  ) {
+    router.push("/");
+  }
+  archiveOpen.value = false;
+  archiveTarget.value = null;
+}
+
+function openRemoveConfirm(p: Project) {
+  removeTarget.value = p;
+  removeOpen.value = true;
+}
+
+function confirmRemove() {
+  const target = removeTarget.value;
+  if (!target) return;
+  removeProject(target.id);
+  if (
+    route.params.projectId &&
+    String(route.params.projectId) === target.id
+  ) {
+    router.push("/");
+  }
+  // 顺手清掉 expanded 里的孤儿条目，免得日后同 id 复用拿到旧状态。
+  delete expanded[target.id];
+  removeOpen.value = false;
+  removeTarget.value = null;
+}
+
+function buildProjectMenu(p: Project): ContextMenuItem[] {
+  const hasCwd = !!p.cwd;
+  return [
+    {
+      id: "open-explorer",
+      label: "在资源管理器中打开",
+      icon: FolderOpen,
+      disabled: !hasCwd,
+      onSelect: () => openInExplorer(p),
+    },
+    {
+      id: "open-vscode",
+      label: "在 VSCode 中打开",
+      icon: Code2,
+      disabled: !hasCwd,
+      onSelect: () => openWithVSCode(p),
+    },
+    {
+      id: "rename",
+      label: "重命名项目",
+      icon: Pencil,
+      onSelect: () => startRename(p),
+    },
+    {
+      id: "archive",
+      label: "归档所有对话",
+      icon: Archive,
+      onSelect: () => openArchiveConfirm(p),
+    },
+    {
+      id: "remove",
+      label: "移除项目",
+      icon: Trash2,
+      danger: true,
+      onSelect: () => openRemoveConfirm(p),
+    },
+  ];
+}
+
+function onMoreClick(e: MouseEvent, p: Project) {
+  e.stopPropagation();
+  const btn = e.currentTarget as HTMLElement | null;
+  // 锚点取按钮右下角，鼠标点偏一两像素也保持菜单位置稳定；ContextMenuHost 会 clamp 视口。
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    openContextMenuAt(rect.right, rect.bottom + 2, buildProjectMenu(p));
+  } else {
+    openContextMenuAt(e.clientX, e.clientY, buildProjectMenu(p));
+  }
+}
 </script>
 
 <template>
@@ -477,13 +658,31 @@ function confirmCategory() {
 
       <div class="sb-tree">
         <div v-for="p in projects" :key="p.id" class="sb-tree__group">
-          <div class="sb-tree__row sb-tree__row--project" :class="{ 'is-open': expanded[p.id] }" role="button"
-            tabindex="0" :aria-expanded="expanded[p.id]" @click="toggle(p.id)" @keydown.enter.prevent="toggle(p.id)"
-            @keydown.space.prevent="toggle(p.id)">
+          <div class="sb-tree__row sb-tree__row--project"
+            :class="{ 'is-open': expanded[p.id], 'is-editing': editingId === p.id }"
+            :role="editingId === p.id ? undefined : 'button'"
+            :tabindex="editingId === p.id ? -1 : 0"
+            :aria-expanded="expanded[p.id]"
+            v-context-menu="() => buildProjectMenu(p)"
+            @click="editingId === p.id ? null : toggle(p.id)"
+            @keydown.enter.prevent="editingId === p.id ? null : toggle(p.id)"
+            @keydown.space.prevent="editingId === p.id ? null : toggle(p.id)">
             <Folder :size="14" aria-hidden="true" />
-            <span class="sb-tree__name">{{ p.name }}</span>
-            <div class="sb-tree__hover-tools" @click.stop>
-              <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="noop">
+            <input
+              v-if="editingId === p.id"
+              :ref="bindEditingInput"
+              v-model="editingValue"
+              type="text"
+              class="sb-tree__rename-input"
+              spellcheck="false"
+              @click.stop
+              @pointerdown.stop
+              @keydown="onEditingKeydown"
+              @blur="commitRename"
+            />
+            <span v-else class="sb-tree__name">{{ p.name }}</span>
+            <div v-if="editingId !== p.id" class="sb-tree__hover-tools" @click.stop>
+              <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="onMoreClick($event, p)">
                 <MoreHorizontal :size="13" aria-hidden="true" />
               </button>
               <button type="button" class="sb-icon-btn" title="新对话" aria-label="新对话" @click="newProjectChat(p.id)">
@@ -661,5 +860,26 @@ function confirmCategory() {
         </div>
       </Transition>
     </Teleport>
+
+    <!-- ===== 归档对话确认 ===== -->
+    <ConfirmDialog
+      :open="archiveOpen"
+      title="归档所有对话"
+      :message="`将清空「${archiveTarget?.name ?? ''}」下的所有对话与草稿（不会删除磁盘上的项目目录）。继续吗？`"
+      confirm-text="归档"
+      @cancel="archiveOpen = false"
+      @confirm="confirmArchive"
+    />
+
+    <!-- ===== 移除项目确认 ===== -->
+    <ConfirmDialog
+      :open="removeOpen"
+      title="移除项目"
+      :message="`将从侧栏移除「${removeTarget?.name ?? ''}」及其全部对话记录（不会删除磁盘上的项目目录）。继续吗？`"
+      confirm-text="移除"
+      danger
+      @cancel="removeOpen = false"
+      @confirm="confirmRemove"
+    />
   </aside>
 </template>

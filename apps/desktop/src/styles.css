@@ -680,6 +680,32 @@ pre code {
   white-space: nowrap;
 }
 
+/* 行内重命名输入框：占位、字号、颜色都贴齐 .sb-tree__name，
+ * 让用户感受像是把名字直接变成可编辑状态而不是「弹出输入框」。 */
+.sb-tree__rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  margin: 0 -6px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  outline: none;
+}
+
+.sb-tree__rename-input:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.sb-tree__row--project.is-editing {
+  background: var(--bg-hover);
+  cursor: text;
+}
+
 /* 项目行右侧 hover 才显示的「+ / …」工具 */
 .sb-tree__hover-tools {
   display: inline-flex;

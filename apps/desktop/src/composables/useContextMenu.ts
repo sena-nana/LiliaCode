@@ -47,6 +47,20 @@ function openMenu(x: number, y: number, items: ContextMenuItem[]) {
   state.open = true;
 }
 
+/**
+ * 不走 right-click 的程序化入口：用在「更多」按钮 / kebab 图标这类
+ * 用左键点开同一份菜单的场景。锚点 (x,y) 一般取按钮的 bottom-left
+ * 或鼠标点击的 clientX/clientY，ContextMenuHost 会自己 clamp 视口。
+ */
+export function openContextMenuAt(
+  x: number,
+  y: number,
+  items: ContextMenuItem[],
+) {
+  if (!items.length) return;
+  openMenu(x, y, items);
+}
+
 export function closeContextMenu() {
   if (!state.open) return;
   state.open = false;

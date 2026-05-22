@@ -9,5 +9,8 @@ export {
   listProjects,
   getProject,
   createProject,
+  renameProject,
+  archiveProjectConversations,
+  removeProject,
   deriveProjectName,
 } from "../data/projectsStub";
