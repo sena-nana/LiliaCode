@@ -88,7 +88,7 @@ async function confirmClone() {
   cloneBusy.value = true;
   try {
     const cloned = await gitCloneRepo(url, parent);
-    const project = createProject({
+    const project = await createProject({
       name: deriveProjectName(cloned) || "新项目",
       cwd: cloned,
     });

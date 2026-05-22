@@ -122,6 +122,10 @@ fn run_migrations(conn: &mut Connection) -> Result<(), String> {
     let migrations: &[Mig] = &[
         // v1: TaskTodo 主表
         migration_v1_task_todos,
+        // v2: projects + tasks + task_dependencies
+        migration_v2_projects_tasks,
+        // v3: sort_order 列（支持拖拽排序）
+        migration_v3_sort_order,
     ];
 
     let current: i64 = conn
@@ -159,4 +163,68 @@ fn migration_v1_task_todos(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store v1: 建 task_todos 失败：{e}"))
+}
+
+fn migration_v2_projects_tasks(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS projects (
+          id         TEXT PRIMARY KEY,
+          name       TEXT NOT NULL,
+          cwd        TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+          id          TEXT PRIMARY KEY,
+          project_id  TEXT,
+          session_id  TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'waiting'
+                        CHECK (status IN
+                          ('draft','waiting','running','blocked','done','cancelled')),
+          created_at  INTEGER NOT NULL,
+          parent_id   TEXT,
+          archived    INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_project_id
+          ON tasks(project_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_archived
+          ON tasks(archived);
+
+        CREATE TABLE IF NOT EXISTS task_dependencies (
+          task_id       TEXT NOT NULL,
+          depends_on_id TEXT NOT NULL,
+          PRIMARY KEY (task_id, depends_on_id),
+          FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        "#,
+    )
+    .map_err(|e| format!("lilia-store v2: 建 projects/tasks 失败：{e}"))
+}
+
+fn migration_v3_sort_order(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+        -- 已有数据按 created_at 初始化排序（ASC：越旧 sort_order 越小，越新越大）
+        UPDATE projects SET sort_order = (
+          SELECT COUNT(*) FROM projects p2 WHERE p2.created_at <= projects.created_at
+        ) - 1;
+
+        -- tasks 按 project_id 分组初始化，orphan (NULL) 单独排
+        UPDATE tasks SET sort_order = (
+          SELECT COUNT(*) FROM tasks t2
+          WHERE t2.archived = 0
+            AND (t2.project_id = tasks.project_id OR (t2.project_id IS NULL AND tasks.project_id IS NULL))
+            AND t2.created_at >= tasks.created_at
+        ) - 1;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store v3: 加 sort_order 列失败：{e}"))
 }

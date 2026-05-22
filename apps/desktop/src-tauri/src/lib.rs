@@ -16,6 +16,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
 mod plugins;
+mod projects_tasks;
 mod store;
 mod todos;
 mod util;
@@ -1400,6 +1401,21 @@ pub fn run() {
             todos::todo_update,
             todos::todo_delete,
             todos::todo_apply_agent_event,
+            projects_tasks::project_list,
+            projects_tasks::project_get,
+            projects_tasks::project_create,
+            projects_tasks::project_rename,
+            projects_tasks::project_remove,
+            projects_tasks::task_list,
+            projects_tasks::task_get,
+            projects_tasks::task_create,
+            projects_tasks::task_update,
+            projects_tasks::task_delete,
+            projects_tasks::task_promote,
+            projects_tasks::task_archive_project,
+            projects_tasks::project_reorder,
+            projects_tasks::task_reorder,
+            projects_tasks::task_reparent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
