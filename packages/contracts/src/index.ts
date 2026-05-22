@@ -214,6 +214,34 @@ export interface CCSwitchConfig {
   baseUrl: string | null;
 }
 
+/**
+ * 辅助模型（Assistant AI）配置。
+ *
+ * 独立于 ProviderConfig 的 OpenAI 兼容配置，**不参与 Agent 主循环**，
+ * 仅供周边系统消费——例如 Memory 模块的外置观察模型
+ * （见 docs/design/memory.md §3.1）、Tool Call 后处理、对话摘要等。
+ * 目的：把高频低复杂度的辅助请求迁到便宜模型，降低 Agent 提供商成本。
+ *
+ * v1 仅全局一份。三件套（baseUrl / apiKey / model）齐全才算启用，
+ * 任一缺失消费方应 short-circuit 跳过。
+ */
+export interface AssistantAIConfig {
+  baseUrl: string | null;
+  apiKey: string | null;
+  model: string | null;
+}
+
+/** 连通性测试结果。models 在端点不支持 /models 时为 null，UI 据此降级提示。 */
+export interface AssistantAITestResult {
+  ok: boolean;
+  /** 失败原因；ok=true 时为 null。 */
+  error: string | null;
+  /** 服务端 /models 返回的 id 列表；端点不支持时为 null。 */
+  models: string[] | null;
+  /** 配置里的 model 是否出现在 models 列表里。models=null 时为 null。 */
+  modelMatched: boolean | null;
+}
+
 export type ConnectionMode = "cc-switch" | "custom" | "direct" | "unconfigured";
 
 export interface BackendEnvStatus {

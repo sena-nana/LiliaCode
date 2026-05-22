@@ -43,6 +43,7 @@ const PROVIDER_KEY_CODEX: &str = "provider.codex";
 const CC_SWITCH_KEY: &str = "cc-switch.config";
 const ROUTER_KEY_CLAUDE: &str = "router.claude";
 const ROUTER_KEY_CODEX: &str = "router.codex";
+const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
 /// 「添加项目 → 从 GitHub clone」时默认 clone 到的父目录。
 const PROJECT_CLONE_PARENT_KEY: &str = "project.cloneParentDir";
 
@@ -119,6 +120,28 @@ impl Default for CCSwitchConfig {
             base_url: Some(CC_SWITCH_DEFAULT_URL.to_string()),
         }
     }
+}
+
+/// 辅助模型（Assistant AI）配置。独立于 ProviderConfig，**不参与 Agent 主循环**，
+/// 仅供周边系统（Memory 助手、Tool Call 后处理、摘要等）消费。
+/// 三件套齐全才算启用；任一缺失消费方应 short-circuit 跳过。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AssistantAIConfig {
+    base_url: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssistantAITestResult {
+    ok: bool,
+    error: Option<String>,
+    /// 端点不支持 /models 时为 None，UI 据此降级提示。
+    models: Option<Vec<String>>,
+    /// 配置里的 model 是否出现在 models 列表里。models 为 None 时也为 None。
+    model_matched: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -301,6 +324,16 @@ fn load_cc_switch_config(app: &AppHandle) -> CCSwitchConfig {
         let store = app.store(PROVIDER_STORE_FILE).ok()?;
         let value = store.get(CC_SWITCH_KEY)?;
         serde_json::from_value::<CCSwitchConfig>(value).ok()
+    };
+    read().unwrap_or_default()
+}
+
+/// 读辅助模型配置；读不到回 Default（三件套全 None）。
+fn load_assistant_ai_config(app: &AppHandle) -> AssistantAIConfig {
+    let read = || -> Option<AssistantAIConfig> {
+        let store = app.store(PROVIDER_STORE_FILE).ok()?;
+        let value = store.get(ASSISTANT_AI_KEY)?;
+        serde_json::from_value::<AssistantAIConfig>(value).ok()
     };
     read().unwrap_or_default()
 }
@@ -959,6 +992,94 @@ fn cc_switch_set_config(app: AppHandle, config: CCSwitchConfig) -> Result<(), St
 }
 
 #[tauri::command]
+fn assistant_ai_get_config(app: AppHandle) -> AssistantAIConfig {
+    load_assistant_ai_config(&app)
+}
+
+#[tauri::command]
+fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Result<(), String> {
+    let store = app
+        .store(PROVIDER_STORE_FILE)
+        .map_err(|e| format!("打开配置存储失败：{e}"))?;
+    let value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
+    store.set(ASSISTANT_AI_KEY, value);
+    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
+    Ok(())
+}
+
+/// 连通性 ping：GET {baseUrl}/models，3 秒超时。
+/// 不消耗 token，能同时验证 baseUrl 可达、apiKey 被接受、配置的 model 是否在列表里。
+#[tauri::command]
+fn assistant_ai_test_connection(config: AssistantAIConfig) -> AssistantAITestResult {
+    let base = config
+        .base_url
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/');
+    let key = config.api_key.as_deref().unwrap_or("").trim();
+    let model = config.model.as_deref().unwrap_or("").trim();
+    if base.is_empty() || key.is_empty() || model.is_empty() {
+        return AssistantAITestResult {
+            ok: false,
+            error: Some("baseUrl / apiKey / model 必须全部填写".into()),
+            models: None,
+            model_matched: None,
+        };
+    }
+    let url = format!("{base}/models");
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return AssistantAITestResult {
+                ok: false,
+                error: Some(format!("HTTP 客户端构造失败：{e}")),
+                models: None,
+                model_matched: None,
+            }
+        }
+    };
+    match client.get(&url).bearer_auth(key).send() {
+        Ok(resp) if resp.status().is_success() => {
+            let parsed: Option<Vec<String>> = resp
+                .json::<JsonValue>()
+                .ok()
+                .and_then(|v| v.get("data").cloned())
+                .and_then(|d| d.as_array().cloned())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+                        .collect()
+                });
+            let matched = parsed
+                .as_ref()
+                .map(|list| list.iter().any(|m| m == model));
+            AssistantAITestResult {
+                ok: true,
+                error: None,
+                models: parsed,
+                model_matched: matched,
+            }
+        }
+        Ok(resp) => AssistantAITestResult {
+            ok: false,
+            error: Some(format!("HTTP {} from {url}", resp.status())),
+            models: None,
+            model_matched: None,
+        },
+        Err(e) => AssistantAITestResult {
+            ok: false,
+            error: Some(format!("请求失败：{e}")),
+            models: None,
+            model_matched: None,
+        },
+    }
+}
+
+#[tauri::command]
 fn router_get_mode(app: AppHandle, backend: String) -> String {
     load_router_mode(&app, &backend)
 }
@@ -1203,6 +1324,9 @@ pub fn run() {
             provider_set_config,
             cc_switch_get_config,
             cc_switch_set_config,
+            assistant_ai_get_config,
+            assistant_ai_set_config,
+            assistant_ai_test_connection,
             router_get_mode,
             router_set_mode,
             project_get_settings,

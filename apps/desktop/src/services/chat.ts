@@ -7,6 +7,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AssistantAIConfig,
+  AssistantAITestResult,
   BackendEnvStatus,
   CCSwitchConfig,
   CCSwitchStatus,
@@ -22,6 +24,8 @@ import type {
 } from "@lilia/contracts";
 
 export type {
+  AssistantAIConfig,
+  AssistantAITestResult,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -112,6 +116,23 @@ export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {
 
 export function setRouterMode(backend: ChatBackendKind, mode: RouterMode): Promise<void> {
   return invoke<void>("router_set_mode", { backend, mode });
+}
+
+// ---- 辅助模型（Assistant AI） ----
+// 与 Provider 平级、独立配置，不参与 Agent 主循环；供 Memory 助手等周边模块消费。
+
+export function getAssistantAIConfig(): Promise<AssistantAIConfig> {
+  return invoke<AssistantAIConfig>("assistant_ai_get_config");
+}
+
+export function setAssistantAIConfig(config: AssistantAIConfig): Promise<void> {
+  return invoke<void>("assistant_ai_set_config", { config });
+}
+
+export function testAssistantAIConnection(
+  config: AssistantAIConfig,
+): Promise<AssistantAITestResult> {
+  return invoke<AssistantAITestResult>("assistant_ai_test_connection", { config });
 }
 
 // ---- 事件订阅 ----
