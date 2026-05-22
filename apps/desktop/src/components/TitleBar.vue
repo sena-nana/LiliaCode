@@ -117,22 +117,27 @@ async function onClose() {
 
     <div class="titlebar__crumbs" data-tauri-drag-region>
       <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。 -->
+      <!-- 每个子节点都标 data-tauri-drag-region：Tauri v2 只看 event.target 自身，
+           不上溯祖先，否则 span/SVG 会拦截 mousedown 让面包屑拖不动。 -->
       <Transition name="tb-crumbs" mode="out-in">
         <span
           v-if="nonLeafCrumbs.length > 0"
           :key="prefixKey"
           class="titlebar__crumbs-prefix"
+          data-tauri-drag-region
         >
           <template v-for="(c, i) in nonLeafCrumbs" :key="i">
             <span
               class="titlebar__crumb"
               :class="{ 'titlebar__crumb--muted': c.muted }"
               :title="c.text"
+              data-tauri-drag-region
             >{{ c.text }}</span>
             <ChevronRight
               class="titlebar__crumb-sep"
               :size="12"
               aria-hidden="true"
+              data-tauri-drag-region
             />
           </template>
         </span>
@@ -149,6 +154,7 @@ async function onClose() {
             'titlebar__crumb--leaf': !leafCrumb.muted,
           }"
           :title="leafCrumb.text"
+          data-tauri-drag-region
         >{{ leafCrumb.text }}</span>
       </Transition>
     </div>
