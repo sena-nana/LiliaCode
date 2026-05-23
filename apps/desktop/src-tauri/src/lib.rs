@@ -74,6 +74,7 @@ struct PendingChatTurn {
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    message: ChatMessage,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,22 +194,6 @@ struct EnvStatusReport {
     backends: HashMap<String, BackendEnvStatus>,
 }
 
-// 推给前端的流事件 payload。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ChunkEvent {
-    task_id: String,
-    text: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToolEvent {
-    task_id: String,
-    name: String,
-    input: JsonValue,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TurnStartedEvent {
@@ -222,13 +207,6 @@ struct DoneEvent {
     task_id: String,
     session_id: Option<String>,
     subtype: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ErrorEvent {
-    task_id: String,
-    message: String,
 }
 
 fn persist_and_emit_timeline_event(
@@ -295,11 +273,86 @@ fn persist_and_emit_timeline_event(
     }
 }
 
+fn persist_and_emit_message_timeline_event(
+    app_handle: &AppHandle,
+    message: &ChatMessage,
+    backend: &str,
+    queued: bool,
+) {
+    let input = AgentTimelineEventInput {
+        id: Some(message.id.clone()),
+        task_id: message.task_id.clone(),
+        turn_id: None,
+        backend: backend.to_string(),
+        kind: "message".to_string(),
+        status: if queued { "pending" } else { "success" }.to_string(),
+        title: "用户输入".to_string(),
+        summary: Some(message.content.clone()),
+        payload: serde_json::json!({
+            "role": message.role,
+            "content": message.content,
+            "queued": queued,
+        }),
+        created_at: Some(message.created_at as i64),
+        updated_at: Some(now_millis() as i64),
+        order: Some(0),
+    };
+
+    let store = app_handle.state::<LiliaStore>();
+    match store
+        .conn()
+        .and_then(|conn| agent_timeline::insert(&conn, input))
+    {
+        Ok(saved) => {
+            let _ = app_handle.emit("agent:timeline", saved);
+        }
+        Err(err) => {
+            eprintln!("[agent-timeline] persist message failed: {err}");
+        }
+    }
+}
+
+fn persist_and_emit_error_timeline_event(
+    app_handle: &AppHandle,
+    task_id: &str,
+    backend: &str,
+    turn_id: Option<&str>,
+    message: String,
+) {
+    let now = now_millis();
+    let input = AgentTimelineEventInput {
+        id: None,
+        task_id: task_id.to_string(),
+        turn_id: turn_id.map(|id| id.to_string()),
+        backend: backend.to_string(),
+        kind: "error".to_string(),
+        status: "error".to_string(),
+        title: "错误".to_string(),
+        summary: Some(message.clone()),
+        payload: serde_json::json!({ "message": message }),
+        created_at: Some(now as i64),
+        updated_at: Some(now as i64),
+        order: None,
+    };
+
+    let store = app_handle.state::<LiliaStore>();
+    match store
+        .conn()
+        .and_then(|conn| agent_timeline::insert(&conn, input))
+    {
+        Ok(saved) => {
+            let _ = app_handle.emit("agent:timeline", saved);
+        }
+        Err(err) => {
+            eprintln!("[agent-timeline] persist error failed: {err}");
+        }
+    }
+}
+
 // ---------- 进程内状态 ----------
 
 #[derive(Default)]
 struct ChatStore {
-    messages: Mutex<HashMap<String, Vec<ChatMessage>>>,
     composers: Mutex<HashMap<String, ChatComposerState>>,
     /// SDK session id：key = "{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
     sdk_sessions: Mutex<HashMap<String, String>>,
@@ -342,6 +395,7 @@ fn queue_pending_turn(
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    message: ChatMessage,
 ) -> usize {
     let mut pending = store.pending_turns.lock().unwrap();
     let queue = pending.entry(task_id.to_string()).or_default();
@@ -349,6 +403,7 @@ fn queue_pending_turn(
         content,
         composer,
         project_cwd,
+        message,
     });
     queue.len()
 }
@@ -642,12 +697,12 @@ fn spawn_agent_turn(
                 let msg = format!(
                     "无法启动 node 子进程（请确保已安装 Node 18+ 并在 PATH 中）：{err}"
                 );
-                let _ = app_handle.emit(
-                    "chat:error",
-                    ErrorEvent {
-                        task_id: task_id_for_thread.clone(),
-                        message: msg,
-                    },
+                persist_and_emit_error_timeline_event(
+                    &app_handle,
+                    &task_id_for_thread,
+                    &backend_for_thread,
+                    Some(&turn_id_for_thread),
+                    msg,
                 );
                 finish_agent_turn(
                     app_handle,
@@ -686,13 +741,6 @@ fn spawn_agent_turn(
                     "chunk" => {
                         if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
                             assistant_buf.push_str(text);
-                            let _ = app_handle.emit(
-                                "chat:chunk",
-                                ChunkEvent {
-                                    task_id: task_id_for_thread.clone(),
-                                    text: text.to_string(),
-                                },
-                            );
                         }
                     }
                     "tool_use" => {
@@ -737,15 +785,6 @@ fn spawn_agent_turn(
                                 }
                             }
                         }
-
-                        let _ = app_handle.emit(
-                            "chat:tool",
-                            ToolEvent {
-                                task_id: task_id_for_thread.clone(),
-                                name,
-                                input,
-                            },
-                        );
                     }
                     "timeline" => {
                         if let Some(event) = value.get("event").cloned() {
@@ -763,13 +802,6 @@ fn spawn_agent_turn(
                         if assistant_buf.is_empty() {
                             if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
                                 assistant_buf.push_str(text);
-                                let _ = app_handle.emit(
-                                    "chat:chunk",
-                                    ChunkEvent {
-                                        task_id: task_id_for_thread.clone(),
-                                        text: text.to_string(),
-                                    },
-                                );
                             }
                         }
                         if let Some(sid) = value.get("sessionId").and_then(|v| v.as_str()) {
@@ -787,12 +819,12 @@ fn spawn_agent_turn(
                             .and_then(|v| v.as_str())
                             .unwrap_or("未知错误")
                             .to_string();
-                        let _ = app_handle.emit(
-                            "chat:error",
-                            ErrorEvent {
-                                task_id: task_id_for_thread.clone(),
-                                message: msg,
-                            },
+                        persist_and_emit_error_timeline_event(
+                            &app_handle,
+                            &task_id_for_thread,
+                            &backend_for_thread,
+                            Some(&turn_id_for_thread),
+                            msg,
                         );
                     }
                     _ => {}
@@ -814,12 +846,12 @@ fn spawn_agent_turn(
 
         let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
         if nonzero && !stderr_text.trim().is_empty() {
-            let _ = app_handle.emit(
-                "chat:error",
-                ErrorEvent {
-                    task_id: task_id_for_thread.clone(),
-                    message: format!("agent 进程异常退出：{}", stderr_text.trim()),
-                },
+            persist_and_emit_error_timeline_event(
+                &app_handle,
+                &task_id_for_thread,
+                &backend_for_thread,
+                Some(&turn_id_for_thread),
+                format!("agent 进程异常退出：{}", stderr_text.trim()),
             );
         }
 
@@ -884,6 +916,12 @@ fn finish_agent_turn(
         next
     };
     if let Some(turn) = next {
+        persist_and_emit_message_timeline_event(
+            &app_handle,
+            &turn.message,
+            &turn.composer.backend,
+            false,
+        );
         spawn_agent_turn(
             app_handle,
             task_id,
@@ -899,17 +937,6 @@ fn finish_agent_turn(
 #[tauri::command]
 fn ping() -> &'static str {
     "pong"
-}
-
-#[tauri::command]
-fn chat_list_messages(task_id: String, store: State<'_, ChatStore>) -> Vec<ChatMessage> {
-    store
-        .messages
-        .lock()
-        .unwrap()
-        .get(&task_id)
-        .cloned()
-        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -929,12 +956,6 @@ fn chat_send_message(
         content: content.clone(),
         created_at: now_millis(),
     };
-    {
-        let mut all = store.messages.lock().unwrap();
-        all.entry(task_id.clone())
-            .or_default()
-            .push(user_msg.clone());
-    }
     // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
     store
         .composers
@@ -950,8 +971,15 @@ fn chat_send_message(
                 &store,
                 &task_id,
                 content,
-                composer,
+                composer.clone(),
                 project_cwd,
+                user_msg.clone(),
+            );
+            persist_and_emit_message_timeline_event(
+                &app,
+                &user_msg,
+                &composer.backend,
+                true,
             );
             return Ok(ChatSendResult {
                 message: user_msg,
@@ -961,6 +989,8 @@ fn chat_send_message(
         }
         running.insert(task_id.clone(), true);
     }
+
+    persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, false);
 
     spawn_agent_turn(
         app,
@@ -1065,7 +1095,6 @@ fn chat_reset_session(
     sessions.remove(&session_key(BACKEND_CLAUDE, &task_id));
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
     drop(sessions);
-    chat_store.messages.lock().unwrap().remove(&task_id);
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
     chat_store.pending_turns.lock().unwrap().remove(&task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
@@ -1615,7 +1644,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
-            chat_list_messages,
             chat_send_message,
             chat_list_models,
             chat_list_branches,

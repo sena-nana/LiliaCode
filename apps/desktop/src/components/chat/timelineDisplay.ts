@@ -194,6 +194,8 @@ export function timelineInlinePreview(
       }
       case "todo_list":
         return summary || timelineTodoInlinePreview(payload);
+      case "message":
+        return "";
       case "plan":
       case "reasoning":
       case "turn":
@@ -365,6 +367,7 @@ export function timelineFileChanges(
 
 export function timelineKindLabel(kind: AgentTimelineEventKind): string {
   const labels: Record<AgentTimelineEventKind, string> = {
+    message: "消息",
     reasoning: "思考",
     plan: "计划",
     todo_list: "Todo",

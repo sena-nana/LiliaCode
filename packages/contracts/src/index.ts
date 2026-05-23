@@ -142,7 +142,8 @@ export interface TaskMilestoneLink {
 }
 
 /**
- * 聊天面板契约。ChatMessage 只覆盖纯文本，引入 tool_use / 图像时改成 discriminated union。
+ * 聊天命令契约。ChatMessage 只作为发送确认和历史兼容结构；
+ * 可见对话流以 AgentTimelineEvent 为唯一来源。
  * ChatComposerState 按 taskId 持久化，切换会话不会污染彼此的偏好。
  */
 
@@ -178,11 +179,11 @@ export type PermissionMode = "full" | "ask" | "readonly";
 export type ChatBackendKind = "claude" | "codex";
 
 /**
- * Agent 工作过程时间线。ChatMessage 只承载对话文本，工具调用、计划推进、
- * 状态变化等过程信息走独立 timeline；runner NDJSON 到这些事件的映射由
- * 后续接线层负责。
+ * 对话时间线。用户输入、工具调用、计划推进、模型最终回复和错误都进入
+ * 同一套 timeline；不同 kind 只决定各自的渲染方式。
  */
 export type AgentTimelineEventKind =
+  | "message"
   | "reasoning"
   | "plan"
   | "todo_list"

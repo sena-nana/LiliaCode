@@ -5,13 +5,10 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import type { AgentTimelineEvent, ChatMessage } from "@lilia/contracts";
+import type { AgentTimelineEvent } from "@lilia/contracts";
 import AgentTimeline from "./AgentTimeline.vue";
 
-type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
-
 const props = defineProps<{
-  messages: StreamableMessage[];
   timelineEvents: AgentTimelineEvent[];
   /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」决定文案。 */
   emptyHeadline: string;
@@ -19,10 +16,6 @@ const props = defineProps<{
 
 const scroller = ref<HTMLElement | null>(null);
 const isPinnedToBottom = ref(true);
-
-const visibleMessages = computed(() =>
-  props.messages.filter((message) => message.role !== "assistant"),
-);
 
 function checkPinned() {
   const el = scroller.value;
@@ -39,14 +32,14 @@ async function scrollToBottom() {
 }
 
 watch(
-  () => [props.messages.length, props.timelineEvents.length] as const,
+  () => props.timelineEvents.length,
   async () => {
     if (isPinnedToBottom.value) await scrollToBottom();
   },
 );
 
 const isEmpty = computed(() =>
-  visibleMessages.value.length === 0 && props.timelineEvents.length === 0
+  props.timelineEvents.length === 0
 );
 </script>
 
@@ -61,7 +54,7 @@ const isEmpty = computed(() =>
       {{ emptyHeadline }}
     </div>
     <template v-else>
-      <AgentTimeline :events="timelineEvents" :messages="visibleMessages" />
+      <AgentTimeline :events="timelineEvents" />
     </template>
   </div>
 </template>

@@ -8,6 +8,7 @@ import { allTasksReady } from "../src/data/tasks";
 import {
   completeMockAgentTurn,
   emitMockTimelineEvent,
+  emitTauriEvent,
   mockInvoke,
   seedMockChatMessages,
 } from "./tauriMock";
@@ -485,6 +486,36 @@ describe("chat scheduler", () => {
       .toBeLessThan(timelineText.indexOf("插在过程中的用户消息"));
     expect(timelineText.indexOf("插在过程中的用户消息"))
       .toBeLessThan(timelineText.indexOf("用户消息之后的最终回复"));
+  });
+
+  it("agent 错误走 timeline 错误事件，不再创建 system 普通气泡", async () => {
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-agent-error",
+      kind: "error",
+      status: "error",
+      title: "错误",
+      summary: "agent 报错：连接失败",
+      payload: {
+        message: "agent 报错：连接失败",
+      },
+      order: 1,
+    });
+    emitTauriEvent("chat:error", {
+      taskId: "t-002",
+      message: "旧错误通道不应生成气泡",
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("agent 报错：连接失败")).toBeInTheDocument();
+    });
+    expect(view.getByText("agent 报错：连接失败").closest(".chat-bubble")).toBeNull();
+    expect(view.queryByText("旧错误通道不应生成气泡")).toBeNull();
   });
 
   it("历史 assistant 消息不会作为普通气泡显示", async () => {
