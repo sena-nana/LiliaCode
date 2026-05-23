@@ -35,6 +35,7 @@ import TimelineToolEvent from "./TimelineToolEvent.vue";
 import {
   isTimelineExpanded,
   isTimelineFinalReply,
+  timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
   timelineKindLabel,
@@ -95,6 +96,14 @@ const orderedEntries = computed<TimelineEntry[]>(() =>
   ),
 );
 
+const eventPreviewCache = computed(() => {
+  const cache = new Map<string, string>();
+  for (const event of props.events) {
+    cache.set(event.id, timelineInlinePreview(event));
+  }
+  return cache;
+});
+
 watch(
   () => props.events.map((event) => event.id).join("|"),
   () => {
@@ -102,8 +111,15 @@ watch(
   },
 );
 
+watch(
+  finalReplySeen,
+  (seen) => {
+    if (!seen) return;
+    toggledIds.value = new Set();
+  },
+);
+
 function expanded(event: AgentTimelineEvent): boolean {
-  if (event.kind === "error") return true;
   if (finalReplySeen.value && !isTimelineFinalReply(event)) {
     return toggledIds.value.has(event.id);
   }
@@ -111,14 +127,11 @@ function expanded(event: AgentTimelineEvent): boolean {
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
-  return finalReplySeen.value &&
-    !isTimelineFinalReply(event) &&
-    event.kind !== "error" &&
-    !expanded(event);
+  return !isTimelineFinalReply(event) && !expanded(event);
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return event.kind !== "error";
+  return !isTimelineFinalReply(event);
 }
 
 function toggleEvent(event: AgentTimelineEvent) {
@@ -168,6 +181,10 @@ function kindIcon(kind: AgentTimelineEventKind): LucideIcon {
   };
   return icons[kind] ?? CircleDot;
 }
+
+function previewText(event: AgentTimelineEvent): string {
+  return eventPreviewCache.value.get(event.id) ?? "";
+}
 </script>
 
 <template>
@@ -215,32 +232,46 @@ function kindIcon(kind: AgentTimelineEventKind): LucideIcon {
             :aria-labelledby="`agent-timeline-title-${entry.event.id}`"
           >
             <header class="agent-timeline__head">
-              <button
-                type="button"
-                class="agent-timeline__title"
-                :aria-expanded="expanded(entry.event)"
-                :aria-controls="`agent-timeline-details-${entry.event.id}`"
-                :disabled="!canToggle(entry.event)"
-                @click="toggleEvent(entry.event)"
+              <div
+                class="agent-timeline__title-row"
+                :class="{ 'has-preview': previewText(entry.event) }"
               >
-                <component
-                  :is="expanded(entry.event) ? ChevronDown : ChevronRight"
-                  class="agent-timeline__chevron"
-                  :size="14"
-                  aria-hidden="true"
-                />
-                <span :id="`agent-timeline-title-${entry.event.id}`">
-                  {{ timelineEventLabel(entry.event) }}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  class="agent-timeline__title"
+                  :aria-expanded="expanded(entry.event)"
+                  :aria-controls="`agent-timeline-details-${entry.event.id}`"
+                  :disabled="!canToggle(entry.event)"
+                  @click="toggleEvent(entry.event)"
+                >
+                  <component
+                    :is="expanded(entry.event) ? ChevronDown : ChevronRight"
+                    class="agent-timeline__chevron"
+                    :size="14"
+                    aria-hidden="true"
+                  />
+                  <span :id="`agent-timeline-title-${entry.event.id}`">
+                    {{ timelineEventLabel(entry.event) }}
+                  </span>
+                </button>
 
-              <div class="agent-timeline__meta" aria-label="事件分类和状态">
+                <p v-if="previewText(entry.event)" class="agent-timeline__preview">
+                  {{ previewText(entry.event) }}
+                </p>
+              </div>
+
+              <div
+                v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
+                class="agent-timeline__meta"
+                aria-label="事件分类和状态"
+              >
                 <span class="agent-timeline__badge">{{ timelineKindLabel(entry.event.kind) }}</span>
                 <span class="agent-timeline__badge">{{ timelineStatusLabel(entry.event.status) }}</span>
               </div>
             </header>
 
             <div
+              v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
               :id="`agent-timeline-details-${entry.event.id}`"
               class="agent-timeline__content"
             >

@@ -98,14 +98,18 @@ function formatExtraPayload(payload: TimelinePayloadRecord): string {
     :class="{ 'timeline-card--compact': props.compact }"
     role="alert"
   >
-    <p class="timeline-card__error-title">
-      {{ props.event.title.trim() || "错误事件" }}
-    </p>
-    <MarkdownBlock :content="message" class="timeline-card__error-message" />
-    <p
-      v-if="metaLine"
-      class="timeline-muted-line timeline-muted-line--single"
-    >
+    <div class="timeline-muted-line timeline-muted-line--single timeline-card__error-line">
+      <span class="timeline-card__error-title">
+        {{ props.event.title.trim() || "错误事件" }}
+      </span>
+      <MarkdownBlock
+        :content="message"
+        :single-line="true"
+        tone="muted"
+        class="timeline-card__error-message"
+      />
+    </div>
+    <p v-if="metaLine" class="timeline-muted-line timeline-muted-line--single">
       {{ metaLine }}
     </p>
 

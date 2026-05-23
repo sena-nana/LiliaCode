@@ -1787,7 +1787,7 @@ button.ghost:hover {
 .agent-timeline__item {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 10px;
   min-width: 0;
   overflow: hidden;
@@ -1822,10 +1822,15 @@ button.ghost:hover {
 }
 
 .agent-timeline__item.is-compact .agent-timeline__event {
-  padding: 6px 0;
+  padding: 5px 0;
   border-color: transparent;
   border-left-color: transparent;
   background: transparent;
+}
+
+.agent-timeline__item.is-expanded,
+.agent-timeline__item.is-final-reply {
+  align-items: start;
 }
 
 .agent-timeline__item.is-final-reply .agent-timeline__event {
@@ -1838,14 +1843,22 @@ button.ghost:hover {
 .agent-timeline__head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-timeline__title-row {
+  display: flex;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
 .agent-timeline__title {
   min-width: 0;
-  width: 100%;
+  max-width: 100%;
+  width: auto;
   height: auto;
   padding: 0;
   border: 0;
@@ -1862,6 +1875,25 @@ button.ghost:hover {
   align-items: center;
   gap: 5px;
   filter: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-timeline__title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-timeline__title-row.has-preview .agent-timeline__title {
+  max-width: 45%;
+}
+
+.agent-timeline__item.is-expanded .agent-timeline__title,
+.agent-timeline__item.is-final-reply .agent-timeline__title {
+  max-width: 100%;
 }
 
 .agent-timeline__title:disabled {
@@ -1878,6 +1910,17 @@ button.ghost:hover {
 .agent-timeline__chevron {
   flex: 0 0 auto;
   color: var(--text-faint);
+}
+
+.agent-timeline__preview {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-timeline__meta {
@@ -1918,7 +1961,7 @@ button.ghost:hover {
 }
 
 .agent-timeline__item.is-compact .agent-timeline__content {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .timeline-card {
@@ -2050,16 +2093,22 @@ button.ghost:hover {
 
 .timeline-card__error-title {
   min-width: 0;
-  margin: 0;
   color: var(--err);
-  font-size: 13px;
   font-weight: 700;
-  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
+.timeline-card__error-line {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
 .timeline-card__error-message {
-  margin-top: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline-card--error .timeline-card__label {

@@ -86,7 +86,7 @@ export function isTimelineFinalReply(
 export function timelineDefaultExpanded(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
 ): boolean {
-  return isTimelineFinalReply(event) || RUNNING_STATUSES.has(event.status) || event.kind === "error";
+  return isTimelineFinalReply(event);
 }
 
 export function timelineDefaultCollapsed(
@@ -139,6 +139,79 @@ export function timelineEventSummary(
     tone: "muted",
     singleLine: true,
   };
+}
+
+export function timelineInlinePreview(
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "summary" | "title">,
+): string {
+  if (isTimelineFinalReply(event)) return "";
+  const payload = readTimelinePayloadRecord(event);
+  const summary = event.summary?.trim();
+
+  const preview = (() => {
+    switch (event.kind) {
+      case "command":
+        return summary || readFirstPayloadString(payload, [
+          "command",
+          "cmd",
+          "shellCommand",
+          "script",
+          "argv",
+        ]);
+      case "file_change":
+        return summary || timelineFileChangeInlinePreview(payload);
+      case "mcp": {
+        const target = [
+          readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]),
+          readFirstPayloadString(payload, ["tool", "toolName", "name"]),
+        ].filter(Boolean).join("/");
+        return summary || target;
+      }
+      case "web_search":
+        return summary || readFirstPayloadString(payload, ["query", "searchQuery", "q", "url"]);
+      case "tool":
+        return summary || readFirstPayloadString(payload, [
+          "toolName",
+          "name",
+          "tool",
+          "function",
+        ]);
+      case "subagent": {
+        const agentName = readFirstPayloadString(payload, [
+          "agentType",
+          "subagentType",
+          "agentName",
+          "name",
+          "type",
+        ]);
+        const task = readFirstPayloadString(payload, [
+          "taskDescription",
+          "description",
+          "prompt",
+          "task",
+        ]);
+        return summary || [agentName, task].filter(Boolean).join(": ");
+      }
+      case "todo_list":
+        return summary || timelineTodoInlinePreview(payload);
+      case "plan":
+      case "reasoning":
+      case "turn":
+      case "error":
+      default:
+        return summary || readFirstPayloadString(payload, [
+          "summary",
+          "message",
+          "error",
+          "text",
+          "content",
+          "result",
+          "details",
+        ]);
+    }
+  })();
+
+  return preview ? truncateTimelineText(toSingleLineText(preview), 180) : "";
 }
 
 export function timelineEventDetails(
@@ -357,4 +430,88 @@ function timelineFileChangeSummary(changes: AgentTimelinePayload | undefined): s
     const path = typeof row.path === "string" ? row.path : "";
     return path ? `${kind} ${path}` : kind;
   }));
+}
+
+function timelineFileChangeInlinePreview(payload: TimelinePayloadRecord): string {
+  const changes = payload.changes;
+  if (Array.isArray(changes) && changes.length > 0) {
+    const first = readPayloadRecord(changes[0]);
+    const path = readFirstPayloadString(first, [
+      "path",
+      "filePath",
+      "relativePath",
+      "targetPath",
+      "name",
+    ]);
+    const kind = readFirstPayloadString(first, ["kind", "operation", "type", "status"]) || "update";
+    const suffix = changes.length > 1 ? ` 等 ${changes.length} 个文件` : "";
+    return path ? `${kind} ${path}${suffix}` : `${kind}${suffix}`;
+  }
+
+  const path = readFirstPayloadString(payload, [
+    "path",
+    "filePath",
+    "relativePath",
+    "targetPath",
+    "name",
+  ]);
+  if (!path) return "";
+  const kind = readFirstPayloadString(payload, ["kind", "operation", "type", "status"]) || "update";
+  return `${kind} ${path}`;
+}
+
+function timelineTodoInlinePreview(payload: TimelinePayloadRecord): string {
+  const rawItems = [
+    payload.items,
+    payload.todos,
+    readPayloadRecord(payload.input).items,
+    readPayloadRecord(payload.input).todos,
+  ].find((value) => Array.isArray(value));
+
+  if (!Array.isArray(rawItems) || rawItems.length === 0) return "";
+
+  let completed = 0;
+  let firstOpen = "";
+  for (const item of rawItems) {
+    const row = readPayloadRecord(item);
+    const text = typeof item === "string"
+      ? item.trim()
+      : readFirstPayloadString(row, ["text", "content", "title", "description"]);
+    const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
+    const done = row.completed === true || row.done === true || status === "completed";
+    if (done) completed += 1;
+    if (!done && !firstOpen) firstOpen = text;
+  }
+
+  return `${completed}/${rawItems.length} 已完成${firstOpen ? ` · ${firstOpen}` : ""}`;
+}
+
+function readFirstPayloadString(payload: TimelinePayloadRecord, keys: string[]): string {
+  for (const key of keys) {
+    const value = payload[key];
+    const text = stringifyPayloadInline(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function stringifyPayloadInline(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyPayloadInline(item)).filter(Boolean).join(" ").trim();
+  }
+  if (value && typeof value === "object") {
+    const row = value as TimelinePayloadRecord;
+    return readFirstPayloadString(row, [
+      "text",
+      "title",
+      "summary",
+      "content",
+      "message",
+      "name",
+      "path",
+    ]);
+  }
+  return "";
 }

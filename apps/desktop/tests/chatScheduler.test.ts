@@ -104,6 +104,41 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("过程事件默认显示为单行，点击后展开详情", async () => {
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-single-line-command",
+      kind: "command",
+      status: "running",
+      title: "pnpm test",
+      summary: "正在运行单测",
+      payload: {
+        command: "pnpm test",
+        stdout: "详细输出只在展开后出现",
+      },
+      order: 1,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("正在运行单测")).toBeInTheDocument();
+      expect(view.queryByText("详细输出只在展开后出现")).toBeNull();
+      expect(view.getByRole("button", { name: /pnpm test/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /pnpm test/ }));
+    await waitFor(() => {
+      expect(view.getByText("详细输出只在展开后出现")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /pnpm test/ }))
+        .toHaveAttribute("aria-expanded", "true");
+    });
+  });
+
   it("最终回复显示在 timeline 中，不再创建 assistant 普通气泡", async () => {
     const view = await renderTaskDetail();
 
@@ -164,6 +199,13 @@ describe("chat scheduler", () => {
       order: 1,
     });
 
+    await waitFor(() => {
+      expect(view.queryByText("验证输出详情")).toBeNull();
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
     await waitFor(() => {
       expect(view.getByText("验证输出详情")).toBeInTheDocument();
       expect(view.getByRole("button", { name: /yarn verify/ }))
