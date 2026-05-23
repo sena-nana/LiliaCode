@@ -156,6 +156,18 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+export type ChatSendDispatch = "started" | "queued";
+
+export interface ChatSendResult {
+  message: ChatMessage;
+  /**
+   * started：本次输入立即进入 Agent turn；
+   * queued：当前 turn 仍在运行，输入已进入 Lilia 调度队列。
+   */
+  dispatch: ChatSendDispatch;
+  queuedCount: number;
+}
+
 export type PermissionMode = "full" | "ask" | "readonly";
 
 /**

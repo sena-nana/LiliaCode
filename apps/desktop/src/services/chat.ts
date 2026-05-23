@@ -17,6 +17,7 @@ import type {
   ChatComposerState,
   ChatMessage,
   ChatModelOption,
+  ChatSendResult,
   ConnectionMode,
   EnvStatusReport,
   ProviderConfig,
@@ -37,6 +38,7 @@ export type {
 
 export interface ChunkEvent { taskId: string; text: string; }
 export interface ToolEvent { taskId: string; name: string; input: unknown; }
+export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
 export interface ErrorEvent { taskId: string; message: string; }
 
@@ -59,8 +61,8 @@ export function sendMessage(
   content: string,
   composer: ChatComposerState,
   projectCwd: string,
-): Promise<ChatMessage> {
-  return invoke<ChatMessage>("chat_send_message", {
+): Promise<ChatSendResult> {
+  return invoke<ChatSendResult>("chat_send_message", {
     taskId,
     content,
     composer,
@@ -144,6 +146,10 @@ export function onChunk(handler: (e: ChunkEvent) => void): Promise<UnlistenFn> {
 
 export function onTool(handler: (e: ToolEvent) => void): Promise<UnlistenFn> {
   return listen<ToolEvent>("chat:tool", (event) => handler(event.payload));
+}
+
+export function onTurnStarted(handler: (e: TurnStartedEvent) => void): Promise<UnlistenFn> {
+  return listen<TurnStartedEvent>("chat:turn-started", (event) => handler(event.payload));
 }
 
 export function onDone(handler: (e: DoneEvent) => void): Promise<UnlistenFn> {

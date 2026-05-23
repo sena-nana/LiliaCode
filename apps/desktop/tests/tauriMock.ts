@@ -94,6 +94,10 @@ const baseTasks: TaskRow[] = [
 
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
+let chatMessages: Record<string, unknown[]> = {};
+let chatRunning: Record<string, boolean> = {};
+let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -115,9 +119,51 @@ function refreshSessionCounts() {
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
+  chatMessages = {};
+  chatRunning = {};
+  chatQueued = {};
+  eventHandlers = {};
   refreshSessionCounts();
   mockInvoke.mockClear();
+  mockListen.mockClear();
 }
+
+export function emitTauriEvent(event: string, payload: unknown) {
+  for (const handler of eventHandlers[event] ?? []) {
+    handler({ payload });
+  }
+}
+
+export function completeMockAgentTurn(taskId: string) {
+  emitTauriEvent("chat:done", {
+    taskId,
+    sessionId: `mock-${taskId}`,
+    subtype: null,
+  });
+  const [next, ...rest] = chatQueued[taskId] ?? [];
+  if (next) {
+    chatQueued[taskId] = rest;
+    chatRunning[taskId] = true;
+    queueMicrotask(() => {
+      emitTauriEvent("chat:turn-started", {
+        taskId,
+        queuedCount: rest.length,
+      });
+    });
+  } else {
+    chatRunning[taskId] = false;
+  }
+}
+
+export const mockListen = vi.fn(async (
+  event: string,
+  handler: (event: { payload: unknown }) => void,
+) => {
+  eventHandlers[event] = [...(eventHandlers[event] ?? []), handler];
+  return async () => {
+    eventHandlers[event] = (eventHandlers[event] ?? []).filter((h) => h !== handler);
+  };
+});
 
 export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
   switch (cmd) {
@@ -215,6 +261,81 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           },
         },
       };
+
+    case "chat_list_messages": {
+      const taskId = String(args.taskId);
+      return chatMessages[taskId] ?? [];
+    }
+
+    case "chat_get_composer_state": {
+      const taskId = String(args.taskId);
+      return {
+        taskId,
+        backend: "claude",
+        model: "claude-sonnet-4-6",
+        branch: "main",
+        permission: "ask",
+      };
+    }
+
+    case "chat_set_composer_state":
+      return undefined;
+
+    case "chat_list_models": {
+      const backend = String(args.backend || "claude");
+      return [
+        {
+          id: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-6",
+          label: backend === "codex" ? "GPT-5 Codex" : "Sonnet 4.6",
+          backend,
+        },
+      ];
+    }
+
+    case "chat_list_branches":
+      return [{ name: "main", current: true }];
+
+    case "todo_list":
+      return [];
+
+    case "chat_send_message": {
+      const taskId = String(args.taskId);
+      const content = String(args.content);
+      const message = {
+        id: `u-${(chatMessages[taskId] ?? []).length + 1}`,
+        taskId,
+        role: "user",
+        content,
+        createdAt: Date.now(),
+      };
+      chatMessages[taskId] = [...(chatMessages[taskId] ?? []), message];
+      if (chatRunning[taskId]) {
+        chatQueued[taskId] = [...(chatQueued[taskId] ?? []), args];
+        return {
+          message,
+          dispatch: "queued",
+          queuedCount: chatQueued[taskId].length,
+        };
+      }
+      chatRunning[taskId] = true;
+      queueMicrotask(() => {
+        emitTauriEvent("chat:turn-started", {
+          taskId,
+          queuedCount: 0,
+        });
+      });
+      return {
+        message,
+        dispatch: "started",
+        queuedCount: 0,
+      };
+    }
+
+    case "plugin:event|listen": {
+      const event = String(args.event);
+      const handlerId = Number(args.handler);
+      return handlerId || 1;
+    }
 
     default:
       throw new Error(`未配置的 Tauri mock 命令：${cmd}`);

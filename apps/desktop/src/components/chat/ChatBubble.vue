@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import type { ChatMessage } from "@lilia/contracts";
 
-defineProps<{ message: ChatMessage & { streaming?: boolean } }>();
+defineProps<{ message: ChatMessage & { streaming?: boolean; queued?: boolean } }>();
 </script>
 
 <template>
   <div
     class="chat-bubble"
-    :class="[`chat-bubble--${message.role}`, { 'is-streaming': message.streaming }]"
+    :class="[
+      `chat-bubble--${message.role}`,
+      { 'is-streaming': message.streaming, 'is-queued': message.queued },
+    ]"
     :data-role="message.role"
   >
     <div class="chat-bubble__content">{{ message.content }}<span

@@ -2,6 +2,7 @@
 /**
  * Composer：textarea 自动撑高（最多 8 行）+ 一排 chip。
  * 键位：Enter 发送，Shift+Enter 换行，输入框为空时禁用发送。
+ * Agent 运行中仍允许发送；消息会进入 Lilia 调度队列，等当前 turn 收束后续发。
  */
 
 import { computed, nextTick, ref, watch } from "vue";
@@ -19,7 +20,7 @@ const props = defineProps<{
   state: ChatComposerState;
   models: ChatModelOption[];
   branches: ChatBranchOption[];
-  /** 上一轮还在 streaming 时为 true，禁用发送按钮避免并发请求。 */
+  /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
 }>();
 
@@ -31,7 +32,7 @@ const emit = defineEmits<{
 const text = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
 
-const canSend = computed(() => !props.sending && text.value.trim().length > 0);
+const canSend = computed(() => text.value.trim().length > 0);
 
 const permissionOptions = [
   { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },
@@ -152,8 +153,8 @@ watch(text, async () => {
           type="button"
           class="chat-composer__send"
           :disabled="!canSend"
-          title="发送（Enter）"
-          aria-label="发送"
+          :title="sending ? '加入调度队列（Enter）' : '发送（Enter）'"
+          :aria-label="sending ? '加入调度队列' : '发送'"
           @click="send"
         >
           <ArrowUp :size="16" aria-hidden="true" />

@@ -31,6 +31,7 @@ import {
   onChunk,
   onDone,
   onError,
+  onTurnStarted,
   onTool,
   sendMessage,
   setComposerState,
@@ -90,7 +91,7 @@ const {
   streamingId,
   startStreamBubble,
   abortStream,
-  markStreamDone,
+  completeStream,
   appendChunk,
   stopRevealLoop,
 } = useStreamReveal(messages, () => props.taskId);
@@ -103,10 +104,6 @@ function summarizeTitle(text: string): string {
 
 async function onSend(content: string) {
   if (!hasContext.value) return;
-  if (streamingId.value) {
-    // 上一轮还没结束，禁止并发请求。
-    return;
-  }
 
   // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
   if (props.projectId && isDraftTask(props.taskId)) {
@@ -125,16 +122,17 @@ async function onSend(content: string) {
     createdAt: Date.now(),
   };
   messages.value = [...messages.value, optimistic];
-  startStreamBubble();
   try {
-    const real = await sendMessage(
+    const result = await sendMessage(
       props.taskId,
       content,
       composer.value,
       cwd,
     );
     messages.value = messages.value.map((m) =>
-      m.id === optimistic.id ? { ...real } : m,
+      m.id === optimistic.id
+        ? { ...result.message, queued: result.dispatch === "queued" }
+        : m,
     );
   } catch (err) {
     messages.value = messages.value.filter((m) => m.id !== optimistic.id);
@@ -213,9 +211,25 @@ onMounted(async () => {
     }),
   );
   unlisteners.push(
+    await onTurnStarted((e) => {
+      if (e.taskId !== props.taskId) return;
+      // 队列续发可能紧跟上一轮 done 到来，先收束旧气泡再开新气泡。
+      completeStream();
+      let cleared = false;
+      messages.value = messages.value.map((m) => {
+        if (!cleared && m.queued && m.role === "user") {
+          cleared = true;
+          return { ...m, queued: false };
+        }
+        return m;
+      });
+      startStreamBubble();
+    }),
+  );
+  unlisteners.push(
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
-      markStreamDone();
+      completeStream();
     }),
   );
   unlisteners.push(

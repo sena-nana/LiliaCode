@@ -62,7 +62,24 @@ VCC 是把对话整理为"对话链"的存储算法,关键性质:
 
 检索命中后**不直接塞进 agent 上下文**,而是把"有相关记忆"的引导消息回送到 agent 对话,由 agent 自行决定是否通过 grep 拉取完整内容。
 
-### 4.2 三层时机策略
+### 4.2 Todo 调度器边界
+
+注入时机由 **Lilia 调度器**统一管理,但它只介入原生 Todo 的**生命周期信号**,不接管原生 Todo 的**内容所有权**。
+
+- Claude / Codex 的原生 Todo、Task、Plan 仍归 agent 自己维护。Lilia 只镜像、观察和归一化事件,不伪造、不改写、不屏蔽原生 Todo 工具。
+- 原生 Todo 的价值是提供自然调度窗口:计划创建、步骤切换、步骤完成、工具结果返回、turn 收束。这些窗口比任意时刻插入上下文更不打断 agent 思路。
+- Memory / 插件 / 前置任务等扩展不直接注入上下文,也不写入原生 Todo;它们只向 Lilia 的 `ContextQueue` 提交候选项。
+- 调度器在合适窗口消费 `ContextQueue`,再通过 Lilia 的聊天上下文通道发出引导消息或续发输入。
+- 第一批实现用"用户在 agent 思考过程中追加发送的内容"验证这个路径:当前 turn 运行时,用户输入不会并发打断 agent,而是进入队列;当前 turn 结束后由调度器自动启动下一轮。
+
+架构分层:
+
+```text
+Claude / Codex 原生 Todo -> NativeTodoMirror -> Scheduler Trigger
+Memory / Plugin / User   -> ContextQueue     -> Context Injection
+```
+
+### 4.3 三层时机策略
 
 **TODO Layer 1 — 基线注入(必做,v1)**
 
@@ -90,7 +107,7 @@ session 启动时把「用户级强偏好 + 项目级硬约束」作为 system p
 - 触发阈值要高(宁可不救,不能误救)
 - **v1 不做**,先把 Layer 1+2 跑稳,根据真实采纳率数据再决定是否上 Layer 3
 
-### 4.3 跨层兜底
+### 4.4 跨层兜底
 
 无论选哪层,以下都是"不做早晚翻车"的基础设施:
 

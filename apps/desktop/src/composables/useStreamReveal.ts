@@ -3,6 +3,7 @@ import type { ChatMessage } from "@lilia/contracts";
 
 export type LocalMessage = ChatMessage & {
   streaming?: boolean;
+  queued?: boolean;
 };
 
 export function useStreamReveal(
@@ -89,6 +90,24 @@ export function useStreamReveal(
     ensureRevealLoop();
   }
 
+  function completeStream() {
+    const id = streamingId.value;
+    if (!id) return;
+    const idx = messages.value.findIndex((m) => m.id === id);
+    if (idx >= 0) {
+      const m = messages.value[idx];
+      messages.value[idx] = {
+        ...m,
+        content: m.content + streamBuffer.value,
+        streaming: false,
+      };
+    }
+    streamingId.value = null;
+    streamBuffer.value = "";
+    streamFinalized = false;
+    stopRevealLoop();
+  }
+
   function appendChunk(text: string) {
     streamBuffer.value += text;
     ensureRevealLoop();
@@ -100,6 +119,7 @@ export function useStreamReveal(
     startStreamBubble,
     abortStream,
     markStreamDone,
+    completeStream,
     appendChunk,
     stopRevealLoop,
   };

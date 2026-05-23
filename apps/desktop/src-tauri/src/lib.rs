@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -65,6 +65,22 @@ struct ChatMessage {
     role: String, // "user" | "assistant" | "system"
     content: String,
     created_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingChatTurn {
+    content: String,
+    composer: ChatComposerState,
+    project_cwd: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatSendResult {
+    message: ChatMessage,
+    /// "started" | "queued"
+    dispatch: String,
+    queued_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +209,13 @@ struct ToolEvent {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct TurnStartedEvent {
+    task_id: String,
+    queued_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DoneEvent {
     task_id: String,
     session_id: Option<String>,
@@ -214,6 +237,8 @@ struct ChatStore {
     composers: Mutex<HashMap<String, ChatComposerState>>,
     /// SDK session id：key = "{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
     sdk_sessions: Mutex<HashMap<String, String>>,
+    running_tasks: Mutex<HashMap<String, bool>>,
+    pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
     next_id: AtomicU64,
 }
 
@@ -243,6 +268,23 @@ fn default_composer(task_id: &str) -> ChatComposerState {
         branch: "main".to_string(),
         permission: "ask".to_string(),
     }
+}
+
+fn queue_pending_turn(
+    store: &ChatStore,
+    task_id: &str,
+    content: String,
+    composer: ChatComposerState,
+    project_cwd: String,
+) -> usize {
+    let mut pending = store.pending_turns.lock().unwrap();
+    let queue = pending.entry(task_id.to_string()).or_default();
+    queue.push_back(PendingChatTurn {
+        content,
+        composer,
+        project_cwd,
+    });
+    queue.len()
 }
 
 // ---------- 连接解析 ----------
@@ -454,64 +496,25 @@ fn locate_agent_runner(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("agent-runner.mjs"))
 }
 
-// ---------- Commands ----------
-
-#[tauri::command]
-fn ping() -> &'static str {
-    "pong"
-}
-
-#[tauri::command]
-fn chat_list_messages(task_id: String, store: State<'_, ChatStore>) -> Vec<ChatMessage> {
-    store
-        .messages
-        .lock()
-        .unwrap()
-        .get(&task_id)
-        .cloned()
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-fn chat_send_message(
+fn spawn_agent_turn(
     app: AppHandle,
     task_id: String,
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
-    store: State<'_, ChatStore>,
-) -> Result<ChatMessage, String> {
-    // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
-    let user_msg = ChatMessage {
-        id: store.new_id("u"),
-        task_id: task_id.clone(),
-        role: "user".to_string(),
-        content: content.clone(),
-        created_at: now_millis(),
-    };
-    {
-        let mut all = store.messages.lock().unwrap();
-        all.entry(task_id.clone())
-            .or_default()
-            .push(user_msg.clone());
-    }
-    // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
-    store
-        .composers
-        .lock()
-        .unwrap()
-        .insert(task_id.clone(), composer.clone());
-
-    // 按 backend 找上一轮的 SDK session id 用于 resume。
+) {
     let backend = composer.backend.clone();
-    let resume_session_id = store
-        .sdk_sessions
-        .lock()
-        .unwrap()
-        .get(&session_key(&backend, &task_id))
-        .cloned();
+    let resume_session_id = {
+        let store = app.state::<ChatStore>();
+        let session = store
+            .sdk_sessions
+            .lock()
+            .unwrap()
+            .get(&session_key(&backend, &task_id))
+            .cloned();
+        session
+    };
 
-    // 2) 起 Node 子进程跑对应 backend 的 Agent SDK，把它的事件流转成 Tauri 事件。
     let script_path = locate_agent_runner(&app);
     let connection = resolve_connection_for(&app, &backend);
     let app_handle = app.clone();
@@ -521,6 +524,25 @@ fn chat_send_message(
     let backend_for_thread = backend.clone();
 
     thread::spawn(move || {
+        let queued_count = {
+            let store = app_handle.state::<ChatStore>();
+            let count = store
+                .pending_turns
+                .lock()
+                .unwrap()
+                .get(&task_id_for_thread)
+                .map(|q| q.len())
+                .unwrap_or(0);
+            count
+        };
+        let _ = app_handle.emit(
+            "chat:turn-started",
+            TurnStartedEvent {
+                task_id: task_id_for_thread.clone(),
+                queued_count,
+            },
+        );
+
         let stdin_payload = serde_json::json!({
             "backend": backend_for_thread,
             "cwd": project_cwd,
@@ -559,6 +581,13 @@ fn chat_send_message(
                         task_id: task_id_for_thread.clone(),
                         message: msg,
                     },
+                );
+                finish_agent_turn(
+                    app_handle,
+                    task_id_for_thread,
+                    backend_for_thread,
+                    None,
+                    None,
                 );
                 return;
             }
@@ -716,45 +745,176 @@ fn chat_send_message(
             );
         }
 
-        // 落盘 assistant 消息到历史。
-        if !assistant_buf.is_empty() {
-            let store = app_handle.state::<ChatStore>();
-            let reply = ChatMessage {
-                id: store.new_id("a"),
-                task_id: task_id_for_thread.clone(),
-                role: "assistant".to_string(),
-                content: assistant_buf,
-                created_at: now_millis(),
-            };
-            store
-                .messages
-                .lock()
-                .unwrap()
-                .entry(task_id_for_thread.clone())
-                .or_default()
-                .push(reply);
-        }
-
-        // 记下 session id 供下一轮 resume。
-        if let Some(sid) = last_session_id.clone() {
-            let store = app_handle.state::<ChatStore>();
-            store.sdk_sessions.lock().unwrap().insert(
-                session_key(&backend_for_thread, &task_id_for_thread),
-                sid,
-            );
-        }
-
-        let _ = app_handle.emit(
-            "chat:done",
-            DoneEvent {
-                task_id: task_id_for_thread,
-                session_id: last_session_id,
-                subtype: None,
+        finish_agent_turn(
+            app_handle,
+            task_id_for_thread,
+            backend_for_thread,
+            last_session_id,
+            if assistant_buf.is_empty() {
+                None
+            } else {
+                Some(assistant_buf)
             },
         );
     });
+}
 
-    Ok(user_msg)
+fn finish_agent_turn(
+    app_handle: AppHandle,
+    task_id: String,
+    backend: String,
+    last_session_id: Option<String>,
+    assistant_buf: Option<String>,
+) {
+    if let Some(buf) = assistant_buf {
+        let store = app_handle.state::<ChatStore>();
+        let reply = ChatMessage {
+            id: store.new_id("a"),
+            task_id: task_id.clone(),
+            role: "assistant".to_string(),
+            content: buf,
+            created_at: now_millis(),
+        };
+        store
+            .messages
+            .lock()
+            .unwrap()
+            .entry(task_id.clone())
+            .or_default()
+            .push(reply);
+    }
+
+    // 记下 session id 供下一轮 resume。
+    if let Some(sid) = last_session_id.clone() {
+        let store = app_handle.state::<ChatStore>();
+        store
+            .sdk_sessions
+            .lock()
+            .unwrap()
+            .insert(session_key(&backend, &task_id), sid);
+    }
+
+    let _ = app_handle.emit(
+        "chat:done",
+        DoneEvent {
+            task_id: task_id.clone(),
+            session_id: last_session_id,
+            subtype: None,
+        },
+    );
+
+    let next = {
+        let store = app_handle.state::<ChatStore>();
+        let mut running = store.running_tasks.lock().unwrap();
+        let mut pending = store.pending_turns.lock().unwrap();
+        let mut should_remove_queue = false;
+        let next = if let Some(queue) = pending.get_mut(&task_id) {
+            let turn = queue.pop_front();
+            should_remove_queue = queue.is_empty();
+            turn
+        } else {
+            None
+        };
+        if should_remove_queue {
+            pending.remove(&task_id);
+        }
+        if next.is_none() {
+            running.remove(&task_id);
+        }
+        next
+    };
+    if let Some(turn) = next {
+        spawn_agent_turn(
+            app_handle,
+            task_id,
+            turn.content,
+            turn.composer,
+            turn.project_cwd,
+        );
+    }
+}
+
+// ---------- Commands ----------
+
+#[tauri::command]
+fn ping() -> &'static str {
+    "pong"
+}
+
+#[tauri::command]
+fn chat_list_messages(task_id: String, store: State<'_, ChatStore>) -> Vec<ChatMessage> {
+    store
+        .messages
+        .lock()
+        .unwrap()
+        .get(&task_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn chat_send_message(
+    app: AppHandle,
+    task_id: String,
+    content: String,
+    composer: ChatComposerState,
+    project_cwd: String,
+    store: State<'_, ChatStore>,
+) -> Result<ChatSendResult, String> {
+    // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
+    let user_msg = ChatMessage {
+        id: store.new_id("u"),
+        task_id: task_id.clone(),
+        role: "user".to_string(),
+        content: content.clone(),
+        created_at: now_millis(),
+    };
+    {
+        let mut all = store.messages.lock().unwrap();
+        all.entry(task_id.clone())
+            .or_default()
+            .push(user_msg.clone());
+    }
+    // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
+    store
+        .composers
+        .lock()
+        .unwrap()
+        .insert(task_id.clone(), composer.clone());
+
+    {
+        let mut running = store.running_tasks.lock().unwrap();
+        if running.contains_key(&task_id) {
+            drop(running);
+            let queued_count = queue_pending_turn(
+                &store,
+                &task_id,
+                content,
+                composer,
+                project_cwd,
+            );
+            return Ok(ChatSendResult {
+                message: user_msg,
+                dispatch: "queued".to_string(),
+                queued_count,
+            });
+        }
+        running.insert(task_id.clone(), true);
+    }
+
+    spawn_agent_turn(
+        app,
+        task_id,
+        content,
+        composer,
+        project_cwd,
+    );
+
+    Ok(ChatSendResult {
+        message: user_msg,
+        dispatch: "started".to_string(),
+        queued_count: 0,
+    })
 }
 
 #[tauri::command]
@@ -842,6 +1002,8 @@ fn chat_reset_session(task_id: String, store: State<'_, ChatStore>) {
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
     drop(sessions);
     store.messages.lock().unwrap().remove(&task_id);
+    store.running_tasks.lock().unwrap().remove(&task_id);
+    store.pending_turns.lock().unwrap().remove(&task_id);
 }
 
 fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {

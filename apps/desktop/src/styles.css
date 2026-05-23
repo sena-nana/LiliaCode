@@ -1677,6 +1677,12 @@ button.ghost:hover {
   border-bottom-right-radius: 4px;
 }
 
+.chat-bubble--user.is-queued {
+  border: 1px dashed var(--accent);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+}
+
 .chat-bubble--assistant {
   align-self: flex-start;
   background: var(--bg-elev);
