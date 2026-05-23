@@ -4,12 +4,12 @@
  *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
  *   /chats/:taskId                     —— 不绑定项目的收集箱/草稿对话
  *
- * 流式呈现：streamBuffer 缓冲 chunk，rAF 节奏的 tick 逐字 reveal 到 streaming
- * 气泡——无论 SDK 发字符级 delta 还是整段 block 最终都是「打字机」节奏。
+ * Agent 过程和最终回复走 timeline 呈现；transcript 里的气泡只保留用户输入
+ * 和必要的 system 错误提示，避免 assistant 回复跑到过程时间线前面。
  * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送把草稿 promote 到收集箱。
  */
 
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import {
@@ -25,23 +25,26 @@ import ChatComposer from "../components/chat/ChatComposer.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
 import {
   getComposerState,
+  listAgentTimeline,
   listBranches,
   listMessages,
   listModels,
-  onChunk,
+  onAgentTimeline,
   onDone,
   onError,
   onTurnStarted,
-  onTool,
   sendMessage,
   setComposerState,
 } from "../services/chat";
 import type {
+  AgentTimelineEvent,
   ChatBranchOption,
+  ChatMessage,
   ChatComposerState,
   ChatModelOption,
 } from "@lilia/contracts";
-import { useStreamReveal, type LocalMessage } from "../composables/useStreamReveal";
+
+type LocalMessage = ChatMessage & { queued?: boolean };
 
 const props = defineProps<{ projectId?: string; taskId: string }>();
 
@@ -63,6 +66,7 @@ const emptyHeadline = computed(() =>
 );
 
 const messages = ref<LocalMessage[]>([]);
+const timelineEvents = shallowRef<AgentTimelineEvent[]>([]);
 const composer = ref<ChatComposerState>({
   taskId: props.taskId,
   backend: "claude",
@@ -72,6 +76,7 @@ const composer = ref<ChatComposerState>({
 });
 const models = ref<ChatModelOption[]>([]);
 const branches = ref<ChatBranchOption[]>([]);
+const isTurnRunning = ref(false);
 
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
@@ -86,20 +91,36 @@ async function ensureOrphanCwd(): Promise<string> {
   return orphanCwd.value;
 }
 
-// 流式渲染逻辑
-const {
-  streamingId,
-  startStreamBubble,
-  abortStream,
-  completeStream,
-  appendChunk,
-  stopRevealLoop,
-} = useStreamReveal(messages, () => props.taskId);
-
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
   return normalized.slice(0, 30) + "…";
+}
+
+function isVisibleMessage(message: ChatMessage): boolean {
+  return message.role !== "assistant";
+}
+
+function sortMessages(list: LocalMessage[]): LocalMessage[] {
+  return [...list].sort((a, b) =>
+    a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+  );
+}
+
+function mergeVisibleMessages(
+  fetched: ChatMessage[],
+  current: LocalMessage[],
+): LocalMessage[] {
+  const byId = new Map<string, LocalMessage>();
+  for (const message of fetched) {
+    if (isVisibleMessage(message)) byId.set(message.id, message);
+  }
+  for (const message of current) {
+    if (isVisibleMessage(message) && !byId.has(message.id)) {
+      byId.set(message.id, message);
+    }
+  }
+  return sortMessages([...byId.values()]);
 }
 
 async function onSend(content: string) {
@@ -129,14 +150,21 @@ async function onSend(content: string) {
       composer.value,
       cwd,
     );
-    messages.value = messages.value.map((m) =>
-      m.id === optimistic.id
-        ? { ...result.message, queued: result.dispatch === "queued" }
-        : m,
-    );
+    let replaced = false;
+    messages.value = messages.value.map((m) => {
+      if (m.id !== optimistic.id) return m;
+      replaced = true;
+      return { ...result.message, queued: result.dispatch === "queued" };
+    });
+    if (!replaced && isVisibleMessage(result.message)) {
+      messages.value = sortMessages([
+        ...messages.value,
+        { ...result.message, queued: result.dispatch === "queued" },
+      ]);
+    }
   } catch (err) {
     messages.value = messages.value.filter((m) => m.id !== optimistic.id);
-    abortStream();
+    isTurnRunning.value = false;
     pushSystemMessage(`发送失败：${String(err)}`);
   }
 }
@@ -178,17 +206,48 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
   }
 }
 
+function upsertTimelineEvent(event: AgentTimelineEvent) {
+  const existingIndex = timelineEvents.value.findIndex((item) => item.id === event.id);
+  if (existingIndex < 0) {
+    const next: AgentTimelineEvent[] = timelineEvents.value.slice();
+    next.push(event);
+    timelineEvents.value = next;
+    return;
+  }
+
+  const next: AgentTimelineEvent[] = timelineEvents.value.slice();
+  next[existingIndex] = event;
+  timelineEvents.value = next;
+}
+
+async function loadTimelineEvents(taskId: string): Promise<AgentTimelineEvent[]> {
+  try {
+    return await listAgentTimeline(taskId);
+  } catch (err) {
+    console.error("[agent-timeline] list failed", err);
+    return [];
+  }
+}
+
+let loadSeq = 0;
+
 async function loadAll() {
+  const seq = ++loadSeq;
+  const taskId = props.taskId;
+  const projectId = props.projectId;
   // orphan 模式没有项目分支概念，给 branches 一个空数组。
-  const branchesPromise = props.projectId
-    ? listBranches(props.projectId)
+  const branchesPromise = projectId
+    ? listBranches(projectId)
     : Promise.resolve<ChatBranchOption[]>([]);
-  const [msgs, comp, brs] = await Promise.all([
-    listMessages(props.taskId),
-    getComposerState(props.taskId),
+  const [msgs, events, comp, brs] = await Promise.all([
+    listMessages(taskId),
+    loadTimelineEvents(taskId),
+    getComposerState(taskId),
     branchesPromise,
   ]);
-  messages.value = msgs;
+  if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+  messages.value = mergeVisibleMessages(msgs, messages.value);
+  timelineEvents.value = events;
   composer.value = comp;
   branches.value = brs;
   // models 依赖 backend，单独拉。
@@ -199,22 +258,15 @@ const unlisteners: UnlistenFn[] = [];
 
 onMounted(async () => {
   unlisteners.push(
-    await onChunk((e) => {
+    await onAgentTimeline((e) => {
       if (e.taskId !== props.taskId) return;
-      appendChunk(e.text);
-    }),
-  );
-  unlisteners.push(
-    await onTool((e) => {
-      if (e.taskId !== props.taskId) return;
-      pushSystemMessage(`agent 正在使用工具：${e.name}`);
+      upsertTimelineEvent(e);
     }),
   );
   unlisteners.push(
     await onTurnStarted((e) => {
       if (e.taskId !== props.taskId) return;
-      // 队列续发可能紧跟上一轮 done 到来，先收束旧气泡再开新气泡。
-      completeStream();
+      isTurnRunning.value = true;
       let cleared = false;
       messages.value = messages.value.map((m) => {
         if (!cleared && m.queued && m.role === "user") {
@@ -223,19 +275,18 @@ onMounted(async () => {
         }
         return m;
       });
-      startStreamBubble();
     }),
   );
   unlisteners.push(
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
-      completeStream();
+      isTurnRunning.value = false;
     }),
   );
   unlisteners.push(
     await onError((e) => {
       if (e.taskId !== props.taskId) return;
-      abortStream();
+      isTurnRunning.value = false;
       pushSystemMessage(`agent 报错：${e.message}`);
     }),
   );
@@ -243,7 +294,6 @@ onMounted(async () => {
 });
 
 onUnmounted(async () => {
-  stopRevealLoop();
   for (const u of unlisteners) {
     try { await u(); } catch { /* ignore */ }
   }
@@ -253,8 +303,9 @@ onUnmounted(async () => {
 watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
-    abortStream();
+    isTurnRunning.value = false;
     messages.value = [];
+    timelineEvents.value = [];
     await loadAll();
   },
 );
@@ -266,13 +317,17 @@ watch(
     class="chat-page"
   >
     <div class="chat">
-      <ChatTranscript :messages="messages" :empty-headline="emptyHeadline" />
+      <ChatTranscript
+        :messages="messages"
+        :timeline-events="timelineEvents"
+        :empty-headline="emptyHeadline"
+      />
       <TodoFloat v-if="taskId" :task-id="taskId" />
       <ChatComposer
         :state="composer"
         :models="models"
         :branches="branches"
-        :sending="streamingId !== null"
+        :sending="isTurnRunning"
         @send="onSend"
         @update:state="onComposerUpdate"
       />

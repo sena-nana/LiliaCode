@@ -22,6 +22,32 @@ interface TaskRow {
   pinned: boolean;
 }
 
+interface AgentTimelineEvent {
+  id: string;
+  taskId: string;
+  turnId: string | null;
+  backend: "claude" | "codex";
+  kind:
+    | "reasoning"
+    | "plan"
+    | "todo_list"
+    | "tool"
+    | "command"
+    | "subagent"
+    | "file_change"
+    | "mcp"
+    | "web_search"
+    | "error"
+    | "turn";
+  status: string;
+  title: string;
+  summary: string | null;
+  payload: unknown;
+  createdAt: number;
+  updatedAt: number;
+  order: number;
+}
+
 const baseProjects: ProjectRow[] = [
   {
     id: "lilia",
@@ -95,6 +121,7 @@ const baseTasks: TaskRow[] = [
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
 let chatMessages: Record<string, unknown[]> = {};
+let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
@@ -120,6 +147,24 @@ export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
   chatMessages = {};
+  timelineEvents = {
+    "t-002": [
+      {
+        id: "tl-existing",
+        taskId: "t-002",
+        turnId: "turn-existing",
+        backend: "claude",
+        kind: "reasoning",
+        status: "info",
+        title: "历史思考摘要",
+        summary: "从持久化时间线恢复的公开摘要。",
+        payload: { source: "mock" },
+        createdAt: 1500,
+        updatedAt: 1500,
+        order: 0,
+      },
+    ],
+  };
   chatRunning = {};
   chatQueued = {};
   eventHandlers = {};
@@ -153,6 +198,36 @@ export function completeMockAgentTurn(taskId: string) {
   } else {
     chatRunning[taskId] = false;
   }
+}
+
+export function emitMockTimelineEvent(
+  taskId: string,
+  patch: Partial<AgentTimelineEvent> = {},
+) {
+  const event: AgentTimelineEvent = {
+    id: patch.id ?? `tl-${Date.now()}`,
+    taskId,
+    turnId: patch.turnId ?? "turn-live",
+    backend: patch.backend ?? "claude",
+    kind: patch.kind ?? "command",
+    status: patch.status ?? "running",
+    title: patch.title ?? "实时命令",
+    summary: patch.summary ?? "正在运行命令",
+    payload: patch.payload ?? { command: "yarn test" },
+    createdAt: patch.createdAt ?? Date.now(),
+    updatedAt: patch.updatedAt ?? Date.now(),
+    order: patch.order ?? (timelineEvents[taskId]?.length ?? 0),
+  };
+  timelineEvents[taskId] = [
+    ...(timelineEvents[taskId] ?? []).filter((item) => item.id !== event.id),
+    event,
+  ];
+  emitTauriEvent("agent:timeline", event);
+  return event;
+}
+
+export function seedMockChatMessages(taskId: string, messages: unknown[]) {
+  chatMessages[taskId] = messages;
 }
 
 export const mockListen = vi.fn(async (
@@ -265,6 +340,18 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_list_messages": {
       const taskId = String(args.taskId);
       return chatMessages[taskId] ?? [];
+    }
+
+    case "agent_timeline_list": {
+      const taskId = String(args.taskId);
+      return timelineEvents[taskId] ?? [];
+    }
+
+    case "agent_timeline_clear_task": {
+      const taskId = String(args.taskId);
+      const count = timelineEvents[taskId]?.length ?? 0;
+      timelineEvents[taskId] = [];
+      return count;
     }
 
     case "chat_get_composer_state": {

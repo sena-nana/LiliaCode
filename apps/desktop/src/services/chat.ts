@@ -15,6 +15,7 @@ import type {
   ChatBackendKind,
   ChatBranchOption,
   ChatComposerState,
+  AgentTimelineEvent,
   ChatMessage,
   ChatModelOption,
   ChatSendResult,
@@ -51,9 +52,13 @@ export function listMessages(taskId: string): Promise<ChatMessage[]> {
   return invoke<ChatMessage[]>("chat_list_messages", { taskId });
 }
 
+export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
+  return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
+}
+
 /**
  * 发起一轮对话。返回值是 user 那条消息本身（用于乐观渲染）；
- * assistant 的回复通过 onChunk/onDone/onError 事件异步推回。
+ * Agent 的过程与最终回复通过 agent timeline 异步推回。
  * projectCwd 决定 agent 能看到的文件树。
  */
 export function sendMessage(
@@ -158,4 +163,10 @@ export function onDone(handler: (e: DoneEvent) => void): Promise<UnlistenFn> {
 
 export function onError(handler: (e: ErrorEvent) => void): Promise<UnlistenFn> {
   return listen<ErrorEvent>("chat:error", (event) => handler(event.payload));
+}
+
+export function onAgentTimeline(
+  handler: (e: AgentTimelineEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentTimelineEvent>("agent:timeline", (event) => handler(event.payload));
 }

@@ -18,6 +18,7 @@
 //       {"type":"assistant_done","text":"完整回复全文","sessionId":"..."}
 //       {"type":"done","sessionId":"...","subtype":"success|error_..."}
 //       {"type":"error","message":"..."}
+//       {"type":"timeline","event":{"kind":"command","status":"success","title":"...","summary":"...","payload":{}}}
 //   - 写完后进程 exit(0)；出错 exit(1)
 //
 // 不是为长连接设计——每次发送都起一个新进程。Node 启动 + SDK 加载 ~200ms 是
@@ -28,8 +29,172 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
+const TIMELINE_RESERVED_KEYS = new Set([
+  "taskId",
+  "task_id",
+  "turnId",
+  "turn_id",
+  "order",
+  "thinking",
+  "redacted_thinking",
+  "signature",
+]);
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringOrNull(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+function shortText(value, max = 600) {
+  const text = stringOrNull(value);
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function toJsonSafe(value, seen = new WeakSet()) {
+  if (
+    value === undefined ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    return undefined;
+  }
+  if (typeof value === "bigint") return value.toString();
+  if (value === null || typeof value !== "object") return value;
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
+  if (seen.has(value)) return "[Circular]";
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const safeArray = value
+      .map((item) => toJsonSafe(item, seen))
+      .filter((item) => item !== undefined);
+    seen.delete(value);
+    return safeArray;
+  }
+
+  const safeObject = {};
+  for (const [key, item] of Object.entries(value)) {
+    const safeItem = toJsonSafe(item, seen);
+    if (safeItem !== undefined) safeObject[key] = safeItem;
+  }
+  seen.delete(value);
+  return safeObject;
+}
+
+function sanitizeTimelinePayload(value, seen = new WeakSet(), depth = 0) {
+  if (
+    value === undefined ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    return undefined;
+  }
+  if (typeof value === "bigint") return value.toString();
+  if (value === null || typeof value !== "object") return value;
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
+  if (depth > 5) return "[Truncated]";
+  if (seen.has(value)) return "[Circular]";
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const safeArray = value
+      .map((item) => sanitizeTimelinePayload(item, seen, depth + 1))
+      .filter((item) => item !== undefined);
+    seen.delete(value);
+    return safeArray;
+  }
+
+  const safeObject = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (TIMELINE_RESERVED_KEYS.has(key)) continue;
+    const safeItem = sanitizeTimelinePayload(item, seen, depth + 1);
+    if (safeItem !== undefined) safeObject[key] = safeItem;
+  }
+  seen.delete(value);
+  return safeObject;
+}
+
 function emit(obj) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  let line;
+  try {
+    line = JSON.stringify(obj);
+  } catch {
+    line = JSON.stringify(toJsonSafe(obj));
+  }
+  process.stdout.write(line + "\n");
+}
+
+function emitTimeline(input) {
+  if (!input || typeof input !== "object") return;
+  const kind = stringOrNull(input.kind);
+  if (!kind) return;
+
+  const status = stringOrNull(input.status) || "info";
+  const title = shortText(input.title, 200) || kind;
+  const summary = shortText(input.summary, 1200) || "";
+  const payload = sanitizeTimelinePayload(input.payload);
+  const sourceId = stringOrNull(input.sourceId);
+  const event = {
+    kind,
+    status,
+    title,
+    summary,
+    payload: payload === undefined ? {} : payload,
+  };
+  if (sourceId) event.sourceId = sourceId;
+  emit({ type: "timeline", event });
+}
+
+function emitError(message, payload) {
+  const text = shortText(message, 1200) || "unknown error";
+  emit({ type: "error", message: text });
+  emitTimeline({
+    kind: "error",
+    status: "error",
+    title: "Error",
+    summary: text,
+    payload,
+  });
+}
+
+function normalizeTimelineStatus(status) {
+  switch (status) {
+    case "failed":
+      return "error";
+    case "completed":
+      return "success";
+    case "in_progress":
+      return "running";
+    default:
+      return status || "info";
+  }
+}
+
+function fullTextOrNull(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function addFinalText(payload, finalText) {
+  const text = fullTextOrNull(finalText);
+  return text ? { ...payload, finalText: text } : payload;
 }
 
 // ---------- Claude ----------
@@ -59,6 +224,95 @@ function extractClaudeTextDelta(streamEvent) {
   return typeof delta.text === "string" ? delta.text : null;
 }
 
+function isClaudeThinkingSummaryContainer(value, fallbackType = "") {
+  if (!isRecord(value)) return false;
+  const type = String(value.type || fallbackType || "").toLowerCase();
+  if (type.includes("redacted")) return false;
+  return (
+    type.includes("thinking") ||
+    type.includes("reasoning") ||
+    type.includes("summary") ||
+    value.is_summary === true
+  );
+}
+
+function rememberClaudeStreamBlock(streamEvent, ctx) {
+  if (!isRecord(streamEvent) || !ctx?.streamBlocks) return;
+  const index = streamEvent.index;
+  if (index === undefined || index === null) return;
+
+  if (streamEvent.type === "content_block_start") {
+    const blockType = stringOrNull(streamEvent.content_block?.type);
+    if (blockType) ctx.streamBlocks.set(index, blockType);
+    return;
+  }
+
+  if (streamEvent.type === "content_block_stop") {
+    ctx.streamBlocks.delete(index);
+  }
+}
+
+function extractPublicClaudeThinkingSummary(streamEvent, ctx) {
+  if (!streamEvent || typeof streamEvent !== "object") return null;
+
+  const delta = isRecord(streamEvent.delta) ? streamEvent.delta : null;
+  const contentBlock = isRecord(streamEvent.content_block)
+    ? streamEvent.content_block
+    : null;
+  const blockType =
+    streamEvent.index === undefined || streamEvent.index === null
+      ? ""
+      : ctx?.streamBlocks?.get(streamEvent.index) || "";
+  const candidates = [delta, contentBlock, streamEvent];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (isClaudeThinkingSummaryContainer(candidate, blockType)) {
+      const summary =
+        candidate.summary ||
+        candidate.text ||
+        candidate.content ||
+        candidate.delta ||
+        candidate.thinking_summary;
+      const text = shortText(summary, 1200);
+      if (text) return text;
+    }
+
+    const nestedSummary = candidate.summary || candidate.thinking_summary;
+    if (isRecord(nestedSummary)) {
+      const text = shortText(nestedSummary.text || nestedSummary.summary, 1200);
+      if (text) return text;
+    } else {
+      const text = shortText(nestedSummary, 1200);
+      if (text) return text;
+    }
+  }
+
+  return null;
+}
+
+function emitClaudeStreamTimeline(msg, ctx) {
+  const event = msg?.event;
+  const summary = extractPublicClaudeThinkingSummary(event, ctx);
+  rememberClaudeStreamBlock(event, ctx);
+  if (!summary) return;
+
+  emitTimeline({
+    kind: "reasoning",
+    status: "running",
+    title: "Thinking summary",
+    summary,
+    payload: {
+      backend: "claude",
+      eventType: event?.type,
+      deltaType: event?.delta?.type,
+      blockType: event?.content_block?.type,
+      sessionId: msg?.session_id,
+    },
+    sourceId: msg?.uuid,
+  });
+}
+
 /** 从 SDKAssistantMessage.message.content 里抽出全部 text 块拼接结果。 */
 function extractClaudeAssistantText(msg) {
   const content = msg?.message?.content;
@@ -67,6 +321,348 @@ function extractClaudeAssistantText(msg) {
     .filter((b) => b && b.type === "text" && typeof b.text === "string")
     .map((b) => b.text)
     .join("");
+}
+
+function inferClaudeToolKind(name) {
+  switch (name) {
+    case "Bash":
+      return "command";
+    case "FileEdit":
+    case "FileWrite":
+      return "file_change";
+    case "TodoWrite":
+      return "todo_list";
+    case "Agent":
+    case "Task":
+      return "subagent";
+    case "ExitPlanMode":
+      return "plan";
+    default:
+      return "tool";
+  }
+}
+
+function summarizeClaudeToolInput(name, input) {
+  if (!isRecord(input)) return "";
+  switch (name) {
+    case "Bash":
+      return shortText(input.command || input.description, 400) || "";
+    case "FileEdit":
+    case "FileWrite":
+      return shortText(input.file_path || input.path, 400) || "";
+    case "TodoWrite": {
+      const todos = Array.isArray(input.todos) ? input.todos : [];
+      return `${todos.length} todo item${todos.length === 1 ? "" : "s"}`;
+    }
+    case "Agent":
+    case "Task":
+      return (
+        shortText(input.description || input.subagent_type || input.agent_type, 400) ||
+        ""
+      );
+    case "ExitPlanMode":
+      return shortText(input.plan || input.summary, 400) || "";
+    default:
+      return shortText(input.description || input.path || input.file_path, 400) || "";
+  }
+}
+
+function emitClaudeToolTimeline(block, msg) {
+  const name = stringOrNull(block?.name) || "tool";
+  const input = isRecord(block?.input) ? block.input : {};
+  const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
+  emitTimeline({
+    kind: inferClaudeToolKind(name),
+    status: "started",
+    title: name,
+    summary: summarizeClaudeToolInput(name, input),
+    payload: {
+      backend: "claude",
+      toolName: name,
+      input,
+      sessionId: msg?.session_id,
+      subagentType: msg?.subagent_type,
+      taskDescription: msg?.task_description,
+    },
+    sourceId,
+  });
+}
+
+function mapClaudeSystemTimeline(msg) {
+  if (!isRecord(msg)) return;
+  const subtype = stringOrNull(msg.subtype) || "";
+
+  if (msg.type === "tool_progress") {
+    emitTimeline({
+      kind: inferClaudeToolKind(msg.tool_name),
+      status: "running",
+      title: msg.tool_name || "Tool",
+      summary: `${msg.elapsed_time_seconds ?? 0}s`,
+      payload: {
+        backend: "claude",
+        toolName: msg.tool_name,
+        elapsedTimeSeconds: msg.elapsed_time_seconds,
+        sessionId: msg.session_id,
+      },
+      sourceId: msg.tool_use_id || msg.uuid,
+    });
+    return;
+  }
+
+  if (msg.type === "tool_use_summary") {
+    emitTimeline({
+      kind: "tool",
+      status: "success",
+      title: "Tool summary",
+      summary: msg.summary,
+      payload: {
+        backend: "claude",
+        precedingToolUseIds: msg.preceding_tool_use_ids,
+        sessionId: msg.session_id,
+      },
+      sourceId: msg.uuid,
+    });
+    return;
+  }
+
+  if (msg.type === "auth_status") {
+    const text = Array.isArray(msg.output) ? msg.output.join("\n") : msg.error;
+    emitTimeline({
+      kind: msg.error ? "error" : "turn",
+      status: msg.error ? "error" : msg.isAuthenticating ? "running" : "success",
+      title: "Authentication",
+      summary: msg.error || text || "",
+      payload: {
+        backend: "claude",
+        isAuthenticating: msg.isAuthenticating,
+        sessionId: msg.session_id,
+      },
+      sourceId: msg.uuid,
+    });
+    return;
+  }
+
+  if (msg.type === "system") {
+    switch (subtype) {
+      case "init":
+        emitTimeline({
+          kind: "turn",
+          status: "started",
+          title: "Claude session",
+          summary: msg.model || "",
+          payload: {
+            backend: "claude",
+            model: msg.model,
+            cwd: msg.cwd,
+            permissionMode: msg.permissionMode,
+            tools: msg.tools,
+            mcpServers: msg.mcp_servers,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "task_started":
+        emitTimeline({
+          kind: "subagent",
+          status: "started",
+          title: msg.subagent_type || msg.task_type || "Task",
+          summary: msg.description || msg.prompt || "",
+          payload: {
+            backend: "claude",
+            description: msg.description,
+            subagentType: msg.subagent_type,
+            taskType: msg.task_type,
+            workflowName: msg.workflow_name,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.tool_use_id || msg.uuid,
+        });
+        return;
+      case "task_progress":
+        emitTimeline({
+          kind: "subagent",
+          status: "running",
+          title: msg.subagent_type || "Task progress",
+          summary: msg.summary || msg.description || msg.last_tool_name || "",
+          payload: {
+            backend: "claude",
+            description: msg.description,
+            subagentType: msg.subagent_type,
+            usage: msg.usage,
+            lastToolName: msg.last_tool_name,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.tool_use_id || msg.uuid,
+        });
+        return;
+      case "task_updated": {
+        const patch = isRecord(msg.patch) ? msg.patch : {};
+        emitTimeline({
+          kind: "subagent",
+          status: normalizeTimelineStatus(patch.status || "running"),
+          title: "Task updated",
+          summary: patch.error || patch.description || "",
+          payload: {
+            backend: "claude",
+            patch,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      }
+      case "task_notification":
+        emitTimeline({
+          kind: msg.status === "failed" ? "error" : "subagent",
+          status: normalizeTimelineStatus(msg.status || "success"),
+          title: "Task notification",
+          summary: msg.summary || "",
+          payload: {
+            backend: "claude",
+            status: msg.status,
+            outputFile: msg.output_file,
+            usage: msg.usage,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.tool_use_id || msg.uuid,
+        });
+        return;
+      case "notification":
+        emitTimeline({
+          kind: "turn",
+          status: msg.priority === "immediate" ? "requires_action" : "info",
+          title: msg.key || "Notification",
+          summary: msg.text || "",
+          payload: {
+            backend: "claude",
+            priority: msg.priority,
+            color: msg.color,
+            timeoutMs: msg.timeout_ms,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "api_retry":
+        emitTimeline({
+          kind: "turn",
+          status: "running",
+          title: "API retry",
+          summary: msg.error || "",
+          payload: {
+            backend: "claude",
+            attempt: msg.attempt,
+            maxRetries: msg.max_retries,
+            retryDelayMs: msg.retry_delay_ms,
+            errorStatus: msg.error_status,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "status":
+        emitTimeline({
+          kind: "turn",
+          status: msg.status || msg.compact_result || "info",
+          title: "Claude status",
+          summary: msg.compact_error || msg.status || "",
+          payload: {
+            backend: "claude",
+            status: msg.status,
+            permissionMode: msg.permissionMode,
+            compactResult: msg.compact_result,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "session_state_changed":
+        emitTimeline({
+          kind: "turn",
+          status: msg.state || "info",
+          title: "Session state",
+          summary: msg.state || "",
+          payload: {
+            backend: "claude",
+            state: msg.state,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "hook_started":
+      case "hook_progress":
+      case "hook_response":
+        emitTimeline({
+          kind: "tool",
+          status:
+            subtype === "hook_started"
+              ? "started"
+              : msg.outcome === "error"
+                ? "error"
+                : normalizeTimelineStatus(msg.outcome || "running"),
+          title: msg.hook_name || "Hook",
+          summary: msg.output || msg.stderr || msg.stdout || msg.hook_event || "",
+          payload: {
+            backend: "claude",
+            hookName: msg.hook_name,
+            hookEvent: msg.hook_event,
+            exitCode: msg.exit_code,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      case "permission_denied":
+        emitTimeline({
+          kind: "error",
+          status: "error",
+          title: msg.tool_name || "Permission denied",
+          summary: msg.message || msg.decision_reason || "",
+          payload: {
+            backend: "claude",
+            toolName: msg.tool_name,
+            decisionReasonType: msg.decision_reason_type,
+            decisionReason: msg.decision_reason,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.tool_use_id || msg.uuid,
+        });
+        return;
+      case "mirror_error":
+        emitTimeline({
+          kind: "error",
+          status: "error",
+          title: "Mirror error",
+          summary: msg.error || "",
+          payload: {
+            backend: "claude",
+            key: msg.key,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      default:
+        break;
+    }
+  }
+
+  if (msg.error) {
+    emitTimeline({
+      kind: "error",
+      status: "error",
+      title: stringOrNull(msg.type) || "Claude error",
+      summary: msg.error,
+      payload: {
+        backend: "claude",
+        type: msg.type,
+        subtype,
+        sessionId: msg.session_id,
+      },
+      sourceId: msg.uuid,
+    });
+  }
 }
 
 async function runClaude(cmd) {
@@ -83,20 +679,33 @@ async function runClaude(cmd) {
   };
 
   let lastSessionId = null;
+  const ctx = {
+    streamBlocks: new Map(),
+    assistantDeltaText: "",
+    assistantSnapshotText: "",
+    resultSeen: false,
+  };
   for await (const msg of query({ prompt, options })) {
     if (msg.session_id) lastSessionId = msg.session_id;
 
-    switch (msg.type) {
-      case "stream_event": {
-        const text = extractClaudeTextDelta(msg.event);
-        if (text) emit({ type: "chunk", text });
-        break;
-      }
+    try {
+      mapClaudeSystemTimeline(msg);
+      switch (msg.type) {
+        case "stream_event": {
+          emitClaudeStreamTimeline(msg, ctx);
+          const text = extractClaudeTextDelta(msg.event);
+          if (text) {
+            ctx.assistantDeltaText += text;
+            emit({ type: "chunk", text });
+          }
+          break;
+        }
       case "assistant": {
         // 完整文本块作为一次稳定快照（用于在 delta 漏接时兜底显示）。
         // 含 tool_use 的 assistant 消息这里 text 会是空串，跳过。
         const text = extractClaudeAssistantText(msg);
         if (text) {
+          ctx.assistantSnapshotText = text;
           emit({ type: "assistant_done", text, sessionId: msg.session_id });
         }
         // 抽 tool_use 块单独发，给前端做「Claude 正在 Read X」提示用。
@@ -105,12 +714,40 @@ async function runClaude(cmd) {
           for (const b of content) {
             if (b && b.type === "tool_use") {
               emit({ type: "tool_use", name: b.name, input: b.input });
+              emitClaudeToolTimeline(b, msg);
             }
           }
         }
         break;
       }
       case "result": {
+        ctx.resultSeen = true;
+        const finalText =
+          fullTextOrNull(msg.result) ||
+          fullTextOrNull(ctx.assistantDeltaText) ||
+          fullTextOrNull(ctx.assistantSnapshotText);
+        const errorSummary = msg.is_error
+          ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
+          : "";
+        emitTimeline({
+          kind: "turn",
+          status: msg.is_error ? "error" : "success",
+          title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
+          summary: errorSummary,
+          payload: addFinalText({
+            backend: "claude",
+            subtype: msg.subtype,
+            stopReason: msg.stop_reason,
+            terminalReason: msg.terminal_reason,
+            totalCostUsd: msg.total_cost_usd,
+            usage: msg.usage,
+            modelUsage: msg.modelUsage,
+            permissionDenials: msg.permission_denials,
+            errors: msg.errors,
+            sessionId: msg.session_id || lastSessionId,
+          }, finalText),
+          sourceId: msg.uuid,
+        });
         emit({
           type: "done",
           sessionId: msg.session_id || lastSessionId,
@@ -124,10 +761,38 @@ async function runClaude(cmd) {
       default:
         // 第一阶段忽略，未来要可视化 tool_result / system init 时再开。
         break;
+      }
+    } catch (err) {
+      emitTimeline({
+        kind: "error",
+        status: "error",
+        title: "Claude event mapping",
+        summary: err?.message || String(err),
+        payload: {
+          backend: "claude",
+          rawType: msg?.type,
+        },
+        sourceId: msg?.uuid,
+      });
     }
   }
-  if (lastSessionId) {
+  if (lastSessionId && !ctx.resultSeen) {
     // 兜底：万一某些 result 路径没有触发 done 事件
+    const finalText =
+      fullTextOrNull(ctx.assistantDeltaText) ||
+      fullTextOrNull(ctx.assistantSnapshotText);
+    emitTimeline({
+      kind: "turn",
+      status: "success",
+      title: "Claude turn completed",
+      summary: "",
+      payload: addFinalText({
+        backend: "claude",
+        subtype: "success",
+        sessionId: lastSessionId,
+      }, finalText),
+      sourceId: `${lastSessionId}:turn:done`,
+    });
     emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
   }
 }
@@ -148,6 +813,186 @@ function mapCodexPermission(p) {
   }
 }
 
+function getCodexItemType(item) {
+  return stringOrNull(item?.type || item?.item_type) || "";
+}
+
+function getCodexStatus(eventType, item) {
+  const status = stringOrNull(item?.status);
+  if (status) return normalizeTimelineStatus(status);
+  if (eventType === "item.started") return "started";
+  if (eventType === "item.updated") return "running";
+  if (eventType === "item.completed") return "success";
+  if (eventType === "turn.started") return "started";
+  if (eventType === "turn.completed") return "success";
+  if (eventType === "turn.failed" || eventType === "error") return "error";
+  return "info";
+}
+
+function codexTimelineKindForItem(item) {
+  switch (getCodexItemType(item)) {
+    case "reasoning":
+      return "reasoning";
+    case "command_execution":
+      return "command";
+    case "file_change":
+      return "file_change";
+    case "mcp_tool_call":
+      return "mcp";
+    case "web_search":
+      return "web_search";
+    case "todo_list":
+      return "todo_list";
+    case "error":
+      return "error";
+    default:
+      return null;
+  }
+}
+
+function summarizeCodexTodoList(items) {
+  if (!Array.isArray(items)) return "";
+  return items
+    .map((todo) => {
+      if (!isRecord(todo)) return shortText(todo, 120);
+      const prefix = todo.completed ? "[x]" : "[ ]";
+      return `${prefix} ${shortText(todo.text, 160) || ""}`.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function summarizeCodexFileChanges(changes) {
+  if (!Array.isArray(changes)) return "";
+  return changes
+    .map((change) => {
+      if (!isRecord(change)) return shortText(change, 160);
+      const path = shortText(change.path, 240) || "(unknown path)";
+      return `${change.kind || "update"} ${path}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function codexTimelineTitle(kind, item, eventType) {
+  switch (kind) {
+    case "reasoning":
+      return "Reasoning";
+    case "command":
+      return shortText(item.command, 200) || "Command";
+    case "file_change":
+      return "File change";
+    case "mcp":
+      return [item.server, item.tool].filter(Boolean).join(" / ") || "MCP tool";
+    case "web_search":
+      return shortText(item.query, 200) || "Web search";
+    case "todo_list":
+      return eventType === "item.completed" ? "Plan completed" : "Plan";
+    case "error":
+      return "Error";
+    default:
+      return kind;
+  }
+}
+
+function codexTimelineSummary(kind, item) {
+  switch (kind) {
+    case "reasoning":
+      return shortText(item.text, 1200) || "";
+    case "command":
+      return (
+        shortText(item.aggregated_output, 1200) ||
+        shortText(item.command, 1200) ||
+        ""
+      );
+    case "file_change":
+      return summarizeCodexFileChanges(item.changes);
+    case "mcp":
+      return [item.server, item.tool].filter(Boolean).join(" / ");
+    case "web_search":
+      return shortText(item.query, 1200) || "";
+    case "todo_list":
+      return summarizeCodexTodoList(item.items);
+    case "error":
+      return shortText(item.message, 1200) || "";
+    default:
+      return "";
+  }
+}
+
+function codexTimelinePayload(kind, item, eventType) {
+  const base = {
+    backend: "codex",
+    eventType,
+    itemType: getCodexItemType(item),
+    status: item?.status,
+  };
+  switch (kind) {
+    case "reasoning":
+      return { ...base, text: item.text };
+    case "command":
+      return {
+        ...base,
+        command: item.command,
+        aggregatedOutput: item.aggregated_output,
+        exitCode: item.exit_code,
+      };
+    case "file_change":
+      return { ...base, changes: item.changes };
+    case "mcp":
+      return { ...base, server: item.server, tool: item.tool };
+    case "web_search":
+      return { ...base, query: item.query };
+    case "todo_list":
+      return { ...base, items: item.items };
+    case "error":
+      return { ...base, message: item.message };
+    default:
+      return base;
+  }
+}
+
+function emitCodexItemTimeline(eventType, item) {
+  const kind = codexTimelineKindForItem(item);
+  if (!kind) return;
+  emitTimeline({
+    kind,
+    status: getCodexStatus(eventType, item),
+    title: codexTimelineTitle(kind, item, eventType),
+    summary: codexTimelineSummary(kind, item),
+    payload: codexTimelinePayload(kind, item, eventType),
+    sourceId: item?.id,
+  });
+}
+
+function emitCodexTurnTimeline(eventType, ev, ctx) {
+  const errorMessage = ev?.error?.message || ev?.message || "";
+  const finalText =
+    fullTextOrNull(ev?.result) ||
+    fullTextOrNull(ev?.output) ||
+    fullTextOrNull(ev?.text) ||
+    fullTextOrNull(ctx?.assistantSnapshotText) ||
+    fullTextOrNull(ctx?.assistantDeltaText);
+  emitTimeline({
+    kind: "turn",
+    status: getCodexStatus(eventType, null),
+    title:
+      eventType === "turn.started"
+        ? "Codex turn started"
+        : eventType === "turn.completed"
+          ? "Codex turn completed"
+          : "Codex turn failed",
+    summary: errorMessage || "",
+    payload: addFinalText({
+      backend: "codex",
+      eventType,
+      usage: ev?.usage,
+      error: ev?.error,
+      sessionId: ctx?.lastThreadId,
+    }, finalText),
+  });
+}
+
 /**
  * 把 @openai/codex-sdk 的 ThreadEvent 翻译为 Lilia 的 NDJSON 协议。
  * SDK 的事件 schema 可能在 minor 版本间漂移，所有 picker 都做防御性 fallback。
@@ -160,7 +1005,12 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   const type = ev.type || "";
 
-  if (type === "thread.started" || type === "turn.started") return;
+  if (type === "thread.started") return;
+
+  if (type === "turn.started") {
+    emitCodexTurnTimeline(type, ev, ctx);
+    return;
+  }
 
   // 文本增量：0.47 的 item.updated 给的是累积后的 ThreadItem.text（不是 delta），
   // 用 itemTextSeen 按 item.id 跟踪已发长度提取增量。若上游 SDK 改回发 delta
@@ -168,6 +1018,7 @@ function mapCodexEventToNdjson(ev, ctx) {
   if (type === "item.updated") {
     const item = ev.item || ev;
     const kind = item?.type || item?.item_type;
+    emitCodexItemTimeline(type, item);
     if (
       (kind === "agent_message" || kind === "assistant_message") &&
       typeof item?.text === "string" &&
@@ -176,16 +1027,24 @@ function mapCodexEventToNdjson(ev, ctx) {
       const seen = ctx.itemTextSeen.get(item.id) || 0;
       const total = item.text.length;
       if (total > seen) {
-        emit({ type: "chunk", text: item.text.slice(seen) });
+        const delta = item.text.slice(seen);
+        ctx.assistantDeltaText += delta;
+        ctx.assistantSnapshotText = item.text;
+        emit({ type: "chunk", text: delta });
         ctx.itemTextSeen.set(item.id, total);
       } else if (total < seen) {
+        ctx.assistantDeltaText += item.text;
+        ctx.assistantSnapshotText = item.text;
         emit({ type: "chunk", text: item.text });
       }
       return;
     }
     // 老 SDK / 未识别 item 类型走 picker 兜底。
     const text = pickCodexDeltaText(ev);
-    if (text) emit({ type: "chunk", text });
+    if (text) {
+      ctx.assistantDeltaText += text;
+      emit({ type: "chunk", text });
+    }
     return;
   }
 
@@ -193,6 +1052,7 @@ function mapCodexEventToNdjson(ev, ctx) {
   if (type === "item.completed" || type === "item.started") {
     const item = ev.item || ev;
     const kind = item?.item_type || item?.type;
+    emitCodexItemTimeline(type, item);
     if (
       kind === "agent_message" ||
       kind === "assistant_message" ||
@@ -200,6 +1060,7 @@ function mapCodexEventToNdjson(ev, ctx) {
     ) {
       const text = pickCodexAssistantText(item);
       if (text && type === "item.completed") {
+        ctx.assistantSnapshotText = text;
         emit({ type: "assistant_done", text, sessionId: ctx.lastThreadId });
         if (item?.id) ctx.itemTextSeen.delete(item.id);
       }
@@ -214,6 +1075,8 @@ function mapCodexEventToNdjson(ev, ctx) {
   }
 
   if (type === "turn.completed") {
+    ctx.turnCompletedSeen = true;
+    emitCodexTurnTimeline(type, ev, ctx);
     emit({
       type: "done",
       sessionId: ctx.lastThreadId,
@@ -224,6 +1087,7 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   if (type === "turn.failed" || type === "error") {
     const msg = ev.error?.message || ev.message || "codex turn failed";
+    emitCodexTurnTimeline(type, ev, ctx);
     emit({ type: "error", message: msg });
   }
 }
@@ -286,6 +1150,9 @@ async function runCodex(cmd) {
   const ctx = {
     lastThreadId: thread?.id ?? resumeSessionId ?? null,
     itemTextSeen: new Map(),
+    assistantDeltaText: "",
+    assistantSnapshotText: "",
+    turnCompletedSeen: false,
   };
 
   // 0.47 起 thread.run() 返回完整 Turn（非流式），要拿事件流必须用 runStreamed。
@@ -295,8 +1162,19 @@ async function runCodex(cmd) {
     mapCodexEventToNdjson(ev, ctx);
   }
 
-  if (ctx.lastThreadId) {
+  if (ctx.lastThreadId && !ctx.turnCompletedSeen) {
     // 兜底 done：与 Claude 分支语义一致——某些版本可能不发 turn.completed。
+    emitTimeline({
+      kind: "turn",
+      status: "success",
+      title: "Codex turn completed",
+      summary: "",
+      payload: addFinalText({
+        backend: "codex",
+        eventType: "turn.completed",
+        sessionId: ctx.lastThreadId,
+      }, fullTextOrNull(ctx.assistantSnapshotText) || fullTextOrNull(ctx.assistantDeltaText)),
+    });
     emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
   }
 }
@@ -306,10 +1184,97 @@ async function runCodex(cmd) {
 async function runDryRun(cmd) {
   const backend = cmd.backend === "codex" ? "codex" : "claude";
   const sid = `dry-${backend}-xxx`;
+  emitTimeline({
+    kind: "turn",
+    status: "started",
+    title: `${backend} turn started`,
+    summary: "Dry-run agent turn",
+    payload: { backend, sessionId: sid },
+    sourceId: `${sid}:turn:start`,
+  });
+  emitTimeline({
+    kind: "reasoning",
+    status: "running",
+    title: "公开思考摘要",
+    summary: "正在检查当前实现并规划下一步。",
+    payload: { backend, source: "dry-run" },
+    sourceId: `${sid}:reasoning`,
+  });
+  emitTimeline({
+    kind: "command",
+    status: "success",
+    title: "yarn verify:contracts",
+    summary: "Contracts verification completed.",
+    payload: {
+      backend,
+      command: "yarn verify:contracts",
+      exitCode: 0,
+      aggregatedOutput: "ok",
+    },
+    sourceId: `${sid}:command`,
+  });
+  emitTimeline({
+    kind: "file_change",
+    status: "success",
+    title: "File changes",
+    summary: "update apps/desktop/src/components/chat/AgentTimeline.vue",
+    payload: {
+      backend,
+      changes: [
+        {
+          kind: "update",
+          path: "apps/desktop/src/components/chat/AgentTimeline.vue",
+        },
+      ],
+    },
+    sourceId: `${sid}:file-change`,
+  });
+  emitTimeline({
+    kind: "subagent",
+    status: "success",
+    title: "Worker summary",
+    summary: "子代理完成 timeline 样式切片。",
+    payload: { backend, agentType: "worker" },
+    sourceId: `${sid}:subagent`,
+  });
+  emitTimeline({
+    kind: "todo_list",
+    status: "success",
+    title: "计划",
+    summary: "[x] 接线 runner\n[x] 渲染 timeline",
+    payload: {
+      backend,
+      items: [
+        { text: "接线 runner", completed: true },
+        { text: "渲染 timeline", completed: true },
+      ],
+    },
+    sourceId: `${sid}:todo`,
+  });
+  emitTimeline({
+    kind: "error",
+    status: "error",
+    title: "示例错误",
+    summary: "Dry-run error sample for UI coverage.",
+    payload: { backend, message: "Dry-run error sample" },
+    sourceId: `${sid}:error`,
+  });
   emit({ type: "chunk", text: "hello " });
   emit({ type: "chunk", text: "from " });
   emit({ type: "chunk", text: backend });
   emit({ type: "assistant_done", text: `hello from ${backend}`, sessionId: sid });
+  emitTimeline({
+    kind: "turn",
+    status: "success",
+    title: `${backend} turn completed`,
+    summary: "",
+    payload: {
+      backend,
+      sessionId: sid,
+      finalText: `hello from ${backend}`,
+    },
+    sourceId: `${sid}:turn:done`,
+  });
   emit({ type: "done", sessionId: sid, subtype: "success" });
 }
 

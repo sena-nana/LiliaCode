@@ -15,6 +15,7 @@ use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEven
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
+pub mod agent_timeline;
 mod plugins;
 mod projects_tasks;
 mod store;
@@ -24,6 +25,7 @@ mod window_state;
 use plugins::{
     ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview,
 };
+use agent_timeline::AgentTimelineEventInput;
 use store::LiliaStore;
 use todos::AgentTodoItem;
 
@@ -227,6 +229,70 @@ struct DoneEvent {
 struct ErrorEvent {
     task_id: String,
     message: String,
+}
+
+fn persist_and_emit_timeline_event(
+    app_handle: &AppHandle,
+    task_id: &str,
+    backend: &str,
+    turn_id: &str,
+    event: JsonValue,
+) {
+    let Some(obj) = event.as_object() else {
+        return;
+    };
+
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("tool")
+        .to_string();
+    let status = obj
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("info")
+        .to_string();
+    let title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or(kind.as_str())
+        .to_string();
+    let summary = obj
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+    let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
+    let source_id = obj.get("sourceId").and_then(|v| v.as_str());
+    let id = source_id.map(|sid| format!("{task_id}:{turn_id}:{sid}"));
+
+    let input = AgentTimelineEventInput {
+        id,
+        task_id: task_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        backend: backend.to_string(),
+        kind,
+        status,
+        title,
+        summary,
+        payload,
+        created_at: None,
+        updated_at: None,
+        order: None,
+    };
+
+    let store = app_handle.state::<LiliaStore>();
+    match store
+        .conn()
+        .and_then(|conn| agent_timeline::insert(&conn, input))
+    {
+        Ok(saved) => {
+            let _ = app_handle.emit("agent:timeline", saved);
+        }
+        Err(err) => {
+            eprintln!("[agent-timeline] persist failed: {err}");
+        }
+    }
 }
 
 // ---------- 进程内状态 ----------
@@ -522,6 +588,7 @@ fn spawn_agent_turn(
     let composer_for_thread = composer.clone();
     let prompt_for_thread = content.clone();
     let backend_for_thread = backend.clone();
+    let turn_id_for_thread = format!("turn-{}", now_millis());
 
     thread::spawn(move || {
         let queued_count = {
@@ -680,6 +747,17 @@ fn spawn_agent_turn(
                             },
                         );
                     }
+                    "timeline" => {
+                        if let Some(event) = value.get("event").cloned() {
+                            persist_and_emit_timeline_event(
+                                &app_handle,
+                                &task_id_for_thread,
+                                &backend_for_thread,
+                                &turn_id_for_thread,
+                                event,
+                            );
+                        }
+                    }
                     "assistant_done" => {
                         // 兜底：如果某轮文本只来自 assistant 消息没走 delta，把它补到累计缓冲。
                         if assistant_buf.is_empty() {
@@ -764,26 +842,8 @@ fn finish_agent_turn(
     task_id: String,
     backend: String,
     last_session_id: Option<String>,
-    assistant_buf: Option<String>,
+    _assistant_buf: Option<String>,
 ) {
-    if let Some(buf) = assistant_buf {
-        let store = app_handle.state::<ChatStore>();
-        let reply = ChatMessage {
-            id: store.new_id("a"),
-            task_id: task_id.clone(),
-            role: "assistant".to_string(),
-            content: buf,
-            created_at: now_millis(),
-        };
-        store
-            .messages
-            .lock()
-            .unwrap()
-            .entry(task_id.clone())
-            .or_default()
-            .push(reply);
-    }
-
     // 记下 session id 供下一轮 resume。
     if let Some(sid) = last_session_id.clone() {
         let store = app_handle.state::<ChatStore>();
@@ -996,14 +1056,26 @@ fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatStore>
 }
 
 #[tauri::command]
-fn chat_reset_session(task_id: String, store: State<'_, ChatStore>) {
-    let mut sessions = store.sdk_sessions.lock().unwrap();
+fn chat_reset_session(
+    task_id: String,
+    chat_store: State<'_, ChatStore>,
+    app: AppHandle,
+) {
+    let mut sessions = chat_store.sdk_sessions.lock().unwrap();
     sessions.remove(&session_key(BACKEND_CLAUDE, &task_id));
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
     drop(sessions);
-    store.messages.lock().unwrap().remove(&task_id);
-    store.running_tasks.lock().unwrap().remove(&task_id);
-    store.pending_turns.lock().unwrap().remove(&task_id);
+    chat_store.messages.lock().unwrap().remove(&task_id);
+    chat_store.running_tasks.lock().unwrap().remove(&task_id);
+    chat_store.pending_turns.lock().unwrap().remove(&task_id);
+    if let Some(store) = app.try_state::<LiliaStore>() {
+        if let Err(err) = store
+            .conn()
+            .and_then(|conn| agent_timeline::clear(&conn, &task_id).map(|_| ()))
+        {
+            eprintln!("[agent-timeline] clear on reset failed: {err}");
+        }
+    }
 }
 
 fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {
@@ -1596,6 +1668,8 @@ pub fn run() {
             projects_tasks::project_reorder,
             projects_tasks::task_reorder,
             projects_tasks::task_reparent,
+            agent_timeline::agent_timeline_list,
+            agent_timeline::agent_timeline_clear_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

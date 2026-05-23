@@ -177,6 +177,63 @@ export type PermissionMode = "full" | "ask" | "readonly";
  */
 export type ChatBackendKind = "claude" | "codex";
 
+/**
+ * Agent 工作过程时间线。ChatMessage 只承载对话文本，工具调用、计划推进、
+ * 状态变化等过程信息走独立 timeline；runner NDJSON 到这些事件的映射由
+ * 后续接线层负责。
+ */
+export type AgentTimelineEventKind =
+  | "reasoning"
+  | "plan"
+  | "todo_list"
+  | "tool"
+  | "command"
+  | "subagent"
+  | "file_change"
+  | "mcp"
+  | "web_search"
+  | "error"
+  | "turn";
+
+export type AgentTimelineEventStatus =
+  | "pending"
+  | "started"
+  | "running"
+  | "in_progress"
+  | "completed"
+  | "done"
+  | "success"
+  | "failed"
+  | "error"
+  | "cancelled"
+  | "skipped"
+  | "info"
+  | "requires_action";
+
+export type AgentTimelinePayload =
+  | null
+  | boolean
+  | number
+  | string
+  | AgentTimelinePayload[]
+  | { [key: string]: AgentTimelinePayload };
+
+export interface AgentTimelineEvent {
+  id: string;
+  taskId: string;
+  turnId: string | null;
+  backend: ChatBackendKind;
+  kind: AgentTimelineEventKind;
+  status: AgentTimelineEventStatus;
+  title: string;
+  summary: string | null;
+  payload: AgentTimelinePayload;
+  createdAt: number;
+  updatedAt: number;
+  /** 同一 task 内的显示顺序，越小越靠前。 */
+  order: number;
+}
+
 export interface ChatComposerState {
   taskId: string;
   backend: ChatBackendKind;

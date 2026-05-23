@@ -130,6 +130,8 @@ fn run_migrations(conn: &mut Connection) -> Result<(), String> {
         migration_v4_pinned,
         // v5: tasks.pinned 列（session 置顶）
         migration_v5_task_pinned,
+        // v6: Agent 工作过程时间线
+        migration_v6_agent_timeline_events,
     ];
 
     let current: i64 = conn
@@ -249,4 +251,32 @@ fn migration_v5_task_pinned(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store v5: 加 tasks.pinned 列失败：{e}"))
+}
+
+fn migration_v6_agent_timeline_events(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS agent_timeline_events (
+          id          TEXT PRIMARY KEY,
+          task_id     TEXT NOT NULL,
+          turn_id     TEXT,
+          backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          kind        TEXT NOT NULL CHECK (kind IN (
+                        'reasoning','plan','todo_list','tool','command','subagent',
+                        'file_change','mcp','web_search','error','turn'
+                      )),
+          status      TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          summary     TEXT,
+          payload     TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL,
+          "order"     INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_timeline_events_task_id_order
+          ON agent_timeline_events(task_id, "order");
+        "#,
+    )
+    .map_err(|e| format!("lilia-store v6: 建 agent_timeline_events 失败：{e}"))
 }
