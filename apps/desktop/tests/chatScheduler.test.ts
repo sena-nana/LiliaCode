@@ -248,9 +248,27 @@ describe("chat scheduler", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "展开过程 1 项" }));
     await waitFor(() => {
-      expect(view.getByText(/命令 · yarn verify/)).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText(/正在运行完整验证/)).toBeInTheDocument();
-      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
+    });
+
+    const commandItem = view.getByRole("button", { name: /yarn verify/ })
+      .closest(".agent-timeline__item");
+    const finalItem = view.getByText("最终结果完整展示。")
+      .closest(".agent-timeline__item");
+    expect(commandItem).not.toBe(finalItem);
+    expect(commandItem).not.toHaveClass("is-final-reply");
+
+    const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
+    expect(timelineText.indexOf("yarn verify"))
+      .toBeLessThan(timelineText.indexOf("最终结果完整展示。"));
+
+    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
+    await waitFor(() => {
+      expect(view.getByText("验证输出详情")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "true");
     });
   });
 
@@ -399,12 +417,34 @@ describe("chat scheduler", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "展开过程 2 项" }));
     await waitFor(() => {
-      expect(view.getByText(/命令 · yarn test/)).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn test/ }))
+        .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText(/这条过程默认不应显示/)).toBeInTheDocument();
-      expect(view.getByText(/计划 · 更新计划/)).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /更新计划/ }))
+        .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText(/这条计划默认不应显示/)).toBeInTheDocument();
       expect(view.getByRole("button", { name: "收起过程 2 项" }))
         .toHaveAttribute("aria-expanded", "true");
+    });
+
+    const processItem = view.getByRole("button", { name: /yarn test/ })
+      .closest(".agent-timeline__item");
+    const finalItem = view.getByText("最终回复应该直接可见。")
+      .closest(".agent-timeline__item");
+    expect(processItem).not.toBe(finalItem);
+    expect(processItem).not.toHaveClass("is-final-reply");
+
+    const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
+    expect(timelineText.indexOf("yarn test"))
+      .toBeLessThan(timelineText.indexOf("最终回复应该直接可见。"));
+    expect(timelineText.indexOf("更新计划"))
+      .toBeLessThan(timelineText.indexOf("最终回复应该直接可见。"));
+
+    await fireEvent.click(view.getByRole("button", { name: /yarn test/ }));
+    await fireEvent.click(view.getByRole("button", { name: /更新计划/ }));
+    await waitFor(() => {
+      expect(view.getByText("折叠后的命令详情")).toBeInTheDocument();
+      expect(view.getByText("折叠后的计划详情")).toBeInTheDocument();
     });
   });
 

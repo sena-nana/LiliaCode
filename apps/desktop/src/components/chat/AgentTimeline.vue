@@ -38,7 +38,6 @@ import {
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
-  timelineFinalText,
   timelineKindLabel,
   timelineStatusClass,
   timelineStatusLabel,
@@ -78,20 +77,10 @@ const visibleMessages = computed(() =>
   (props.messages ?? []).filter((message) => message.role !== "assistant"),
 );
 
-const finalReplySeen = computed(() => props.events.some(isTimelineFinalReply));
-
 const finalReplyCollapseKey = computed(() =>
   props.events
     .filter(isTimelineFinalReply)
-    .map((event) =>
-      [
-        event.id,
-        event.status,
-        event.updatedAt,
-        event.order,
-        timelineFinalText(event).length,
-      ].join(":")
-    )
+    .map((event) => [event.id, event.status, event.updatedAt, event.order].join(":"))
     .join("|"),
 );
 
@@ -117,42 +106,92 @@ const chronologicalEntries = computed<TimelineEntry[]>(() =>
 );
 
 const orderedEntries = computed<TimelineEntry[]>(() => {
-  const output: TimelineEntry[] = [];
-  let turnSpan: TimelineEntry[] = [];
+  const entries = chronologicalEntries.value;
+  const hiddenEventIds = new Set<string>();
+  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
+  const finalByTurnId = new Map<string, TimelineEventEntry>();
 
-  function flushRunningSpan() {
-    output.push(...turnSpan);
-    turnSpan = [];
+  function addProcessEvent(finalEntry: TimelineEventEntry, event: AgentTimelineEvent) {
+    const list = processEventsByFinalId.get(finalEntry.event.id) ?? [];
+    if (!list.some((item) => item.id === event.id)) list.push(event);
+    processEventsByFinalId.set(finalEntry.event.id, list);
+    hiddenEventIds.add(event.id);
   }
 
-  function visibleSpanEntries(): TimelineEntry[] {
-    return turnSpan.filter((entry) => entry.type === "message");
+  function occursBeforeFinal(entry: TimelineEventEntry, finalEntry: TimelineEventEntry): boolean {
+    return entry.createdAt < finalEntry.createdAt ||
+      (entry.createdAt === finalEntry.createdAt && entry.order < finalEntry.order);
   }
 
-  for (const entry of chronologicalEntries.value) {
+  for (const entry of entries) {
+    if (
+      entry.type === "event" &&
+      isTimelineFinalReply(entry.event) &&
+      entry.event.turnId
+    ) {
+      finalByTurnId.set(entry.event.turnId, entry);
+    }
+  }
+
+  for (const entry of entries) {
+    if (
+      entry.type === "event" &&
+      !isTimelineFinalReply(entry.event) &&
+      entry.event.turnId
+    ) {
+      const finalEntry = finalByTurnId.get(entry.event.turnId);
+      if (finalEntry && occursBeforeFinal(entry, finalEntry)) {
+        addProcessEvent(finalEntry, entry.event);
+      }
+    }
+  }
+
+  let pendingSpanEvents: TimelineEventEntry[] = [];
+  let collectingSpan = false;
+  for (const entry of entries) {
     if (entry.type === "message") {
-      turnSpan.push(entry);
+      collectingSpan = true;
       continue;
     }
-
     if (isTimelineFinalReply(entry.event)) {
-      const processEvents = turnSpan
-        .filter((item): item is TimelineEventEntry => item.type === "event")
-        .map((item) => item.event);
-      output.push(...visibleSpanEntries());
-      output.push({ ...entry, processEvents });
-      turnSpan = [];
+      for (const processEntry of pendingSpanEvents) {
+        if (!hiddenEventIds.has(processEntry.event.id)) {
+          addProcessEvent(entry, processEntry.event);
+        }
+      }
+      pendingSpanEvents = [];
+      collectingSpan = false;
       continue;
     }
+    if (collectingSpan && !hiddenEventIds.has(entry.event.id)) {
+      pendingSpanEvents.push(entry);
+    }
+  }
 
-    if (turnSpan.length > 0) {
-      turnSpan.push(entry);
+  const output: TimelineEntry[] = [];
+  for (const entry of entries) {
+    if (entry.type === "event" && hiddenEventIds.has(entry.event.id)) continue;
+
+    if (entry.type === "event" && isTimelineFinalReply(entry.event)) {
+      const processEvents = processEventsByFinalId.get(entry.event.id) ?? [];
+      if (processGroupExpanded(entry.event)) {
+        output.push(...processEvents.map((event): TimelineEventEntry => ({
+          type: "event",
+          id: `process:${entry.event.id}:${event.id}`,
+          createdAt: event.createdAt,
+          order: event.order + 1,
+          event,
+        })));
+      }
+      output.push({
+        ...entry,
+        processEvents,
+      });
     } else {
       output.push(entry);
     }
   }
 
-  flushRunningSpan();
   return output;
 });
 
@@ -181,9 +220,6 @@ watch(
 );
 
 function expanded(event: AgentTimelineEvent): boolean {
-  if (finalReplySeen.value && !isTimelineFinalReply(event)) {
-    return toggledIds.value.has(event.id);
-  }
   return isTimelineExpanded(event, toggledIds.value);
 }
 
@@ -367,13 +403,16 @@ function previewText(event: AgentTimelineEvent): string {
               :id="`agent-timeline-details-${entry.event.id}`"
               class="agent-timeline__content"
             >
+              <TimelineFinalReply
+                v-if="isTimelineFinalReply(entry.event)"
+                :event="entry.event"
+              />
               <component
+                v-else
                 :is="eventComponent(entry.event)"
                 :event="entry.event"
                 :expanded="expanded(entry.event)"
                 :compact="isCompact(entry.event)"
-                :process-events="entry.processEvents ?? []"
-                :process-expanded="processGroupExpanded(entry.event)"
               />
             </div>
           </article>

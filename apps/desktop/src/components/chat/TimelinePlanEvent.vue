@@ -16,21 +16,28 @@ const props = defineProps<{
   compact?: boolean;
 }>();
 
-const planText = computed(() => {
+const planDetailText = computed(() => {
   const payload = readTimelinePayloadRecord(props.event);
   const input = readPayloadRecord(payload.input ?? null);
   return firstText([
-    props.event.summary,
     payload.plan,
     payload.steps,
-    payload.summary,
-    payload.text,
-    payload.content,
     input.plan,
     input.steps,
+    payload.content,
+    payload.text,
+    payload.summary,
     input.summary,
   ]);
 });
+
+const compactText = computed(() =>
+  props.event.summary?.trim() || planDetailText.value,
+);
+
+const planText = computed(() =>
+  planDetailText.value || props.event.summary?.trim() || "",
+);
 
 const collapsed = computed(() => props.compact === true || !props.expanded);
 const planView = computed(() =>
@@ -41,7 +48,7 @@ const planView = computed(() =>
 );
 const compactView = computed(() =>
   createTimelineMarkdownView(
-    truncateTimelineText(planText.value || "暂无计划内容。", 180),
+    truncateTimelineText(compactText.value || "暂无计划内容。", 180),
     { forceSingleLine: true, singleLineTone: "muted" },
   ),
 );

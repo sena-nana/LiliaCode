@@ -2058,8 +2058,7 @@ button.ghost:hover {
 }
 
 .timeline-card__todo-list,
-.timeline-card__file-list,
-.timeline-card__process-list {
+.timeline-card__file-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2067,10 +2066,6 @@ button.ghost:hover {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.timeline-card__process-row {
-  padding-left: 2px;
 }
 
 .timeline-card__todo-item,
