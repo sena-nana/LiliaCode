@@ -14,6 +14,7 @@ import {
   Github,
   Sparkles,
   X,
+  Archive,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import {
@@ -22,6 +23,7 @@ import {
   listProjects,
 } from "../services/projectsStore";
 import {
+  archiveTask,
   createDraftOrphan,
   createDraftTask,
   listOrphanConversations,
@@ -100,6 +102,24 @@ function toggleAll() {
 const orphansExpanded = ref(true);
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
+}
+
+// --- 孤儿 session 归档确认 ---
+const confirmingOrphanId = ref<string | null>(null);
+
+function onOrphanArchiveClick(e: MouseEvent, orphanId: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (confirmingOrphanId.value === orphanId) {
+    archiveTask(orphanId);
+    confirmingOrphanId.value = null;
+  } else {
+    confirmingOrphanId.value = orphanId;
+  }
+}
+
+function onOrphanRowLeave() {
+  confirmingOrphanId.value = null;
 }
 
 // ── Navigation helpers ──
@@ -311,8 +331,18 @@ function onProjectDeleted(projectId: string) {
         <div class="sb-collapse__inner">
           <div class="sb-tree">
             <RouterLink v-for="o in orphans" :key="o.id" :to="`/chats/${o.id}`" class="sb-tree__row sb-tree__row--orphan"
-              :class="{ 'is-active': isActiveOrphan(o.id) }">
+              :class="{ 'is-active': isActiveOrphan(o.id) }"
+              @mouseleave="onOrphanRowLeave">
               <span class="sb-tree__name">{{ o.title }}</span>
+              <div class="sb-tree__hover-tools" @click.stop>
+                <button type="button" class="sb-icon-btn" :class="{ 'is-confirming': confirmingOrphanId === o.id }"
+                  :title="confirmingOrphanId === o.id ? '确认归档，再点一次' : '归档'"
+                  :aria-label="confirmingOrphanId === o.id ? '确认归档，再点一次' : '归档'"
+                  @click="onOrphanArchiveClick($event, o.id)">
+                  <template v-if="confirmingOrphanId === o.id">确认</template>
+                  <Archive v-else :size="13" aria-hidden="true" />
+                </button>
+              </div>
             </RouterLink>
             <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
           </div>

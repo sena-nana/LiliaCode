@@ -149,6 +149,23 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
   }
 }
 
+/** 归档单条对话：软删除（archived = 1），并从缓存移除。 */
+export async function archiveTask(taskId: string): Promise<boolean> {
+  const ok = await invoke<boolean>("task_archive", { id: taskId });
+  if (!ok) return false;
+  for (const [pid, list] of Object.entries(TASKS.value)) {
+    const idx = list.findIndex((t) => t.id === taskId);
+    if (idx !== -1) {
+      const next = [...list];
+      next.splice(idx, 1);
+      TASKS.value = { ...TASKS.value, [pid]: next };
+      return true;
+    }
+  }
+  ORPHAN_LIST.value = ORPHAN_LIST.value.filter((o) => o.id !== taskId);
+  return true;
+}
+
 /**
  * 「归档所有对话」：软删除该项目下所有 Task + 清空草稿。
  * 返回清掉的数量（含草稿），方便调用方做提示。

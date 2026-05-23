@@ -739,17 +739,32 @@ pre code {
   cursor: text;
 }
 
-/* 项目行右侧 hover 才显示的「+ / …」工具 */
+/* 项目行 / 子行 / 孤儿行右侧 hover 才显示的工具 */
 .sb-tree__hover-tools {
   display: inline-flex;
   gap: 1px;
   opacity: 0;
   transition: opacity 0.12s ease;
+  margin-left: auto;
 }
 
 .sb-tree__row--project:hover .sb-tree__hover-tools,
-.sb-tree__row--project:focus-within .sb-tree__hover-tools {
+.sb-tree__row--project:focus-within .sb-tree__hover-tools,
+.sb-tree__row--child:hover .sb-tree__hover-tools,
+.sb-tree__row--child:focus-within .sb-tree__hover-tools,
+.sb-tree__row--orphan:hover .sb-tree__hover-tools,
+.sb-tree__row--orphan:focus-within .sb-tree__hover-tools {
   opacity: 1;
+}
+
+.sb-icon-btn.is-confirming {
+  width: auto;
+  padding: 0 6px;
+  background: var(--err-soft);
+  color: var(--err);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .sb-tree__children {

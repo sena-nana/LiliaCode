@@ -22,7 +22,7 @@ import {
   removeProject,
   renameProject,
 } from "../../services/projectsStore";
-import { listProjectConversations } from "../../services/tasksStore";
+import { archiveTask, listProjectConversations } from "../../services/tasksStore";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 
 const props = defineProps<{
@@ -44,6 +44,24 @@ const route = useRoute();
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
+
+// --- Session 归档确认 ---
+const confirmingId = ref<string | null>(null);
+
+function onArchiveClick(e: MouseEvent, taskId: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (confirmingId.value === taskId) {
+    archiveTask(taskId);
+    confirmingId.value = null;
+  } else {
+    confirmingId.value = taskId;
+  }
+}
+
+function onRowLeave() {
+  confirmingId.value = null;
+}
 
 async function startRename() {
   editingId.value = props.project.id;
@@ -223,8 +241,18 @@ function onMoreClick(e: MouseEvent) {
       <div class="sb-collapse__inner">
         <RouterLink v-for="c in listProjectConversations(project.id)" :key="c.id"
           :to="`/projects/${project.id}/tasks/${c.id}`" class="sb-tree__row sb-tree__row--child"
-          :class="{ 'is-active': isActiveTask(c.id) }">
+          :class="{ 'is-active': isActiveTask(c.id) }"
+          @mouseleave="onRowLeave">
           <span class="sb-tree__name">{{ c.title }}</span>
+          <div class="sb-tree__hover-tools" @click.stop>
+            <button type="button" class="sb-icon-btn" :class="{ 'is-confirming': confirmingId === c.id }"
+              :title="confirmingId === c.id ? '确认归档，再点一次' : '归档'"
+              :aria-label="confirmingId === c.id ? '确认归档，再点一次' : '归档'"
+              @click="onArchiveClick($event, c.id)">
+              <template v-if="confirmingId === c.id">确认</template>
+              <Archive v-else :size="13" aria-hidden="true" />
+            </button>
+          </div>
         </RouterLink>
         <p v-if="listProjectConversations(project.id).length === 0" class="sb-tree__empty">
           还没有对话

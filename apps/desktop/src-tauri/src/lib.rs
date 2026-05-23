@@ -1413,6 +1413,7 @@ pub fn run() {
             projects_tasks::task_delete,
             projects_tasks::task_promote,
             projects_tasks::task_archive_project,
+            projects_tasks::task_archive,
             projects_tasks::project_reorder,
             projects_tasks::task_reorder,
             projects_tasks::task_reparent,

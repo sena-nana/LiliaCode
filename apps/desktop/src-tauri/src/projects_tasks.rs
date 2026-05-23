@@ -402,6 +402,16 @@ pub fn task_archive_project(project_id: String, store: State<'_, LiliaStore>) ->
     Ok(count)
 }
 
+/// 归档单条对话：软删除（archived = 1）。返回是否成功。
+#[tauri::command]
+pub fn task_archive(id: String, store: State<'_, LiliaStore>) -> Result<bool, String> {
+    let conn = store.conn()?;
+    let changed = conn
+        .execute("UPDATE tasks SET archived = 1 WHERE id = ?1 AND archived = 0", params![id])
+        .map_err(|e| format!("task_archive: {e}"))?;
+    Ok(changed > 0)
+}
+
 // ========== 排序 / 跨项目移动 ==========
 
 /// 批量更新项目排序。`ordered_ids` 按显示顺序传入（index 0 = sort_order 0）。

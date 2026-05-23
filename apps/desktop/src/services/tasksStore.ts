@@ -10,6 +10,7 @@ export {
   getTask,
   listProjectConversations,
   archiveProjectConversations,
+  archiveTask,
   isDraftTask,
   createDraftTask,
   promoteDraftTask,
