@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
@@ -82,30 +82,132 @@ const connectionTooltip = computed(() => {
 
 // ── Project tree expansion ──
 
-const expanded = reactive<Record<string, boolean>>(
-  Object.fromEntries(projects.value.map((p) => [p.id, true])),
+const TREE_EXPANSION_KEY = "lilia.projectTree.expansion";
+
+interface ProjectTreeExpansionSnapshot {
+  projects: Record<string, boolean>;
+  orphansExpanded: boolean;
+}
+
+function loadProjectTreeExpansion(): Partial<ProjectTreeExpansionSnapshot> {
+  try {
+    const raw = localStorage.getItem(TREE_EXPANSION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<ProjectTreeExpansionSnapshot>;
+    const projectEntries =
+      parsed.projects && typeof parsed.projects === "object"
+        ? Object.entries(parsed.projects).filter(
+            ([, value]) => typeof value === "boolean",
+          )
+        : [];
+    return {
+      projects: Object.fromEntries(projectEntries),
+      orphansExpanded:
+        typeof parsed.orphansExpanded === "boolean"
+          ? parsed.orphansExpanded
+          : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+const savedTreeExpansion = loadProjectTreeExpansion();
+const expanded = reactive<Record<string, boolean>>({});
+const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
+
+function isProjectExpanded(projectId: string): boolean {
+  return expanded[projectId] !== false;
+}
+
+function persistProjectTreeExpansion() {
+  try {
+    const projectSnapshot: Record<string, boolean> = {};
+    for (const project of projects.value) {
+      projectSnapshot[project.id] = isProjectExpanded(project.id);
+    }
+    localStorage.setItem(
+      TREE_EXPANSION_KEY,
+      JSON.stringify({
+        projects: projectSnapshot,
+        orphansExpanded: orphansExpanded.value,
+      } satisfies ProjectTreeExpansionSnapshot),
+    );
+  } catch {
+    /* localStorage 不可用或配额满时忽略。 */
+  }
+}
+
+function syncProjectExpansion(nextProjects: Project[]): boolean {
+  let changed = false;
+  const liveIds = new Set(nextProjects.map((project) => project.id));
+  for (const projectId of Object.keys(expanded)) {
+    if (!liveIds.has(projectId)) {
+      delete expanded[projectId];
+      changed = true;
+    }
+  }
+  for (const project of nextProjects) {
+    if (!Object.prototype.hasOwnProperty.call(expanded, project.id)) {
+      expanded[project.id] = savedTreeExpansion.projects?.[project.id] ?? true;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+watch(
+  projects,
+  (nextProjects) => {
+    if (syncProjectExpansion(nextProjects)) {
+      persistProjectTreeExpansion();
+    }
+  },
+  { immediate: true },
 );
 
 function toggle(projectId: string) {
-  expanded[projectId] = !expanded[projectId];
+  expanded[projectId] = !isProjectExpanded(projectId);
+  persistProjectTreeExpansion();
 }
 
 const allExpanded = computed(
-  () => projects.value.length > 0 && projects.value.every((p) => expanded[p.id]),
+  () =>
+    projects.value.length > 0 &&
+    projects.value.every((p) => isProjectExpanded(p.id)),
 );
 
 function toggleAll() {
   const target = !allExpanded.value;
   for (const p of projects.value) expanded[p.id] = target;
+  persistProjectTreeExpansion();
 }
+
+function rememberExpanded(projectId: string) {
+  expanded[projectId] = true;
+  persistProjectTreeExpansion();
+}
+
+function rememberCurrentExpansion() {
+  persistProjectTreeExpansion();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", rememberCurrentExpansion);
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", rememberCurrentExpansion);
+  persistProjectTreeExpansion();
+});
 
 // ── Orphan inbox ──
 
 const searchActive = ref(false);
 
-const orphansExpanded = ref(true);
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
+  persistProjectTreeExpansion();
 }
 
 // --- 孤儿 session 归档确认 ---
@@ -152,7 +254,7 @@ function newChat() {
 function newProjectChat(projectId: string) {
   const draft = createDraftTask(projectId);
   if (!draft) return;
-  expanded[projectId] = true;
+  rememberExpanded(projectId);
   router.push(`/projects/${projectId}/tasks/${draft.id}`);
 }
 
@@ -220,7 +322,7 @@ async function pickLocalFolder() {
       name: deriveProjectName(picked) || "新项目",
       cwd: picked,
     });
-    expanded[project.id] = true;
+    rememberExpanded(project.id);
   } catch (err) {
     projectError.value = `选择文件夹失败：${String(err)}`;
   }
@@ -238,7 +340,7 @@ function openClone() {
 }
 
 function onCloneCreated(p: Project) {
-  expanded[p.id] = true;
+  rememberExpanded(p.id);
 }
 
 // ── Category dialog ──
@@ -253,7 +355,7 @@ function openCategory() {
 }
 
 function onCategoryCreated(p: Project) {
-  expanded[p.id] = true;
+  rememberExpanded(p.id);
 }
 
 // ── Project tree item handlers ──
@@ -265,6 +367,7 @@ function onProjectArchived() {
 function onProjectDeleted(projectId: string) {
   router.push("/");
   delete expanded[projectId];
+  persistProjectTreeExpansion();
 }
 </script>
 
@@ -319,7 +422,7 @@ function onProjectDeleted(projectId: string) {
           v-for="p in projects"
           :key="p.id"
           :project="p"
-          :is-expanded="expanded[p.id]"
+          :is-expanded="isProjectExpanded(p.id)"
           @toggle="toggle"
           @new-chat="newProjectChat"
           @error="(msg: string) => projectError = msg"

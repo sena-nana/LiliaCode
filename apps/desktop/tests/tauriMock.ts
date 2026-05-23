@@ -188,6 +188,34 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return count;
     }
 
+    case "chat_check_env":
+      return {
+        nodeAvailable: true,
+        codexCliAvailable: true,
+        ccSwitch: {
+          reachable: true,
+          baseUrl: "http://127.0.0.1:15721",
+        },
+        routerModes: {
+          claude: "cc-switch",
+          codex: "cc-switch",
+        },
+        backends: {
+          claude: {
+            backend: "claude",
+            hasApiKey: true,
+            connectionMode: "cc-switch",
+            effectiveUrl: "http://127.0.0.1:15721",
+          },
+          codex: {
+            backend: "codex",
+            hasApiKey: true,
+            connectionMode: "cc-switch",
+            effectiveUrl: "http://127.0.0.1:15721",
+          },
+        },
+      };
+
     default:
       throw new Error(`未配置的 Tauri mock 命令：${cmd}`);
   }
