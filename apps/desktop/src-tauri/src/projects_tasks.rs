@@ -210,7 +210,7 @@ pub fn task_list(
                     r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order
                        FROM tasks
                        WHERE project_id = ?1 AND archived = 0
-                       ORDER BY sort_order DESC"#,
+                       ORDER BY sort_order ASC"#,
                 )
                 .map_err(|e| format!("task_list: prepare 失败：{e}"))?;
             let rows = stmt
@@ -226,7 +226,7 @@ pub fn task_list(
                     r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order
                        FROM tasks
                        WHERE project_id IS NULL AND archived = 0
-                       ORDER BY sort_order DESC"#,
+                       ORDER BY sort_order ASC"#,
                 )
                 .map_err(|e| format!("task_list: prepare 失败：{e}"))?;
             let rows = stmt

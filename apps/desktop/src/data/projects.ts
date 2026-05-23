@@ -17,6 +17,15 @@ interface ProjectRow {
 }
 
 export const PROJECTS = ref<Project[]>([]);
+let onProjectRemoved:
+  | ((projectId: string) => void | Promise<void>)
+  | null = null;
+
+export function registerProjectRemovalHandler(
+  handler: (projectId: string) => void | Promise<void>,
+): void {
+  onProjectRemoved = handler;
+}
 
 async function refresh(): Promise<void> {
   const rows = await invoke<ProjectRow[]>("project_list");
@@ -75,7 +84,10 @@ export async function renameProject(id: string, nextName: string): Promise<boole
  */
 export async function removeProject(id: string): Promise<boolean> {
   const removed = await invoke<boolean>("project_remove", { id });
-  if (removed) await refresh();
+  if (removed) {
+    await refresh();
+    await onProjectRemoved?.(id);
+  }
   return removed;
 }
 

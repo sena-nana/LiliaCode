@@ -8,7 +8,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 import type { Task } from "@lilia/contracts";
-import { projectsReady, listProjects } from "./projects";
+import {
+  listProjects,
+  projectsReady,
+  registerProjectRemovalHandler,
+} from "./projects";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {
@@ -173,6 +177,17 @@ export function removeProjectTasks(projectId: string): void {
     if (draft.projectId === projectId) DRAFT_TASKS.delete(draftId);
   }
 }
+
+/**
+ * 项目被移除时 DB 会把该项目下的 task project_id 置 NULL。
+ * 前端缓存需要同步清掉原项目列表并重新拉取收集箱。
+ */
+export async function detachProjectTasksToOrphans(projectId: string): Promise<void> {
+  removeProjectTasks(projectId);
+  await refreshOrphans();
+}
+
+registerProjectRemovalHandler(detachProjectTasksToOrphans);
 
 // ---------- Orphan Conversation CRUD ----------
 

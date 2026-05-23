@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { searchSessions } from "../src/services/sessionSearch";
+import { allTasksReady } from "../src/data/tasks";
+import { projectsReady } from "../src/data/projects";
 
 describe("sessionSearch", () => {
-  it("text 模式按子串命中标题，返回高亮区间", () => {
+  it("text 模式按子串命中标题，返回高亮区间", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
     const res = searchSessions("Claude", "text");
-    // stub 数据里至少有「接入 Claude Code 会话发现」和「随手问问 Claude：tsconfig paths」。
+    // IPC fixtures 里至少有「接入 Claude Code 会话发现」和「随手问问 Claude：tsconfig paths」。
     expect(res.length).toBeGreaterThanOrEqual(2);
     for (const r of res) {
       expect(r.title.toLowerCase()).toContain("claude");
@@ -17,7 +20,8 @@ describe("sessionSearch", () => {
     expect(searchSessions("   ", "text")).toEqual([]);
   });
 
-  it("vector 模式按相似度排序、分值 0..1", () => {
+  it("vector 模式按相似度排序、分值 0..1", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
     const res = searchSessions("tsconfig", "vector");
     expect(res.length).toBeGreaterThan(0);
     for (const r of res) {
@@ -30,7 +34,8 @@ describe("sessionSearch", () => {
     expect(scores).toEqual(sorted);
   });
 
-  it("project-task 走 /projects 路由，orphan 走 /chats 路由", () => {
+  it("project-task 走 /projects 路由，orphan 走 /chats 路由", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
     const res = searchSessions("Claude", "text");
     const task = res.find((r) => r.kind === "project-task");
     const orphan = res.find((r) => r.kind === "orphan");
@@ -38,7 +43,8 @@ describe("sessionSearch", () => {
     expect(orphan?.route.startsWith("/chats/")).toBe(true);
   });
 
-  it("hybrid 模式合并文本 + 向量结果并按 source 标注来源", () => {
+  it("hybrid 模式合并文本 + 向量结果并按 source 标注来源", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
     const res = searchSessions("Claude", "hybrid");
     expect(res.length).toBeGreaterThan(0);
 

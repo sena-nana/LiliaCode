@@ -101,13 +101,17 @@ async function openWithVSCode() {
   }
 }
 
-function archiveAllConversations() {
-  archiveProjectConversations(props.project.id);
-  if (
-    route.params.projectId &&
-    String(route.params.projectId) === props.project.id
-  ) {
-    emit("archived");
+async function archiveAllConversations() {
+  try {
+    await archiveProjectConversations(props.project.id);
+    if (
+      route.params.projectId &&
+      String(route.params.projectId) === props.project.id
+    ) {
+      emit("archived");
+    }
+  } catch (err) {
+    emit("error", `归档所有对话失败：${String(err)}`);
   }
 }
 

@@ -181,7 +181,7 @@ async function pickLocalFolder() {
   try {
     const picked = await pickFolder({ title: "选择项目根目录" });
     if (!picked) return;
-    const project = createProject({
+    const project = await createProject({
       name: deriveProjectName(picked) || "新项目",
       cwd: picked,
     });
