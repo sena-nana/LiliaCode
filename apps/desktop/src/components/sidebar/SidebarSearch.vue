@@ -5,11 +5,21 @@ import { searchSessions, type SearchResult } from "../../services/sessionSearch"
 
 interface Segment { text: string; mark: boolean; }
 
-const emit = defineEmits<{ select: [result: SearchResult] }>();
+const props = defineProps<{
+  modelValue?: boolean
+}>();
+
+const emit = defineEmits<{
+  select: [result: SearchResult]
+  'update:modelValue': [value: boolean]
+}>();
 
 // ── Search state ──
 
-const active = ref(false);
+const active = computed({
+  get: () => props.modelValue ?? false,
+  set: (val) => emit('update:modelValue', val)
+});
 const query = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
 const selectedIdx = ref(0);

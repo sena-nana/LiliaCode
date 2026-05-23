@@ -99,6 +99,8 @@ function toggleAll() {
 
 // ── Orphan inbox ──
 
+const searchActive = ref(false);
+
 const orphansExpanded = ref(true);
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
@@ -143,6 +145,7 @@ function newProjectChat(projectId: string) {
 }
 
 function onSearchSelect(r: { route: string }) {
+  searchActive.value = false;
   router.push(r.route);
 }
 
@@ -257,11 +260,18 @@ function onProjectDeleted(projectId: string) {
   <aside class="secondary-panel">
     <!-- Actions: new chat + search -->
     <div class="sb-section sb-section--actions">
-      <button type="button" class="sb-primary-btn" title="新对话" aria-label="新对话" @click="newChat">
+      <button
+        v-if="!searchActive"
+        type="button"
+        class="sb-primary-btn"
+        title="新对话"
+        aria-label="新对话"
+        @click="newChat"
+      >
         <MessageSquarePlus :size="15" aria-hidden="true" />
         <span class="sb-primary-btn__label">新对话</span>
       </button>
-      <SidebarSearch @select="onSearchSelect" />
+      <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
     </div>
 
     <!-- Project tree -->
