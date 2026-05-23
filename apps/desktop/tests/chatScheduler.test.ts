@@ -178,10 +178,21 @@ describe("chat scheduler", () => {
   });
 
   it("最终回复出现后默认折叠中间过程，只展开最终结果", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-collapse-start",
+        taskId: "t-002",
+        role: "user",
+        content: "请执行完整验证",
+        createdAt: 2000,
+      },
+    ]);
+
     const view = await renderTaskDetail();
 
     await waitFor(() => {
       expect(view.getByText("历史思考摘要")).toBeInTheDocument();
+      expect(view.getByText("请执行完整验证")).toBeInTheDocument();
     });
 
     emitMockTimelineEvent("t-002", {
@@ -229,9 +240,171 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("最终回复")).toBeInTheDocument();
       expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /yarn verify/ }))
-        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
       expect(view.queryByText("验证输出详情")).toBeNull();
+      expect(view.getByRole("button", { name: "展开过程 1 项" }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "展开过程 1 项" }));
+    await waitFor(() => {
+      expect(view.getByText(/命令 · yarn verify/)).toBeInTheDocument();
+      expect(view.getByText(/正在运行完整验证/)).toBeInTheDocument();
+      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
+    });
+  });
+
+  it("已有历史最终回复时，新一轮最终回复仍会折叠中间过程", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-after-history-final",
+        taskId: "t-002",
+        role: "user",
+        content: "继续验证 Rust",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-history-final",
+      kind: "turn",
+      status: "success",
+      title: "历史 turn completed",
+      payload: {
+        backend: "claude",
+        finalText: "上一轮已经完成的最终回复。",
+      },
+      createdAt: 1600,
+      updatedAt: 1600,
+      order: 1,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("上一轮已经完成的最终回复。")).toBeInTheDocument();
+      expect(view.getByText("继续验证 Rust")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-running-after-history-final",
+      kind: "command",
+      status: "running",
+      title: "cargo check",
+      summary: "正在验证 Rust",
+      payload: {
+        command: "cargo check",
+        stdout: "Rust 验证输出详情",
+      },
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /cargo check/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /cargo check/ }));
+    await waitFor(() => {
+      expect(view.getByText("Rust 验证输出详情")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /cargo check/ }))
+        .toHaveAttribute("aria-expanded", "true");
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-new-final-after-history",
+      kind: "turn",
+      status: "success",
+      title: "Claude turn completed",
+      payload: {
+        backend: "claude",
+        finalText: "新一轮最终回复。",
+      },
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("新一轮最终回复。")).toBeInTheDocument();
+      expect(view.queryByRole("button", { name: /cargo check/ })).toBeNull();
+      expect(view.queryByText("Rust 验证输出详情")).toBeNull();
+      expect(view.getByRole("button", { name: "展开过程 1 项" }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
+  it("最终回复后默认折叠用户消息到最终回复之间的过程事件", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-turn-start",
+        taskId: "t-002",
+        role: "user",
+        content: "请实现时间线折叠",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-process-command",
+      kind: "command",
+      status: "success",
+      title: "yarn test",
+      summary: "这条过程默认不应显示",
+      payload: {
+        command: "yarn test",
+        stdout: "折叠后的命令详情",
+      },
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-process-plan",
+      kind: "plan",
+      status: "completed",
+      title: "更新计划",
+      summary: "这条计划默认不应显示",
+      payload: {
+        plan: "折叠后的计划详情",
+      },
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-final-with-hidden-process",
+      kind: "turn",
+      status: "success",
+      title: "Claude turn completed",
+      payload: {
+        backend: "claude",
+        finalText: "最终回复应该直接可见。",
+      },
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("请实现时间线折叠")).toBeInTheDocument();
+      expect(view.getByText("最终回复应该直接可见。")).toBeInTheDocument();
+      expect(view.queryByText("这条过程默认不应显示")).toBeNull();
+      expect(view.queryByText("这条计划默认不应显示")).toBeNull();
+      expect(view.getByRole("button", { name: "展开过程 2 项" }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "展开过程 2 项" }));
+    await waitFor(() => {
+      expect(view.getByText(/命令 · yarn test/)).toBeInTheDocument();
+      expect(view.getByText(/这条过程默认不应显示/)).toBeInTheDocument();
+      expect(view.getByText(/计划 · 更新计划/)).toBeInTheDocument();
+      expect(view.getByText(/这条计划默认不应显示/)).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "收起过程 2 项" }))
+        .toHaveAttribute("aria-expanded", "true");
     });
   });
 
