@@ -99,7 +99,7 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
-      expect(view.getByText("yarn verify")).toBeInTheDocument();
+      expect(view.getAllByText("yarn verify").length).toBeGreaterThan(0);
       expect(view.getByText("正在运行完整验证")).toBeInTheDocument();
     });
   });
@@ -140,6 +140,57 @@ describe("chat scheduler", () => {
 
     expect(view.queryByText(/这是 Claude turn 完成后返回给用户的完整结果/)
       ?.closest(".chat-bubble")).toBeNull();
+  });
+
+  it("最终回复出现后默认折叠中间过程，只展开最终结果", async () => {
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-running-before-final",
+      kind: "command",
+      status: "running",
+      title: "yarn verify",
+      summary: "正在运行完整验证",
+      payload: {
+        command: "yarn verify",
+        stdout: "验证输出详情",
+      },
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 1,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("验证输出详情")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "true");
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-final-collapse",
+      kind: "turn",
+      status: "success",
+      title: "Claude turn completed",
+      payload: {
+        backend: "claude",
+        finalText: "## 完成\n\n最终结果完整展示。",
+      },
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 2,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("最终回复")).toBeInTheDocument();
+      expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByText("验证输出详情")).toBeNull();
+    });
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {
