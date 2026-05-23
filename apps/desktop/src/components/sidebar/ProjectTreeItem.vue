@@ -10,6 +10,7 @@ import {
   Archive,
   Trash2,
   Code2,
+  Pin,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import { vContextMenu } from "../../directives/contextMenu";
@@ -21,6 +22,7 @@ import {
   archiveProjectConversations,
   removeProject,
   renameProject,
+  toggleProjectPin,
 } from "../../services/projectsStore";
 import { archiveTask, listProjectConversations } from "../../services/tasksStore";
 import { openInFileManager, openInVSCode } from "../../services/projects";
@@ -133,6 +135,10 @@ async function archiveAllConversations() {
   }
 }
 
+async function togglePin() {
+  await toggleProjectPin(props.project.id);
+}
+
 async function deleteProject() {
   await removeProject(props.project.id);
   if (
@@ -151,6 +157,12 @@ function isActiveTask(taskId: string) {
 function buildMenu(): ContextMenuItem[] {
   const hasCwd = !!props.project.cwd;
   return [
+    {
+      id: "pin",
+      label: props.project.pinned ? "取消置顶" : "置顶项目",
+      icon: Pin,
+      onSelect: () => togglePin(),
+    },
     {
       id: "open-explorer",
       label: "在资源管理器中打开",
@@ -213,6 +225,7 @@ function onMoreClick(e: MouseEvent) {
       @keydown.enter.prevent="editingId === project.id ? null : emit('toggle', project.id)"
       @keydown.space.prevent="editingId === project.id ? null : emit('toggle', project.id)">
       <Folder :size="14" aria-hidden="true" />
+      <Pin v-if="project.pinned" :size="12" class="sb-tree__pin-icon" aria-hidden="true" />
       <input
         v-if="editingId === project.id"
         :ref="bindEditingInput"

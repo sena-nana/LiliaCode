@@ -14,6 +14,7 @@ interface ProjectRow {
   cwd: string | null;
   sessionCount: number;
   sortOrder: number;
+  pinned: boolean;
 }
 
 export const PROJECTS = ref<Project[]>([]);
@@ -34,6 +35,7 @@ async function refresh(): Promise<void> {
     name: r.name,
     cwd: r.cwd,
     sessionCount: r.sessionCount,
+    pinned: r.pinned,
   }));
 }
 
@@ -66,6 +68,7 @@ export async function createProject(input: {
     name: row.name,
     cwd: row.cwd,
     sessionCount: row.sessionCount,
+    pinned: row.pinned,
   };
   PROJECTS.value = [...PROJECTS.value, project];
   return project;
@@ -97,6 +100,13 @@ export function deriveProjectName(absPath: string): string {
   if (!cleaned) return "";
   const parts = cleaned.split(/[\\/]/);
   return parts[parts.length - 1] ?? cleaned;
+}
+
+/** 切换项目置顶状态。 */
+export async function toggleProjectPin(id: string): Promise<boolean> {
+  const pinned = await invoke<boolean>("project_toggle_pin", { id });
+  await refresh();
+  return pinned;
 }
 
 /** 项目列表拖拽排序后调用。`orderedIds` 按显示顺序传入。 */

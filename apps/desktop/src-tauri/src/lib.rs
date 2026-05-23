@@ -1406,6 +1406,7 @@ pub fn run() {
             projects_tasks::project_create,
             projects_tasks::project_rename,
             projects_tasks::project_remove,
+            projects_tasks::project_toggle_pin,
             projects_tasks::task_list,
             projects_tasks::task_get,
             projects_tasks::task_create,

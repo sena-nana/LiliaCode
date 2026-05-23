@@ -14,6 +14,8 @@ export interface Project {
   cwd: string | null;
   /** 该项目下的会话数量（用于侧边栏角标）。 */
   sessionCount: number;
+  /** 是否置顶。置顶项目显示在列表最上方。 */
+  pinned: boolean;
 }
 
 export type SessionKind = "interactive" | "headless" | "unknown";

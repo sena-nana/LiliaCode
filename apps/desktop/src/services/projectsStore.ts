@@ -13,6 +13,7 @@ export {
   removeProject,
   deriveProjectName,
   reorderProjects,
+  toggleProjectPin,
   PROJECTS,
 } from "../data/projects";
 

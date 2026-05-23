@@ -25,6 +25,7 @@ pub struct ProjectRow {
     pub cwd: Option<String>,
     pub session_count: i64,
     pub sort_order: i64,
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,12 +45,14 @@ pub struct TaskRow {
 // ========== 内部辅助 ==========
 
 fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
+    let pinned: i64 = row.get(5)?;
     Ok(ProjectRow {
         id: row.get(0)?,
         name: row.get(1)?,
         cwd: row.get(2)?,
         session_count: row.get(3)?,
         sort_order: row.get(4)?,
+        pinned: pinned != 0,
     })
 }
 
@@ -93,12 +96,13 @@ pub fn project_list(store: State<'_, LiliaStore>) -> Result<Vec<ProjectRow>, Str
         .prepare(
             r#"SELECT p.id, p.name, p.cwd,
                       COUNT(t.id) AS session_count,
-                      p.sort_order
+                      p.sort_order,
+                      p.pinned
                FROM projects p
                LEFT JOIN tasks t
                  ON t.project_id = p.id AND t.archived = 0
                GROUP BY p.id
-               ORDER BY p.sort_order ASC"#,
+               ORDER BY p.pinned DESC, p.sort_order ASC"#,
         )
         .map_err(|e| format!("project_list: prepare 失败：{e}"))?;
     let rows = stmt
@@ -119,7 +123,8 @@ pub fn project_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<Pr
             r#"SELECT p.id, p.name, p.cwd,
                       (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.archived = 0)
                       AS session_count,
-                      p.sort_order
+                      p.sort_order,
+                      p.pinned
                FROM projects p WHERE p.id = ?1"#,
             params![id],
             row_to_project,
@@ -155,6 +160,7 @@ pub fn project_create(
         cwd,
         session_count: 0,
         sort_order,
+        pinned: false,
     })
 }
 
@@ -191,6 +197,29 @@ pub fn project_remove(id: String, store: State<'_, LiliaStore>) -> Result<bool, 
         .execute("DELETE FROM projects WHERE id = ?1", params![id])
         .map_err(|e| format!("project_remove: {e}"))?;
     Ok(deleted > 0)
+}
+
+/// 切换项目置顶状态。
+#[tauri::command]
+pub fn project_toggle_pin(
+    id: String,
+    store: State<'_, LiliaStore>,
+) -> Result<bool, String> {
+    let conn = store.conn()?;
+    let current: i64 = conn
+        .query_row(
+            "SELECT pinned FROM projects WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("project_toggle_pin: 查询失败：{e}"))?;
+    let new_val = if current == 0 { 1i64 } else { 0i64 };
+    conn.execute(
+        "UPDATE projects SET pinned = ?1 WHERE id = ?2",
+        params![new_val, id],
+    )
+    .map_err(|e| format!("project_toggle_pin: 更新失败：{e}"))?;
+    Ok(new_val != 0)
 }
 
 // ========== Task 命令 ==========

@@ -713,6 +713,11 @@ pre code {
   white-space: nowrap;
 }
 
+.sb-tree__pin-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 /* 行内重命名输入框：占位、字号、颜色都贴齐 .sb-tree__name，
  * 让用户感受像是把名字直接变成可编辑状态而不是「弹出输入框」。 */
 .sb-tree__rename-input {
