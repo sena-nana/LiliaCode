@@ -15,6 +15,7 @@ import {
   Sparkles,
   X,
   Archive,
+  Pin,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import {
@@ -27,6 +28,7 @@ import {
   createDraftOrphan,
   createDraftTask,
   listOrphanConversations,
+  toggleTaskPin,
 } from "../services/tasksStore";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { pickFolder } from "../services/projects";
@@ -117,6 +119,16 @@ function onOrphanArchiveClick(e: MouseEvent, orphanId: string) {
     confirmingOrphanId.value = null;
   } else {
     confirmingOrphanId.value = orphanId;
+  }
+}
+
+async function onOrphanPinClick(e: MouseEvent, orphanId: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await toggleTaskPin(orphanId);
+  } catch (err) {
+    projectError.value = `切换对话置顶失败：${String(err)}`;
   }
 }
 
@@ -345,6 +357,12 @@ function onProjectDeleted(projectId: string) {
               @mouseleave="onOrphanRowLeave">
               <span class="sb-tree__name">{{ o.title }}</span>
               <div class="sb-tree__hover-tools" @click.stop>
+                <button type="button" class="sb-icon-btn" :class="{ 'is-pinned': o.pinned }"
+                  :title="o.pinned ? '取消置顶' : '置顶'"
+                  :aria-label="o.pinned ? '取消置顶' : '置顶'"
+                  @click="onOrphanPinClick($event, o.id)">
+                  <Pin :size="13" aria-hidden="true" />
+                </button>
                 <button type="button" class="sb-icon-btn" :class="{ 'is-confirming': confirmingOrphanId === o.id }"
                   :title="confirmingOrphanId === o.id ? '确认归档，再点一次' : '归档'"
                   :aria-label="confirmingOrphanId === o.id ? '确认归档，再点一次' : '归档'"

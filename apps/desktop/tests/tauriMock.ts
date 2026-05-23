@@ -6,6 +6,7 @@ interface ProjectRow {
   cwd: string | null;
   sessionCount: number;
   sortOrder: number;
+  pinned: boolean;
 }
 
 interface TaskRow {
@@ -18,6 +19,7 @@ interface TaskRow {
   parentId: string | null;
   dependsOn: string[];
   sortOrder: number;
+  pinned: boolean;
 }
 
 const baseProjects: ProjectRow[] = [
@@ -27,6 +29,7 @@ const baseProjects: ProjectRow[] = [
     cwd: "D:\\PROJECT\\workspace\\Lilia",
     sessionCount: 2,
     sortOrder: 0,
+    pinned: false,
   },
   {
     id: "tools",
@@ -34,6 +37,7 @@ const baseProjects: ProjectRow[] = [
     cwd: "D:\\PROJECT\\workspace\\tools",
     sessionCount: 1,
     sortOrder: 1,
+    pinned: false,
   },
 ];
 
@@ -48,6 +52,7 @@ const baseTasks: TaskRow[] = [
     parentId: null,
     dependsOn: [],
     sortOrder: 0,
+    pinned: false,
   },
   {
     id: "t-002",
@@ -59,6 +64,7 @@ const baseTasks: TaskRow[] = [
     parentId: null,
     dependsOn: ["t-001"],
     sortOrder: 1,
+    pinned: false,
   },
   {
     id: "t-003",
@@ -70,6 +76,7 @@ const baseTasks: TaskRow[] = [
     parentId: null,
     dependsOn: [],
     sortOrder: 0,
+    pinned: false,
   },
   {
     id: "o-001",
@@ -81,6 +88,7 @@ const baseTasks: TaskRow[] = [
     parentId: null,
     dependsOn: [],
     sortOrder: 0,
+    pinned: false,
   },
 ];
 
@@ -134,6 +142,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         cwd,
         sessionCount: 0,
         sortOrder: projects.length,
+        pinned: false,
       };
       projects.push(project);
       return cloneProject(project);
@@ -155,7 +164,20 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return tasks
         .filter((task) => task.projectId === (projectId ?? null))
         .map(cloneTask)
-        .sort((a, b) => a.sortOrder - b.sortOrder);
+        .sort((a, b) =>
+          Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
+        );
+    }
+
+    case "task_toggle_pin": {
+      const id = String(args.id);
+      let pinned = false;
+      tasks = tasks.map((task) => {
+        if (task.id !== id) return task;
+        pinned = !task.pinned;
+        return { ...task, pinned };
+      });
+      return pinned;
     }
 
     case "task_archive_project": {

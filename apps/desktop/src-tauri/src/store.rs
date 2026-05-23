@@ -128,6 +128,8 @@ fn run_migrations(conn: &mut Connection) -> Result<(), String> {
         migration_v3_sort_order,
         // v4: pinned 列（项目置顶）
         migration_v4_pinned,
+        // v5: tasks.pinned 列（session 置顶）
+        migration_v5_task_pinned,
     ];
 
     let current: i64 = conn
@@ -238,4 +240,13 @@ fn migration_v4_pinned(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store v4: 加 pinned 列失败：{e}"))
+}
+
+fn migration_v5_task_pinned(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store v5: 加 tasks.pinned 列失败：{e}"))
 }

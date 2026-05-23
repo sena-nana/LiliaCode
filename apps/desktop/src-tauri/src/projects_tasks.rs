@@ -40,6 +40,7 @@ pub struct TaskRow {
     pub parent_id: Option<String>,
     pub depends_on: Vec<String>,
     pub sort_order: i64,
+    pub pinned: bool,
 }
 
 // ========== 内部辅助 ==========
@@ -56,9 +57,13 @@ fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
     })
 }
 
-fn build_task(row: &rusqlite::Row<'_>, deps: &std::collections::HashMap<String, Vec<String>>) -> rusqlite::Result<TaskRow> {
+fn build_task(
+    row: &rusqlite::Row<'_>,
+    deps: &std::collections::HashMap<String, Vec<String>>,
+) -> rusqlite::Result<TaskRow> {
     let id: String = row.get(0)?;
     let depends_on = deps.get(&id).cloned().unwrap_or_default();
+    let pinned: i64 = row.get(8)?;
     Ok(TaskRow {
         id: id.clone(),
         project_id: row.get(1)?,
@@ -69,15 +74,20 @@ fn build_task(row: &rusqlite::Row<'_>, deps: &std::collections::HashMap<String, 
         parent_id: row.get(6)?,
         depends_on,
         sort_order: row.get(7)?,
+        pinned: pinned != 0,
     })
 }
 
-fn load_all_deps(conn: &Connection) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+fn load_all_deps(
+    conn: &Connection,
+) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
     let mut stmt = conn
         .prepare("SELECT task_id, depends_on_id FROM task_dependencies")
         .map_err(|e| format!("load_all_deps: prepare 失败：{e}"))?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| format!("load_all_deps: query 失败：{e}"))?;
     let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     for r in rows {
@@ -144,9 +154,17 @@ pub fn project_create(
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
     let trimmed = name.trim();
-    let final_name = if trimmed.is_empty() { "未命名项目" } else { trimmed };
+    let final_name = if trimmed.is_empty() {
+        "未命名项目"
+    } else {
+        trimmed
+    };
     let max_order: i64 = conn
-        .query_row("SELECT COALESCE(MAX(sort_order), -1) FROM projects", [], |r| r.get(0))
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM projects",
+            [],
+            |r| r.get(0),
+        )
         .map_err(|e| format!("project_create: max sort_order 失败：{e}"))?;
     let sort_order = max_order + 1;
     conn.execute(
@@ -201,10 +219,7 @@ pub fn project_remove(id: String, store: State<'_, LiliaStore>) -> Result<bool, 
 
 /// 切换项目置顶状态。
 #[tauri::command]
-pub fn project_toggle_pin(
-    id: String,
-    store: State<'_, LiliaStore>,
-) -> Result<bool, String> {
+pub fn project_toggle_pin(id: String, store: State<'_, LiliaStore>) -> Result<bool, String> {
     let conn = store.conn()?;
     let current: i64 = conn
         .query_row(
@@ -236,10 +251,10 @@ pub fn task_list(
         Some(pid) => {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order
+                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
                        FROM tasks
                        WHERE project_id = ?1 AND archived = 0
-                       ORDER BY sort_order ASC"#,
+                       ORDER BY pinned DESC, sort_order ASC"#,
                 )
                 .map_err(|e| format!("task_list: prepare 失败：{e}"))?;
             let rows = stmt
@@ -252,10 +267,10 @@ pub fn task_list(
         None => {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order
+                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
                        FROM tasks
                        WHERE project_id IS NULL AND archived = 0
-                       ORDER BY sort_order ASC"#,
+                       ORDER BY pinned DESC, sort_order ASC"#,
                 )
                 .map_err(|e| format!("task_list: prepare 失败：{e}"))?;
             let rows = stmt
@@ -275,7 +290,7 @@ pub fn task_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<TaskR
     let deps_map = load_all_deps(&conn)?;
     let result = conn
         .query_row(
-            r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order
+            r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
                FROM tasks WHERE id = ?1"#,
             params![id],
             |row| build_task(row, &deps_map),
@@ -328,6 +343,7 @@ pub fn task_create(
         parent_id,
         depends_on,
         sort_order,
+        pinned: false,
     })
 }
 
@@ -343,18 +359,12 @@ pub fn task_update(
     }
     let conn = store.conn()?;
     if let Some(t) = title {
-        conn.execute(
-            "UPDATE tasks SET title = ?1 WHERE id = ?2",
-            params![t, id],
-        )
-        .map_err(|e| format!("task_update(title): {e}"))?;
+        conn.execute("UPDATE tasks SET title = ?1 WHERE id = ?2", params![t, id])
+            .map_err(|e| format!("task_update(title): {e}"))?;
     }
     if let Some(s) = status {
-        conn.execute(
-            "UPDATE tasks SET status = ?1 WHERE id = ?2",
-            params![s, id],
-        )
-        .map_err(|e| format!("task_update(status): {e}"))?;
+        conn.execute("UPDATE tasks SET status = ?1 WHERE id = ?2", params![s, id])
+            .map_err(|e| format!("task_update(status): {e}"))?;
     }
     Ok(())
 }
@@ -409,12 +419,16 @@ pub fn task_promote(
         parent_id: None,
         depends_on,
         sort_order,
+        pinned: false,
     })
 }
 
 /// 归档项目下所有对话：软删除（archived = 1）。返回影响行数。
 #[tauri::command]
-pub fn task_archive_project(project_id: String, store: State<'_, LiliaStore>) -> Result<i64, String> {
+pub fn task_archive_project(
+    project_id: String,
+    store: State<'_, LiliaStore>,
+) -> Result<i64, String> {
     let conn = store.conn()?;
     let count: i64 = conn
         .query_row(
@@ -436,9 +450,32 @@ pub fn task_archive_project(project_id: String, store: State<'_, LiliaStore>) ->
 pub fn task_archive(id: String, store: State<'_, LiliaStore>) -> Result<bool, String> {
     let conn = store.conn()?;
     let changed = conn
-        .execute("UPDATE tasks SET archived = 1 WHERE id = ?1 AND archived = 0", params![id])
+        .execute(
+            "UPDATE tasks SET archived = 1 WHERE id = ?1 AND archived = 0",
+            params![id],
+        )
         .map_err(|e| format!("task_archive: {e}"))?;
     Ok(changed > 0)
+}
+
+/// 切换单条 session 置顶状态。
+#[tauri::command]
+pub fn task_toggle_pin(id: String, store: State<'_, LiliaStore>) -> Result<bool, String> {
+    let conn = store.conn()?;
+    let current: i64 = conn
+        .query_row(
+            "SELECT pinned FROM tasks WHERE id = ?1 AND archived = 0",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("task_toggle_pin: 查询失败：{e}"))?;
+    let new_val = if current == 0 { 1i64 } else { 0i64 };
+    conn.execute(
+        "UPDATE tasks SET pinned = ?1 WHERE id = ?2",
+        params![new_val, id],
+    )
+    .map_err(|e| format!("task_toggle_pin: 更新失败：{e}"))?;
+    Ok(new_val != 0)
 }
 
 // ========== 排序 / 跨项目移动 ==========

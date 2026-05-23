@@ -11,6 +11,7 @@ export {
   listProjectConversations,
   archiveProjectConversations,
   archiveTask,
+  toggleTaskPin,
   isDraftTask,
   createDraftTask,
   promoteDraftTask,

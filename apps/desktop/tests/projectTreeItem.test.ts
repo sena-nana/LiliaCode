@@ -39,6 +39,7 @@ async function renderProjectTreeItem() {
           name: "Lilia",
           cwd: "D:\\PROJECT\\workspace\\Lilia",
           sessionCount: 2,
+          pinned: false,
         },
       };
     },
@@ -63,6 +64,29 @@ async function renderProjectTreeItem() {
 }
 
 describe("ProjectTreeItem", () => {
+  it("session 置顶按钮显示在归档按钮左侧并触发切换", async () => {
+    const view = await renderProjectTreeItem();
+    const sessionRow = view.getByText("接入 Claude Code 会话发现")
+      .closest("a");
+    const buttons = Array.from(sessionRow?.querySelectorAll("button") ?? []);
+
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "置顶",
+      "归档",
+    ]);
+
+    await fireEvent.click(buttons[0]);
+
+    expect(mockInvoke.mock.calls.at(-1)?.slice(0, 2)).toEqual([
+      "task_toggle_pin",
+      { id: "t-001" },
+    ]);
+
+    await waitFor(() => {
+      expect(view.getByLabelText("取消置顶")).toHaveClass("is-pinned");
+    });
+  });
+
   it("归档失败时发出错误事件而不是 archived", async () => {
     mockInvoke.mockRejectedValueOnce(new Error("archive failed"));
     const view = await renderProjectTreeItem();

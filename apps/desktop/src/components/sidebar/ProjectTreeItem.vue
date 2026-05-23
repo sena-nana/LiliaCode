@@ -24,7 +24,11 @@ import {
   renameProject,
   toggleProjectPin,
 } from "../../services/projectsStore";
-import { archiveTask, listProjectConversations } from "../../services/tasksStore";
+import {
+  archiveTask,
+  listProjectConversations,
+  toggleTaskPin,
+} from "../../services/tasksStore";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 
 const props = defineProps<{
@@ -58,6 +62,16 @@ function onArchiveClick(e: MouseEvent, taskId: string) {
     confirmingId.value = null;
   } else {
     confirmingId.value = taskId;
+  }
+}
+
+async function onTaskPinClick(e: MouseEvent, taskId: string) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await toggleTaskPin(taskId);
+  } catch (err) {
+    emit("error", `切换对话置顶失败：${String(err)}`);
   }
 }
 
@@ -258,6 +272,12 @@ function onMoreClick(e: MouseEvent) {
           @mouseleave="onRowLeave">
           <span class="sb-tree__name">{{ c.title }}</span>
           <div class="sb-tree__hover-tools" @click.stop>
+            <button type="button" class="sb-icon-btn" :class="{ 'is-pinned': c.pinned }"
+              :title="c.pinned ? '取消置顶' : '置顶'"
+              :aria-label="c.pinned ? '取消置顶' : '置顶'"
+              @click="onTaskPinClick($event, c.id)">
+              <Pin :size="13" aria-hidden="true" />
+            </button>
             <button type="button" class="sb-icon-btn" :class="{ 'is-confirming': confirmingId === c.id }"
               :title="confirmingId === c.id ? '确认归档，再点一次' : '归档'"
               :aria-label="confirmingId === c.id ? '确认归档，再点一次' : '归档'"

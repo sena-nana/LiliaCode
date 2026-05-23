@@ -5,6 +5,7 @@ import {
   getTask,
   listOrphanConversations,
   listTasks,
+  toggleTaskPin,
 } from "../src/data/tasks";
 
 describe("projects (IPC data layer)", () => {
@@ -28,6 +29,18 @@ describe("projects (IPC data layer)", () => {
   it("任务缓存按后端返回的显示顺序排列", async () => {
     await allTasksReady;
     expect(listTasks("lilia").map((t) => t.id)).toEqual(["t-001", "t-002"]);
+  });
+
+  it("置顶 session 后在项目列表内优先显示", async () => {
+    await allTasksReady;
+
+    const pinned = await toggleTaskPin("t-002");
+
+    expect(pinned).toBe(true);
+    expect(listTasks("lilia").map((t) => [t.id, t.pinned])).toEqual([
+      ["t-002", true],
+      ["t-001", false],
+    ]);
   });
 
   it("通过 (projectId, taskId) 取出任务", async () => {

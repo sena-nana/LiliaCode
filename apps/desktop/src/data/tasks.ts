@@ -20,6 +20,7 @@ export interface OrphanConversation {
   sessionId: string;
   title: string;
   createdAt: number;
+  pinned: boolean;
 }
 
 interface TaskRow {
@@ -32,6 +33,7 @@ interface TaskRow {
   parentId: string | null;
   dependsOn: string[];
   sortOrder: number;
+  pinned: boolean;
 }
 
 // ---------- Reactive 缓存 ----------
@@ -60,6 +62,7 @@ async function refreshOrphans(): Promise<void> {
     sessionId: r.sessionId,
     title: r.title,
     createdAt: r.createdAt,
+    pinned: r.pinned,
   }));
 }
 
@@ -71,6 +74,7 @@ function rowToTask(r: TaskRow): Task {
     title: r.title,
     status: r.status as Task["status"],
     createdAt: r.createdAt,
+    pinned: r.pinned,
     parentId: r.parentId,
     dependsOn: r.dependsOn,
   };
@@ -119,6 +123,7 @@ export function createDraftTask(projectId: string): Task {
     title: "新对话",
     status: "draft",
     createdAt: Date.now(),
+    pinned: false,
     parentId: null,
     dependsOn: [],
   };
@@ -185,6 +190,21 @@ export async function archiveProjectConversations(projectId: string): Promise<nu
   return dbCount + draftCleared;
 }
 
+/** 切换单条 session 置顶状态，并刷新其所在缓存列表。 */
+export async function toggleTaskPin(taskId: string): Promise<boolean> {
+  const pinned = await invoke<boolean>("task_toggle_pin", { id: taskId });
+  for (const [pid, list] of Object.entries(TASKS.value)) {
+    if (list.some((t) => t.id === taskId)) {
+      await refreshTasks(pid);
+      return pinned;
+    }
+  }
+  if (ORPHAN_LIST.value.some((o) => o.id === taskId)) {
+    await refreshOrphans();
+  }
+  return pinned;
+}
+
 /** 供 projects.removeProject 调用：清理该项目关联的草稿任务（DB 侧由 project_remove 处理）。 */
 export function removeProjectTasks(projectId: string): void {
   const next = { ...TASKS.value };
@@ -228,6 +248,7 @@ export function createDraftOrphan(): OrphanConversation {
     sessionId: id,
     title: "新对话",
     createdAt: Date.now(),
+    pinned: false,
   };
   DRAFT_ORPHANS.set(id, draft);
   return draft;
@@ -253,6 +274,7 @@ export async function promoteDraftOrphan(id: string, title: string): Promise<voi
         sessionId: row.sessionId,
         title: row.title,
         createdAt: row.createdAt,
+        pinned: row.pinned,
       },
       ...ORPHAN_LIST.value,
     ];

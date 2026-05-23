@@ -47,6 +47,8 @@ export interface Task {
   title: string;
   status: TaskStatus;
   createdAt: number;
+  /** 是否置顶。置顶 session 显示在同组列表最上方。 */
+  pinned: boolean;
   /** 父任务 id，null 表示顶层任务。 */
   parentId: string | null;
   /** 必须先完成的前置任务 id 列表。 */

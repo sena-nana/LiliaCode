@@ -1415,6 +1415,7 @@ pub fn run() {
             projects_tasks::task_promote,
             projects_tasks::task_archive_project,
             projects_tasks::task_archive,
+            projects_tasks::task_toggle_pin,
             projects_tasks::project_reorder,
             projects_tasks::task_reorder,
             projects_tasks::task_reparent,

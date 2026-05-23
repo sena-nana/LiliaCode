@@ -558,6 +558,11 @@ pre code {
   filter: none;
 }
 
+.sb-icon-btn.is-pinned,
+.sb-icon-btn.is-pinned:hover {
+  color: var(--accent);
+}
+
 /* 「+ 添加项目」contextmenu：Teleport 到 body 后 z-index 抬到搜索下拉之上。 */
 .sb-menu {
   position: fixed;
