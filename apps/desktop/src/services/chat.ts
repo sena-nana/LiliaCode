@@ -16,7 +16,6 @@ import type {
   ChatBranchOption,
   ChatComposerState,
   AgentTimelineEvent,
-  ChatMessage,
   ChatModelOption,
   ChatSendResult,
   ConnectionMode,
@@ -37,20 +36,13 @@ export type {
   RouterMode,
 };
 
-export interface ChunkEvent { taskId: string; text: string; }
-export interface ToolEvent { taskId: string; name: string; input: unknown; }
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
-export interface ErrorEvent { taskId: string; message: string; }
 
 /**
  * @deprecated 用 BackendEnvStatus（per-backend）+ EnvStatusReport（顶层报告）替代。
  */
 export type EnvStatus = BackendEnvStatus;
-
-export function listMessages(taskId: string): Promise<ChatMessage[]> {
-  return invoke<ChatMessage[]>("chat_list_messages", { taskId });
-}
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
@@ -143,15 +135,7 @@ export function testAssistantAIConnection(
 }
 
 // ---- 事件订阅 ----
-// 每个 listen 各自返回 unlisten；调用方在 onUnmounted 里需要全部 await。
-
-export function onChunk(handler: (e: ChunkEvent) => void): Promise<UnlistenFn> {
-  return listen<ChunkEvent>("chat:chunk", (event) => handler(event.payload));
-}
-
-export function onTool(handler: (e: ToolEvent) => void): Promise<UnlistenFn> {
-  return listen<ToolEvent>("chat:tool", (event) => handler(event.payload));
-}
+// UI 只订阅 turn 状态和 agent timeline；文本、工具、错误都归入 timeline 事件。
 
 export function onTurnStarted(handler: (e: TurnStartedEvent) => void): Promise<UnlistenFn> {
   return listen<TurnStartedEvent>("chat:turn-started", (event) => handler(event.payload));
@@ -159,10 +143,6 @@ export function onTurnStarted(handler: (e: TurnStartedEvent) => void): Promise<U
 
 export function onDone(handler: (e: DoneEvent) => void): Promise<UnlistenFn> {
   return listen<DoneEvent>("chat:done", (event) => handler(event.payload));
-}
-
-export function onError(handler: (e: ErrorEvent) => void): Promise<UnlistenFn> {
-  return listen<ErrorEvent>("chat:error", (event) => handler(event.payload));
 }
 
 export function onAgentTimeline(

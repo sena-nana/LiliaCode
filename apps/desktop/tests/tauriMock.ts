@@ -28,6 +28,7 @@ interface AgentTimelineEvent {
   turnId: string | null;
   backend: "claude" | "codex";
   kind:
+    | "message"
     | "reasoning"
     | "plan"
     | "todo_list"
@@ -120,7 +121,6 @@ const baseTasks: TaskRow[] = [
 
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
-let chatMessages: Record<string, unknown[]> = {};
 let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
@@ -146,7 +146,6 @@ function refreshSessionCounts() {
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
-  chatMessages = {};
   timelineEvents = {
     "t-002": [
       {
@@ -189,6 +188,21 @@ export function completeMockAgentTurn(taskId: string) {
   if (next) {
     chatQueued[taskId] = rest;
     chatRunning[taskId] = true;
+    const queuedMessage = (timelineEvents[taskId] ?? []).find((event) => {
+      const payload = event.payload as Record<string, unknown> | null;
+      return event.kind === "message" && payload?.queued === true;
+    });
+    if (queuedMessage) {
+      emitMockTimelineEvent(taskId, {
+        ...queuedMessage,
+        status: "success",
+        payload: {
+          ...(queuedMessage.payload as Record<string, unknown>),
+          queued: false,
+        },
+        updatedAt: Date.now(),
+      });
+    }
     queueMicrotask(() => {
       emitTauriEvent("chat:turn-started", {
         taskId,
@@ -227,7 +241,38 @@ export function emitMockTimelineEvent(
 }
 
 export function seedMockChatMessages(taskId: string, messages: unknown[]) {
-  chatMessages[taskId] = messages;
+  const messageEvents = messages
+    .map((message, index): AgentTimelineEvent | null => {
+      if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+      const row = message as Record<string, unknown>;
+      if (row.role !== "user" && row.role !== "system") return null;
+      const id = String(row.id ?? `legacy-${index}`);
+      const content = String(row.content ?? "");
+      const createdAt = typeof row.createdAt === "number" ? row.createdAt : Date.now();
+      return {
+        id,
+        taskId,
+        turnId: null,
+        backend: "claude",
+        kind: "message",
+        status: "success",
+        title: row.role === "system" ? "系统消息" : "用户输入",
+        summary: content,
+        payload: {
+          role: row.role,
+          content,
+          queued: false,
+        },
+        createdAt,
+        updatedAt: createdAt,
+        order: 0,
+      };
+    })
+    .filter((event): event is AgentTimelineEvent => event !== null);
+  timelineEvents[taskId] = [
+    ...messageEvents,
+    ...(timelineEvents[taskId] ?? []).filter((event) => event.kind !== "message"),
+  ];
 }
 
 export const mockListen = vi.fn(async (
@@ -337,11 +382,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
       };
 
-    case "chat_list_messages": {
-      const taskId = String(args.taskId);
-      return chatMessages[taskId] ?? [];
-    }
-
     case "agent_timeline_list": {
       const taskId = String(args.taskId);
       return timelineEvents[taskId] ?? [];
@@ -388,15 +428,31 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_send_message": {
       const taskId = String(args.taskId);
       const content = String(args.content);
+      const queued = chatRunning[taskId] === true;
       const message = {
-        id: `u-${(chatMessages[taskId] ?? []).length + 1}`,
+        id: `u-${(timelineEvents[taskId]?.filter((event) => event.kind === "message").length ?? 0) + 1}`,
         taskId,
         role: "user",
         content,
         createdAt: Date.now(),
       };
-      chatMessages[taskId] = [...(chatMessages[taskId] ?? []), message];
-      if (chatRunning[taskId]) {
+      emitMockTimelineEvent(taskId, {
+        id: message.id,
+        turnId: null,
+        kind: "message",
+        status: queued ? "pending" : "success",
+        title: "用户输入",
+        summary: content,
+        payload: {
+          role: "user",
+          content,
+          queued,
+        },
+        createdAt: message.createdAt,
+        updatedAt: message.createdAt,
+        order: 0,
+      });
+      if (queued) {
         chatQueued[taskId] = [...(chatQueued[taskId] ?? []), args];
         return {
           message,

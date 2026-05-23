@@ -4,8 +4,8 @@
  *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
  *   /chats/:taskId                     —— 不绑定项目的收集箱/草稿对话
  *
- * Agent 过程和最终回复走 timeline 呈现；transcript 里的气泡只保留用户输入
- * 和必要的 system 错误提示，避免 assistant 回复跑到过程时间线前面。
+ * 用户输入、Agent 过程、最终回复和错误提示统一走 timeline 呈现；
+ * 不再通过 transcript 维护第二套可见消息流。
  * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送把草稿 promote 到收集箱。
  */
 
@@ -27,11 +27,9 @@ import {
   getComposerState,
   listAgentTimeline,
   listBranches,
-  listMessages,
   listModels,
   onAgentTimeline,
   onDone,
-  onError,
   onTurnStarted,
   sendMessage,
   setComposerState,
@@ -39,12 +37,9 @@ import {
 import type {
   AgentTimelineEvent,
   ChatBranchOption,
-  ChatMessage,
   ChatComposerState,
   ChatModelOption,
 } from "@lilia/contracts";
-
-type LocalMessage = ChatMessage & { queued?: boolean };
 
 const props = defineProps<{ projectId?: string; taskId: string }>();
 
@@ -65,7 +60,6 @@ const emptyHeadline = computed(() =>
     : "今天想做什么？",
 );
 
-const messages = ref<LocalMessage[]>([]);
 const timelineEvents = shallowRef<AgentTimelineEvent[]>([]);
 const composer = ref<ChatComposerState>({
   taskId: props.taskId,
@@ -97,32 +91,6 @@ function summarizeTitle(text: string): string {
   return normalized.slice(0, 30) + "…";
 }
 
-function isVisibleMessage(message: ChatMessage): boolean {
-  return message.role !== "assistant";
-}
-
-function sortMessages(list: LocalMessage[]): LocalMessage[] {
-  return [...list].sort((a, b) =>
-    a.createdAt - b.createdAt || a.id.localeCompare(b.id)
-  );
-}
-
-function mergeVisibleMessages(
-  fetched: ChatMessage[],
-  current: LocalMessage[],
-): LocalMessage[] {
-  const byId = new Map<string, LocalMessage>();
-  for (const message of fetched) {
-    if (isVisibleMessage(message)) byId.set(message.id, message);
-  }
-  for (const message of current) {
-    if (isVisibleMessage(message) && !byId.has(message.id)) {
-      byId.set(message.id, message);
-    }
-  }
-  return sortMessages([...byId.values()]);
-}
-
 async function onSend(content: string) {
   if (!hasContext.value) return;
 
@@ -135,14 +103,14 @@ async function onSend(content: string) {
 
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
 
-  const optimistic: LocalMessage = {
+  const optimistic = createMessageTimelineEvent({
     id: `pending-${Date.now()}`,
     taskId: props.taskId,
-    role: "user",
     content,
     createdAt: Date.now(),
-  };
-  messages.value = [...messages.value, optimistic];
+    queued: true,
+  });
+  upsertTimelineEvent(optimistic);
   try {
     const result = await sendMessage(
       props.taskId,
@@ -150,36 +118,19 @@ async function onSend(content: string) {
       composer.value,
       cwd,
     );
-    let replaced = false;
-    messages.value = messages.value.map((m) => {
-      if (m.id !== optimistic.id) return m;
-      replaced = true;
-      return { ...result.message, queued: result.dispatch === "queued" };
-    });
-    if (!replaced && isVisibleMessage(result.message)) {
-      messages.value = sortMessages([
-        ...messages.value,
-        { ...result.message, queued: result.dispatch === "queued" },
-      ]);
-    }
+    removeTimelineEvent(optimistic.id);
+    upsertTimelineEvent(createMessageTimelineEvent({
+      id: result.message.id,
+      taskId: result.message.taskId,
+      content: result.message.content,
+      createdAt: result.message.createdAt,
+      queued: result.dispatch === "queued",
+    }));
   } catch (err) {
-    messages.value = messages.value.filter((m) => m.id !== optimistic.id);
+    removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
-    pushSystemMessage(`发送失败：${String(err)}`);
+    upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`));
   }
-}
-
-function pushSystemMessage(text: string) {
-  messages.value = [
-    ...messages.value,
-    {
-      id: `sys-${Date.now()}`,
-      taskId: props.taskId,
-      role: "system",
-      content: text,
-      createdAt: Date.now(),
-    },
-  ];
 }
 
 async function onComposerUpdate(next: ChatComposerState) {
@@ -220,6 +171,69 @@ function upsertTimelineEvent(event: AgentTimelineEvent) {
   timelineEvents.value = next;
 }
 
+function removeTimelineEvent(eventId: string) {
+  timelineEvents.value = timelineEvents.value.filter((item) => item.id !== eventId);
+}
+
+function createMessageTimelineEvent(input: {
+  id: string;
+  taskId: string;
+  content: string;
+  createdAt: number;
+  queued?: boolean;
+}): AgentTimelineEvent {
+  return {
+    id: input.id,
+    taskId: input.taskId,
+    turnId: null,
+    backend: composer.value.backend,
+    kind: "message",
+    status: input.queued ? "pending" : "success",
+    title: "用户输入",
+    summary: input.content,
+    payload: {
+      role: "user",
+      content: input.content,
+      queued: input.queued === true,
+    },
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    order: 0,
+  };
+}
+
+function mergeTimelineEvents(
+  events: AgentTimelineEvent[],
+  current: AgentTimelineEvent[],
+): AgentTimelineEvent[] {
+  const byId = new Map<string, AgentTimelineEvent>();
+  for (const event of events) byId.set(event.id, event);
+  for (const event of current) {
+    if (!byId.has(event.id)) byId.set(event.id, event);
+  }
+  return [...byId.values()].sort((a, b) =>
+    a.createdAt - b.createdAt || a.order - b.order || a.id.localeCompare(b.id)
+  );
+}
+
+function createErrorTimelineEvent(message: string): AgentTimelineEvent {
+  const now = Date.now();
+  return {
+    id: `error-${now}`,
+    taskId: props.taskId,
+    turnId: null,
+    backend: composer.value.backend,
+    kind: "error",
+    status: "error",
+    title: "错误",
+    summary: message,
+    payload: { message },
+    createdAt: now,
+    updatedAt: now,
+    order: Number.MAX_SAFE_INTEGER,
+  };
+}
+
 async function loadTimelineEvents(taskId: string): Promise<AgentTimelineEvent[]> {
   try {
     return await listAgentTimeline(taskId);
@@ -239,15 +253,13 @@ async function loadAll() {
   const branchesPromise = projectId
     ? listBranches(projectId)
     : Promise.resolve<ChatBranchOption[]>([]);
-  const [msgs, events, comp, brs] = await Promise.all([
-    listMessages(taskId),
+  const [events, comp, brs] = await Promise.all([
     loadTimelineEvents(taskId),
     getComposerState(taskId),
     branchesPromise,
   ]);
   if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-  messages.value = mergeVisibleMessages(msgs, messages.value);
-  timelineEvents.value = events;
+  timelineEvents.value = mergeTimelineEvents(events, timelineEvents.value);
   composer.value = comp;
   branches.value = brs;
   // models 依赖 backend，单独拉。
@@ -268,12 +280,20 @@ onMounted(async () => {
       if (e.taskId !== props.taskId) return;
       isTurnRunning.value = true;
       let cleared = false;
-      messages.value = messages.value.map((m) => {
-        if (!cleared && m.queued && m.role === "user") {
+      timelineEvents.value = timelineEvents.value.map((event) => {
+        const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+          ? event.payload as Record<string, unknown>
+          : {};
+        if (!cleared && event.kind === "message" && payload.queued === true) {
           cleared = true;
-          return { ...m, queued: false };
+          return {
+            ...event,
+            status: "success",
+            payload: { ...payload, queued: false },
+            updatedAt: Date.now(),
+          };
         }
-        return m;
+        return event;
       });
     }),
   );
@@ -281,13 +301,6 @@ onMounted(async () => {
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
       isTurnRunning.value = false;
-    }),
-  );
-  unlisteners.push(
-    await onError((e) => {
-      if (e.taskId !== props.taskId) return;
-      isTurnRunning.value = false;
-      pushSystemMessage(`agent 报错：${e.message}`);
     }),
   );
   await Promise.all([loadAll()]);
@@ -304,7 +317,6 @@ watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
     isTurnRunning.value = false;
-    messages.value = [];
     timelineEvents.value = [];
     await loadAll();
   },
@@ -318,7 +330,6 @@ watch(
   >
     <div class="chat">
       <ChatTranscript
-        :messages="messages"
         :timeline-events="timelineEvents"
         :empty-headline="emptyHeadline"
       />

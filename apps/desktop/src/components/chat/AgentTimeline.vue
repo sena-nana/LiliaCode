@@ -46,14 +46,6 @@ import {
 
 type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
 
-type TimelineMessageEntry = {
-  type: "message";
-  id: string;
-  createdAt: number;
-  order: number;
-  message: StreamableMessage;
-};
-
 type TimelineEventEntry = {
   type: "event";
   id: string;
@@ -63,19 +55,14 @@ type TimelineEventEntry = {
   processEvents?: AgentTimelineEvent[];
 };
 
-type TimelineEntry = TimelineMessageEntry | TimelineEventEntry;
+type TimelineEntry = TimelineEventEntry;
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
-  messages?: StreamableMessage[];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
 const expandedProcessGroupIds = ref<Set<string>>(new Set());
-
-const visibleMessages = computed(() =>
-  (props.messages ?? []).filter((message) => message.role !== "assistant"),
-);
 
 const finalReplyCollapseKey = computed(() =>
   props.events
@@ -85,24 +72,17 @@ const finalReplyCollapseKey = computed(() =>
 );
 
 const chronologicalEntries = computed<TimelineEntry[]>(() =>
-  [
-    ...visibleMessages.value.map((message): TimelineEntry => ({
-      type: "message",
-      id: `message:${message.id}`,
-      createdAt: message.createdAt,
-      order: 0,
-      message,
-    })),
-    ...props.events.map((event): TimelineEntry => ({
+  props.events
+    .map((event): TimelineEntry => ({
       type: "event",
       id: `event:${event.id}`,
       createdAt: event.createdAt,
-      order: event.order + 1,
+      order: event.order,
       event,
-    })),
-  ].sort((a, b) =>
-    a.createdAt - b.createdAt || a.order - b.order || a.id.localeCompare(b.id)
-  ),
+    }))
+    .sort((a, b) =>
+      a.createdAt - b.createdAt || a.order - b.order || a.id.localeCompare(b.id)
+    ),
 );
 
 const orderedEntries = computed<TimelineEntry[]>(() => {
@@ -125,7 +105,6 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 
   for (const entry of entries) {
     if (
-      entry.type === "event" &&
       isTimelineFinalReply(entry.event) &&
       entry.event.turnId
     ) {
@@ -135,8 +114,8 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 
   for (const entry of entries) {
     if (
-      entry.type === "event" &&
       !isTimelineFinalReply(entry.event) &&
+      !isTimelineMessage(entry.event) &&
       entry.event.turnId
     ) {
       const finalEntry = finalByTurnId.get(entry.event.turnId);
@@ -149,7 +128,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
   let pendingSpanEvents: TimelineEventEntry[] = [];
   let collectingSpan = false;
   for (const entry of entries) {
-    if (entry.type === "message") {
+    if (isTimelineMessage(entry.event)) {
       collectingSpan = true;
       continue;
     }
@@ -170,9 +149,9 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 
   const output: TimelineEntry[] = [];
   for (const entry of entries) {
-    if (entry.type === "event" && hiddenEventIds.has(entry.event.id)) continue;
+    if (hiddenEventIds.has(entry.event.id)) continue;
 
-    if (entry.type === "event" && isTimelineFinalReply(entry.event)) {
+    if (isTimelineFinalReply(entry.event)) {
       const processEvents = processEventsByFinalId.get(entry.event.id) ?? [];
       if (processGroupExpanded(entry.event)) {
         output.push(...processEvents.map((event): TimelineEventEntry => ({
@@ -224,11 +203,11 @@ function expanded(event: AgentTimelineEvent): boolean {
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
-  return !isTimelineFinalReply(event) && !expanded(event);
+  return !isTimelineFinalReply(event) && !isTimelineMessage(event) && !expanded(event);
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return !isTimelineFinalReply(event);
+  return !isTimelineFinalReply(event) && !isTimelineMessage(event);
 }
 
 function toggleEvent(event: AgentTimelineEvent) {
@@ -237,7 +216,7 @@ function toggleEvent(event: AgentTimelineEvent) {
 }
 
 function processEventCount(entry: TimelineEntry): number {
-  return entry.type === "event" ? entry.processEvents?.length ?? 0 : 0;
+  return entry.processEvents?.length ?? 0;
 }
 
 function processGroupExpanded(event: AgentTimelineEvent): boolean {
@@ -252,7 +231,6 @@ function toggleProcessGroup(event: AgentTimelineEvent) {
 }
 
 function processGroupLabel(entry: TimelineEntry): string {
-  if (entry.type !== "event") return "";
   const count = processEventCount(entry);
   const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
   return `${verb} ${count} 项`;
@@ -277,6 +255,7 @@ function eventComponent(event: AgentTimelineEvent): Component {
       return TimelineSubagentEvent;
     case "error":
       return TimelineErrorEvent;
+    case "message":
     case "reasoning":
     case "turn":
     default:
@@ -286,6 +265,7 @@ function eventComponent(event: AgentTimelineEvent): Component {
 
 function kindIcon(kind: AgentTimelineEventKind): LucideIcon {
   const icons: Record<AgentTimelineEventKind, LucideIcon> = {
+    message: UserRound,
     reasoning: Brain,
     plan: ListChecks,
     todo_list: CheckCircle2,
@@ -304,6 +284,31 @@ function kindIcon(kind: AgentTimelineEventKind): LucideIcon {
 function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
 }
+
+function isTimelineMessage(event: AgentTimelineEvent): boolean {
+  return event.kind === "message";
+}
+
+function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
+  const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+    ? event.payload as Record<string, unknown>
+    : {};
+  const role = payload.role === "system" || payload.role === "assistant"
+    ? payload.role
+    : "user";
+  const content = typeof payload.content === "string"
+    ? payload.content
+    : event.summary ?? "";
+
+  return {
+    id: event.id,
+    taskId: event.taskId,
+    role,
+    content,
+    createdAt: event.createdAt,
+    queued: payload.queued === true,
+  };
+}
 </script>
 
 <template>
@@ -315,17 +320,17 @@ function previewText(event: AgentTimelineEvent): string {
     <ol class="agent-timeline__list">
       <template v-for="entry in orderedEntries" :key="entry.id">
         <li
-          v-if="entry.type === 'message'"
+          v-if="isTimelineMessage(entry.event)"
           class="agent-timeline__message-row"
           :class="[
-            `agent-timeline__message-row--${entry.message.role}`,
-            { 'is-queued': entry.message.queued },
+            `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,
+            { 'is-queued': messageFromEvent(entry.event).queued },
           ]"
         >
           <span class="agent-timeline__message-icon" aria-hidden="true">
             <UserRound :size="14" />
           </span>
-          <ChatBubble :message="entry.message" />
+          <ChatBubble :message="messageFromEvent(entry.event)" />
         </li>
 
         <li
