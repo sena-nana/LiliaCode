@@ -38,6 +38,7 @@ import {
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
+  timelineFinalText,
   timelineKindLabel,
   timelineStatusClass,
   timelineStatusLabel,
@@ -46,21 +47,24 @@ import {
 
 type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
 
-type TimelineEntry =
-  | {
-      type: "message";
-      id: string;
-      createdAt: number;
-      order: number;
-      message: StreamableMessage;
-    }
-  | {
-      type: "event";
-      id: string;
-      createdAt: number;
-      order: number;
-      event: AgentTimelineEvent;
-    };
+type TimelineMessageEntry = {
+  type: "message";
+  id: string;
+  createdAt: number;
+  order: number;
+  message: StreamableMessage;
+};
+
+type TimelineEventEntry = {
+  type: "event";
+  id: string;
+  createdAt: number;
+  order: number;
+  event: AgentTimelineEvent;
+  processEvents?: AgentTimelineEvent[];
+};
+
+type TimelineEntry = TimelineMessageEntry | TimelineEventEntry;
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
@@ -68,6 +72,7 @@ const props = defineProps<{
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
+const expandedProcessGroupIds = ref<Set<string>>(new Set());
 
 const visibleMessages = computed(() =>
   (props.messages ?? []).filter((message) => message.role !== "assistant"),
@@ -75,7 +80,22 @@ const visibleMessages = computed(() =>
 
 const finalReplySeen = computed(() => props.events.some(isTimelineFinalReply));
 
-const orderedEntries = computed<TimelineEntry[]>(() =>
+const finalReplyCollapseKey = computed(() =>
+  props.events
+    .filter(isTimelineFinalReply)
+    .map((event) =>
+      [
+        event.id,
+        event.status,
+        event.updatedAt,
+        event.order,
+        timelineFinalText(event).length,
+      ].join(":")
+    )
+    .join("|"),
+);
+
+const chronologicalEntries = computed<TimelineEntry[]>(() =>
   [
     ...visibleMessages.value.map((message): TimelineEntry => ({
       type: "message",
@@ -96,6 +116,46 @@ const orderedEntries = computed<TimelineEntry[]>(() =>
   ),
 );
 
+const orderedEntries = computed<TimelineEntry[]>(() => {
+  const output: TimelineEntry[] = [];
+  let turnSpan: TimelineEntry[] = [];
+
+  function flushRunningSpan() {
+    output.push(...turnSpan);
+    turnSpan = [];
+  }
+
+  function visibleSpanEntries(): TimelineEntry[] {
+    return turnSpan.filter((entry) => entry.type === "message");
+  }
+
+  for (const entry of chronologicalEntries.value) {
+    if (entry.type === "message") {
+      turnSpan.push(entry);
+      continue;
+    }
+
+    if (isTimelineFinalReply(entry.event)) {
+      const processEvents = turnSpan
+        .filter((item): item is TimelineEventEntry => item.type === "event")
+        .map((item) => item.event);
+      output.push(...visibleSpanEntries());
+      output.push({ ...entry, processEvents });
+      turnSpan = [];
+      continue;
+    }
+
+    if (turnSpan.length > 0) {
+      turnSpan.push(entry);
+    } else {
+      output.push(entry);
+    }
+  }
+
+  flushRunningSpan();
+  return output;
+});
+
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
   for (const event of props.events) {
@@ -112,10 +172,11 @@ watch(
 );
 
 watch(
-  finalReplySeen,
-  (seen) => {
-    if (!seen) return;
+  finalReplyCollapseKey,
+  (key, previousKey) => {
+    if (!key || key === previousKey) return;
     toggledIds.value = new Set();
+    expandedProcessGroupIds.value = new Set();
   },
 );
 
@@ -137,6 +198,28 @@ function canToggle(event: AgentTimelineEvent): boolean {
 function toggleEvent(event: AgentTimelineEvent) {
   if (!canToggle(event)) return;
   toggledIds.value = toggleTimelineExpandedId(toggledIds.value, event.id);
+}
+
+function processEventCount(entry: TimelineEntry): number {
+  return entry.type === "event" ? entry.processEvents?.length ?? 0 : 0;
+}
+
+function processGroupExpanded(event: AgentTimelineEvent): boolean {
+  return expandedProcessGroupIds.value.has(event.id);
+}
+
+function toggleProcessGroup(event: AgentTimelineEvent) {
+  const next = new Set(expandedProcessGroupIds.value);
+  if (next.has(event.id)) next.delete(event.id);
+  else next.add(event.id);
+  expandedProcessGroupIds.value = next;
+}
+
+function processGroupLabel(entry: TimelineEntry): string {
+  if (entry.type !== "event") return "";
+  const count = processEventCount(entry);
+  const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
+  return `${verb} ${count} 项`;
 }
 
 function eventComponent(event: AgentTimelineEvent): Component {
@@ -265,6 +348,15 @@ function previewText(event: AgentTimelineEvent): string {
                 class="agent-timeline__meta"
                 aria-label="事件分类和状态"
               >
+                <button
+                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
+                  type="button"
+                  class="agent-timeline__process-toggle"
+                  :aria-expanded="processGroupExpanded(entry.event)"
+                  @click="toggleProcessGroup(entry.event)"
+                >
+                  {{ processGroupLabel(entry) }}
+                </button>
                 <span class="agent-timeline__badge">{{ timelineKindLabel(entry.event.kind) }}</span>
                 <span class="agent-timeline__badge">{{ timelineStatusLabel(entry.event.status) }}</span>
               </div>
@@ -280,6 +372,8 @@ function previewText(event: AgentTimelineEvent): string {
                 :event="entry.event"
                 :expanded="expanded(entry.event)"
                 :compact="isCompact(entry.event)"
+                :process-events="entry.processEvents ?? []"
+                :process-expanded="processGroupExpanded(entry.event)"
               />
             </div>
           </article>

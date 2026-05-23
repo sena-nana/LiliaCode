@@ -1949,6 +1949,26 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
+.agent-timeline__process-toggle {
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  filter: none;
+}
+
+.agent-timeline__process-toggle:hover {
+  border-color: var(--agent-timeline-border);
+  background: var(--agent-timeline-tint);
+  color: var(--agent-timeline-color);
+  filter: none;
+}
+
 .agent-timeline__item.is-compact .agent-timeline__badge {
   border-color: transparent;
   background: transparent;
@@ -2038,7 +2058,8 @@ button.ghost:hover {
 }
 
 .timeline-card__todo-list,
-.timeline-card__file-list {
+.timeline-card__file-list,
+.timeline-card__process-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2046,6 +2067,10 @@ button.ghost:hover {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.timeline-card__process-row {
+  padding-left: 2px;
 }
 
 .timeline-card__todo-item,
