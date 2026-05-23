@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State};
+use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
@@ -20,6 +20,7 @@ mod projects_tasks;
 mod store;
 mod todos;
 mod util;
+mod window_state;
 use plugins::{
     ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview,
 };
@@ -1349,6 +1350,10 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = window.set_background_color(Some(BG));
+                if let Some(state) = window_state::load_main_window_state(app.handle()) {
+                    window_state::restore_main_window_state(&window, state);
+                }
+                let _ = window.show();
             }
             // 初始化 lilia-store（SQLite）。失败时打印到 stderr 并继续运行——
             // 让 Tauri 窗口先出来，后续 Todo / Memory / Roadmap 命令会因取不到
@@ -1363,6 +1368,16 @@ pub fn run() {
                 }
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != MAIN_WINDOW_LABEL {
+                return;
+            }
+            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed) {
+                if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
+                    window_state::persist_main_window_state(&window.app_handle(), &webview_window);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             ping,
