@@ -15,6 +15,8 @@ use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEven
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 
+pub mod agent_events;
+mod agent_extensions;
 pub mod agent_timeline;
 mod plugins;
 mod projects_tasks;
@@ -22,12 +24,11 @@ mod store;
 mod todos;
 mod util;
 mod window_state;
-use plugins::{
-    ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview,
-};
+use agent_events::{AgentEventEffect, AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
+use agent_extensions::TodoMirrorExtension;
 use agent_timeline::AgentTimelineEventInput;
+use plugins::{ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview};
 use store::LiliaStore;
-use todos::AgentTodoItem;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -209,15 +210,15 @@ struct DoneEvent {
     subtype: Option<String>,
 }
 
-fn persist_and_emit_timeline_event(
-    app_handle: &AppHandle,
-    task_id: &str,
-    backend: &str,
-    turn_id: &str,
-    event: JsonValue,
-) {
+fn timeline_input_from_runtime_event(
+    ctx: &AgentTurnContext,
+    event: &AgentRuntimeEvent,
+) -> Option<AgentTimelineEventInput> {
+    let AgentRuntimeEvent::Timeline { event } = event else {
+        return None;
+    };
     let Some(obj) = event.as_object() else {
-        return;
+        return None;
     };
 
     let kind = obj
@@ -242,13 +243,13 @@ fn persist_and_emit_timeline_event(
         .filter(|s| !s.is_empty());
     let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
     let source_id = obj.get("sourceId").and_then(|v| v.as_str());
-    let id = source_id.map(|sid| format!("{task_id}:{turn_id}:{sid}"));
+    let id = source_id.map(|sid| format!("{}:{}:{sid}", ctx.task_id, ctx.turn_id));
 
-    let input = AgentTimelineEventInput {
+    Some(AgentTimelineEventInput {
         id,
-        task_id: task_id.to_string(),
-        turn_id: Some(turn_id.to_string()),
-        backend: backend.to_string(),
+        task_id: ctx.task_id.clone(),
+        turn_id: Some(ctx.turn_id.clone()),
+        backend: ctx.backend.clone(),
         kind,
         status,
         title,
@@ -257,8 +258,17 @@ fn persist_and_emit_timeline_event(
         created_at: None,
         updated_at: None,
         order: None,
-    };
+    })
+}
 
+fn persist_and_emit_timeline_event(
+    app_handle: &AppHandle,
+    ctx: &AgentTurnContext,
+    event: &AgentRuntimeEvent,
+) {
+    let Some(input) = timeline_input_from_runtime_event(ctx, event) else {
+        return;
+    };
     let store = app_handle.state::<LiliaStore>();
     match store
         .conn()
@@ -346,6 +356,95 @@ fn persist_and_emit_error_timeline_event(
         Err(err) => {
             eprintln!("[agent-timeline] persist error failed: {err}");
         }
+    }
+}
+
+fn log_agent_event_effect(effect: AgentEventEffect) {
+    for err in effect.errors {
+        eprintln!(
+            "[agent-event] extension {} failed: {}",
+            err.extension_id, err.message
+        );
+    }
+    if !effect.context_candidates.is_empty() {
+        eprintln!(
+            "[agent-event] collected {} context candidate(s)",
+            effect.context_candidates.len()
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_event_sink_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn turn_context() -> AgentTurnContext {
+        AgentTurnContext {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CLAUDE.to_string(),
+            turn_id: "turn-1".to_string(),
+        }
+    }
+
+    #[test]
+    fn timeline_runtime_event_maps_to_timeline_input() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!({
+                    "kind": "command",
+                    "status": "success",
+                    "title": "Run tests",
+                    "summary": "17 passed",
+                    "payload": { "command": "cargo test" },
+                    "sourceId": "cargo-test"
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(input.id, Some("task-1:turn-1:cargo-test".to_string()));
+        assert_eq!(input.task_id, "task-1");
+        assert_eq!(input.turn_id, Some("turn-1".to_string()));
+        assert_eq!(input.backend, BACKEND_CLAUDE);
+        assert_eq!(input.kind, "command");
+        assert_eq!(input.status, "success");
+        assert_eq!(input.title, "Run tests");
+        assert_eq!(input.summary, Some("17 passed".to_string()));
+        assert_eq!(input.payload, json!({ "command": "cargo test" }));
+        assert_eq!(input.order, None);
+    }
+
+    #[test]
+    fn timeline_runtime_event_uses_existing_sink_defaults() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!({}),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(input.id, None);
+        assert_eq!(input.kind, "tool");
+        assert_eq!(input.status, "info");
+        assert_eq!(input.title, "tool");
+        assert_eq!(input.summary, None);
+        assert_eq!(input.payload, JsonValue::Null);
+    }
+
+    #[test]
+    fn non_timeline_runtime_event_is_not_a_timeline_input() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::ToolUse {
+                name: "Read".to_string(),
+                input: json!({ "file": "README.md" }),
+            },
+        );
+
+        assert!(input.is_none());
     }
 }
 
@@ -724,6 +823,13 @@ fn spawn_agent_turn(
         // 累计 assistant 完整文本，done 时落盘到消息历史。
         let mut assistant_buf = String::new();
         let mut last_session_id: Option<String> = None;
+        let event_ctx = AgentTurnContext {
+            task_id: task_id_for_thread.clone(),
+            backend: backend_for_thread.clone(),
+            turn_id: turn_id_for_thread.clone(),
+        };
+        let mut event_host = AgentEventHost::new();
+        event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
@@ -736,98 +842,43 @@ fn spawn_agent_turn(
                     Ok(v) => v,
                     Err(_) => continue, // 忽略偶发非 JSON 输出（SDK 内部 log 等）
                 };
-                let ty = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match ty {
-                    "chunk" => {
-                        if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-                            assistant_buf.push_str(text);
-                        }
+                let Some(event) = AgentRuntimeEvent::from_runner_json(&value) else {
+                    continue;
+                };
+                log_agent_event_effect(event_host.dispatch(&event_ctx, &event));
+                match &event {
+                    AgentRuntimeEvent::Chunk { text } => {
+                        assistant_buf.push_str(text);
                     }
-                    "tool_use" => {
-                        let name = value
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let input = value.get("input").cloned().unwrap_or(JsonValue::Null);
-
-                        // 自动通道：SDK 的 TodoWrite 工具事件 → 同步到 task_todos 表。
-                        // 失败仅 log，不影响后续 tool 事件 emit（fall back 到普通 tool 通知）。
-                        if name == "TodoWrite" {
-                            if let Some(arr) = input.get("todos").and_then(|v| v.as_array()) {
-                                let parsed: Vec<AgentTodoItem> = arr
-                                    .iter()
-                                    .filter_map(|v| {
-                                        serde_json::from_value::<AgentTodoItem>(v.clone()).ok()
-                                    })
-                                    .collect();
-                                let store = app_handle.state::<LiliaStore>();
-                                match store.conn().and_then(|conn| {
-                                    todos::apply_agent_event_impl(
-                                        &conn,
-                                        &task_id_for_thread,
-                                        &parsed,
-                                    )
-                                }) {
-                                    Ok(_) => {
-                                        let _ = app_handle.emit(
-                                            "todo-changed",
-                                            serde_json::json!({
-                                                "taskId": task_id_for_thread,
-                                            }),
-                                        );
-                                    }
-                                    Err(err) => {
-                                        eprintln!(
-                                            "[todo] apply_agent_event failed: {err}"
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                    AgentRuntimeEvent::ToolUse { .. } => {}
+                    AgentRuntimeEvent::Timeline { .. } => {
+                        persist_and_emit_timeline_event(&app_handle, &event_ctx, &event);
                     }
-                    "timeline" => {
-                        if let Some(event) = value.get("event").cloned() {
-                            persist_and_emit_timeline_event(
-                                &app_handle,
-                                &task_id_for_thread,
-                                &backend_for_thread,
-                                &turn_id_for_thread,
-                                event,
-                            );
-                        }
-                    }
-                    "assistant_done" => {
+                    AgentRuntimeEvent::AssistantDone { text, session_id } => {
                         // 兜底：如果某轮文本只来自 assistant 消息没走 delta，把它补到累计缓冲。
                         if assistant_buf.is_empty() {
-                            if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-                                assistant_buf.push_str(text);
+                            if let Some(text) = text {
+                                assistant_buf.push_str(&text);
                             }
                         }
-                        if let Some(sid) = value.get("sessionId").and_then(|v| v.as_str()) {
-                            last_session_id = Some(sid.to_string());
+                        if let Some(sid) = session_id {
+                            last_session_id = Some(sid.clone());
                         }
                     }
-                    "done" => {
-                        if let Some(sid) = value.get("sessionId").and_then(|v| v.as_str()) {
-                            last_session_id = Some(sid.to_string());
+                    AgentRuntimeEvent::Done { session_id, .. } => {
+                        if let Some(sid) = session_id {
+                            last_session_id = Some(sid.clone());
                         }
                     }
-                    "error" => {
-                        let msg = value
-                            .get("message")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("未知错误")
-                            .to_string();
+                    AgentRuntimeEvent::Error { message } => {
                         persist_and_emit_error_timeline_event(
                             &app_handle,
                             &task_id_for_thread,
                             &backend_for_thread,
                             Some(&turn_id_for_thread),
-                            msg,
+                            message.clone(),
                         );
                     }
-                    _ => {}
                 }
             }
         }
