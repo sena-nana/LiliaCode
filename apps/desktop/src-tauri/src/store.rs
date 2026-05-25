@@ -6,8 +6,8 @@
  *   解析后立刻确保 `config/ db/ cache/` 三个子目录存在，避免后续每处都自己 mkdir。
  * - **连接池**：r2d2 + r2d2_sqlite。SQLite 单 writer，但读路径走多 reader 仍然受益。
  *   WAL 模式 + busy_timeout 让并发读写不互踩。
- * - **migrations**：用内置的 `PRAGMA user_version` 跟踪，避免引入第三方 migration 包。
- *   每个版本一个 closure，按 (version, fn) 顺序跑；当前版本号 = list 长度。
+ * - **schema baseline**：本次重置会把旧开发库清空并建成新基线；
+ *   之后的 schema 变更继续在该基线后追加迁移。
  */
 
 use std::env;
@@ -78,7 +78,7 @@ pub struct LiliaStore {
 }
 
 impl LiliaStore {
-    /// 打开（或新建）`<home>/db/lilia.db`，启 WAL + foreign_keys，再跑 migrations。
+    /// 打开（或新建）`<home>/db/lilia.db`，启 WAL + foreign_keys，再确保当前 schema。
     pub fn new(home: &Path) -> Result<Self, String> {
         ensure_layout(home).map_err(|e| format!("lilia-store: 准备目录失败：{e}"))?;
         let db_path = home.join("db").join("lilia.db");
@@ -97,12 +97,12 @@ impl LiliaStore {
             .build(manager)
             .map_err(|e| format!("lilia-store: 建连接池失败：{e}"))?;
 
-        // 跑 migrations 用独立连接（用完即归还）。
+        // 初始化 schema 用独立连接（用完即归还）。
         {
             let mut conn = pool
                 .get()
                 .map_err(|e| format!("lilia-store: 取连接失败：{e}"))?;
-            run_migrations(&mut conn)?;
+            ensure_current_schema(&mut conn)?;
         }
 
         Ok(LiliaStore { pool })
@@ -115,46 +115,90 @@ impl LiliaStore {
     }
 }
 
-/// 每个 migration = 一个 closure；按下标顺序 = 目标 user_version。
-/// 增加 schema 变更时在末尾追加一项，**禁止**改动已有 closure 的语义。
-fn run_migrations(conn: &mut Connection) -> Result<(), String> {
-    type Mig = fn(&Connection) -> Result<(), String>;
-    let migrations: &[Mig] = &[
-        // v1: TaskTodo 主表
-        migration_v1_task_todos,
-        // v2: projects + tasks + task_dependencies
-        migration_v2_projects_tasks,
-        // v3: sort_order 列（支持拖拽排序）
-        migration_v3_sort_order,
-        // v4: pinned 列（项目置顶）
-        migration_v4_pinned,
-        // v5: tasks.pinned 列（session 置顶）
-        migration_v5_task_pinned,
-        // v6: Agent 工作过程时间线（开发期直接使用 display 声明契约）
-        migration_v6_agent_timeline_events,
-    ];
+const RESET_BASELINE_SCHEMA_VERSION: i64 = 1;
 
+struct SchemaMigration {
+    version: i64,
+    name: &'static str,
+    apply: fn(&Connection) -> Result<(), String>,
+}
+
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];
+
+/// 本次重置把旧开发库清到新基线；基线之后继续按版本追加迁移。
+fn ensure_current_schema(conn: &mut Connection) -> Result<(), String> {
+    ensure_schema_with_migrations(conn, current_schema_version(), SCHEMA_MIGRATIONS)
+}
+
+fn current_schema_version() -> i64 {
+    SCHEMA_MIGRATIONS
+        .last()
+        .map(|migration| migration.version)
+        .unwrap_or(RESET_BASELINE_SCHEMA_VERSION)
+}
+
+fn ensure_schema_with_migrations(
+    conn: &mut Connection,
+    target_version: i64,
+    migrations: &[SchemaMigration],
+) -> Result<(), String> {
     let current: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| format!("lilia-store: 读取 user_version 失败：{e}"))?;
 
-    for (idx, migrate) in migrations.iter().enumerate() {
-        let target = (idx as i64) + 1;
-        if current >= target {
+    if current < RESET_BASELINE_SCHEMA_VERSION || current > target_version {
+        reset_development_schema(conn)?;
+    }
+
+    let mut version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| format!("lilia-store: 读取重置后 user_version 失败：{e}"))?;
+
+    for migration in migrations {
+        if migration.version <= version {
             continue;
         }
-        migrate(conn)?;
-        // PRAGMA user_version 不接受参数绑定，需用字面量拼接（安全：值由代码控制）。
-        conn.execute_batch(&format!("PRAGMA user_version = {target};"))
-            .map_err(|e| format!("lilia-store: 写 user_version 失败：{e}"))?;
+        if migration.version != version + 1 {
+            return Err(format!(
+                "lilia-store: schema migration {} 版本不连续，当前 {version}",
+                migration.name
+            ));
+        }
+        (migration.apply)(conn)?;
+        conn.execute_batch(&format!("PRAGMA user_version = {};", migration.version))
+            .map_err(|e| format!("lilia-store: 写 {} 版本失败：{e}", migration.name))?;
+        version = migration.version;
     }
+
     Ok(())
 }
 
-fn migration_v1_task_todos(conn: &Connection) -> Result<(), String> {
+fn reset_development_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
-        CREATE TABLE IF NOT EXISTS task_todos (
+        PRAGMA foreign_keys = OFF;
+
+        DROP TABLE IF EXISTS agent_timeline_events;
+        DROP TABLE IF EXISTS task_dependencies;
+        DROP TABLE IF EXISTS tasks;
+        DROP TABLE IF EXISTS projects;
+        DROP TABLE IF EXISTS task_todos;
+
+        PRAGMA foreign_keys = ON;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 清空旧开发库失败：{e}"))?;
+    create_current_schema(conn)?;
+    conn.execute_batch(&format!(
+        "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+    ))
+        .map_err(|e| format!("lilia-store: 写 user_version 失败：{e}"))
+}
+
+fn create_current_schema(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_todos (
           id           TEXT PRIMARY KEY,
           task_id      TEXT NOT NULL,
           text         TEXT NOT NULL,
@@ -164,24 +208,19 @@ fn migration_v1_task_todos(conn: &Connection) -> Result<(), String> {
           created_at   INTEGER NOT NULL,
           updated_at   INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_task_todos_task_id_order
+        CREATE INDEX idx_task_todos_task_id_order
           ON task_todos(task_id, "order");
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v1: 建 task_todos 失败：{e}"))
-}
 
-fn migration_v2_projects_tasks(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS projects (
+        CREATE TABLE projects (
           id         TEXT PRIMARY KEY,
           name       TEXT NOT NULL,
           cwd        TEXT,
-          created_at INTEGER NOT NULL
+          created_at INTEGER NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          pinned     INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS tasks (
+        CREATE TABLE tasks (
           id          TEXT PRIMARY KEY,
           project_id  TEXT,
           session_id  TEXT NOT NULL,
@@ -192,71 +231,25 @@ fn migration_v2_projects_tasks(conn: &Connection) -> Result<(), String> {
           created_at  INTEGER NOT NULL,
           parent_id   TEXT,
           archived    INTEGER NOT NULL DEFAULT 0,
+          sort_order  INTEGER NOT NULL DEFAULT 0,
+          pinned      INTEGER NOT NULL DEFAULT 0,
           FOREIGN KEY (project_id) REFERENCES projects(id)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_tasks_project_id
+        CREATE INDEX idx_tasks_project_id
           ON tasks(project_id);
-        CREATE INDEX IF NOT EXISTS idx_tasks_archived
+        CREATE INDEX idx_tasks_archived
           ON tasks(archived);
 
-        CREATE TABLE IF NOT EXISTS task_dependencies (
+        CREATE TABLE task_dependencies (
           task_id       TEXT NOT NULL,
           depends_on_id TEXT NOT NULL,
           PRIMARY KEY (task_id, depends_on_id),
           FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
           FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v2: 建 projects/tasks 失败：{e}"))
-}
 
-fn migration_v3_sort_order(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
-
-        -- 已有数据按 created_at 初始化排序（ASC：越旧 sort_order 越小，越新越大）
-        UPDATE projects SET sort_order = (
-          SELECT COUNT(*) FROM projects p2 WHERE p2.created_at <= projects.created_at
-        ) - 1;
-
-        -- tasks 按 project_id 分组初始化，orphan (NULL) 单独排
-        UPDATE tasks SET sort_order = (
-          SELECT COUNT(*) FROM tasks t2
-          WHERE t2.archived = 0
-            AND (t2.project_id = tasks.project_id OR (t2.project_id IS NULL AND tasks.project_id IS NULL))
-            AND t2.created_at >= tasks.created_at
-        ) - 1;
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v3: 加 sort_order 列失败：{e}"))
-}
-
-fn migration_v4_pinned(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v4: 加 pinned 列失败：{e}"))
-}
-
-fn migration_v5_task_pinned(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v5: 加 tasks.pinned 列失败：{e}"))
-}
-
-fn migration_v6_agent_timeline_events(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS agent_timeline_events (
+        CREATE TABLE agent_timeline_events (
           id          TEXT PRIMARY KEY,
           task_id     TEXT NOT NULL,
           turn_id     TEXT,
@@ -272,11 +265,11 @@ fn migration_v6_agent_timeline_events(conn: &Connection) -> Result<(), String> {
           "order"     INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_agent_timeline_events_task_id_order
+        CREATE INDEX idx_agent_timeline_events_task_id_order
           ON agent_timeline_events(task_id, "order");
         "#,
     )
-    .map_err(|e| format!("lilia-store v6: 建 agent_timeline_events 失败：{e}"))
+    .map_err(|e| format!("lilia-store: 创建当前 schema 失败：{e}"))
 }
 
 #[cfg(test)]
@@ -285,9 +278,9 @@ mod tests {
     use rusqlite::params;
 
     #[test]
-    fn migration_v6_creates_display_contract_with_open_kind() {
+    fn current_schema_creates_display_contract_with_open_kind() {
         let conn = Connection::open_in_memory().unwrap();
-        migration_v6_agent_timeline_events(&conn).unwrap();
+        create_current_schema(&conn).unwrap();
         conn.execute(
             r#"INSERT INTO agent_timeline_events
                (id, task_id, turn_id, backend, kind, status, title, summary, payload, display, created_at, updated_at, "order")
@@ -316,5 +309,85 @@ mod tests {
             )
             .unwrap();
         assert_eq!(display, Some(r#"{"icon":"tool","action":"同步"}"#.to_string()));
+    }
+
+    #[test]
+    fn old_development_database_is_rebuilt_from_current_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE projects (
+              id         TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              cwd        TEXT,
+              created_at INTEGER NOT NULL
+            );
+            INSERT INTO projects (id, name, cwd, created_at)
+              VALUES ('old-project', '旧项目', NULL, 1);
+            PRAGMA user_version = 6;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+
+        let project_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(project_count, 0);
+
+        conn.execute(
+            "INSERT INTO projects (id, name, cwd, created_at, sort_order, pinned) VALUES (?1, ?2, NULL, ?3, ?4, ?5)",
+            params!["new-project", "新项目", 2, 0, 0],
+        )
+        .unwrap();
+    }
+
+    fn add_future_project_label_migration(conn: &Connection) -> Result<(), String> {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN label TEXT;")
+            .map_err(|e| format!("test migration: {e}"))
+    }
+
+    #[test]
+    fn future_migrations_continue_after_reset_baseline() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_current_schema(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO projects (id, name, cwd, created_at, sort_order, pinned) VALUES (?1, ?2, NULL, ?3, ?4, ?5)",
+            params!["kept-project", "保留项目", 2, 0, 0],
+        )
+        .unwrap();
+
+        ensure_schema_with_migrations(
+            &mut conn,
+            RESET_BASELINE_SCHEMA_VERSION + 1,
+            &[SchemaMigration {
+                version: RESET_BASELINE_SCHEMA_VERSION + 1,
+                name: "test_add_project_label",
+                apply: add_future_project_label_migration,
+            }],
+        )
+        .unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, RESET_BASELINE_SCHEMA_VERSION + 1);
+
+        let project_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(project_count, 1);
+
+        conn.execute(
+            "UPDATE projects SET label = ?1 WHERE id = ?2",
+            params!["future", "kept-project"],
+        )
+        .unwrap();
     }
 }

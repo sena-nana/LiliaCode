@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEvent};
@@ -528,6 +529,72 @@ mod agent_event_sink_tests {
         assert_ne!(first, second);
         assert_ne!(first, "u-0");
     }
+
+    fn create_resume_schema(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL
+            );
+            CREATE TABLE agent_timeline_events (
+              id          TEXT PRIMARY KEY,
+              task_id     TEXT NOT NULL,
+              turn_id     TEXT,
+              backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind        TEXT NOT NULL,
+              status      TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              summary     TEXT,
+              payload     TEXT NOT NULL,
+              display     TEXT NOT NULL,
+              created_at  INTEGER NOT NULL,
+              updated_at  INTEGER NOT NULL,
+              "order"     INTEGER NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn persisted_resume_session_id_ignores_unscoped_task_session_id() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            "INSERT INTO tasks (id, session_id) VALUES ('task-1', 'claude-session')",
+            [],
+        )
+        .unwrap();
+        agent_timeline::insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("codex-turn".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: BACKEND_CODEX.to_string(),
+                kind: "turn".to_string(),
+                status: "success".to_string(),
+                title: "Codex done".to_string(),
+                summary: None,
+                payload: json!({ "sessionId": "codex-thread" }),
+                display: json!({ "icon": "turn" }),
+                created_at: Some(200),
+                updated_at: Some(200),
+                order: Some(1),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CODEX),
+            Some("codex-thread".to_string())
+        );
+        assert_eq!(
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CLAUDE),
+            None
+        );
+    }
 }
 
 // ---------- 进程内状态 ----------
@@ -543,6 +610,16 @@ struct ChatStore {
 
 fn session_key(backend: &str, task_id: &str) -> String {
     format!("{backend}:{task_id}")
+}
+
+fn load_persisted_resume_session_id(
+    conn: &Connection,
+    task_id: &str,
+    backend: &str,
+) -> Option<String> {
+    agent_timeline::latest_session_id(conn, task_id, backend)
+        .ok()
+        .flatten()
 }
 
 fn now_millis() -> u64 {
@@ -815,19 +892,7 @@ fn spawn_agent_turn(
     .or_else(|| {
         let store = app.try_state::<LiliaStore>()?;
         let conn = store.conn().ok()?;
-        let task_session = projects_tasks::task_session_id(&conn, &task_id)
-            .ok()
-            .flatten()
-            .filter(|sid| sid != &task_id && !sid.trim().is_empty());
-        if task_session.is_some() {
-            return task_session;
-        }
-
-        let timeline_session = agent_timeline::latest_session_id(&conn, &task_id, &backend)
-            .ok()
-            .flatten()?;
-        let _ = projects_tasks::task_set_session_id(&conn, &task_id, &timeline_session);
-        Some(timeline_session)
+        load_persisted_resume_session_id(&conn, &task_id, &backend)
     });
 
     let script_path = locate_agent_runner(&app);
@@ -1016,13 +1081,6 @@ fn finish_agent_turn(
             .lock()
             .unwrap()
             .insert(session_key(&backend, &task_id), sid.clone());
-        if let Some(store) = app_handle.try_state::<LiliaStore>() {
-            if let Err(err) = store.conn().and_then(|conn| {
-                projects_tasks::task_set_session_id(&conn, &task_id, sid.as_str()).map(|_| ())
-            }) {
-                eprintln!("[chat] persist session id failed: {err}");
-            }
-        }
     }
 
     let _ = app_handle.emit(
@@ -1237,11 +1295,6 @@ fn chat_reset_session(
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
     chat_store.pending_turns.lock().unwrap().remove(&task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
-        if let Err(err) = store.conn().and_then(|conn| {
-            projects_tasks::task_set_session_id(&conn, &task_id, &task_id).map(|_| ())
-        }) {
-            eprintln!("[chat] clear persisted session id failed: {err}");
-        }
         if let Err(err) = store
             .conn()
             .and_then(|conn| agent_timeline::clear(&conn, &task_id).map(|_| ()))

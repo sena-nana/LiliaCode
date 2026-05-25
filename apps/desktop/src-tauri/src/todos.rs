@@ -1,7 +1,7 @@
 /*!
  * Todo 命令组：任务内 checklist，定位是「AI 思考过程可视化」。
  *
- * - 数据全部走 [`crate::store::LiliaStore`]，schema 见 `store::migration_v1_task_todos`。
+ * - 数据全部走 [`crate::store::LiliaStore`]，schema 由当前开发库基线创建。
  * - 自动通道：聊天事件流里 `tool_use { name: "TodoWrite" }` → [`apply_agent_event_impl`]
  *   会按 `text` 匹配现有 source="agent" 的行做 upsert，并删掉本次没出现的 agent 行；
  *   `source="user"` 的行不受影响。

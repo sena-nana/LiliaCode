@@ -300,30 +300,6 @@ pub fn task_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<TaskR
     Ok(result)
 }
 
-pub fn task_session_id(conn: &Connection, task_id: &str) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT session_id FROM tasks WHERE id = ?1",
-        params![task_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(|e| format!("task_session_id: {e}"))
-}
-
-pub fn task_set_session_id(
-    conn: &Connection,
-    task_id: &str,
-    session_id: &str,
-) -> Result<bool, String> {
-    let changed = conn
-        .execute(
-            "UPDATE tasks SET session_id = ?1 WHERE id = ?2 AND session_id != ?1",
-            params![session_id, task_id],
-        )
-        .map_err(|e| format!("task_set_session_id: {e}"))?;
-    Ok(changed > 0)
-}
-
 #[tauri::command]
 pub fn task_create(
     project_id: Option<String>,
@@ -566,35 +542,4 @@ pub fn task_reparent(
     .map_err(|e| format!("task_reparent: update 失败：{e}"))?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn task_session_id_can_be_persisted_for_resume() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id TEXT PRIMARY KEY,
-              session_id TEXT NOT NULL
-            );
-            INSERT INTO tasks (id, session_id) VALUES ('task-1', 'task-1');
-            "#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            task_session_id(&conn, "task-1").unwrap(),
-            Some("task-1".to_string())
-        );
-        assert!(task_set_session_id(&conn, "task-1", "sdk-session-1").unwrap());
-        assert_eq!(
-            task_session_id(&conn, "task-1").unwrap(),
-            Some("sdk-session-1".to_string())
-        );
-        assert!(!task_set_session_id(&conn, "task-1", "sdk-session-1").unwrap());
-    }
 }
