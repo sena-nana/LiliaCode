@@ -7,6 +7,7 @@ import TimelineCommandEvent from "./TimelineCommandEvent.vue";
 import TimelineErrorEvent from "./TimelineErrorEvent.vue";
 import TimelineFileChangeEvent from "./TimelineFileChangeEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
+import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import TimelinePlanEvent from "./TimelinePlanEvent.vue";
 import TimelineSubagentEvent from "./TimelineSubagentEvent.vue";
 import TimelineSummaryEvent from "./TimelineSummaryEvent.vue";
@@ -275,66 +276,74 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
             :aria-labelledby="isTimelineFinalReply(entry.event) ? undefined : `agent-timeline-title-${entry.event.id}`"
             :aria-label="isTimelineFinalReply(entry.event) ? 'Agent 回复' : undefined"
           >
-            <header
-              v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
-              class="agent-timeline__head"
-            >
-              <button
-                v-if="!isTimelineFinalReply(entry.event)"
-                type="button"
-                class="agent-timeline__title"
-                :aria-expanded="expanded(entry.event)"
-                :aria-controls="`agent-timeline-details-${entry.event.id}`"
-                :disabled="!canToggle(entry.event)"
-                @click="toggleEvent(entry.event)"
+            <div class="agent-timeline__rail">
+              <TimelineNodeIcon
+                :kind="entry.event.kind"
+                :status="entry.event.status"
+              />
+            </div>
+            <div class="agent-timeline__body">
+              <header
+                v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
+                class="agent-timeline__head"
               >
-                <component
-                  v-if="canToggle(entry.event)"
-                  :is="expanded(entry.event) ? ChevronDown : ChevronRight"
-                  class="agent-timeline__chevron"
-                  :size="14"
-                  aria-hidden="true"
+                <button
+                  v-if="!isTimelineFinalReply(entry.event)"
+                  type="button"
+                  class="agent-timeline__title"
+                  :aria-expanded="expanded(entry.event)"
+                  :aria-controls="`agent-timeline-details-${entry.event.id}`"
+                  :disabled="!canToggle(entry.event)"
+                  @click="toggleEvent(entry.event)"
+                >
+                  <span :id="`agent-timeline-title-${entry.event.id}`">
+                    {{ timelineEventLabel(entry.event) }}
+                  </span>
+                  <component
+                    v-if="canToggle(entry.event)"
+                    :is="expanded(entry.event) ? ChevronDown : ChevronRight"
+                    class="agent-timeline__chevron"
+                    :size="12"
+                    aria-hidden="true"
+                  />
+                </button>
+
+                <p
+                  v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
+                  class="agent-timeline__preview"
+                >
+                  {{ previewText(entry.event) }}
+                </p>
+
+                <button
+                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
+                  type="button"
+                  class="agent-timeline__process-toggle"
+                  :aria-expanded="processGroupExpanded(entry.event)"
+                  @click="toggleProcessGroup(entry.event)"
+                >
+                  {{ processGroupLabel(entry) }}
+                </button>
+              </header>
+
+              <div
+                v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
+                :id="`agent-timeline-details-${entry.event.id}`"
+                class="agent-timeline__content"
+              >
+                <TimelineFinalReply
+                  v-if="isTimelineFinalReply(entry.event)"
+                  :event="entry.event"
+                  :streaming="isTimelineFinalReplyStreaming(entry.event)"
                 />
-                <span :id="`agent-timeline-title-${entry.event.id}`">
-                  {{ timelineEventLabel(entry.event) }}
-                </span>
-              </button>
-
-              <p
-                v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
-                class="agent-timeline__preview"
-              >
-                {{ previewText(entry.event) }}
-              </p>
-
-              <button
-                v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
-                type="button"
-                class="agent-timeline__process-toggle"
-                :aria-expanded="processGroupExpanded(entry.event)"
-                @click="toggleProcessGroup(entry.event)"
-              >
-                {{ processGroupLabel(entry) }}
-              </button>
-            </header>
-
-            <div
-              v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
-              :id="`agent-timeline-details-${entry.event.id}`"
-              class="agent-timeline__content"
-            >
-              <TimelineFinalReply
-                v-if="isTimelineFinalReply(entry.event)"
-                :event="entry.event"
-                :streaming="isTimelineFinalReplyStreaming(entry.event)"
-              />
-              <component
-                v-else
-                :is="eventComponent(entry.event)"
-                :event="entry.event"
-                :expanded="expanded(entry.event)"
-                :compact="isCompact(entry.event)"
-              />
+                <component
+                  v-else
+                  :is="eventComponent(entry.event)"
+                  :event="entry.event"
+                  :expanded="expanded(entry.event)"
+                  :compact="isCompact(entry.event)"
+                />
+              </div>
             </div>
           </article>
         </li>

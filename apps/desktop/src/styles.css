@@ -1735,12 +1735,29 @@ button.ghost:hover {
   margin: 0;
   padding: 0;
   list-style: none;
+  position: relative;
+}
+
+/* 贯穿整个列表的左侧轨道线。节点容器用 --bg 自身把线"咬"开,
+ * 不需要 mask；用户消息行也用 --bg 盖住,让 rail 在对话中"让位"。 */
+.agent-timeline__list::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 14px;
+  margin-left: -0.5px;
+  width: 1px;
+  background: var(--border-soft);
+  z-index: 0;
+  pointer-events: none;
 }
 
 .agent-timeline__list > li {
   min-width: 0;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-soft);
+  padding: 7px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .agent-timeline__list > li:first-child {
@@ -1751,19 +1768,7 @@ button.ghost:hover {
   padding-bottom: 0;
 }
 
-/* 不画分割线：最终回复（线挪到 header 上）、过程子项（与最终回复合并为一组）、
-   用户消息行（上下都不要线）、紧邻用户消息之前的项、列表末尾。 */
-.agent-timeline__list > li:is(
-  :last-child,
-  .is-final-reply,
-  .is-process-child,
-  .agent-timeline__message-row
-),
-.agent-timeline__list > li:has(+ .agent-timeline__message-row) {
-  border-bottom: 0;
-}
-
-/* 过程子项与其后的最终回复合并为组，内部 padding 收紧 */
+/* 过程子项与其后的最终回复合并为组,内部 padding 收紧 */
 .agent-timeline__list > li.is-process-child {
   padding-bottom: 4px;
 }
@@ -1772,15 +1777,16 @@ button.ghost:hover {
   padding-top: 4px;
 }
 
-/* 最终回复的分割线挪到「展开/收起过程」按钮所在那一行下方 */
+/* 最终回复的 toggle 行与正文之间只靠 body 的 7px gap 隔开,不再额外 padding */
 .agent-timeline__item.is-final-reply .agent-timeline__head {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 0;
 }
 
 .agent-timeline__message-row {
   display: flex;
   min-width: 0;
+  /* 用 --bg 自身把身后的轨道线"打断",让对话语流不被技术线打扰。 */
+  background: var(--bg);
 }
 
 .agent-timeline__message-row--user {
@@ -1801,6 +1807,75 @@ button.ghost:hover {
   padding: 0;
   border: 0;
   background: transparent;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 0;
+  /* 不让 rail 列被 body 撑到全高——节点只需要坐在 head 那一行 */
+  align-items: start;
+}
+
+/* 左侧轨道槽:节点居中坐在 14px 处,正好压在 ::before 那根线上 */
+.agent-timeline__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 22px;
+}
+
+.agent-timeline__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* 节点容器:22px 圆,bg = --bg 自然把背后的 rail 线打断 */
+.agent-timeline__node {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.agent-timeline__node--pending {
+  border: 1px dashed var(--border-strong);
+}
+
+.agent-timeline__node--running {
+  color: var(--text-faint);
+}
+
+.agent-timeline__node--failed {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.agent-timeline__node--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* 思考类:不放图标,只一个小点,视觉权重压到最低 */
+.agent-timeline__node--dot-only {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-timeline__node-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
 }
 
 .agent-timeline__head {
@@ -1809,6 +1884,8 @@ button.ghost:hover {
   align-items: center;
   gap: 4px 10px;
   min-width: 0;
+  /* 与 rail 列保持同样的最小高度,让节点和这一行内容垂直居中 */
+  min-height: 22px;
 }
 
 .agent-timeline__title {
@@ -1857,6 +1934,13 @@ button.ghost:hover {
 .agent-timeline__chevron {
   flex: 0 0 auto;
   color: var(--text-faint);
+  opacity: 0.7;
+  transition: color 0.12s ease, opacity 0.12s ease;
+}
+
+.agent-timeline__title:hover:not(:disabled) .agent-timeline__chevron {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .agent-timeline__preview {
@@ -1873,14 +1957,16 @@ button.ghost:hover {
 
 .agent-timeline__process-toggle {
   flex: 0 0 auto;
-  margin-left: auto;
-  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  /* 与 rail 列节点同高,这样按钮文本和图标真正落在同一条中线上 */
+  height: 22px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--text-faint);
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.3;
   filter: none;
@@ -1894,11 +1980,10 @@ button.ghost:hover {
 
 .agent-timeline__content {
   min-width: 0;
-  margin-top: 7px;
 }
 
-.agent-timeline__item.is-compact .agent-timeline__content {
-  margin-top: 0;
+.agent-timeline__item.is-compact .agent-timeline__body {
+  gap: 0;
 }
 
 .timeline-card {

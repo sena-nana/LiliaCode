@@ -437,12 +437,16 @@ function summarizeClaudeToolInput(name, input) {
   }
 }
 
-function emitClaudeToolTimeline(block, msg) {
+function emitClaudeToolTimeline(block, msg, ctx) {
   const name = stringOrNull(block?.name) || "tool";
   const input = isRecord(block?.input) ? block.input : {};
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
+  const kind = inferClaudeToolKind(name);
+  if (ctx?.activeTools && sourceId) {
+    ctx.activeTools.set(sourceId, { kind, title: name });
+  }
   emitTimeline({
-    kind: inferClaudeToolKind(name),
+    kind,
     status: "started",
     title: name,
     summary: summarizeClaudeToolInput(name, input),
@@ -456,6 +460,67 @@ function emitClaudeToolTimeline(block, msg) {
     },
     sourceId,
   });
+}
+
+/**
+ * Claude SDK 把工具结果放在「user」消息的 tool_result 块里，自带
+ * `tool_use_id` 关联到原 tool_use。这里按相同 sourceId upsert 一条终态事件，
+ * 让前端时间线节点从 running 翻成 success/error，不再卡在「跑中」icon 上。
+ */
+function emitClaudeToolResultTimeline(block, msg, ctx) {
+  const sourceId = stringOrNull(block?.tool_use_id);
+  if (!sourceId) return;
+  const cached = ctx?.activeTools?.get(sourceId);
+  const kind = cached?.kind || "tool";
+  const title = cached?.title || "Tool";
+  const isError = block?.is_error === true;
+  let text = "";
+  if (typeof block?.content === "string") {
+    text = block.content;
+  } else if (Array.isArray(block?.content)) {
+    text = block.content
+      .filter((c) => c && c.type === "text" && typeof c.text === "string")
+      .map((c) => c.text)
+      .join("\n");
+  }
+  emitTimeline({
+    kind,
+    status: isError ? "error" : "success",
+    title,
+    summary: shortText(text, 400) || "",
+    payload: {
+      backend: "claude",
+      toolName: title,
+      isError,
+      sessionId: msg?.session_id,
+    },
+    sourceId,
+  });
+  ctx?.activeTools?.delete(sourceId);
+}
+
+/**
+ * Turn 结束前的兜底：把任何还没收到 tool_result 的工具一次性翻成终态，
+ * 否则前端时间线会永远停在「跑中」状态。
+ */
+function sweepActiveClaudeTools(ctx, status, sessionId) {
+  if (!ctx?.activeTools || ctx.activeTools.size === 0) return;
+  for (const [sourceId, info] of ctx.activeTools) {
+    emitTimeline({
+      kind: info.kind,
+      status,
+      title: info.title,
+      summary: "",
+      payload: {
+        backend: "claude",
+        toolName: info.title,
+        sweptByTurnEnd: true,
+        sessionId,
+      },
+      sourceId,
+    });
+  }
+  ctx.activeTools.clear();
 }
 
 function mapClaudeSystemTimeline(msg) {
@@ -754,6 +819,8 @@ async function runClaude(cmd) {
     assistantDeltaText: "",
     assistantSnapshotText: "",
     resultSeen: false,
+    /** sourceId → { kind, title }，给未收到 tool_result 的工具做收尾用。 */
+    activeTools: new Map(),
   };
   const pacer = createTextPacer({
     emit: (text) => emitAssistantMessageTimeline(text, "running", "claude"),
@@ -786,7 +853,7 @@ async function runClaude(cmd) {
           for (const b of content) {
             if (b && b.type === "tool_use") {
               emit({ type: "tool_use", name: b.name, input: b.input });
-              emitClaudeToolTimeline(b, msg);
+              emitClaudeToolTimeline(b, msg, ctx);
             }
           }
         }
@@ -802,6 +869,7 @@ async function runClaude(cmd) {
           ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
           : "";
         pacer.finishImmediate();
+        sweepActiveClaudeTools(ctx, msg.is_error ? "error" : "success", msg?.session_id);
         if (finalText) {
           emitAssistantMessageTimeline(
             finalText,
@@ -835,11 +903,23 @@ async function runClaude(cmd) {
         });
         break;
       }
-      case "system":
       case "user":
-      case "user_replay":
+      case "user_replay": {
+        // SDK 把 tool_result 放在 user/user_replay 消息的 content 里，
+        // 用 tool_use_id 跟 assistant 那边的 tool_use 块关联。
+        const content = msg?.message?.content;
+        if (Array.isArray(content)) {
+          for (const b of content) {
+            if (b && b.type === "tool_result") {
+              emitClaudeToolResultTimeline(b, msg, ctx);
+            }
+          }
+        }
+        break;
+      }
+      case "system":
       default:
-        // 第一阶段忽略，未来要可视化 tool_result / system init 时再开。
+        // system init 等已在 mapClaudeSystemTimeline 处理；其余暂忽略。
         break;
       }
     } catch (err) {
@@ -862,6 +942,7 @@ async function runClaude(cmd) {
       fullTextOrNull(ctx.assistantDeltaText) ||
       fullTextOrNull(ctx.assistantSnapshotText);
     pacer.finishImmediate();
+    sweepActiveClaudeTools(ctx, "success", lastSessionId);
     if (finalText) {
       emitAssistantMessageTimeline(finalText, "success", "claude");
     }
