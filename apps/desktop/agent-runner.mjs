@@ -132,6 +132,433 @@ function sanitizeTimelinePayload(value, seen = new WeakSet(), depth = 0) {
   return safeObject;
 }
 
+function sanitizeTimelineDisplay(value) {
+  return sanitizeTimelinePayload(value);
+}
+
+function fallbackTimelineDisplay(kind, title, summary) {
+  return {
+    icon: "tool",
+    action: "处理",
+    object: title || kind || "事件",
+    preview: summary || title || kind || "",
+    group: {
+      key: `kind:${kind || "event"}`,
+      bucket: "other",
+      unit: "项",
+      count: 1,
+    },
+  };
+}
+
+function compactLine(value, max = 600) {
+  const text = stringifyDisplayInline(value).replace(/\s+/g, " ").trim();
+  return text ? shortText(text, max) : "";
+}
+
+function readRecord(value) {
+  return isRecord(value) ? value : {};
+}
+
+function readFirstDisplayString(payload, keys, max = 600) {
+  for (const key of keys) {
+    const text = compactLine(payload?.[key], max);
+    if (text) return text;
+  }
+  return "";
+}
+
+function stringifyDisplayInline(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyDisplayInline(item)).filter(Boolean).join(" ").trim();
+  }
+  if (isRecord(value)) {
+    return readFirstDisplayString(value, [
+      "text",
+      "title",
+      "summary",
+      "content",
+      "message",
+      "name",
+      "path",
+      "filePath",
+      "query",
+      "command",
+    ]);
+  }
+  return "";
+}
+
+function displayField(label, value) {
+  const text = compactLine(value, 1200);
+  return label && text ? { label, value: text } : null;
+}
+
+function lineDetail(text, tone = "muted") {
+  const content = compactLine(text, 1200);
+  return content ? { type: "line", text: content, tone } : null;
+}
+
+function fieldsDetail(fields) {
+  const items = fields.filter(Boolean);
+  return items.length ? { type: "fields", fields: items } : null;
+}
+
+function codeDetail(label, content, language = "") {
+  let text = stringOrNull(content);
+  if (!text && (Array.isArray(content) || isRecord(content))) {
+    try {
+      text = JSON.stringify(content, null, 2);
+    } catch {
+      text = String(content);
+    }
+  }
+  if (!text || !text.trim()) return null;
+  return {
+    type: "code",
+    label: label || null,
+    content: shortText(text.trim(), 6000) || "",
+    language: language || null,
+  };
+}
+
+function markdownDetail(content, tone = "default", singleLine = false) {
+  const text = stringOrNull(content);
+  if (!text || !text.trim()) return null;
+  return {
+    type: "markdown",
+    content: shortText(text.trim(), 6000) || "",
+    tone,
+    singleLine,
+  };
+}
+
+function listDetail(items, ordered = false) {
+  const normalized = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (typeof item === "string") return { text: compactLine(item, 1200) };
+      if (!isRecord(item)) return null;
+      const text = readFirstDisplayString(item, ["text", "content", "title", "summary"], 1200);
+      if (!text) return null;
+      const status = String(item.status || "").toLowerCase();
+      const tone = item.completed === true || item.done === true || status === "completed"
+        ? "success"
+        : status === "failed" || status === "error"
+          ? "error"
+          : "default";
+      return { text, tone };
+    })
+    .filter(Boolean);
+  return normalized.length ? { type: "list", items: normalized, ordered } : null;
+}
+
+function cleanDisplay(display) {
+  if (!isRecord(display)) return null;
+  const details = Array.isArray(display.details)
+    ? display.details.filter((detail) => isRecord(detail))
+    : undefined;
+  const group = isRecord(display.group) && typeof display.group.key === "string"
+    ? {
+        key: display.group.key,
+        bucket: stringOrNull(display.group.bucket) || undefined,
+        unit: stringOrNull(display.group.unit) || undefined,
+        count: typeof display.group.count === "number" ? display.group.count : undefined,
+      }
+    : undefined;
+  const next = {
+    icon: stringOrNull(display.icon) || undefined,
+    label: stringOrNull(display.label) || undefined,
+    action: stringOrNull(display.action) || undefined,
+    object: stringOrNull(display.object) || undefined,
+    preview: stringOrNull(display.preview) || undefined,
+    details,
+    group,
+    defaultExpanded: typeof display.defaultExpanded === "boolean"
+      ? display.defaultExpanded
+      : undefined,
+  };
+  for (const key of Object.keys(next)) {
+    if (next[key] === undefined || next[key] === null) delete next[key];
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+function buildTimelineDisplay(input) {
+  const kind = stringOrNull(input?.kind) || "tool";
+  const title = compactLine(input?.title || kind, 200) || kind;
+  const summary = compactLine(input?.summary, 1200);
+  const payload = readRecord(input?.payload);
+
+  switch (kind) {
+    case "message": {
+      const role = readFirstDisplayString(payload, ["role"], 80);
+      return cleanDisplay({
+        icon: "message",
+        label: role === "assistant" ? "Assistant" : title,
+        preview: summary || readFirstDisplayString(payload, ["content"], 600),
+        defaultExpanded: role === "assistant",
+      });
+    }
+    case "reasoning":
+      return cleanDisplay({
+        icon: "none",
+        action: "思考",
+        preview: summary || readFirstDisplayString(payload, ["text", "summary"], 600),
+        details: [markdownDetail(summary || payload.text || payload.summary, "muted")],
+      });
+    case "plan": {
+      const text = summary || readFirstDisplayString(payload, ["plan", "summary", "text", "content"], 1200);
+      return cleanDisplay({
+        icon: "plan",
+        action: "制定计划",
+        object: usefulDisplayObject(title, ["plan", "计划"]),
+        preview: text,
+        details: [markdownDetail(text || "暂无计划内容。")],
+        group: { key: "kind:plan", bucket: "plan", unit: "项计划", count: 1 },
+      });
+    }
+    case "todo_list": {
+      const items = readTimelineTodoItems(payload);
+      return cleanDisplay({
+        icon: "todo",
+        action: "更新待办",
+        preview: summary || timelineTodoPreview(items),
+        details: [lineDetail(summary), listDetail(items)],
+        group: { key: "kind:todo_list", bucket: "todo", unit: "次待办", count: 1 },
+      });
+    }
+    case "command": {
+      const command = readFirstDisplayString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
+        usefulDisplayObject(title, ["command", "命令"]);
+      const output = readFirstDisplayString(payload, ["aggregatedOutput", "combinedOutput", "outputText", "stdout"], 6000);
+      const stderr = readFirstDisplayString(payload, ["stderr", "errorOutput", "message", "error"], 6000);
+      const fields = fieldsDetail([
+        displayField("cwd", payload.cwd || payload.workdir || payload.workingDirectory),
+        displayField("exit", payload.exitCode ?? payload.code ?? payload.statusCode),
+        displayField("duration", formatDisplayDuration(payload)),
+      ]);
+      return cleanDisplay({
+        icon: "terminal",
+        action: "运行",
+        object: command,
+        preview: summary || command || output || stderr,
+        details: [
+          lineDetail(summary),
+          fields,
+          codeDetail("COMMAND", command, "shell"),
+          codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
+        ],
+        group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
+      });
+    }
+    case "file_change": {
+      const changes = readTimelineFileChanges(payload);
+      const count = changes.length || 1;
+      const preview = summary || timelineFileChangePreview(changes, payload);
+      return cleanDisplay({
+        icon: "file",
+        action: "修改",
+        object: timelineFileChangeObject(changes, payload) || usefulDisplayObject(title, ["file change", "file changes"]),
+        preview,
+        details: [lineDetail(summary), listDetail(changes.map((change) => `${change.kind} ${change.path}`))],
+        group: { key: "kind:file_change", bucket: "file", unit: "个文件", count },
+      });
+    }
+    case "mcp": {
+      const target = [payload.server || payload.serverName || payload.mcpServer, payload.tool || payload.toolName || payload.name]
+        .map((value) => compactLine(value, 200))
+        .filter(Boolean)
+        .join("/");
+      return cleanDisplay({
+        icon: "plug",
+        action: "调用 MCP",
+        object: target || usefulDisplayObject(title, ["mcp", "mcp tool"]),
+        preview: summary || target,
+        details: [fieldsDetail([
+          displayField("服务", payload.server || payload.serverName || payload.mcpServer),
+          displayField("工具", payload.tool || payload.toolName || payload.name),
+        ])],
+        group: { key: `mcp:${compactLine(payload.server || payload.serverName || payload.mcpServer, 120) || "default"}`, bucket: "mcp", unit: "次 MCP", count: 1 },
+      });
+    }
+    case "web_search": {
+      const query = readFirstDisplayString(payload, ["query", "searchQuery", "q", "url"], 1200);
+      return cleanDisplay({
+        icon: "search",
+        action: "网络搜索",
+        object: query || usefulDisplayObject(title, ["web search", "search"]),
+        preview: summary || query,
+        details: [fieldsDetail([displayField("查询", query)])],
+        group: { key: "kind:web_search", bucket: "web_search", unit: "次搜索", count: 1 },
+      });
+    }
+    case "subagent": {
+      const name = readFirstDisplayString(payload, ["agentType", "subagentType", "agentName", "taskType", "name", "type"], 200) ||
+        usefulDisplayObject(title, ["task", "agent"]);
+      const task = readFirstDisplayString(payload, ["taskDescription", "description", "prompt", "task"], 1200);
+      const result = readFirstDisplayString(payload, ["result", "output", "summary"], 1200);
+      return cleanDisplay({
+        icon: "subagent",
+        action: "调用子代理",
+        object: name,
+        preview: summary || [name, task].filter(Boolean).join(": "),
+        details: [
+          fieldsDetail([displayField("类型", name)]),
+          markdownDetail(task, "default"),
+          markdownDetail(result, "default"),
+        ],
+        group: { key: "kind:subagent", bucket: "subagent", unit: "个子代理", count: 1 },
+      });
+    }
+    case "error": {
+      const message = summary || readFirstDisplayString(payload, ["message", "error", "reason", "details", "stderr"], 1200);
+      return cleanDisplay({
+        icon: "error",
+        label: title || "错误",
+        preview: message,
+        details: [
+          lineDetail(message, "muted"),
+          fieldsDetail([
+            displayField("code", payload.code ?? payload.exitCode ?? payload.statusCode),
+            displayField("path", payload.file || payload.filePath || payload.path),
+            displayField("command", payload.command || payload.cmd || payload.shellCommand),
+          ]),
+          codeDetail("STACK", payload.stack || payload.trace || payload.backtrace),
+        ],
+        group: { key: "kind:error", bucket: "error", unit: "个错误", count: 1 },
+      });
+    }
+    case "turn":
+      return cleanDisplay({
+        icon: "turn",
+        label: title,
+        preview: summary || readFirstDisplayString(payload, ["status", "eventType", "subtype", "state"], 600),
+        details: [lineDetail(summary), fieldsDetail([
+          displayField("backend", payload.backend),
+          displayField("event", payload.eventType || payload.subtype || payload.status || payload.state),
+          displayField("session", payload.sessionId),
+        ])],
+      });
+    case "tool":
+    default: {
+      const tool = readFirstDisplayString(payload, ["toolName", "name", "tool", "function", "hookName"], 200) ||
+        usefulDisplayObject(title, ["tool"]);
+      const input = payload.input || payload.arguments || payload.args || payload.parameters || payload.params || payload.request;
+      const output = payload.result || payload.response || payload.output || payload.text || payload.content;
+      return cleanDisplay({
+        icon: "tool",
+        action: kind === "tool" ? "调用工具" : "处理",
+        object: tool || title,
+        preview: summary || tool || readFirstDisplayString(payload, ["query", "path", "command"], 600),
+        details: [
+          fieldsDetail([
+            displayField("工具", tool),
+            displayField("服务", payload.server || payload.serverName || payload.mcpServer),
+          ]),
+          codeDetail("INPUT", input),
+          codeDetail("OUTPUT", output),
+        ],
+        group: { key: `tool:${tool || title || kind}`, bucket: "tool", unit: "个工具", count: 1 },
+      });
+    }
+  }
+}
+
+function mergeTimelineDisplay(base, update) {
+  const cleanBase = cleanDisplay(base);
+  const cleanUpdate = cleanDisplay(update);
+  if (!cleanBase) return cleanUpdate;
+  if (!cleanUpdate) return cleanBase;
+  const merged = {
+    ...cleanBase,
+    ...cleanUpdate,
+    details: [
+      ...(Array.isArray(cleanBase.details) ? cleanBase.details : []),
+      ...(Array.isArray(cleanUpdate.details) ? cleanUpdate.details : []),
+    ],
+    group: cleanUpdate.group || cleanBase.group,
+  };
+  if (!merged.details.length) delete merged.details;
+  return cleanDisplay(merged);
+}
+
+function usefulDisplayObject(title, genericLabels = []) {
+  const text = compactLine(title, 300);
+  if (!text) return "";
+  const normalized = text.toLowerCase();
+  if (genericLabels.map((label) => String(label).toLowerCase()).includes(normalized)) return "";
+  return text;
+}
+
+function formatDisplayDuration(payload) {
+  const raw = payload.durationMs ?? payload.elapsedMs ?? payload.duration;
+  if (typeof raw === "number") return raw >= 1000 ? `${(raw / 1000).toFixed(1)}s` : `${raw}ms`;
+  return compactLine(raw, 80);
+}
+
+function readTimelineTodoItems(payload) {
+  const rawItems = [payload.items, payload.todos, readRecord(payload.input).items, readRecord(payload.input).todos]
+    .find((value) => Array.isArray(value));
+  if (!Array.isArray(rawItems)) return [];
+  return rawItems
+    .map((item) => {
+      if (typeof item === "string") return { text: item, completed: false };
+      if (!isRecord(item)) return null;
+      const text = readFirstDisplayString(item, ["text", "content", "title", "description"], 1200);
+      if (!text) return null;
+      const status = String(item.status || "").toLowerCase();
+      return {
+        text,
+        completed: item.completed === true || item.done === true || status === "completed",
+        status,
+      };
+    })
+    .filter(Boolean);
+}
+
+function timelineTodoPreview(items) {
+  if (!items.length) return "";
+  const done = items.filter((item) => item.completed).length;
+  const next = items.find((item) => !item.completed)?.text || "";
+  return `${done}/${items.length} 已完成${next ? ` · ${next}` : ""}`;
+}
+
+function readTimelineFileChanges(payload) {
+  const rawChanges = [payload.changes, readRecord(payload.input).changes, readRecord(payload.args).changes, readRecord(payload.parameters).changes]
+    .find((value) => Array.isArray(value));
+  if (!Array.isArray(rawChanges)) return [];
+  return rawChanges
+    .map((change) => {
+      if (!isRecord(change)) return null;
+      const path = readFirstDisplayString(change, ["path", "filePath", "relativePath", "targetPath", "name"], 600);
+      if (!path) return null;
+      return {
+        kind: readFirstDisplayString(change, ["kind", "operation", "type", "status"], 80) || "update",
+        path,
+      };
+    })
+    .filter(Boolean);
+}
+
+function timelineFileChangeObject(changes, payload) {
+  if (changes.length) return changes[0].path;
+  return readFirstDisplayString(payload, ["path", "filePath", "relativePath", "targetPath", "name"], 600);
+}
+
+function timelineFileChangePreview(changes, payload) {
+  if (changes.length) {
+    const first = changes[0];
+    const suffix = changes.length > 1 ? ` 等 ${changes.length} 个文件` : "";
+    return `${first.kind} ${first.path}${suffix}`;
+  }
+  const path = timelineFileChangeObject(changes, payload);
+  if (!path) return "";
+  const kind = readFirstDisplayString(payload, ["kind", "operation", "type", "status"], 80) || "update";
+  return `${kind} ${path}`;
+}
+
 function emit(obj) {
   let line;
   try {
@@ -151,6 +578,16 @@ function emitTimeline(input) {
   const title = shortText(input.title, 200) || kind;
   const summary = shortText(input.summary, 1200) || "";
   const payload = sanitizeTimelinePayload(input.payload);
+  const declaredDisplay = cleanDisplay(input.display) || buildTimelineDisplay({
+    kind,
+    status,
+    title,
+    summary,
+    payload: payload === undefined ? {} : payload,
+  });
+  const display = sanitizeTimelineDisplay(
+    declaredDisplay || fallbackTimelineDisplay(kind, title, summary),
+  );
   const sourceId = stringOrNull(input.sourceId);
   const event = {
     kind,
@@ -158,6 +595,7 @@ function emitTimeline(input) {
     title,
     summary,
     payload: payload === undefined ? {} : payload,
+    display,
   };
   if (sourceId) event.sourceId = sourceId;
   emit({ type: "timeline", event });
@@ -442,22 +880,32 @@ function emitClaudeToolTimeline(block, msg, ctx) {
   const input = isRecord(block?.input) ? block.input : {};
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
   const kind = inferClaudeToolKind(name);
+  const summary = summarizeClaudeToolInput(name, input);
+  const payload = {
+    backend: "claude",
+    toolName: name,
+    input,
+    sessionId: msg?.session_id,
+    subagentType: msg?.subagent_type,
+    taskDescription: msg?.task_description,
+  };
+  const display = buildTimelineDisplay({
+    kind,
+    status: "started",
+    title: name,
+    summary,
+    payload,
+  });
   if (ctx?.activeTools && sourceId) {
-    ctx.activeTools.set(sourceId, { kind, title: name });
+    ctx.activeTools.set(sourceId, { kind, title: name, display });
   }
   emitTimeline({
     kind,
     status: "started",
     title: name,
-    summary: summarizeClaudeToolInput(name, input),
-    payload: {
-      backend: "claude",
-      toolName: name,
-      input,
-      sessionId: msg?.session_id,
-      subagentType: msg?.subagent_type,
-      taskDescription: msg?.task_description,
-    },
+    summary,
+    payload,
+    display,
     sourceId,
   });
 }
@@ -483,17 +931,33 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
       .map((c) => c.text)
       .join("\n");
   }
+  const summary = shortText(text, 400) || "";
+  const payload = {
+    backend: "claude",
+    toolName: title,
+    isError,
+    sessionId: msg?.session_id,
+  };
+  const display = mergeTimelineDisplay(
+    cached?.display,
+    buildTimelineDisplay({
+      kind,
+      status: isError ? "error" : "success",
+      title,
+      summary,
+      payload: {
+        ...payload,
+        output: text,
+      },
+    }),
+  );
   emitTimeline({
     kind,
     status: isError ? "error" : "success",
     title,
-    summary: shortText(text, 400) || "",
-    payload: {
-      backend: "claude",
-      toolName: title,
-      isError,
-      sessionId: msg?.session_id,
-    },
+    summary,
+    payload,
+    display,
     sourceId,
   });
   ctx?.activeTools?.delete(sourceId);
@@ -517,6 +981,7 @@ function sweepActiveClaudeTools(ctx, status, sessionId) {
         sweptByTurnEnd: true,
         sessionId,
       },
+      display: info.display,
       sourceId,
     });
   }
@@ -819,7 +1284,7 @@ async function runClaude(cmd) {
     assistantDeltaText: "",
     assistantSnapshotText: "",
     resultSeen: false,
-    /** sourceId → { kind, title }，给未收到 tool_result 的工具做收尾用。 */
+    /** sourceId → { kind, title, display }，给未收到 tool_result 的工具做收尾用。 */
     activeTools: new Map(),
   };
   const pacer = createTextPacer({

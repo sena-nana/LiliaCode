@@ -180,9 +180,9 @@ export type ChatBackendKind = "claude" | "codex";
 
 /**
  * 对话时间线。用户输入、工具调用、计划推进、模型最终回复和错误都进入
- * 同一套 timeline；不同 kind 只决定各自的渲染方式。
+ * 同一套 timeline；事件生产方通过 display 声明通用渲染语义。
  */
-export type AgentTimelineEventKind =
+export type AgentTimelineKnownEventKind =
   | "message"
   | "reasoning"
   | "plan"
@@ -195,6 +195,8 @@ export type AgentTimelineEventKind =
   | "web_search"
   | "error"
   | "turn";
+
+export type AgentTimelineEventKind = AgentTimelineKnownEventKind | (string & {});
 
 export type AgentTimelineEventStatus =
   | "pending"
@@ -219,6 +221,90 @@ export type AgentTimelinePayload =
   | AgentTimelinePayload[]
   | { [key: string]: AgentTimelinePayload };
 
+export type AgentTimelineDisplayIcon =
+  | "message"
+  | "reasoning"
+  | "plan"
+  | "todo"
+  | "terminal"
+  | "file"
+  | "tool"
+  | "plug"
+  | "search"
+  | "subagent"
+  | "error"
+  | "turn"
+  | "none";
+
+export type AgentTimelineDisplayBucket =
+  | "command"
+  | "file"
+  | "plan"
+  | "todo"
+  | "tool"
+  | "mcp"
+  | "web_search"
+  | "subagent"
+  | "error"
+  | "other"
+  | (string & {});
+
+export interface AgentTimelineDisplayGroup {
+  key: string;
+  bucket?: AgentTimelineDisplayBucket | null;
+  unit?: string | null;
+  count?: number | null;
+}
+
+export interface AgentTimelineDisplayField {
+  label: string;
+  value: string;
+}
+
+export interface AgentTimelineDisplayListItem {
+  text: string;
+  tone?: "default" | "muted" | "success" | "warning" | "error" | null;
+}
+
+export type AgentTimelineDisplayDetail =
+  | {
+      type: "line";
+      text: string;
+      tone?: "default" | "muted" | null;
+    }
+  | {
+      type: "fields";
+      fields: AgentTimelineDisplayField[];
+    }
+  | {
+      type: "code";
+      label?: string | null;
+      content: string;
+      language?: string | null;
+    }
+  | {
+      type: "markdown";
+      content: string;
+      tone?: "default" | "muted" | null;
+      singleLine?: boolean | null;
+    }
+  | {
+      type: "list";
+      items: AgentTimelineDisplayListItem[];
+      ordered?: boolean | null;
+    };
+
+export interface AgentTimelineDisplay {
+  icon?: AgentTimelineDisplayIcon | null;
+  label?: string | null;
+  action?: string | null;
+  object?: string | null;
+  preview?: string | null;
+  details?: AgentTimelineDisplayDetail[] | null;
+  group?: AgentTimelineDisplayGroup | null;
+  defaultExpanded?: boolean | null;
+}
+
 export interface AgentTimelineEvent {
   id: string;
   taskId: string;
@@ -229,6 +315,7 @@ export interface AgentTimelineEvent {
   title: string;
   summary: string | null;
   payload: AgentTimelinePayload;
+  display: AgentTimelineDisplay;
   createdAt: number;
   updatedAt: number;
   /** 同一 task 内的显示顺序，越小越靠前。 */

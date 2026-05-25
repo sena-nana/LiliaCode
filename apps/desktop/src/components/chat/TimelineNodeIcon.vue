@@ -14,19 +14,24 @@ import {
   Wrench,
 } from "lucide-vue-next";
 import type {
-  AgentTimelineEventKind,
+  AgentTimelineDisplayIcon,
   AgentTimelineEventStatus,
 } from "@lilia/contracts";
 
 type StatusTone = "pending" | "running" | "done" | "failed" | "warn";
 
 const props = defineProps<{
-  kind: AgentTimelineEventKind;
   status: AgentTimelineEventStatus;
+  icon?: AgentTimelineDisplayIcon | null;
 }>();
 
 const tone = computed<StatusTone>(() => statusToTone(props.status));
-const icon = computed<Component | null>(() => iconForKind(props.kind, props.status));
+const icon = computed<Component | null>(() => {
+  const declared = iconForDisplay(props.icon);
+  return declared === undefined
+    ? statusToTone(props.status) === "running" ? Circle : null
+    : declared;
+});
 
 function statusToTone(status: AgentTimelineEventStatus): StatusTone {
   switch (status) {
@@ -52,37 +57,39 @@ function statusToTone(status: AgentTimelineEventStatus): StatusTone {
   }
 }
 
-function iconForKind(
-  kind: AgentTimelineEventKind,
-  status: AgentTimelineEventStatus,
-): Component | null {
-  // 最终回复（assistant message）始终保留 icon
-  if (kind === "message") return MessageSquare;
-  // reasoning 只给低权重点位，不和「Agent 思考」文案抢视觉焦点。
-  if (kind === "reasoning") return null;
-
-  switch (kind) {
+function iconForDisplay(iconName: AgentTimelineDisplayIcon | null | undefined): Component | null | undefined {
+  switch (iconName) {
+    case "message":
+      return MessageSquare;
+    case "reasoning":
+      return null;
     case "plan":
       return ListOrdered;
-    case "todo_list":
+    case "todo":
       return ListChecks;
-    case "command":
+    case "terminal":
       return Terminal;
-    case "file_change":
+    case "file":
       return FilePen;
     case "tool":
       return Wrench;
-    case "mcp":
+    case "plug":
       return Plug;
-    case "web_search":
+    case "search":
       return Search;
     case "subagent":
       return Bot;
     case "error":
       return AlertTriangle;
     case "turn":
+      return Circle;
+    case "none":
+      return null;
+    case null:
+    case undefined:
+      return undefined;
     default:
-      return statusToTone(status) === "running" ? Circle : null;
+      return Wrench;
   }
 }
 </script>

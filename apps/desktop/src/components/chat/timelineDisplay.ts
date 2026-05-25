@@ -1,4 +1,6 @@
 import type {
+  AgentTimelineDisplay,
+  AgentTimelineDisplayIcon,
   AgentTimelineEvent,
   AgentTimelineEventStatus,
   AgentTimelinePayload,
@@ -7,7 +9,6 @@ import type {
 export type MarkdownBlockTone = "default" | "muted";
 
 export const TIMELINE_SUMMARY_MAX_LENGTH = 220;
-export const TIMELINE_PAYLOAD_MAX_LENGTH = 2000;
 
 export type TimelinePayloadRecord = Record<string, AgentTimelinePayload | undefined>;
 
@@ -17,14 +18,10 @@ export interface TimelineMarkdownView {
   singleLine: boolean;
 }
 
-export interface TimelineTodoItem {
-  text: string;
-  completed: boolean;
-}
-
-export interface TimelineFileChange {
-  kind: string;
-  path: string;
+export interface TimelineDeclaredGroupUnit {
+  key: string;
+  count: number;
+  unit: string | null;
 }
 
 const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
@@ -40,18 +37,16 @@ export function readTimelinePayloadRecord(
   return readPayloadRecord(event.payload);
 }
 
+export function readTimelineDisplay(
+  event: Pick<AgentTimelineEvent, "display">,
+): AgentTimelineDisplay {
+  return event.display;
+}
+
 export function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? payload as TimelinePayloadRecord
     : {};
-}
-
-export function readTimelinePayloadString(
-  event: Pick<AgentTimelineEvent, "payload">,
-  key: string,
-): string {
-  const value = readTimelinePayloadRecord(event)[key];
-  return typeof value === "string" ? value : "";
 }
 
 export function timelineFinalText(event: Pick<AgentTimelineEvent, "kind" | "payload">): string {
@@ -74,7 +69,7 @@ export function isTimelineAssistantMessage(
  * 这样组件树展开/折叠状态在 token 增量到达时不会抖动。
  */
 export function isTimelineFinalReply(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
+  event: Pick<AgentTimelineEvent, "kind" | "payload">,
 ): boolean {
   return isTimelineAssistantMessage(event);
 }
@@ -86,19 +81,21 @@ export function isTimelineFinalReplyStreaming(
 }
 
 export function timelineDefaultExpanded(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "display">,
 ): boolean {
+  const display = readTimelineDisplay(event);
+  if (typeof display?.defaultExpanded === "boolean") return display.defaultExpanded;
   return isTimelineFinalReply(event);
 }
 
 export function timelineDefaultCollapsed(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "display">,
 ): boolean {
   return !timelineDefaultExpanded(event);
 }
 
 export function isTimelineExpanded(
-  event: Pick<AgentTimelineEvent, "id" | "kind" | "payload" | "status">,
+  event: Pick<AgentTimelineEvent, "id" | "kind" | "payload" | "status" | "display">,
   toggledIds: ReadonlySet<string>,
 ): boolean {
   const defaultExpanded = timelineDefaultExpanded(event);
@@ -124,121 +121,29 @@ export function pruneTimelineExpandedIds(
 }
 
 export function timelineEventLabel(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "title">,
+  event: Pick<AgentTimelineEvent, "display" | "status">,
 ): string {
-  const title = event.title.trim();
-
-  if (event.kind === "tool") {
-    const verb = TOOL_VERB_MAP[title];
-    if (verb) return appendTimelineObjectLabel(
-      formatTimelineActionLabel(event.status, verb),
-      timelineEventObjectLabel(event, title),
+  const display = readTimelineDisplay(event);
+  const label = display.label?.trim();
+  if (label) return label;
+  const action = display.action?.trim();
+  if (action) {
+    return appendTimelineObjectLabel(
+      formatTimelineActionLabel(event.status, action),
+      display.object?.trim() ?? "",
     );
   }
 
-  const kindVerb = KIND_VERB_MAP[event.kind];
-  if (kindVerb) return appendTimelineObjectLabel(
-    formatTimelineActionLabel(event.status, kindVerb),
-    timelineEventObjectLabel(event, title),
-  );
-
-  return title || event.kind;
+  return "事件";
 }
 
-const TOOL_VERB_MAP: Record<string, string> = {
-  Bash: "运行",
-  Read: "读取",
-  Write: "写入",
-  Edit: "编辑",
-  MultiEdit: "编辑",
-  Grep: "搜索",
-  Glob: "查找",
-  LS: "列出目录",
-  WebFetch: "抓取网页",
-  WebSearch: "网络搜索",
-  TodoWrite: "更新待办",
-  NotebookEdit: "编辑 Notebook",
-  NotebookRead: "读取 Notebook",
-  Task: "调用子代理",
-  Agent: "调用子代理",
-  ExitPlanMode: "提交计划",
-  AskUserQuestion: "向用户提问",
-  ScheduleWakeup: "安排稍后唤醒",
-  PushNotification: "推送通知",
-  SendMessage: "发送消息",
-  Skill: "调用 Skill",
-};
-
-const KIND_VERB_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
-  command: "运行",
-  file_change: "修改",
-  plan: "制定计划",
-  todo_list: "更新待办",
-  mcp: "调用 MCP",
-  web_search: "网络搜索",
-  subagent: "调用子代理",
-  reasoning: "思考",
-};
-
-const TOOL_QUANTIFIER_MAP: Record<string, string> = {
-  Bash: "条命令",
-  Read: "个文件",
-  Write: "个文件",
-  Edit: "个文件",
-  MultiEdit: "个文件",
-  Grep: "次",
-  Glob: "次",
-  LS: "次",
-  WebFetch: "个网页",
-  WebSearch: "次",
-  TodoWrite: "次",
-  NotebookEdit: "次",
-  NotebookRead: "次",
-  Task: "次",
-  Agent: "次",
-  ExitPlanMode: "次",
-  AskUserQuestion: "次",
-  ScheduleWakeup: "次",
-  PushNotification: "次",
-  SendMessage: "次",
-  Skill: "次",
-};
-
-const KIND_QUANTIFIER_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
-  command: "条命令",
-  file_change: "个文件",
-  mcp: "次",
-  web_search: "次",
-  subagent: "次",
-  tool: "项",
-};
-
-const GROUPABLE_KINDS = new Set<AgentTimelineEvent["kind"]>([
-  "tool",
-  "command",
-  "file_change",
-  "mcp",
-  "web_search",
-]);
-
-/**
- * 相邻同类事件可合并为一组。tool 按 title 区分（Read 和 Write 不合并），
- * mcp 按 server 区分，其他按 kind。返回 null 表示不参与合并。
- */
 export function timelineGroupKey(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "title">,
+  event: Pick<AgentTimelineEvent, "display">,
 ): string | null {
-  if (!GROUPABLE_KINDS.has(event.kind)) return null;
-  if (event.kind === "tool") {
-    const name = event.title.trim();
-    return name ? `tool:${name}` : null;
-  }
-  if (event.kind === "mcp") {
-    const payload = readTimelinePayloadRecord(event);
-    const server = readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]);
-    return `mcp:${server || "default"}`;
-  }
-  return `kind:${event.kind}`;
+  const display = readTimelineDisplay(event);
+  const declaredKey = display.group?.key?.trim();
+  if (declaredKey) return `display:${declaredKey}`;
+  return null;
 }
 
 export function aggregateTimelineStatus(
@@ -254,23 +159,43 @@ export function aggregateTimelineStatus(
 }
 
 export function timelineGroupLabel(
-  representative: Pick<AgentTimelineEvent, "kind" | "title">,
+  representative: Pick<AgentTimelineEvent, "display">,
   count: number,
   status: AgentTimelineEventStatus,
 ): string {
-  const title = representative.title.trim();
-  let verb: string | undefined;
-  let unit: string | undefined;
-
-  if (representative.kind === "tool") {
-    verb = TOOL_VERB_MAP[title];
-    unit = TOOL_QUANTIFIER_MAP[title];
+  const display = readTimelineDisplay(representative);
+  const group = display.group;
+  if (group?.key) {
+    const unit = group.unit?.trim() || "项";
+    const action = display.action?.trim();
+    if (action) return `${formatTimelineActionLabel(status, action)} ${count} ${unit}`;
+    const label = display.label?.trim() || "事件";
+    return `${label} ${count} ${unit}`;
   }
-  verb = verb ?? KIND_VERB_MAP[representative.kind] ?? title ?? representative.kind;
-  unit = unit ?? KIND_QUANTIFIER_MAP[representative.kind] ?? "项";
 
-  const verbLabel = formatTimelineActionLabel(status, verb);
-  return `${verbLabel} ${count} ${unit}`;
+  return `事件 ${count} 项`;
+}
+
+export function timelineDisplayIcon(
+  event: Pick<AgentTimelineEvent, "display">,
+): AgentTimelineDisplayIcon | null {
+  return readTimelineDisplay(event).icon ?? null;
+}
+
+export function timelineDeclaredGroupUnit(
+  event: Pick<AgentTimelineEvent, "display">,
+): TimelineDeclaredGroupUnit | null {
+  const group = readTimelineDisplay(event).group;
+  const key = group?.bucket?.trim() || group?.key?.trim();
+  if (!key) return null;
+  const count = typeof group?.count === "number" && Number.isFinite(group.count) && group.count > 0
+    ? group.count
+    : 1;
+  return {
+    key,
+    count,
+    unit: group?.unit?.trim() || null,
+  };
 }
 
 function formatTimelineActionLabel(
@@ -304,220 +229,14 @@ function appendTimelineObjectLabel(label: string, objectLabel: string): string {
   return objectLabel ? `${label} ${objectLabel}` : label;
 }
 
-function timelineEventObjectLabel(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "title">,
-  title: string,
-): string {
-  const payload = readTimelinePayloadRecord(event);
-
-  switch (event.kind) {
-    case "command":
-      return readFirstPayloadString(payload, [
-        "command",
-        "cmd",
-        "shellCommand",
-        "script",
-        "argv",
-      ]) || usefulTitleObject(event.kind, title);
-    case "file_change":
-      return timelineFileChangeInlinePreview(payload) || usefulTitleObject(event.kind, title);
-    case "tool":
-      return readFirstPayloadString(payload, [
-        "path",
-        "filePath",
-        "relativePath",
-        "targetPath",
-        "query",
-        "command",
-        "toolName",
-        "name",
-      ]);
-    case "mcp": {
-      const target = [
-        readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]),
-        readFirstPayloadString(payload, ["tool", "toolName", "name"]),
-      ].filter(Boolean).join("/");
-      return target || usefulTitleObject(event.kind, title);
-    }
-    case "web_search":
-      return readFirstPayloadString(payload, ["query", "searchQuery", "q", "url"]) ||
-        usefulTitleObject(event.kind, title);
-    case "subagent":
-      return readFirstPayloadString(payload, [
-        "agentType",
-        "subagentType",
-        "agentName",
-        "name",
-        "type",
-      ]) || usefulTitleObject(event.kind, title);
-    case "reasoning":
-    case "plan":
-    case "todo_list":
-      return usefulTitleObject(event.kind, title);
-    default:
-      return "";
-  }
-}
-
-function usefulTitleObject(kind: AgentTimelineEvent["kind"], title: string): string {
-  if (!title) return "";
-  const normalized = title.toLowerCase();
-  const generic = new Set([
-    kind,
-    "plan",
-    "assistant",
-    "reasoning",
-    "thinking",
-    "message",
-    "turn",
-  ]);
-  if (generic.has(normalized)) return "";
-  if (TOOL_VERB_MAP[title]) return "";
-  return title;
-}
-
-export function timelineEventSummary(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "summary">,
-): TimelineMarkdownView | null {
-  if (isTimelineFinalReply(event)) return null;
-  const summary = event.summary?.trim();
-  if (!summary) return null;
-  return {
-    content: truncateTimelineText(toSingleLineText(summary), TIMELINE_SUMMARY_MAX_LENGTH),
-    tone: "muted",
-    singleLine: true,
-  };
-}
-
 export function timelineInlinePreview(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "summary" | "title">,
+  event: Pick<AgentTimelineEvent, "display" | "kind" | "payload">,
 ): string {
   if (isTimelineFinalReply(event)) return "";
-  const payload = readTimelinePayloadRecord(event);
-  const summary = event.summary?.trim();
-
-  const preview = (() => {
-    switch (event.kind) {
-      case "command":
-        return summary || readFirstPayloadString(payload, [
-          "command",
-          "cmd",
-          "shellCommand",
-          "script",
-          "argv",
-        ]);
-      case "file_change":
-        return summary || timelineFileChangeInlinePreview(payload);
-      case "mcp": {
-        const target = [
-          readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]),
-          readFirstPayloadString(payload, ["tool", "toolName", "name"]),
-        ].filter(Boolean).join("/");
-        return summary || target;
-      }
-      case "web_search":
-        return summary || readFirstPayloadString(payload, ["query", "searchQuery", "q", "url"]);
-      case "tool":
-        return summary || readFirstPayloadString(payload, [
-          "toolName",
-          "name",
-          "tool",
-          "function",
-        ]);
-      case "subagent": {
-        const agentName = readFirstPayloadString(payload, [
-          "agentType",
-          "subagentType",
-          "agentName",
-          "name",
-          "type",
-        ]);
-        const task = readFirstPayloadString(payload, [
-          "taskDescription",
-          "description",
-          "prompt",
-          "task",
-        ]);
-        return summary || [agentName, task].filter(Boolean).join(": ");
-      }
-      case "todo_list":
-        return summary || timelineTodoInlinePreview(payload);
-      case "message":
-        return "";
-      case "plan":
-      case "reasoning":
-      case "turn":
-      case "error":
-      default:
-        return summary || readFirstPayloadString(payload, [
-          "summary",
-          "message",
-          "error",
-          "text",
-          "content",
-          "result",
-          "details",
-        ]);
-    }
-  })();
-
-  return preview ? truncateTimelineText(toSingleLineText(preview), 180) : "";
-}
-
-export function timelineEventDetails(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
-): TimelineMarkdownView | null {
-  if (isTimelineFinalReply(event)) {
-    return createTimelineMarkdownView(timelineFinalText(event), {
-      multilineTone: "default",
-      singleLineTone: "default",
-    });
-  }
-
-  return createTimelineMarkdownView(timelineEventDetailsText(event), {
-    multilineTone: "default",
-    singleLineTone: "muted",
-  });
-}
-
-export function timelineEventDetailsText(
-  event: Pick<AgentTimelineEvent, "kind" | "payload">,
-): string | null {
-  const payload = readTimelinePayloadRecord(event);
-
-  switch (event.kind) {
-    case "command":
-      return joinTimelineLines([
-        readTimelinePayloadString(event, "command"),
-        readTimelinePayloadString(event, "aggregatedOutput"),
-        readTimelinePayloadString(event, "stdout"),
-        readTimelinePayloadString(event, "stderr"),
-      ]);
-    case "file_change":
-      return timelineFileChangeSummary(payload.changes);
-    case "mcp":
-      return joinTimelineLines([
-        readTimelinePayloadString(event, "server"),
-        readTimelinePayloadString(event, "tool"),
-      ]);
-    case "web_search":
-      return readTimelinePayloadString(event, "query");
-    case "tool":
-    case "subagent":
-      return joinTimelineLines([
-        readTimelinePayloadString(event, "toolName"),
-        readTimelinePayloadString(event, "agentType"),
-        readTimelinePayloadString(event, "subagentType"),
-        readTimelinePayloadString(event, "taskDescription"),
-      ]);
-    case "error":
-      return joinTimelineLines([
-        readTimelinePayloadString(event, "message"),
-        readTimelinePayloadString(event, "error"),
-      ]);
-    default:
-      return timelinePayloadPreviewText(payload);
-  }
+  const display = readTimelineDisplay(event);
+  const declaredPreview = display.preview?.trim();
+  if (declaredPreview) return truncateTimelineText(toSingleLineText(declaredPreview), 180);
+  return "";
 }
 
 export function createTimelineMarkdownView(
@@ -550,173 +269,6 @@ export function truncateTimelineText(
   return `${chars.slice(0, Math.max(0, maxLength)).join("").trimEnd()}...`;
 }
 
-export function joinTimelineLines(lines: Array<string | null | undefined>): string | null {
-  const text = lines
-    .map((line) => line?.trim())
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
-  return text || null;
-}
-
-export function formatTimelinePayload(
-  event: Pick<AgentTimelineEvent, "payload">,
-  maxLength = TIMELINE_PAYLOAD_MAX_LENGTH,
-): string | null {
-  const payload = readTimelinePayloadRecord(event);
-  if (Object.keys(payload).length === 0) return null;
-
-  try {
-    return truncateTimelineText(JSON.stringify(payload, null, 2), maxLength);
-  } catch {
-    return truncateTimelineText(String(payload), maxLength);
-  }
-}
-
-export function timelineTodoItems(
-  event: Pick<AgentTimelineEvent, "payload">,
-): TimelineTodoItem[] {
-  const items = readTimelinePayloadRecord(event).items;
-  if (!Array.isArray(items)) return [];
-
-  return items
-    .map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const row = item as TimelinePayloadRecord;
-      const text = typeof row.text === "string" ? row.text : "";
-      if (!text.trim()) return null;
-      return {
-        text,
-        completed: row.completed === true || row.status === "completed",
-      };
-    })
-    .filter((item): item is TimelineTodoItem => item !== null);
-}
-
-export function timelineFileChanges(
-  event: Pick<AgentTimelineEvent, "payload">,
-): TimelineFileChange[] {
-  const changes = readTimelinePayloadRecord(event).changes;
-  if (!Array.isArray(changes)) return [];
-
-  return changes
-    .map((change) => {
-      if (!change || typeof change !== "object" || Array.isArray(change)) return null;
-      const row = change as TimelinePayloadRecord;
-      const path = typeof row.path === "string" ? row.path : "";
-      if (!path.trim()) return null;
-      return {
-        kind: typeof row.kind === "string" ? row.kind : "update",
-        path,
-      };
-    })
-    .filter((change): change is TimelineFileChange => change !== null);
-}
-
 function toSingleLineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-function timelinePayloadPreviewText(payload: TimelinePayloadRecord): string | null {
-  for (const key of ["command", "path", "filePath", "toolName", "query"]) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return null;
-}
-
-function timelineFileChangeSummary(changes: AgentTimelinePayload | undefined): string | null {
-  if (!Array.isArray(changes)) return null;
-  return joinTimelineLines(changes.map((change) => {
-    if (!change || typeof change !== "object" || Array.isArray(change)) {
-      return String(change);
-    }
-    const row = change as TimelinePayloadRecord;
-    const kind = typeof row.kind === "string" ? row.kind : "update";
-    const path = typeof row.path === "string" ? row.path : "";
-    return path ? `${kind} ${path}` : kind;
-  }));
-}
-
-function timelineFileChangeInlinePreview(payload: TimelinePayloadRecord): string {
-  const changes = payload.changes;
-  if (Array.isArray(changes) && changes.length > 0) {
-    const first = readPayloadRecord(changes[0]);
-    const path = readFirstPayloadString(first, [
-      "path",
-      "filePath",
-      "relativePath",
-      "targetPath",
-      "name",
-    ]);
-    const kind = readFirstPayloadString(first, ["kind", "operation", "type", "status"]) || "update";
-    const suffix = changes.length > 1 ? ` 等 ${changes.length} 个文件` : "";
-    return path ? `${kind} ${path}${suffix}` : `${kind}${suffix}`;
-  }
-
-  const path = readFirstPayloadString(payload, [
-    "path",
-    "filePath",
-    "relativePath",
-    "targetPath",
-    "name",
-  ]);
-  if (!path) return "";
-  const kind = readFirstPayloadString(payload, ["kind", "operation", "type", "status"]) || "update";
-  return `${kind} ${path}`;
-}
-
-function timelineTodoInlinePreview(payload: TimelinePayloadRecord): string {
-  const rawItems = [
-    payload.items,
-    payload.todos,
-    readPayloadRecord(payload.input).items,
-    readPayloadRecord(payload.input).todos,
-  ].find((value) => Array.isArray(value));
-
-  if (!Array.isArray(rawItems) || rawItems.length === 0) return "";
-
-  let completed = 0;
-  let firstOpen = "";
-  for (const item of rawItems) {
-    const row = readPayloadRecord(item);
-    const text = typeof item === "string"
-      ? item.trim()
-      : readFirstPayloadString(row, ["text", "content", "title", "description"]);
-    const status = typeof row.status === "string" ? row.status.toLowerCase() : "";
-    const done = row.completed === true || row.done === true || status === "completed";
-    if (done) completed += 1;
-    if (!done && !firstOpen) firstOpen = text;
-  }
-
-  return `${completed}/${rawItems.length} 已完成${firstOpen ? ` · ${firstOpen}` : ""}`;
-}
-
-function readFirstPayloadString(payload: TimelinePayloadRecord, keys: string[]): string {
-  for (const key of keys) {
-    const value = payload[key];
-    const text = stringifyPayloadInline(value);
-    if (text) return text;
-  }
-  return "";
-}
-
-function stringifyPayloadInline(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => stringifyPayloadInline(item)).filter(Boolean).join(" ").trim();
-  }
-  if (value && typeof value === "object") {
-    const row = value as TimelinePayloadRecord;
-    return readFirstPayloadString(row, [
-      "text",
-      "title",
-      "summary",
-      "content",
-      "message",
-      "name",
-      "path",
-    ]);
-  }
-  return "";
 }

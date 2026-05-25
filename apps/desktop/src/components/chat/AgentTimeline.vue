@@ -3,16 +3,9 @@ import { computed, ref, watch, type Component } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus, ChatMessage } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
-import TimelineCommandEvent from "./TimelineCommandEvent.vue";
-import TimelineErrorEvent from "./TimelineErrorEvent.vue";
-import TimelineFileChangeEvent from "./TimelineFileChangeEvent.vue";
+import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
-import TimelinePlanEvent from "./TimelinePlanEvent.vue";
-import TimelineSubagentEvent from "./TimelineSubagentEvent.vue";
-import TimelineSummaryEvent from "./TimelineSummaryEvent.vue";
-import TimelineTodoEvent from "./TimelineTodoEvent.vue";
-import TimelineToolEvent from "./TimelineToolEvent.vue";
 import {
   aggregateTimelineStatus,
   isTimelineAssistantMessage,
@@ -21,8 +14,8 @@ import {
   isTimelineFinalReplyStreaming,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
-  readPayloadRecord,
-  readTimelinePayloadRecord,
+  timelineDeclaredGroupUnit,
+  timelineDisplayIcon,
   timelineEventLabel,
   timelineGroupKey,
   timelineGroupLabel,
@@ -50,6 +43,7 @@ type TimelineGroupEntry = {
   events: AgentTimelineEvent[];
   representative: AgentTimelineEvent;
   aggregatedStatus: AgentTimelineEventStatus;
+  groupCount: number;
   isProcessChild?: boolean;
 };
 
@@ -159,6 +153,7 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
         events,
         representative: first.event,
         aggregatedStatus: aggregateTimelineStatus(events),
+        groupCount: events.reduce((total, event) => total + eventGroupCount(event), 0),
         isProcessChild: first.isProcessChild,
       });
     }
@@ -270,29 +265,7 @@ function processGroupLabel(entry: TimelineEventEntry): string {
 
 function eventComponent(event: AgentTimelineEvent): Component {
   if (isTimelineFinalReply(event)) return TimelineFinalReply;
-  switch (event.kind) {
-    case "plan":
-      return TimelinePlanEvent;
-    case "todo_list":
-      return TimelineTodoEvent;
-    case "command":
-      return TimelineCommandEvent;
-    case "file_change":
-      return TimelineFileChangeEvent;
-    case "tool":
-    case "mcp":
-    case "web_search":
-      return TimelineToolEvent;
-    case "subagent":
-      return TimelineSubagentEvent;
-    case "error":
-      return TimelineErrorEvent;
-    case "message":
-    case "reasoning":
-    case "turn":
-    default:
-      return TimelineSummaryEvent;
-  }
+  return TimelineDeclaredEvent;
 }
 
 function previewText(event: AgentTimelineEvent): string {
@@ -311,11 +284,19 @@ function toggleGroup(entry: TimelineGroupEntry) {
 }
 
 function groupLabelText(entry: TimelineGroupEntry): string {
-  return timelineGroupLabel(entry.representative, entry.events.length, entry.aggregatedStatus);
+  return timelineGroupLabel(entry.representative, entry.groupCount, entry.aggregatedStatus);
+}
+
+function nodeIcon(event: AgentTimelineEvent) {
+  return timelineDisplayIcon(event);
 }
 
 function statusClass(status: AgentTimelineEventStatus): string {
   return `is-status-${status.replace(/_/g, "-")}`;
+}
+
+function kindClass(prefix: string, kind: string): string {
+  return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
 function processGroupTone(entry: TimelineEventEntry): "failed" | "running" | "done" {
@@ -331,26 +312,20 @@ function processGroupToneClass(entry: TimelineEventEntry): string {
 
 function processEventsSummary(events: AgentTimelineEvent[]): string {
   if (!events.length) return "";
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; unit: string | null; order: number }>();
   for (const event of events) {
-    const [key, count] = processEventSummaryUnit(event);
-    counts.set(key, (counts.get(key) ?? 0) + count);
+    const [key, count, unit] = processEventSummaryUnit(event);
+    const existing = counts.get(key);
+    counts.set(key, {
+      count: (existing?.count ?? 0) + count,
+      unit: existing?.unit ?? unit,
+      order: existing?.order ?? counts.size,
+    });
   }
 
-  const orderedKeys = [
-    "command",
-    "file",
-    "plan",
-    "todo",
-    "tool",
-    "mcp",
-    "web_search",
-    "subagent",
-    "error",
-    "other",
-  ];
-  const parts = orderedKeys
-    .map((key) => formatProcessSummaryCount(key, counts.get(key) ?? 0))
+  const parts = [...counts.entries()]
+    .sort((a, b) => a[1].order - b[1].order)
+    .map(([key, value]) => formatProcessSummaryCount(key, value.count, value.unit))
     .filter(Boolean);
 
   if (events.some((event) => isFailedStatus(event.status))) parts.push("有失败");
@@ -359,101 +334,20 @@ function processEventsSummary(events: AgentTimelineEvent[]): string {
   return parts.join(" · ");
 }
 
-function processEventSummaryUnit(event: AgentTimelineEvent): [string, number] {
-  switch (event.kind) {
-    case "command":
-      return ["command", 1];
-    case "file_change":
-      return ["file", fileChangeCount(event)];
-    case "plan":
-      return ["plan", 1];
-    case "todo_list":
-      return ["todo", 1];
-    case "tool":
-      return toolProcessEventSummaryUnit(event);
-    case "mcp":
-      return ["mcp", 1];
-    case "web_search":
-      return ["web_search", 1];
-    case "subagent":
-      return ["subagent", 1];
-    case "error":
-      return ["error", 1];
-    default:
-      return ["other", 1];
-  }
+function processEventSummaryUnit(event: AgentTimelineEvent): [string, number, string | null] {
+  const declared = timelineDeclaredGroupUnit(event);
+  if (declared) return [declared.key, declared.count, declared.unit];
+  return ["other", 1, null];
 }
 
-function toolProcessEventSummaryUnit(event: AgentTimelineEvent): [string, number] {
-  switch (event.title.trim()) {
-    case "Bash":
-      return ["command", 1];
-    case "Read":
-    case "Write":
-    case "Edit":
-    case "MultiEdit":
-    case "NotebookRead":
-    case "NotebookEdit":
-      return ["file", toolFileCount(event)];
-    case "TodoWrite":
-      return ["todo", 1];
-    case "WebSearch":
-    case "WebFetch":
-    case "Grep":
-    case "Glob":
-    case "LS":
-      return ["web_search", 1];
-    case "Task":
-    case "Agent":
-      return ["subagent", 1];
-    default:
-      return ["tool", 1];
-  }
+function eventGroupCount(event: AgentTimelineEvent): number {
+  return timelineDeclaredGroupUnit(event)?.count ?? 1;
 }
 
-function fileChangeCount(event: AgentTimelineEvent): number {
-  const changes = readTimelinePayloadRecord(event).changes;
-  return Array.isArray(changes) && changes.length > 0 ? changes.length : 1;
-}
-
-function toolFileCount(event: AgentTimelineEvent): number {
-  const payload = readTimelinePayloadRecord(event);
-  const input = readPayloadRecord(payload.input);
-  const args = readPayloadRecord(payload.args);
-  const parameters = readPayloadRecord(payload.parameters);
-  const changes = [
-    payload.changes,
-    input.changes,
-    args.changes,
-    parameters.changes,
-  ].find((value) => Array.isArray(value));
-  return Array.isArray(changes) && changes.length > 0 ? changes.length : 1;
-}
-
-function formatProcessSummaryCount(key: string, count: number): string {
+function formatProcessSummaryCount(_key: string, count: number, unit: string | null = null): string {
   if (count <= 0) return "";
-  switch (key) {
-    case "command":
-      return `${count} 条命令`;
-    case "file":
-      return `${count} 个文件`;
-    case "plan":
-      return `${count} 项计划`;
-    case "todo":
-      return `${count} 次待办`;
-    case "tool":
-      return `${count} 个工具`;
-    case "mcp":
-      return `${count} 次 MCP`;
-    case "web_search":
-      return `${count} 次搜索`;
-    case "subagent":
-      return `${count} 个子代理`;
-    case "error":
-      return `${count} 个错误`;
-    default:
-      return `${count} 项`;
-  }
+  if (unit) return `${count} ${unit}`;
+  return `${count} 项`;
 }
 
 function isRunningStatus(status: AgentTimelineEventStatus): boolean {
@@ -511,7 +405,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           v-if="entry.type === 'group'"
           class="agent-timeline__item agent-timeline__item--group"
           :class="[
-            `agent-timeline__item--${entry.representative.kind}`,
+            kindClass('agent-timeline__item--', entry.representative.kind),
             statusClass(entry.aggregatedStatus),
             {
               'is-compact': !groupExpanded(entry),
@@ -525,8 +419,8 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           >
             <div class="agent-timeline__rail">
               <TimelineNodeIcon
-                :kind="entry.representative.kind"
                 :status="entry.aggregatedStatus"
+                :icon="nodeIcon(entry.representative)"
               />
             </div>
             <div class="agent-timeline__body">
@@ -559,7 +453,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
                   v-for="event in entry.events"
                   :key="event.id"
                   class="agent-timeline__group-item"
-                  :class="[`agent-timeline__group-item--${event.kind}`, statusClass(event.status)]"
+                  :class="[kindClass('agent-timeline__group-item--', event.kind), statusClass(event.status)]"
                 >
                   <article class="agent-timeline__group-event">
                     <header class="agent-timeline__head agent-timeline__group-head">
@@ -625,7 +519,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           v-else
           class="agent-timeline__item"
           :class="[
-            `agent-timeline__item--${entry.event.kind}`,
+            kindClass('agent-timeline__item--', entry.event.kind),
             statusClass(entry.event.status),
             {
               'is-final-reply': isTimelineFinalReply(entry.event),
@@ -641,8 +535,8 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           >
             <div class="agent-timeline__rail">
               <TimelineNodeIcon
-                :kind="entry.event.kind"
                 :status="entry.event.status"
+                :icon="nodeIcon(entry.event)"
               />
             </div>
             <div class="agent-timeline__body">

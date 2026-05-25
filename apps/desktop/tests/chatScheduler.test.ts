@@ -530,6 +530,62 @@ describe("chat scheduler", () => {
     expect(view.queryByText("旧错误通道不应生成气泡")).toBeNull();
   });
 
+  it("未知节点优先使用 display 声明渲染标题、预览和详情", async () => {
+    const view = await renderTaskDetail();
+
+    await expectInitialReasoning(view);
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-declared-custom",
+      kind: "extension_index",
+      status: "success",
+      title: "title should not win",
+      summary: "summary should not win",
+      payload: {
+        raw: "payload should not be required for display",
+      },
+      display: {
+        icon: "tool",
+        action: "同步",
+        object: "索引",
+        preview: "索引完成",
+        details: [
+          {
+            type: "fields",
+            fields: [
+              { label: "范围", value: "workspace" },
+            ],
+          },
+          {
+            type: "code",
+            label: "OUTPUT",
+            content: "indexed 42 files",
+          },
+        ],
+        group: {
+          key: "extension:index",
+          bucket: "index",
+          unit: "次索引",
+          count: 2,
+        },
+      },
+      order: 5,
+    });
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /已同步 索引/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.getByText("索引完成")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /已同步 索引/ }));
+    await waitFor(() => {
+      expect(view.getByText("范围")).toBeInTheDocument();
+      expect(view.getByText("workspace")).toBeInTheDocument();
+      expect(view.getByText("indexed 42 files")).toBeInTheDocument();
+    });
+  });
+
   it("折叠后的过程摘要会显示事件类型和异常状态", async () => {
     seedMockChatMessages("t-002", [
       {
@@ -590,6 +646,89 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("已经定位失败原因。")).toBeInTheDocument();
       expect(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 个文件.*有失败/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
+  it("折叠后的过程摘要优先使用 display group 声明", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-declared-process-summary",
+        taskId: "t-002",
+        role: "user",
+        content: "请同步索引",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-declared-process-a",
+      kind: "extension_index",
+      status: "success",
+      title: "Index A",
+      summary: "索引 A",
+      payload: {},
+      display: {
+        icon: "tool",
+        action: "同步",
+        object: "索引 A",
+        preview: "索引 A",
+        group: {
+          key: "extension:index",
+          bucket: "index",
+          unit: "次索引",
+          count: 2,
+        },
+      },
+      turnId: "turn-declared-process",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-declared-process-b",
+      kind: "extension_index",
+      status: "success",
+      title: "Index B",
+      summary: "索引 B",
+      payload: {},
+      display: {
+        icon: "tool",
+        action: "同步",
+        object: "索引 B",
+        preview: "索引 B",
+        group: {
+          key: "extension:index",
+          bucket: "index",
+          unit: "次索引",
+          count: 1,
+        },
+      },
+      turnId: "turn-declared-process",
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-declared-process-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "索引同步完成。",
+      },
+      turnId: "turn-declared-process",
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("索引同步完成。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /展开过程 2 项.*3 次索引/ }))
         .toHaveAttribute("aria-expanded", "false");
     });
   });

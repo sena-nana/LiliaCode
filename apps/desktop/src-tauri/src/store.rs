@@ -130,10 +130,8 @@ fn run_migrations(conn: &mut Connection) -> Result<(), String> {
         migration_v4_pinned,
         // v5: tasks.pinned 列（session 置顶）
         migration_v5_task_pinned,
-        // v6: Agent 工作过程时间线
+        // v6: Agent 工作过程时间线（开发期直接使用 display 声明契约）
         migration_v6_agent_timeline_events,
-        // v7: 放宽 kind CHECK，纳入 'message'（user/assistant 都走 timeline）
-        migration_v7_timeline_message_kind,
     ];
 
     let current: i64 = conn
@@ -263,14 +261,12 @@ fn migration_v6_agent_timeline_events(conn: &Connection) -> Result<(), String> {
           task_id     TEXT NOT NULL,
           turn_id     TEXT,
           backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          kind        TEXT NOT NULL CHECK (kind IN (
-                        'reasoning','plan','todo_list','tool','command','subagent',
-                        'file_change','mcp','web_search','error','turn'
-                      )),
+          kind        TEXT NOT NULL,
           status      TEXT NOT NULL,
           title       TEXT NOT NULL,
           summary     TEXT,
           payload     TEXT NOT NULL,
+          display     TEXT NOT NULL,
           created_at  INTEGER NOT NULL,
           updated_at  INTEGER NOT NULL,
           "order"     INTEGER NOT NULL
@@ -283,42 +279,42 @@ fn migration_v6_agent_timeline_events(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("lilia-store v6: 建 agent_timeline_events 失败：{e}"))
 }
 
-/// SQLite 不支持 ALTER CHECK，rebuild 表把 kind 集合放宽到包含 'message'。
-/// user 输入与 assistant 流式回复都按 message 走 timeline，schema 必须接得住。
-fn migration_v7_timeline_message_kind(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE agent_timeline_events_v7 (
-          id          TEXT PRIMARY KEY,
-          task_id     TEXT NOT NULL,
-          turn_id     TEXT,
-          backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          kind        TEXT NOT NULL CHECK (kind IN (
-                        'message','reasoning','plan','todo_list','tool','command',
-                        'subagent','file_change','mcp','web_search','error','turn'
-                      )),
-          status      TEXT NOT NULL,
-          title       TEXT NOT NULL,
-          summary     TEXT,
-          payload     TEXT NOT NULL,
-          created_at  INTEGER NOT NULL,
-          updated_at  INTEGER NOT NULL,
-          "order"     INTEGER NOT NULL
-        );
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
 
-        INSERT INTO agent_timeline_events_v7
-          (id, task_id, turn_id, backend, kind, status, title, summary,
-           payload, created_at, updated_at, "order")
-          SELECT id, task_id, turn_id, backend, kind, status, title, summary,
-                 payload, created_at, updated_at, "order"
-          FROM agent_timeline_events;
+    #[test]
+    fn migration_v6_creates_display_contract_with_open_kind() {
+        let conn = Connection::open_in_memory().unwrap();
+        migration_v6_agent_timeline_events(&conn).unwrap();
+        conn.execute(
+            r#"INSERT INTO agent_timeline_events
+               (id, task_id, turn_id, backend, kind, status, title, summary, payload, display, created_at, updated_at, "order")
+               VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, ?11)"#,
+            params![
+                "event-1",
+                "task-1",
+                "claude",
+                "extension_index",
+                "success",
+                "Index",
+                "{}",
+                r#"{"icon":"tool","action":"同步"}"#,
+                101,
+                101,
+                2,
+            ],
+        )
+        .unwrap();
 
-        DROP TABLE agent_timeline_events;
-        ALTER TABLE agent_timeline_events_v7 RENAME TO agent_timeline_events;
-
-        CREATE INDEX IF NOT EXISTS idx_agent_timeline_events_task_id_order
-          ON agent_timeline_events(task_id, "order");
-        "#,
-    )
-    .map_err(|e| format!("lilia-store v7: 放宽 timeline kind CHECK 失败：{e}"))
+        let display: Option<String> = conn
+            .query_row(
+                "SELECT display FROM agent_timeline_events WHERE id = ?1",
+                params!["event-1"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(display, Some(r#"{"icon":"tool","action":"同步"}"#.to_string()));
+    }
 }

@@ -27,27 +27,19 @@ interface AgentTimelineEvent {
   taskId: string;
   turnId: string | null;
   backend: "claude" | "codex";
-  kind:
-    | "message"
-    | "reasoning"
-    | "plan"
-    | "todo_list"
-    | "tool"
-    | "command"
-    | "subagent"
-    | "file_change"
-    | "mcp"
-    | "web_search"
-    | "error"
-    | "turn";
+  kind: string;
   status: string;
   title: string;
   summary: string | null;
   payload: unknown;
+  display: AgentTimelineDisplay;
   createdAt: number;
   updatedAt: number;
   order: number;
 }
+
+type AgentTimelineDisplay = Record<string, unknown>;
+type AgentTimelineDisplayDetail = Record<string, unknown>;
 
 const baseProjects: ProjectRow[] = [
   {
@@ -158,6 +150,12 @@ export function resetTauriMockData() {
         title: "历史思考摘要",
         summary: "从持久化时间线恢复的公开摘要。",
         payload: { source: "mock" },
+        display: {
+          icon: "reasoning",
+          action: "思考",
+          object: "历史思考摘要",
+          preview: "从持久化时间线恢复的公开摘要。",
+        },
         createdAt: 1500,
         updatedAt: 1500,
         order: 0,
@@ -218,7 +216,7 @@ export function emitMockTimelineEvent(
   taskId: string,
   patch: Partial<AgentTimelineEvent> = {},
 ) {
-  const event: AgentTimelineEvent = {
+  const base = {
     id: patch.id ?? `tl-${Date.now()}`,
     taskId,
     turnId: patch.turnId ?? "turn-live",
@@ -231,6 +229,10 @@ export function emitMockTimelineEvent(
     createdAt: patch.createdAt ?? Date.now(),
     updatedAt: patch.updatedAt ?? Date.now(),
     order: patch.order ?? (timelineEvents[taskId]?.length ?? 0),
+  } satisfies Omit<AgentTimelineEvent, "display">;
+  const event: AgentTimelineEvent = {
+    ...base,
+    display: patch.display ?? mockTimelineDisplay(base),
   };
   timelineEvents[taskId] = [
     ...(timelineEvents[taskId] ?? []).filter((item) => item.id !== event.id),
@@ -246,9 +248,10 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
       if (!message || typeof message !== "object" || Array.isArray(message)) return null;
       const row = message as Record<string, unknown>;
       if (row.role !== "user" && row.role !== "system") return null;
-      const id = String(row.id ?? `legacy-${index}`);
+      const id = String(row.id ?? `message-${index}`);
       const content = String(row.content ?? "");
       const createdAt = typeof row.createdAt === "number" ? row.createdAt : Date.now();
+      const title = row.role === "system" ? "系统消息" : "用户输入";
       return {
         id,
         taskId,
@@ -256,12 +259,17 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
         backend: "claude",
         kind: "message",
         status: "success",
-        title: row.role === "system" ? "系统消息" : "用户输入",
+        title,
         summary: content,
         payload: {
           role: row.role,
           content,
           queued: false,
+        },
+        display: {
+          icon: "message",
+          label: title,
+          preview: content,
         },
         createdAt,
         updatedAt: createdAt,
@@ -486,4 +494,250 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 });
 
 resetTauriMockData();
+
+function mockTimelineDisplay(
+  event: Pick<AgentTimelineEvent, "kind" | "title" | "summary" | "payload">,
+): AgentTimelineDisplay {
+  const payload = readRecord(event.payload);
+  const title = event.title.trim() || event.kind;
+  const preview = event.summary?.trim() || title;
+
+  if (event.kind === "message") {
+    const role = typeof payload.role === "string" ? payload.role : "user";
+    const content = readString(payload, ["content"]) || event.summary || "";
+    return {
+      icon: "message",
+      label: role === "system" ? "系统消息" : role === "assistant" ? "Assistant" : "用户输入",
+      preview: content,
+    };
+  }
+
+  if (event.kind === "reasoning") {
+    return {
+      icon: "reasoning",
+      action: "思考",
+      object: title,
+      preview,
+    };
+  }
+
+  if (event.kind === "command") {
+    const command = readString(payload, ["command", "cmd", "shellCommand"]) || title;
+    return commandDisplay(command, preview, payload);
+  }
+
+  if (event.kind === "file_change") {
+    const changes = readArray(payload.changes);
+    return fileDisplay(title, preview, Math.max(1, changes.length), payload);
+  }
+
+  if (event.kind === "plan") {
+    return {
+      icon: "plan",
+      action: "制定计划",
+      object: title,
+      preview,
+      details: markdownDetails(readString(payload, ["plan", "content", "text"]) || preview),
+      group: { key: "kind:plan", bucket: "plan", unit: "项计划", count: 1 },
+    };
+  }
+
+  if (event.kind === "todo_list") {
+    return {
+      icon: "todo",
+      action: "更新待办",
+      object: title,
+      preview,
+      group: { key: "kind:todo", bucket: "todo", unit: "次待办", count: 1 },
+    };
+  }
+
+  if (event.kind === "error") {
+    const message = readString(payload, ["message", "error"]) || preview;
+    return {
+      icon: "error",
+      label: "错误",
+      preview: message,
+      details: [{ type: "line", text: message, tone: "muted" }],
+      group: { key: "kind:error", bucket: "error", unit: "个错误", count: 1 },
+    };
+  }
+
+  if (event.kind === "mcp") {
+    return {
+      icon: "plug",
+      action: "调用",
+      object: title,
+      preview,
+      group: { key: "kind:mcp", bucket: "mcp", unit: "个 MCP", count: 1 },
+    };
+  }
+
+  if (event.kind === "web_search") {
+    return {
+      icon: "search",
+      action: "搜索",
+      object: title,
+      preview,
+      group: { key: "kind:web_search", bucket: "web_search", unit: "次搜索", count: 1 },
+    };
+  }
+
+  if (event.kind === "subagent") {
+    return {
+      icon: "subagent",
+      action: "运行子代理",
+      object: title,
+      preview,
+      group: { key: "kind:subagent", bucket: "subagent", unit: "个子代理", count: 1 },
+    };
+  }
+
+  if (event.kind === "tool") {
+    return mockToolDisplay(title, preview, payload);
+  }
+
+  return {
+    icon: "tool",
+    action: "处理",
+    object: title,
+    preview,
+    group: { key: `kind:${event.kind}`, bucket: "other", unit: "项", count: 1 },
+  };
+}
+
+function mockToolDisplay(
+  title: string,
+  preview: string,
+  payload: Record<string, unknown>,
+): AgentTimelineDisplay {
+  const input = readRecord(payload.input);
+  const toolName = readString(payload, ["toolName", "tool", "name"]) || title;
+  const normalized = toolName.toLowerCase();
+
+  if (normalized === "bash") {
+    const command = readString(input, ["command"]) || readString(payload, ["command"]) || title;
+    return commandDisplay(command, preview, payload);
+  }
+
+  if (["read", "edit", "write", "multiedit", "notebookedit"].includes(normalized)) {
+    const path = readString(input, ["path", "filePath", "file_path", "file"]) ||
+      readString(payload, ["path", "filePath", "file"]);
+    return fileDisplay(path || title, preview, 1, payload);
+  }
+
+  if (normalized === "todowrite") {
+    return {
+      icon: "todo",
+      action: "更新待办",
+      object: title,
+      preview,
+      group: { key: "tool:todo", bucket: "todo", unit: "次待办", count: 1 },
+    };
+  }
+
+  if (["websearch", "webfetch", "grep", "glob", "ls"].includes(normalized)) {
+    return {
+      icon: "search",
+      action: "搜索",
+      object: title,
+      preview,
+      group: { key: "tool:search", bucket: "web_search", unit: "次搜索", count: 1 },
+    };
+  }
+
+  if (["task", "agent"].includes(normalized)) {
+    return {
+      icon: "subagent",
+      action: "运行子代理",
+      object: title,
+      preview,
+      group: { key: "tool:subagent", bucket: "subagent", unit: "个子代理", count: 1 },
+    };
+  }
+
+  return {
+    icon: "tool",
+    action: "调用",
+    object: title,
+    preview,
+    group: { key: "kind:tool", bucket: "tool", unit: "个工具", count: 1 },
+  };
+}
+
+function commandDisplay(
+  command: string,
+  preview: string,
+  payload: Record<string, unknown>,
+): AgentTimelineDisplay {
+  const details = [
+    fieldsDetail([{ label: "命令", value: command }]),
+    codeDetail("stdout", readString(payload, ["stdout", "output", "result"])),
+    codeDetail("stderr", readString(payload, ["stderr", "error"])),
+  ].filter((detail): detail is AgentTimelineDisplayDetail => detail !== null);
+  return {
+    icon: "terminal",
+    action: "运行",
+    object: command,
+    preview,
+    details,
+    group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
+  };
+}
+
+function fileDisplay(
+  object: string,
+  preview: string,
+  count: number,
+  payload: Record<string, unknown>,
+): AgentTimelineDisplay {
+  const changes = readArray(payload.changes)
+    .map((change) => {
+      const row = readRecord(change);
+      return readString(row, ["path", "file", "filePath"]);
+    })
+    .filter((path) => path.trim());
+  return {
+    icon: "file",
+    action: "修改",
+    object,
+    preview,
+    details: changes.length
+      ? [{ type: "list", items: changes.map((path) => ({ text: path })) }]
+      : undefined,
+    group: { key: "kind:file", bucket: "file", unit: "个文件", count },
+  };
+}
+
+function fieldsDetail(fields: Array<{ label: string; value: string }>): AgentTimelineDisplayDetail | null {
+  const visible = fields.filter((field) => field.label.trim() && field.value.trim());
+  return visible.length ? { type: "fields", fields: visible } : null;
+}
+
+function codeDetail(label: string, content: string): AgentTimelineDisplayDetail | null {
+  return content.trim() ? { type: "code", label, content } : null;
+}
+
+function markdownDetails(content: string): AgentTimelineDisplayDetail[] | undefined {
+  return content.trim() ? [{ type: "markdown", content }] : undefined;
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readString(payload: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+  }
+  return "";
+}
 

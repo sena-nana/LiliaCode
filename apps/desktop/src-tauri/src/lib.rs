@@ -242,6 +242,7 @@ fn timeline_input_from_runtime_event(
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
     let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
+    let display = obj.get("display").cloned().filter(|value| !value.is_null())?;
     let source_id = obj.get("sourceId").and_then(|v| v.as_str());
     let id = source_id.map(|sid| format!("{}:{}:{sid}", ctx.task_id, ctx.turn_id));
 
@@ -255,6 +256,7 @@ fn timeline_input_from_runtime_event(
         title,
         summary,
         payload,
+        display,
         created_at: None,
         updated_at: None,
         order: None,
@@ -373,6 +375,11 @@ fn persist_and_emit_message_timeline_event(
             "content": message.content,
             "queued": queued,
         }),
+        display: serde_json::json!({
+            "icon": "message",
+            "label": "用户输入",
+            "preview": message.content,
+        }),
         created_at: Some(message.created_at as i64),
         updated_at: Some(now_millis() as i64),
         order: Some(0),
@@ -398,7 +405,16 @@ fn persist_and_emit_error_timeline_event(
         status: "error".to_string(),
         title: "错误".to_string(),
         summary: Some(message.clone()),
-        payload: serde_json::json!({ "message": message }),
+        payload: serde_json::json!({ "message": message.clone() }),
+        display: serde_json::json!({
+            "icon": "error",
+            "label": "错误",
+            "preview": message,
+            "details": [
+                { "type": "line", "text": message, "tone": "muted" }
+            ],
+            "group": { "key": "kind:error", "bucket": "error", "unit": "个错误", "count": 1 }
+        }),
         created_at: Some(now as i64),
         updated_at: Some(now as i64),
         order: None,
@@ -446,6 +462,11 @@ mod agent_event_sink_tests {
                     "title": "Run tests",
                     "summary": "17 passed",
                     "payload": { "command": "cargo test" },
+                    "display": {
+                        "icon": "terminal",
+                        "action": "运行",
+                        "object": "cargo test"
+                    },
                     "sourceId": "cargo-test"
                 }),
             },
@@ -461,25 +482,27 @@ mod agent_event_sink_tests {
         assert_eq!(input.title, "Run tests");
         assert_eq!(input.summary, Some("17 passed".to_string()));
         assert_eq!(input.payload, json!({ "command": "cargo test" }));
+        assert_eq!(
+            input.display,
+            json!({
+                "icon": "terminal",
+                "action": "运行",
+                "object": "cargo test"
+            })
+        );
         assert_eq!(input.order, None);
     }
 
     #[test]
-    fn timeline_runtime_event_uses_existing_sink_defaults() {
+    fn timeline_runtime_event_missing_display_is_ignored() {
         let input = timeline_input_from_runtime_event(
             &turn_context(),
             &AgentRuntimeEvent::Timeline {
                 event: json!({}),
             },
-        )
-        .unwrap();
+        );
 
-        assert_eq!(input.id, None);
-        assert_eq!(input.kind, "tool");
-        assert_eq!(input.status, "info");
-        assert_eq!(input.title, "tool");
-        assert_eq!(input.summary, None);
-        assert_eq!(input.payload, JsonValue::Null);
+        assert!(input.is_none());
     }
 
     #[test]

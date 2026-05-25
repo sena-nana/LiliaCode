@@ -196,6 +196,11 @@ function createMessageTimelineEvent(input: {
       content: input.content,
       queued: input.queued === true,
     },
+    display: {
+      icon: "message",
+      label: "用户输入",
+      preview: input.content,
+    },
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
     order: 0,
@@ -228,6 +233,20 @@ function createErrorTimelineEvent(message: string): AgentTimelineEvent {
     title: "错误",
     summary: message,
     payload: { message },
+    display: {
+      icon: "error",
+      label: "错误",
+      preview: message,
+      details: [
+        { type: "line", text: message, tone: "muted" },
+      ],
+      group: {
+        key: "kind:error",
+        bucket: "error",
+        unit: "个错误",
+        count: 1,
+      },
+    },
     createdAt: now,
     updatedAt: now,
     order: Number.MAX_SAFE_INTEGER,
