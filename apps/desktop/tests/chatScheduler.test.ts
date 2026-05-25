@@ -154,14 +154,14 @@ describe("chat scheduler", () => {
 
     emitMockTimelineEvent("t-002", {
       id: "tl-final-reply",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "Claude turn completed",
-      summary: "",
+      title: "Assistant",
+      summary: "这是 Claude turn 完成后返回给用户的完整结果。",
       payload: {
         backend: "claude",
-        sessionId: "mock-t-002",
-        finalText: "这是 Claude turn 完成后返回给用户的完整结果。\n包含第二行。",
+        role: "assistant",
+        content: "这是 Claude turn 完成后返回给用户的完整结果。\n包含第二行。",
       },
       order: 2,
     });
@@ -206,6 +206,7 @@ describe("chat scheduler", () => {
         command: "yarn verify",
         stdout: "验证输出详情",
       },
+      turnId: "turn-collapse",
       createdAt: 2100,
       updatedAt: 2100,
       order: 1,
@@ -226,13 +227,15 @@ describe("chat scheduler", () => {
 
     emitMockTimelineEvent("t-002", {
       id: "tl-final-collapse",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "Claude turn completed",
+      title: "Assistant",
       payload: {
         backend: "claude",
-        finalText: "## 完成\n\n最终结果完整展示。",
+        role: "assistant",
+        content: "## 完成\n\n最终结果完整展示。",
       },
+      turnId: "turn-collapse",
       createdAt: 2200,
       updatedAt: 2200,
       order: 2,
@@ -285,13 +288,15 @@ describe("chat scheduler", () => {
     ]);
     emitMockTimelineEvent("t-002", {
       id: "tl-history-final",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "历史 turn completed",
+      title: "Assistant",
       payload: {
         backend: "claude",
-        finalText: "上一轮已经完成的最终回复。",
+        role: "assistant",
+        content: "上一轮已经完成的最终回复。",
       },
+      turnId: "turn-history",
       createdAt: 1600,
       updatedAt: 1600,
       order: 1,
@@ -314,6 +319,7 @@ describe("chat scheduler", () => {
         command: "cargo check",
         stdout: "Rust 验证输出详情",
       },
+      turnId: "turn-new",
       createdAt: 2100,
       updatedAt: 2100,
       order: 2,
@@ -333,13 +339,15 @@ describe("chat scheduler", () => {
 
     emitMockTimelineEvent("t-002", {
       id: "tl-new-final-after-history",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "Claude turn completed",
+      title: "Assistant",
       payload: {
         backend: "claude",
-        finalText: "新一轮最终回复。",
+        role: "assistant",
+        content: "新一轮最终回复。",
       },
+      turnId: "turn-new",
       createdAt: 2200,
       updatedAt: 2200,
       order: 3,
@@ -374,6 +382,7 @@ describe("chat scheduler", () => {
         command: "yarn test",
         stdout: "折叠后的命令详情",
       },
+      turnId: "turn-fold",
       createdAt: 2100,
       updatedAt: 2100,
       order: 2,
@@ -387,19 +396,22 @@ describe("chat scheduler", () => {
       payload: {
         plan: "折叠后的计划详情",
       },
+      turnId: "turn-fold",
       createdAt: 2200,
       updatedAt: 2200,
       order: 3,
     });
     emitMockTimelineEvent("t-002", {
       id: "tl-final-with-hidden-process",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "Claude turn completed",
+      title: "Assistant",
       payload: {
         backend: "claude",
-        finalText: "最终回复应该直接可见。",
+        role: "assistant",
+        content: "最终回复应该直接可见。",
       },
+      turnId: "turn-fold",
       createdAt: 2300,
       updatedAt: 2300,
       order: 4,
@@ -461,13 +473,15 @@ describe("chat scheduler", () => {
     ]);
     emitMockTimelineEvent("t-002", {
       id: "tl-final-after-user",
-      kind: "turn",
+      kind: "message",
       status: "success",
-      title: "Claude turn completed",
+      title: "Assistant",
       payload: {
         backend: "claude",
-        finalText: "用户消息之后的最终回复",
+        role: "assistant",
+        content: "用户消息之后的最终回复",
       },
+      turnId: "turn-after-user",
       createdAt: 3000,
       updatedAt: 3000,
       order: 2,

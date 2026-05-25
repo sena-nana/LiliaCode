@@ -33,8 +33,10 @@ import TimelineSummaryEvent from "./TimelineSummaryEvent.vue";
 import TimelineTodoEvent from "./TimelineTodoEvent.vue";
 import TimelineToolEvent from "./TimelineToolEvent.vue";
 import {
+  isTimelineAssistantMessage,
   isTimelineExpanded,
   isTimelineFinalReply,
+  isTimelineFinalReplyStreaming,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
@@ -67,7 +69,7 @@ const expandedProcessGroupIds = ref<Set<string>>(new Set());
 const finalReplyCollapseKey = computed(() =>
   props.events
     .filter(isTimelineFinalReply)
-    .map((event) => [event.id, event.status, event.updatedAt, event.order].join(":"))
+    .map((event) => [event.id, event.status, event.order].join(":"))
     .join("|"),
 );
 
@@ -87,64 +89,28 @@ const chronologicalEntries = computed<TimelineEntry[]>(() =>
 
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
-  const hiddenEventIds = new Set<string>();
-  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
   const finalByTurnId = new Map<string, TimelineEventEntry>();
-
-  function addProcessEvent(finalEntry: TimelineEventEntry, event: AgentTimelineEvent) {
-    const list = processEventsByFinalId.get(finalEntry.event.id) ?? [];
-    if (!list.some((item) => item.id === event.id)) list.push(event);
-    processEventsByFinalId.set(finalEntry.event.id, list);
-    hiddenEventIds.add(event.id);
-  }
-
-  function occursBeforeFinal(entry: TimelineEventEntry, finalEntry: TimelineEventEntry): boolean {
-    return entry.createdAt < finalEntry.createdAt ||
-      (entry.createdAt === finalEntry.createdAt && entry.order < finalEntry.order);
-  }
+  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
+  const hiddenEventIds = new Set<string>();
 
   for (const entry of entries) {
-    if (
-      isTimelineFinalReply(entry.event) &&
-      entry.event.turnId
-    ) {
+    if (isTimelineAssistantMessage(entry.event) && entry.event.turnId) {
       finalByTurnId.set(entry.event.turnId, entry);
     }
   }
 
+  // 同一 turnId 的非 message 事件统统折叠到该 turn 的最终回复下，
+  // 不再做 createdAt 前后比较——流式 message 的 createdAt 会随 upsert 漂移到末尾，
+  // 用 turnId 而不是时序更稳定。
   for (const entry of entries) {
-    if (
-      !isTimelineFinalReply(entry.event) &&
-      !isTimelineMessage(entry.event) &&
-      entry.event.turnId
-    ) {
-      const finalEntry = finalByTurnId.get(entry.event.turnId);
-      if (finalEntry && occursBeforeFinal(entry, finalEntry)) {
-        addProcessEvent(finalEntry, entry.event);
-      }
-    }
-  }
-
-  let pendingSpanEvents: TimelineEventEntry[] = [];
-  let collectingSpan = false;
-  for (const entry of entries) {
-    if (isTimelineMessage(entry.event)) {
-      collectingSpan = true;
-      continue;
-    }
-    if (isTimelineFinalReply(entry.event)) {
-      for (const processEntry of pendingSpanEvents) {
-        if (!hiddenEventIds.has(processEntry.event.id)) {
-          addProcessEvent(entry, processEntry.event);
-        }
-      }
-      pendingSpanEvents = [];
-      collectingSpan = false;
-      continue;
-    }
-    if (collectingSpan && !hiddenEventIds.has(entry.event.id)) {
-      pendingSpanEvents.push(entry);
-    }
+    if (!entry.event.turnId) continue;
+    if (isTimelineMessage(entry.event)) continue;
+    const finalEntry = finalByTurnId.get(entry.event.turnId);
+    if (!finalEntry) continue;
+    const list = processEventsByFinalId.get(finalEntry.event.id) ?? [];
+    if (!list.some((item) => item.id === entry.event.id)) list.push(entry.event);
+    processEventsByFinalId.set(finalEntry.event.id, list);
+    hiddenEventIds.add(entry.event.id);
   }
 
   const output: TimelineEntry[] = [];
@@ -289,6 +255,10 @@ function isTimelineMessage(event: AgentTimelineEvent): boolean {
   return event.kind === "message";
 }
 
+function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
+  return isTimelineMessage(event) && !isTimelineAssistantMessage(event);
+}
+
 function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
@@ -320,7 +290,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
     <ol class="agent-timeline__list">
       <template v-for="entry in orderedEntries" :key="entry.id">
         <li
-          v-if="isTimelineMessage(entry.event)"
+          v-if="isTimelineUserMessage(entry.event)"
           class="agent-timeline__message-row"
           :class="[
             `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,
@@ -344,6 +314,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
               'is-expanded': expanded(entry.event),
               'is-final-reply': isTimelineFinalReply(entry.event),
               'is-compact': isCompact(entry.event),
+              'is-streaming': isTimelineFinalReplyStreaming(entry.event),
             },
           ]"
         >
@@ -411,6 +382,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
               <TimelineFinalReply
                 v-if="isTimelineFinalReply(entry.event)"
                 :event="entry.event"
+                :streaming="isTimelineFinalReplyStreaming(entry.event)"
               />
               <component
                 v-else

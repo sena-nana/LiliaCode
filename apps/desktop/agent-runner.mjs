@@ -163,6 +163,81 @@ function emitTimeline(input) {
   emit({ type: "timeline", event });
 }
 
+/**
+ * Assistant 流式回复落到 message kind 的 timeline。
+ * 用固定 sourceId="assistant"，Rust 端会拼成 `task:turn:assistant`，
+ * 同一 turn 内反复 upsert 即可实现 token 级增量更新。
+ */
+function emitAssistantMessageTimeline(text, status, backend) {
+  const content = typeof text === "string" ? text : "";
+  emitTimeline({
+    kind: "message",
+    status,
+    title: "Assistant",
+    summary: content,
+    payload: {
+      role: "assistant",
+      content,
+      backend,
+    },
+    sourceId: "assistant",
+  });
+}
+
+/**
+ * "假流式" 派发器：上游 SDK 实测按 1-2s 节奏成批 flush stream_event，
+ * 直接转发会让 UI 看到"块状"刷新。这里把到达的 chunk 推进 buffer，按 tick
+ * 节奏（默认 30Hz、约每 6 tick 排空一批）从 buffer 取一段提交，UI 看到的
+ * 就是平稳滚动的文本流。
+ *
+ * 终态调 `finishImmediate` 一次性提交剩余，上层紧接 emit success，保证
+ * 最终态不被 pacer 延迟。`syncTo` 给 SDK 漏发 delta 但给完整 snapshot
+ * （Claude case "assistant"）时补差量用。
+ */
+function createTextPacer({ intervalMs = 33, flushDivisor = 6, emit }) {
+  let buffer = "";
+  let committed = "";
+  let timer = null;
+
+  const tick = () => {
+    if (!buffer) {
+      clearInterval(timer);
+      timer = null;
+      return;
+    }
+    const take = Math.max(1, Math.ceil(buffer.length / flushDivisor));
+    committed += buffer.slice(0, take);
+    buffer = buffer.slice(take);
+    emit(committed);
+  };
+
+  return {
+    push(delta) {
+      if (!delta) return;
+      buffer += delta;
+      if (!timer) timer = setInterval(tick, intervalMs);
+    },
+    finishImmediate() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (buffer) {
+        committed += buffer;
+        buffer = "";
+        emit(committed);
+      }
+    },
+    syncTo(fullText) {
+      if (typeof fullText !== "string") return;
+      if (fullText.length <= committed.length) return;
+      const extra = fullText.slice(committed.length);
+      buffer += extra;
+      if (!timer) timer = setInterval(tick, intervalMs);
+    },
+  };
+}
+
 function emitError(message, payload) {
   const text = shortText(message, 1200) || "unknown error";
   emit({ type: "error", message: text });
@@ -190,11 +265,6 @@ function normalizeTimelineStatus(status) {
 
 function fullTextOrNull(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function addFinalText(payload, finalText) {
-  const text = fullTextOrNull(finalText);
-  return text ? { ...payload, finalText: text } : payload;
 }
 
 // ---------- Claude ----------
@@ -685,6 +755,9 @@ async function runClaude(cmd) {
     assistantSnapshotText: "",
     resultSeen: false,
   };
+  const pacer = createTextPacer({
+    emit: (text) => emitAssistantMessageTimeline(text, "running", "claude"),
+  });
   for await (const msg of query({ prompt, options })) {
     if (msg.session_id) lastSessionId = msg.session_id;
 
@@ -696,19 +769,18 @@ async function runClaude(cmd) {
           const text = extractClaudeTextDelta(msg.event);
           if (text) {
             ctx.assistantDeltaText += text;
-            emit({ type: "chunk", text });
+            pacer.push(text);
+            pacer.push(text);
           }
           break;
         }
       case "assistant": {
-        // 完整文本块作为一次稳定快照（用于在 delta 漏接时兜底显示）。
-        // 含 tool_use 的 assistant 消息这里 text 会是空串，跳过。
+        // 含 tool_use 的 assistant 消息 text 是空串——跳过；纯文本块作为 delta 漏接时的兜底快照。
         const text = extractClaudeAssistantText(msg);
         if (text) {
           ctx.assistantSnapshotText = text;
-          emit({ type: "assistant_done", text, sessionId: msg.session_id });
+          pacer.syncTo(text);
         }
-        // 抽 tool_use 块单独发，给前端做「Claude 正在 Read X」提示用。
         const content = msg?.message?.content;
         if (Array.isArray(content)) {
           for (const b of content) {
@@ -729,12 +801,20 @@ async function runClaude(cmd) {
         const errorSummary = msg.is_error
           ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
           : "";
+        pacer.finishImmediate();
+        if (finalText) {
+          emitAssistantMessageTimeline(
+            finalText,
+            msg.is_error ? "error" : "success",
+            "claude",
+          );
+        }
         emitTimeline({
           kind: "turn",
           status: msg.is_error ? "error" : "success",
           title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
           summary: errorSummary,
-          payload: addFinalText({
+          payload: {
             backend: "claude",
             subtype: msg.subtype,
             stopReason: msg.stop_reason,
@@ -745,7 +825,7 @@ async function runClaude(cmd) {
             permissionDenials: msg.permission_denials,
             errors: msg.errors,
             sessionId: msg.session_id || lastSessionId,
-          }, finalText),
+          },
           sourceId: msg.uuid,
         });
         emit({
@@ -781,16 +861,20 @@ async function runClaude(cmd) {
     const finalText =
       fullTextOrNull(ctx.assistantDeltaText) ||
       fullTextOrNull(ctx.assistantSnapshotText);
+    pacer.finishImmediate();
+    if (finalText) {
+      emitAssistantMessageTimeline(finalText, "success", "claude");
+    }
     emitTimeline({
       kind: "turn",
       status: "success",
       title: "Claude turn completed",
       summary: "",
-      payload: addFinalText({
+      payload: {
         backend: "claude",
         subtype: "success",
         sessionId: lastSessionId,
-      }, finalText),
+      },
       sourceId: `${lastSessionId}:turn:done`,
     });
     emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
@@ -967,12 +1051,6 @@ function emitCodexItemTimeline(eventType, item) {
 
 function emitCodexTurnTimeline(eventType, ev, ctx) {
   const errorMessage = ev?.error?.message || ev?.message || "";
-  const finalText =
-    fullTextOrNull(ev?.result) ||
-    fullTextOrNull(ev?.output) ||
-    fullTextOrNull(ev?.text) ||
-    fullTextOrNull(ctx?.assistantSnapshotText) ||
-    fullTextOrNull(ctx?.assistantDeltaText);
   emitTimeline({
     kind: "turn",
     status: getCodexStatus(eventType, null),
@@ -983,13 +1061,13 @@ function emitCodexTurnTimeline(eventType, ev, ctx) {
           ? "Codex turn completed"
           : "Codex turn failed",
     summary: errorMessage || "",
-    payload: addFinalText({
+    payload: {
       backend: "codex",
       eventType,
       usage: ev?.usage,
       error: ev?.error,
       sessionId: ctx?.lastThreadId,
-    }, finalText),
+    },
   });
 }
 
@@ -1030,12 +1108,12 @@ function mapCodexEventToNdjson(ev, ctx) {
         const delta = item.text.slice(seen);
         ctx.assistantDeltaText += delta;
         ctx.assistantSnapshotText = item.text;
-        emit({ type: "chunk", text: delta });
+        ctx.pacer.push(delta);
         ctx.itemTextSeen.set(item.id, total);
       } else if (total < seen) {
         ctx.assistantDeltaText += item.text;
         ctx.assistantSnapshotText = item.text;
-        emit({ type: "chunk", text: item.text });
+        ctx.pacer.syncTo(ctx.assistantSnapshotText);
       }
       return;
     }
@@ -1043,12 +1121,12 @@ function mapCodexEventToNdjson(ev, ctx) {
     const text = pickCodexDeltaText(ev);
     if (text) {
       ctx.assistantDeltaText += text;
-      emit({ type: "chunk", text });
+      ctx.pacer.push(text);
     }
     return;
   }
 
-  // 完成的 item：agent_message 走 assistant_done，其它当 tool_use。
+  // 完成的 item：agent_message 触发最终回复 timeline，其它当 tool_use。
   if (type === "item.completed" || type === "item.started") {
     const item = ev.item || ev;
     const kind = item?.item_type || item?.type;
@@ -1061,7 +1139,8 @@ function mapCodexEventToNdjson(ev, ctx) {
       const text = pickCodexAssistantText(item);
       if (text && type === "item.completed") {
         ctx.assistantSnapshotText = text;
-        emit({ type: "assistant_done", text, sessionId: ctx.lastThreadId });
+        ctx.pacer.finishImmediate();
+        emitAssistantMessageTimeline(text, "success", "codex");
         if (item?.id) ctx.itemTextSeen.delete(item.id);
       }
       return;
@@ -1076,6 +1155,7 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   if (type === "turn.completed") {
     ctx.turnCompletedSeen = true;
+    ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
     emit({
       type: "done",
@@ -1087,6 +1167,7 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   if (type === "turn.failed" || type === "error") {
     const msg = ev.error?.message || ev.message || "codex turn failed";
+    ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
     emit({ type: "error", message: msg });
   }
@@ -1153,6 +1234,9 @@ async function runCodex(cmd) {
     assistantDeltaText: "",
     assistantSnapshotText: "",
     turnCompletedSeen: false,
+    pacer: createTextPacer({
+      emit: (text) => emitAssistantMessageTimeline(text, "running", "codex"),
+    }),
   };
 
   // 0.47 起 thread.run() 返回完整 Turn（非流式），要拿事件流必须用 runStreamed。
@@ -1164,16 +1248,23 @@ async function runCodex(cmd) {
 
   if (ctx.lastThreadId && !ctx.turnCompletedSeen) {
     // 兜底 done：与 Claude 分支语义一致——某些版本可能不发 turn.completed。
+    const finalText =
+      fullTextOrNull(ctx.assistantSnapshotText) ||
+      fullTextOrNull(ctx.assistantDeltaText);
+    ctx.pacer.finishImmediate();
+    if (finalText) {
+      emitAssistantMessageTimeline(finalText, "success", "codex");
+    }
     emitTimeline({
       kind: "turn",
       status: "success",
       title: "Codex turn completed",
       summary: "",
-      payload: addFinalText({
+      payload: {
         backend: "codex",
         eventType: "turn.completed",
         sessionId: ctx.lastThreadId,
-      }, fullTextOrNull(ctx.assistantSnapshotText) || fullTextOrNull(ctx.assistantDeltaText)),
+      },
     });
     emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
   }
@@ -1259,10 +1350,10 @@ async function runDryRun(cmd) {
     payload: { backend, message: "Dry-run error sample" },
     sourceId: `${sid}:error`,
   });
-  emit({ type: "chunk", text: "hello " });
-  emit({ type: "chunk", text: "from " });
-  emit({ type: "chunk", text: backend });
-  emit({ type: "assistant_done", text: `hello from ${backend}`, sessionId: sid });
+  emitAssistantMessageTimeline("hello ", "running", backend);
+  emitAssistantMessageTimeline("hello from ", "running", backend);
+  emitAssistantMessageTimeline(`hello from ${backend}`, "running", backend);
+  emitAssistantMessageTimeline(`hello from ${backend}`, "success", backend);
   emitTimeline({
     kind: "turn",
     status: "success",
@@ -1271,7 +1362,6 @@ async function runDryRun(cmd) {
     payload: {
       backend,
       sessionId: sid,
-      finalText: `hello from ${backend}`,
     },
     sourceId: `${sid}:turn:done`,
   });

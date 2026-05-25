@@ -28,12 +28,6 @@ export interface TimelineFileChange {
   path: string;
 }
 
-const FINAL_REPLY_STATUSES = new Set<AgentTimelineEventStatus>([
-  "success",
-  "completed",
-  "done",
-]);
-
 const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
   "pending",
   "started",
@@ -73,14 +67,34 @@ export function readTimelinePayloadString(
 }
 
 export function timelineFinalText(event: Pick<AgentTimelineEvent, "kind" | "payload">): string {
-  return event.kind === "turn" ? readTimelinePayloadString(event, "finalText") : "";
+  if (event.kind !== "message") return "";
+  const payload = readTimelinePayloadRecord(event);
+  if (payload.role !== "assistant") return "";
+  const content = payload.content;
+  return typeof content === "string" ? content : "";
 }
 
+export function isTimelineAssistantMessage(
+  event: Pick<AgentTimelineEvent, "kind" | "payload">,
+): boolean {
+  if (event.kind !== "message") return false;
+  return readTimelinePayloadRecord(event).role === "assistant";
+}
+
+/**
+ * 「最终回复」= assistant message timeline。流式过程中（status=running）也算，
+ * 这样组件树展开/折叠状态在 token 增量到达时不会抖动。
+ */
 export function isTimelineFinalReply(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
 ): boolean {
-  return timelineFinalText(event).trim().length > 0 &&
-    FINAL_REPLY_STATUSES.has(event.status);
+  return isTimelineAssistantMessage(event);
+}
+
+export function isTimelineFinalReplyStreaming(
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
+): boolean {
+  return isTimelineAssistantMessage(event) && RUNNING_STATUSES.has(event.status);
 }
 
 export function timelineDefaultExpanded(
@@ -315,13 +329,12 @@ export function formatTimelinePayload(
   maxLength = TIMELINE_PAYLOAD_MAX_LENGTH,
 ): string | null {
   const payload = readTimelinePayloadRecord(event);
-  const { finalText: _finalText, ...rest } = payload;
-  if (Object.keys(rest).length === 0) return null;
+  if (Object.keys(payload).length === 0) return null;
 
   try {
-    return truncateTimelineText(JSON.stringify(rest, null, 2), maxLength);
+    return truncateTimelineText(JSON.stringify(payload, null, 2), maxLength);
   } catch {
-    return truncateTimelineText(String(rest), maxLength);
+    return truncateTimelineText(String(payload), maxLength);
   }
 }
 

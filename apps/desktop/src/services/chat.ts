@@ -39,11 +39,6 @@ export type {
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
 
-/**
- * @deprecated 用 BackendEnvStatus（per-backend）+ EnvStatusReport（顶层报告）替代。
- */
-export type EnvStatus = BackendEnvStatus;
-
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
 }

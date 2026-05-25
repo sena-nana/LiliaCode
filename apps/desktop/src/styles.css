@@ -1995,6 +1995,12 @@ button.ghost:hover {
   font-size: 14px;
 }
 
+/* 流式生成时把光标贴到 markdown 块末尾，与 ChatBubble 用同一闪烁动画。 */
+.timeline-card--final-reply__cursor {
+  align-self: flex-start;
+  margin-top: -4px;
+}
+
 .timeline-card--command.timeline-card--error {
   padding: 8px;
   border: 1px solid rgba(244, 113, 116, 0.58);

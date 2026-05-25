@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -261,14 +261,10 @@ fn timeline_input_from_runtime_event(
     })
 }
 
-fn persist_and_emit_timeline_event(
-    app_handle: &AppHandle,
-    ctx: &AgentTurnContext,
-    event: &AgentRuntimeEvent,
-) {
-    let Some(input) = timeline_input_from_runtime_event(ctx, event) else {
-        return;
-    };
+/// 直接落库 + emit 一条 timeline 输入，不做节流。
+/// 任何调用方（throttle、用户消息、错误事件）都共用同一条物理路径，
+/// 保证「emit 的 payload = DB 写入的快照」始终成立。
+fn persist_and_emit_input(app_handle: &AppHandle, input: AgentTimelineEventInput) {
     let store = app_handle.state::<LiliaStore>();
     match store
         .conn()
@@ -279,6 +275,80 @@ fn persist_and_emit_timeline_event(
         }
         Err(err) => {
             eprintln!("[agent-timeline] persist failed: {err}");
+        }
+    }
+}
+
+/// 同一 turn 内 timeline 事件的合并节流器。
+///
+/// 设计目标：UI = Rust 时间线的镜像。前端不维护任何独立的"流式中间态"，
+/// 而是直接把每条 `agent:timeline` 事件作为最新快照应用到本地副本上。
+/// 这里把同 id 的 event 合并成「最新一帧」按 `interval` 发出，让镜像通道
+/// 既能跟上 token 速度，又不被高频小事件淹没 WebView2 IPC。
+///
+/// 调用契约：`flush_all` 必须在 turn 结束前调用一次，保证 pending 的最后
+/// 一帧不滞留——`submit` 自己不会在静默期主动 flush。
+struct TimelineThrottle {
+    interval: Duration,
+    last_emit_at: HashMap<String, Instant>,
+    pending: HashMap<String, AgentTimelineEventInput>,
+}
+
+/// 约 60Hz。token 流速度通常 30-50/s，16ms 窗口能放过绝大多数 chunk，
+/// 同时给 WebView2 留出聚合空间避免高频 IPC 抖动。
+const TIMELINE_EMIT_INTERVAL: Duration = Duration::from_millis(16);
+
+/// 这些 status 视为「此 id 的最终状态」，必须立即 emit + 落库，不进 pending。
+fn is_terminal_timeline_status(status: &str) -> bool {
+    matches!(
+        status,
+        "success"
+            | "completed"
+            | "done"
+            | "failed"
+            | "error"
+            | "cancelled"
+            | "skipped"
+            | "requires_action"
+    )
+}
+
+impl TimelineThrottle {
+    fn new() -> Self {
+        Self {
+            interval: TIMELINE_EMIT_INTERVAL,
+            last_emit_at: HashMap::new(),
+            pending: HashMap::new(),
+        }
+    }
+
+    fn submit(&mut self, app_handle: &AppHandle, input: AgentTimelineEventInput) {
+        let Some(id) = input.id.clone() else {
+            // 没有稳定 id 的事件每条都是新行，节流无意义。
+            persist_and_emit_input(app_handle, input);
+            return;
+        };
+
+        let terminal = is_terminal_timeline_status(&input.status);
+        let now = Instant::now();
+        let due = self
+            .last_emit_at
+            .get(&id)
+            .map_or(true, |t| now.duration_since(*t) >= self.interval);
+
+        if terminal || due {
+            persist_and_emit_input(app_handle, input);
+            self.last_emit_at.insert(id.clone(), now);
+            self.pending.remove(&id);
+        } else {
+            self.pending.insert(id, input);
+        }
+    }
+
+    fn flush_all(&mut self, app_handle: &AppHandle) {
+        let drained: Vec<_> = self.pending.drain().collect();
+        for (_id, input) in drained {
+            persist_and_emit_input(app_handle, input);
         }
     }
 }
@@ -308,18 +378,7 @@ fn persist_and_emit_message_timeline_event(
         order: Some(0),
     };
 
-    let store = app_handle.state::<LiliaStore>();
-    match store
-        .conn()
-        .and_then(|conn| agent_timeline::insert(&conn, input))
-    {
-        Ok(saved) => {
-            let _ = app_handle.emit("agent:timeline", saved);
-        }
-        Err(err) => {
-            eprintln!("[agent-timeline] persist message failed: {err}");
-        }
-    }
+    persist_and_emit_input(app_handle, input);
 }
 
 fn persist_and_emit_error_timeline_event(
@@ -345,18 +404,7 @@ fn persist_and_emit_error_timeline_event(
         order: None,
     };
 
-    let store = app_handle.state::<LiliaStore>();
-    match store
-        .conn()
-        .and_then(|conn| agent_timeline::insert(&conn, input))
-    {
-        Ok(saved) => {
-            let _ = app_handle.emit("agent:timeline", saved);
-        }
-        Err(err) => {
-            eprintln!("[agent-timeline] persist error failed: {err}");
-        }
-    }
+    persist_and_emit_input(app_handle, input);
 }
 
 fn log_agent_event_effect(effect: AgentEventEffect) {
@@ -808,7 +856,6 @@ fn spawn_agent_turn(
                     task_id_for_thread,
                     backend_for_thread,
                     None,
-                    None,
                 );
                 return;
             }
@@ -820,8 +867,6 @@ fn spawn_agent_turn(
             let _ = stdin.write_all(&bytes);
         }
 
-        // 累计 assistant 完整文本，done 时落盘到消息历史。
-        let mut assistant_buf = String::new();
         let mut last_session_id: Option<String> = None;
         let event_ctx = AgentTurnContext {
             task_id: task_id_for_thread.clone(),
@@ -830,6 +875,7 @@ fn spawn_agent_turn(
         };
         let mut event_host = AgentEventHost::new();
         event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
+        let mut timeline_throttle = TimelineThrottle::new();
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
@@ -847,22 +893,12 @@ fn spawn_agent_turn(
                 };
                 log_agent_event_effect(event_host.dispatch(&event_ctx, &event));
                 match &event {
-                    AgentRuntimeEvent::Chunk { text } => {
-                        assistant_buf.push_str(text);
-                    }
                     AgentRuntimeEvent::ToolUse { .. } => {}
                     AgentRuntimeEvent::Timeline { .. } => {
-                        persist_and_emit_timeline_event(&app_handle, &event_ctx, &event);
-                    }
-                    AgentRuntimeEvent::AssistantDone { text, session_id } => {
-                        // 兜底：如果某轮文本只来自 assistant 消息没走 delta，把它补到累计缓冲。
-                        if assistant_buf.is_empty() {
-                            if let Some(text) = text {
-                                assistant_buf.push_str(&text);
-                            }
-                        }
-                        if let Some(sid) = session_id {
-                            last_session_id = Some(sid.clone());
+                        if let Some(input) =
+                            timeline_input_from_runtime_event(&event_ctx, &event)
+                        {
+                            timeline_throttle.submit(&app_handle, input);
                         }
                     }
                     AgentRuntimeEvent::Done { session_id, .. } => {
@@ -871,6 +907,7 @@ fn spawn_agent_turn(
                         }
                     }
                     AgentRuntimeEvent::Error { message } => {
+                        timeline_throttle.flush_all(&app_handle);
                         persist_and_emit_error_timeline_event(
                             &app_handle,
                             &task_id_for_thread,
@@ -882,6 +919,9 @@ fn spawn_agent_turn(
                 }
             }
         }
+
+        // 流结束前确保 pending 的最后一帧落地——否则 turn 末尾的尾段文本会卡在节流窗口里。
+        timeline_throttle.flush_all(&app_handle);
 
         // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
         let exit_status = child.wait();
@@ -911,11 +951,6 @@ fn spawn_agent_turn(
             task_id_for_thread,
             backend_for_thread,
             last_session_id,
-            if assistant_buf.is_empty() {
-                None
-            } else {
-                Some(assistant_buf)
-            },
         );
     });
 }
@@ -925,7 +960,6 @@ fn finish_agent_turn(
     task_id: String,
     backend: String,
     last_session_id: Option<String>,
-    _assistant_buf: Option<String>,
 ) {
     // 记下 session id 供下一轮 resume。
     if let Some(sid) = last_session_id.clone() {

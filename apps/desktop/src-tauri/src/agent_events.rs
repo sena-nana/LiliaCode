@@ -12,9 +12,6 @@ pub struct AgentTurnContext {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentRuntimeEvent {
-    Chunk {
-        text: String,
-    },
     ToolUse {
         name: String,
         #[serde(default)]
@@ -23,10 +20,6 @@ pub enum AgentRuntimeEvent {
     Timeline {
         #[serde(default)]
         event: JsonValue,
-    },
-    AssistantDone {
-        text: Option<String>,
-        session_id: Option<String>,
     },
     Done {
         session_id: Option<String>,
@@ -41,12 +34,6 @@ impl AgentRuntimeEvent {
     pub fn from_runner_json(value: &JsonValue) -> Option<Self> {
         let ty = value.get("type").and_then(|v| v.as_str())?;
         match ty {
-            "chunk" => value
-                .get("text")
-                .and_then(|v| v.as_str())
-                .map(|text| Self::Chunk {
-                    text: text.to_string(),
-                }),
             "tool_use" => {
                 let name = value
                     .get("name")
@@ -60,17 +47,6 @@ impl AgentRuntimeEvent {
                 .get("event")
                 .cloned()
                 .map(|event| Self::Timeline { event }),
-            "assistant_done" => {
-                let text = value
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .map(|text| text.to_string());
-                let session_id = value
-                    .get("sessionId")
-                    .and_then(|v| v.as_str())
-                    .map(|sid| sid.to_string());
-                Some(Self::AssistantDone { text, session_id })
-            }
             "done" => {
                 let session_id = value
                     .get("sessionId")
@@ -265,8 +241,8 @@ mod tests {
 
         let effect = host.dispatch(
             &turn_context(),
-            &AgentRuntimeEvent::Chunk {
-                text: "hello".to_string(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!({ "kind": "reasoning" }),
             },
         );
 
@@ -350,12 +326,6 @@ mod tests {
     #[test]
     fn runner_json_is_normalized_to_runtime_events() {
         assert_eq!(
-            AgentRuntimeEvent::from_runner_json(&json!({ "type": "chunk", "text": "hi" })),
-            Some(AgentRuntimeEvent::Chunk {
-                text: "hi".to_string()
-            })
-        );
-        assert_eq!(
             AgentRuntimeEvent::from_runner_json(
                 &json!({ "type": "tool_use", "name": "Read", "input": { "file": "a.md" } })
             ),
@@ -374,15 +344,6 @@ mod tests {
         );
         assert_eq!(
             AgentRuntimeEvent::from_runner_json(
-                &json!({ "type": "assistant_done", "text": "done", "sessionId": "s1" })
-            ),
-            Some(AgentRuntimeEvent::AssistantDone {
-                text: Some("done".to_string()),
-                session_id: Some("s1".to_string()),
-            })
-        );
-        assert_eq!(
-            AgentRuntimeEvent::from_runner_json(
                 &json!({ "type": "done", "sessionId": "s1", "subtype": "success" })
             ),
             Some(AgentRuntimeEvent::Done {
@@ -396,5 +357,11 @@ mod tests {
                 message: "failed".to_string(),
             })
         );
+        // 未知/历史 type 直接降级为 None，runner 端如果发了 `chunk`/`assistant_done`
+        // 这类已淘汰的帧也不会让主循环 panic。
+        assert!(AgentRuntimeEvent::from_runner_json(
+            &json!({ "type": "chunk", "text": "hi" })
+        )
+        .is_none());
     }
 }
