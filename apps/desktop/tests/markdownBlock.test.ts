@@ -1,5 +1,5 @@
 import { render, waitFor } from "@testing-library/vue";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownBlock from "../src/components/chat/MarkdownBlock.vue";
 
 const mermaidMock = vi.hoisted(() => ({
@@ -14,6 +14,11 @@ vi.mock("mermaid", () => ({
 }));
 
 describe("MarkdownBlock", () => {
+  beforeEach(() => {
+    mermaidMock.initialize.mockClear();
+    mermaidMock.render.mockClear();
+  });
+
   it("渲染 markdown 表格并保留列对齐", () => {
     const view = render(MarkdownBlock, {
       props: {
@@ -51,6 +56,36 @@ describe("MarkdownBlock", () => {
       .toHaveLength(2);
     expect(view.container.querySelector(".markdown-block__math-block .katex-display"))
       .toBeInTheDocument();
+  });
+
+  it("未闭合块级 LaTeX 先按文本显示", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "$$",
+          "a^2 + b^2 = c^2",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.container.querySelector(".markdown-block__math-block")).not.toBeInTheDocument();
+    expect(view.container.textContent).toContain("$$ a^2 + b^2 = c^2");
+  });
+
+  it("未闭合 mermaid fence 不触发图表渲染", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "```mermaid",
+          "graph TD",
+          "  A --> B",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.container.querySelector(".markdown-block__code")).toBeInTheDocument();
+    expect(view.container.querySelector(".markdown-block__mermaid")).not.toBeInTheDocument();
+    expect(mermaidMock.render).not.toHaveBeenCalled();
   });
 
   it("把 mermaid fenced code 渲染为图表", async () => {

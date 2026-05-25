@@ -17,8 +17,11 @@ const container = ref<HTMLElement | null>(null);
 const state = ref<"idle" | "rendering" | "ready" | "error">("idle");
 const errorText = ref("");
 let renderId = 0;
+let renderTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const instanceId = `m${++mermaidInstanceSeed}`;
+const MERMAID_RENDER_DELAY_MS = 80;
+const MAX_MERMAID_SOURCE_LENGTH = 20_000;
 
 async function getMermaid(): Promise<MermaidApi> {
   const module = await import("mermaid");
@@ -44,13 +47,28 @@ function configureMermaid(mermaid: MermaidApi) {
   mermaidConfigured = true;
 }
 
-async function renderDiagram() {
+function clearRenderTimer() {
+  if (renderTimer === null) return;
+  window.clearTimeout(renderTimer);
+  renderTimer = null;
+}
+
+function scheduleRenderDiagram() {
+  const currentRenderId = renderId + 1;
+  renderId = currentRenderId;
+  clearRenderTimer();
+
+  renderTimer = window.setTimeout(() => {
+    renderTimer = null;
+    void renderDiagram(currentRenderId);
+  }, MERMAID_RENDER_DELAY_MS);
+}
+
+async function renderDiagram(currentRenderId: number) {
   const element = container.value;
   if (!element) return;
 
   const source = props.source.trim();
-  const currentRenderId = renderId + 1;
-  renderId = currentRenderId;
   element.innerHTML = "";
   errorText.value = "";
 
@@ -60,11 +78,18 @@ async function renderDiagram() {
     return;
   }
 
+  if (source.length > MAX_MERMAID_SOURCE_LENGTH) {
+    state.value = "error";
+    errorText.value = "Mermaid 内容过长，已跳过渲染。";
+    return;
+  }
+
   state.value = "rendering";
   await nextTick();
 
   try {
     const mermaid = await getMermaid();
+    if (currentRenderId !== renderId || !container.value) return;
     configureMermaid(mermaid);
     const id = `markdown-mermaid-${instanceId}-${props.blockKey}-${currentRenderId}`.replace(
       /[^A-Za-z0-9_-]/g,
@@ -88,15 +113,16 @@ async function renderDiagram() {
 watch(
   () => [props.source, props.blockKey] as const,
   () => {
-    void renderDiagram();
+    scheduleRenderDiagram();
   },
 );
 
 onMounted(() => {
-  void renderDiagram();
+  scheduleRenderDiagram();
 });
 
 onBeforeUnmount(() => {
+  clearRenderTimer();
   renderId += 1;
 });
 </script>

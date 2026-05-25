@@ -40,6 +40,24 @@ interface MarkdownBlockNode {
   rows: InlineToken[][][];
 }
 
+interface FencedCodeBlock {
+  text: string;
+  language: string;
+  nextIndex: number;
+  closed: boolean;
+}
+
+interface MathBlock {
+  text: string;
+  raw: string;
+  nextIndex: number;
+  closed: boolean;
+}
+
+const MAX_MATH_SOURCE_LENGTH = 2_000;
+const MATH_RENDER_CACHE_LIMIT = 200;
+const mathRenderCache = new Map<string, string | null>();
+
 const props = withDefaults(defineProps<{
   content: string | null | undefined;
   tone?: MarkdownBlockTone;
@@ -106,39 +124,32 @@ function parseMarkdownBlocks(source: string): MarkdownBlockNode[] {
       continue;
     }
 
-    const fence = line.match(/^\s*(```+|~~~+)\s*([A-Za-z0-9_-]*)?.*$/);
+    const fence = parseFencedCodeBlock(lines, index);
     if (fence) {
-      const fenceMarker = fence[1] ?? "```";
-      const closingFence = fenceMarker[0]?.repeat(fenceMarker.length) ?? "```";
-      const language = fence[2] ?? "";
-      const codeLines: string[] = [];
-      index += 1;
-
-      while (index < lines.length) {
-        const codeLine = lines[index] ?? "";
-        if (codeLine.trimStart().startsWith(closingFence)) {
-          index += 1;
-          break;
-        }
-        codeLines.push(codeLine);
-        index += 1;
-      }
-
-      const text = codeLines.join("\n").replace(/\n+$/, "");
-      const blockType = language.toLowerCase() === "mermaid" ? "mermaid" : "code";
+      const blockType = fence.closed && fence.language.toLowerCase() === "mermaid"
+        ? "mermaid"
+        : "code";
       parsedBlocks.push(makeBlock(blockType, key, {
-        text,
-        language,
+        text: fence.text,
+        language: fence.language,
       }));
+      index = fence.nextIndex;
       continue;
     }
 
     const mathBlock = parseMathBlock(lines, index);
     if (mathBlock) {
-      parsedBlocks.push(makeBlock("math", key, {
-        text: mathBlock.text,
-        html: renderMathToHtml(mathBlock.text, true),
-      }));
+      const html = mathBlock.closed ? renderMathToHtml(mathBlock.text, true) : null;
+      if (html) {
+        parsedBlocks.push(makeBlock("math", key, {
+          text: mathBlock.text,
+          html,
+        }));
+      } else {
+        parsedBlocks.push(makeBlock("paragraph", key, {
+          inlines: parseInlineMarkdown(toSingleLineText(mathBlock.raw)),
+        }));
+      }
       index = mathBlock.nextIndex;
       continue;
     }
@@ -216,6 +227,37 @@ function parseMarkdownBlocks(source: string): MarkdownBlockNode[] {
   return parsedBlocks;
 }
 
+function parseFencedCodeBlock(lines: string[], startIndex: number): FencedCodeBlock | null {
+  const line = lines[startIndex] ?? "";
+  const fence = line.match(/^\s*(```+|~~~+)\s*([A-Za-z0-9_-]*)?.*$/);
+  if (!fence) return null;
+
+  const fenceMarker = fence[1] ?? "```";
+  const closingFence = fenceMarker[0]?.repeat(fenceMarker.length) ?? "```";
+  const language = fence[2] ?? "";
+  const codeLines: string[] = [];
+  let index = startIndex + 1;
+  let closed = false;
+
+  while (index < lines.length) {
+    const codeLine = lines[index] ?? "";
+    if (codeLine.trimStart().startsWith(closingFence)) {
+      closed = true;
+      index += 1;
+      break;
+    }
+    codeLines.push(codeLine);
+    index += 1;
+  }
+
+  return {
+    text: codeLines.join("\n").replace(/\n+$/, ""),
+    language,
+    nextIndex: index,
+    closed,
+  };
+}
+
 function isBlockStart(line: string, lines?: string[], index?: number): boolean {
   return /^\s*(```+|~~~+)/.test(line) ||
     isMathBlockStart(line) ||
@@ -233,7 +275,7 @@ function isMathBlockStart(line: string): boolean {
 function parseMathBlock(
   lines: string[],
   startIndex: number,
-): { text: string; nextIndex: number } | null {
+): MathBlock | null {
   const line = lines[startIndex] ?? "";
   const trimmed = line.trim();
 
@@ -253,7 +295,7 @@ function parseDelimitedMathBlock(
   startIndex: number,
   opening: "$$" | "\\[",
   closing: "$$" | "\\]",
-): { text: string; nextIndex: number } {
+): MathBlock {
   const firstLine = lines[startIndex] ?? "";
   const firstTrimmed = firstLine.trim();
   const openingIndex = firstTrimmed.indexOf(opening);
@@ -263,20 +305,29 @@ function parseDelimitedMathBlock(
   if (sameLineClosingIndex >= 0) {
     return {
       text: firstRemainder.slice(0, sameLineClosingIndex).trim(),
+      raw: firstLine,
       nextIndex: startIndex + 1,
+      closed: true,
     };
   }
 
   const mathLines = firstRemainder.trimEnd() ? [firstRemainder.trimEnd()] : [];
+  const rawLines = [firstLine];
   let index = startIndex + 1;
 
   while (index < lines.length) {
     const currentLine = lines[index] ?? "";
+    rawLines.push(currentLine);
     const closingIndex = currentLine.indexOf(closing);
     if (closingIndex >= 0) {
       mathLines.push(currentLine.slice(0, closingIndex));
       index += 1;
-      break;
+      return {
+        text: mathLines.join("\n").trim(),
+        raw: rawLines.join("\n"),
+        nextIndex: index,
+        closed: true,
+      };
     }
 
     mathLines.push(currentLine);
@@ -285,7 +336,9 @@ function parseDelimitedMathBlock(
 
   return {
     text: mathLines.join("\n").trim(),
+    raw: rawLines.join("\n"),
     nextIndex: index,
+    closed: false,
   };
 }
 
@@ -400,13 +453,19 @@ function parseInlineMarkdown(text: string): InlineToken[] {
     if (match[1] !== undefined) {
       tokens.push(makeInlineToken("code", match[1]));
     } else if (match[2] !== undefined) {
-      tokens.push(makeInlineToken("math", match[2], {
-        html: renderMathToHtml(match[2], false),
-      }));
+      const html = renderMathToHtml(match[2], false);
+      if (html) {
+        tokens.push(makeInlineToken("math", match[2], { html }));
+      } else {
+        pushTextToken(tokens, match[0]);
+      }
     } else if (match[3] !== undefined) {
-      tokens.push(makeInlineToken("math", match[3], {
-        html: renderMathToHtml(match[3], false),
-      }));
+      const html = renderMathToHtml(match[3], false);
+      if (html) {
+        tokens.push(makeInlineToken("math", match[3], { html }));
+      } else {
+        pushTextToken(tokens, match[0]);
+      }
     } else if (match[4] !== undefined) {
       tokens.push(makeInlineToken("strong", match[4]));
     } else if (match[5] !== undefined || match[6] !== undefined) {
@@ -449,13 +508,34 @@ function pushTextToken(tokens: InlineToken[], text: string) {
   if (text) tokens.push(makeInlineToken("text", text));
 }
 
-function renderMathToHtml(text: string, displayMode: boolean): string {
-  return katex.renderToString(text, {
-    displayMode,
-    throwOnError: false,
-    trust: false,
-    strict: "ignore",
-  });
+function renderMathToHtml(text: string, displayMode: boolean): string | null {
+  const source = text.trim();
+  if (!source || source.length > MAX_MATH_SOURCE_LENGTH) return null;
+
+  const cacheKey = `${displayMode ? "block" : "inline"}:${source}`;
+  if (mathRenderCache.has(cacheKey)) {
+    return mathRenderCache.get(cacheKey) ?? null;
+  }
+
+  let html: string | null = null;
+  try {
+    html = katex.renderToString(source, {
+      displayMode,
+      throwOnError: false,
+      trust: false,
+      strict: "ignore",
+    });
+  } catch {
+    html = null;
+  }
+
+  mathRenderCache.set(cacheKey, html);
+  if (mathRenderCache.size > MATH_RENDER_CACHE_LIMIT) {
+    const oldestKey = mathRenderCache.keys().next().value;
+    if (oldestKey !== undefined) mathRenderCache.delete(oldestKey);
+  }
+
+  return html;
 }
 
 function normalizeHref(href: string): string | null {
