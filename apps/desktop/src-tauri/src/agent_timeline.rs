@@ -189,6 +189,44 @@ pub fn clear(conn: &Connection, task_id: &str) -> Result<usize, String> {
     .map_err(|e| format!("agent_timeline_clear_task: 删除失败：{e}"))
 }
 
+pub fn latest_session_id(
+    conn: &Connection,
+    task_id: &str,
+    backend: &str,
+) -> Result<Option<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT payload
+               FROM agent_timeline_events
+               WHERE task_id = ?1
+                 AND backend = ?2
+                 AND kind = 'turn'
+                 AND payload LIKE '%"sessionId"%'
+               ORDER BY updated_at DESC
+               LIMIT 100"#,
+        )
+        .map_err(|e| format!("agent_timeline_latest_session_id: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id, backend], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("agent_timeline_latest_session_id: query 失败：{e}"))?;
+
+    for row in rows {
+        let payload_text = row
+            .map_err(|e| format!("agent_timeline_latest_session_id: row 失败：{e}"))?;
+        let Ok(payload) = serde_json::from_str::<JsonValue>(&payload_text) else {
+            continue;
+        };
+        let Some(session_id) = payload.get("sessionId").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let trimmed = session_id.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+    Ok(None)
+}
+
 #[tauri::command]
 pub fn agent_timeline_list(
     task_id: String,
@@ -284,4 +322,53 @@ mod tests {
         assert_eq!(listed[0].display, saved.display);
     }
 
+    #[test]
+    fn latest_session_id_reads_recent_turn_payload() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("turn-old".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: "claude".to_string(),
+                kind: "turn".to_string(),
+                status: "requesting".to_string(),
+                title: "Claude status".to_string(),
+                summary: None,
+                payload: json!({ "sessionId": "old-session" }),
+                display: json!({ "icon": "turn" }),
+                created_at: Some(100),
+                updated_at: Some(100),
+                order: Some(1),
+            },
+        )
+        .unwrap();
+        insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("turn-new".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-2".to_string()),
+                backend: "claude".to_string(),
+                kind: "turn".to_string(),
+                status: "requesting".to_string(),
+                title: "Claude status".to_string(),
+                summary: None,
+                payload: json!({ "sessionId": "new-session" }),
+                display: json!({ "icon": "turn" }),
+                created_at: Some(200),
+                updated_at: Some(200),
+                order: Some(2),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            latest_session_id(&conn, "task-1", "claude").unwrap(),
+            Some("new-session".to_string())
+        );
+    }
 }

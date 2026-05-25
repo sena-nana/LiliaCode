@@ -4,7 +4,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -14,6 +13,7 @@ use serde_json::Value as JsonValue;
 use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
+use uuid::Uuid;
 
 pub mod agent_events;
 mod agent_extensions;
@@ -517,6 +517,17 @@ mod agent_event_sink_tests {
 
         assert!(input.is_none());
     }
+
+    #[test]
+    fn chat_message_ids_do_not_reset_to_counter_values() {
+        let first = new_chat_message_id();
+        let second = new_chat_message_id();
+
+        assert!(first.starts_with("u-"));
+        assert!(second.starts_with("u-"));
+        assert_ne!(first, second);
+        assert_ne!(first, "u-0");
+    }
 }
 
 // ---------- 进程内状态 ----------
@@ -528,14 +539,6 @@ struct ChatStore {
     sdk_sessions: Mutex<HashMap<String, String>>,
     running_tasks: Mutex<HashMap<String, bool>>,
     pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
-    next_id: AtomicU64,
-}
-
-impl ChatStore {
-    fn new_id(&self, prefix: &str) -> String {
-        let n = self.next_id.fetch_add(1, Ordering::Relaxed);
-        format!("{prefix}-{n}")
-    }
 }
 
 fn session_key(backend: &str, task_id: &str) -> String {
@@ -547,6 +550,10 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn new_chat_message_id() -> String {
+    format!("u-{}", Uuid::new_v4())
 }
 
 fn default_composer(task_id: &str) -> ChatComposerState {
@@ -804,7 +811,24 @@ fn spawn_agent_turn(
             .get(&session_key(&backend, &task_id))
             .cloned();
         session
-    };
+    }
+    .or_else(|| {
+        let store = app.try_state::<LiliaStore>()?;
+        let conn = store.conn().ok()?;
+        let task_session = projects_tasks::task_session_id(&conn, &task_id)
+            .ok()
+            .flatten()
+            .filter(|sid| sid != &task_id && !sid.trim().is_empty());
+        if task_session.is_some() {
+            return task_session;
+        }
+
+        let timeline_session = agent_timeline::latest_session_id(&conn, &task_id, &backend)
+            .ok()
+            .flatten()?;
+        let _ = projects_tasks::task_set_session_id(&conn, &task_id, &timeline_session);
+        Some(timeline_session)
+    });
 
     let script_path = locate_agent_runner(&app);
     let connection = resolve_connection_for(&app, &backend);
@@ -991,7 +1015,14 @@ fn finish_agent_turn(
             .sdk_sessions
             .lock()
             .unwrap()
-            .insert(session_key(&backend, &task_id), sid);
+            .insert(session_key(&backend, &task_id), sid.clone());
+        if let Some(store) = app_handle.try_state::<LiliaStore>() {
+            if let Err(err) = store.conn().and_then(|conn| {
+                projects_tasks::task_set_session_id(&conn, &task_id, sid.as_str()).map(|_| ())
+            }) {
+                eprintln!("[chat] persist session id failed: {err}");
+            }
+        }
     }
 
     let _ = app_handle.emit(
@@ -1058,7 +1089,7 @@ fn chat_send_message(
 ) -> Result<ChatSendResult, String> {
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {
-        id: store.new_id("u"),
+        id: new_chat_message_id(),
         task_id: task_id.clone(),
         role: "user".to_string(),
         content: content.clone(),
@@ -1206,6 +1237,11 @@ fn chat_reset_session(
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
     chat_store.pending_turns.lock().unwrap().remove(&task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
+        if let Err(err) = store.conn().and_then(|conn| {
+            projects_tasks::task_set_session_id(&conn, &task_id, &task_id).map(|_| ())
+        }) {
+            eprintln!("[chat] clear persisted session id failed: {err}");
+        }
         if let Err(err) = store
             .conn()
             .and_then(|conn| agent_timeline::clear(&conn, &task_id).map(|_| ()))
