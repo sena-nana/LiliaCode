@@ -2045,6 +2045,14 @@ button.ghost:hover {
   font-size: 14px;
 }
 
+.timeline-card--final-reply .markdown-block {
+  font-weight: 500;
+}
+
+.timeline-card--final-reply .markdown-block code {
+  font-weight: 500;
+}
+
 /* 流式生成时把光标贴到 markdown 块末尾，与 ChatBubble 用同一闪烁动画。 */
 .timeline-card--final-reply__cursor {
   align-self: flex-start;

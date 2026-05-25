@@ -13,6 +13,16 @@ function ruleTextAt(index: number): string {
 }
 
 describe("agent timeline styles", () => {
+  it("Agent 最终回复正文和代码片段都使用更高字重", () => {
+    const finalReply = selectorIndex(".timeline-card--final-reply .markdown-block");
+    const finalReplyCode = selectorIndex(".timeline-card--final-reply .markdown-block code");
+
+    expect(finalReply).toBeGreaterThan(-1);
+    expect(finalReplyCode).toBeGreaterThan(finalReply);
+    expect(ruleTextAt(finalReply)).toContain("font-weight: 500");
+    expect(ruleTextAt(finalReplyCode)).toContain("font-weight: 500");
+  });
+
   it("折叠项 hover 时只高亮箭头，不改写标题文本颜色", () => {
     const titleHover = selectorIndex(".agent-timeline__title:hover:not(:disabled)");
     const chevronHover = selectorIndex(".agent-timeline__title:hover:not(:disabled) .agent-timeline__chevron");
