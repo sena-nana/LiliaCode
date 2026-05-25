@@ -265,11 +265,14 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
         <li
           v-else
           class="agent-timeline__item"
-          :class="{
-            'is-final-reply': isTimelineFinalReply(entry.event),
-            'is-compact': isCompact(entry.event),
-            'is-process-child': entry.isProcessChild,
-          }"
+          :class="[
+            `agent-timeline__item--${entry.event.kind}`,
+            {
+              'is-final-reply': isTimelineFinalReply(entry.event),
+              'is-compact': isCompact(entry.event),
+              'is-process-child': entry.isProcessChild,
+            },
+          ]"
         >
           <article
             class="agent-timeline__event"

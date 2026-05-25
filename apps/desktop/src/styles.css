@@ -1855,8 +1855,8 @@ button.ghost:hover {
 }
 
 .agent-timeline__node--failed {
-  background: var(--err-soft);
   color: var(--err);
+  opacity: 0.85;
 }
 
 .agent-timeline__node--warn {
@@ -1911,6 +1911,12 @@ button.ghost:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 过程节点的操作文本降级为灰色，仅 reasoning（Agent 思考）和最终回复保持正常 */
+.agent-timeline__item:not(.is-final-reply):not(.agent-timeline__item--reasoning) .agent-timeline__title {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .agent-timeline__title span {

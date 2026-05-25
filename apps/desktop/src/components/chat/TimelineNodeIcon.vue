@@ -58,8 +58,8 @@ function iconForKind(
 ): Component | null {
   // 最终回复（assistant message）始终保留 icon
   if (kind === "message") return MessageSquare;
-  // 其他节点：只有 running 状态保留 icon（灰色显示），其余全部降级为点
-  if (statusToTone(status) !== "running") return null;
+  // reasoning 走纯文本展示，不挂 icon，避免和「Agent 思考」语义重复
+  if (kind === "reasoning") return null;
 
   switch (kind) {
     case "plan":
@@ -80,11 +80,9 @@ function iconForKind(
       return Bot;
     case "error":
       return AlertTriangle;
-    case "reasoning":
-      return null;
     case "turn":
     default:
-      return Circle;
+      return statusToTone(status) === "running" ? Circle : null;
   }
 }
 </script>
