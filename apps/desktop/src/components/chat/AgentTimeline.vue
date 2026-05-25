@@ -1,27 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
-import {
-  Brain,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  CircleDot,
-  Code2,
-  FilePenLine,
-  GitBranch,
-  Globe2,
-  ListChecks,
-  Terminal,
-  TriangleAlert,
-  UserRound,
-  Wrench,
-  type LucideIcon,
-} from "lucide-vue-next";
-import type {
-  AgentTimelineEvent,
-  AgentTimelineEventKind,
-  ChatMessage,
-} from "@lilia/contracts";
+import { ChevronDown, ChevronRight } from "lucide-vue-next";
+import type { AgentTimelineEvent, ChatMessage } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
 import TimelineCommandEvent from "./TimelineCommandEvent.vue";
 import TimelineErrorEvent from "./TimelineErrorEvent.vue";
@@ -40,9 +20,6 @@ import {
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
-  timelineKindLabel,
-  timelineStatusClass,
-  timelineStatusLabel,
   toggleTimelineExpandedId,
 } from "./timelineDisplay";
 
@@ -55,6 +32,7 @@ type TimelineEventEntry = {
   order: number;
   event: AgentTimelineEvent;
   processEvents?: AgentTimelineEvent[];
+  isProcessChild?: boolean;
 };
 
 type TimelineEntry = TimelineEventEntry;
@@ -126,6 +104,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
           createdAt: event.createdAt,
           order: event.order + 1,
           event,
+          isProcessChild: true,
         })));
       }
       output.push({
@@ -229,24 +208,6 @@ function eventComponent(event: AgentTimelineEvent): Component {
   }
 }
 
-function kindIcon(kind: AgentTimelineEventKind): LucideIcon {
-  const icons: Record<AgentTimelineEventKind, LucideIcon> = {
-    message: UserRound,
-    reasoning: Brain,
-    plan: ListChecks,
-    todo_list: CheckCircle2,
-    tool: Wrench,
-    command: Terminal,
-    subagent: GitBranch,
-    file_change: FilePenLine,
-    mcp: Code2,
-    web_search: Globe2,
-    error: TriangleAlert,
-    turn: CircleDot,
-  };
-  return icons[kind] ?? CircleDot;
-}
-
 function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
 }
@@ -297,81 +258,64 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
             { 'is-queued': messageFromEvent(entry.event).queued },
           ]"
         >
-          <span class="agent-timeline__message-icon" aria-hidden="true">
-            <UserRound :size="14" />
-          </span>
           <ChatBubble :message="messageFromEvent(entry.event)" />
         </li>
 
         <li
           v-else
           class="agent-timeline__item"
-          :class="[
-            `agent-timeline--${entry.event.kind}`,
-            `agent-timeline__item--${entry.event.status}`,
-            timelineStatusClass(entry.event.status),
-            {
-              'is-expanded': expanded(entry.event),
-              'is-final-reply': isTimelineFinalReply(entry.event),
-              'is-compact': isCompact(entry.event),
-              'is-streaming': isTimelineFinalReplyStreaming(entry.event),
-            },
-          ]"
+          :class="{
+            'is-final-reply': isTimelineFinalReply(entry.event),
+            'is-compact': isCompact(entry.event),
+            'is-process-child': entry.isProcessChild,
+          }"
         >
-          <span class="agent-timeline__icon" aria-hidden="true">
-            <component :is="kindIcon(entry.event.kind)" :size="14" />
-          </span>
-
           <article
             class="agent-timeline__event"
-            :aria-labelledby="`agent-timeline-title-${entry.event.id}`"
+            :aria-labelledby="isTimelineFinalReply(entry.event) ? undefined : `agent-timeline-title-${entry.event.id}`"
+            :aria-label="isTimelineFinalReply(entry.event) ? 'Agent 回复' : undefined"
           >
-            <header class="agent-timeline__head">
-              <div
-                class="agent-timeline__title-row"
-                :class="{ 'has-preview': previewText(entry.event) }"
+            <header
+              v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
+              class="agent-timeline__head"
+            >
+              <button
+                v-if="!isTimelineFinalReply(entry.event)"
+                type="button"
+                class="agent-timeline__title"
+                :aria-expanded="expanded(entry.event)"
+                :aria-controls="`agent-timeline-details-${entry.event.id}`"
+                :disabled="!canToggle(entry.event)"
+                @click="toggleEvent(entry.event)"
               >
-                <button
-                  type="button"
-                  class="agent-timeline__title"
-                  :aria-expanded="expanded(entry.event)"
-                  :aria-controls="`agent-timeline-details-${entry.event.id}`"
-                  :disabled="!canToggle(entry.event)"
-                  @click="toggleEvent(entry.event)"
-                >
-                  <component
-                    :is="expanded(entry.event) ? ChevronDown : ChevronRight"
-                    class="agent-timeline__chevron"
-                    :size="14"
-                    aria-hidden="true"
-                  />
-                  <span :id="`agent-timeline-title-${entry.event.id}`">
-                    {{ timelineEventLabel(entry.event) }}
-                  </span>
-                </button>
+                <component
+                  v-if="canToggle(entry.event)"
+                  :is="expanded(entry.event) ? ChevronDown : ChevronRight"
+                  class="agent-timeline__chevron"
+                  :size="14"
+                  aria-hidden="true"
+                />
+                <span :id="`agent-timeline-title-${entry.event.id}`">
+                  {{ timelineEventLabel(entry.event) }}
+                </span>
+              </button>
 
-                <p v-if="previewText(entry.event)" class="agent-timeline__preview">
-                  {{ previewText(entry.event) }}
-                </p>
-              </div>
-
-              <div
-                v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
-                class="agent-timeline__meta"
-                aria-label="事件分类和状态"
+              <p
+                v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
+                class="agent-timeline__preview"
               >
-                <button
-                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
-                  type="button"
-                  class="agent-timeline__process-toggle"
-                  :aria-expanded="processGroupExpanded(entry.event)"
-                  @click="toggleProcessGroup(entry.event)"
-                >
-                  {{ processGroupLabel(entry) }}
-                </button>
-                <span class="agent-timeline__badge">{{ timelineKindLabel(entry.event.kind) }}</span>
-                <span class="agent-timeline__badge">{{ timelineStatusLabel(entry.event.status) }}</span>
-              </div>
+                {{ previewText(entry.event) }}
+              </p>
+
+              <button
+                v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
+                type="button"
+                class="agent-timeline__process-toggle"
+                :aria-expanded="processGroupExpanded(entry.event)"
+                @click="toggleProcessGroup(entry.event)"
+              >
+                {{ processGroupLabel(entry) }}
+              </button>
             </header>
 
             <div

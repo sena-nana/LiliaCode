@@ -1,6 +1,5 @@
 import type {
   AgentTimelineEvent,
-  AgentTimelineEventKind,
   AgentTimelineEventStatus,
   AgentTimelinePayload,
 } from "@lilia/contracts";
@@ -33,17 +32,6 @@ const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
   "started",
   "running",
   "in_progress",
-]);
-
-const COMPLETED_STATUSES = new Set<AgentTimelineEventStatus>([
-  "completed",
-  "done",
-  "success",
-]);
-
-const ERROR_STATUSES = new Set<AgentTimelineEventStatus>([
-  "failed",
-  "error",
 ]);
 
 export function readTimelinePayloadRecord(
@@ -138,7 +126,6 @@ export function pruneTimelineExpandedIds(
 export function timelineEventLabel(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "title">,
 ): string {
-  if (isTimelineFinalReply(event)) return "最终回复";
   return event.title.trim() || event.kind;
 }
 
@@ -376,51 +363,6 @@ export function timelineFileChanges(
       };
     })
     .filter((change): change is TimelineFileChange => change !== null);
-}
-
-export function timelineKindLabel(kind: AgentTimelineEventKind): string {
-  const labels: Record<AgentTimelineEventKind, string> = {
-    message: "消息",
-    reasoning: "思考",
-    plan: "计划",
-    todo_list: "Todo",
-    tool: "工具",
-    command: "命令",
-    subagent: "子代理",
-    file_change: "修改",
-    mcp: "MCP",
-    web_search: "搜索",
-    error: "错误",
-    turn: "回合",
-  };
-  return labels[kind] ?? kind;
-}
-
-export function timelineStatusLabel(status: AgentTimelineEventStatus): string {
-  const labels: Record<AgentTimelineEventStatus, string> = {
-    pending: "等待",
-    started: "开始",
-    running: "运行中",
-    in_progress: "运行中",
-    completed: "完成",
-    done: "完成",
-    success: "完成",
-    failed: "失败",
-    error: "失败",
-    cancelled: "取消",
-    skipped: "跳过",
-    info: "信息",
-    requires_action: "待处理",
-  };
-  return labels[status] ?? status;
-}
-
-export function timelineStatusClass(status: AgentTimelineEventStatus): Record<string, boolean> {
-  return {
-    "is-running": RUNNING_STATUSES.has(status),
-    "is-completed": COMPLETED_STATUSES.has(status),
-    "is-error": ERROR_STATUSES.has(status),
-  };
 }
 
 function toSingleLineText(text: string): string {

@@ -1718,8 +1718,6 @@ button.ghost:hover {
 /* ----- Agent timeline（内嵌执行过程流） ----- */
 .agent-timeline {
   --agent-timeline-color: var(--text-muted);
-  --agent-timeline-tint: rgba(138, 138, 138, 0.10);
-  --agent-timeline-border: var(--border-strong);
 
   width: min(100%, 760px);
   margin: 0 auto;
@@ -1733,51 +1731,60 @@ button.ghost:hover {
 .agent-timeline__list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.agent-timeline__list > li {
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-timeline__list > li:first-child {
+  padding-top: 0;
+}
+
+.agent-timeline__list > li:last-child {
+  padding-bottom: 0;
+}
+
+/* 不画分割线：最终回复（线挪到 header 上）、过程子项（与最终回复合并为一组）、
+   用户消息行（上下都不要线）、紧邻用户消息之前的项、列表末尾。 */
+.agent-timeline__list > li:is(
+  :last-child,
+  .is-final-reply,
+  .is-process-child,
+  .agent-timeline__message-row
+),
+.agent-timeline__list > li:has(+ .agent-timeline__message-row) {
+  border-bottom: 0;
+}
+
+/* 过程子项与其后的最终回复合并为组，内部 padding 收紧 */
+.agent-timeline__list > li.is-process-child {
+  padding-bottom: 4px;
+}
+
+.agent-timeline__list > li.is-process-child + .agent-timeline__item {
+  padding-top: 4px;
+}
+
+/* 最终回复的分割线挪到「展开/收起过程」按钮所在那一行下方 */
+.agent-timeline__item.is-final-reply .agent-timeline__head {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
 .agent-timeline__message-row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  display: flex;
   min-width: 0;
 }
 
 .agent-timeline__message-row--user {
-  grid-template-columns: minmax(0, 1fr) 28px;
-}
-
-.agent-timeline__message-row--user .agent-timeline__message-icon {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.agent-timeline__message-row--user .chat-bubble {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: end;
-}
-
-.agent-timeline__message-icon,
-.agent-timeline__icon {
-  width: 28px;
-  height: 28px;
-  min-width: 0;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
-.agent-timeline__message-icon {
-  background: var(--accent-soft);
-  color: var(--accent);
+  justify-content: flex-end;
 }
 
 .agent-timeline__message-row .chat-bubble {
@@ -1785,77 +1792,27 @@ button.ghost:hover {
 }
 
 .agent-timeline__item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
   min-width: 0;
   overflow: hidden;
 }
 
-.agent-timeline__item::after {
-  content: "";
-  grid-column: 2;
-  display: block;
-  height: 1px;
-  margin: 2px 0 -2px;
-  background: var(--border-soft);
-}
-
-.agent-timeline__item.is-final-reply::after,
-.agent-timeline__item:last-child::after {
-  display: none;
-}
-
-.agent-timeline__icon {
-  background: var(--agent-timeline-tint);
-  color: var(--agent-timeline-color);
-}
-
 .agent-timeline__event {
   min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--agent-timeline-border);
-  border-radius: 8px;
-  background: var(--bg-elev);
-}
-
-.agent-timeline__item.is-compact .agent-timeline__event {
-  padding: 5px 0;
-  border-color: transparent;
-  border-left-color: transparent;
+  padding: 0;
+  border: 0;
   background: transparent;
 }
 
-.agent-timeline__item.is-expanded,
-.agent-timeline__item.is-final-reply {
-  align-items: start;
-}
-
-.agent-timeline__item.is-final-reply .agent-timeline__event {
-  padding: 14px;
-  border-color: var(--agent-timeline-border);
-  background: var(--bg-elev);
-  box-shadow: 0 8px 24px -18px rgba(0, 0, 0, 0.7);
-}
-
 .agent-timeline__head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.agent-timeline__title-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 10px;
   min-width: 0;
 }
 
 .agent-timeline__title {
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
   width: auto;
@@ -1868,7 +1825,6 @@ button.ghost:hover {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
-  overflow-wrap: anywhere;
   text-align: left;
   justify-content: flex-start;
   display: inline-flex;
@@ -1885,15 +1841,6 @@ button.ghost:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.agent-timeline__title-row.has-preview .agent-timeline__title {
-  max-width: 45%;
-}
-
-.agent-timeline__item.is-expanded .agent-timeline__title,
-.agent-timeline__item.is-final-reply .agent-timeline__title {
-  max-width: 100%;
 }
 
 .agent-timeline__title:disabled {
@@ -1913,6 +1860,7 @@ button.ghost:hover {
 }
 
 .agent-timeline__preview {
+  flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   color: var(--text-muted);
@@ -1923,56 +1871,25 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
-.agent-timeline__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px 6px;
-  min-width: 0;
+.agent-timeline__process-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-faint);
   font-size: 11px;
-  line-height: 1.35;
-}
-
-.agent-timeline__badge {
-  max-width: 100%;
-  min-height: 20px;
-  padding: 2px 6px;
-  border: 1px solid var(--agent-timeline-border);
-  border-radius: 999px;
-  background: var(--agent-timeline-tint);
-  color: var(--agent-timeline-color);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.agent-timeline__process-toggle {
-  min-height: 20px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-subtle);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.25;
+  font-weight: 500;
+  line-height: 1.3;
   filter: none;
 }
 
 .agent-timeline__process-toggle:hover {
-  border-color: var(--agent-timeline-border);
-  background: var(--agent-timeline-tint);
-  color: var(--agent-timeline-color);
-  filter: none;
-}
-
-.agent-timeline__item.is-compact .agent-timeline__badge {
-  border-color: transparent;
   background: transparent;
-  color: var(--text-faint);
+  color: var(--accent);
+  filter: none;
 }
 
 .agent-timeline__content {
@@ -2291,87 +2208,9 @@ button.ghost:hover {
   box-shadow: 0 0 0 2px var(--bg);
 }
 
-.agent-timeline--reasoning {
-  --agent-timeline-color: #c0a15e;
-  --agent-timeline-tint: rgba(192, 161, 94, 0.13);
-  --agent-timeline-border: rgba(192, 161, 94, 0.48);
-}
-
-.agent-timeline--command {
-  --agent-timeline-color: #65b889;
-  --agent-timeline-tint: rgba(101, 184, 137, 0.12);
-  --agent-timeline-border: rgba(101, 184, 137, 0.42);
-}
-
-.agent-timeline--file_change {
-  --agent-timeline-color: #d08d5f;
-  --agent-timeline-tint: rgba(208, 141, 95, 0.13);
-  --agent-timeline-border: rgba(208, 141, 95, 0.46);
-}
-
-.agent-timeline--subagent {
-  --agent-timeline-color: #9aa7d9;
-  --agent-timeline-tint: rgba(154, 167, 217, 0.13);
-  --agent-timeline-border: rgba(154, 167, 217, 0.42);
-}
-
-.agent-timeline--error,
-.agent-timeline__item.is-error {
-  --agent-timeline-color: var(--err);
-  --agent-timeline-tint: var(--err-soft);
-  --agent-timeline-border: rgba(244, 113, 116, 0.58);
-}
-
-.agent-timeline--turn {
-  --agent-timeline-color: var(--text-muted);
-  --agent-timeline-tint: rgba(138, 138, 138, 0.10);
-  --agent-timeline-border: var(--border-strong);
-}
-
-.agent-timeline--todo_list,
-.agent-timeline__item.is-completed {
-  --agent-timeline-color: var(--ok);
-  --agent-timeline-tint: var(--ok-soft);
-  --agent-timeline-border: rgba(63, 185, 80, 0.46);
-}
-
-.agent-timeline--mcp {
-  --agent-timeline-color: #7fb7b0;
-  --agent-timeline-tint: rgba(127, 183, 176, 0.12);
-  --agent-timeline-border: rgba(127, 183, 176, 0.42);
-}
-
-.agent-timeline--web_search {
-  --agent-timeline-color: #83add6;
-  --agent-timeline-tint: rgba(131, 173, 214, 0.12);
-  --agent-timeline-border: rgba(131, 173, 214, 0.42);
-}
-
-.agent-timeline__item.is-running {
-  --agent-timeline-color: var(--accent);
-  --agent-timeline-tint: var(--accent-soft);
-  --agent-timeline-border: rgba(123, 185, 240, 0.48);
-}
-
-.agent-timeline__item.is-final-reply {
-  --agent-timeline-color: var(--accent);
-  --agent-timeline-tint: var(--accent-soft);
-  --agent-timeline-border: rgba(123, 185, 240, 0.58);
-}
-
 @media (max-width: 720px) {
   .chat-transcript > .agent-timeline {
     width: 100%;
-  }
-
-  .agent-timeline__item {
-    grid-template-columns: 22px minmax(0, 1fr);
-    padding: 8px;
-  }
-
-  .agent-timeline__icon {
-    width: 22px;
-    height: 22px;
   }
 }
 

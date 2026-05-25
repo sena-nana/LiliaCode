@@ -169,13 +169,13 @@ describe("chat scheduler", () => {
     completeMockAgentTurn("t-002");
 
     await waitFor(() => {
-      expect(view.getByText("最终回复")).toBeInTheDocument();
       expect(view.getByText(/这是 Claude turn 完成后返回给用户的完整结果/))
         .toBeInTheDocument();
     });
 
-    expect(view.queryByText(/这是 Claude turn 完成后返回给用户的完整结果/)
-      ?.closest(".chat-bubble")).toBeNull();
+    const finalContent = view.getByText(/这是 Claude turn 完成后返回给用户的完整结果/);
+    expect(finalContent.closest(".chat-bubble")).toBeNull();
+    expect(finalContent.closest(".agent-timeline__item")).toHaveClass("is-final-reply");
   });
 
   it("最终回复出现后默认折叠中间过程，只展开最终结果", async () => {
@@ -242,7 +242,6 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
-      expect(view.getByText("最终回复")).toBeInTheDocument();
       expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
       expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
       expect(view.queryByText("验证输出详情")).toBeNull();
