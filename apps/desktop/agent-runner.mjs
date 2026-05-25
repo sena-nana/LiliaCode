@@ -1302,7 +1302,6 @@ async function runClaude(cmd) {
           if (text) {
             ctx.assistantDeltaText += text;
             pacer.push(text);
-            pacer.push(text);
           }
           break;
         }
