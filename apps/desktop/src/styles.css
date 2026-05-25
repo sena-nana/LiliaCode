@@ -1851,31 +1851,16 @@ button.ghost:hover {
 }
 
 .agent-timeline__node--running {
-  color: var(--text-faint);
+  color: var(--accent);
 }
 
 .agent-timeline__node--failed {
   color: var(--err);
-  opacity: 0.85;
 }
 
 .agent-timeline__node--warn {
   background: var(--warn-soft);
   color: var(--warn);
-}
-
-/* 思考类:不放图标,只一个小点,视觉权重压到最低 */
-.agent-timeline__node--dot-only {
-  width: 14px;
-  height: 14px;
-}
-
-.agent-timeline__node-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.6;
 }
 
 .agent-timeline__head {
@@ -1919,6 +1904,20 @@ button.ghost:hover {
   font-weight: 500;
 }
 
+.agent-timeline__item--reasoning .agent-timeline__title,
+.agent-timeline__item--turn .agent-timeline__title {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.agent-timeline__item:is(.is-status-running, .is-status-started, .is-status-in-progress) .agent-timeline__title {
+  color: var(--text);
+}
+
+.agent-timeline__item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__title {
+  color: var(--err);
+}
+
 .agent-timeline__title span {
   min-width: 0;
   overflow: hidden;
@@ -1933,7 +1932,6 @@ button.ghost:hover {
 
 .agent-timeline__title:hover:not(:disabled) {
   background: transparent;
-  color: var(--accent);
   filter: none;
 }
 
@@ -1947,6 +1945,10 @@ button.ghost:hover {
 .agent-timeline__title:hover:not(:disabled) .agent-timeline__chevron {
   color: var(--accent);
   opacity: 1;
+}
+
+.agent-timeline__item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__title:hover:not(:disabled) .agent-timeline__chevron {
+  color: var(--err);
 }
 
 .agent-timeline__preview {
@@ -1982,26 +1984,46 @@ button.ghost:hover {
   list-style: none;
   margin: 4px 0 0;
   padding: 6px 10px;
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
-  background: var(--bg-soft, rgba(127, 127, 127, 0.06));
+  background: var(--bg-subtle);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 .agent-timeline__group-item {
+  min-width: 0;
+}
+
+.agent-timeline__group-event {
+  min-width: 0;
+}
+
+.agent-timeline__group-head {
+  min-height: 20px;
+}
+
+.agent-timeline__group-title {
   font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .agent-timeline__process-toggle:hover {
   background: transparent;
   color: var(--accent);
   filter: none;
+}
+
+.agent-timeline__process-toggle--running {
+  color: var(--accent);
+}
+
+.agent-timeline__process-toggle--failed {
+  color: var(--err);
+}
+
+.agent-timeline__process-toggle--failed:hover {
+  color: var(--err);
 }
 
 .agent-timeline__content {
@@ -2035,6 +2057,13 @@ button.ghost:hover {
   border-radius: 6px;
   background: var(--err-soft);
   color: var(--text);
+}
+
+.timeline-card--compact.timeline-card--command.timeline-card--error {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--err);
 }
 
 .timeline-card--error {

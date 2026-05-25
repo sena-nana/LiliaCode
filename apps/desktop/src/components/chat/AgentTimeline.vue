@@ -21,6 +21,8 @@ import {
   isTimelineFinalReplyStreaming,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
+  readPayloadRecord,
+  readTimelinePayloadRecord,
   timelineEventLabel,
   timelineGroupKey,
   timelineGroupLabel,
@@ -64,7 +66,7 @@ const expandedGroupIds = ref<Set<string>>(new Set());
 const finalReplyCollapseKey = computed(() =>
   props.events
     .filter(isTimelineFinalReply)
-    .map((event) => [event.id, event.status, event.order].join(":"))
+    .map((event) => event.id)
     .join("|"),
 );
 
@@ -262,7 +264,8 @@ function toggleProcessGroup(event: AgentTimelineEvent) {
 function processGroupLabel(entry: TimelineEventEntry): string {
   const count = processEventCount(entry);
   const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
-  return `${verb} ${count} 项`;
+  const summary = processEventsSummary(entry.processEvents ?? []);
+  return summary ? `${verb} ${count} 项 · ${summary}` : `${verb} ${count} 项`;
 }
 
 function eventComponent(event: AgentTimelineEvent): Component {
@@ -311,8 +314,159 @@ function groupLabelText(entry: TimelineGroupEntry): string {
   return timelineGroupLabel(entry.representative, entry.events.length, entry.aggregatedStatus);
 }
 
-function groupItemText(event: AgentTimelineEvent): string {
-  return previewText(event) || event.summary?.trim() || event.title.trim() || event.kind;
+function statusClass(status: AgentTimelineEventStatus): string {
+  return `is-status-${status.replace(/_/g, "-")}`;
+}
+
+function processGroupTone(entry: TimelineEventEntry): "failed" | "running" | "done" {
+  const events = entry.processEvents ?? [];
+  if (events.some((event) => isFailedStatus(event.status))) return "failed";
+  if (events.some((event) => isRunningStatus(event.status))) return "running";
+  return "done";
+}
+
+function processGroupToneClass(entry: TimelineEventEntry): string {
+  return `agent-timeline__process-toggle--${processGroupTone(entry)}`;
+}
+
+function processEventsSummary(events: AgentTimelineEvent[]): string {
+  if (!events.length) return "";
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const [key, count] = processEventSummaryUnit(event);
+    counts.set(key, (counts.get(key) ?? 0) + count);
+  }
+
+  const orderedKeys = [
+    "command",
+    "file",
+    "plan",
+    "todo",
+    "tool",
+    "mcp",
+    "web_search",
+    "subagent",
+    "error",
+    "other",
+  ];
+  const parts = orderedKeys
+    .map((key) => formatProcessSummaryCount(key, counts.get(key) ?? 0))
+    .filter(Boolean);
+
+  if (events.some((event) => isFailedStatus(event.status))) parts.push("有失败");
+  else if (events.some((event) => isRunningStatus(event.status))) parts.push("运行中");
+
+  return parts.join(" · ");
+}
+
+function processEventSummaryUnit(event: AgentTimelineEvent): [string, number] {
+  switch (event.kind) {
+    case "command":
+      return ["command", 1];
+    case "file_change":
+      return ["file", fileChangeCount(event)];
+    case "plan":
+      return ["plan", 1];
+    case "todo_list":
+      return ["todo", 1];
+    case "tool":
+      return toolProcessEventSummaryUnit(event);
+    case "mcp":
+      return ["mcp", 1];
+    case "web_search":
+      return ["web_search", 1];
+    case "subagent":
+      return ["subagent", 1];
+    case "error":
+      return ["error", 1];
+    default:
+      return ["other", 1];
+  }
+}
+
+function toolProcessEventSummaryUnit(event: AgentTimelineEvent): [string, number] {
+  switch (event.title.trim()) {
+    case "Bash":
+      return ["command", 1];
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookRead":
+    case "NotebookEdit":
+      return ["file", toolFileCount(event)];
+    case "TodoWrite":
+      return ["todo", 1];
+    case "WebSearch":
+    case "WebFetch":
+    case "Grep":
+    case "Glob":
+    case "LS":
+      return ["web_search", 1];
+    case "Task":
+    case "Agent":
+      return ["subagent", 1];
+    default:
+      return ["tool", 1];
+  }
+}
+
+function fileChangeCount(event: AgentTimelineEvent): number {
+  const changes = readTimelinePayloadRecord(event).changes;
+  return Array.isArray(changes) && changes.length > 0 ? changes.length : 1;
+}
+
+function toolFileCount(event: AgentTimelineEvent): number {
+  const payload = readTimelinePayloadRecord(event);
+  const input = readPayloadRecord(payload.input);
+  const args = readPayloadRecord(payload.args);
+  const parameters = readPayloadRecord(payload.parameters);
+  const changes = [
+    payload.changes,
+    input.changes,
+    args.changes,
+    parameters.changes,
+  ].find((value) => Array.isArray(value));
+  return Array.isArray(changes) && changes.length > 0 ? changes.length : 1;
+}
+
+function formatProcessSummaryCount(key: string, count: number): string {
+  if (count <= 0) return "";
+  switch (key) {
+    case "command":
+      return `${count} 条命令`;
+    case "file":
+      return `${count} 个文件`;
+    case "plan":
+      return `${count} 项计划`;
+    case "todo":
+      return `${count} 次待办`;
+    case "tool":
+      return `${count} 个工具`;
+    case "mcp":
+      return `${count} 次 MCP`;
+    case "web_search":
+      return `${count} 次搜索`;
+    case "subagent":
+      return `${count} 个子代理`;
+    case "error":
+      return `${count} 个错误`;
+    default:
+      return `${count} 项`;
+  }
+}
+
+function isRunningStatus(status: AgentTimelineEventStatus): boolean {
+  return status === "pending" ||
+    status === "started" ||
+    status === "running" ||
+    status === "in_progress";
+}
+
+function isFailedStatus(status: AgentTimelineEventStatus): boolean {
+  return status === "failed" ||
+    status === "error" ||
+    status === "cancelled";
 }
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
@@ -358,6 +512,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           class="agent-timeline__item agent-timeline__item--group"
           :class="[
             `agent-timeline__item--${entry.representative.kind}`,
+            statusClass(entry.aggregatedStatus),
             {
               'is-compact': !groupExpanded(entry),
               'is-process-child': entry.isProcessChild,
@@ -404,8 +559,51 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
                   v-for="event in entry.events"
                   :key="event.id"
                   class="agent-timeline__group-item"
+                  :class="[`agent-timeline__group-item--${event.kind}`, statusClass(event.status)]"
                 >
-                  {{ groupItemText(event) }}
+                  <article class="agent-timeline__group-event">
+                    <header class="agent-timeline__head agent-timeline__group-head">
+                      <button
+                        type="button"
+                        class="agent-timeline__title agent-timeline__group-title"
+                        :aria-expanded="expanded(event)"
+                        :aria-controls="`agent-timeline-details-${event.id}`"
+                        :disabled="!canToggle(event)"
+                        @click="toggleEvent(event)"
+                      >
+                        <span :id="`agent-timeline-title-${event.id}`">
+                          {{ timelineEventLabel(event) }}
+                        </span>
+                        <component
+                          v-if="canToggle(event)"
+                          :is="expanded(event) ? ChevronDown : ChevronRight"
+                          class="agent-timeline__chevron"
+                          :size="12"
+                          aria-hidden="true"
+                        />
+                      </button>
+
+                      <p
+                        v-if="previewText(event)"
+                        class="agent-timeline__preview"
+                      >
+                        {{ previewText(event) }}
+                      </p>
+                    </header>
+
+                    <div
+                      v-if="expanded(event)"
+                      :id="`agent-timeline-details-${event.id}`"
+                      class="agent-timeline__content"
+                    >
+                      <component
+                        :is="eventComponent(event)"
+                        :event="event"
+                        :expanded="expanded(event)"
+                        :compact="isCompact(event)"
+                      />
+                    </div>
+                  </article>
                 </li>
               </ul>
             </div>
@@ -428,6 +626,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           class="agent-timeline__item"
           :class="[
             `agent-timeline__item--${entry.event.kind}`,
+            statusClass(entry.event.status),
             {
               'is-final-reply': isTimelineFinalReply(entry.event),
               'is-compact': isCompact(entry.event),
@@ -483,6 +682,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
                   v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
                   type="button"
                   class="agent-timeline__process-toggle"
+                  :class="processGroupToneClass(entry)"
                   :aria-expanded="processGroupExpanded(entry.event)"
                   @click="toggleProcessGroup(entry.event)"
                 >

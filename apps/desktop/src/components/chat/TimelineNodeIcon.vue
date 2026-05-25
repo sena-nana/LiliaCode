@@ -58,7 +58,7 @@ function iconForKind(
 ): Component | null {
   // 最终回复（assistant message）始终保留 icon
   if (kind === "message") return MessageSquare;
-  // reasoning 走纯文本展示，不挂 icon，避免和「Agent 思考」语义重复
+  // reasoning 只给低权重点位，不和「Agent 思考」文案抢视觉焦点。
   if (kind === "reasoning") return null;
 
   switch (kind) {

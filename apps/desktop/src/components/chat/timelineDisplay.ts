@@ -130,11 +130,17 @@ export function timelineEventLabel(
 
   if (event.kind === "tool") {
     const verb = TOOL_VERB_MAP[title];
-    if (verb) return formatTimelineActionLabel(event.status, verb);
+    if (verb) return appendTimelineObjectLabel(
+      formatTimelineActionLabel(event.status, verb),
+      timelineEventObjectLabel(event, title),
+    );
   }
 
   const kindVerb = KIND_VERB_MAP[event.kind];
-  if (kindVerb) return formatTimelineActionLabel(event.status, kindVerb);
+  if (kindVerb) return appendTimelineObjectLabel(
+    formatTimelineActionLabel(event.status, kindVerb),
+    timelineEventObjectLabel(event, title),
+  );
 
   return title || event.kind;
 }
@@ -164,8 +170,8 @@ const TOOL_VERB_MAP: Record<string, string> = {
 };
 
 const KIND_VERB_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
-  command: "运行命令",
-  file_change: "修改文件",
+  command: "运行",
+  file_change: "修改",
   plan: "制定计划",
   todo_list: "更新待办",
   mcp: "调用 MCP",
@@ -292,6 +298,82 @@ function formatTimelineActionLabel(
     default:
       return `已${verb}`;
   }
+}
+
+function appendTimelineObjectLabel(label: string, objectLabel: string): string {
+  return objectLabel ? `${label} ${objectLabel}` : label;
+}
+
+function timelineEventObjectLabel(
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "title">,
+  title: string,
+): string {
+  const payload = readTimelinePayloadRecord(event);
+
+  switch (event.kind) {
+    case "command":
+      return readFirstPayloadString(payload, [
+        "command",
+        "cmd",
+        "shellCommand",
+        "script",
+        "argv",
+      ]) || usefulTitleObject(event.kind, title);
+    case "file_change":
+      return timelineFileChangeInlinePreview(payload) || usefulTitleObject(event.kind, title);
+    case "tool":
+      return readFirstPayloadString(payload, [
+        "path",
+        "filePath",
+        "relativePath",
+        "targetPath",
+        "query",
+        "command",
+        "toolName",
+        "name",
+      ]);
+    case "mcp": {
+      const target = [
+        readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]),
+        readFirstPayloadString(payload, ["tool", "toolName", "name"]),
+      ].filter(Boolean).join("/");
+      return target || usefulTitleObject(event.kind, title);
+    }
+    case "web_search":
+      return readFirstPayloadString(payload, ["query", "searchQuery", "q", "url"]) ||
+        usefulTitleObject(event.kind, title);
+    case "subagent":
+      return readFirstPayloadString(payload, [
+        "agentType",
+        "subagentType",
+        "agentName",
+        "name",
+        "type",
+      ]) || usefulTitleObject(event.kind, title);
+    case "reasoning":
+    case "plan":
+    case "todo_list":
+      return usefulTitleObject(event.kind, title);
+    default:
+      return "";
+  }
+}
+
+function usefulTitleObject(kind: AgentTimelineEvent["kind"], title: string): string {
+  if (!title) return "";
+  const normalized = title.toLowerCase();
+  const generic = new Set([
+    kind,
+    "plan",
+    "assistant",
+    "reasoning",
+    "thinking",
+    "message",
+    "turn",
+  ]);
+  if (generic.has(normalized)) return "";
+  if (TOOL_VERB_MAP[title]) return "";
+  return title;
 }
 
 export function timelineEventSummary(

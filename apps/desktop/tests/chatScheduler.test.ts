@@ -35,6 +35,14 @@ async function sendText(view: ReturnType<typeof render>, text: string) {
   await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
 }
 
+async function expectInitialReasoning(view: ReturnType<typeof render>) {
+  await waitFor(() => {
+    expect(view.getByRole("button", { name: /已思考 历史思考摘要/ }))
+      .toHaveAttribute("aria-expanded", "false");
+    expect(view.getByText("从持久化时间线恢复的公开摘要。")).toBeInTheDocument();
+  });
+}
+
 describe("chat scheduler", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
@@ -72,8 +80,8 @@ describe("chat scheduler", () => {
 
     await sendText(view, "页面刚打开时发送的用户消息");
 
+    await expectInitialReasoning(view);
     await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
       expect(view.getByText("页面刚打开时发送的用户消息")).toBeInTheDocument();
     });
 
@@ -84,10 +92,7 @@ describe("chat scheduler", () => {
   it("会显示持久化和实时 Agent 工作过程", async () => {
     const view = await renderTaskDetail();
 
-    await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
-      expect(view.getByText("从持久化时间线恢复的公开摘要。")).toBeInTheDocument();
-    });
+    await expectInitialReasoning(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-live-command",
@@ -100,7 +105,7 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
-      expect(view.getAllByText("yarn verify").length).toBeGreaterThan(0);
+      expect(view.getByRole("button", { name: /yarn verify/ })).toBeInTheDocument();
       expect(view.getByText("正在运行完整验证")).toBeInTheDocument();
     });
   });
@@ -108,9 +113,7 @@ describe("chat scheduler", () => {
   it("过程事件默认显示为单行，点击后展开详情", async () => {
     const view = await renderTaskDetail();
 
-    await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
-    });
+    await expectInitialReasoning(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-single-line-command",
@@ -143,9 +146,7 @@ describe("chat scheduler", () => {
   it("最终回复显示在 timeline 中，不再创建 assistant 普通气泡", async () => {
     const view = await renderTaskDetail();
 
-    await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
-    });
+    await expectInitialReasoning(view);
 
     await sendText(view, "实现 timeline 最终回复");
     await waitFor(() => {
@@ -191,8 +192,8 @@ describe("chat scheduler", () => {
 
     const view = await renderTaskDetail();
 
+    await expectInitialReasoning(view);
     await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
       expect(view.getByText("请执行完整验证")).toBeInTheDocument();
     });
 
@@ -245,11 +246,11 @@ describe("chat scheduler", () => {
       expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
       expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
       expect(view.queryByText("验证输出详情")).toBeNull();
-      expect(view.getByRole("button", { name: "展开过程 1 项" }))
+      expect(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }))
         .toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "展开过程 1 项" }));
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }));
     await waitFor(() => {
       expect(view.getByRole("button", { name: /yarn verify/ }))
         .toHaveAttribute("aria-expanded", "false");
@@ -356,7 +357,7 @@ describe("chat scheduler", () => {
       expect(view.getByText("新一轮最终回复。")).toBeInTheDocument();
       expect(view.queryByRole("button", { name: /cargo check/ })).toBeNull();
       expect(view.queryByText("Rust 验证输出详情")).toBeNull();
-      expect(view.getByRole("button", { name: "展开过程 1 项" }))
+      expect(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }))
         .toHaveAttribute("aria-expanded", "false");
     });
   });
@@ -423,11 +424,11 @@ describe("chat scheduler", () => {
       expect(view.getByText("最终回复应该直接可见。")).toBeInTheDocument();
       expect(view.queryByText("这条过程默认不应显示")).toBeNull();
       expect(view.queryByText("这条计划默认不应显示")).toBeNull();
-      expect(view.getByRole("button", { name: "展开过程 2 项" }))
+      expect(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 项计划/ }))
         .toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "展开过程 2 项" }));
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 项计划/ }));
     await waitFor(() => {
       expect(view.getByRole("button", { name: /yarn test/ }))
         .toHaveAttribute("aria-expanded", "false");
@@ -435,7 +436,7 @@ describe("chat scheduler", () => {
       expect(view.getByRole("button", { name: /更新计划/ }))
         .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText(/这条计划默认不应显示/)).toBeInTheDocument();
-      expect(view.getByRole("button", { name: "收起过程 2 项" }))
+      expect(view.getByRole("button", { name: /收起过程 2 项.*1 条命令.*1 项计划/ }))
         .toHaveAttribute("aria-expanded", "true");
     });
 
@@ -488,14 +489,14 @@ describe("chat scheduler", () => {
 
     const view = await renderTaskDetail();
 
+    await expectInitialReasoning(view);
     await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
       expect(view.getByText("插在过程中的用户消息")).toBeInTheDocument();
       expect(view.getByText("用户消息之后的最终回复")).toBeInTheDocument();
     });
 
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
-    expect(timelineText.indexOf("历史思考摘要"))
+    expect(timelineText.indexOf("已思考"))
       .toBeLessThan(timelineText.indexOf("插在过程中的用户消息"));
     expect(timelineText.indexOf("插在过程中的用户消息"))
       .toBeLessThan(timelineText.indexOf("用户消息之后的最终回复"));
@@ -504,9 +505,7 @@ describe("chat scheduler", () => {
   it("agent 错误走 timeline 错误事件，不再创建 system 普通气泡", async () => {
     const view = await renderTaskDetail();
 
-    await waitFor(() => {
-      expect(view.getByText("历史思考摘要")).toBeInTheDocument();
-    });
+    await expectInitialReasoning(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-agent-error",
@@ -529,6 +528,284 @@ describe("chat scheduler", () => {
     });
     expect(view.getByText("agent 报错：连接失败").closest(".chat-bubble")).toBeNull();
     expect(view.queryByText("旧错误通道不应生成气泡")).toBeNull();
+  });
+
+  it("折叠后的过程摘要会显示事件类型和异常状态", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-process-summary",
+        taskId: "t-002",
+        role: "user",
+        content: "请修复失败验证",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-summary-command",
+      kind: "command",
+      status: "failed",
+      title: "yarn test",
+      summary: "测试失败",
+      payload: {
+        command: "yarn test",
+        stderr: "Expected true to be false",
+      },
+      turnId: "turn-summary",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-summary-file",
+      kind: "file_change",
+      status: "success",
+      title: "更新测试",
+      summary: "修改测试文件",
+      payload: {
+        changes: [{ kind: "update", path: "apps/desktop/tests/chatScheduler.test.ts" }],
+      },
+      turnId: "turn-summary",
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-summary-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "已经定位失败原因。",
+      },
+      turnId: "turn-summary",
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("已经定位失败原因。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 个文件.*有失败/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
+  it("折叠后的过程摘要会把 Bash 和文件工具归入命令与文件", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-tool-process-summary",
+        taskId: "t-002",
+        role: "user",
+        content: "请检查文件并验证",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-tool-summary-bash",
+      kind: "tool",
+      status: "success",
+      title: "Bash",
+      summary: "运行验证",
+      payload: {
+        toolName: "Bash",
+        input: { command: "yarn verify" },
+      },
+      turnId: "turn-tool-summary",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-tool-summary-read",
+      kind: "tool",
+      status: "success",
+      title: "Read",
+      summary: "读取组件",
+      payload: {
+        toolName: "Read",
+        input: { path: "apps/desktop/src/components/chat/AgentTimeline.vue" },
+      },
+      turnId: "turn-tool-summary",
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-tool-summary-edit",
+      kind: "tool",
+      status: "success",
+      title: "Edit",
+      summary: "修改样式",
+      payload: {
+        toolName: "Edit",
+        input: { path: "apps/desktop/src/styles.css" },
+      },
+      turnId: "turn-tool-summary",
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-tool-summary-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "文件检查完成。",
+      },
+      turnId: "turn-tool-summary",
+      createdAt: 2400,
+      updatedAt: 2400,
+      order: 5,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("文件检查完成。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /展开过程 3 项.*1 条命令.*2 个文件/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByRole("button", { name: /3 个工具/ })).toBeNull();
+    });
+  });
+
+  it("相邻事件分组展开后保留原始事件详情", async () => {
+    const view = await renderTaskDetail();
+    await expectInitialReasoning(view);
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-group-command-1",
+      kind: "command",
+      status: "success",
+      title: "pnpm test",
+      summary: "运行前端测试",
+      payload: {
+        command: "pnpm test",
+        stdout: "pnpm 测试输出",
+      },
+      turnId: null,
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-group-command-2",
+      kind: "command",
+      status: "success",
+      title: "yarn build",
+      summary: "运行构建",
+      payload: {
+        command: "yarn build",
+        stdout: "构建输出",
+      },
+      turnId: null,
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /2 条命令/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /2 条命令/ }));
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /pnpm test/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.getByRole("button", { name: /yarn build/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByText("pnpm 测试输出")).toBeNull();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /pnpm test/ }));
+    await waitFor(() => {
+      expect(view.getByText("pnpm 测试输出")).toBeInTheDocument();
+    });
+  });
+
+  it("最终回复状态更新不会重置当前 turn 的过程展开状态", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-stream-final",
+        taskId: "t-002",
+        role: "user",
+        content: "请边跑边回复",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-stream-command",
+      kind: "command",
+      status: "success",
+      title: "yarn verify",
+      summary: "验证完成",
+      payload: {
+        command: "yarn verify",
+        stdout: "验证输出保持展开",
+      },
+      turnId: "turn-stream-final",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-stream-final",
+      kind: "message",
+      status: "running",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "正在整理结果",
+      },
+      turnId: "turn-stream-final",
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("正在整理结果")).toBeInTheDocument();
+    });
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项.*1 条命令/ }));
+    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
+    await waitFor(() => {
+      expect(view.getByText("验证输出保持展开")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /收起过程 1 项.*1 条命令/ }))
+        .toHaveAttribute("aria-expanded", "true");
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-stream-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "整理完成",
+      },
+      turnId: "turn-stream-final",
+      createdAt: 2200,
+      updatedAt: 2300,
+      order: 3,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("整理完成")).toBeInTheDocument();
+      expect(view.getByText("验证输出保持展开")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /收起过程 1 项.*1 条命令/ }))
+        .toHaveAttribute("aria-expanded", "true");
+    });
   });
 
   it("历史 assistant 消息不会作为普通气泡显示", async () => {
