@@ -126,7 +126,79 @@ export function pruneTimelineExpandedIds(
 export function timelineEventLabel(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "title">,
 ): string {
-  return event.title.trim() || event.kind;
+  const title = event.title.trim();
+
+  if (event.kind === "tool") {
+    const verb = TOOL_VERB_MAP[title];
+    if (verb) return formatTimelineActionLabel(event.status, verb);
+  }
+
+  const kindVerb = KIND_VERB_MAP[event.kind];
+  if (kindVerb) return formatTimelineActionLabel(event.status, kindVerb);
+
+  return title || event.kind;
+}
+
+const TOOL_VERB_MAP: Record<string, string> = {
+  Bash: "运行",
+  Read: "读取",
+  Write: "写入",
+  Edit: "编辑",
+  MultiEdit: "编辑",
+  Grep: "搜索",
+  Glob: "查找",
+  LS: "列出目录",
+  WebFetch: "抓取网页",
+  WebSearch: "网络搜索",
+  TodoWrite: "更新待办",
+  NotebookEdit: "编辑 Notebook",
+  NotebookRead: "读取 Notebook",
+  Task: "调用子代理",
+  Agent: "调用子代理",
+  ExitPlanMode: "提交计划",
+  AskUserQuestion: "向用户提问",
+  ScheduleWakeup: "安排稍后唤醒",
+  PushNotification: "推送通知",
+  SendMessage: "发送消息",
+  Skill: "调用 Skill",
+};
+
+const KIND_VERB_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
+  command: "运行命令",
+  file_change: "修改文件",
+  plan: "制定计划",
+  todo_list: "更新待办",
+  mcp: "调用 MCP",
+  web_search: "网络搜索",
+  subagent: "调用子代理",
+  reasoning: "思考",
+};
+
+function formatTimelineActionLabel(
+  status: AgentTimelineEventStatus,
+  verb: string,
+): string {
+  switch (status) {
+    case "pending":
+    case "started":
+    case "running":
+    case "in_progress":
+      return `正在${verb}`;
+    case "failed":
+    case "error":
+      return `${verb}失败`;
+    case "cancelled":
+      return `已取消${verb}`;
+    case "skipped":
+      return `已跳过${verb}`;
+    case "info":
+    case "requires_action":
+    case "completed":
+    case "done":
+    case "success":
+    default:
+      return `已${verb}`;
+  }
 }
 
 export function timelineEventSummary(
