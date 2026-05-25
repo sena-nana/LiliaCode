@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
-import type { AgentTimelineEvent, ChatMessage } from "@lilia/contracts";
+import type { AgentTimelineEvent, AgentTimelineEventStatus, ChatMessage } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
 import TimelineCommandEvent from "./TimelineCommandEvent.vue";
 import TimelineErrorEvent from "./TimelineErrorEvent.vue";
@@ -14,6 +14,7 @@ import TimelineSummaryEvent from "./TimelineSummaryEvent.vue";
 import TimelineTodoEvent from "./TimelineTodoEvent.vue";
 import TimelineToolEvent from "./TimelineToolEvent.vue";
 import {
+  aggregateTimelineStatus,
   isTimelineAssistantMessage,
   isTimelineExpanded,
   isTimelineFinalReply,
@@ -21,6 +22,8 @@ import {
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineEventLabel,
+  timelineGroupKey,
+  timelineGroupLabel,
   toggleTimelineExpandedId,
 } from "./timelineDisplay";
 
@@ -36,7 +39,19 @@ type TimelineEventEntry = {
   isProcessChild?: boolean;
 };
 
-type TimelineEntry = TimelineEventEntry;
+type TimelineGroupEntry = {
+  type: "group";
+  id: string;
+  createdAt: number;
+  order: number;
+  groupKey: string;
+  events: AgentTimelineEvent[];
+  representative: AgentTimelineEvent;
+  aggregatedStatus: AgentTimelineEventStatus;
+  isProcessChild?: boolean;
+};
+
+type TimelineEntry = TimelineEventEntry | TimelineGroupEntry;
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
@@ -44,6 +59,7 @@ const props = defineProps<{
 
 const toggledIds = ref<Set<string>>(new Set());
 const expandedProcessGroupIds = ref<Set<string>>(new Set());
+const expandedGroupIds = ref<Set<string>>(new Set());
 
 const finalReplyCollapseKey = computed(() =>
   props.events
@@ -52,9 +68,9 @@ const finalReplyCollapseKey = computed(() =>
     .join("|"),
 );
 
-const chronologicalEntries = computed<TimelineEntry[]>(() =>
+const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
   props.events
-    .map((event): TimelineEntry => ({
+    .map((event): TimelineEventEntry => ({
       type: "event",
       id: `event:${event.id}`,
       createdAt: event.createdAt,
@@ -92,7 +108,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     hiddenEventIds.add(entry.event.id);
   }
 
-  const output: TimelineEntry[] = [];
+  const output: TimelineEventEntry[] = [];
   for (const entry of entries) {
     if (hiddenEventIds.has(entry.event.id)) continue;
 
@@ -117,8 +133,61 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     }
   }
 
-  return output;
+  return mergeAdjacentGroups(output);
 });
+
+function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
+  const result: TimelineEntry[] = [];
+  let bucket: TimelineEventEntry[] = [];
+  let bucketKey: string | null = null;
+
+  const flush = () => {
+    if (bucket.length === 0) return;
+    if (bucket.length === 1 || !bucketKey) {
+      result.push(...bucket);
+    } else {
+      const first = bucket[0];
+      const events = bucket.map((b) => b.event);
+      result.push({
+        type: "group",
+        id: `group:${bucketKey}:${first.event.id}`,
+        createdAt: first.createdAt,
+        order: first.order,
+        groupKey: bucketKey,
+        events,
+        representative: first.event,
+        aggregatedStatus: aggregateTimelineStatus(events),
+        isProcessChild: first.isProcessChild,
+      });
+    }
+    bucket = [];
+    bucketKey = null;
+  };
+
+  for (const entry of entries) {
+    const event = entry.event;
+    const key = isTimelineFinalReply(event) || isTimelineMessage(event)
+      ? null
+      : timelineGroupKey(event);
+
+    if (!key) {
+      flush();
+      result.push(entry);
+      continue;
+    }
+
+    if (bucketKey === key) {
+      bucket.push(entry);
+    } else {
+      flush();
+      bucket = [entry];
+      bucketKey = key;
+    }
+  }
+  flush();
+
+  return result;
+}
 
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
@@ -136,11 +205,24 @@ watch(
 );
 
 watch(
+  orderedEntries,
+  (entries) => {
+    const valid = new Set(
+      entries.filter((entry): entry is TimelineGroupEntry => entry.type === "group").map((entry) => entry.id),
+    );
+    expandedGroupIds.value = new Set(
+      [...expandedGroupIds.value].filter((id) => valid.has(id)),
+    );
+  },
+);
+
+watch(
   finalReplyCollapseKey,
   (key, previousKey) => {
     if (!key || key === previousKey) return;
     toggledIds.value = new Set();
     expandedProcessGroupIds.value = new Set();
+    expandedGroupIds.value = new Set();
   },
 );
 
@@ -162,6 +244,7 @@ function toggleEvent(event: AgentTimelineEvent) {
 }
 
 function processEventCount(entry: TimelineEntry): number {
+  if (entry.type !== "event") return 0;
   return entry.processEvents?.length ?? 0;
 }
 
@@ -176,7 +259,7 @@ function toggleProcessGroup(event: AgentTimelineEvent) {
   expandedProcessGroupIds.value = next;
 }
 
-function processGroupLabel(entry: TimelineEntry): string {
+function processGroupLabel(entry: TimelineEventEntry): string {
   const count = processEventCount(entry);
   const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
   return `${verb} ${count} 项`;
@@ -211,6 +294,25 @@ function eventComponent(event: AgentTimelineEvent): Component {
 
 function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
+}
+
+function groupExpanded(entry: TimelineGroupEntry): boolean {
+  return expandedGroupIds.value.has(entry.id);
+}
+
+function toggleGroup(entry: TimelineGroupEntry) {
+  const next = new Set(expandedGroupIds.value);
+  if (next.has(entry.id)) next.delete(entry.id);
+  else next.add(entry.id);
+  expandedGroupIds.value = next;
+}
+
+function groupLabelText(entry: TimelineGroupEntry): string {
+  return timelineGroupLabel(entry.representative, entry.events.length, entry.aggregatedStatus);
+}
+
+function groupItemText(event: AgentTimelineEvent): string {
+  return previewText(event) || event.summary?.trim() || event.title.trim() || event.kind;
 }
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
@@ -252,7 +354,66 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
     <ol class="agent-timeline__list">
       <template v-for="entry in orderedEntries" :key="entry.id">
         <li
-          v-if="isTimelineUserMessage(entry.event)"
+          v-if="entry.type === 'group'"
+          class="agent-timeline__item agent-timeline__item--group"
+          :class="[
+            `agent-timeline__item--${entry.representative.kind}`,
+            {
+              'is-compact': !groupExpanded(entry),
+              'is-process-child': entry.isProcessChild,
+            },
+          ]"
+        >
+          <article
+            class="agent-timeline__event"
+            :aria-labelledby="`agent-timeline-title-${entry.id}`"
+          >
+            <div class="agent-timeline__rail">
+              <TimelineNodeIcon
+                :kind="entry.representative.kind"
+                :status="entry.aggregatedStatus"
+              />
+            </div>
+            <div class="agent-timeline__body">
+              <header class="agent-timeline__head">
+                <button
+                  type="button"
+                  class="agent-timeline__title"
+                  :aria-expanded="groupExpanded(entry)"
+                  :aria-controls="`agent-timeline-details-${entry.id}`"
+                  @click="toggleGroup(entry)"
+                >
+                  <span :id="`agent-timeline-title-${entry.id}`">
+                    {{ groupLabelText(entry) }}
+                  </span>
+                  <component
+                    :is="groupExpanded(entry) ? ChevronDown : ChevronRight"
+                    class="agent-timeline__chevron"
+                    :size="12"
+                    aria-hidden="true"
+                  />
+                </button>
+              </header>
+
+              <ul
+                v-if="groupExpanded(entry)"
+                :id="`agent-timeline-details-${entry.id}`"
+                class="agent-timeline__group-list"
+              >
+                <li
+                  v-for="event in entry.events"
+                  :key="event.id"
+                  class="agent-timeline__group-item"
+                >
+                  {{ groupItemText(event) }}
+                </li>
+              </ul>
+            </div>
+          </article>
+        </li>
+
+        <li
+          v-else-if="isTimelineUserMessage(entry.event)"
           class="agent-timeline__message-row"
           :class="[
             `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,

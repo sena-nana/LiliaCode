@@ -174,6 +174,99 @@ const KIND_VERB_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
   reasoning: "思考",
 };
 
+const TOOL_QUANTIFIER_MAP: Record<string, string> = {
+  Bash: "条命令",
+  Read: "个文件",
+  Write: "个文件",
+  Edit: "个文件",
+  MultiEdit: "个文件",
+  Grep: "次",
+  Glob: "次",
+  LS: "次",
+  WebFetch: "个网页",
+  WebSearch: "次",
+  TodoWrite: "次",
+  NotebookEdit: "次",
+  NotebookRead: "次",
+  Task: "次",
+  Agent: "次",
+  ExitPlanMode: "次",
+  AskUserQuestion: "次",
+  ScheduleWakeup: "次",
+  PushNotification: "次",
+  SendMessage: "次",
+  Skill: "次",
+};
+
+const KIND_QUANTIFIER_MAP: Partial<Record<AgentTimelineEvent["kind"], string>> = {
+  command: "条命令",
+  file_change: "个文件",
+  mcp: "次",
+  web_search: "次",
+  subagent: "次",
+  tool: "项",
+};
+
+const GROUPABLE_KINDS = new Set<AgentTimelineEvent["kind"]>([
+  "tool",
+  "command",
+  "file_change",
+  "mcp",
+  "web_search",
+]);
+
+/**
+ * 相邻同类事件可合并为一组。tool 按 title 区分（Read 和 Write 不合并），
+ * mcp 按 server 区分，其他按 kind。返回 null 表示不参与合并。
+ */
+export function timelineGroupKey(
+  event: Pick<AgentTimelineEvent, "kind" | "payload" | "title">,
+): string | null {
+  if (!GROUPABLE_KINDS.has(event.kind)) return null;
+  if (event.kind === "tool") {
+    const name = event.title.trim();
+    return name ? `tool:${name}` : null;
+  }
+  if (event.kind === "mcp") {
+    const payload = readTimelinePayloadRecord(event);
+    const server = readFirstPayloadString(payload, ["server", "serverName", "mcpServer"]);
+    return `mcp:${server || "default"}`;
+  }
+  return `kind:${event.kind}`;
+}
+
+export function aggregateTimelineStatus(
+  events: ReadonlyArray<Pick<AgentTimelineEvent, "status">>,
+): AgentTimelineEventStatus {
+  if (events.some((e) =>
+    e.status === "failed" || e.status === "error" || e.status === "cancelled"
+  )) {
+    return "failed";
+  }
+  if (events.some((e) => RUNNING_STATUSES.has(e.status))) return "running";
+  return "completed";
+}
+
+export function timelineGroupLabel(
+  representative: Pick<AgentTimelineEvent, "kind" | "title">,
+  count: number,
+  status: AgentTimelineEventStatus,
+): string {
+  const title = representative.title.trim();
+  let verb: string | undefined;
+  let unit: string | undefined;
+
+  if (representative.kind === "tool") {
+    verb = TOOL_VERB_MAP[title];
+    unit = TOOL_QUANTIFIER_MAP[title];
+  }
+  verb = verb ?? KIND_VERB_MAP[representative.kind] ?? title ?? representative.kind;
+  unit = unit ?? KIND_QUANTIFIER_MAP[representative.kind] ?? "项";
+
+  const verbLabel = formatTimelineActionLabel(status, verb);
+  return `${verbLabel} ${count} ${unit}`;
+}
+
 function formatTimelineActionLabel(
   status: AgentTimelineEventStatus,
   verb: string,
