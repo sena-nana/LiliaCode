@@ -2269,7 +2269,10 @@ button.ghost:hover {
 .markdown-block__heading,
 .markdown-block__quote,
 .markdown-block__list,
-.markdown-block__code {
+.markdown-block__code,
+.markdown-block__table-wrap,
+.markdown-block__math-block,
+.markdown-block__mermaid {
   margin: 0 0 8px;
 }
 
@@ -2331,6 +2334,109 @@ button.ghost:hover {
   background: transparent;
   font-size: inherit;
   white-space: inherit;
+}
+
+.markdown-block__table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+.markdown-block__table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.markdown-block__table th,
+.markdown-block__table td {
+  min-width: 96px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.markdown-block__table th {
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.markdown-block__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-block .katex {
+  color: inherit;
+  font-size: 1em;
+}
+
+.markdown-block__math-inline {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: -0.15em;
+}
+
+.markdown-block__math-block {
+  max-width: 100%;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+.markdown-block__math-block .katex-display {
+  margin: 0;
+  text-align: left;
+}
+
+.markdown-block__mermaid {
+  max-width: 100%;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+.markdown-block__mermaid-canvas {
+  min-width: min-content;
+  color: var(--text);
+}
+
+.markdown-block__mermaid-canvas svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-block__mermaid-canvas :is(text, .nodeLabel, .edgeLabel) {
+  color: var(--text);
+  fill: var(--text);
+}
+
+.markdown-block__render-note,
+.markdown-block__render-error {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.markdown-block__render-note {
+  color: var(--text-muted);
+}
+
+.markdown-block__render-error {
+  color: var(--err);
 }
 
 .markdown-block a {

@@ -19,7 +19,9 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2",
+    "katex": "^0.17.0",
     "lucide-vue-next": "^1.0.0",
+    "mermaid": "^11.15.0",
     "vue": "^3.5.34",
     "vue-router": "^5.0.7",
     "zod": "^4.4.3"
