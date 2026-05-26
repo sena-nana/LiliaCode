@@ -371,8 +371,8 @@ function eventGroupCount(event: AgentTimelineEvent): number {
 
 function formatProcessSummaryCount(_key: string, count: number, unit: string | null = null): string {
   if (count <= 0) return "";
-  if (unit) return `${count} ${unit}`;
-  return `${count} 项`;
+  if (!unit) return "";
+  return `${count} ${unit}`;
 }
 
 function isRunningStatus(status: AgentTimelineEventStatus): boolean {
