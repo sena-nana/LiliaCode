@@ -1,390 +1,235 @@
-// Claude 工具表 —— runner（agent-runner.mjs）和前端（timelineDisplay.ts）共享的
-// 单一事实表。每个工具一条记录，含 lilia 的分类（kind）、input 摘要字段
-// （summaryFields）、以及 timeline 渲染规则（display）。
+// Claude SDK → lilia 工具协议适配层。runner 在收到 @anthropic-ai/claude-agent-sdk
+// 的 tool_use 块时，按 `CLAUDE_TO_LILIA` 表把 (toolName, input, payload) 翻译成
+// lilia 协议事件 `{kind, subkind?, payload}`，再 emit 进 NDJSON。
 //
-// 改一处两边同步。新增工具：在 CLAUDE_TOOLS 加一条；未列入的工具自动落 CLAUDE_TOOL_DEFAULT。
+// 设计原则：
+//  - 本文件只 runner 用，渲染器不读 —— 渲染器只认 lilia 协议（liliaTools.mjs）。
+//  - 未登记的工具名走 `CLAUDE_DEFAULT_NORMALIZE`，落 lilia 的 tool 兜底 kind。
+//  - 新增 Claude 工具：在 `CLAUDE_TO_LILIA` 加一条；不要在 liliaTools.mjs 里硬编码工具名。
 //
 // 这是 .mjs 而非 .ts 是因为 runner 由 Tauri 直接 `node agent-runner.mjs` 拉起，
 // 不经过任何构建步骤；TS 端通过同目录 claudeTools.d.mts 拿到类型。
-
-// ---------- helper ----------
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function readRecord(value) {
+function readRecord(value) {
   return isRecord(value) ? value : {};
 }
 
-export function pick(record, keys) {
+function pickString(record, keys) {
   for (const key of keys) {
     const value = record[key];
-    if (value !== undefined && value !== null && value !== "") return value;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function pickNumber(record, keys) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
   }
   return undefined;
 }
 
-function stringOrNull(value) {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return null;
-}
-
 function shortText(value, max) {
-  const text = stringOrNull(value);
-  if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}...` : text;
+  if (typeof value !== "string") return "";
+  return value.length > max ? `${value.slice(0, max)}...` : value;
 }
 
-function stringifyInline(value) {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => stringifyInline(item)).filter(Boolean).join(" ").trim();
-  }
-  if (isRecord(value)) {
-    return readFirstString(value, [
-      "text", "title", "summary", "content", "message",
-      "name", "path", "filePath", "query", "command",
-    ], 600);
-  }
-  return "";
-}
+const FILE_PATH_KEYS = ["file_path", "path"];
 
-export function compactLine(value, max) {
-  const text = stringifyInline(value).replace(/\s+/g, " ").trim();
-  return text ? shortText(text, max) : "";
-}
-
-export function readFirstString(payload, keys, max) {
-  for (const key of keys) {
-    const text = compactLine(payload[key], max);
-    if (text) return text;
-  }
-  return "";
-}
-
-export function displayField(label, value) {
-  const text = compactLine(value, 1200);
-  return label && text ? { label, value: text } : null;
-}
-
-export function fieldsDetail(fields) {
-  const items = fields.filter((field) => field !== null);
-  return items.length ? { type: "fields", fields: items } : null;
-}
-
-export function codeDetail(label, content, language = "") {
-  let text = stringOrNull(content);
-  if (!text && (Array.isArray(content) || isRecord(content))) {
-    try {
-      text = JSON.stringify(content, null, 2);
-    } catch {
-      text = String(content);
-    }
-  }
-  if (!text || !text.trim()) return null;
-  return {
-    type: "code",
-    label: label || null,
-    content: shortText(text.trim(), 6000),
-    language: language || null,
-  };
-}
-
-export function markdownDetail(content, tone = "default", singleLine = false) {
-  const text = stringOrNull(content);
-  if (!text || !text.trim()) return null;
-  return {
-    type: "markdown",
-    content: shortText(text.trim(), 6000),
-    tone,
-    singleLine,
-  };
-}
-
-export function listDetail(items, ordered = false) {
-  const normalized = (Array.isArray(items) ? items : [])
-    .map((item) => {
-      if (typeof item === "string") return { text: compactLine(item, 1200) };
-      if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "summary"], 1200);
-      if (!text) return null;
-      const status = String(item.status ?? "").toLowerCase();
-      const completed = item.completed === true || item.done === true || status === "completed";
-      const tone = completed
-        ? "success"
-        : status === "failed" || status === "error"
-          ? "error"
-          : "default";
-      return { text, tone };
-    })
-    .filter((item) => item !== null && Boolean(item.text));
-  return normalized.length ? { type: "list", items: normalized, ordered } : null;
-}
-
-export function readTodoItems(payload) {
-  const input = readRecord(payload.input);
-  const raw =
-    (Array.isArray(payload.items) && payload.items) ||
-    (Array.isArray(payload.todos) && payload.todos) ||
-    (Array.isArray(input.items) && input.items) ||
-    (Array.isArray(input.todos) && input.todos) ||
-    [];
-  return raw
-    .map((item) => {
-      if (typeof item === "string") return { text: item, completed: false };
-      if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "description"], 1200);
-      if (!text) return null;
-      const status = String(item.status ?? "").toLowerCase();
-      return {
-        text,
-        completed: item.completed === true || item.done === true || status === "completed",
-        status,
-      };
-    })
-    .filter((item) => item !== null);
-}
-
-// ---------- 工具表 ----------
-
-const FILE_FIELDS = ["file_path", "path"];
-
-export const CLAUDE_TOOLS = {
-  Bash: {
-    kind: "command",
-    summaryFields: ["command", "description"],
-    display: {
-      action: "运行",
-      icon: "terminal",
-      bucket: "command",
-      unit: "条命令",
-      extractObject: (input) =>
-        compactLine(pick(input, ["command", "description"]), 1200),
-      buildDetails: (input, payload) => [
-        fieldsDetail([
-          displayField("cwd", pick(payload, ["cwd"])),
-          displayField("exit", pick(payload, ["exitCode"])),
-        ]),
-        codeDetail("COMMAND", pick(input, ["command"]), "shell"),
-        codeDetail("OUTPUT", pick(payload, ["output"])),
-      ],
-    },
-  },
-  Read: {
-    kind: "file_read",
-    summaryFields: FILE_FIELDS,
-    display: {
-      action: "读取",
-      icon: "book-open",
-      bucket: "file",
-      unit: "个文件",
-      extractObject: (input) => compactLine(pick(input, FILE_FIELDS), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([
-          displayField("文件", pick(input, FILE_FIELDS)),
-          displayField("offset", pick(input, ["offset"])),
-          displayField("limit", pick(input, ["limit"])),
-        ]),
-      ],
-    },
-  },
-  Edit: {
-    kind: "file_change",
-    summaryFields: FILE_FIELDS,
-    display: {
-      action: "修改",
-      icon: "file-pen",
-      bucket: "file",
-      unit: "个文件",
-      extractObject: (input) => compactLine(pick(input, FILE_FIELDS), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([displayField("文件", pick(input, FILE_FIELDS))]),
-      ],
-    },
-  },
-  MultiEdit: {
-    kind: "file_change",
-    summaryFields: FILE_FIELDS,
-    display: {
-      action: "批量修改",
-      icon: "file-pen",
-      bucket: "file",
-      unit: "个文件",
-      extractObject: (input) => compactLine(pick(input, FILE_FIELDS), 1200),
-      buildDetails: (input) => {
-        const edits = Array.isArray(input.edits) ? input.edits : [];
-        return [
-          fieldsDetail([
-            displayField("文件", pick(input, FILE_FIELDS)),
-            displayField("编辑数", edits.length || undefined),
-          ]),
-        ];
+/**
+ * Claude 工具名 → lilia 协议规范化器。
+ *
+ * 每个条目 `(input, payload) => { kind, subkind?, payload, summary? }`：
+ *  - kind/subkind：lilia 协议分类
+ *  - payload：lilia 协议字段（已挑过的键，不要塞整个 input）
+ *  - summary：runner 写入 timeline event 的 summary 字段（默认空串）
+ *
+ * payload 传进来的是 SDK 给的原始 input + 周边 metadata 合并后的对象，
+ * 适配器只挑感兴趣的字段往 lilia payload 上拷。
+ */
+export const CLAUDE_TO_LILIA = {
+  Bash: (input) => {
+    const command = pickString(input, ["command"]);
+    return {
+      kind: "command",
+      payload: {
+        command,
+        description: pickString(input, ["description"]) || undefined,
       },
-    },
+      summary: shortText(command || pickString(input, ["description"]), 200),
+    };
   },
-  Write: {
-    kind: "file_change",
-    summaryFields: FILE_FIELDS,
-    display: {
-      action: "写入",
-      icon: "file-pen",
-      bucket: "file",
-      unit: "个文件",
-      extractObject: (input) => compactLine(pick(input, FILE_FIELDS), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([displayField("文件", pick(input, FILE_FIELDS))]),
-      ],
-    },
-  },
-  NotebookEdit: {
-    kind: "file_change",
-    summaryFields: ["notebook_path", ...FILE_FIELDS],
-    display: {
-      action: "修改笔记本",
-      icon: "file-pen",
-      bucket: "file",
-      unit: "个文件",
-      extractObject: (input) =>
-        compactLine(pick(input, ["notebook_path", ...FILE_FIELDS]), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([
-          displayField("笔记本", pick(input, ["notebook_path", ...FILE_FIELDS])),
-        ]),
-      ],
-    },
-  },
-  Glob: {
-    kind: "tool",
-    summaryFields: ["pattern"],
-    display: {
-      action: "查找文件",
-      icon: "search",
-      bucket: "tool",
-      unit: "个工具",
-      extractObject: (input) => compactLine(pick(input, ["pattern"]), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([
-          displayField("pattern", pick(input, ["pattern"])),
-          displayField("path", pick(input, ["path"])),
-        ]),
-      ],
-    },
-  },
-  Grep: {
-    kind: "tool",
-    summaryFields: ["pattern"],
-    display: {
-      action: "搜索内容",
-      icon: "search",
-      bucket: "tool",
-      unit: "个工具",
-      extractObject: (input) => compactLine(pick(input, ["pattern"]), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([
-          displayField("pattern", pick(input, ["pattern"])),
-          displayField("path", pick(input, ["path"])),
-          displayField("glob", pick(input, ["glob"])),
-        ]),
-      ],
-    },
-  },
-  WebSearch: {
-    kind: "web_search",
-    summaryFields: ["query"],
-    display: {
-      action: "网络搜索",
-      icon: "search",
-      bucket: "web_search",
-      unit: "次搜索",
-      extractObject: (input) => compactLine(pick(input, ["query"]), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([displayField("查询", pick(input, ["query"]))]),
-      ],
-    },
-  },
-  WebFetch: {
-    kind: "web_search",
-    summaryFields: ["url"],
-    display: {
-      action: "抓取网页",
-      icon: "globe",
-      bucket: "web_search",
-      unit: "次搜索",
-      extractObject: (input) => compactLine(pick(input, ["url"]), 1200),
-      buildDetails: (input) => [
-        fieldsDetail([displayField("URL", pick(input, ["url"]))]),
-      ],
-    },
-  },
-  TodoWrite: {
-    kind: "todo_list",
-    summaryFields: [],
-    display: {
-      action: "更新待办",
-      icon: "list-checks",
-      bucket: "todo",
-      unit: "次待办",
-      extractObject: () => "",
-      buildDetails: (input) => {
-        const items = readTodoItems({ items: input.todos });
-        return [listDetail(items)];
+  Read: (input) => {
+    const path = pickString(input, FILE_PATH_KEYS);
+    return {
+      kind: "file_read",
+      payload: {
+        path,
+        offset: pickNumber(input, ["offset"]),
+        limit: pickNumber(input, ["limit"]),
       },
-    },
+      summary: shortText(path, 200),
+    };
   },
-  Task: {
-    kind: "subagent",
-    summaryFields: ["subagent_type", "description"],
-    display: {
-      action: "调用子代理",
-      icon: "bot",
-      bucket: "subagent",
-      unit: "个子代理",
-      extractObject: (input) =>
-        compactLine(pick(input, ["subagent_type", "description"]), 200),
-      buildDetails: (input) => [
-        markdownDetail(pick(input, ["prompt", "description"]), "default"),
-      ],
-    },
+  Edit: (input) => {
+    const path = pickString(input, FILE_PATH_KEYS);
+    return {
+      kind: "file_change",
+      subkind: "edit",
+      payload: { path },
+      summary: shortText(path, 200),
+    };
   },
-  ExitPlanMode: {
-    kind: "plan",
-    summaryFields: ["plan"],
-    display: {
-      action: "制定计划",
-      icon: "list-ordered",
-      bucket: "plan",
-      unit: "项计划",
-      extractObject: () => "",
-      buildDetails: (input) => [markdownDetail(pick(input, ["plan"]))],
-    },
+  MultiEdit: (input) => {
+    const path = pickString(input, FILE_PATH_KEYS);
+    const edits = Array.isArray(input?.edits) ? input.edits : [];
+    return {
+      kind: "file_change",
+      subkind: "multi_edit",
+      payload: {
+        path,
+        editCount: edits.length || undefined,
+      },
+      summary: shortText(path, 200),
+    };
+  },
+  Write: (input) => {
+    const path = pickString(input, FILE_PATH_KEYS);
+    return {
+      kind: "file_change",
+      subkind: "write",
+      payload: { path },
+      summary: shortText(path, 200),
+    };
+  },
+  NotebookEdit: (input) => {
+    const path = pickString(input, ["notebook_path", ...FILE_PATH_KEYS]);
+    return {
+      kind: "file_change",
+      subkind: "notebook",
+      payload: { path },
+      summary: shortText(path, 200),
+    };
+  },
+  Glob: (input) => {
+    const query = pickString(input, ["pattern"]);
+    return {
+      kind: "search",
+      subkind: "glob",
+      payload: {
+        query,
+        path: pickString(input, ["path"]) || undefined,
+      },
+      summary: shortText(query, 200),
+    };
+  },
+  Grep: (input) => {
+    const query = pickString(input, ["pattern"]);
+    return {
+      kind: "search",
+      subkind: "grep",
+      payload: {
+        query,
+        path: pickString(input, ["path"]) || undefined,
+        glob: pickString(input, ["glob"]) || undefined,
+      },
+      summary: shortText(query, 200),
+    };
+  },
+  WebSearch: (input) => {
+    const query = pickString(input, ["query"]);
+    return {
+      kind: "search",
+      subkind: "web",
+      payload: { query },
+      summary: shortText(query, 200),
+    };
+  },
+  WebFetch: (input) => {
+    const url = pickString(input, ["url"]);
+    return {
+      kind: "web_fetch",
+      payload: { url },
+      summary: shortText(url, 200),
+    };
+  },
+  TodoWrite: (input) => {
+    const todos = Array.isArray(input?.todos) ? input.todos : [];
+    return {
+      kind: "todo_list",
+      payload: { items: todos },
+      summary: "",
+    };
+  },
+  Task: (input, ctx) => {
+    const agentType = pickString(input, ["subagent_type"])
+      || pickString(ctx ?? {}, ["subagent_type", "subagentType"]);
+    const description = pickString(input, ["description"])
+      || pickString(ctx ?? {}, ["task_description", "taskDescription", "description"]);
+    const prompt = pickString(input, ["prompt"]);
+    return {
+      kind: "subagent",
+      payload: {
+        agentType,
+        description: description || undefined,
+        prompt: prompt || undefined,
+      },
+      summary: shortText(agentType || description, 200),
+    };
+  },
+  ExitPlanMode: (input) => {
+    const plan = pickString(input, ["plan"]);
+    return {
+      kind: "plan",
+      payload: { plan },
+      summary: "",
+    };
   },
 };
 
 // Agent 是 Task 的别名（CLI 调度同一类事件）。
-CLAUDE_TOOLS.Agent = CLAUDE_TOOLS.Task;
+CLAUDE_TO_LILIA.Agent = CLAUDE_TO_LILIA.Task;
 
-export const CLAUDE_TOOL_DEFAULT = {
-  kind: "tool",
-  summaryFields: [],
-  display: {
-    action: "调用工具",
-    icon: "wrench",
-    bucket: "tool",
-    unit: "个工具",
-    objectInLabel: true,
-    extractObject: (_input, name) => name,
-    buildDetails: (input, payload, name) => [
-      fieldsDetail([displayField("工具", name)]),
-      codeDetail("INPUT", input),
-      codeDetail("OUTPUT", pick(payload, ["output"])),
-    ],
-  },
-};
+/**
+ * 未登记工具的兜底：归到 lilia 的 tool kind，把原始 input 透传。
+ * 这样下游 deriveLiliaToolDisplay 能给出 "已调用工具 <name>" 的渲染。
+ */
+function defaultNormalize(name, input) {
+  return {
+    kind: "tool",
+    payload: {
+      toolName: name,
+      input,
+    },
+    summary: "",
+  };
+}
 
-/** 按工具名查表，未登记则返回 CLAUDE_TOOL_DEFAULT。 */
-export function getClaudeTool(name) {
-  return CLAUDE_TOOLS[name] ?? CLAUDE_TOOL_DEFAULT;
+/**
+ * 适配 Claude 工具调用为 lilia 协议事件。
+ *
+ * @param name    Claude 工具名（block.name）
+ * @param input   block.input
+ * @param ctx     可选：周边元数据，用于补 subagent_type 等
+ * @returns       { kind, subkind?, payload, summary }
+ */
+export function normalizeClaudeTool(name, input, ctx) {
+  const safeName = typeof name === "string" && name ? name : "tool";
+  const safeInput = readRecord(input);
+  const normalizer = CLAUDE_TO_LILIA[safeName];
+  if (normalizer) {
+    const result = normalizer(safeInput, ctx ?? null);
+    return {
+      kind: result.kind,
+      subkind: result.subkind ?? null,
+      payload: result.payload ?? {},
+      summary: result.summary ?? "",
+    };
+  }
+  return defaultNormalize(safeName, safeInput);
 }

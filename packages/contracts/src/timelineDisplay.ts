@@ -1,19 +1,16 @@
 /**
  * Timeline display 派生器：纯函数，从 `{kind, status, title, summary, payload}`
  * 算出 `AgentTimelineDisplay`。前端在渲染时调用，runner / Rust 端只负责存事实
- * （工具名、原始 input/output、文件路径、命令、todo 项等），不固化任何展示
- * 文本，这样改 display 规则可以即时影响历史数据。
+ * （kind + subkind + lilia payload），不固化任何展示文本，这样改 display 规则
+ * 可以即时影响历史数据。
  *
- * 设计原则：
- * - 工具事件（payload.toolName 命中工具范畴 kind）走 `./claudeTools.mjs` 里的
- *   CLAUDE_TOOLS 表 —— 同一张表里既有 lilia 的 kind 分类、runner 用的 summary
- *   字段，也有渲染规则。改一处两边同步。
- * - 其它 kind（message/reasoning/command/file_change/mcp/web_search/subagent/
- *   plan/error/turn/todo_list/tool default）走本文件 buildByKind 分支。
- * - 兜底返回 "处理 + 标题" 的简陋 display，绝不返回 null。
+ * 工具事件按 lilia 协议（liliaTools.mjs）派生：先取 payload.kind 兜底（旧 DB 数据
+ * payload.toolName=Bash 这类的，再走 Claude 适配层 normalize 一次回填）。其它 kind
+ * （message/reasoning/mcp/error/turn/...）走本文件 buildByKind 分支。
  */
 import {
-  getClaudeTool,
+  deriveLiliaToolDisplay,
+  getLiliaToolRule,
   compactLine,
   pick,
   readFirstString,
@@ -25,7 +22,8 @@ import {
   markdownDetail,
   listDetail,
   type ParsedTodoItem,
-} from "./claudeTools.mjs";
+} from "./liliaTools.mjs";
+import { normalizeClaudeTool } from "./claudeTools.mjs";
 import type {
   AgentTimelineDisplay,
   AgentTimelineDisplayDetail,
@@ -48,11 +46,9 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
   const summary = compactLine(input.summary ?? "", 1200);
   const payload = readRecord(input.payload);
 
-  const declaredToolName = readFirstString(payload, ["toolName", "tool", "name"], 200);
-  if (declaredToolName && isToolKind(kind)) {
-    return cleanDisplay(
-      buildClaudeToolDisplay(declaredToolName, readRecord(payload.input), payload),
-    ) ?? fallbackDisplay(kind, title, summary);
+  const toolDisplay = tryDeriveToolDisplay(kind, payload, title, summary);
+  if (toolDisplay) {
+    return cleanDisplay(toolDisplay) ?? fallbackDisplay(kind, title, summary);
   }
 
   return (
@@ -61,8 +57,78 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
   );
 }
 
-/** kind 取值落在工具范畴时才查 CLAUDE_TOOLS —— message/reasoning/turn/error 不该被工具规则覆写。 */
-function isToolKind(kind: string): boolean {
+/**
+ * 试着按 lilia 工具协议派生 display。命中两类输入：
+ *  - 旧 DB 事件：`payload.toolName` 是 Claude 工具名（如 Bash/Read/Edit）。先尝试
+ *    通过 `normalizeClaudeTool` 把 (toolName, input) 折成 lilia 协议事件 ——
+ *    历史数据 kind 通常是泛型 "tool"，但通过 toolName 能定位到正确的桶。
+ *  - 新协议事件：`kind` 直接是 lilia 工具 kind（command / file_read / ... / tool），
+ *    且没有 toolName（或 normalizer 没命中专用规则），按 kind+subkind 派生。
+ */
+function tryDeriveToolDisplay(
+  kind: string,
+  payload: Record<string, unknown>,
+  title: string,
+  summary: string,
+): AgentTimelineDisplay | null {
+  const toolName = readFirstString(payload, ["toolName", "tool", "name"], 200);
+  if (toolName && isLegacyToolKind(kind)) {
+    const normalized = normalizeClaudeTool(toolName, payload.input, payload);
+    // 仅当 normalizer 命中专用规则（kind 不是兜底的 "tool"）时才走这条路径，
+    // 否则按下面的"事件自身 kind"分支处理（保留事件生产方声明的 kind）。
+    if (normalized.kind !== "tool" || kind === "tool") {
+      const display = deriveLiliaToolDisplay({
+        kind: normalized.kind,
+        subkind: normalized.subkind,
+        payload: { ...normalized.payload, output: pick(payload, ["output"]) },
+        title,
+      });
+      const finished = finishToolDisplay(display, payload, title, summary);
+      if (finished) return finished;
+    }
+  }
+
+  if (getLiliaToolRule(kind, asString(payload.subkind))) {
+    const display = deriveLiliaToolDisplay({
+      kind,
+      subkind: asString(payload.subkind),
+      payload,
+      title,
+    });
+    return finishToolDisplay(display, payload, title, summary);
+  }
+
+  return null;
+}
+
+function finishToolDisplay(
+  display: AgentTimelineDisplay | null,
+  payload: Record<string, unknown>,
+  title: string,
+  summary: string,
+): AgentTimelineDisplay | null {
+  if (!display) return null;
+  // summary 是事件生产方的人工摘要（如 "正在运行完整验证"），优先于派生器自动算的
+  // object 当 preview；object/output/title 做兜底。
+  const preview =
+    summary || display.preview || compactLine(pick(payload, ["output"]), 600) || title;
+  // 派生器只读 payload；当 payload 没给出可用 object 时回退到事件 title。
+  // 主要服务于 plan / todo_list 这类 payload 没有"目标对象"的事件，让 aria-label
+  // 能拼出 "已更新待办 + title"。
+  const object = display.object?.trim() ? display.object : title;
+  return {
+    ...display,
+    object,
+    preview,
+  };
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+/** 旧持久化数据里把工具事件落进这些 kind，需要走兼容映射。 */
+function isLegacyToolKind(kind: string): boolean {
   return (
     kind === "tool" ||
     kind === "command" ||
@@ -71,34 +137,10 @@ function isToolKind(kind: string): boolean {
     kind === "todo_list" ||
     kind === "subagent" ||
     kind === "plan" ||
+    kind === "search" ||
+    kind === "web_fetch" ||
     kind === "web_search"
   );
-}
-
-function buildClaudeToolDisplay(
-  name: string,
-  input: Record<string, unknown>,
-  payload: Record<string, unknown>,
-): AgentTimelineDisplay {
-  const config = getClaudeTool(name).display;
-  const object = config.extractObject(input, name) || "";
-  const details = config
-    .buildDetails(input, payload, name)
-    .filter((detail): detail is AgentTimelineDisplayDetail => detail !== null);
-  return {
-    icon: config.icon,
-    action: config.action,
-    object,
-    objectInLabel: config.objectInLabel === true ? true : undefined,
-    preview: object || compactLine(pick(payload, ["output"]), 600),
-    details: details.length ? details : undefined,
-    group: {
-      key: `tool:${name}`,
-      bucket: config.bucket,
-      unit: config.unit,
-      count: 1,
-    },
-  };
 }
 
 // ---------- kind 分支 ----------
@@ -141,14 +183,16 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
       };
     }
     case "command": {
+      // 旧 DB 事件（runner 直接 emit kind=command，但还没 normalize 到 lilia 协议字段）
+      // 兜底：从 payload 里取 command/output/stderr 这些字段拼显示，
+      // 与 liliaTools.command.default 的渲染保持一致。
       const nestedInput = readRecord(payload.input);
-      // 不回落到 title：title 通常是工具名 "Bash"，灌进 object 会变成"已运行 Bash"。
       const command =
         readFirstString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
         readFirstString(nestedInput, ["command", "cmd", "shellCommand", "script", "argv"], 1200);
       const output = readFirstString(
         payload,
-        ["aggregatedOutput", "combinedOutput", "outputText", "stdout"],
+        ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
         6000,
       );
       const stderr = readFirstString(
@@ -165,7 +209,7 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
           lineDetail(summary),
           fieldsDetail([
             displayField("cwd", pick(payload, ["cwd", "workdir", "workingDirectory"])),
-            displayField("exit", pick(payload, ["exitCode", "code", "statusCode"])),
+            displayField("exit", pick(payload, ["exitCode", "code", "statusCode", "exit"])),
             displayField("duration", formatDuration(payload)),
           ]),
           codeDetail("COMMAND", command, "shell"),
@@ -216,19 +260,8 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         },
       };
     }
-    case "web_search": {
-      const query = readFirstString(payload, ["query", "searchQuery", "q", "url"], 1200);
-      return {
-        icon: "search",
-        action: "网络搜索",
-        object: query || usefulObject(title, ["web search", "search"]),
-        preview: summary || query,
-        details: [fieldsDetail([displayField("查询", query)])]
-          .filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:web_search", bucket: "web_search", unit: "次搜索", count: 1 },
-      };
-    }
     case "subagent": {
+      // 旧 DB 兜底（同 command/file_change）；新协议事件会先命中 lilia 工具规则。
       const name =
         readFirstString(
           payload,

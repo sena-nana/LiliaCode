@@ -32,7 +32,7 @@
 // agent 调度链路而不消耗真实 API。
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getClaudeTool } from "@lilia/contracts/claudeTools.mjs";
+import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -442,52 +442,36 @@ function extractClaudeAssistantText(msg) {
 }
 
 /**
- * 工具的 kind 分类与 summary 字段在 `@lilia/contracts/claudeTools.mjs` 里和渲染
- * 规则共置。runner 这边只复用其中的两件事：
- *  - **kind**：把工具调用归类到 message/command/file_change/file_read/... 这条
- *    数据维度，下游（前端 + agent 扩展）按 kind 决定语义而不是按工具名硬编码。
- *  - **summaryFields**：从 input 里取一个简短字符串塞到 timeline `summary`，方便
- *    timeline 节流器和后续摘要逻辑使用。
+ * Claude 工具调用 → lilia 协议事件：通过 `@lilia/contracts/claudeTools.mjs` 的
+ * `normalizeClaudeTool()` 适配表把 (toolName, input) 折成 `{kind, subkind, payload}`，
+ * runner 直接按 lilia 协议 emit timeline event。
  *
- * runner 不读 display 字段 —— display 由前端 `deriveTimelineDisplay()` 现算。
+ * runner 不知道任何 display / 渲染细节 —— display 由前端
+ * `deriveTimelineDisplay()` 按 lilia 协议（liliaTools.mjs）现算。
  */
-function getClaudeToolKind(name) {
-  return getClaudeTool(name).kind || "tool";
-}
-
-function summarizeClaudeToolInput(name, input) {
-  const fields = getClaudeTool(name).summaryFields ?? [];
-  for (const key of fields) {
-    const value = input?.[key];
-    if (typeof value === "string" && value.trim()) {
-      return shortText(value.trim(), 200) || "";
-    }
-  }
-  return "";
-}
-
 function emitClaudeToolTimeline(block, msg, ctx) {
   const name = stringOrNull(block?.name) || "tool";
   const input = isRecord(block?.input) ? block.input : {};
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
-  const kind = getClaudeToolKind(name);
+  const normalized = normalizeClaudeTool(name, input, {
+    subagent_type: msg?.subagent_type,
+    task_description: msg?.task_description,
+  });
   const payload = {
     backend: "claude",
     toolName: name,
-    input,
+    ...normalized.payload,
     sessionId: msg?.session_id,
-    subagentType: msg?.subagent_type,
-    taskDescription: msg?.task_description,
   };
-  const summary = summarizeClaudeToolInput(name, input);
+  if (normalized.subkind) payload.subkind = normalized.subkind;
   if (ctx?.activeTools && sourceId) {
-    ctx.activeTools.set(sourceId, { name, kind, input });
+    ctx.activeTools.set(sourceId, { name, kind: normalized.kind, subkind: normalized.subkind, payload: normalized.payload });
   }
   emitTimeline({
-    kind,
+    kind: normalized.kind,
     status: "started",
     title: name,
-    summary,
+    summary: normalized.summary,
     payload,
     sourceId,
   });
@@ -503,8 +487,9 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   if (!sourceId) return;
   const cached = ctx?.activeTools?.get(sourceId);
   const name = cached?.name || "tool";
-  const input = cached?.input || {};
-  const kind = cached?.kind || getClaudeToolKind(name);
+  const cachedPayload = cached?.payload || {};
+  const kind = cached?.kind || "tool";
+  const subkind = cached?.subkind || null;
   const isError = block?.is_error === true;
   let text = "";
   if (typeof block?.content === "string") {
@@ -519,11 +504,12 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   const payload = {
     backend: "claude",
     toolName: name,
-    input,
+    ...cachedPayload,
     isError,
     output: text,
     sessionId: msg?.session_id,
   };
+  if (subkind) payload.subkind = subkind;
   emitTimeline({
     kind,
     status: isError ? "error" : "success",
@@ -545,10 +531,11 @@ function sweepActiveClaudeTools(ctx, status, sessionId) {
     const payload = {
       backend: "claude",
       toolName: info.name,
-      input: info.input,
+      ...(info.payload || {}),
       sweptByTurnEnd: true,
       sessionId,
     };
+    if (info.subkind) payload.subkind = info.subkind;
     emitTimeline({
       kind: info.kind,
       status,
@@ -567,14 +554,16 @@ function mapClaudeSystemTimeline(msg) {
 
   if (msg.type === "tool_progress") {
     const name = msg.tool_name || "tool";
+    const normalized = normalizeClaudeTool(name, {});
     const payload = {
       backend: "claude",
       toolName: name,
       elapsedTimeSeconds: msg.elapsed_time_seconds,
       sessionId: msg.session_id,
     };
+    if (normalized.subkind) payload.subkind = normalized.subkind;
     emitTimeline({
-      kind: getClaudeToolKind(name),
+      kind: normalized.kind,
       status: "running",
       title: name,
       summary: `${msg.elapsed_time_seconds ?? 0}s`,
@@ -1040,19 +1029,19 @@ function getCodexStatus(eventType, item) {
 function codexTimelineKindForItem(item) {
   switch (getCodexItemType(item)) {
     case "reasoning":
-      return "reasoning";
+      return { kind: "reasoning" };
     case "command_execution":
-      return "command";
+      return { kind: "command" };
     case "file_change":
-      return "file_change";
+      return { kind: "file_change" };
     case "mcp_tool_call":
-      return "mcp";
+      return { kind: "mcp" };
     case "web_search":
-      return "web_search";
+      return { kind: "search", subkind: "web" };
     case "todo_list":
-      return "todo_list";
+      return { kind: "todo_list" };
     case "error":
-      return "error";
+      return { kind: "error" };
     default:
       return null;
   }
@@ -1092,7 +1081,7 @@ function codexTimelineTitle(kind, item, eventType) {
       return "File change";
     case "mcp":
       return [item.server, item.tool].filter(Boolean).join(" / ") || "MCP tool";
-    case "web_search":
+    case "search":
       return shortText(item.query, 200) || "Web search";
     case "todo_list":
       return eventType === "item.completed" ? "Plan completed" : "Plan";
@@ -1117,7 +1106,7 @@ function codexTimelineSummary(kind, item) {
       return summarizeCodexFileChanges(item.changes);
     case "mcp":
       return [item.server, item.tool].filter(Boolean).join(" / ");
-    case "web_search":
+    case "search":
       return shortText(item.query, 1200) || "";
     case "todo_list":
       return summarizeCodexTodoList(item.items);
@@ -1128,13 +1117,14 @@ function codexTimelineSummary(kind, item) {
   }
 }
 
-function codexTimelinePayload(kind, item, eventType) {
+function codexTimelinePayload(kind, subkind, item, eventType) {
   const base = {
     backend: "codex",
     eventType,
     itemType: getCodexItemType(item),
     status: item?.status,
   };
+  if (subkind) base.subkind = subkind;
   switch (kind) {
     case "reasoning":
       return { ...base, text: item.text };
@@ -1142,14 +1132,14 @@ function codexTimelinePayload(kind, item, eventType) {
       return {
         ...base,
         command: item.command,
-        aggregatedOutput: item.aggregated_output,
-        exitCode: item.exit_code,
+        output: item.aggregated_output,
+        exit: item.exit_code,
       };
     case "file_change":
       return { ...base, changes: item.changes };
     case "mcp":
       return { ...base, server: item.server, tool: item.tool };
-    case "web_search":
+    case "search":
       return { ...base, query: item.query };
     case "todo_list":
       return { ...base, items: item.items };
@@ -1161,14 +1151,15 @@ function codexTimelinePayload(kind, item, eventType) {
 }
 
 function emitCodexItemTimeline(eventType, item) {
-  const kind = codexTimelineKindForItem(item);
-  if (!kind) return;
+  const route = codexTimelineKindForItem(item);
+  if (!route) return;
+  const { kind, subkind = null } = route;
   emitTimeline({
     kind,
     status: getCodexStatus(eventType, item),
     title: codexTimelineTitle(kind, item, eventType),
     summary: codexTimelineSummary(kind, item),
-    payload: codexTimelinePayload(kind, item, eventType),
+    payload: codexTimelinePayload(kind, subkind, item, eventType),
     sourceId: item?.id,
   });
 }
