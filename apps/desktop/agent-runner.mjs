@@ -13,10 +13,12 @@
 //       }
 //   - stdin 后续行：父进程对此前发出的 control_request 的响应，目前包括：
 //       {"type":"consent_response","id":"consent-1","decision":"allow"|"deny","message":"..."}
+//       {"type":"ask_user_response","id":"ask-1","result":{...AskUserResult}}
 //     父进程不会再关闭 stdin —— SDK 调 query 结束、runner 主动 exit 收尾。
 //   - stdout 还是一行一条 NDJSON：
 //       {"type":"timeline","event":{...}}         事实流（落到 UI 时间线）
 //       {"type":"consent_request","id":"...",...} canUseTool 触发，等待父进程响应
+//       {"type":"ask_user_request","id":"...","spec":{...AskUserSpec}} 等待用户反馈
 //       {"type":"done","sessionId":"...","subtype":"success|error_..."}
 //       {"type":"error","message":"..."}
 //
@@ -31,9 +33,10 @@
 // 隐藏 env：LILIA_AGENT_DRY_RUN=1 时跳过真实 SDK，模拟一段 NDJSON——用于单测
 // agent 调度链路而不消耗真实 API。
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 import { createInterface } from "node:readline";
+import { z } from "zod/v4";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -267,12 +270,22 @@ function emitError(message, payload) {
 
 const consentPending = new Map();
 let consentSeq = 1;
+const askUserPending = new Map();
+let askUserSeq = 1;
 
 function requestUserConsent(payload) {
   const id = `consent-${consentSeq++}`;
   emit({ type: "consent_request", id, ...payload });
   return new Promise((resolve) => {
     consentPending.set(id, resolve);
+  });
+}
+
+function requestAskUser(spec) {
+  const id = `ask-${askUserSeq++}`;
+  emit({ type: "ask_user_request", id, spec });
+  return new Promise((resolve) => {
+    askUserPending.set(id, resolve);
   });
 }
 
@@ -292,6 +305,13 @@ function handleControlLine(line) {
       decision: msg.decision === "allow" ? "allow" : "deny",
       message: stringOrNull(msg.message) || "",
     });
+    return;
+  }
+  if (msg.type === "ask_user_response") {
+    const resolve = askUserPending.get(msg.id);
+    if (!resolve) return;
+    askUserPending.delete(msg.id);
+    resolve(normalizeAskUserResult(msg.result));
   }
 }
 
@@ -531,6 +551,162 @@ function extractClaudeAssistantText(msg) {
     .map((b) => b.text)
     .join("");
 }
+
+function normalizeAskUserResult(value) {
+  if (!isRecord(value)) return { answers: {}, cancelled: true };
+  return {
+    answers: isRecord(value.answers) ? value.answers : {},
+    cancelled: value.cancelled === true,
+  };
+}
+
+function stableOptionId(index) {
+  return `o-${index + 1}`;
+}
+
+function normalizeClaudeAskUserQuestions(input) {
+  const rawQuestions = Array.isArray(input?.questions) ? input.questions.slice(0, 4) : [];
+  return rawQuestions
+    .map((question, questionIndex) => {
+      if (!isRecord(question)) return null;
+      const options = Array.isArray(question.options) ? question.options.slice(0, 6) : [];
+      const normalizedOptions = options
+        .map((option, optionIndex) => {
+          if (!isRecord(option)) return null;
+          const label = stringOrNull(option.label) || `Option ${optionIndex + 1}`;
+          const normalized = {
+            id: stableOptionId(optionIndex),
+            label,
+          };
+          const description = stringOrNull(option.description);
+          const preview = stringOrNull(option.preview);
+          if (description) normalized.description = description;
+          if (preview) normalized.preview = preview;
+          if (optionIndex === 0) normalized.recommended = true;
+          return normalized;
+        })
+        .filter(Boolean);
+      if (normalizedOptions.length < 2) return null;
+      return {
+        id: `q-${questionIndex + 1}`,
+        header: shortText(question.header, 12) || `问题 ${questionIndex + 1}`,
+        question: shortText(question.question, 1200) || "请选择一个选项。",
+        mode: question.multiSelect === true ? "multi" : "single",
+        options: normalizedOptions,
+        allowOther: true,
+        skippable: false,
+      };
+    })
+    .filter(Boolean);
+}
+
+function claudeAskUserInputToSpec(input) {
+  return {
+    title: "Claude 想确认一下",
+    source: "Claude",
+    dismissable: true,
+    questions: normalizeClaudeAskUserQuestions(input),
+  };
+}
+
+function answerValueToLabels(answer, question, originalQuestion) {
+  if (!answer) return null;
+  if (answer.skipped) return null;
+  const sourceOptions = Array.isArray(originalQuestion?.options) ? originalQuestion.options : [];
+  const labels = new Map(
+    question.options.map((option, index) => [
+      option.id,
+      stringOrNull(sourceOptions[index]?.label) || option.label,
+    ]),
+  );
+  const one = (value) => {
+    if (value === "other") return stringOrNull(answer.notes) || "Other";
+    return labels.get(value) || stringOrNull(value);
+  };
+  if (Array.isArray(answer.value)) {
+    return answer.value.map(one).filter(Boolean).join(", ");
+  }
+  return one(answer.value);
+}
+
+function askUserResultToClaudeOutput(input, spec, result) {
+  const originalQuestions = Array.isArray(input?.questions) ? input.questions : [];
+  const answers = {};
+  const annotations = {};
+  for (let index = 0; index < spec.questions.length; index += 1) {
+    const question = spec.questions[index];
+    const originalQuestion = originalQuestions[index];
+    const questionText =
+      stringOrNull(originalQuestion?.question) ||
+      question.question ||
+      `Question ${index + 1}`;
+    const answer = result.answers?.[question.id];
+    const labelText = answerValueToLabels(answer, question, originalQuestion);
+    if (labelText) answers[questionText] = labelText;
+    if (answer?.notes) annotations[questionText] = { notes: answer.notes };
+  }
+  return {
+    questions: originalQuestions.slice(0, spec.questions.length),
+    answers,
+    annotations,
+    cancelled: result.cancelled === true,
+  };
+}
+
+async function handleClaudeAskUserQuestion(input) {
+  const spec = claudeAskUserInputToSpec(input);
+  if (spec.questions.length === 0) {
+    return {
+      content: [{ type: "text", text: "No valid questions were provided." }],
+      isError: true,
+    };
+  }
+  const result = await requestAskUser(spec);
+  const output = askUserResultToClaudeOutput(input, spec, result);
+  return {
+    content: [{ type: "text", text: JSON.stringify(output) }],
+    structuredContent: output,
+    isError: output.cancelled,
+  };
+}
+
+const askUserQuestionInputSchema = {
+  questions: z
+    .array(
+      z.object({
+        question: z.string(),
+        header: z.string(),
+        options: z
+          .array(
+            z.object({
+              label: z.string(),
+              description: z.string().optional().default(""),
+              preview: z.string().optional(),
+            }),
+          )
+          .min(2)
+          .max(4),
+        multiSelect: z.boolean().optional().default(false),
+      }),
+    )
+    .min(1)
+    .max(4),
+};
+
+const liliaAskUserServer = createSdkMcpServer({
+  name: "lilia",
+  version: "0.1.0",
+  tools: [
+    tool(
+      "ask_user_question",
+      "Ask the human user one or more multiple-choice questions through Lilia.",
+      askUserQuestionInputSchema,
+      handleClaudeAskUserQuestion,
+      { alwaysLoad: true },
+    ),
+  ],
+  alwaysLoad: true,
+});
 
 /**
  * Claude 工具调用 → lilia 协议事件：通过 `@lilia/contracts/claudeTools.mjs` 的
@@ -940,6 +1116,15 @@ async function runClaude(cmd) {
     // Bash 工具。启用 claude_code 预设拿回基础上下文，Windows 上 append 一段
     // shell 约束，见 buildClaudeSystemPrompt。
     systemPrompt: buildClaudeSystemPrompt(),
+    mcpServers: {
+      lilia: liliaAskUserServer,
+    },
+    toolAliases: {
+      AskUserQuestion: "mcp__lilia__ask_user_question",
+    },
+    toolConfig: {
+      askUserQuestion: { previewFormat: "markdown" },
+    },
     ...permOpts,
     // SDK 默认会启用 Claude Code 的全套工具（Read/Write/Bash/...）。这正是
     // 「Lilia 是 Claude Code 的图形外壳」这一定位要的——不裁剪 tools。

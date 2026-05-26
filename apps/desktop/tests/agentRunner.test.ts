@@ -7,6 +7,16 @@ const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
 
 describe("agent-runner Claude stream", () => {
+  it("Claude AskUserQuestion 走 Lilia AskUser 请求/响应通道", () => {
+    expect(runnerSource).toContain("createSdkMcpServer");
+    expect(runnerSource).toContain("requestAskUser");
+    expect(runnerSource).toContain("ask_user_request");
+    expect(runnerSource).toContain("ask_user_response");
+    expect(runnerSource).toContain("AskUserQuestion");
+    expect(runnerSource).toContain("mcp__lilia__ask_user_question");
+    expect(runnerSource).toMatch(/toolAliases:\s*\{\s*AskUserQuestion:/);
+  });
+
   it("Claude thinking delta 走 reasoning timeline，并按 block index 累加文本", () => {
     // 抽取 candidate 字段时把 thinking 排到首位，否则 thinking_delta
     // 的实际载体 (`delta.thinking`) 会被漏掉。

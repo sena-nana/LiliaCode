@@ -42,6 +42,11 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         tool_use_id: Option<String>,
     },
+    AskUserRequest {
+        id: String,
+        #[serde(default)]
+        spec: JsonValue,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -93,6 +98,11 @@ impl AgentRuntimeEvent {
                     decision_reason: opt_str("decisionReason"),
                     tool_use_id: opt_str("toolUseID"),
                 })
+            }
+            "ask_user_request" => {
+                let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+                let spec = value.get("spec").cloned().unwrap_or(JsonValue::Null);
+                Some(Self::AskUserRequest { id, spec })
             }
             "done" => {
                 let session_id = value
@@ -387,6 +397,49 @@ mod tests {
             ),
             Some(AgentRuntimeEvent::Timeline {
                 event: json!({ "kind": "tool" }),
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(
+                &json!({
+                    "type": "ask_user_request",
+                    "id": "ask-1",
+                    "spec": {
+                        "title": "Claude 想确认一下",
+                        "source": "Claude",
+                        "questions": [
+                            {
+                                "id": "q-1",
+                                "header": "方案",
+                                "question": "选哪个方案？",
+                                "mode": "single",
+                                "options": [
+                                    { "id": "o-1", "label": "A" },
+                                    { "id": "o-2", "label": "B" }
+                                ]
+                            }
+                        ]
+                    }
+                })
+            ),
+            Some(AgentRuntimeEvent::AskUserRequest {
+                id: "ask-1".to_string(),
+                spec: json!({
+                    "title": "Claude 想确认一下",
+                    "source": "Claude",
+                    "questions": [
+                        {
+                            "id": "q-1",
+                            "header": "方案",
+                            "question": "选哪个方案？",
+                            "mode": "single",
+                            "options": [
+                                { "id": "o-1", "label": "A" },
+                                { "id": "o-2", "label": "B" }
+                            ]
+                        }
+                    ]
+                }),
             })
         );
         assert_eq!(

@@ -590,3 +590,17 @@ export interface AskUserResult {
   /** 用户在过程中关闭了整个对话。answers 仍包含此前已回答的题。 */
   cancelled: boolean;
 }
+
+export interface AgentAskUserRequestEvent {
+  taskId: string;
+  turnId: string;
+  backend: ChatBackendKind;
+  requestId: string;
+  spec: AskUserSpec;
+}
+
+export interface AgentAskUserResponsePayload {
+  taskId: string;
+  requestId: string;
+  result: AskUserResult;
+}

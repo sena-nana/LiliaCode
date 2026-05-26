@@ -16,6 +16,8 @@ import type {
   ChatBranchOption,
   ChatComposerState,
   AgentTimelineEvent,
+  AgentAskUserRequestEvent,
+  AskUserResult,
   ChatModelOption,
   ChatSendResult,
   ConnectionMode,
@@ -60,6 +62,8 @@ export interface ToolConsentRequest {
 }
 
 export type ToolConsentDecision = "allow" | "deny";
+
+export type AgentAskUserRequest = AgentAskUserRequestEvent;
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
@@ -176,6 +180,14 @@ export function onToolConsentRequest(
   );
 }
 
+export function onAskUserRequest(
+  handler: (e: AgentAskUserRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentAskUserRequest>("chat:ask-user-request", (event) =>
+    handler(event.payload),
+  );
+}
+
 /** 把用户对一次 canUseTool 的决策写回 runner，让被卡住的工具继续 / 终止。 */
 export function respondToolConsent(
   taskId: string,
@@ -188,5 +200,18 @@ export function respondToolConsent(
     requestId,
     decision,
     message: message ?? null,
+  });
+}
+
+/** 把 AskUser 浮层收集到的结果写回 runner，让 Claude AskUserQuestion 继续。 */
+export function respondAskUser(
+  taskId: string,
+  requestId: string,
+  result: AskUserResult,
+): Promise<void> {
+  return invoke<void>("chat_respond_ask_user", {
+    taskId,
+    requestId,
+    result,
   });
 }

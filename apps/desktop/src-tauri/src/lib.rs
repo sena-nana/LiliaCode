@@ -231,6 +231,16 @@ struct ToolConsentRequestEvent {
     tool_use_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AskUserRequestEvent {
+    task_id: String,
+    turn_id: String,
+    backend: String,
+    request_id: String,
+    spec: JsonValue,
+}
+
 fn timeline_input_from_runtime_event(
     ctx: &AgentTurnContext,
     event: &AgentRuntimeEvent,
@@ -1072,6 +1082,18 @@ fn spawn_agent_turn(
                             },
                         );
                     }
+                    AgentRuntimeEvent::AskUserRequest { id, spec } => {
+                        let _ = app_handle.emit(
+                            "chat:ask-user-request",
+                            AskUserRequestEvent {
+                                task_id: task_id_for_thread.clone(),
+                                turn_id: turn_id_for_thread.clone(),
+                                backend: backend_for_thread.clone(),
+                                request_id: id.clone(),
+                                spec: spec.clone(),
+                            },
+                        );
+                    }
                     AgentRuntimeEvent::Done { session_id, .. } => {
                         if let Some(sid) = session_id {
                             last_session_id = Some(sid.clone());
@@ -1303,6 +1325,35 @@ fn chat_respond_tool_consent(
     };
     let Some(handle) = handle else {
         return Ok(()); // runner 已退出；忽略
+    };
+    let mut stdin = handle.lock().map_err(|e| e.to_string())?;
+    stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stdin.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 把用户对 Claude AskUserQuestion 的回答写回 runner 的 stdin。
+#[tauri::command]
+fn chat_respond_ask_user(
+    task_id: String,
+    request_id: String,
+    result: JsonValue,
+    store: State<'_, ChatStore>,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "type": "ask_user_response",
+        "id": request_id,
+        "result": result,
+    });
+    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    line.push('\n');
+
+    let handle = {
+        let map = store.running_stdins.lock().unwrap();
+        map.get(&task_id).cloned()
+    };
+    let Some(handle) = handle else {
+        return Ok(());
     };
     let mut stdin = handle.lock().map_err(|e| e.to_string())?;
     stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
@@ -1949,6 +2000,7 @@ pub fn run() {
             ping,
             chat_send_message,
             chat_respond_tool_consent,
+            chat_respond_ask_user,
             chat_list_models,
             chat_list_branches,
             chat_get_composer_state,

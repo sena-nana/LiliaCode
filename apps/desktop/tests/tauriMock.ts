@@ -415,6 +415,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_list_branches":
       return [{ name: "main", current: true }];
 
+    case "chat_respond_ask_user":
+      return undefined;
+
     case "todo_list":
       return [];
 
