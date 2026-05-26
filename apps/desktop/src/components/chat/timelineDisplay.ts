@@ -1,8 +1,9 @@
-import type {
-  AgentTimelineDisplay,
-  AgentTimelineEvent,
-  AgentTimelineEventStatus,
-  AgentTimelinePayload,
+import {
+  deriveTimelineDisplay,
+  type AgentTimelineDisplay,
+  type AgentTimelineEvent,
+  type AgentTimelineEventStatus,
+  type AgentTimelinePayload,
 } from "@lilia/contracts";
 
 export type MarkdownBlockTone = "default" | "muted";
@@ -30,16 +31,30 @@ const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
   "in_progress",
 ]);
 
+type DisplayDerivableEvent = Pick<
+  AgentTimelineEvent,
+  "kind" | "status" | "title" | "summary" | "payload"
+>;
+
 export function readTimelinePayloadRecord(
   event: Pick<AgentTimelineEvent, "payload">,
 ): TimelinePayloadRecord {
   return readPayloadRecord(event.payload);
 }
 
-export function readTimelineDisplay(
-  event: Pick<AgentTimelineEvent, "display">,
-): AgentTimelineDisplay {
-  return event.display;
+/**
+ * Display 是从 `{kind, status, title, summary, payload}` 现算的视图缓存，
+ * 不读 DB 上的旧 `display` 列，也不允许任何 caller 自己拼。换 display 规则
+ * 时历史事件自动跟着变 —— 这是把 display 移出 DB 的全部动机。
+ */
+export function readTimelineDisplay(event: DisplayDerivableEvent): AgentTimelineDisplay {
+  return deriveTimelineDisplay({
+    kind: event.kind,
+    status: event.status,
+    title: event.title,
+    summary: event.summary,
+    payload: event.payload,
+  });
 }
 
 export function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
@@ -91,7 +106,7 @@ export function isTimelineFinalReplyStreaming(
 }
 
 export function timelineDefaultExpanded(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "display">,
+  event: DisplayDerivableEvent,
 ): boolean {
   const display = readTimelineDisplay(event);
   if (typeof display?.defaultExpanded === "boolean") return display.defaultExpanded;
@@ -99,13 +114,13 @@ export function timelineDefaultExpanded(
 }
 
 export function timelineDefaultCollapsed(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status" | "display">,
+  event: DisplayDerivableEvent,
 ): boolean {
   return !timelineDefaultExpanded(event);
 }
 
 export function isTimelineExpanded(
-  event: Pick<AgentTimelineEvent, "id" | "kind" | "payload" | "status" | "display">,
+  event: DisplayDerivableEvent & Pick<AgentTimelineEvent, "id">,
   toggledIds: ReadonlySet<string>,
 ): boolean {
   const defaultExpanded = timelineDefaultExpanded(event);
@@ -130,9 +145,7 @@ export function pruneTimelineExpandedIds(
   return new Set([...toggledIds].filter((id) => currentIds.has(id)));
 }
 
-export function timelineEventLabel(
-  event: Pick<AgentTimelineEvent, "display" | "status">,
-): string {
+export function timelineEventLabel(event: DisplayDerivableEvent): string {
   const display = readTimelineDisplay(event);
   const label = display.label?.trim();
   if (label) return label;
@@ -147,9 +160,7 @@ export function timelineEventLabel(
   return "事件";
 }
 
-export function timelineGroupKey(
-  event: Pick<AgentTimelineEvent, "display">,
-): string | null {
+export function timelineGroupKey(event: DisplayDerivableEvent): string | null {
   const display = readTimelineDisplay(event);
   const declaredKey = display.group?.key?.trim();
   if (declaredKey) return `display:${declaredKey}`;
@@ -169,7 +180,7 @@ export function aggregateTimelineStatus(
 }
 
 export function timelineGroupLabel(
-  representative: Pick<AgentTimelineEvent, "display">,
+  representative: DisplayDerivableEvent,
   count: number,
   status: AgentTimelineEventStatus,
 ): string {
@@ -186,14 +197,12 @@ export function timelineGroupLabel(
   return `事件 ${count} 项`;
 }
 
-export function timelineDisplayIcon(
-  event: Pick<AgentTimelineEvent, "display">,
-): string | null {
+export function timelineDisplayIcon(event: DisplayDerivableEvent): string | null {
   return readTimelineDisplay(event).icon ?? null;
 }
 
 export function timelineDeclaredGroupUnit(
-  event: Pick<AgentTimelineEvent, "display">,
+  event: DisplayDerivableEvent,
 ): TimelineDeclaredGroupUnit | null {
   const group = readTimelineDisplay(event).group;
   const key = group?.bucket?.trim() || group?.key?.trim();
@@ -239,9 +248,7 @@ function appendTimelineObjectLabel(label: string, objectLabel: string): string {
   return objectLabel ? `${label} ${objectLabel}` : label;
 }
 
-export function timelineInlinePreview(
-  event: Pick<AgentTimelineEvent, "display" | "kind" | "payload">,
-): string {
+export function timelineInlinePreview(event: DisplayDerivableEvent): string {
   if (isTimelineFinalReply(event)) return "";
   const display = readTimelineDisplay(event);
   const declaredPreview = display.preview?.trim();

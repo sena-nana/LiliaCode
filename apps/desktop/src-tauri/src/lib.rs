@@ -243,7 +243,6 @@ fn timeline_input_from_runtime_event(
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
     let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
-    let display = obj.get("display").cloned().filter(|value| !value.is_null())?;
     let source_id = obj.get("sourceId").and_then(|v| v.as_str());
     let id = source_id.map(|sid| format!("{}:{}:{sid}", ctx.task_id, ctx.turn_id));
 
@@ -257,7 +256,6 @@ fn timeline_input_from_runtime_event(
         title,
         summary,
         payload,
-        display,
         created_at: None,
         updated_at: None,
         order: None,
@@ -376,11 +374,6 @@ fn persist_and_emit_message_timeline_event(
             "content": message.content,
             "queued": queued,
         }),
-        display: serde_json::json!({
-            "icon": "message",
-            "label": "用户输入",
-            "preview": message.content,
-        }),
         created_at: Some(message.created_at as i64),
         updated_at: Some(now_millis() as i64),
         order: Some(0),
@@ -406,16 +399,7 @@ fn persist_and_emit_error_timeline_event(
         status: "error".to_string(),
         title: "错误".to_string(),
         summary: Some(message.clone()),
-        payload: serde_json::json!({ "message": message.clone() }),
-        display: serde_json::json!({
-            "icon": "error",
-            "label": "错误",
-            "preview": message,
-            "details": [
-                { "type": "line", "text": message, "tone": "muted" }
-            ],
-            "group": { "key": "kind:error", "bucket": "error", "unit": "个错误", "count": 1 }
-        }),
+        payload: serde_json::json!({ "message": message }),
         created_at: Some(now as i64),
         updated_at: Some(now as i64),
         order: None,
@@ -463,11 +447,6 @@ mod agent_event_sink_tests {
                     "title": "Run tests",
                     "summary": "17 passed",
                     "payload": { "command": "cargo test" },
-                    "display": {
-                        "icon": "terminal",
-                        "action": "运行",
-                        "object": "cargo test"
-                    },
                     "sourceId": "cargo-test"
                 }),
             },
@@ -483,23 +462,36 @@ mod agent_event_sink_tests {
         assert_eq!(input.title, "Run tests");
         assert_eq!(input.summary, Some("17 passed".to_string()));
         assert_eq!(input.payload, json!({ "command": "cargo test" }));
-        assert_eq!(
-            input.display,
-            json!({
-                "icon": "terminal",
-                "action": "运行",
-                "object": "cargo test"
-            })
-        );
         assert_eq!(input.order, None);
     }
 
     #[test]
-    fn timeline_runtime_event_missing_display_is_ignored() {
+    fn timeline_runtime_event_without_payload_still_maps() {
+        // runner 不再产出 display；事件缺 payload 时也要兜底为 null 而非被丢弃。
         let input = timeline_input_from_runtime_event(
             &turn_context(),
             &AgentRuntimeEvent::Timeline {
-                event: json!({}),
+                event: json!({
+                    "kind": "reasoning",
+                    "status": "running",
+                    "title": "思考中"
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(input.kind, "reasoning");
+        assert_eq!(input.status, "running");
+        assert_eq!(input.title, "思考中");
+        assert_eq!(input.payload, JsonValue::Null);
+    }
+
+    #[test]
+    fn non_object_timeline_event_is_ignored() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!("not an object"),
             },
         );
 
@@ -547,7 +539,6 @@ mod agent_event_sink_tests {
               title       TEXT NOT NULL,
               summary     TEXT,
               payload     TEXT NOT NULL,
-              display     TEXT NOT NULL,
               created_at  INTEGER NOT NULL,
               updated_at  INTEGER NOT NULL,
               "order"     INTEGER NOT NULL
@@ -578,7 +569,6 @@ mod agent_event_sink_tests {
                 title: "Codex done".to_string(),
                 summary: None,
                 payload: json!({ "sessionId": "codex-thread" }),
-                display: json!({ "icon": "turn" }),
                 created_at: Some(200),
                 updated_at: Some(200),
                 order: Some(1),

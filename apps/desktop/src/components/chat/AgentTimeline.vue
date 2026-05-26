@@ -14,6 +14,7 @@ import {
   isTimelineExpanded,
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
+  readTimelineDisplay,
   readTimelinePayloadRecord,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
@@ -405,7 +406,7 @@ function reasoningContent(event: AgentTimelineEvent): string {
   if (fromPayload) return fromPayload;
   const fromSummary = (event.summary ?? "").trim();
   if (fromSummary) return fromSummary;
-  return (event.display.preview ?? "").trim();
+  return (readTimelineDisplay(event).preview ?? "").trim();
 }
 
 function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
