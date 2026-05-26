@@ -59,11 +59,13 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
 
 /**
  * 试着按 lilia 工具协议派生 display。命中两类输入：
- *  - 旧 DB 事件：`payload.toolName` 是 Claude 工具名（如 Bash/Read/Edit）。先尝试
- *    通过 `normalizeClaudeTool` 把 (toolName, input) 折成 lilia 协议事件 ——
- *    历史数据 kind 通常是泛型 "tool"，但通过 toolName 能定位到正确的桶。
- *  - 新协议事件：`kind` 直接是 lilia 工具 kind（command / file_read / ... / tool），
- *    且没有 toolName（或 normalizer 没命中专用规则），按 kind+subkind 派生。
+ *  - 旧 DB 事件：`payload.toolName` 是 Claude 工具名（如 Bash/Read/Edit），lilia
+ *    字段（command / path / query …）藏在 `payload.input` 里。通过
+ *    `normalizeClaudeTool` 把 input 折成 lilia 协议字段，再补回 payload。
+ *  - 新协议事件：`kind` 已经是 lilia 工具 kind，payload 顶层就有 command/path/query
+ *    等字段。Claude normalizer 看不见 `payload.input`（没那字段），会返回空字段，
+ *    必须用原始 payload 的值覆盖回来，否则派生器只剩下 output 可用，preview 就
+ *    退化成结果文本。
  */
 function tryDeriveToolDisplay(
   kind: string,
@@ -77,10 +79,11 @@ function tryDeriveToolDisplay(
     // 仅当 normalizer 命中专用规则（kind 不是兜底的 "tool"）时才走这条路径，
     // 否则按下面的"事件自身 kind"分支处理（保留事件生产方声明的 kind）。
     if (normalized.kind !== "tool" || kind === "tool") {
+      const mergedPayload = mergeToolPayload(normalized.payload, payload);
       const display = deriveLiliaToolDisplay({
         kind: normalized.kind,
         subkind: normalized.subkind,
-        payload: { ...normalized.payload, output: pick(payload, ["output"]) },
+        payload: mergedPayload,
         title,
       });
       const finished = finishToolDisplay(display, payload, title, summary);
@@ -101,17 +104,37 @@ function tryDeriveToolDisplay(
   return null;
 }
 
+/**
+ * 合并 Claude normalizer 的输出和原始 payload —— 原始 payload 的非空值优先
+ * （这是新协议事件 / tool result 事件的情况，顶层就有 command/path），
+ * normalizer 的字段做兜底（旧 DB 事件的 payload.input 里才有真值）。
+ */
+function mergeToolPayload(
+  normalized: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...normalized };
+  for (const [key, value] of Object.entries(original)) {
+    if (value === undefined || value === null || value === "") continue;
+    merged[key] = value;
+  }
+  if (original.output !== undefined) merged.output = original.output;
+  return merged;
+}
+
 function finishToolDisplay(
   display: AgentTimelineDisplay | null,
-  payload: Record<string, unknown>,
+  _payload: Record<string, unknown>,
   title: string,
   summary: string,
 ): AgentTimelineDisplay | null {
   if (!display) return null;
-  // summary 是事件生产方的人工摘要（如 "正在运行完整验证"），优先于派生器自动算的
-  // object 当 preview；object/output/title 做兜底。
-  const preview =
-    summary || display.preview || compactLine(pick(payload, ["output"]), 600) || title;
+  // summary 是事件生产方的人工旁白（如 "正在运行完整验证"），优先于派生器自动算的
+  // object 当 preview。runner 在工具完成时已不再把 output 写进 summary，所以这条
+  // 回退链不会再被结果文本覆盖掉 command/path 之类的派生预览。
+  // 派生器 preview 紧跟其后，title 兜底；不把 output 当 preview，否则折叠态会
+  // 把「这一步在做什么」替换成「这一步的结果是什么」。
+  const preview = summary || display.preview || title;
   // 派生器只读 payload；当 payload 没给出可用 object 时回退到事件 title。
   // 主要服务于 plan / todo_list 这类 payload 没有"目标对象"的事件，让 aria-label
   // 能拼出 "已更新待办 + title"。
