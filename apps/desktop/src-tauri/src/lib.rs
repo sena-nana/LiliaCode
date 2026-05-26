@@ -68,7 +68,18 @@ struct ChatMessage {
     task_id: String,
     role: String, // "user" | "assistant" | "system"
     content: String,
+    attachments: Vec<ChatAttachment>,
     created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatAttachment {
+    id: String,
+    name: String,
+    path: String,
+    kind: String,
+    size: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +87,7 @@ struct PendingChatTurn {
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    attachments: Vec<ChatAttachment>,
     message: ChatMessage,
 }
 
@@ -402,6 +414,7 @@ fn persist_and_emit_message_timeline_event(
         payload: serde_json::json!({
             "role": message.role,
             "content": message.content,
+            "attachments": message.attachments,
             "queued": queued,
         }),
         created_at: Some(message.created_at as i64),
@@ -672,6 +685,7 @@ fn queue_pending_turn(
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    attachments: Vec<ChatAttachment>,
     message: ChatMessage,
 ) -> usize {
     let mut pending = store.pending_turns.lock().unwrap();
@@ -680,6 +694,7 @@ fn queue_pending_turn(
         content,
         composer,
         project_cwd,
+        attachments,
         message,
     });
     queue.len()
@@ -900,6 +915,7 @@ fn spawn_agent_turn(
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    attachments: Vec<ChatAttachment>,
 ) {
     let backend = composer.backend.clone();
     let resume_session_id = {
@@ -924,6 +940,7 @@ fn spawn_agent_turn(
     let task_id_for_thread = task_id.clone();
     let composer_for_thread = composer.clone();
     let prompt_for_thread = content.clone();
+    let attachments_for_thread = attachments.clone();
     let backend_for_thread = backend.clone();
     let turn_id_for_thread = format!("turn-{}", now_millis());
 
@@ -951,6 +968,7 @@ fn spawn_agent_turn(
             "backend": backend_for_thread,
             "cwd": project_cwd,
             "prompt": prompt_for_thread,
+            "attachments": attachments_for_thread,
             "model": composer_for_thread.model,
             "resumeSessionId": resume_session_id,
             "permission": composer_for_thread.permission,
@@ -1218,6 +1236,7 @@ fn finish_agent_turn(
             turn.content,
             turn.composer,
             turn.project_cwd,
+            turn.attachments,
         );
     }
 }
@@ -1229,6 +1248,58 @@ fn ping() -> &'static str {
     "pong"
 }
 
+fn describe_attachment_path(path: String) -> ChatAttachment {
+    let raw_path = PathBuf::from(path.trim());
+    let normalized_path = if raw_path.is_absolute() {
+        raw_path
+    } else {
+        env::current_dir()
+            .map(|cwd| cwd.join(&raw_path))
+            .unwrap_or(raw_path)
+    };
+    let metadata = std::fs::metadata(&normalized_path).ok();
+    let kind = metadata
+        .as_ref()
+        .map(|meta| {
+            if meta.is_file() {
+                "file"
+            } else if meta.is_dir() {
+                "directory"
+            } else {
+                "unknown"
+            }
+        })
+        .unwrap_or("unknown")
+        .to_string();
+    let size = metadata
+        .as_ref()
+        .and_then(|meta| if meta.is_file() { Some(meta.len()) } else { None });
+    let path_text = normalized_path.to_string_lossy().to_string();
+    let name = normalized_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| path_text.clone());
+
+    ChatAttachment {
+        id: format!("att-{}", Uuid::new_v4()),
+        name,
+        path: path_text,
+        kind,
+        size,
+    }
+}
+
+#[tauri::command]
+fn chat_describe_attachments(paths: Vec<String>) -> Result<Vec<ChatAttachment>, String> {
+    Ok(paths
+        .into_iter()
+        .filter(|path| !path.trim().is_empty())
+        .map(describe_attachment_path)
+        .collect())
+}
+
 #[tauri::command]
 fn chat_send_message(
     app: AppHandle,
@@ -1236,6 +1307,7 @@ fn chat_send_message(
     content: String,
     composer: ChatComposerState,
     project_cwd: String,
+    attachments: Vec<ChatAttachment>,
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
@@ -1244,6 +1316,7 @@ fn chat_send_message(
         task_id: task_id.clone(),
         role: "user".to_string(),
         content: content.clone(),
+        attachments: attachments.clone(),
         created_at: now_millis(),
     };
     // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
@@ -1263,6 +1336,7 @@ fn chat_send_message(
                 content,
                 composer.clone(),
                 project_cwd,
+                attachments,
                 user_msg.clone(),
             );
             persist_and_emit_message_timeline_event(
@@ -1288,6 +1362,7 @@ fn chat_send_message(
         content,
         composer,
         project_cwd,
+        attachments,
     );
 
     Ok(ChatSendResult {
@@ -1998,6 +2073,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            chat_describe_attachments,
             chat_send_message,
             chat_respond_tool_consent,
             chat_respond_ask_user,

@@ -31,9 +31,29 @@ import {
 } from "../../services/tasksStore";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 
+type TreeDragKind = "project" | "task";
+type TreeDropPosition = "before" | "after" | "inside";
+
+interface TreeDragMarker {
+  kind: TreeDragKind;
+  active: boolean;
+  projectId: string | null;
+  taskId: string | null;
+}
+
+interface TreeDropMarker {
+  kind: "project" | "task" | "orphans";
+  projectId: string | null;
+  taskId: string | null;
+  position: TreeDropPosition;
+  valid: boolean;
+}
+
 const props = defineProps<{
   project: Project;
   isExpanded: boolean;
+  dragSource?: TreeDragMarker | null;
+  dropTarget?: TreeDropMarker | null;
 }>();
 
 const emit = defineEmits<{
@@ -167,6 +187,38 @@ function isActiveTask(taskId: string) {
   return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
 }
 
+function isSameTreeRow(
+  marker: TreeDragMarker | TreeDropMarker | null | undefined,
+  kind: TreeDragKind,
+  projectId: string | null,
+  taskId: string | null,
+): boolean {
+  return !!marker &&
+    marker.kind === kind &&
+    marker.projectId === projectId &&
+    marker.taskId === taskId;
+}
+
+function treeRowStateClass(
+  kind: TreeDragKind,
+  projectId: string | null,
+  taskId: string | null,
+) {
+  const isSource = props.dragSource?.active === true &&
+    isSameTreeRow(props.dragSource, kind, projectId, taskId);
+  const isTarget = isSameTreeRow(props.dropTarget, kind, projectId, taskId);
+  const position = isTarget ? props.dropTarget?.position : null;
+  const valid = isTarget && props.dropTarget?.valid === true;
+  return {
+    "is-tree-drag-source": isSource,
+    "is-tree-drop-target": isTarget,
+    "is-tree-drop-invalid": isTarget && !valid,
+    "is-tree-drop-before": valid && position === "before",
+    "is-tree-drop-after": valid && position === "after",
+    "is-tree-drop-inside": valid && position === "inside",
+  };
+}
+
 // --- Context menu ---
 function buildMenu(): ContextMenuItem[] {
   const hasCwd = !!props.project.cwd;
@@ -230,7 +282,13 @@ function onMoreClick(e: MouseEvent) {
 <template>
   <div class="sb-tree__group">
     <div class="sb-tree__row sb-tree__row--project"
-      :class="{ 'is-open': isExpanded, 'is-editing': editingId === project.id }"
+      :class="[
+        { 'is-open': isExpanded, 'is-editing': editingId === project.id },
+        treeRowStateClass('project', project.id, null),
+      ]"
+      data-tree-kind="project"
+      :data-project-id="project.id"
+      :data-pinned="project.pinned ? 'true' : 'false'"
       :role="editingId === project.id ? undefined : 'button'"
       :tabindex="editingId === project.id ? -1 : 0"
       :aria-expanded="isExpanded"
@@ -268,7 +326,16 @@ function onMoreClick(e: MouseEvent) {
       <div class="sb-collapse__inner">
         <RouterLink v-for="c in listProjectConversations(project.id)" :key="c.id"
           :to="`/projects/${project.id}/tasks/${c.id}`" class="sb-tree__row sb-tree__row--child"
-          :class="{ 'is-active': isActiveTask(c.id) }"
+          :class="[
+            { 'is-active': isActiveTask(c.id) },
+            treeRowStateClass('task', project.id, c.id),
+          ]"
+          draggable="false"
+          data-tree-kind="task"
+          :data-task-id="c.id"
+          :data-project-id="project.id"
+          :data-pinned="c.pinned ? 'true' : 'false'"
+          @dragstart.prevent
           @mouseleave="onRowLeave">
           <span class="sb-tree__name">{{ c.title }}</span>
           <div class="sb-tree__hover-tools" @click.stop>

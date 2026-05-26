@@ -3,6 +3,8 @@ import type {
   AgentTimelineDisplayDetail,
   AgentTimelineEvent,
   AgentTimelineEventKind,
+  ChatAttachment,
+  ChatMessage,
   TimelineDisplayInput,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
@@ -44,5 +46,32 @@ export type TimelineDisplayInputShapeTypeTest = Assert<
 
 export type AgentTimelineDisplayDetailSchemaTypeTest = Assert<
   Extends<DetailCases, AgentTimelineDisplayDetail>
+>;
+
+export type ChatAttachmentSchemaTypeTest = Assert<
+  Extends<
+    {
+      id: "att-1";
+      name: "README.md";
+      path: "D:/PROJECT/workspace/Lilia/README.md";
+      kind: "file";
+      size: 42;
+    },
+    ChatAttachment
+  >
+>;
+
+export type ChatMessageIncludesAttachmentsTypeTest = Assert<
+  Extends<
+    {
+      id: "u-1";
+      taskId: "t-1";
+      role: "user";
+      content: "see attached";
+      attachments: [];
+      createdAt: 1;
+    },
+    ChatMessage
+  >
 >;
 

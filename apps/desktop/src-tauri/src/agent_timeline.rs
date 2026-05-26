@@ -94,12 +94,29 @@ pub fn insert(
 ) -> Result<AgentTimelineEvent, String> {
     let now = now_millis();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let existing_position: Option<(i64, i64)> = conn
+        .query_row(
+            r#"SELECT created_at, "order" FROM agent_timeline_events WHERE id = ?1"#,
+            params![id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| format!("agent_timeline_insert: 查询已有事件位置失败：{e}"))?;
+    let created_at = input
+        .created_at
+        .or_else(|| existing_position.map(|(created_at, _)| created_at))
+        .unwrap_or(now);
     let order = match input.order {
         Some(order) => order,
-        None => next_order(conn, &input.task_id)?,
+        None => existing_position
+            .map(|(_, order)| order)
+            .unwrap_or(next_order(conn, &input.task_id)?),
     };
-    let created_at = input.created_at.unwrap_or(now);
-    let updated_at = input.updated_at.unwrap_or(created_at);
+    let updated_at = input.updated_at.unwrap_or(if existing_position.is_some() {
+        now
+    } else {
+        created_at
+    });
     let payload_text = serde_json::to_string(&input.payload)
         .map_err(|e| format!("agent_timeline_insert: payload 序列化失败：{e}"))?;
 
@@ -299,6 +316,78 @@ mod tests {
         assert_eq!(listed[0].kind, "extension_index");
         assert_eq!(listed[0].payload, json!({ "raw": true }));
         assert_eq!(listed[0].summary.as_deref(), Some("indexed"));
+    }
+
+    #[test]
+    fn upsert_without_explicit_position_keeps_original_timeline_position() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("reasoning-1".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: "claude".to_string(),
+                kind: "reasoning".to_string(),
+                status: "running".to_string(),
+                title: "思考中".to_string(),
+                summary: Some("first".to_string()),
+                payload: json!({ "text": "first" }),
+                created_at: Some(100),
+                updated_at: Some(100),
+                order: Some(1),
+            },
+        )
+        .unwrap();
+        insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("command-1".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: "claude".to_string(),
+                kind: "command".to_string(),
+                status: "success".to_string(),
+                title: "yarn test".to_string(),
+                summary: Some("command".to_string()),
+                payload: json!({ "command": "yarn test" }),
+                created_at: Some(200),
+                updated_at: Some(200),
+                order: Some(2),
+            },
+        )
+        .unwrap();
+
+        let updated = insert(
+            &conn,
+            AgentTimelineEventInput {
+                id: Some("reasoning-1".to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: "claude".to_string(),
+                kind: "reasoning".to_string(),
+                status: "success".to_string(),
+                title: "已思考".to_string(),
+                summary: Some("first completed".to_string()),
+                payload: json!({ "text": "first completed" }),
+                created_at: None,
+                updated_at: None,
+                order: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated.created_at, 100);
+        assert_eq!(updated.order, 1);
+
+        let listed = list(&conn, "task-1").unwrap();
+        assert_eq!(
+            listed.iter().map(|event| event.id.as_str()).collect::<Vec<_>>(),
+            vec!["reasoning-1", "command-1"],
+        );
+        assert_eq!(listed[0].summary.as_deref(), Some("first completed"));
     }
 
     #[test]

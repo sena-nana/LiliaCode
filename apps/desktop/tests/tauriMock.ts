@@ -117,6 +117,8 @@ let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
+let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
+let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -159,9 +161,11 @@ export function resetTauriMockData() {
   chatRunning = {};
   chatQueued = {};
   eventHandlers = {};
+  webviewDragDropHandlers = [];
   refreshSessionCounts();
   mockInvoke.mockClear();
   mockListen.mockClear();
+  mockGetCurrentWebview.mockClear();
 }
 
 export function emitTauriEvent(event: string, payload: unknown) {
@@ -169,6 +173,85 @@ export function emitTauriEvent(event: string, payload: unknown) {
     handler({ payload });
   }
 }
+
+export function emitWebviewDragDropEvent(payload: unknown) {
+  for (const handler of webviewDragDropHandlers) {
+    handler({ payload });
+  }
+}
+
+export function setMockProjectPinned(projectId: string, pinned: boolean) {
+  projects = projects.map((project) =>
+    project.id === projectId ? { ...project, pinned } : project
+  );
+  projectPinUpdater?.(projectId, pinned);
+}
+
+export function bindMockProjectPinUpdater(
+  updater: ((projectId: string, pinned: boolean) => void) | null,
+) {
+  projectPinUpdater = updater;
+}
+
+export function mockProjectsForStore() {
+  refreshSessionCounts();
+  return projects.map((project) => ({
+    id: project.id,
+    name: project.name,
+    cwd: project.cwd,
+    sessionCount: project.sessionCount,
+    pinned: project.pinned,
+  }));
+}
+
+export function mockTasksByProjectForStore() {
+  const byProject: Record<string, unknown[]> = {};
+  for (const project of projects) {
+    byProject[project.id] = tasks
+      .filter((task) => task.projectId === project.id)
+      .map(cloneTask)
+      .sort((a, b) =>
+        Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
+      )
+      .map((task) => ({
+        id: task.id,
+        projectId: task.projectId ?? "",
+        sessionId: task.sessionId,
+        title: task.title,
+        status: task.status,
+        createdAt: task.createdAt,
+        pinned: task.pinned,
+        parentId: task.parentId,
+        dependsOn: [...task.dependsOn],
+      }));
+  }
+  return byProject;
+}
+
+export function mockOrphansForStore() {
+  return tasks
+    .filter((task) => task.projectId === null)
+    .map(cloneTask)
+    .sort((a, b) =>
+      Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
+    )
+    .map((task) => ({
+      id: task.id,
+      sessionId: task.sessionId,
+      title: task.title,
+      createdAt: task.createdAt,
+      pinned: task.pinned,
+    }));
+}
+
+export const mockGetCurrentWebview = vi.fn(() => ({
+  onDragDropEvent: vi.fn(async (handler: (event: { payload: unknown }) => void) => {
+    webviewDragDropHandlers = [...webviewDragDropHandlers, handler];
+    return async () => {
+      webviewDragDropHandlers = webviewDragDropHandlers.filter((h) => h !== handler);
+    };
+  }),
+}));
 
 export function completeMockAgentTurn(taskId: string) {
   emitTauriEvent("chat:done", {
@@ -240,6 +323,7 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
       if (row.role !== "user" && row.role !== "system") return null;
       const id = String(row.id ?? `message-${index}`);
       const content = String(row.content ?? "");
+      const attachments = Array.isArray(row.attachments) ? row.attachments : [];
       const createdAt = typeof row.createdAt === "number" ? row.createdAt : Date.now();
       const title = row.role === "system" ? "系统消息" : "用户输入";
       return {
@@ -254,6 +338,7 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
         payload: {
           role: row.role,
           content,
+          attachments,
           queued: false,
         },
         createdAt,
@@ -318,6 +403,15 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return projects.length !== before;
     }
 
+    case "project_reorder": {
+      const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
+      projects = projects.map((project) => {
+        const index = orderedIds.indexOf(project.id);
+        return index >= 0 ? { ...project, sortOrder: index } : project;
+      });
+      return undefined;
+    }
+
     case "task_list": {
       const projectId = args.projectId as string | null | undefined;
       return tasks
@@ -337,6 +431,31 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         return { ...task, pinned };
       });
       return pinned;
+    }
+
+    case "task_reorder": {
+      const projectId = args.projectId as string | null | undefined;
+      const targetProjectId = projectId ?? null;
+      const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
+      tasks = tasks.map((task) => {
+        if (task.projectId !== targetProjectId) return task;
+        const index = orderedIds.indexOf(task.id);
+        return index >= 0 ? { ...task, sortOrder: index } : task;
+      });
+      return undefined;
+    }
+
+    case "task_reparent": {
+      const taskId = String(args.taskId);
+      const newProjectId = args.newProjectId === null || args.newProjectId === undefined
+        ? null
+        : String(args.newProjectId);
+      tasks = tasks.map((task) =>
+        task.id === taskId
+          ? { ...task, projectId: newProjectId, sortOrder: Number.MAX_SAFE_INTEGER }
+          : task
+      );
+      return undefined;
     }
 
     case "task_archive_project": {
@@ -418,18 +537,34 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_respond_ask_user":
       return undefined;
 
+    case "chat_describe_attachments": {
+      const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
+      return paths.map((path, index) => {
+        const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+        return {
+          id: `att-${index + 1}`,
+          name,
+          path,
+          kind: path.includes(".") ? "file" : "directory",
+          size: path.includes(".") ? 42 : null,
+        };
+      });
+    }
+
     case "todo_list":
       return [];
 
     case "chat_send_message": {
       const taskId = String(args.taskId);
       const content = String(args.content);
+      const attachments = Array.isArray(args.attachments) ? args.attachments : [];
       const queued = chatRunning[taskId] === true;
       const message = {
         id: `u-${(timelineEvents[taskId]?.filter((event) => event.kind === "message").length ?? 0) + 1}`,
         taskId,
         role: "user",
         content,
+        attachments,
         createdAt: Date.now(),
       };
       emitMockTimelineEvent(taskId, {
@@ -442,6 +577,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         payload: {
           role: "user",
           content,
+          attachments,
           queued,
         },
         createdAt: message.createdAt,

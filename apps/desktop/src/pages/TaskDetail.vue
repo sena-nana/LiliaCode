@@ -12,6 +12,7 @@
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   getOrphanConversation,
   isDraftOrphan,
@@ -32,11 +33,15 @@ import {
   onAgentTimeline,
   onDone,
   onTurnStarted,
+  describeAttachments,
+  pickAttachmentFiles,
   sendMessage,
   setComposerState,
 } from "../services/chat";
 import type {
   AgentTimelineEvent,
+  AgentTimelinePayload,
+  ChatAttachment,
   ChatBranchOption,
   ChatComposerState,
   ChatModelOption,
@@ -72,6 +77,8 @@ const composer = ref<ChatComposerState>({
 const models = ref<ChatModelOption[]>([]);
 const branches = ref<ChatBranchOption[]>([]);
 const isTurnRunning = ref(false);
+const chatPageRef = ref<HTMLElement | null>(null);
+const attachments = ref<ChatAttachment[]>([]);
 
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
@@ -92,14 +99,86 @@ function summarizeTitle(text: string): string {
   return normalized.slice(0, 30) + "…";
 }
 
-async function onSend(content: string) {
+function titleForMessage(content: string, outgoingAttachments: ChatAttachment[]): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized) return summarizeTitle(normalized);
+  return outgoingAttachments[0]?.name ?? "附件";
+}
+
+function isPointInsideElement(
+  point: { x: number; y: number } | null,
+  element: HTMLElement | null,
+): boolean {
+  if (!point || !element) return false;
+  const rect = element.getBoundingClientRect();
+  return point.x >= rect.left &&
+    point.x <= rect.right &&
+    point.y >= rect.top &&
+    point.y <= rect.bottom;
+}
+
+function readDropPayload(payload: unknown): {
+  type: string;
+  paths: string[];
+  position: { x: number; y: number } | null;
+} | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  const paths = Array.isArray(row.paths)
+    ? row.paths.filter((path): path is string => typeof path === "string")
+    : [];
+  const position = row.position && typeof row.position === "object" && !Array.isArray(row.position)
+    ? row.position as Record<string, unknown>
+    : null;
+  const x = typeof position?.x === "number" ? position.x : null;
+  const y = typeof position?.y === "number" ? position.y : null;
+  return {
+    type: typeof row.type === "string" ? row.type : "",
+    paths,
+    position: x === null || y === null ? null : { x, y },
+  };
+}
+
+async function addAttachmentsFromPaths(paths: string[]) {
+  const uniquePaths = paths.filter((path, index) =>
+    paths.indexOf(path) === index &&
+    !attachments.value.some((attachment) => attachment.path === path)
+  );
+  if (uniquePaths.length === 0) return;
+  try {
+    const described = await describeAttachments(uniquePaths);
+    const existing = new Set(attachments.value.map((attachment) => attachment.path));
+    attachments.value = [
+      ...attachments.value,
+      ...described.filter((attachment) => !existing.has(attachment.path)),
+    ];
+  } catch (err) {
+    console.error("[chat] describeAttachments failed", err);
+  }
+}
+
+async function onPickAttachments() {
+  try {
+    const paths = await pickAttachmentFiles();
+    await addAttachmentsFromPaths(paths);
+  } catch (err) {
+    console.error("[chat] pickAttachmentFiles failed", err);
+  }
+}
+
+function removeAttachment(attachmentId: string) {
+  attachments.value = attachments.value.filter((attachment) => attachment.id !== attachmentId);
+}
+
+async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
   if (!hasContext.value) return;
+  if (!content.trim() && outgoingAttachments.length === 0) return;
 
   // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
   if (props.projectId && isDraftTask(props.taskId)) {
-    await promoteDraftTask(props.taskId, summarizeTitle(content));
+    await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
   } else if (!props.projectId && isDraftOrphan(props.taskId)) {
-    await promoteDraftOrphan(props.taskId, summarizeTitle(content));
+    await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
   }
 
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
@@ -108,6 +187,7 @@ async function onSend(content: string) {
     id: `pending-${Date.now()}`,
     taskId: props.taskId,
     content,
+    attachments: outgoingAttachments,
     createdAt: Date.now(),
     queued: true,
   });
@@ -118,15 +198,18 @@ async function onSend(content: string) {
       content,
       composer.value,
       cwd,
+      outgoingAttachments,
     );
     removeTimelineEvent(optimistic.id);
     upsertTimelineEvent(createMessageTimelineEvent({
       id: result.message.id,
       taskId: result.message.taskId,
       content: result.message.content,
+      attachments: result.message.attachments,
       createdAt: result.message.createdAt,
       queued: result.dispatch === "queued",
     }));
+    attachments.value = [];
   } catch (err) {
     removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
@@ -176,10 +259,21 @@ function removeTimelineEvent(eventId: string) {
   timelineEvents.value = timelineEvents.value.filter((item) => item.id !== eventId);
 }
 
+function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimelinePayload[] {
+  return attachments.map((attachment) => ({
+    id: attachment.id,
+    name: attachment.name,
+    path: attachment.path,
+    kind: attachment.kind,
+    size: attachment.size,
+  }));
+}
+
 function createMessageTimelineEvent(input: {
   id: string;
   taskId: string;
   content: string;
+  attachments?: ChatAttachment[];
   createdAt: number;
   queued?: boolean;
 }): AgentTimelineEvent {
@@ -195,6 +289,7 @@ function createMessageTimelineEvent(input: {
     payload: {
       role: "user",
       content: input.content,
+      attachments: attachmentsToTimelinePayload(input.attachments ?? []),
       queued: input.queued === true,
     },
     createdAt: input.createdAt,
@@ -271,6 +366,14 @@ const unlisteners: UnlistenFn[] = [];
 
 onMounted(async () => {
   unlisteners.push(
+    await getCurrentWebview().onDragDropEvent(async (event) => {
+      const drop = readDropPayload(event.payload);
+      if (!drop || drop.type !== "drop" || drop.paths.length === 0) return;
+      if (!isPointInsideElement(drop.position, chatPageRef.value)) return;
+      await addAttachmentsFromPaths(drop.paths);
+    }),
+  );
+  unlisteners.push(
     await onAgentTimeline((e) => {
       if (e.taskId !== props.taskId) return;
       upsertTimelineEvent(e);
@@ -319,6 +422,7 @@ watch(
   async () => {
     isTurnRunning.value = false;
     timelineEvents.value = [];
+    attachments.value = [];
     await loadAll();
   },
 );
@@ -327,6 +431,7 @@ watch(
 <template>
   <section
     v-if="hasContext"
+    ref="chatPageRef"
     class="chat-page"
   >
     <div class="chat">
@@ -341,9 +446,12 @@ watch(
         :state="composer"
         :models="models"
         :branches="branches"
+        :attachments="attachments"
         :sending="isTurnRunning"
         @send="onSend"
         @update:state="onComposerUpdate"
+        @remove-attachment="removeAttachment"
+        @pick-attachments="onPickAttachments"
       />
     </div>
   </section>

@@ -9,6 +9,7 @@ import {
   completeMockAgentTurn,
   emitMockTimelineEvent,
   emitTauriEvent,
+  emitWebviewDragDropEvent,
   mockInvoke,
   seedMockChatMessages,
 } from "./tauriMock";
@@ -35,6 +36,22 @@ async function sendText(view: ReturnType<typeof render>, text: string) {
   await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
 }
 
+function setChatDropBounds(view: ReturnType<typeof render>) {
+  const page = view.container.querySelector(".chat-page") as HTMLElement | null;
+  if (!page) throw new Error("未找到聊天页面");
+  page.getBoundingClientRect = () => ({
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: 800,
+    bottom: 800,
+    width: 800,
+    height: 800,
+    toJSON: () => ({}),
+  });
+}
+
 async function expectInitialReasoning(view: ReturnType<typeof render>) {
   await waitFor(() => {
     const node = view.getByText("从持久化时间线恢复的公开摘要。");
@@ -46,6 +63,46 @@ async function expectInitialReasoning(view: ReturnType<typeof render>) {
 describe("chat scheduler", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
+  });
+
+  it("只处理落在当前聊天区域内的文件 drop，并随消息发送", async () => {
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\IGNORED.md"],
+      position: { x: 900, y: 900 },
+    });
+
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_describe_attachments"),
+    ).toBe(false);
+    expect(view.queryByText("IGNORED.md")).not.toBeInTheDocument();
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 120, y: 160 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("README.md")).toBeInTheDocument();
+    });
+
+    await sendText(view, "参考附件总结项目");
+
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      content: "参考附件总结项目",
+      attachments: [
+        {
+          name: "README.md",
+          path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+          kind: "file",
+        },
+      ],
+    });
   });
 
   it("会把 Agent 运行中追加的用户消息进入调度队列", async () => {
@@ -577,6 +634,106 @@ describe("chat scheduler", () => {
       expect(view.getByText("折叠后的命令详情")).toBeInTheDocument();
       expect(view.getByText("折叠后的计划详情")).toBeInTheDocument();
     });
+  });
+
+  it("多个思考事件之间的过程事件仍按时间线顺序显示", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-multi-reasoning",
+        taskId: "t-002",
+        role: "user",
+        content: "请分段思考并检查实现",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-reasoning-first",
+      kind: "reasoning",
+      status: "success",
+      title: "已思考",
+      summary: "第一段思考：先定位渲染归并规则。",
+      payload: {
+        text: "第一段思考：先定位渲染归并规则。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-between-reasoning-command",
+      kind: "command",
+      status: "success",
+      title: "yarn inspect",
+      summary: "读取时间线事件",
+      payload: {
+        command: "yarn inspect",
+        stdout: "中间事件详情",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2200,
+      updatedAt: 2200,
+      order: 3,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-reasoning-second",
+      kind: "reasoning",
+      status: "success",
+      title: "已思考",
+      summary: "第二段思考：再确认命令事件没有被吞掉。",
+      payload: {
+        text: "第二段思考：再确认命令事件没有被吞掉。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-multi-reasoning-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "已按真实顺序展示时间线。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2400,
+      updatedAt: 2400,
+      order: 5,
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn inspect/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
+      expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
+    });
+
+    const firstReasoningItem = view.getByText("第一段思考：先定位渲染归并规则。")
+      .closest(".agent-timeline__item");
+    const commandItem = view.getByRole("button", { name: /yarn inspect/ })
+      .closest(".agent-timeline__item");
+    const secondReasoningItem = view.getByText("第二段思考：再确认命令事件没有被吞掉。")
+      .closest(".agent-timeline__item");
+    const finalItem = view.getByText("已按真实顺序展示时间线。")
+      .closest(".agent-timeline__item");
+
+    expect(firstReasoningItem).not.toBeNull();
+    expect(commandItem).not.toBeNull();
+    expect(secondReasoningItem).not.toBeNull();
+    expect(finalItem).not.toBeNull();
+    expect(firstReasoningItem!.compareDocumentPosition(commandItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(commandItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(secondReasoningItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {

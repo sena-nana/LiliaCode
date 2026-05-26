@@ -83,4 +83,12 @@ describe("agent-runner Claude stream", () => {
       /shortText\(item\.aggregated_output[\s\S]*?\|\|\s*\n?\s*shortText\(item\.command/,
     );
   });
+
+  it("本轮附件会作为路径上下文注入 Claude/Codex prompt", () => {
+    expect(runnerSource).toContain("function buildPromptWithAttachments");
+    expect(runnerSource).toContain("用户随本轮消息附加的本地路径");
+    expect(runnerSource).toContain("不要假设已经读取了内容");
+    expect(runnerSource).toMatch(/cmd\.prompt\s*=\s*buildPromptWithAttachments\(/);
+    expect(runnerSource).toMatch(/attachments[\s\S]*?path/);
+  });
 });

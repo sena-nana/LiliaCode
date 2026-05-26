@@ -6,8 +6,9 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import { Paperclip, ShieldCheck, GitBranch, Sparkles, ArrowUp, Bot } from "lucide-vue-next";
+import { Paperclip, ShieldCheck, GitBranch, Sparkles, ArrowUp, Bot, X } from "lucide-vue-next";
 import type {
+  ChatAttachment,
   ChatBackendKind,
   ChatBranchOption,
   ChatComposerState,
@@ -20,19 +21,24 @@ const props = defineProps<{
   state: ChatComposerState;
   models: ChatModelOption[];
   branches: ChatBranchOption[];
+  attachments?: ChatAttachment[];
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
 }>();
 
 const emit = defineEmits<{
-  send: [content: string];
+  send: [content: string, attachments: ChatAttachment[]];
   "update:state": [next: ChatComposerState];
+  "remove-attachment": [attachmentId: string];
+  "pick-attachments": [];
 }>();
 
 const text = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
 
-const canSend = computed(() => text.value.trim().length > 0);
+const canSend = computed(() =>
+  text.value.trim().length > 0 || (props.attachments?.length ?? 0) > 0,
+);
 
 const permissionOptions = [
   { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },
@@ -70,8 +76,9 @@ function setBackend(v: ChatBackendKind) {
 
 function send() {
   const value = text.value.trim();
-  if (!value) return;
-  emit("send", value);
+  const attachments = props.attachments ?? [];
+  if (!value && attachments.length === 0) return;
+  emit("send", value, attachments);
   text.value = "";
   resize();
 }
@@ -111,14 +118,38 @@ watch(text, async () => {
       @input="resize"
     />
 
+    <div
+      v-if="attachments?.length"
+      class="chat-composer__attachments"
+      aria-label="待发送附件"
+    >
+      <span
+        v-for="attachment in attachments"
+        :key="attachment.id"
+        class="chat-attachment-chip"
+        :title="attachment.path"
+      >
+        <Paperclip :size="13" aria-hidden="true" />
+        <span class="chat-attachment-chip__name">{{ attachment.name }}</span>
+        <button
+          type="button"
+          class="chat-attachment-chip__remove"
+          :aria-label="`移除附件 ${attachment.name}`"
+          @click="emit('remove-attachment', attachment.id)"
+        >
+          <X :size="12" aria-hidden="true" />
+        </button>
+      </span>
+    </div>
+
     <div class="chat-composer__row">
       <div class="chat-composer__group">
         <button
           type="button"
           class="chat-chip chat-chip--icon"
-          title="添加附件（即将上线）"
+          title="添加附件"
           aria-label="添加附件"
-          disabled
+          @click="emit('pick-attachments')"
         >
           <Paperclip :size="14" aria-hidden="true" />
         </button>
