@@ -3,6 +3,7 @@ import { computed, type Component } from "vue";
 import {
   AlertTriangle,
   Bot,
+  BookOpen,
   Circle,
   FilePen,
   ListChecks,
@@ -71,6 +72,8 @@ function iconForDisplay(iconName: AgentTimelineDisplayIcon | null | undefined): 
       return Terminal;
     case "file":
       return FilePen;
+    case "read":
+      return BookOpen;
     case "tool":
       return Wrench;
     case "plug":

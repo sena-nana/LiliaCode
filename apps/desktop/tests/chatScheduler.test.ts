@@ -37,9 +37,9 @@ async function sendText(view: ReturnType<typeof render>, text: string) {
 
 async function expectInitialReasoning(view: ReturnType<typeof render>) {
   await waitFor(() => {
-    expect(view.getByRole("button", { name: /已思考 历史思考摘要/ }))
-      .toHaveAttribute("aria-expanded", "false");
-    expect(view.getByText("从持久化时间线恢复的公开摘要。")).toBeInTheDocument();
+    const node = view.getByText("从持久化时间线恢复的公开摘要。");
+    expect(node.closest(".agent-timeline__item--reasoning-inline"))
+      .not.toBeNull();
   });
 }
 
@@ -572,7 +572,7 @@ describe("chat scheduler", () => {
     });
 
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
-    expect(timelineText.indexOf("已思考"))
+    expect(timelineText.indexOf("从持久化时间线恢复的公开摘要。"))
       .toBeLessThan(timelineText.indexOf("插在过程中的用户消息"));
     expect(timelineText.indexOf("插在过程中的用户消息"))
       .toBeLessThan(timelineText.indexOf("用户消息之后的最终回复"));
