@@ -186,6 +186,48 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("Claude tool result 事件（payload.toolName=Bash + 顶层 command + output）折叠态显示指令而不是输出", async () => {
+    // 复现 runner emit 的 Bash 完成事件形态：summary="" 不再被 output 占用、payload
+    // 同时带 toolName/command/output。派生器要能从顶层 command 拼出预览，而不是被
+    // Claude normalizer 用空 payload.input 折出空 command 后回退到 output。
+    const view = await renderTaskDetail();
+
+    await expectInitialReasoning(view);
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-bash-result",
+      kind: "command",
+      status: "success",
+      title: "Bash",
+      summary: "",
+      payload: {
+        backend: "claude",
+        toolName: "Bash",
+        command: "yarn verify",
+        isError: false,
+        output: "verify 的完整输出文本在折叠态绝不应该露出来",
+      },
+      order: 1,
+    });
+
+    await waitFor(() => {
+      const button = view.getByRole("button", { name: /yarn verify/ });
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      expect(button.closest(".agent-timeline__item")).not.toBeNull();
+      const preview = button
+        .closest(".agent-timeline__head")
+        ?.querySelector(".agent-timeline__preview");
+      expect(preview?.textContent ?? "").toContain("yarn verify");
+      expect(preview?.textContent ?? "").not.toContain("verify 的完整输出文本");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
+    await waitFor(() => {
+      expect(view.getByText("verify 的完整输出文本在折叠态绝不应该露出来"))
+        .toBeInTheDocument();
+    });
+  });
+
   it("过程事件默认显示为单行，点击后展开详情", async () => {
     const view = await renderTaskDetail();
 

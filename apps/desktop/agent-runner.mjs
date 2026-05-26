@@ -500,7 +500,11 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
       .map((c) => c.text)
       .join("\n");
   }
-  const summary = shortText(text, 400) || "";
+  // 工具完成时不要把 output 写进 summary —— 折叠预览由 deriveTimelineDisplay 按
+  // lilia 协议从 payload 派生（command → command 文本，file_read → path…），输出
+  // 用 payload.output 留给展开态的 OUTPUT 代码块。错误信息仍保留进 summary，
+  // 折叠预览能直接看到失败原因。
+  const summary = isError ? shortText(text, 400) || "" : "";
   const payload = {
     backend: "claude",
     toolName: name,
@@ -1097,11 +1101,10 @@ function codexTimelineSummary(kind, item) {
     case "reasoning":
       return shortText(item.text, 1200) || "";
     case "command":
-      return (
-        shortText(item.aggregated_output, 1200) ||
-        shortText(item.command, 1200) ||
-        ""
-      );
+      // 折叠预览要保持稳定地显示指令本身——派生器从 payload.command 算出 object，
+      // 这里把 command 当作 summary 兜底，避免 item.aggregated_output 在命令结束后
+      // 反过来把指令覆盖成输出。
+      return shortText(item.command, 1200) || "";
     case "file_change":
       return summarizeCodexFileChanges(item.changes);
     case "mcp":
