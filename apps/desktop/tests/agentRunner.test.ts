@@ -33,6 +33,28 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toContain("finalizeClaudeThinkingBlocks");
   });
 
+  it("Claude text_delta 只有 text block 能进入最终回复流", () => {
+    const helper = runnerSource.match(
+      /function extractClaudeTextDelta\([\s\S]*?\n\}/,
+    )?.[0];
+    expect(helper).toBeTruthy();
+
+    const blockTypeIndex = helper.indexOf(
+      "const blockType = claudeStreamBlockType(streamEvent, ctx);",
+    );
+    const guardIndex = helper.indexOf(
+      "if (!isClaudeTextStreamBlock(blockType)) return null;",
+    );
+    const returnIndex = helper.indexOf(
+      'return typeof delta.text === "string" ? delta.text : null;',
+    );
+    expect(blockTypeIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeGreaterThan(blockTypeIndex);
+    expect(returnIndex).toBeGreaterThan(guardIndex);
+    expect(runnerSource).toContain("function isClaudeTextStreamBlock");
+    expect(runnerSource).toMatch(/extractClaudeTextDelta\(msg\.event,\s*ctx\)/);
+  });
+
   it("Claude 工具结果只在出错时把 output 写进 summary，成功时让派生器从 payload 现算预览", () => {
     // 起始事件已把 command/path 写进 summary（normalizeClaudeTool 算出的），
     // 工具完成时如果再用 output 覆盖，折叠预览会从「指令」变「结果」——

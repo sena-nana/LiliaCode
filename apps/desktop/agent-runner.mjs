@@ -401,12 +401,24 @@ function buildClaudeSystemPrompt() {
   return append ? { ...base, append } : base;
 }
 
-/** 从 SDKPartialAssistantMessage.event 里抽出文本增量。 */
-function extractClaudeTextDelta(streamEvent) {
+function claudeStreamBlockType(streamEvent, ctx) {
+  if (!isRecord(streamEvent)) return "";
+  if (streamEvent.index === undefined || streamEvent.index === null) return "";
+  return ctx?.streamBlocks?.get(streamEvent.index) || "";
+}
+
+function isClaudeTextStreamBlock(blockType) {
+  return String(blockType || "").toLowerCase() === "text";
+}
+
+/** 从 SDKPartialAssistantMessage.event 里抽出最终回复文本增量。 */
+function extractClaudeTextDelta(streamEvent, ctx) {
   if (!streamEvent || typeof streamEvent !== "object") return null;
   if (streamEvent.type !== "content_block_delta") return null;
   const delta = streamEvent.delta;
   if (!delta || delta.type !== "text_delta") return null;
+  const blockType = claudeStreamBlockType(streamEvent, ctx);
+  if (!isClaudeTextStreamBlock(blockType)) return null;
   return typeof delta.text === "string" ? delta.text : null;
 }
 
@@ -445,10 +457,7 @@ function extractPublicClaudeThinkingSummary(streamEvent, ctx) {
   const contentBlock = isRecord(streamEvent.content_block)
     ? streamEvent.content_block
     : null;
-  const blockType =
-    streamEvent.index === undefined || streamEvent.index === null
-      ? ""
-      : ctx?.streamBlocks?.get(streamEvent.index) || "";
+  const blockType = claudeStreamBlockType(streamEvent, ctx);
   const candidates = [delta, contentBlock, streamEvent];
 
   for (const candidate of candidates) {
@@ -1152,7 +1161,7 @@ async function runClaude(cmd) {
       switch (msg.type) {
         case "stream_event": {
           emitClaudeStreamTimeline(msg, ctx);
-          const text = extractClaudeTextDelta(msg.event);
+          const text = extractClaudeTextDelta(msg.event, ctx);
           if (text) {
             ctx.assistantDeltaText += text;
             pacer.push(text);
