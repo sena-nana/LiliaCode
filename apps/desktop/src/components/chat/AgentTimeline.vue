@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Component } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
-import type { AgentTimelineEvent, AgentTimelineEventStatus, ChatMessage } from "@lilia/contracts";
+import type {
+  AgentTimelineEvent,
+  AgentTimelineEventStatus,
+  ChatAttachment,
+  ChatMessage,
+} from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
 import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
@@ -91,6 +96,7 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
   const finalByTurnId = new Map<string, TimelineEventEntry>();
+  const reasoningByTurnId = new Map<string, TimelineEventEntry[]>();
   const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
   const hiddenEventIds = new Set<string>();
 
@@ -98,16 +104,26 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     if (isTimelineAssistantMessage(entry.event) && entry.event.turnId) {
       finalByTurnId.set(entry.event.turnId, entry);
     }
+    if (isTimelineReasoning(entry.event) && entry.event.turnId) {
+      const list = reasoningByTurnId.get(entry.event.turnId) ?? [];
+      list.push(entry);
+      reasoningByTurnId.set(entry.event.turnId, list);
+    }
   }
 
-  // 同一 turnId 的非 message 事件统统折叠到该 turn 的最终回复下，
-  // 不再做 createdAt 前后比较——流式 message 的 createdAt 会随 upsert 漂移到末尾，
-  // 用 turnId 而不是时序更稳定。
+  // 最终回复只折叠它前方、且不被 reasoning 分段隔开的尾部过程。
+  // reasoning 是模型公开思考正文，要按时间点内联显示；夹在多段 reasoning
+  // 之间的工具/命令也保留在原位置，避免真实时间线被一个最终回复摘要吞掉。
   for (const entry of entries) {
     if (!entry.event.turnId) continue;
     if (isTimelineMessage(entry.event)) continue;
+    if (isTimelineReasoning(entry.event)) continue;
     const finalEntry = finalByTurnId.get(entry.event.turnId);
     if (!finalEntry) continue;
+    if (!isBeforeTimelineEntry(entry, finalEntry)) continue;
+    if (hasReasoningBetween(entry, finalEntry, reasoningByTurnId.get(entry.event.turnId) ?? [])) {
+      continue;
+    }
     const list = processEventsByFinalId.get(finalEntry.event.id) ?? [];
     if (!list.some((item) => item.id === entry.event.id)) list.push(entry.event);
     processEventsByFinalId.set(finalEntry.event.id, list);
@@ -141,6 +157,26 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 
   return mergeAdjacentGroups(output);
 });
+
+function isBeforeTimelineEntry(a: TimelineEventEntry, b: TimelineEventEntry): boolean {
+  return compareTimelineEntryPosition(a, b) < 0;
+}
+
+function compareTimelineEntryPosition(a: TimelineEventEntry, b: TimelineEventEntry): number {
+  return a.createdAt - b.createdAt ||
+    a.order - b.order ||
+    a.event.id.localeCompare(b.event.id);
+}
+
+function hasReasoningBetween(
+  entry: TimelineEventEntry,
+  finalEntry: TimelineEventEntry,
+  reasoningEntries: TimelineEventEntry[],
+): boolean {
+  return reasoningEntries.some((reasoning) =>
+    isBeforeTimelineEntry(entry, reasoning) && isBeforeTimelineEntry(reasoning, finalEntry)
+  );
+}
 
 function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
   const result: TimelineEntry[] = [];
@@ -429,15 +465,29 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const content = typeof payload.content === "string"
     ? payload.content
     : event.summary ?? "";
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.filter(isChatAttachment)
+    : [];
 
   return {
     id: event.id,
     taskId: event.taskId,
     role,
     content,
+    attachments,
     createdAt: event.createdAt,
     queued: payload.queued === true,
   };
+}
+
+function isChatAttachment(value: unknown): value is ChatAttachment {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === "string" &&
+    typeof row.name === "string" &&
+    typeof row.path === "string" &&
+    (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
+    (typeof row.size === "number" || row.size === null);
 }
 </script>
 

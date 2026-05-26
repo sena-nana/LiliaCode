@@ -149,11 +149,22 @@ export interface TaskMilestoneLink {
 
 export type ChatRole = "user" | "assistant" | "system";
 
+export type ChatAttachmentKind = "file" | "directory" | "unknown";
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  path: string;
+  kind: ChatAttachmentKind;
+  size: number | null;
+}
+
 export interface ChatMessage {
   id: string;
   taskId: string;
   role: ChatRole;
   content: string;
+  attachments: ChatAttachment[];
   createdAt: number;
 }
 

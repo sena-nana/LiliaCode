@@ -14,6 +14,7 @@ import type {
   CCSwitchStatus,
   ChatBackendKind,
   ChatBranchOption,
+  ChatAttachment,
   ChatComposerState,
   AgentTimelineEvent,
   AgentAskUserRequestEvent,
@@ -29,6 +30,7 @@ import type {
 export type {
   AssistantAIConfig,
   AssistantAITestResult,
+  ChatAttachment,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -79,13 +81,31 @@ export function sendMessage(
   content: string,
   composer: ChatComposerState,
   projectCwd: string,
+  attachments: ChatAttachment[] = [],
 ): Promise<ChatSendResult> {
   return invoke<ChatSendResult>("chat_send_message", {
     taskId,
     content,
     composer,
     projectCwd,
+    attachments,
   });
+}
+
+export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
+  return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
+}
+
+export async function pickAttachmentFiles(): Promise<string[]> {
+  const picked = await invoke<string | string[] | null>("plugin:dialog|open", {
+    options: {
+      directory: false,
+      multiple: true,
+      title: "选择附件",
+    },
+  });
+  if (!picked) return [];
+  return Array.isArray(picked) ? picked : [picked];
 }
 
 export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {

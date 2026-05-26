@@ -112,7 +112,16 @@ export async function toggleProjectPin(id: string): Promise<boolean> {
 /** 项目列表拖拽排序后调用。`orderedIds` 按显示顺序传入。 */
 export async function reorderProjects(orderedIds: string[]): Promise<void> {
   await invoke("project_reorder", { orderedIds });
-  // 本地缓存按新顺序重排
+  // 本地缓存只重排参与本次拖动的项目；其它 pinned 分组保持原位。
   const byId = new Map(PROJECTS.value.map((p) => [p.id, p]));
-  PROJECTS.value = orderedIds.map((id) => byId.get(id)).filter(Boolean) as Project[];
+  const reordered = orderedIds
+    .map((id) => byId.get(id))
+    .filter((project): project is Project => Boolean(project));
+  if (reordered.length === 0) return;
+  let nextIndex = 0;
+  const affected = new Set(orderedIds);
+  PROJECTS.value = PROJECTS.value.map((project) => {
+    if (!affected.has(project.id)) return project;
+    return reordered[nextIndex++] ?? project;
+  });
 }

@@ -259,6 +259,48 @@ function emitError(message, payload) {
   });
 }
 
+function normalizePromptAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const path = stringOrNull(item.path);
+      if (!path) return null;
+      return {
+        name: stringOrNull(item.name) || path,
+        path,
+        kind: stringOrNull(item.kind) || "unknown",
+        size: typeof item.size === "number" && Number.isFinite(item.size)
+          ? item.size
+          : null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function attachmentSizeLabel(size) {
+  if (typeof size !== "number" || !Number.isFinite(size)) return "unknown size";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${Math.round(size / (1024 * 1024))} MB`;
+}
+
+function buildPromptWithAttachments(prompt, attachments) {
+  const normalized = normalizePromptAttachments(attachments);
+  const content = typeof prompt === "string" ? prompt : "";
+  if (normalized.length === 0) return content;
+  const lines = [
+    "用户随本轮消息附加的本地路径如下。不要假设已经读取了内容；需要时请使用可用工具按路径读取文件或遍历目录。",
+    ...normalized.map((attachment, index) =>
+      `${index + 1}. ${attachment.name} (${attachment.kind}, ${attachmentSizeLabel(attachment.size)}): ${attachment.path}`,
+    ),
+  ];
+  const trimmedContent = content.trim();
+  return trimmedContent
+    ? `${lines.join("\n")}\n\n用户消息：\n${trimmedContent}`
+    : lines.join("\n");
+}
+
 // ---------- 用户同意（canUseTool）双向通道 ----------
 //
 // SDK 在 "ask"/"default" 模式下对敏感工具调用走 canUseTool。这里把请求转成
@@ -1807,8 +1849,12 @@ async function main() {
 
   cmd = await cmdReady;
 
-  const { prompt } = cmd;
-  if (typeof prompt !== "string" || prompt.length === 0) {
+  if (typeof cmd.prompt !== "string") {
+    emit({ type: "error", message: "missing prompt" });
+    process.exit(1);
+  }
+  cmd.prompt = buildPromptWithAttachments(cmd.prompt, cmd.attachments);
+  if (cmd.prompt.trim().length === 0) {
     emit({ type: "error", message: "missing prompt" });
     process.exit(1);
   }

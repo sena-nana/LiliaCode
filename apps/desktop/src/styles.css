@@ -659,6 +659,7 @@ pre code {
 }
 
 .sb-tree__row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -674,6 +675,64 @@ pre code {
 
 .sb-tree__row:hover {
   background: var(--bg-hover);
+}
+
+.secondary-panel.is-tree-dragging,
+.secondary-panel.is-tree-dragging .sb-tree__row {
+  cursor: grabbing;
+}
+
+.secondary-panel.is-tree-dragging .sb-tree__row:hover {
+  background: var(--bg-active);
+}
+
+.sb-tree__row.is-tree-drag-source {
+  opacity: 0.62;
+  background: var(--bg-active);
+}
+
+.sb-tree__row.is-tree-drop-target {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-hover));
+}
+
+.sb-tree__row.is-tree-drop-before::before,
+.sb-tree__row.is-tree-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  pointer-events: none;
+}
+
+.sb-tree__row.is-tree-drop-before::before {
+  top: -2px;
+}
+
+.sb-tree__row.is-tree-drop-after::after {
+  bottom: -2px;
+}
+
+.sb-tree__row.is-tree-drop-inside {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.sb-tree__row.is-tree-drop-invalid {
+  background: var(--err-soft);
+  color: var(--err);
+  outline: 1px dashed color-mix(in srgb, var(--err) 72%, transparent);
+  outline-offset: -1px;
+  cursor: not-allowed;
+}
+
+.sb-tree.is-tree-drop-target {
+  border-radius: 6px;
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .sb-tree__row.is-active {
@@ -1711,6 +1770,13 @@ button.ghost:hover {
   animation: chat-cursor-blink 1s steps(2, start) infinite;
 }
 
+.chat-bubble__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 @keyframes chat-cursor-blink {
   to { visibility: hidden; }
 }
@@ -2535,6 +2601,13 @@ button.ghost:hover {
   color: var(--text-faint);
 }
 
+.chat-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chat-composer__row {
   display: flex;
   justify-content: space-between;
@@ -3073,6 +3146,52 @@ button.ghost:hover {
 
 .chat-chip__caret {
   opacity: 0.65;
+}
+
+.chat-attachment-chip {
+  min-width: 0;
+  max-width: min(240px, 100%);
+  height: 28px;
+  padding: 0 6px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chat-attachment-chip--bubble {
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+}
+
+.chat-attachment-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip__remove {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-attachment-chip__remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .dd {
