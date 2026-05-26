@@ -13,6 +13,15 @@ function ruleTextAt(index: number): string {
 }
 
 describe("agent timeline styles", () => {
+  it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {
+    const timeline = selectorIndex(".agent-timeline {");
+
+    expect(timeline).toBeGreaterThan(-1);
+    expect(ruleTextAt(timeline)).toContain("--agent-timeline-rail-offset: 28px");
+    expect(ruleTextAt(timeline)).toContain("width: min(100%, calc(760px + var(--agent-timeline-rail-offset)))");
+    expect(ruleTextAt(timeline)).toContain("padding-right: var(--agent-timeline-rail-offset)");
+  });
+
   it("Agent 最终回复正文和代码片段都使用更高字重", () => {
     const finalReply = selectorIndex(".timeline-card--final-reply .markdown-block");
     const finalReplyCode = selectorIndex(".timeline-card--final-reply .markdown-block code");

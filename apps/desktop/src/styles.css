@@ -1784,9 +1784,11 @@ button.ghost:hover {
 /* ----- Agent timeline（内嵌执行过程流） ----- */
 .agent-timeline {
   --agent-timeline-color: var(--text-muted);
+  --agent-timeline-rail-offset: 28px;
 
-  width: min(100%, 760px);
+  width: min(100%, calc(760px + var(--agent-timeline-rail-offset)));
   margin: 0 auto;
+  padding-right: var(--agent-timeline-rail-offset);
   min-width: 0;
   color: var(--text);
   font-weight: 400;
