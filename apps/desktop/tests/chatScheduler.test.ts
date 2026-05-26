@@ -621,7 +621,7 @@ describe("chat scheduler", () => {
         raw: "payload should not be required for display",
       },
       display: {
-        icon: "tool",
+        icon: "wrench",
         action: "同步",
         object: "索引",
         preview: "索引完成",
@@ -744,7 +744,7 @@ describe("chat scheduler", () => {
       summary: "索引 A",
       payload: {},
       display: {
-        icon: "tool",
+        icon: "wrench",
         action: "同步",
         object: "索引 A",
         preview: "索引 A",
@@ -768,7 +768,7 @@ describe("chat scheduler", () => {
       summary: "索引 B",
       payload: {},
       display: {
-        icon: "tool",
+        icon: "wrench",
         action: "同步",
         object: "索引 B",
         preview: "索引 B",

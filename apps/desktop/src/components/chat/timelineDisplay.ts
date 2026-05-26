@@ -1,6 +1,5 @@
 import type {
   AgentTimelineDisplay,
-  AgentTimelineDisplayIcon,
   AgentTimelineEvent,
   AgentTimelineEventStatus,
   AgentTimelinePayload,
@@ -189,7 +188,7 @@ export function timelineGroupLabel(
 
 export function timelineDisplayIcon(
   event: Pick<AgentTimelineEvent, "display">,
-): AgentTimelineDisplayIcon | null {
+): string | null {
   return readTimelineDisplay(event).icon ?? null;
 }
 

@@ -1,38 +1,17 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import {
-  AlertTriangle,
-  Bot,
-  BookOpen,
-  Circle,
-  FilePen,
-  ListChecks,
-  ListOrdered,
-  MessageSquare,
-  Plug,
-  Search,
-  Terminal,
-  Wrench,
-} from "lucide-vue-next";
-import type {
-  AgentTimelineDisplayIcon,
-  AgentTimelineEventStatus,
-} from "@lilia/contracts";
+import * as LucideIcons from "lucide-vue-next";
+import type { AgentTimelineEventStatus } from "@lilia/contracts";
 
 type StatusTone = "pending" | "running" | "done" | "failed" | "warn";
 
 const props = defineProps<{
   status: AgentTimelineEventStatus;
-  icon?: AgentTimelineDisplayIcon | null;
+  icon?: string | null;
 }>();
 
 const tone = computed<StatusTone>(() => statusToTone(props.status));
-const icon = computed<Component | null>(() => {
-  const declared = iconForDisplay(props.icon);
-  return declared === undefined
-    ? statusToTone(props.status) === "running" ? Circle : null
-    : declared;
-});
+const icon = computed<Component | null>(() => resolveLucideIcon(props.icon));
 
 function statusToTone(status: AgentTimelineEventStatus): StatusTone {
   switch (status) {
@@ -58,42 +37,22 @@ function statusToTone(status: AgentTimelineEventStatus): StatusTone {
   }
 }
 
-function iconForDisplay(iconName: AgentTimelineDisplayIcon | null | undefined): Component | null | undefined {
-  switch (iconName) {
-    case "message":
-      return MessageSquare;
-    case "reasoning":
-      return null;
-    case "plan":
-      return ListOrdered;
-    case "todo":
-      return ListChecks;
-    case "terminal":
-      return Terminal;
-    case "file":
-      return FilePen;
-    case "read":
-      return BookOpen;
-    case "tool":
-      return Wrench;
-    case "plug":
-      return Plug;
-    case "search":
-      return Search;
-    case "subagent":
-      return Bot;
-    case "error":
-      return AlertTriangle;
-    case "turn":
-      return Circle;
-    case "none":
-      return null;
-    case null:
-    case undefined:
-      return undefined;
-    default:
-      return Wrench;
-  }
+function resolveLucideIcon(name: string | null | undefined): Component | null {
+  const normalized = name?.trim();
+  if (!normalized) return null;
+  const pascal = kebabToPascal(normalized);
+  const found = (LucideIcons as Record<string, unknown>)[pascal];
+  return typeof found === "function" || (found && typeof found === "object")
+    ? (found as Component)
+    : null;
+}
+
+function kebabToPascal(name: string): string {
+  return name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join("");
 }
 </script>
 

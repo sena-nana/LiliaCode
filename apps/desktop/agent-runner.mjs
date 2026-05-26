@@ -138,7 +138,6 @@ function sanitizeTimelineDisplay(value) {
 
 function fallbackTimelineDisplay(kind, title, summary) {
   return {
-    icon: "tool",
     action: "处理",
     object: title || kind || "事件",
     preview: summary || title || kind || "",
@@ -295,7 +294,7 @@ function buildTimelineDisplay(input) {
     case "message": {
       const role = readFirstDisplayString(payload, ["role"], 80);
       return cleanDisplay({
-        icon: "message",
+        icon: "message-square",
         label: role === "assistant" ? "Assistant" : title,
         preview: summary || readFirstDisplayString(payload, ["content"], 600),
         defaultExpanded: role === "assistant",
@@ -303,7 +302,6 @@ function buildTimelineDisplay(input) {
     }
     case "reasoning":
       return cleanDisplay({
-        icon: "none",
         action: "思考",
         preview: summary || readFirstDisplayString(payload, ["text", "summary"], 600),
         details: [markdownDetail(summary || payload.text || payload.summary, "muted")],
@@ -311,7 +309,7 @@ function buildTimelineDisplay(input) {
     case "plan": {
       const text = summary || readFirstDisplayString(payload, ["plan", "summary", "text", "content"], 1200);
       return cleanDisplay({
-        icon: "plan",
+        icon: "list-ordered",
         action: "制定计划",
         object: usefulDisplayObject(title, ["plan", "计划"]),
         preview: text,
@@ -322,7 +320,7 @@ function buildTimelineDisplay(input) {
     case "todo_list": {
       const items = readTimelineTodoItems(payload);
       return cleanDisplay({
-        icon: "todo",
+        icon: "list-checks",
         action: "更新待办",
         preview: summary || timelineTodoPreview(items),
         details: [lineDetail(summary), listDetail(items)],
@@ -362,7 +360,7 @@ function buildTimelineDisplay(input) {
       const offset = nestedInput.offset ?? payload.offset;
       const limit = nestedInput.limit ?? payload.limit;
       return cleanDisplay({
-        icon: "read",
+        icon: "book-open",
         action: "读取",
         object: path,
         preview: summary || path,
@@ -381,7 +379,7 @@ function buildTimelineDisplay(input) {
       const count = changes.length || 1;
       const preview = summary || timelineFileChangePreview(changes, payload);
       return cleanDisplay({
-        icon: "file",
+        icon: "file-pen",
         action: "修改",
         object: timelineFileChangeObject(changes, payload) || usefulDisplayObject(title, ["file change", "file changes"]),
         preview,
@@ -423,7 +421,7 @@ function buildTimelineDisplay(input) {
       const task = readFirstDisplayString(payload, ["taskDescription", "description", "prompt", "task"], 1200);
       const result = readFirstDisplayString(payload, ["result", "output", "summary"], 1200);
       return cleanDisplay({
-        icon: "subagent",
+        icon: "bot",
         action: "调用子代理",
         object: name,
         preview: summary || [name, task].filter(Boolean).join(": "),
@@ -437,7 +435,7 @@ function buildTimelineDisplay(input) {
     case "error": {
       const message = summary || readFirstDisplayString(payload, ["message", "error", "reason", "details", "stderr"], 1200);
       return cleanDisplay({
-        icon: "error",
+        icon: "alert-triangle",
         label: title || "错误",
         preview: message,
         details: [
@@ -454,7 +452,6 @@ function buildTimelineDisplay(input) {
     }
     case "turn":
       return cleanDisplay({
-        icon: "turn",
         label: title,
         preview: summary || readFirstDisplayString(payload, ["status", "eventType", "subtype", "state"], 600),
         details: [lineDetail(summary), fieldsDetail([
@@ -470,7 +467,7 @@ function buildTimelineDisplay(input) {
       const input = payload.input || payload.arguments || payload.args || payload.parameters || payload.params || payload.request;
       const output = payload.result || payload.response || payload.output || payload.text || payload.content;
       return cleanDisplay({
-        icon: "tool",
+        icon: "wrench",
         action: kind === "tool" ? "调用工具" : "处理",
         object: tool || title,
         preview: summary || tool || readFirstDisplayString(payload, ["query", "path", "command"], 600),

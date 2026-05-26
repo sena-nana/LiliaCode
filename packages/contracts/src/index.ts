@@ -222,21 +222,12 @@ export type AgentTimelinePayload =
   | AgentTimelinePayload[]
   | { [key: string]: AgentTimelinePayload };
 
-export type AgentTimelineDisplayIcon =
-  | "message"
-  | "reasoning"
-  | "plan"
-  | "todo"
-  | "terminal"
-  | "file"
-  | "read"
-  | "tool"
-  | "plug"
-  | "search"
-  | "subagent"
-  | "error"
-  | "turn"
-  | "none";
+/**
+ * 时间线节点图标：事件生产方直接声明 lucide 图标的 kebab-case 名
+ * （如 "terminal"、"file-pen"、"book-open"），前端动态查找对应组件。
+ * 未声明或解析不到则不渲染图标节点。
+ */
+export type AgentTimelineDisplayIcon = string;
 
 export type AgentTimelineDisplayBucket =
   | "command"

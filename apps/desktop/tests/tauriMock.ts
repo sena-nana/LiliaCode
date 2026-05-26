@@ -506,7 +506,7 @@ function mockTimelineDisplay(
     const role = typeof payload.role === "string" ? payload.role : "user";
     const content = readString(payload, ["content"]) || event.summary || "";
     return {
-      icon: "message",
+      icon: "message-square",
       label: role === "system" ? "系统消息" : role === "assistant" ? "Assistant" : "用户输入",
       preview: content,
     };
@@ -514,7 +514,6 @@ function mockTimelineDisplay(
 
   if (event.kind === "reasoning") {
     return {
-      icon: "reasoning",
       action: "思考",
       object: title,
       preview,
@@ -533,7 +532,7 @@ function mockTimelineDisplay(
 
   if (event.kind === "plan") {
     return {
-      icon: "plan",
+      icon: "list-ordered",
       action: "制定计划",
       object: title,
       preview,
@@ -544,7 +543,7 @@ function mockTimelineDisplay(
 
   if (event.kind === "todo_list") {
     return {
-      icon: "todo",
+      icon: "list-checks",
       action: "更新待办",
       object: title,
       preview,
@@ -555,7 +554,7 @@ function mockTimelineDisplay(
   if (event.kind === "error") {
     const message = readString(payload, ["message", "error"]) || preview;
     return {
-      icon: "error",
+      icon: "alert-triangle",
       label: "错误",
       preview: message,
       details: [{ type: "line", text: message, tone: "muted" }],
@@ -585,7 +584,7 @@ function mockTimelineDisplay(
 
   if (event.kind === "subagent") {
     return {
-      icon: "subagent",
+      icon: "bot",
       action: "运行子代理",
       object: title,
       preview,
@@ -598,7 +597,6 @@ function mockTimelineDisplay(
   }
 
   return {
-    icon: "tool",
     action: "处理",
     object: title,
     preview,
@@ -628,7 +626,7 @@ function mockToolDisplay(
 
   if (normalized === "todowrite") {
     return {
-      icon: "todo",
+      icon: "list-checks",
       action: "更新待办",
       object: title,
       preview,
@@ -648,7 +646,7 @@ function mockToolDisplay(
 
   if (["task", "agent"].includes(normalized)) {
     return {
-      icon: "subagent",
+      icon: "bot",
       action: "运行子代理",
       object: title,
       preview,
@@ -657,7 +655,7 @@ function mockToolDisplay(
   }
 
   return {
-    icon: "tool",
+    icon: "wrench",
     action: "调用",
     object: title,
     preview,
@@ -698,7 +696,7 @@ function fileDisplay(
     })
     .filter((path) => path.trim());
   return {
-    icon: "file",
+    icon: "file-pen",
     action: "修改",
     object,
     preview,
