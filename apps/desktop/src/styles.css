@@ -2589,6 +2589,8 @@ button.ghost:hover {
  * 不加色块/光晕等装饰；danger 状态只通过 AlertTriangle 图标颜色与
  * 主按钮的 ghost danger 表达，不再染边框/染图标背景/加左侧红条。 */
 .tool-consent {
+  max-width: 100%;
+  min-width: 0;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -2603,6 +2605,7 @@ button.ghost:hover {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center;
+  min-width: 0;
   gap: 10px;
 }
 
@@ -2718,6 +2721,8 @@ button.ghost:hover {
 
 /* 展开后的完整 input JSON：等宽 code block，最高 200px 内滚。 */
 .tool-consent__details {
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
@@ -2729,7 +2734,8 @@ button.ghost:hover {
   line-height: 1.5;
   max-height: 200px;
   overflow: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* 进出动效：从下方 4px 滑入，淡出。与 search-palette 的曲线一致以保持手感统一。 */
