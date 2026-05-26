@@ -1689,9 +1689,12 @@ button.ghost:hover {
   min-height: 0;
   /* flex 容器里要显式拉伸到剩余高度，否则 grid 内部会塌成内容高度。 */
   flex: 1 1 auto;
-  max-width: 860px;
   width: 100%;
-  margin: 0 auto;
+}
+
+.chat > :not(.chat-transcript) {
+  width: min(100%, 860px);
+  justify-self: center;
 }
 
 .chat-transcript {

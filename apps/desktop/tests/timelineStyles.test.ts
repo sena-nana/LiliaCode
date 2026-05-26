@@ -13,6 +13,19 @@ function ruleTextAt(index: number): string {
 }
 
 describe("agent timeline styles", () => {
+  it("聊天滚动容器占满界面宽度，滚动条停在界面右侧", () => {
+    const chat = selectorIndex(".chat {");
+    const controls = selectorIndex(".chat > :not(.chat-transcript) {");
+
+    expect(chat).toBeGreaterThan(-1);
+    expect(controls).toBeGreaterThan(chat);
+    expect(ruleTextAt(chat)).toContain("width: 100%");
+    expect(ruleTextAt(chat)).not.toContain("max-width: 860px");
+    expect(ruleTextAt(chat)).not.toContain("margin: 0 auto");
+    expect(ruleTextAt(controls)).toContain("width: min(100%, 860px)");
+    expect(ruleTextAt(controls)).toContain("justify-self: center");
+  });
+
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {
     const timeline = selectorIndex(".agent-timeline {");
 
