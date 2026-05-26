@@ -4,7 +4,7 @@
  * 用户贴底时新消息进来自动跟到底，向上翻了就不打断阅读。
  */
 
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import AgentTimeline from "./AgentTimeline.vue";
 
@@ -18,12 +18,70 @@ const props = defineProps<{
 
 const scroller = ref<HTMLElement | null>(null);
 const isPinnedToBottom = ref(true);
+const isScrollbarVisible = ref(false);
+const isPointerInScrollbarZone = ref(false);
+let scrollbarHideTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+const SCROLLBAR_HOT_ZONE = 18;
+const SCROLLBAR_HIDE_DELAY = 180;
+
+function clearScrollbarHideTimer() {
+  if (scrollbarHideTimer === null) return;
+  window.clearTimeout(scrollbarHideTimer);
+  scrollbarHideTimer = null;
+}
+
+function showScrollbar() {
+  clearScrollbarHideTimer();
+  isScrollbarVisible.value = true;
+}
+
+function hideScrollbarSoon() {
+  if (scrollbarHideTimer !== null) return;
+  scrollbarHideTimer = window.setTimeout(() => {
+    if (!isPointerInScrollbarZone.value) {
+      isScrollbarVisible.value = false;
+    }
+    scrollbarHideTimer = null;
+  }, SCROLLBAR_HIDE_DELAY);
+}
 
 function checkPinned() {
   const el = scroller.value;
   if (!el) return;
   const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
   isPinnedToBottom.value = gap < 24;
+}
+
+function onScroll() {
+  checkPinned();
+  showScrollbar();
+}
+
+function onScrollEnd() {
+  if (!isPointerInScrollbarZone.value) hideScrollbarSoon();
+}
+
+function isInScrollbarZone(event: MouseEvent): boolean {
+  const el = scroller.value;
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return event.clientX >= rect.right - SCROLLBAR_HOT_ZONE && event.clientX <= rect.right;
+}
+
+function onMouseMove(event: MouseEvent) {
+  const inZone = isInScrollbarZone(event);
+  isPointerInScrollbarZone.value = inZone;
+  if (inZone) {
+    showScrollbar();
+    return;
+  }
+  if (isScrollbarVisible.value) hideScrollbarSoon();
+}
+
+function onMouseLeave() {
+  isPointerInScrollbarZone.value = false;
+  if (isScrollbarVisible.value) hideScrollbarSoon();
 }
 
 async function scrollToBottom() {
@@ -50,14 +108,24 @@ watch(
 const isEmpty = computed(() =>
   props.timelineEvents.length === 0 && !props.isThinking,
 );
+
+onBeforeUnmount(() => {
+  clearScrollbarHideTimer();
+});
 </script>
 
 <template>
   <div
     ref="scroller"
     class="chat-transcript"
-    :class="{ 'is-empty': isEmpty }"
-    @scroll="checkPinned"
+    :class="{
+      'is-empty': isEmpty,
+      'is-scrollbar-visible': isScrollbarVisible,
+    }"
+    @scroll="onScroll"
+    @scrollend="onScrollEnd"
+    @mousemove="onMouseMove"
+    @mouseleave="onMouseLeave"
   >
     <div v-if="isEmpty" class="chat-empty">
       {{ emptyHeadline }}

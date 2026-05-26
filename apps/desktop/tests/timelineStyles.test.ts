@@ -63,6 +63,32 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(controlsWrap)).toContain("z-index: 2");
   });
 
+  it("聊天滚动条默认隐藏，滚动或进入滚动条区域时再显示", () => {
+    const transcript = selectorIndex(".chat-transcript {");
+    const hiddenThumb = selectorIndex(".chat-transcript::-webkit-scrollbar-thumb");
+    const visibleThumb = selectorIndex(".chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb");
+    const hiddenFirefox = selectorIndex(".chat-transcript:not(.is-scrollbar-visible)");
+    const visibleFirefox = selectorIndex(".chat-transcript.is-scrollbar-visible");
+
+    expect(transcript).toBeGreaterThan(-1);
+    expect(hiddenThumb).toBeGreaterThan(transcript);
+    expect(visibleThumb).toBeGreaterThan(hiddenThumb);
+    expect(ruleTextAt(transcript)).toContain("--chat-scrollbar-transition-duration: 0.48s");
+    expect(ruleTextAt(transcript)).toContain("transition: scrollbar-color var(--chat-scrollbar-transition-duration) ease");
+    expect(ruleTextAt(transcript)).toContain("scrollbar-color: transparent transparent");
+    expect(ruleTextAt(hiddenThumb)).toContain("background-color: transparent");
+    expect(ruleTextAt(hiddenThumb)).toContain("transition: background-color var(--chat-scrollbar-transition-duration) ease");
+    expect(ruleTextAt(visibleThumb)).toContain("background-color: var(--border-strong)");
+    expect(ruleTextAt(hiddenFirefox)).toContain("scrollbar-color: transparent transparent");
+    expect(ruleTextAt(visibleFirefox)).toContain("scrollbar-color: var(--border-strong) transparent");
+    expect(chatTranscript).toContain("is-scrollbar-visible");
+    expect(chatTranscript).toContain("@scrollend=\"onScrollEnd\"");
+    expect(chatTranscript).toContain("@mousemove=\"onMouseMove\"");
+    expect(chatTranscript).toContain("@mouseleave=\"onMouseLeave\"");
+    expect(chatTranscript).toContain("const SCROLLBAR_HIDE_DELAY = 180");
+    expect(chatTranscript).toContain("setTimeout");
+  });
+
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {
     const timeline = selectorIndex(".agent-timeline {");
 

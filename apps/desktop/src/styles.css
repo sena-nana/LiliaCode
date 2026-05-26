@@ -1700,6 +1700,8 @@ button.ghost:hover {
 }
 
 .chat-transcript {
+  --chat-scrollbar-transition-duration: 0.48s;
+
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1707,10 +1709,33 @@ button.ghost:hover {
   padding: 8px 4px 0;
   min-height: 0;
   position: relative;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color var(--chat-scrollbar-transition-duration) ease;
 }
 
 .chat-transcript.is-empty {
   justify-content: flex-end;
+}
+
+.chat-transcript:not(.is-scrollbar-visible) {
+  scrollbar-color: transparent transparent;
+}
+
+.chat-transcript.is-scrollbar-visible {
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.chat-transcript::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  transition: background-color var(--chat-scrollbar-transition-duration) ease;
+}
+
+.chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+}
+
+.chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-faint);
 }
 
 .chat-empty {
