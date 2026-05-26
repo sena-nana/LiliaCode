@@ -296,6 +296,11 @@ export interface AgentTimelineDisplay {
   label?: string | null;
   action?: string | null;
   object?: string | null;
+  /**
+   * action 是泛指动词（"调用工具"、"调用 MCP"）时设 true，渲染层会把 object 拼到标题里
+   * （"已调用工具 Edit"），否则只显示动词（"已读取"），object 留给 aria-label/详情用。
+   */
+  objectInLabel?: boolean | null;
   preview?: string | null;
   details?: AgentTimelineDisplayDetail[] | null;
   group?: AgentTimelineDisplayGroup | null;

@@ -150,14 +150,13 @@ export function timelineEventLabel(event: DisplayDerivableEvent): string {
   const label = display.label?.trim();
   if (label) return label;
   const action = display.action?.trim();
-  if (action) {
-    return appendTimelineObjectLabel(
-      formatTimelineActionLabel(event.status, action),
-      display.object?.trim() ?? "",
-    );
+  if (!action) return "事件";
+  const verb = formatTimelineActionLabel(event.status, action);
+  if (display.objectInLabel) {
+    const object = display.object?.trim() ?? "";
+    if (object) return `${verb} ${object}`;
   }
-
-  return "事件";
+  return verb;
 }
 
 export function timelineGroupKey(event: DisplayDerivableEvent): string | null {
@@ -242,10 +241,6 @@ function formatTimelineActionLabel(
     default:
       return `已${verb}`;
   }
-}
-
-function appendTimelineObjectLabel(label: string, objectLabel: string): string {
-  return objectLabel ? `${label} ${objectLabel}` : label;
 }
 
 export function timelineInlinePreview(event: DisplayDerivableEvent): string {

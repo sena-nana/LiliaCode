@@ -57,6 +57,7 @@ interface ClaudeToolConfig {
   icon: string;
   bucket: string;
   unit: string;
+  objectInLabel?: boolean;
   extractObject: (input: Record<string, unknown>, name: string) => string;
   buildDetails: (
     input: Record<string, unknown>,
@@ -241,6 +242,7 @@ const CLAUDE_TOOL_DEFAULT: ClaudeToolConfig = {
   icon: "wrench",
   bucket: "tool",
   unit: "个工具",
+  objectInLabel: true,
   extractObject: (_input, name) => name,
   buildDetails: (input, payload, name) => [
     fieldsDetail([displayField("工具", name)]),
@@ -281,6 +283,7 @@ function buildClaudeToolDisplay(
     icon: config.icon,
     action: config.action,
     object,
+    objectInLabel: config.objectInLabel === true ? true : undefined,
     preview: object || compactLine(pick(payload, ["output"]), 600),
     details: details.length ? details : undefined,
     group: {
@@ -391,6 +394,7 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         icon: "plug",
         action: "调用 MCP",
         object: target || usefulObject(title, ["mcp", "mcp tool"]),
+        objectInLabel: true,
         preview: summary || target,
         details: [
           fieldsDetail([
@@ -511,6 +515,7 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         icon: "wrench",
         action: kind === "tool" ? "调用工具" : "处理",
         object: tool || title,
+        objectInLabel: true,
         preview:
           summary || tool || readFirstString(payload, ["query", "path", "command"], 600),
         details: [
@@ -531,6 +536,7 @@ function fallbackDisplay(kind: string, title: string, summary: string): AgentTim
   return {
     action: "处理",
     object: title || kind || "事件",
+    objectInLabel: true,
     preview: summary || title || kind || "",
     group: {
       key: `kind:${kind || "event"}`,

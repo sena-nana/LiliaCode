@@ -300,6 +300,12 @@ function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
 }
 
+function titleAriaLabel(event: AgentTimelineEvent): string {
+  const label = timelineEventLabel(event);
+  const object = readTimelineDisplay(event).object?.trim() ?? "";
+  return object ? `${label} ${object}` : label;
+}
+
 function groupExpanded(entry: TimelineGroupEntry): boolean {
   return expandedGroupIds.value.has(entry.id);
 }
@@ -504,6 +510,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
                         class="agent-timeline__title agent-timeline__group-title"
                         :aria-expanded="expanded(event)"
                         :aria-controls="`agent-timeline-details-${event.id}`"
+                        :aria-label="titleAriaLabel(event)"
                         :disabled="!canToggle(event)"
                         @click="toggleEvent(event)"
                       >
@@ -604,6 +611,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
                   class="agent-timeline__title"
                   :aria-expanded="expanded(entry.event)"
                   :aria-controls="`agent-timeline-details-${entry.event.id}`"
+                  :aria-label="titleAriaLabel(entry.event)"
                   :disabled="!canToggle(entry.event)"
                   @click="toggleEvent(entry.event)"
                 >
