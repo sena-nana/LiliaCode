@@ -2580,60 +2580,43 @@ button.ghost:hover {
  * 不用 modal，理由：授权是日常高频动作，弹窗会打断聊天节奏；inline 卡片
  * 既能强调"现在需要你拍板"，又不抢走输入焦点。
  *
- * danger 工具（Bash/Write/Edit 等）走 .tool-consent--danger：
- *   左侧 3px 红条 + 主按钮换 ghost danger，icon 走 AlertTriangle。
+ * danger 仅在调用本身具有破坏性时启用（当前规则：Bash 命令命中破坏性模式）：
+ *   AlertTriangle 图标染 --err + 主按钮换 ghost danger，仅此两处。
+ *   不加红条 / 不染边框 / 不染图标背景——保持与 composer 同款纯卡片观感。
+ *   写文件/抓网页这些 coding agent 的常规活不再算 danger，否则红色会被脱敏。
  */
+/* 与 composer / todo-float 共用的卡片几何（bg-elev + 14px 圆角 + 轻阴影），
+ * 不加色块/光晕等装饰；danger 状态只通过 AlertTriangle 图标颜色与
+ * 主按钮的 ghost danger 表达，不再染边框/染图标背景/加左侧红条。 */
 .tool-consent {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 10px 12px;
   box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
-  /* 与 composer 之间一个独立的"插槽"，靠 .chat 的 grid gap 维持间距。 */
   display: flex;
   flex-direction: column;
   gap: 8px;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 危险工具的左侧识别条：3px 渐变红，不抢标题视觉但能扫一眼区分。 */
-.tool-consent--danger {
-  border-color: color-mix(in srgb, var(--err) 45%, var(--border));
-}
-
-.tool-consent--danger::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--err);
-  opacity: 0.85;
 }
 
 .tool-consent__row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
 }
 
 .tool-consent__icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--text-muted);
   flex: 0 0 auto;
 }
 
 .tool-consent--danger .tool-consent__icon {
-  background: var(--err-soft);
   color: var(--err);
 }
 
@@ -2661,11 +2644,6 @@ button.ghost:hover {
   border-radius: 4px;
   background: var(--bg-subtle);
   border: 1px solid var(--border-soft);
-}
-
-.tool-consent--danger .tool-consent__tool {
-  color: var(--err);
-  border-color: color-mix(in srgb, var(--err) 35%, var(--border-soft));
 }
 
 .tool-consent__headline {

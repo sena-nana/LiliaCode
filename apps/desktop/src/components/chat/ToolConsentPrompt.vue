@@ -6,8 +6,11 @@
  * 不再用 modal 弹窗——授权交互是日常高频动作，弹窗会打断聊天节奏。
  *
  * 设计点：
- * - 危险工具（Bash / Write / Edit 等）给 .tool-consent--danger：左侧 3px 红条 +
- *   主按钮换 ghost danger。其它工具走 accent 主按钮。
+ * - 视觉与 composer / todo-float 同款：bg-elev + 14px 圆角 + 轻阴影，不加色块/光晕。
+ * - 只有真正具备破坏性的调用走 .tool-consent--danger：AlertTriangle 图标染红 +
+ *   主按钮换 ghost danger，仅此两处信号；不再加红条、染边框、染图标背景。
+ *   目前唯一会被升级成 danger 的是命中 DANGEROUS_BASH_RE 的 Bash 调用——
+ *   如果每次同意都是红色，红色就失去预警意义。
  * - 默认折叠成一行；右下"查看入参"展开 code block 看全文。
  * - 一旦提交决策（或被 service 主动撤掉），父级 v-if=false → Transition 退场。
  */
@@ -36,14 +39,8 @@ const expanded = ref(false);
 /** 提交中：禁用按钮，避免连点。 */
 const submitting = ref<"allow" | "deny" | null>(null);
 
-const DANGEROUS_TOOLS = new Set([
-  "Bash",
-  "Write",
-  "Edit",
-  "MultiEdit",
-  "NotebookEdit",
-  "WebFetch",
-]);
+const DANGEROUS_BASH_RE =
+  /\b(rm\s+-[a-z]*r|rmdir\s+\/s|sudo\b|doas\b|chmod\s+-R|chown\s+-R|mkfs\b|dd\s+if=|fdisk\b|format\s+[a-z]:|del\s+\/[fsq]|rd\s+\/s|kill(all)?\s+-9|pkill\b|shutdown\b|reboot\b|halt\b|drop\s+(database|table|schema)|truncate\s+table|:\(\)\{\s*:\|:&\s*\};:)/i;
 
 const TOOL_ICON_MAP: Record<string, Component> = {
   Bash: Terminal,
@@ -61,8 +58,13 @@ const TOOL_ICON_MAP: Record<string, Component> = {
 };
 
 const danger = computed(() => {
-  const name = current.value?.toolName ?? "";
-  return DANGEROUS_TOOLS.has(name);
+  const c = current.value;
+  if (!c) return false;
+  // 只在 Bash 命令文本命中破坏性模式时才升级成 danger。
+  // 写文件/抓网页本来就是 coding agent 的常规活，不应触发红色预警。
+  if (c.toolName !== "Bash") return false;
+  const cmd = (c.input as Record<string, unknown> | null | undefined)?.command;
+  return typeof cmd === "string" && DANGEROUS_BASH_RE.test(cmd);
 });
 
 const toolIcon = computed<Component>(() => {
