@@ -65,6 +65,17 @@ export function isTimelineAssistantMessage(
 }
 
 /**
+ * 时间线里的 `kind === "turn"` 事件全部由 runner 出于会话恢复/调试目的发出
+ * （Claude session、Claude status、Claude turn completed、API retry...），对终端
+ * 用户都是噪音。统一在 UI 这层过滤；持久化层仍保留它们，session resume 依赖。
+ */
+export function isHiddenTimelineEvent(
+  event: Pick<AgentTimelineEvent, "kind">,
+): boolean {
+  return event.kind === "turn";
+}
+
+/**
  * 「最终回复」= assistant message timeline。流式过程中（status=running）也算，
  * 这样组件树展开/折叠状态在 token 增量到达时不会抖动。
  */

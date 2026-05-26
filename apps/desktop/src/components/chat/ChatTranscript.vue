@@ -12,6 +12,8 @@ const props = defineProps<{
   timelineEvents: AgentTimelineEvent[];
   /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」决定文案。 */
   emptyHeadline: string;
+  /** Turn 正在跑——传给 AgentTimeline 后用来在末尾叠一个「思考中…」指示器。 */
+  isThinking?: boolean;
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -38,8 +40,15 @@ watch(
   },
 );
 
+watch(
+  () => props.isThinking,
+  async () => {
+    if (isPinnedToBottom.value) await scrollToBottom();
+  },
+);
+
 const isEmpty = computed(() =>
-  props.timelineEvents.length === 0
+  props.timelineEvents.length === 0 && !props.isThinking,
 );
 </script>
 
@@ -54,7 +63,7 @@ const isEmpty = computed(() =>
       {{ emptyHeadline }}
     </div>
     <template v-else>
-      <AgentTimeline :events="timelineEvents" />
+      <AgentTimeline :events="timelineEvents" :is-thinking="isThinking" />
     </template>
   </div>
 </template>

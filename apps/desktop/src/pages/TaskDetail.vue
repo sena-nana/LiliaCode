@@ -351,6 +351,7 @@ watch(
       <ChatTranscript
         :timeline-events="timelineEvents"
         :empty-headline="emptyHeadline"
+        :is-thinking="isTurnRunning"
       />
       <TodoFloat v-if="taskId" :task-id="taskId" />
       <ChatComposer

@@ -8,6 +8,7 @@ import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import {
   aggregateTimelineStatus,
+  isHiddenTimelineEvent,
   isTimelineAssistantMessage,
   isTimelineExpanded,
   isTimelineFinalReply,
@@ -51,6 +52,8 @@ type TimelineEntry = TimelineEventEntry | TimelineGroupEntry;
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
+  /** Turn 正在跑、但还没有最终回复时，在时间线末尾显示「思考中…」指示器。 */
+  isThinking?: boolean;
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -64,8 +67,12 @@ const finalReplyCollapseKey = computed(() =>
     .join("|"),
 );
 
+const visibleEvents = computed(() =>
+  props.events.filter((event) => !isHiddenTimelineEvent(event)),
+);
+
 const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
-  props.events
+  visibleEvents.value
     .map((event): TimelineEventEntry => ({
       type: "event",
       id: `event:${event.id}`,
@@ -188,16 +195,34 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
 
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
-  for (const event of props.events) {
+  for (const event of visibleEvents.value) {
     cache.set(event.id, timelineInlinePreview(event));
   }
   return cache;
 });
 
+/**
+ * 「思考中」指示器只在 turn 在跑、且当前 turn 还没开始流式回复时出现。
+ * 一旦有 running 状态的 assistant message（流式开头）落地，回复卡片本身
+ * 的光标就够用了；这里只想覆盖 turn 启动 → 第一个 token 到达 之间的空窗。
+ */
+const showThinkingIndicator = computed(() => {
+  if (!props.isThinking) return false;
+  return !visibleEvents.value.some((event) => {
+    if (!isTimelineAssistantMessage(event)) return false;
+    return (
+      event.status === "pending" ||
+      event.status === "started" ||
+      event.status === "running" ||
+      event.status === "in_progress"
+    );
+  });
+});
+
 watch(
-  () => props.events.map((event) => event.id).join("|"),
+  () => visibleEvents.value.map((event) => event.id).join("|"),
   () => {
-    toggledIds.value = pruneTimelineExpandedIds(toggledIds.value, props.events);
+    toggledIds.value = pruneTimelineExpandedIds(toggledIds.value, visibleEvents.value);
   },
 );
 
@@ -395,7 +420,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
 
 <template>
   <section
-    v-if="orderedEntries.length"
+    v-if="orderedEntries.length || showThinkingIndicator"
     class="agent-timeline"
     aria-label="Agent 工作过程"
   >
@@ -606,6 +631,20 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
           </article>
         </li>
       </template>
+      <li
+        v-if="showThinkingIndicator"
+        class="agent-timeline__item agent-timeline__item--thinking is-status-running"
+        aria-live="polite"
+      >
+        <article class="agent-timeline__event">
+          <div class="agent-timeline__rail">
+            <TimelineNodeIcon :status="'running'" :icon="null" />
+          </div>
+          <div class="agent-timeline__body">
+            <p class="agent-timeline__thinking-label">思考中…</p>
+          </div>
+        </article>
+      </li>
     </ol>
   </section>
 </template>

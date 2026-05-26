@@ -110,6 +110,82 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("kind=turn 的 Claude session/status/turn completed 事件不在 timeline 中渲染", async () => {
+    const view = await renderTaskDetail();
+
+    await expectInitialReasoning(view);
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-session",
+      kind: "turn",
+      status: "started",
+      title: "Claude session",
+      summary: "claude-sonnet-4-6",
+      payload: { backend: "claude", model: "claude-sonnet-4-6" },
+      order: 1,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-status",
+      kind: "turn",
+      status: "info",
+      title: "Claude status",
+      summary: "requesting",
+      payload: { backend: "claude", status: "requesting" },
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-turn-done",
+      kind: "turn",
+      status: "success",
+      title: "Claude turn completed",
+      summary: "",
+      payload: { backend: "claude", sessionId: "session-x" },
+      order: 3,
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText("Claude session")).toBeNull();
+      expect(view.queryByText("Claude status")).toBeNull();
+      expect(view.queryByText("Claude turn completed")).toBeNull();
+    });
+  });
+
+  it("turn 在跑且尚未流式回复时，timeline 末尾显示「思考中…」指示器", async () => {
+    const view = await renderTaskDetail();
+
+    await expectInitialReasoning(view);
+
+    await sendText(view, "去想一下怎么做");
+    await waitFor(() => {
+      expect(view.getByText("思考中…")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-stream-start",
+      kind: "message",
+      status: "running",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "开始回复",
+      },
+      turnId: "turn-thinking",
+      order: 5,
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("开始回复")).toBeInTheDocument();
+      expect(view.queryByText("思考中…")).toBeNull();
+    });
+
+    completeMockAgentTurn("t-002");
+
+    await waitFor(() => {
+      expect(view.queryByText("思考中…")).toBeNull();
+    });
+  });
+
   it("过程事件默认显示为单行，点击后展开详情", async () => {
     const view = await renderTaskDetail();
 

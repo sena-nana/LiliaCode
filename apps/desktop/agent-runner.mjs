@@ -776,7 +776,10 @@ function extractPublicClaudeThinkingSummary(streamEvent, ctx) {
   for (const candidate of candidates) {
     if (!candidate) continue;
     if (isClaudeThinkingSummaryContainer(candidate, blockType)) {
+      // 抽顺序：delta 的 `thinking` 字段（thinking_delta 的实际文本载体）
+      // 优先于 summary/text，避免 thinking_delta 因没有 summary 字段而漏抽。
       const summary =
+        candidate.thinking ||
         candidate.summary ||
         candidate.text ||
         candidate.content ||
@@ -799,26 +802,66 @@ function extractPublicClaudeThinkingSummary(streamEvent, ctx) {
   return null;
 }
 
+/**
+ * 思考事件按 stream_event.index 聚合：同一 thinking 块内的 delta 文本拼接成
+ * 一条 reasoning timeline 事件，sourceId 与 block 一一对应。这样 UI 看到的是
+ * 一条平稳增长的"思考中"卡片，而不是每个 delta 一条噪点。
+ */
 function emitClaudeStreamTimeline(msg, ctx) {
   const event = msg?.event;
-  const summary = extractPublicClaudeThinkingSummary(event, ctx);
   rememberClaudeStreamBlock(event, ctx);
-  if (!summary) return;
+  const delta = extractPublicClaudeThinkingSummary(event, ctx);
+  if (!delta) return;
+
+  const index =
+    event?.index === undefined || event?.index === null
+      ? "default"
+      : String(event.index);
+  if (!ctx.thinkingByIndex) ctx.thinkingByIndex = new Map();
+  const accumulated = (ctx.thinkingByIndex.get(index) || "") + delta;
+  ctx.thinkingByIndex.set(index, accumulated);
+  const sessionPrefix = msg?.session_id || "claude";
+  const sourceId = `${sessionPrefix}:thinking:${index}`;
 
   emitTimeline({
     kind: "reasoning",
     status: "running",
-    title: "Thinking summary",
-    summary,
+    title: "思考中",
+    summary: accumulated,
     payload: {
       backend: "claude",
       eventType: event?.type,
       deltaType: event?.delta?.type,
       blockType: event?.content_block?.type,
       sessionId: msg?.session_id,
+      text: accumulated,
     },
-    sourceId: msg?.uuid,
+    sourceId,
   });
+}
+
+/**
+ * Turn 结束时把所有思考块标记成已完成。状态改成 success 后 UI 标题从
+ * "正在思考" 变成 "已思考"，避免一直显示运行中。
+ */
+function finalizeClaudeThinkingBlocks(ctx, sessionId) {
+  if (!ctx?.thinkingByIndex || ctx.thinkingByIndex.size === 0) return;
+  for (const [index, text] of ctx.thinkingByIndex) {
+    const sourceId = `${sessionId || "claude"}:thinking:${index}`;
+    emitTimeline({
+      kind: "reasoning",
+      status: "success",
+      title: "思考中",
+      summary: text,
+      payload: {
+        backend: "claude",
+        sessionId,
+        text,
+      },
+      sourceId,
+    });
+  }
+  ctx.thinkingByIndex.clear();
 }
 
 /** 从 SDKAssistantMessage.message.content 里抽出全部 text 块拼接结果。 */
@@ -1286,6 +1329,8 @@ async function runClaude(cmd) {
     resultSeen: false,
     /** sourceId → { kind, title, display }，给未收到 tool_result 的工具做收尾用。 */
     activeTools: new Map(),
+    /** block index → accumulated thinking text，turn 结束时统一翻成 success。 */
+    thinkingByIndex: new Map(),
   };
   const pacer = createTextPacer({
     emit: (text) => emitAssistantMessageTimeline(text, "running", "claude"),
@@ -1334,6 +1379,7 @@ async function runClaude(cmd) {
           : "";
         pacer.finishImmediate();
         sweepActiveClaudeTools(ctx, msg.is_error ? "error" : "success", msg?.session_id);
+        finalizeClaudeThinkingBlocks(ctx, msg?.session_id || lastSessionId);
         if (finalText) {
           emitAssistantMessageTimeline(
             finalText,
@@ -1407,6 +1453,7 @@ async function runClaude(cmd) {
       fullTextOrNull(ctx.assistantSnapshotText);
     pacer.finishImmediate();
     sweepActiveClaudeTools(ctx, "success", lastSessionId);
+    finalizeClaudeThinkingBlocks(ctx, lastSessionId);
     if (finalText) {
       emitAssistantMessageTimeline(finalText, "success", "claude");
     }
