@@ -1865,7 +1865,7 @@ button.ghost:hover {
 
 .agent-timeline__head {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 10px;
   min-width: 0;
@@ -1874,8 +1874,7 @@ button.ghost:hover {
 }
 
 .agent-timeline__title {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
   max-width: 100%;
   width: auto;
   height: auto;
@@ -1894,8 +1893,6 @@ button.ghost:hover {
   gap: 5px;
   filter: none;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 过程节点的操作文本降级为灰色，仅 reasoning（Agent 思考）和最终回复保持正常 */
@@ -1944,9 +1941,6 @@ button.ghost:hover {
 }
 
 .agent-timeline__title span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
