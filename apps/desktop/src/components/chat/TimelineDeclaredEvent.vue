@@ -33,11 +33,14 @@ const compactView = computed(() =>
     { forceSingleLine: true, singleLineTone: "muted" },
   ),
 );
-const summaryView = computed(() =>
-  createTimelineMarkdownView(summaryLine.value, {
-    multilineTone: "muted",
-    singleLineTone: "muted",
-  }),
+// 展开后若有 details 就让 details 接管，避免「标题」「单行预览」连续出现两次。
+const expandedFallbackView = computed(() =>
+  details.value.length
+    ? null
+    : createTimelineMarkdownView(summaryLine.value, {
+        multilineTone: "muted",
+        singleLineTone: "muted",
+      }),
 );
 
 function detailKey(detail: AgentTimelineDisplayDetail, index: number): string {
@@ -102,14 +105,12 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
 
     <template v-else>
       <MarkdownBlock
-        v-if="summaryView"
-        :content="summaryView.content"
-        :tone="summaryView.tone"
-        :single-line="summaryView.singleLine"
+        v-if="expandedFallbackView"
+        :content="expandedFallbackView.content"
+        :tone="expandedFallbackView.tone"
+        :single-line="expandedFallbackView.singleLine"
         class="timeline-muted-line"
       />
-
-      <div v-if="summaryView && details.length" class="timeline-divider" />
 
       <div
         v-if="details.length"
@@ -171,7 +172,7 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
         </template>
       </div>
 
-      <p v-if="!summaryView && !details.length" class="timeline-muted-line">
+      <p v-if="!expandedFallbackView && !details.length" class="timeline-muted-line">
         暂无摘要。
       </p>
     </template>

@@ -330,8 +330,10 @@ function buildTimelineDisplay(input) {
       });
     }
     case "command": {
+      const nestedInput = readRecord(payload.input);
+      // 不回落到 title：title 是工具名（"Bash"），灌进 object 会变成"已运行 Bash"。
       const command = readFirstDisplayString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
-        usefulDisplayObject(title, ["command", "命令"]);
+        readFirstDisplayString(nestedInput, ["command", "cmd", "shellCommand", "script", "argv"], 1200);
       const output = readFirstDisplayString(payload, ["aggregatedOutput", "combinedOutput", "outputText", "stdout"], 6000);
       const stderr = readFirstDisplayString(payload, ["stderr", "errorOutput", "message", "error"], 6000);
       const fields = fieldsDetail([
@@ -351,6 +353,27 @@ function buildTimelineDisplay(input) {
           codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
         ],
         group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
+      });
+    }
+    case "file_read": {
+      const nestedInput = readRecord(payload.input);
+      const path = readFirstDisplayString(payload, ["path", "filePath", "file_path"], 1200) ||
+        readFirstDisplayString(nestedInput, ["file_path", "filePath", "path"], 1200);
+      const offset = nestedInput.offset ?? payload.offset;
+      const limit = nestedInput.limit ?? payload.limit;
+      return cleanDisplay({
+        icon: "read",
+        action: "读取",
+        object: path,
+        preview: summary || path,
+        details: [
+          fieldsDetail([
+            displayField("文件", path),
+            displayField("offset", offset),
+            displayField("limit", limit),
+          ]),
+        ],
+        group: { key: "kind:file_read", bucket: "tool", unit: "次读取", count: 1 },
       });
     }
     case "file_change": {
@@ -405,7 +428,6 @@ function buildTimelineDisplay(input) {
         object: name,
         preview: summary || [name, task].filter(Boolean).join(": "),
         details: [
-          fieldsDetail([displayField("类型", name)]),
           markdownDetail(task, "default"),
           markdownDetail(result, "default"),
         ],
@@ -878,6 +900,8 @@ function inferClaudeToolKind(name) {
   switch (name) {
     case "Bash":
       return "command";
+    case "Read":
+      return "file_read";
     case "FileEdit":
     case "FileWrite":
       return "file_change";
@@ -898,6 +922,8 @@ function summarizeClaudeToolInput(name, input) {
   switch (name) {
     case "Bash":
       return shortText(input.command || input.description, 400) || "";
+    case "Read":
+      return shortText(input.file_path || input.path, 400) || "";
     case "FileEdit":
     case "FileWrite":
       return shortText(input.file_path || input.path, 400) || "";
