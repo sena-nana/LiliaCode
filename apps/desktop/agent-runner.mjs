@@ -357,6 +357,30 @@ function mapClaudePermission(p) {
   }
 }
 
+/**
+ * 平台/Shell 提示：Claude Agent SDK 1.0 默认不注入任何 system prompt，模型就
+ * 看不见自己在哪个平台跑、Bash 工具背后是什么 shell。Windows 上 Claude Code 的
+ * Bash 工具走 Git Bash（/usr/bin/bash），不认 PowerShell cmdlet——若模型自作主张
+ * 发 `Get-ChildItem | Select-Object` 就会 exit 127。这里启用 claude_code 预设
+ * 拿回 SDK 内置的环境描述，并在 Windows 上 append 一段显式约束。
+ */
+function buildClaudePlatformAppend() {
+  if (process.platform !== "win32") return "";
+  return [
+    "运行平台：Windows（win32）。",
+    "Bash 工具在 Windows 上走 Git Bash 的 /usr/bin/bash，仅认 POSIX 命令，不认 PowerShell cmdlet（Get-ChildItem / Select-Object / Format-Table 等）。",
+    "- 默认使用 POSIX 命令：ls / cat / grep / find / awk / sed / head / tail …",
+    '- 必须用 PowerShell 时显式包装：powershell.exe -NoProfile -Command "<原 PS 命令> | Out-String"。',
+    "- 路径用正斜杠或在双引号内用反斜杠都可。",
+  ].join("\n");
+}
+
+function buildClaudeSystemPrompt() {
+  const append = buildClaudePlatformAppend();
+  const base = { type: "preset", preset: "claude_code" };
+  return append ? { ...base, append } : base;
+}
+
 /** 从 SDKPartialAssistantMessage.event 里抽出文本增量。 */
 function extractClaudeTextDelta(streamEvent) {
   if (!streamEvent || typeof streamEvent !== "object") return null;
@@ -911,6 +935,11 @@ async function runClaude(cmd) {
     // 注：full/readonly 也注册 canUseTool 是无副作用的 —— SDK 在 bypass/plan
     // 模式下不会触发回调；ask 模式下才会把请求转给我们。
     canUseTool: claudeCanUseTool,
+    // SDK 1.0 默认不注入任何 system prompt——既丢了 Claude Code 内置的工具说明，
+    // 也让模型不知道当前平台/shell，于是在 Windows 上偶尔会发 PowerShell 命令进
+    // Bash 工具。启用 claude_code 预设拿回基础上下文，Windows 上 append 一段
+    // shell 约束，见 buildClaudeSystemPrompt。
+    systemPrompt: buildClaudeSystemPrompt(),
     ...permOpts,
     // SDK 默认会启用 Claude Code 的全套工具（Read/Write/Bash/...）。这正是
     // 「Lilia 是 Claude Code 的图形外壳」这一定位要的——不裁剪 tools。

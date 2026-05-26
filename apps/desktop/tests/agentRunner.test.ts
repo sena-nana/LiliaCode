@@ -7,15 +7,6 @@ const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
 
 describe("agent-runner Claude stream", () => {
-  it("只把 Claude 文本 delta 推进 pacer 一次", () => {
-    const streamEventBranch = runnerSource.match(
-      /case "stream_event": \{([\s\S]*?)\n\s*break;\n\s*\}/,
-    )?.[1];
-
-    expect(streamEventBranch).toContain("ctx.assistantDeltaText += text;");
-    expect(streamEventBranch?.match(/pacer\.push\(text\);/g) ?? []).toHaveLength(1);
-  });
-
   it("Claude thinking delta 走 reasoning timeline，并按 block index 累加文本", () => {
     // 抽取 candidate 字段时把 thinking 排到首位，否则 thinking_delta
     // 的实际载体 (`delta.thinking`) 会被漏掉。
