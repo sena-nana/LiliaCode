@@ -22,6 +22,7 @@ import {
 import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
+import ToolConsentPrompt from "../components/chat/ToolConsentPrompt.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
 import {
   getComposerState,
@@ -335,6 +336,7 @@ watch(
         :is-thinking="isTurnRunning"
       />
       <TodoFloat v-if="taskId" :task-id="taskId" />
+      <ToolConsentPrompt :task-id="taskId" />
       <ChatComposer
         :state="composer"
         :models="models"
