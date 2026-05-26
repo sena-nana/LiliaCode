@@ -2574,6 +2574,209 @@ button.ghost:hover {
   opacity: 0.85;
 }
 
+/* ----- Tool-consent inline prompt ----- *
+ * 工具调用授权卡，贴在 composer 上方。视觉几何与 composer 同体：
+ *   bg-elev + 14px 圆角 + 软阴影 + 1px border。
+ * 不用 modal，理由：授权是日常高频动作，弹窗会打断聊天节奏；inline 卡片
+ * 既能强调"现在需要你拍板"，又不抢走输入焦点。
+ *
+ * danger 工具（Bash/Write/Edit 等）走 .tool-consent--danger：
+ *   左侧 3px 红条 + 主按钮换 ghost danger，icon 走 AlertTriangle。
+ */
+.tool-consent {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
+  /* 与 composer 之间一个独立的"插槽"，靠 .chat 的 grid gap 维持间距。 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 危险工具的左侧识别条：3px 渐变红，不抢标题视觉但能扫一眼区分。 */
+.tool-consent--danger {
+  border-color: color-mix(in srgb, var(--err) 45%, var(--border));
+}
+
+.tool-consent--danger::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--err);
+  opacity: 0.85;
+}
+
+.tool-consent__row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.tool-consent__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.tool-consent--danger .tool-consent__icon {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.tool-consent__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-consent__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tool-consent__tool {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+}
+
+.tool-consent--danger .tool-consent__tool {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 35%, var(--border-soft));
+}
+
+.tool-consent__headline {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 单行入参摘要：等宽字 + 截尾省略号，扫一眼就知道要跑什么。 */
+.tool-consent__preview {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-consent__subtitle {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「查看入参」纯文本 chevron 按钮，不抢主操作按钮的视觉。 */
+.tool-consent__toggle {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.tool-consent__toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.tool-consent__actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.tool-consent__btn {
+  /* 反掉全局 button 的 32px 高度——这里要紧凑些贴合卡片高度。 */
+  height: 28px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+/* 展开后的完整 input JSON：等宽 code block，最高 200px 内滚。 */
+.tool-consent__details {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre;
+}
+
+/* 进出动效：从下方 4px 滑入，淡出。与 search-palette 的曲线一致以保持手感统一。 */
+.tool-consent-enter-active,
+.tool-consent-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.tool-consent-enter-from,
+.tool-consent-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-consent-enter-active,
+  .tool-consent-leave-active {
+    transition: none;
+  }
+  .tool-consent-enter-from,
+  .tool-consent-leave-to {
+    transform: none;
+  }
+}
+
 /* ----- Todo float（贴附 composer 顶边的 chip / 卡片） ----- */
 .todo-float {
   /* 展开态：与 composer 同视觉语言的卡片 */
@@ -3020,7 +3223,369 @@ button.ghost:hover {
   }
 }
 
+/* ---------------- Ask User dialog ---------------- *
+ * Agent 反向问询用户的浮层。复用 .search-palette 背板 + .dialog__card 几何，
+ * 在其上加：步进 chip、单/多选选项块、可选 preview 副栏、Other 自填。
+ *
+ * 关键设计点：
+ * - .ask-user__card 比默认 dialog 略宽（720px）；带 preview 时再放大到 960px
+ *   并切成左右两栏（options | preview）。
+ * - 选项块用 .ask-user__option，hover/focus 走 .is-active 提色，多选打钩走
+ *   .is-picked 描边，推荐项给 .is-recommended 微提色。
+ * - 步进 chip 只在多问题时显示，单题时整张卡退化成普通确认框。
+ */
+
+.ask-user__card {
+  width: min(720px, 94vw);
+  max-height: min(78vh, 760px);
+}
+
+.ask-user__card--with-preview {
+  width: min(960px, 96vw);
+}
+
+.ask-user__header {
+  gap: 10px;
+}
+
+.ask-user__title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-user__source {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ask-user__progress {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+}
+
+.ask-user__close {
+  /* 反掉全局 button 的 32 高 + accent 背景。 */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.ask-user__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.ask-user__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ask-user__question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 题前小角标：和 sb-section__title 同款大写小字距风格。 */
+.ask-user__chip {
+  align-self: flex-start;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ask-user__qtext {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.ask-user__main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.ask-user__main--with-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.ask-user__options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask-user__option {
+  /* 用 li 当布局容器，按钮在内部全占；外层 li 负责 :is-* class 状态切换。 */
+  position: relative;
+}
+
+.ask-user__option-btn {
+  /* 反掉全局 button 默认。 */
+  width: 100%;
+  height: auto;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 500;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.ask-user__option-btn:hover,
+.ask-user__option.is-active .ask-user__option-btn {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.ask-user__option.is-picked .ask-user__option-btn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ask-user__option.is-recommended .ask-user__option-btn {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.ask-user__option.is-danger .ask-user__option-btn {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  color: var(--err);
+}
+
+.ask-user__option.is-danger.is-active .ask-user__option-btn,
+.ask-user__option.is-danger.is-picked .ask-user__option-btn {
+  background: var(--err-soft);
+  border-color: var(--err);
+}
+
+/* 左侧 indicator：单选时是圆点，多选时是方框 + Check 图标。
+ * 通过 li 的 :is-picked / :is-active 决定填色，按钮内部只放 Check 图标。 */
+.ask-user__option-indicator {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-text);
+  flex: 0 0 auto;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+/* 默认 radio 样式 */
+[role="radiogroup"] .ask-user__option-indicator {
+  border-radius: 50%;
+}
+
+[role="radiogroup"] .ask-user__option.is-active .ask-user__option-indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* 用 inset shadow 模拟 radio 内圆点 */
+  box-shadow: inset 0 0 0 3px var(--bg);
+}
+
+/* checkbox 样式 */
+[role="group"] .ask-user__option-indicator {
+  border-radius: 4px;
+}
+
+[role="group"] .ask-user__option.is-picked .ask-user__option-indicator {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ask-user__option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ask-user__option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: inherit;
+}
+
+.ask-user__option-desc {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ask-user__option.is-picked .ask-user__option-desc {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.ask-user__badge {
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 「其他…」自填项的 textarea：选中时才展开，不抢视觉重心。 */
+.ask-user__other-input {
+  width: 100%;
+  margin-top: 8px;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text);
+  resize: vertical;
+  min-height: 52px;
+  transition: border-color 0.12s ease;
+}
+
+.ask-user__other-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+/* 右侧 preview 副栏：等宽字体 + 与选项同高的卡片，给 mockup/diff 比较用。 */
+.ask-user__preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.ask-user__preview-pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow: auto;
+  white-space: pre;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ask-user__preview-empty {
+  margin: 0;
+  padding: 20px 14px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 底部操作栏：左跳过、右继续；中间 spacer 把按钮组顶到右侧。 */
+.ask-user__actions {
+  align-items: center;
+}
+
+.ask-user__skip {
+  margin-right: auto;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+
+.ask-user__skip:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.ask-user__spacer {
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .ask-user__card--with-preview {
+    width: min(720px, 96vw);
+  }
+  .ask-user__main--with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ask-user__preview {
+    min-height: 120px;
+  }
+}
+
 /* ================ 插件 / 技能管理 ================ */
+
 
 /* .card 默认 overflow:hidden 会裁掉内部 Dropdown 的绝对定位菜单。 */
 .card.card--allow-overflow {

@@ -21,6 +21,27 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         event: JsonValue,
     },
+    /// runner 的 canUseTool 回调把决策请求转交父进程。父进程随后用
+    /// `chat_respond_tool_consent` command 把 allow/deny 写回 runner stdin。
+    ConsentRequest {
+        id: String,
+        #[serde(default)]
+        tool_name: String,
+        #[serde(default)]
+        input: JsonValue,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        display_name: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        blocked_path: Option<String>,
+        #[serde(default)]
+        decision_reason: Option<String>,
+        #[serde(default)]
+        tool_use_id: Option<String>,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -47,6 +68,32 @@ impl AgentRuntimeEvent {
                 .get("event")
                 .cloned()
                 .map(|event| Self::Timeline { event }),
+            "consent_request" => {
+                let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+                let tool_name = value
+                    .get("toolName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let input = value.get("input").cloned().unwrap_or(JsonValue::Null);
+                let opt_str = |k: &str| {
+                    value
+                        .get(k)
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                };
+                Some(Self::ConsentRequest {
+                    id,
+                    tool_name,
+                    input,
+                    title: opt_str("title"),
+                    display_name: opt_str("displayName"),
+                    description: opt_str("description"),
+                    blocked_path: opt_str("blockedPath"),
+                    decision_reason: opt_str("decisionReason"),
+                    tool_use_id: opt_str("toolUseID"),
+                })
+            }
             "done" => {
                 let session_id = value
                     .get("sessionId")

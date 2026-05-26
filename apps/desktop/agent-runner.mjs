@@ -1,8 +1,8 @@
 // Lilia · Agent SDK 子进程包装器（双 backend：Claude / Codex）
 //
-// 调用约定：
+// 调用约定（NDJSON 双向）：
 //   - 父进程（Tauri Rust 端）启动 `node agent-runner.mjs`
-//   - 父进程把一行 JSON 写到 stdin：
+//   - stdin 第一行：初始命令 JSON
 //       {
 //         "backend": "claude" | "codex",
 //         "cwd": "...",
@@ -11,14 +11,14 @@
 //         "resumeSessionId": "...|null",
 //         "permission": "full|ask|readonly"
 //       }
-//   - 父进程关闭 stdin
-//   - 我们把 SDK 流出的事件按 NDJSON（一行一条）写到 stdout：
-//       {"type":"chunk","text":"..."}              文本增量
-//       {"type":"tool_use","name":"Read","input":{...}}
-//       {"type":"assistant_done","text":"完整回复全文","sessionId":"..."}
+//   - stdin 后续行：父进程对此前发出的 control_request 的响应，目前包括：
+//       {"type":"consent_response","id":"consent-1","decision":"allow"|"deny","message":"..."}
+//     父进程不会再关闭 stdin —— SDK 调 query 结束、runner 主动 exit 收尾。
+//   - stdout 还是一行一条 NDJSON：
+//       {"type":"timeline","event":{...}}         事实流（落到 UI 时间线）
+//       {"type":"consent_request","id":"...",...} canUseTool 触发，等待父进程响应
 //       {"type":"done","sessionId":"...","subtype":"success|error_..."}
 //       {"type":"error","message":"..."}
-//       {"type":"timeline","event":{"kind":"command","status":"success","title":"...","summary":"...","payload":{}}}
 //
 // 关键约定：timeline 事件只输出「事实」字段 —— kind / status / title / summary /
 // payload / sourceId。**绝不**再向 event 里塞 display：display 是渲染时的视图
@@ -33,6 +33,7 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
+import { createInterface } from "node:readline";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -255,6 +256,71 @@ function emitError(message, payload) {
   });
 }
 
+// ---------- 用户同意（canUseTool）双向通道 ----------
+//
+// SDK 在 "ask"/"default" 模式下对敏感工具调用走 canUseTool。这里把请求转成
+// 一条 stdout NDJSON（`consent_request`），等父进程把决策写回 stdin
+// （`consent_response`）。请求按递增 id 关联。
+//
+// 父进程在 turn 异常退出时直接关 stdin/杀进程——pending 的 Promise 不需要显式
+// 拒绝，runner 整体会被 SIGTERM 终结。
+
+const consentPending = new Map();
+let consentSeq = 1;
+
+function requestUserConsent(payload) {
+  const id = `consent-${consentSeq++}`;
+  emit({ type: "consent_request", id, ...payload });
+  return new Promise((resolve) => {
+    consentPending.set(id, resolve);
+  });
+}
+
+function handleControlLine(line) {
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (!isRecord(msg)) return;
+  if (msg.type === "consent_response") {
+    const resolve = consentPending.get(msg.id);
+    if (!resolve) return;
+    consentPending.delete(msg.id);
+    resolve({
+      decision: msg.decision === "allow" ? "allow" : "deny",
+      message: stringOrNull(msg.message) || "",
+    });
+  }
+}
+
+/**
+ * 给 Claude SDK 用的 canUseTool 实现。把 SDK 传来的 prompt 字段
+ * （title / description / displayName / blockedPath / decisionReason / toolUseID）
+ * 透传给父进程，让 UI 用最合适的文案渲染。
+ */
+async function claudeCanUseTool(toolName, input, opts) {
+  const safeInput = input ?? {};
+  const { decision, message } = await requestUserConsent({
+    toolName,
+    input: safeInput,
+    toolUseID: stringOrNull(opts?.toolUseID),
+    title: stringOrNull(opts?.title),
+    displayName: stringOrNull(opts?.displayName),
+    description: stringOrNull(opts?.description),
+    blockedPath: stringOrNull(opts?.blockedPath),
+    decisionReason: stringOrNull(opts?.decisionReason),
+  });
+  if (decision === "allow") {
+    // Claude Code 二进制端 Zod 校验要求 allow 必须带 updatedInput——SDK 的 d.ts
+    // 把它标成 optional 但底层 schema 实际 required。不填会被当作工具调用失败，
+    // Agent 收到 is_error 结果会无限重试 canUseTool。原样回填即可。
+    return { behavior: "allow", updatedInput: safeInput };
+  }
+  return { behavior: "deny", message: message || "用户拒绝了此次工具调用" };
+}
+
 function normalizeTimelineStatus(status) {
   switch (status) {
     case "failed":
@@ -277,7 +343,8 @@ function fullTextOrNull(value) {
 function mapClaudePermission(p) {
   // Lilia 的三档语义 → Claude SDK 的 PermissionMode。
   // - full：直接放行所有工具调用，不弹窗。SDK 要求显式 opt-in。
-  // - ask：默认行为，碰到敏感操作走 canUseTool（这里没接，等同 prompt 阻塞）。
+  // - ask：SDK 默认行为；敏感工具走 canUseTool 回调（见 claudeCanUseTool），
+  //        我们把请求通过 stdout 转交父进程，由 Lilia AskUser 浮层收用户决策。
   // - readonly：plan 模式，禁止写入。
   switch (p) {
     case "full":
@@ -841,6 +908,9 @@ async function runClaude(cmd) {
     model: model || undefined,
     resume: resumeSessionId || undefined,
     includePartialMessages: true,
+    // 注：full/readonly 也注册 canUseTool 是无副作用的 —— SDK 在 bypass/plan
+    // 模式下不会触发回调；ask 模式下才会把请求转给我们。
+    canUseTool: claudeCanUseTool,
     ...permOpts,
     // SDK 默认会启用 Claude Code 的全套工具（Read/Write/Bash/...）。这正是
     // 「Lilia 是 Claude Code 的图形外壳」这一定位要的——不裁剪 tools。
@@ -1489,18 +1559,30 @@ async function runDryRun(cmd) {
 // ---------- 入口 ----------
 
 async function main() {
-  // 1) 读 stdin 上的 JSON 命令——只读一次直到 EOF。
-  let raw = "";
-  for await (const chunk of process.stdin) {
-    raw += chunk;
-  }
-  let cmd;
-  try {
-    cmd = JSON.parse(raw);
-  } catch (err) {
-    emit({ type: "error", message: `invalid stdin JSON: ${err.message}` });
-    process.exit(1);
-  }
+  // 1) readline 拆 NDJSON 行：第一行是初始命令；后续行交给 handleControlLine
+  //    （目前仅消费 consent_response）。父进程不再用 close-stdin 表示完事，
+  //    runner 在 SDK 跑完后主动 exit。
+  const rl = createInterface({ input: process.stdin });
+  let cmd = null;
+  let cmdResolve;
+  const cmdReady = new Promise((resolve) => {
+    cmdResolve = resolve;
+  });
+  rl.on("line", (line) => {
+    if (!cmd) {
+      try {
+        cmd = JSON.parse(line);
+      } catch (err) {
+        emit({ type: "error", message: `invalid stdin JSON: ${err.message}` });
+        process.exit(1);
+      }
+      cmdResolve(cmd);
+      return;
+    }
+    handleControlLine(line);
+  });
+
+  cmd = await cmdReady;
 
   const { prompt } = cmd;
   if (typeof prompt !== "string" || prompt.length === 0) {
@@ -1529,6 +1611,9 @@ async function main() {
     emit({ type: "error", message: err?.message || String(err) });
     process.exit(1);
   }
+  // SDK 循环退出后主动收尾，不然 readline 会让进程挂在 stdin 上不退。
+  rl.close();
+  process.exit(0);
 }
 
 main().catch((err) => {

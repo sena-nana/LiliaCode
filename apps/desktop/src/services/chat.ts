@@ -39,6 +39,28 @@ export type {
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
 
+/**
+ * runner 通过 canUseTool 把工具调用授权请求转过来，等用户决策。
+ * 字段对齐 Claude SDK 的 CanUseTool 入参：title / description / displayName
+ * 由 SDK bridge 在能拿到时填好；input 是原始工具入参 JSON。
+ */
+export interface ToolConsentRequest {
+  taskId: string;
+  turnId: string;
+  backend: ChatBackendKind;
+  requestId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  title: string | null;
+  displayName: string | null;
+  description: string | null;
+  blockedPath: string | null;
+  decisionReason: string | null;
+  toolUseId: string | null;
+}
+
+export type ToolConsentDecision = "allow" | "deny";
+
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
 }
@@ -144,4 +166,27 @@ export function onAgentTimeline(
   handler: (e: AgentTimelineEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<AgentTimelineEvent>("agent:timeline", (event) => handler(event.payload));
+}
+
+export function onToolConsentRequest(
+  handler: (e: ToolConsentRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<ToolConsentRequest>("chat:tool-consent-request", (event) =>
+    handler(event.payload),
+  );
+}
+
+/** 把用户对一次 canUseTool 的决策写回 runner，让被卡住的工具继续 / 终止。 */
+export function respondToolConsent(
+  taskId: string,
+  requestId: string,
+  decision: ToolConsentDecision,
+  message?: string,
+): Promise<void> {
+  return invoke<void>("chat_respond_tool_consent", {
+    taskId,
+    requestId,
+    decision,
+    message: message ?? null,
+  });
 }

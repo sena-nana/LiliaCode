@@ -3,8 +3,8 @@ use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -209,6 +209,26 @@ struct DoneEvent {
     task_id: String,
     session_id: Option<String>,
     subtype: Option<String>,
+}
+
+/// 工具调用授权请求：runner 调用 canUseTool 时通过 stdout 转过来的事实字段。
+/// 前端 ToolConsentBridge 收到后弹 AskUser 浮层，再用 chat_respond_tool_consent
+/// 把决策写回。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolConsentRequestEvent {
+    task_id: String,
+    turn_id: String,
+    backend: String,
+    request_id: String,
+    tool_name: String,
+    input: JsonValue,
+    title: Option<String>,
+    display_name: Option<String>,
+    description: Option<String>,
+    blocked_path: Option<String>,
+    decision_reason: Option<String>,
+    tool_use_id: Option<String>,
 }
 
 fn timeline_input_from_runtime_event(
@@ -596,6 +616,9 @@ struct ChatStore {
     sdk_sessions: Mutex<HashMap<String, String>>,
     running_tasks: Mutex<HashMap<String, bool>>,
     pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
+    /// 仍在运行的 runner 子进程 stdin。key = task_id，turn 结束时移除（Drop 即关 stdin）。
+    /// 让 chat_respond_tool_consent 命令能把决策写回给 runner。
+    running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
 }
 
 fn session_key(backend: &str, task_id: &str) -> String {
@@ -963,11 +986,28 @@ fn spawn_agent_turn(
             }
         };
 
-        // 把命令 JSON 一次性写完然后关 stdin，让 Node 进入 EOF 分支。
-        if let Some(mut stdin) = child.stdin.take() {
-            let bytes = serde_json::to_vec(&stdin_payload).unwrap_or_default();
-            let _ = stdin.write_all(&bytes);
-        }
+        // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 consent_response
+        // 还要通过它写回 runner。stdin 存到 ChatStore，turn 结束时移除（Drop 关闭）。
+        let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child.stdin.take() {
+            Some(mut stdin) => {
+                let mut bytes = serde_json::to_vec(&stdin_payload).unwrap_or_default();
+                bytes.push(b'\n');
+                if stdin.write_all(&bytes).is_err() {
+                    // 子进程已经死了；让 stdout 循环正常退出兜底
+                    None
+                } else {
+                    let shared = Arc::new(Mutex::new(stdin));
+                    let store = app_handle.state::<ChatStore>();
+                    store
+                        .running_stdins
+                        .lock()
+                        .unwrap()
+                        .insert(task_id_for_thread.clone(), shared.clone());
+                    Some(shared)
+                }
+            }
+            None => None,
+        };
 
         let mut last_session_id: Option<String> = None;
         let event_ctx = AgentTurnContext {
@@ -1003,6 +1043,35 @@ fn spawn_agent_turn(
                             timeline_throttle.submit(&app_handle, input);
                         }
                     }
+                    AgentRuntimeEvent::ConsentRequest {
+                        id,
+                        tool_name,
+                        input,
+                        title,
+                        display_name,
+                        description,
+                        blocked_path,
+                        decision_reason,
+                        tool_use_id,
+                    } => {
+                        let _ = app_handle.emit(
+                            "chat:tool-consent-request",
+                            ToolConsentRequestEvent {
+                                task_id: task_id_for_thread.clone(),
+                                turn_id: turn_id_for_thread.clone(),
+                                backend: backend_for_thread.clone(),
+                                request_id: id.clone(),
+                                tool_name: tool_name.clone(),
+                                input: input.clone(),
+                                title: title.clone(),
+                                display_name: display_name.clone(),
+                                description: description.clone(),
+                                blocked_path: blocked_path.clone(),
+                                decision_reason: decision_reason.clone(),
+                                tool_use_id: tool_use_id.clone(),
+                            },
+                        );
+                    }
                     AgentRuntimeEvent::Done { session_id, .. } => {
                         if let Some(sid) = session_id {
                             last_session_id = Some(sid.clone());
@@ -1024,6 +1093,18 @@ fn spawn_agent_turn(
 
         // 流结束前确保 pending 的最后一帧落地——否则 turn 末尾的尾段文本会卡在节流窗口里。
         timeline_throttle.flush_all(&app_handle);
+
+        // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
+        // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
+        drop(stdin_handle);
+        {
+            let store = app_handle.state::<ChatStore>();
+            store
+                .running_stdins
+                .lock()
+                .unwrap()
+                .remove(&task_id_for_thread);
+        }
 
         // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
         let exit_status = child.wait();
@@ -1192,6 +1273,41 @@ fn chat_send_message(
         dispatch: "started".to_string(),
         queued_count: 0,
     })
+}
+
+/// 把用户对一次工具调用的决策（allow / deny）写回 runner 的 stdin。
+/// 通过 ChatStore.running_stdins 找到该 task 当前的 runner 子进程；若进程已退出
+/// （比如用户拖太久 turn 已 timeout / cancel），静默返回——SDK 端的 promise 也
+/// 会随子进程死亡被丢弃，没有进一步副作用。
+#[tauri::command]
+fn chat_respond_tool_consent(
+    task_id: String,
+    request_id: String,
+    decision: String,
+    message: Option<String>,
+    store: State<'_, ChatStore>,
+) -> Result<(), String> {
+    let decision_norm = if decision == "allow" { "allow" } else { "deny" };
+    let payload = serde_json::json!({
+        "type": "consent_response",
+        "id": request_id,
+        "decision": decision_norm,
+        "message": message.unwrap_or_default(),
+    });
+    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    line.push('\n');
+
+    let handle = {
+        let map = store.running_stdins.lock().unwrap();
+        map.get(&task_id).cloned()
+    };
+    let Some(handle) = handle else {
+        return Ok(()); // runner 已退出；忽略
+    };
+    let mut stdin = handle.lock().map_err(|e| e.to_string())?;
+    stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stdin.flush().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1832,6 +1948,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             chat_send_message,
+            chat_respond_tool_consent,
             chat_list_models,
             chat_list_branches,
             chat_get_composer_state,

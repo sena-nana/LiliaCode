@@ -497,3 +497,96 @@ export interface PluginsOverview {
   /** 解析期发生的非致命错误，UI 用来提示「读取 .codex/config.toml 时第 N 行有误」。 */
   warnings: string[];
 }
+
+/**
+ * Agent 向用户发起的"求确认 / 求选择"协议。一次 askUser 调用可以排进 1~N 个问题，
+ * UI 端按顺序逐一展示；每个问题独立有 mode（confirm / single / multi）和回答。
+ *
+ * 设计要点：
+ * - 与现有 dialog（ConfirmDialog / CategoryDialog）共用 search-palette 浮层壳，
+ *   组件视觉以 dialog__card + dialog__body 几何为基；本协议只描述「问什么」。
+ * - 选项语义对齐 AskUserQuestion 工具：每个 option 给 label + 可选 description；
+ *   recommended/danger/icon 仅作样式提示，UI 端可自由降级。
+ * - 多问题时 UI 应保持单卡片、步进显示（progress 1/N），不要堆叠 N 个浮层。
+ * - 回答最终以 questionId → AskUserAnswer 的映射回收，UI 自带"上一题"回滚。
+ */
+
+export type AskUserMode = "confirm" | "single" | "multi";
+
+export interface AskUserOption {
+  /** 选项 ID。返回时写进 AskUserAnswer.value；缺省时用 label。 */
+  id?: string;
+  /** 选项主标题。 */
+  label: string;
+  /** 1~2 句描述，渲染在 label 下方的副文本。 */
+  description?: string;
+  /** focus 当前选项时在右侧预览区渲染的等宽文本（mockup / 代码片段）。 */
+  preview?: string;
+  /** lucide 图标 kebab-case 名；缺失不渲染。 */
+  icon?: string;
+  /** 标记为推荐项：渲染时优先 focus + 附 "推荐" 角标。 */
+  recommended?: boolean;
+  /** 危险动作样式：选项框染红，并要求二次确认。 */
+  danger?: boolean;
+}
+
+export interface AskUserQuestion {
+  /** 稳定 id：回答 map 里用它做 key；同一次 askUser 内不能重复。 */
+  id: string;
+  /** 顶部小角标（≤12 字符），例如 "认证方式"。可空。 */
+  header?: string;
+  /** 问题主文本。允许包含 markdown，UI 端按 MarkdownBlock 渲染。 */
+  question: string;
+  /**
+   * confirm：是 / 否（不需要 options）
+   * single：单选，options 必填，2~6 项
+   * multi：多选，options 必填，2~10 项
+   */
+  mode: AskUserMode;
+  options?: AskUserOption[];
+  /** confirm 模式的主按钮文案；缺省 "确认"。 */
+  confirmLabel?: string;
+  /** confirm 模式的次按钮文案；缺省 "取消"。 */
+  cancelLabel?: string;
+  /** 整题以危险动作呈现：标题加 AlertTriangle，主按钮换 ghost danger。 */
+  danger?: boolean;
+  /** 是否允许跳过本题（保留为 skipped）。多问题流程默认 true，单问题默认 false。 */
+  skippable?: boolean;
+  /** single/multi 是否允许"其他…"自填文本。 */
+  allowOther?: boolean;
+  /** multi 模式：要求至少选 N 个；缺省 1。 */
+  minSelections?: number;
+  /** multi 模式：最多选 N 个；缺省不限。 */
+  maxSelections?: number;
+}
+
+export interface AskUserSpec {
+  /** 顶部标题，例如 "Lilia 想确认几件事"；缺省按问题数自动生成。 */
+  title?: string;
+  /** 来源标签，渲染在标题旁的小 chip，例如 agent 名 / 工具名。 */
+  source?: string;
+  /** 是否允许整体取消（按 Esc / 点击遮罩 / 右上 X 关闭）；默认 true。 */
+  dismissable?: boolean;
+  questions: AskUserQuestion[];
+}
+
+export interface AskUserAnswer {
+  questionId: string;
+  /**
+   * confirm：'yes' | 'no'
+   * single：所选 option.id；选了 "其他" 则为 'other'
+   * multi： option.id 数组；含 'other' 时配合 notes
+   */
+  value: "yes" | "no" | "other" | string | string[];
+  /** allowOther 时用户填的自定义文本。 */
+  notes?: string;
+  /** 用户主动跳过本题。 */
+  skipped?: boolean;
+}
+
+export interface AskUserResult {
+  /** questionId → AskUserAnswer。被跳过 / 取消的题不会出现在这里。 */
+  answers: Record<string, AskUserAnswer>;
+  /** 用户在过程中关闭了整个对话。answers 仍包含此前已回答的题。 */
+  cancelled: boolean;
+}
