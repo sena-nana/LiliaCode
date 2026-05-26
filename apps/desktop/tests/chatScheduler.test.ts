@@ -606,58 +606,38 @@ describe("chat scheduler", () => {
     expect(view.queryByText("旧错误通道不应生成气泡")).toBeNull();
   });
 
-  it("未知节点优先使用 display 声明渲染标题、预览和详情", async () => {
+  it("未知 kind 仍能由 payload 推导出可用的标题、预览和详情", async () => {
     const view = await renderTaskDetail();
 
     await expectInitialReasoning(view);
 
+    // 持久层不再有 display 字段；事件生产方只塞 payload，前端 deriveTimelineDisplay
+    // 命中 default (tool) 分支：kind 不是 "tool" 时动词降级为「处理」，
+    // payload.toolName 进入标题，input/output 自动渲染为 INPUT / OUTPUT 代码块。
     emitMockTimelineEvent("t-002", {
-      id: "tl-declared-custom",
+      id: "tl-derived-custom",
       kind: "extension_index",
       status: "success",
-      title: "title should not win",
-      summary: "summary should not win",
+      title: "title fallback",
+      summary: "索引完成",
       payload: {
-        raw: "payload should not be required for display",
-      },
-      display: {
-        icon: "wrench",
-        action: "同步",
-        object: "索引",
-        preview: "索引完成",
-        details: [
-          {
-            type: "fields",
-            fields: [
-              { label: "范围", value: "workspace" },
-            ],
-          },
-          {
-            type: "code",
-            label: "OUTPUT",
-            content: "indexed 42 files",
-          },
-        ],
-        group: {
-          key: "extension:index",
-          bucket: "index",
-          unit: "次索引",
-          count: 2,
-        },
+        toolName: "Index",
+        input: { scope: "workspace" },
+        output: "indexed 42 files",
       },
       order: 5,
     });
 
     await waitFor(() => {
-      expect(view.getByRole("button", { name: /已同步 索引/ }))
+      expect(view.getByRole("button", { name: /已处理 Index/ }))
         .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText("索引完成")).toBeInTheDocument();
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /已同步 索引/ }));
+    await fireEvent.click(view.getByRole("button", { name: /已处理 Index/ }));
     await waitFor(() => {
-      expect(view.getByText("范围")).toBeInTheDocument();
-      expect(view.getByText("workspace")).toBeInTheDocument();
+      expect(view.getByText("工具")).toBeInTheDocument();
+      expect(view.getByText("Index")).toBeInTheDocument();
       expect(view.getByText("indexed 42 files")).toBeInTheDocument();
     });
   });
@@ -726,75 +706,54 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("折叠后的过程摘要优先使用 display group 声明", async () => {
+  it("折叠后的过程摘要按 deriveTimelineDisplay 推导的 bucket 与单位合并相邻同类事件", async () => {
+    // 之前这里依赖事件生产方自带 display.group 声明（如 unit: "次索引"），
+    // 现在 display 已被前端 deriveTimelineDisplay 现算：相邻同 kind 事件落入同一
+    // 派生分组，摘要使用派生 unit（command → "条命令"）。
     seedMockChatMessages("t-002", [
       {
-        id: "u-declared-process-summary",
+        id: "u-derived-process-summary",
         taskId: "t-002",
         role: "user",
-        content: "请同步索引",
+        content: "请连跑两条命令",
         createdAt: 2000,
       },
     ]);
     emitMockTimelineEvent("t-002", {
-      id: "tl-declared-process-a",
-      kind: "extension_index",
+      id: "tl-derived-process-a",
+      kind: "command",
       status: "success",
-      title: "Index A",
-      summary: "索引 A",
-      payload: {},
-      display: {
-        icon: "wrench",
-        action: "同步",
-        object: "索引 A",
-        preview: "索引 A",
-        group: {
-          key: "extension:index",
-          bucket: "index",
-          unit: "次索引",
-          count: 2,
-        },
-      },
-      turnId: "turn-declared-process",
+      title: "yarn lint",
+      summary: "lint 通过",
+      payload: { command: "yarn lint" },
+      turnId: "turn-derived-process",
       createdAt: 2100,
       updatedAt: 2100,
       order: 2,
     });
     emitMockTimelineEvent("t-002", {
-      id: "tl-declared-process-b",
-      kind: "extension_index",
+      id: "tl-derived-process-b",
+      kind: "command",
       status: "success",
-      title: "Index B",
-      summary: "索引 B",
-      payload: {},
-      display: {
-        icon: "wrench",
-        action: "同步",
-        object: "索引 B",
-        preview: "索引 B",
-        group: {
-          key: "extension:index",
-          bucket: "index",
-          unit: "次索引",
-          count: 1,
-        },
-      },
-      turnId: "turn-declared-process",
+      title: "yarn build",
+      summary: "build 通过",
+      payload: { command: "yarn build" },
+      turnId: "turn-derived-process",
       createdAt: 2200,
       updatedAt: 2200,
       order: 3,
     });
     emitMockTimelineEvent("t-002", {
-      id: "tl-declared-process-final",
+      id: "tl-derived-process-final",
       kind: "message",
       status: "success",
       title: "Assistant",
       payload: {
         backend: "claude",
         role: "assistant",
-        content: "索引同步完成。",
+        content: "两条命令都通过。",
       },
-      turnId: "turn-declared-process",
+      turnId: "turn-derived-process",
       createdAt: 2300,
       updatedAt: 2300,
       order: 4,
@@ -803,8 +762,8 @@ describe("chat scheduler", () => {
     const view = await renderTaskDetail();
 
     await waitFor(() => {
-      expect(view.getByText("索引同步完成。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /展开过程 2 项.*3 次索引/ }))
+      expect(view.getByText("两条命令都通过。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /展开过程 2 项.*2 条命令/ }))
         .toHaveAttribute("aria-expanded", "false");
     });
   });

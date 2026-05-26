@@ -223,9 +223,13 @@ export type AgentTimelinePayload =
   | { [key: string]: AgentTimelinePayload };
 
 /**
- * 时间线节点图标：事件生产方直接声明 lucide 图标的 kebab-case 名
- * （如 "terminal"、"file-pen"、"book-open"），前端动态查找对应组件。
- * 未声明或解析不到则不渲染图标节点。
+ * 时间线节点图标：lucide 图标的 kebab-case 名（如 "terminal"、"file-pen"、
+ * "book-open"），前端动态查找对应组件，解析不到不渲染。
+ *
+ * NB：display 整套结构（icon / label / action / details / group ...）是渲染时
+ * 派生出来的「视图缓存」，不持久化到 DB。事件生产方只负责存事实
+ * （`kind` + `payload`），UI 调 `deriveTimelineDisplay()` 现算 —— 这样修改 display
+ * 规则可以立即反映到历史事件上。详见 packages/contracts/src/timelineDisplay.ts。
  */
 export type AgentTimelineDisplayIcon = string;
 
@@ -308,12 +312,14 @@ export interface AgentTimelineEvent {
   title: string;
   summary: string | null;
   payload: AgentTimelinePayload;
-  display: AgentTimelineDisplay;
   createdAt: number;
   updatedAt: number;
   /** 同一 task 内的显示顺序，越小越靠前。 */
   order: number;
 }
+
+export { deriveTimelineDisplay } from "./timelineDisplay";
+export type { TimelineDisplayInput } from "./timelineDisplay";
 
 export interface ChatComposerState {
   taskId: string;

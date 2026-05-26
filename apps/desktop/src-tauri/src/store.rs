@@ -115,7 +115,7 @@ impl LiliaStore {
     }
 }
 
-const RESET_BASELINE_SCHEMA_VERSION: i64 = 1;
+const RESET_BASELINE_SCHEMA_VERSION: i64 = 2;
 
 struct SchemaMigration {
     version: i64,
@@ -126,6 +126,11 @@ struct SchemaMigration {
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];
 
 /// 本次重置把旧开发库清到新基线；基线之后继续按版本追加迁移。
+///
+/// baseline=2 的语义：display 列被彻底移出 `agent_timeline_events`。display 是
+/// 渲染时的视图缓存，由前端 `deriveTimelineDisplay()` 现算，不再持久化。开发库
+/// 跨过这个版本会触发 reset：旧 timeline 数据丢失但 schema 干净，跟之前 v1 的
+/// 「本次重置」一脉相承。
 fn ensure_current_schema(conn: &mut Connection) -> Result<(), String> {
     ensure_schema_with_migrations(conn, current_schema_version(), SCHEMA_MIGRATIONS)
 }
@@ -259,7 +264,6 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           title       TEXT NOT NULL,
           summary     TEXT,
           payload     TEXT NOT NULL,
-          display     TEXT NOT NULL,
           created_at  INTEGER NOT NULL,
           updated_at  INTEGER NOT NULL,
           "order"     INTEGER NOT NULL
@@ -278,13 +282,13 @@ mod tests {
     use rusqlite::params;
 
     #[test]
-    fn current_schema_creates_display_contract_with_open_kind() {
+    fn current_schema_persists_payload_without_display_column() {
         let conn = Connection::open_in_memory().unwrap();
         create_current_schema(&conn).unwrap();
         conn.execute(
             r#"INSERT INTO agent_timeline_events
-               (id, task_id, turn_id, backend, kind, status, title, summary, payload, display, created_at, updated_at, "order")
-               VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, ?11)"#,
+               (id, task_id, turn_id, backend, kind, status, title, summary, payload, created_at, updated_at, "order")
+               VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10)"#,
             params![
                 "event-1",
                 "task-1",
@@ -292,8 +296,7 @@ mod tests {
                 "extension_index",
                 "success",
                 "Index",
-                "{}",
-                r#"{"icon":"tool","action":"同步"}"#,
+                r#"{"toolName":"Index","scope":"workspace"}"#,
                 101,
                 101,
                 2,
@@ -301,14 +304,31 @@ mod tests {
         )
         .unwrap();
 
-        let display: Option<String> = conn
+        let payload: Option<String> = conn
             .query_row(
-                "SELECT display FROM agent_timeline_events WHERE id = ?1",
+                "SELECT payload FROM agent_timeline_events WHERE id = ?1",
                 params!["event-1"],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(display, Some(r#"{"icon":"tool","action":"同步"}"#.to_string()));
+        assert_eq!(
+            payload,
+            Some(r#"{"toolName":"Index","scope":"workspace"}"#.to_string())
+        );
+
+        // display 列彻底消失：让 PRAGMA 报告所有列名再断言。
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(agent_timeline_events)")
+            .unwrap();
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            !columns.iter().any(|name| name == "display"),
+            "display column should be removed, got columns: {columns:?}"
+        );
     }
 
     #[test]
@@ -334,7 +354,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, RESET_BASELINE_SCHEMA_VERSION);
 
         let project_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))

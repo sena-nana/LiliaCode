@@ -3,7 +3,9 @@ import type {
   AgentTimelineDisplayDetail,
   AgentTimelineEvent,
   AgentTimelineEventKind,
+  TimelineDisplayInput,
 } from "./index";
+import { deriveTimelineDisplay } from "./index";
 
 type Assert<T extends true> = T;
 type Extends<From, To> = From extends To ? true : false;
@@ -19,10 +21,28 @@ export type AgentTimelineOpenKindTypeTest = Assert<
   Extends<"extension_index", AgentTimelineEventKind>
 >;
 
-export type AgentTimelineDisplayRequiredTypeTest = Assert<
-  Extends<AgentTimelineEvent["display"], AgentTimelineDisplay>
+export type AgentTimelineEventHasNoDisplayTypeTest = Assert<
+  Extends<"display" extends keyof AgentTimelineEvent ? true : false, false>
+>;
+
+export type DeriveTimelineDisplayReturnsDisplayTypeTest = Assert<
+  Extends<ReturnType<typeof deriveTimelineDisplay>, AgentTimelineDisplay>
+>;
+
+export type TimelineDisplayInputShapeTypeTest = Assert<
+  Extends<
+    {
+      kind: "command";
+      status: "success";
+      title: "Bash";
+      summary: null;
+      payload: { command: "ls" };
+    },
+    TimelineDisplayInput
+  >
 >;
 
 export type AgentTimelineDisplayDetailSchemaTypeTest = Assert<
   Extends<DetailCases, AgentTimelineDisplayDetail>
 >;
+
