@@ -65,5 +65,8 @@ const isEmpty = computed(() =>
     <template v-else>
       <AgentTimeline :events="timelineEvents" :is-thinking="isThinking" />
     </template>
+    <div class="chat-controls-wrap">
+      <slot name="controls" />
+    </div>
   </div>
 </template>

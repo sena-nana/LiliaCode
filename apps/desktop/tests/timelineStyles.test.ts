@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const styles = readFileSync("src/styles.css", "utf8");
+const chatTranscript = readFileSync("src/components/chat/ChatTranscript.vue", "utf8");
+const taskDetail = readFileSync("src/pages/TaskDetail.vue", "utf8");
 
 function selectorIndex(selector: string): number {
   return styles.indexOf(selector);
@@ -15,7 +17,7 @@ function ruleTextAt(index: number): string {
 describe("agent timeline styles", () => {
   it("聊天滚动容器占满界面宽度，滚动条停在界面右侧", () => {
     const chat = selectorIndex(".chat {");
-    const controls = selectorIndex(".chat > :not(.chat-transcript) {");
+    const controls = selectorIndex(".chat-controls {");
 
     expect(chat).toBeGreaterThan(-1);
     expect(controls).toBeGreaterThan(chat);
@@ -23,7 +25,28 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(chat)).not.toContain("max-width: 860px");
     expect(ruleTextAt(chat)).not.toContain("margin: 0 auto");
     expect(ruleTextAt(controls)).toContain("width: min(100%, 860px)");
-    expect(ruleTextAt(controls)).toContain("justify-self: center");
+    expect(ruleTextAt(controls)).toContain("align-self: center");
+    expect(taskDetail).toContain('class="chat-controls"');
+  });
+
+  it("聊天滚动范围延伸到界面底部", () => {
+    const chat = selectorIndex(".chat {");
+    const transcript = selectorIndex(".chat-transcript {");
+    const controls = selectorIndex(".chat-controls {");
+    const controlsWrap = selectorIndex(".chat-controls-wrap {");
+
+    expect(chat).toBeGreaterThan(-1);
+    expect(transcript).toBeGreaterThan(chat);
+    expect(controls).toBeGreaterThan(chat);
+    expect(controlsWrap).toBeGreaterThan(transcript);
+    expect(ruleTextAt(chat)).not.toContain("overflow-y: auto");
+    expect(ruleTextAt(transcript)).toContain("overflow-y: auto");
+    expect(ruleTextAt(transcript)).toContain("padding: 8px 4px");
+    expect(ruleTextAt(controls)).toContain("align-self: center");
+    expect(ruleTextAt(controlsWrap)).toContain("position: sticky");
+    expect(ruleTextAt(controlsWrap)).toContain("bottom: 0");
+    expect(chatTranscript).toContain('<slot name="controls" />');
+    expect(chatTranscript).toContain('class="chat-controls-wrap"');
   });
 
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {

@@ -439,20 +439,25 @@ watch(
         :timeline-events="timelineEvents"
         :empty-headline="emptyHeadline"
         :is-thinking="isTurnRunning"
-      />
-      <TodoFloat v-if="taskId" :task-id="taskId" />
-      <ToolConsentPrompt :task-id="taskId" />
-      <ChatComposer
-        :state="composer"
-        :models="models"
-        :branches="branches"
-        :attachments="attachments"
-        :sending="isTurnRunning"
-        @send="onSend"
-        @update:state="onComposerUpdate"
-        @remove-attachment="removeAttachment"
-        @pick-attachments="onPickAttachments"
-      />
+      >
+        <template #controls>
+          <div class="chat-controls">
+            <TodoFloat v-if="taskId" :task-id="taskId" />
+            <ToolConsentPrompt :task-id="taskId" />
+            <ChatComposer
+              :state="composer"
+              :models="models"
+              :branches="branches"
+              :attachments="attachments"
+              :sending="isTurnRunning"
+              @send="onSend"
+              @update:state="onComposerUpdate"
+              @remove-attachment="removeAttachment"
+              @pick-attachments="onPickAttachments"
+            />
+          </div>
+        </template>
+      </ChatTranscript>
     </div>
   </section>
 
