@@ -32,6 +32,7 @@
 // agent 调度链路而不消耗真实 API。
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { getClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -441,52 +442,21 @@ function extractClaudeAssistantText(msg) {
 }
 
 /**
- * Claude 工具的「事件分类」（kind）+ 用于摘要的输入字段名。
- *
- * runner 不再产出 display：display 由前端 `deriveTimelineDisplay()` 现算，包含
- * 图标 / 中文动词 / 单位 / 详情面板等。这里只保留两件事：
+ * 工具的 kind 分类与 summary 字段在 `@lilia/contracts/claudeTools.mjs` 里和渲染
+ * 规则共置。runner 这边只复用其中的两件事：
  *  - **kind**：把工具调用归类到 message/command/file_change/file_read/... 这条
  *    数据维度，下游（前端 + agent 扩展）按 kind 决定语义而不是按工具名硬编码。
  *  - **summaryFields**：从 input 里取一个简短字符串塞到 timeline `summary`，方便
  *    timeline 节流器和后续摘要逻辑使用。
+ *
+ * runner 不读 display 字段 —— display 由前端 `deriveTimelineDisplay()` 现算。
  */
-const CLAUDE_TOOL_KIND = {
-  Bash: "command",
-  Read: "file_read",
-  Edit: "file_change",
-  MultiEdit: "file_change",
-  Write: "file_change",
-  NotebookEdit: "file_change",
-  WebSearch: "web_search",
-  WebFetch: "web_search",
-  TodoWrite: "todo_list",
-  Task: "subagent",
-  Agent: "subagent",
-  ExitPlanMode: "plan",
-};
-
-const CLAUDE_TOOL_SUMMARY_FIELDS = {
-  Bash: ["command", "description"],
-  Read: ["file_path", "path"],
-  Edit: ["file_path", "path"],
-  MultiEdit: ["file_path", "path"],
-  Write: ["file_path", "path"],
-  NotebookEdit: ["notebook_path", "file_path", "path"],
-  Glob: ["pattern"],
-  Grep: ["pattern"],
-  WebSearch: ["query"],
-  WebFetch: ["url"],
-  Task: ["subagent_type", "description"],
-  Agent: ["subagent_type", "description"],
-  ExitPlanMode: ["plan"],
-};
-
 function getClaudeToolKind(name) {
-  return CLAUDE_TOOL_KIND[name] || "tool";
+  return getClaudeTool(name).kind || "tool";
 }
 
 function summarizeClaudeToolInput(name, input) {
-  const fields = CLAUDE_TOOL_SUMMARY_FIELDS[name] || [];
+  const fields = getClaudeTool(name).summaryFields ?? [];
   for (const key of fields) {
     const value = input?.[key];
     if (typeof value === "string" && value.trim()) {

@@ -5,18 +5,30 @@
  * 文本，这样改 display 规则可以即时影响历史数据。
  *
  * 设计原则：
- * - 只依赖 payload 中的「事实」字段，不读 display；display 字段在 contracts 里
- *   会被改成可选只用作运行时缓存。
- * - 工具事件优先走 CLAUDE_TOOL_DISPLAY 注册表（按 `payload.toolName` 命中），
- *   未登记的工具用 `CLAUDE_TOOL_DEFAULT`。
- * - 其它 kind（command/file_change/mcp/web_search/subagent/error/turn/message/
- *   reasoning/todo_list）走 kind 分支。
+ * - 工具事件（payload.toolName 命中工具范畴 kind）走 `./claudeTools.mjs` 里的
+ *   CLAUDE_TOOLS 表 —— 同一张表里既有 lilia 的 kind 分类、runner 用的 summary
+ *   字段，也有渲染规则。改一处两边同步。
+ * - 其它 kind（message/reasoning/command/file_change/mcp/web_search/subagent/
+ *   plan/error/turn/todo_list/tool default）走本文件 buildByKind 分支。
  * - 兜底返回 "处理 + 标题" 的简陋 display，绝不返回 null。
  */
+import {
+  getClaudeTool,
+  compactLine,
+  pick,
+  readFirstString,
+  readRecord,
+  readTodoItems,
+  displayField,
+  fieldsDetail,
+  codeDetail,
+  markdownDetail,
+  listDetail,
+  type ParsedTodoItem,
+} from "./claudeTools.mjs";
 import type {
   AgentTimelineDisplay,
   AgentTimelineDisplayDetail,
-  AgentTimelineDisplayField,
   AgentTimelineDisplayListItem,
   AgentTimelineEventStatus,
   AgentTimelinePayload,
@@ -49,209 +61,7 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
   );
 }
 
-// ---------- 工具注册表 ----------
-
-interface ClaudeToolConfig {
-  kind: string;
-  action: string;
-  icon: string;
-  bucket: string;
-  unit: string;
-  objectInLabel?: boolean;
-  extractObject: (input: Record<string, unknown>, name: string) => string;
-  buildDetails: (
-    input: Record<string, unknown>,
-    payload: Record<string, unknown>,
-    name: string,
-  ) => Array<AgentTimelineDisplayDetail | null>;
-}
-
-const CLAUDE_TOOL_DISPLAY: Record<string, ClaudeToolConfig> = {
-  Bash: {
-    kind: "command",
-    action: "运行",
-    icon: "terminal",
-    bucket: "command",
-    unit: "条命令",
-    extractObject: (input) =>
-      compactLine(pick(input, ["command", "description"]), 1200),
-    buildDetails: (input, payload) => [
-      fieldsDetail([
-        displayField("cwd", pick(payload, ["cwd"])),
-        displayField("exit", pick(payload, ["exitCode"])),
-      ]),
-      codeDetail("COMMAND", pick(input, ["command"]), "shell"),
-      codeDetail("OUTPUT", pick(payload, ["output"])),
-    ],
-  },
-  Read: {
-    kind: "file_read",
-    action: "读取",
-    icon: "book-open",
-    bucket: "file",
-    unit: "个文件",
-    extractObject: (input) => compactLine(pick(input, ["file_path", "path"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([
-        displayField("文件", pick(input, ["file_path", "path"])),
-        displayField("offset", pick(input, ["offset"])),
-        displayField("limit", pick(input, ["limit"])),
-      ]),
-    ],
-  },
-  Edit: {
-    kind: "file_change",
-    action: "修改",
-    icon: "file-pen",
-    bucket: "file",
-    unit: "个文件",
-    extractObject: (input) => compactLine(pick(input, ["file_path", "path"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([displayField("文件", pick(input, ["file_path", "path"]))]),
-    ],
-  },
-  MultiEdit: {
-    kind: "file_change",
-    action: "批量修改",
-    icon: "file-pen",
-    bucket: "file",
-    unit: "个文件",
-    extractObject: (input) => compactLine(pick(input, ["file_path", "path"]), 1200),
-    buildDetails: (input) => {
-      const edits = Array.isArray(input.edits) ? input.edits : [];
-      return [
-        fieldsDetail([
-          displayField("文件", pick(input, ["file_path", "path"])),
-          displayField("编辑数", edits.length || undefined),
-        ]),
-      ];
-    },
-  },
-  Write: {
-    kind: "file_change",
-    action: "写入",
-    icon: "file-pen",
-    bucket: "file",
-    unit: "个文件",
-    extractObject: (input) => compactLine(pick(input, ["file_path", "path"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([displayField("文件", pick(input, ["file_path", "path"]))]),
-    ],
-  },
-  NotebookEdit: {
-    kind: "file_change",
-    action: "修改笔记本",
-    icon: "file-pen",
-    bucket: "file",
-    unit: "个文件",
-    extractObject: (input) =>
-      compactLine(pick(input, ["notebook_path", "file_path", "path"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([
-        displayField("笔记本", pick(input, ["notebook_path", "file_path", "path"])),
-      ]),
-    ],
-  },
-  Glob: {
-    kind: "tool",
-    action: "查找文件",
-    icon: "search",
-    bucket: "tool",
-    unit: "个工具",
-    extractObject: (input) => compactLine(pick(input, ["pattern"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([
-        displayField("pattern", pick(input, ["pattern"])),
-        displayField("path", pick(input, ["path"])),
-      ]),
-    ],
-  },
-  Grep: {
-    kind: "tool",
-    action: "搜索内容",
-    icon: "search",
-    bucket: "tool",
-    unit: "个工具",
-    extractObject: (input) => compactLine(pick(input, ["pattern"]), 1200),
-    buildDetails: (input) => [
-      fieldsDetail([
-        displayField("pattern", pick(input, ["pattern"])),
-        displayField("path", pick(input, ["path"])),
-        displayField("glob", pick(input, ["glob"])),
-      ]),
-    ],
-  },
-  WebSearch: {
-    kind: "web_search",
-    action: "网络搜索",
-    icon: "search",
-    bucket: "web_search",
-    unit: "次搜索",
-    extractObject: (input) => compactLine(pick(input, ["query"]), 1200),
-    buildDetails: (input) => [fieldsDetail([displayField("查询", pick(input, ["query"]))])],
-  },
-  WebFetch: {
-    kind: "web_search",
-    action: "抓取网页",
-    icon: "globe",
-    bucket: "web_search",
-    unit: "次搜索",
-    extractObject: (input) => compactLine(pick(input, ["url"]), 1200),
-    buildDetails: (input) => [fieldsDetail([displayField("URL", pick(input, ["url"]))])],
-  },
-  TodoWrite: {
-    kind: "todo_list",
-    action: "更新待办",
-    icon: "list-checks",
-    bucket: "todo",
-    unit: "次待办",
-    extractObject: () => "",
-    buildDetails: (input) => {
-      const items = readTodoItems({ items: input.todos });
-      return [listDetail(items)];
-    },
-  },
-  Task: {
-    kind: "subagent",
-    action: "调用子代理",
-    icon: "bot",
-    bucket: "subagent",
-    unit: "个子代理",
-    extractObject: (input) =>
-      compactLine(pick(input, ["subagent_type", "description"]), 200),
-    buildDetails: (input) => [
-      markdownDetail(pick(input, ["prompt", "description"]), "default"),
-    ],
-  },
-  ExitPlanMode: {
-    kind: "plan",
-    action: "制定计划",
-    icon: "list-ordered",
-    bucket: "plan",
-    unit: "项计划",
-    extractObject: () => "",
-    buildDetails: (input) => [markdownDetail(pick(input, ["plan"]))],
-  },
-};
-
-CLAUDE_TOOL_DISPLAY.Agent = CLAUDE_TOOL_DISPLAY.Task;
-
-const CLAUDE_TOOL_DEFAULT: ClaudeToolConfig = {
-  kind: "tool",
-  action: "调用工具",
-  icon: "wrench",
-  bucket: "tool",
-  unit: "个工具",
-  objectInLabel: true,
-  extractObject: (_input, name) => name,
-  buildDetails: (input, payload, name) => [
-    fieldsDetail([displayField("工具", name)]),
-    codeDetail("INPUT", input),
-    codeDetail("OUTPUT", pick(payload, ["output"])),
-  ],
-};
-
-/** kind 取值落在工具范畴时才查注册表 —— message/reasoning/turn/error 不该被工具规则覆写。 */
+/** kind 取值落在工具范畴时才查 CLAUDE_TOOLS —— message/reasoning/turn/error 不该被工具规则覆写。 */
 function isToolKind(kind: string): boolean {
   return (
     kind === "tool" ||
@@ -265,16 +75,12 @@ function isToolKind(kind: string): boolean {
   );
 }
 
-function getToolConfig(name: string): ClaudeToolConfig {
-  return CLAUDE_TOOL_DISPLAY[name] ?? CLAUDE_TOOL_DEFAULT;
-}
-
 function buildClaudeToolDisplay(
   name: string,
   input: Record<string, unknown>,
   payload: Record<string, unknown>,
 ): AgentTimelineDisplay {
-  const config = getToolConfig(name);
+  const config = getClaudeTool(name).display;
   const object = config.extractObject(input, name) || "";
   const details = config
     .buildDetails(input, payload, name)
@@ -547,22 +353,10 @@ function fallbackDisplay(kind: string, title: string, summary: string): AgentTim
   };
 }
 
-// ---------- 通用 helper ----------
+// ---------- TS-only helper（不需要跨到 runner） ----------
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function readRecord(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
-function pick(record: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = record[key];
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
-  return undefined;
 }
 
 function pickValue(record: Record<string, unknown>, keys: string[]): unknown {
@@ -572,136 +366,12 @@ function pickValue(record: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
-function stringOrNull(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return null;
-}
-
-function shortText(value: unknown, max: number): string {
-  const text = stringOrNull(value);
-  if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
-function stringifyInline(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => stringifyInline(item)).filter(Boolean).join(" ").trim();
-  }
-  if (isRecord(value)) {
-    return readFirstString(value, [
-      "text",
-      "title",
-      "summary",
-      "content",
-      "message",
-      "name",
-      "path",
-      "filePath",
-      "query",
-      "command",
-    ], 600);
-  }
-  return "";
-}
-
-function compactLine(value: unknown, max: number): string {
-  const text = stringifyInline(value).replace(/\s+/g, " ").trim();
-  return text ? shortText(text, max) : "";
-}
-
-function readFirstString(
-  payload: Record<string, unknown>,
-  keys: string[],
-  max: number,
-): string {
-  for (const key of keys) {
-    const text = compactLine(payload[key], max);
-    if (text) return text;
-  }
-  return "";
-}
-
-function displayField(label: string, value: unknown): AgentTimelineDisplayField | null {
-  const text = compactLine(value, 1200);
-  return label && text ? { label, value: text } : null;
-}
-
 function lineDetail(
   text: unknown,
   tone: "default" | "muted" = "muted",
 ): AgentTimelineDisplayDetail | null {
   const content = compactLine(text, 1200);
   return content ? { type: "line", text: content, tone } : null;
-}
-
-function fieldsDetail(
-  fields: Array<AgentTimelineDisplayField | null>,
-): AgentTimelineDisplayDetail | null {
-  const items = fields.filter((field): field is AgentTimelineDisplayField => field !== null);
-  return items.length ? { type: "fields", fields: items } : null;
-}
-
-function codeDetail(
-  label: string,
-  content: unknown,
-  language: string = "",
-): AgentTimelineDisplayDetail | null {
-  let text = stringOrNull(content);
-  if (!text && (Array.isArray(content) || isRecord(content))) {
-    try {
-      text = JSON.stringify(content, null, 2);
-    } catch {
-      text = String(content);
-    }
-  }
-  if (!text || !text.trim()) return null;
-  return {
-    type: "code",
-    label: label || null,
-    content: shortText(text.trim(), 6000),
-    language: language || null,
-  };
-}
-
-function markdownDetail(
-  content: unknown,
-  tone: "default" | "muted" = "default",
-  singleLine: boolean = false,
-): AgentTimelineDisplayDetail | null {
-  const text = stringOrNull(content);
-  if (!text || !text.trim()) return null;
-  return {
-    type: "markdown",
-    content: shortText(text.trim(), 6000),
-    tone,
-    singleLine,
-  };
-}
-
-function listDetail(
-  items: unknown,
-  ordered: boolean = false,
-): AgentTimelineDisplayDetail | null {
-  const normalized = (Array.isArray(items) ? items : [])
-    .map((item): AgentTimelineDisplayListItem | null => {
-      if (typeof item === "string") return { text: compactLine(item, 1200) };
-      if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "summary"], 1200);
-      if (!text) return null;
-      const status = String(item.status ?? "").toLowerCase();
-      const completed = item.completed === true || item.done === true || status === "completed";
-      const tone: AgentTimelineDisplayListItem["tone"] = completed
-        ? "success"
-        : status === "failed" || status === "error"
-          ? "error"
-          : "default";
-      return { text, tone };
-    })
-    .filter((item): item is AgentTimelineDisplayListItem => item !== null && Boolean(item.text));
-  return normalized.length ? { type: "list", items: normalized, ordered } : null;
 }
 
 function usefulObject(title: string, generic: string[]): string {
@@ -717,36 +387,6 @@ function formatDuration(payload: Record<string, unknown>): string {
     return raw >= 1000 ? `${(raw / 1000).toFixed(1)}s` : `${raw}ms`;
   }
   return compactLine(raw, 80);
-}
-
-interface ParsedTodoItem {
-  text: string;
-  completed: boolean;
-  status?: string;
-}
-
-function readTodoItems(payload: Record<string, unknown>): ParsedTodoItem[] {
-  const input = readRecord(payload.input);
-  const raw =
-    (Array.isArray(payload.items) && payload.items) ||
-    (Array.isArray(payload.todos) && payload.todos) ||
-    (Array.isArray(input.items) && input.items) ||
-    (Array.isArray(input.todos) && input.todos) ||
-    [];
-  return raw
-    .map((item: unknown): ParsedTodoItem | null => {
-      if (typeof item === "string") return { text: item, completed: false };
-      if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "description"], 1200);
-      if (!text) return null;
-      const status = String(item.status ?? "").toLowerCase();
-      return {
-        text,
-        completed: item.completed === true || item.done === true || status === "completed",
-        status,
-      };
-    })
-    .filter((item): item is ParsedTodoItem => item !== null);
 }
 
 function todoPreview(items: ParsedTodoItem[]): string {
@@ -819,3 +459,7 @@ function cleanDisplay(display: AgentTimelineDisplay | null): AgentTimelineDispla
   });
   return entries.length ? (Object.fromEntries(entries) as AgentTimelineDisplay) : null;
 }
+
+// AgentTimelineDisplayListItem 仅在 lineDetail/listDetail 内部被 .mjs 闭包构造，
+// 这里 re-export 保证 .d.mts 类型链路完整。
+export type { AgentTimelineDisplayListItem };
