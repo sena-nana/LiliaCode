@@ -74,12 +74,20 @@ const editingInput = ref<HTMLInputElement | null>(null);
 // --- Session 归档确认 ---
 const confirmingId = ref<string | null>(null);
 
-function onArchiveClick(e: MouseEvent, taskId: string) {
+async function onArchiveClick(e: MouseEvent, taskId: string) {
   e.preventDefault();
   e.stopPropagation();
   if (confirmingId.value === taskId) {
-    archiveTask(taskId);
-    confirmingId.value = null;
+    try {
+      const archived = await archiveTask(taskId);
+      confirmingId.value = null;
+      if (archived && isActiveTask(taskId)) {
+        emit("archived");
+      }
+    } catch (err) {
+      confirmingId.value = null;
+      emit("error", `归档对话失败：${String(err)}`);
+    }
   } else {
     confirmingId.value = taskId;
   }
@@ -160,6 +168,7 @@ async function archiveAllConversations() {
     await archiveProjectConversations(props.project.id);
     if (
       route.params.projectId &&
+      route.params.taskId &&
       String(route.params.projectId) === props.project.id
     ) {
       emit("archived");

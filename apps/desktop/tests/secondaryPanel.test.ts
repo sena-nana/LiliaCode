@@ -1,7 +1,9 @@
-import { render, fireEvent, waitFor } from "@testing-library/vue";
+import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it, beforeEach } from "vitest";
+import { defineComponent, nextTick } from "vue";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
+import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
@@ -11,16 +13,25 @@ function seedTreeExpansionState(state: unknown) {
   localStorage.setItem("lilia.projectTree.expansion", JSON.stringify(state));
 }
 
-async function renderSecondaryPanel() {
+async function renderSecondaryPanel(initialRoute = "/") {
   const router = createLiliaRouter(createMemoryHistory());
-  await router.push("/");
+  await router.push(initialRoute);
   await router.isReady();
 
-  return render(SecondaryPanel, {
+  const Wrapper = defineComponent({
+    components: { SecondaryPanel, ContextMenuHost },
+    template: `
+      <SecondaryPanel />
+      <ContextMenuHost />
+    `,
+  });
+
+  const view = render(Wrapper, {
     global: {
       plugins: [router],
     },
   });
+  return { ...view, router };
 }
 
 function getProjectToggle(view: ReturnType<typeof render>, projectName: string): HTMLElement {
@@ -159,6 +170,80 @@ describe("SecondaryPanel project tree expansion", () => {
     expect(parsed.projects?.lilia).toBe(false);
     expect(parsed.projects?.tools).toBe(false);
     expect(Object.values(parsed.projects ?? {}).some(Boolean)).toBe(true);
+  });
+});
+
+describe("SecondaryPanel project chat navigation", () => {
+  beforeEach(async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    localStorage.clear();
+  });
+
+  it("创建空分类后会自动进入该项目的新对话", async () => {
+    const view = await renderSecondaryPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: "添加项目" }));
+    await fireEvent.click(await view.findByRole("menuitem", { name: "创建空分类" }));
+    await fireEvent.update(
+      await view.findByPlaceholderText("例如：实验、归档…"),
+      "临时分类",
+    );
+    await fireEvent.click(view.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toMatch(
+        /^\/projects\/p-3\/tasks\/t-draft-/,
+      );
+    });
+  });
+
+  it("归档当前项目对话后会进入该项目的新对话", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
+    const lilia = getProjectToggle(view, "Lilia");
+
+    await fireEvent.click(within(lilia).getByRole("button", { name: "更多" }));
+    await fireEvent.click(await view.findByText("归档所有对话"));
+    await fireEvent.click(await view.findByText("确认归档？再点一次"));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toMatch(
+        /^\/projects\/lilia\/tasks\/t-draft-/,
+      );
+    });
+  });
+
+  it("在项目页归档全部对话时不会自动进入新对话", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia");
+    const lilia = getProjectToggle(view, "Lilia");
+
+    await fireEvent.click(within(lilia).getByRole("button", { name: "更多" }));
+    await fireEvent.click(await view.findByText("归档所有对话"));
+    await fireEvent.click(await view.findByText("确认归档？再点一次"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("task_archive_project", {
+        projectId: "lilia",
+      }, undefined);
+    });
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.router.currentRoute.value.path).toBe("/projects/lilia");
+  });
+
+  it("归档当前打开的单条项目对话后会进入该项目的新对话", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
+    const row = getConversationRow(view, "接入 Claude Code 会话发现");
+
+    await fireEvent.click(within(row).getByRole("button", { name: "归档" }));
+    await fireEvent.click(
+      within(row).getByRole("button", { name: "确认归档，再点一次" }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toMatch(
+        /^\/projects\/lilia\/tasks\/t-draft-/,
+      );
+    });
   });
 });
 

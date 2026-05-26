@@ -6,7 +6,7 @@ import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { mockInvoke } from "./tauriMock";
 
-async function renderProjectTreeItem() {
+async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -18,7 +18,7 @@ async function renderProjectTreeItem() {
       },
     ],
   });
-  await router.push("/projects/lilia");
+  await router.push(initialRoute);
   await router.isReady();
 
   const Wrapper = defineComponent({
@@ -101,8 +101,8 @@ describe("ProjectTreeItem", () => {
     expect(view.emitted("archived")).toBeUndefined();
   });
 
-  it("归档成功后才发出 archived", async () => {
-    const view = await renderProjectTreeItem();
+  it("归档当前打开的项目对话成功后才发出 archived", async () => {
+    const view = await renderProjectTreeItem("/projects/lilia/tasks/t-001");
 
     await fireEvent.click(view.getByLabelText("更多"));
     await fireEvent.click(await view.findByText("归档所有对话"));

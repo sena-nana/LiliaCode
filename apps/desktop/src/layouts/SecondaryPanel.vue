@@ -297,6 +297,10 @@ function newChat() {
 }
 
 function newProjectChat(projectId: string) {
+  openProjectChat(projectId);
+}
+
+function openProjectChat(projectId: string) {
   const draft = createDraftTask(projectId);
   if (!draft) return;
   rememberExpanded(projectId);
@@ -367,7 +371,7 @@ async function pickLocalFolder() {
       name: deriveProjectName(picked) || "新项目",
       cwd: picked,
     });
-    rememberExpanded(project.id);
+    openProjectChat(project.id);
   } catch (err) {
     projectError.value = `选择文件夹失败：${String(err)}`;
   }
@@ -385,7 +389,7 @@ function openClone() {
 }
 
 function onCloneCreated(p: Project) {
-  rememberExpanded(p.id);
+  openProjectChat(p.id);
 }
 
 // ── Category dialog ──
@@ -400,13 +404,13 @@ function openCategory() {
 }
 
 function onCategoryCreated(p: Project) {
-  rememberExpanded(p.id);
+  openProjectChat(p.id);
 }
 
 // ── Project tree item handlers ──
 
-function onProjectArchived() {
-  router.push("/");
+function onProjectArchived(projectId: string) {
+  openProjectChat(projectId);
 }
 
 function onProjectDeleted(projectId: string) {
@@ -766,7 +770,7 @@ onBeforeUnmount(() => {
           @toggle="toggle"
           @new-chat="newProjectChat"
           @error="(msg: string) => projectError = msg"
-          @archived="onProjectArchived"
+          @archived="onProjectArchived(p.id)"
           @deleted="onProjectDeleted(p.id)"
         />
 

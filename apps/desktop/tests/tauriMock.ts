@@ -458,6 +458,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
+    case "task_archive": {
+      const id = String(args.id);
+      const before = tasks.length;
+      tasks = tasks.filter((task) => task.id !== id);
+      refreshSessionCounts();
+      return tasks.length !== before;
+    }
+
     case "task_archive_project": {
       const projectId = String(args.projectId);
       const count = tasks.filter((task) => task.projectId === projectId).length;
