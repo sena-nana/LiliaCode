@@ -1703,8 +1703,8 @@ button.ghost:hover {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 8px 4px;
+  gap: 0;
+  padding: 8px 4px 0;
   min-height: 0;
   position: relative;
 }
@@ -1726,13 +1726,14 @@ button.ghost:hover {
 }
 
 .chat-controls-wrap {
-  margin-top: auto;
+  margin: auto -4px 0;
   width: 100%;
   display: flex;
   justify-content: center;
   position: sticky;
   bottom: 0;
-  z-index: 1;
+  z-index: 2;
+  padding: 12px 4px 8px;
   background: var(--bg);
 }
 

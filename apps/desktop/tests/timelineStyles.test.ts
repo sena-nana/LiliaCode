@@ -41,12 +41,26 @@ describe("agent timeline styles", () => {
     expect(controlsWrap).toBeGreaterThan(transcript);
     expect(ruleTextAt(chat)).not.toContain("overflow-y: auto");
     expect(ruleTextAt(transcript)).toContain("overflow-y: auto");
-    expect(ruleTextAt(transcript)).toContain("padding: 8px 4px");
+    expect(ruleTextAt(transcript)).toContain("padding: 8px 4px 0");
     expect(ruleTextAt(controls)).toContain("align-self: center");
     expect(ruleTextAt(controlsWrap)).toContain("position: sticky");
     expect(ruleTextAt(controlsWrap)).toContain("bottom: 0");
     expect(chatTranscript).toContain('<slot name="controls" />');
     expect(chatTranscript).toContain('class="chat-controls-wrap"');
+  });
+
+  it("输入区粘底时遮住底部安全区，时间线不会露到输入框下方", () => {
+    const transcript = selectorIndex(".chat-transcript {");
+    const controlsWrap = selectorIndex(".chat-controls-wrap {");
+
+    expect(transcript).toBeGreaterThan(-1);
+    expect(controlsWrap).toBeGreaterThan(transcript);
+    expect(ruleTextAt(transcript)).toContain("gap: 0");
+    expect(ruleTextAt(transcript)).toContain("padding: 8px 4px 0");
+    expect(ruleTextAt(controlsWrap)).toContain("margin: auto -4px 0");
+    expect(ruleTextAt(controlsWrap)).toContain("padding: 12px 4px 8px");
+    expect(ruleTextAt(controlsWrap)).toContain("background: var(--bg)");
+    expect(ruleTextAt(controlsWrap)).toContain("z-index: 2");
   });
 
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {
