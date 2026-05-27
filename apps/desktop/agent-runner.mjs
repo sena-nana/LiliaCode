@@ -37,6 +37,11 @@ import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk"
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 import { createInterface } from "node:readline";
 import { z } from "zod/v4";
+import {
+  createClaudeStreamState,
+  dispatchClaudeStreamEvent,
+  finalizeClaudeReasoningBlocks,
+} from "./agent-runner/claudeStream.mjs";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -443,129 +448,30 @@ function buildClaudeSystemPrompt() {
   return append ? { ...base, append } : base;
 }
 
-function claudeStreamBlockType(streamEvent, ctx) {
-  if (!isRecord(streamEvent)) return "";
-  if (streamEvent.index === undefined || streamEvent.index === null) return "";
-  return ctx?.streamBlocks?.get(streamEvent.index) || "";
-}
-
-function isClaudeTextStreamBlock(blockType) {
-  return String(blockType || "").toLowerCase() === "text";
-}
-
-/** 从 SDKPartialAssistantMessage.event 里抽出最终回复文本增量。 */
-function extractClaudeTextDelta(streamEvent, ctx) {
-  if (!streamEvent || typeof streamEvent !== "object") return null;
-  if (streamEvent.type !== "content_block_delta") return null;
-  const delta = streamEvent.delta;
-  if (!delta || delta.type !== "text_delta") return null;
-  const blockType = claudeStreamBlockType(streamEvent, ctx);
-  if (!isClaudeTextStreamBlock(blockType)) return null;
-  return typeof delta.text === "string" ? delta.text : null;
-}
-
-function isClaudeThinkingSummaryContainer(value, fallbackType = "") {
-  if (!isRecord(value)) return false;
-  const type = String(value.type || fallbackType || "").toLowerCase();
-  if (type.includes("redacted")) return false;
-  return (
-    type.includes("thinking") ||
-    type.includes("reasoning") ||
-    type.includes("summary") ||
-    value.is_summary === true
-  );
-}
-
-function rememberClaudeStreamBlock(streamEvent, ctx) {
-  if (!isRecord(streamEvent) || !ctx?.streamBlocks) return;
-  const index = streamEvent.index;
-  if (index === undefined || index === null) return;
-
-  if (streamEvent.type === "content_block_start") {
-    const blockType = stringOrNull(streamEvent.content_block?.type);
-    if (blockType) ctx.streamBlocks.set(index, blockType);
-    return;
-  }
-
-  if (streamEvent.type === "content_block_stop") {
-    ctx.streamBlocks.delete(index);
-  }
-}
-
-function extractPublicClaudeThinkingSummary(streamEvent, ctx) {
-  if (!streamEvent || typeof streamEvent !== "object") return null;
-
-  const delta = isRecord(streamEvent.delta) ? streamEvent.delta : null;
-  const contentBlock = isRecord(streamEvent.content_block)
-    ? streamEvent.content_block
-    : null;
-  const blockType = claudeStreamBlockType(streamEvent, ctx);
-  const candidates = [delta, contentBlock, streamEvent];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    if (isClaudeThinkingSummaryContainer(candidate, blockType)) {
-      // 抽顺序：delta 的 `thinking` 字段（thinking_delta 的实际文本载体）
-      // 优先于 summary/text，避免 thinking_delta 因没有 summary 字段而漏抽。
-      const summary =
-        candidate.thinking ||
-        candidate.summary ||
-        candidate.text ||
-        candidate.content ||
-        candidate.delta ||
-        candidate.thinking_summary;
-      const text = shortText(summary, 1200);
-      if (text) return text;
-    }
-
-    const nestedSummary = candidate.summary || candidate.thinking_summary;
-    if (isRecord(nestedSummary)) {
-      const text = shortText(nestedSummary.text || nestedSummary.summary, 1200);
-      if (text) return text;
-    } else {
-      const text = shortText(nestedSummary, 1200);
-      if (text) return text;
-    }
-  }
-
-  return null;
+function claudeReasoningSourceId(sessionId, index) {
+  return `${sessionId || "claude"}:thinking:${index}`;
 }
 
 /**
- * 思考事件按 stream_event.index 聚合：同一 thinking 块内的 delta 文本拼接成
- * 一条 reasoning timeline 事件，sourceId 与 block 一一对应。这样 UI 看到的是
- * 一条平稳增长的"思考中"卡片，而不是每个 delta 一条噪点。
+ * Reasoning timeline 卡片的统一出口：dispatcher 每收到一段思考增量都会回调
+ * 这里，sourceId 与 block index 一一对应，UI 上看到的是一条平稳增长的
+ * "思考中"卡片，而不是每个 delta 一条噪点。
  */
-function emitClaudeStreamTimeline(msg, ctx) {
-  const event = msg?.event;
-  rememberClaudeStreamBlock(event, ctx);
-  const delta = extractPublicClaudeThinkingSummary(event, ctx);
-  if (!delta) return;
-
-  const index =
-    event?.index === undefined || event?.index === null
-      ? "default"
-      : String(event.index);
-  if (!ctx.thinkingByIndex) ctx.thinkingByIndex = new Map();
-  const accumulated = (ctx.thinkingByIndex.get(index) || "") + delta;
-  ctx.thinkingByIndex.set(index, accumulated);
-  const sessionPrefix = msg?.session_id || "claude";
-  const sourceId = `${sessionPrefix}:thinking:${index}`;
-
+function emitClaudeReasoningSnapshot({ index, text, eventType, deltaType, blockType }, sessionId) {
   emitTimeline({
     kind: "reasoning",
     status: "running",
     title: "思考中",
-    summary: accumulated,
+    summary: text,
     payload: {
       backend: "claude",
-      eventType: event?.type,
-      deltaType: event?.delta?.type,
-      blockType: event?.content_block?.type,
-      sessionId: msg?.session_id,
-      text: accumulated,
+      eventType,
+      deltaType,
+      blockType,
+      sessionId,
+      text,
     },
-    sourceId,
+    sourceId: claudeReasoningSourceId(sessionId, index),
   });
 }
 
@@ -573,10 +479,8 @@ function emitClaudeStreamTimeline(msg, ctx) {
  * Turn 结束时把所有思考块标记成已完成。状态改成 success 后 UI 标题从
  * "正在思考" 变成 "已思考"，避免一直显示运行中。
  */
-function finalizeClaudeThinkingBlocks(ctx, sessionId) {
-  if (!ctx?.thinkingByIndex || ctx.thinkingByIndex.size === 0) return;
-  for (const [index, text] of ctx.thinkingByIndex) {
-    const sourceId = `${sessionId || "claude"}:thinking:${index}`;
+function finalizeClaudeReasoningTimeline(ctx, sessionId) {
+  finalizeClaudeReasoningBlocks(ctx.claudeStream, ({ index, text }) => {
     emitTimeline({
       kind: "reasoning",
       status: "success",
@@ -587,10 +491,9 @@ function finalizeClaudeThinkingBlocks(ctx, sessionId) {
         sessionId,
         text,
       },
-      sourceId,
+      sourceId: claudeReasoningSourceId(sessionId, index),
     });
-  }
-  ctx.thinkingByIndex.clear();
+  });
 }
 
 /** 从 SDKAssistantMessage.message.content 里抽出全部 text 块拼接结果。 */
@@ -1183,14 +1086,15 @@ async function runClaude(cmd) {
 
   let lastSessionId = null;
   const ctx = {
-    streamBlocks: new Map(),
+    claudeStream: createClaudeStreamState(),
     assistantDeltaText: "",
     assistantSnapshotText: "",
+    /** 见过任何 type==="text" 的 assistant content block；用于 result 兜底判断是否
+     *  该 emit 一张空 final 卡（vs 纯思考/纯 tool_use 的合法静默 turn）。 */
+    sawAssistantTextBlock: false,
     resultSeen: false,
     /** sourceId → { kind, title, display }，给未收到 tool_result 的工具做收尾用。 */
     activeTools: new Map(),
-    /** block index → accumulated thinking text，turn 结束时统一翻成 success。 */
-    thinkingByIndex: new Map(),
   };
   const pacer = createTextPacer({
     emit: (text) => emitAssistantMessageTimeline(text, "running", "claude"),
@@ -1202,12 +1106,15 @@ async function runClaude(cmd) {
       mapClaudeSystemTimeline(msg);
       switch (msg.type) {
         case "stream_event": {
-          emitClaudeStreamTimeline(msg, ctx);
-          const text = extractClaudeTextDelta(msg.event, ctx);
-          if (text) {
-            ctx.assistantDeltaText += text;
-            pacer.push(text);
-          }
+          dispatchClaudeStreamEvent({
+            event: msg.event,
+            state: ctx.claudeStream,
+            onTextDelta: (text) => {
+              ctx.assistantDeltaText += text;
+              pacer.push(text);
+            },
+            onReasoning: (info) => emitClaudeReasoningSnapshot(info, msg?.session_id),
+          });
           break;
         }
       case "assistant": {
@@ -1220,6 +1127,9 @@ async function runClaude(cmd) {
         const content = msg?.message?.content;
         if (Array.isArray(content)) {
           for (const b of content) {
+            if (b && b.type === "text") {
+              ctx.sawAssistantTextBlock = true;
+            }
             if (b && b.type === "tool_use") {
               emit({ type: "tool_use", name: b.name, input: b.input });
               emitClaudeToolTimeline(b, msg, ctx);
@@ -1239,10 +1149,19 @@ async function runClaude(cmd) {
           : "";
         pacer.finishImmediate();
         sweepActiveClaudeTools(ctx, msg.is_error ? "error" : "success", msg?.session_id);
-        finalizeClaudeThinkingBlocks(ctx, msg?.session_id || lastSessionId);
+        finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
+        // finalText 非空 → 正常 emit；finalText 空但本 turn 出现过 assistant text block
+        // → emit 空内容 final 卡，让 UI 显式提示「最终回复为空」而不是无卡片，便于
+        // 发现 SDK 行为异常（纯思考/纯 tool_use 的合法 turn 走 else 分支静默）。
         if (finalText) {
           emitAssistantMessageTimeline(
             finalText,
+            msg.is_error ? "error" : "success",
+            "claude",
+          );
+        } else if (ctx.sawAssistantTextBlock) {
+          emitAssistantMessageTimeline(
+            "",
             msg.is_error ? "error" : "success",
             "claude",
           );
@@ -1313,9 +1232,11 @@ async function runClaude(cmd) {
       fullTextOrNull(ctx.assistantSnapshotText);
     pacer.finishImmediate();
     sweepActiveClaudeTools(ctx, "success", lastSessionId);
-    finalizeClaudeThinkingBlocks(ctx, lastSessionId);
+    finalizeClaudeReasoningTimeline(ctx, lastSessionId);
     if (finalText) {
       emitAssistantMessageTimeline(finalText, "success", "claude");
+    } else if (ctx.sawAssistantTextBlock) {
+      emitAssistantMessageTimeline("", "success", "claude");
     }
     emitTimeline({
       kind: "turn",

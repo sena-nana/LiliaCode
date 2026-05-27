@@ -17,42 +17,20 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/toolAliases:\s*\{\s*AskUserQuestion:/);
   });
 
-  it("Claude thinking delta 走 reasoning timeline，并按 block index 累加文本", () => {
-    // 抽取 candidate 字段时把 thinking 排到首位，否则 thinking_delta
-    // 的实际载体 (`delta.thinking`) 会被漏掉。
-    expect(runnerSource).toMatch(
-      /candidate\.thinking\s*\|\|[\s\S]*?candidate\.summary/,
-    );
-
-    // 同一 block 的多个 delta 必须聚合：sourceId 与 block index 绑定，
-    // ctx.thinkingByIndex 持久化已发文本，新 delta 拼接后 upsert 同一事件。
-    expect(runnerSource).toContain("thinkingByIndex");
-    expect(runnerSource).toMatch(/`\$\{[^`]+\}:thinking:\$\{index\}`/);
-
-    // turn 结束要把所有 thinking 块标记完成，让标题从「正在思考」→「已思考」。
-    expect(runnerSource).toContain("finalizeClaudeThinkingBlocks");
+  it("Claude thinking 与最终回复走互斥通道，由 block 类型权威路由", () => {
+    // 行为细节走 claudeStreamDispatch.test.ts；这里只断言 runner 主文件确实
+    // 把 stream_event 处理外包给了子模块 dispatcher，没有遗留 substring 猜测代码。
+    expect(runnerSource).toContain("dispatchClaudeStreamEvent");
+    expect(runnerSource).toContain("createClaudeStreamState");
+    expect(runnerSource).toContain("finalizeClaudeReasoningBlocks");
+    expect(runnerSource).not.toMatch(/isClaudeThinkingSummaryContainer/);
+    expect(runnerSource).not.toMatch(/extractPublicClaudeThinkingSummary/);
+    expect(runnerSource).not.toMatch(/thinkingByIndex/);
   });
 
-  it("Claude text_delta 只有 text block 能进入最终回复流", () => {
-    const helper = runnerSource.match(
-      /function extractClaudeTextDelta\([\s\S]*?\n\}/,
-    )?.[0];
-    expect(helper).toBeTruthy();
-
-    const blockTypeIndex = helper.indexOf(
-      "const blockType = claudeStreamBlockType(streamEvent, ctx);",
-    );
-    const guardIndex = helper.indexOf(
-      "if (!isClaudeTextStreamBlock(blockType)) return null;",
-    );
-    const returnIndex = helper.indexOf(
-      'return typeof delta.text === "string" ? delta.text : null;',
-    );
-    expect(blockTypeIndex).toBeGreaterThan(-1);
-    expect(guardIndex).toBeGreaterThan(blockTypeIndex);
-    expect(returnIndex).toBeGreaterThan(guardIndex);
-    expect(runnerSource).toContain("function isClaudeTextStreamBlock");
-    expect(runnerSource).toMatch(/extractClaudeTextDelta\(msg\.event,\s*ctx\)/);
+  it("Claude result 阶段：finalText 缺失但出现过 text block 仍 emit 空 final 卡，便于发现 SDK 异常", () => {
+    expect(runnerSource).toContain("sawAssistantTextBlock");
+    expect(runnerSource).toMatch(/else if \(ctx\.sawAssistantTextBlock\)/);
   });
 
   it("Claude 工具结果只在出错时把 output 写进 summary，成功时让派生器从 payload 现算预览", () => {
