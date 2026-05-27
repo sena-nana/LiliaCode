@@ -446,7 +446,6 @@ watch(
             <ToolConsentPrompt :task-id="taskId" />
             <ChatComposer
               :state="composer"
-              :models="models"
               :branches="branches"
               :attachments="attachments"
               :sending="isTurnRunning"

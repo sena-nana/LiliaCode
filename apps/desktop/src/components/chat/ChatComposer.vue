@@ -6,20 +6,17 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import { Paperclip, ShieldCheck, GitBranch, Sparkles, ArrowUp, Bot, X } from "lucide-vue-next";
+import { Paperclip, ShieldCheck, GitBranch, ArrowUp, X } from "lucide-vue-next";
 import type {
   ChatAttachment,
-  ChatBackendKind,
   ChatBranchOption,
   ChatComposerState,
-  ChatModelOption,
   PermissionMode,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
 
 const props = defineProps<{
   state: ChatComposerState;
-  models: ChatModelOption[];
   branches: ChatBranchOption[];
   attachments?: ChatAttachment[];
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
@@ -46,14 +43,6 @@ const permissionOptions = [
   { value: "readonly" as PermissionMode, label: "只读", hint: "禁止写操作" },
 ];
 
-const backendOptions = [
-  { value: "claude" as ChatBackendKind, label: "Claude", hint: "Claude Agent SDK" },
-  { value: "codex" as ChatBackendKind, label: "Codex", hint: "OpenAI Codex SDK" },
-];
-
-const modelOptions = computed(() =>
-  props.models.map((m) => ({ value: m.id, label: m.label })),
-);
 const branchOptions = computed(() =>
   props.branches.map((b) => ({
     value: b.name,
@@ -66,13 +55,8 @@ function patch(next: Partial<ChatComposerState>) {
   emit("update:state", { ...props.state, ...next });
 }
 
-function setModel(v: string) { patch({ model: v }); }
 function setBranch(v: string) { patch({ branch: v }); }
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
-function setBackend(v: ChatBackendKind) {
-  // 父层会监听 state.backend 变化重新拉 models 并修正 model 字段。
-  patch({ backend: v });
-}
 
 function send() {
   const value = text.value.trim();
@@ -167,30 +151,16 @@ watch(text, async () => {
         />
       </div>
 
-      <div class="chat-composer__group">
-        <Dropdown
-          :model-value="state.backend"
-          :options="backendOptions"
-          :icon="Bot"
-          @update:model-value="setBackend"
-        />
-        <Dropdown
-          :model-value="state.model"
-          :options="modelOptions"
-          :icon="Sparkles"
-          @update:model-value="setModel"
-        />
-        <button
-          type="button"
-          class="chat-composer__send"
-          :disabled="!canSend"
-          :title="sending ? '加入调度队列（Enter）' : '发送（Enter）'"
-          :aria-label="sending ? '加入调度队列' : '发送'"
-          @click="send"
-        >
-          <ArrowUp :size="16" aria-hidden="true" />
-        </button>
-      </div>
+      <button
+        type="button"
+        class="chat-composer__send"
+        :disabled="!canSend"
+        :title="sending ? '加入调度队列（Enter）' : '发送（Enter）'"
+        :aria-label="sending ? '加入调度队列' : '发送'"
+        @click="send"
+      >
+        <ArrowUp :size="16" aria-hidden="true" />
+      </button>
     </div>
   </div>
 </template>
