@@ -2165,21 +2165,6 @@ button.ghost:hover {
   gap: 0;
 }
 
-/* padding-left: 28px 与 .agent-timeline__event 第一列宽对齐；选择器带
- * .agent-timeline__list > li 是为了压过 `li { padding: 7px 0 }` 的 0 左 padding，
- * 否则段落会贴回左边、压到 rail 竖线上。 */
-.agent-timeline__list > li.agent-timeline__item--reasoning-inline {
-  display: block;
-  min-width: 0;
-  padding-left: 28px;
-}
-
-.agent-timeline__item--reasoning-inline .agent-timeline__reasoning-markdown {
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
 .timeline-card {
   min-width: 0;
   display: flex;

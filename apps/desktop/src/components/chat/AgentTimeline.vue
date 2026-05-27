@@ -8,7 +8,6 @@ import type {
   ChatMessage,
 } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
-import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
@@ -19,7 +18,6 @@ import {
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
   readTimelineDisplay,
-  readTimelinePayloadRecord,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineDeclaredGroupUnit,
@@ -417,20 +415,6 @@ function isTimelineMessage(event: AgentTimelineEvent): boolean {
   return event.kind === "message";
 }
 
-function isTimelineReasoning(event: AgentTimelineEvent): boolean {
-  return event.kind === "reasoning";
-}
-
-function reasoningContent(event: AgentTimelineEvent): string {
-  // payload.text 是完整累加文本；event.summary 在中间层被截到 1200 字符。
-  const payload = readTimelinePayloadRecord(event);
-  const fromPayload = typeof payload.text === "string" ? payload.text.trim() : "";
-  if (fromPayload) return fromPayload;
-  const fromSummary = (event.summary ?? "").trim();
-  if (fromSummary) return fromSummary;
-  return (readTimelineDisplay(event).preview ?? "").trim();
-}
-
 function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
   return isTimelineMessage(event) && !isTimelineFinalReply(event);
 }
@@ -592,18 +576,6 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           ]"
         >
           <ChatBubble :message="messageFromEvent(entry.event)" />
-        </li>
-
-        <li
-          v-else-if="isTimelineReasoning(entry.event) && reasoningContent(entry.event)"
-          class="agent-timeline__item agent-timeline__item--reasoning-inline"
-          :class="[statusClass(entry.event.status), { 'is-process-child': entry.isProcessChild }]"
-        >
-          <MarkdownBlock
-            :content="reasoningContent(entry.event)"
-            tone="default"
-            class="agent-timeline__reasoning-markdown"
-          />
         </li>
 
         <li
