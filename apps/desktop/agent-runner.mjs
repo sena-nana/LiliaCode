@@ -1170,8 +1170,11 @@ async function runClaude(cmd) {
   const ctx = {
     claudeStream: createClaudeStreamState(),
     /** blockKey → { pacer, accumulatedText, sessionId }；每个 text block 一个独立
-     *  pacer，sourceId 也按 blockKey 拆开。结束 turn 时统一翻成 success。 */
+     *  pacer，sourceId 也按 blockKey 拆开。block stop 时立刻翻 success（onTextClose
+     *  路径），turn 末尾 finalize 只兜剩下的；textFragmentsEmittedCount 累计两条
+     *  路径的总和，供 result 兜底判断是否还需要补一张 final 卡。 */
     textFragments: new Map(),
+    textFragmentsEmittedCount: 0,
     /** blockKey → { pacer, lastText, sessionId }；每个 thinking block 一个独立
      *  snapshot pacer，按 33ms 节奏吐累计快照；block stop 时直接 emit success。 */
     reasoningBlocks: new Map(),
@@ -1323,6 +1326,10 @@ function handleClaudeStreamEvent(msg, ctx) {
       fragment.sessionId = msg?.session_id || fragment.sessionId;
       fragment.pacer.push(text);
     },
+    onTextClose: ({ blockKey }) => {
+      if (blockKey === null || blockKey === undefined) return;
+      closeClaudeTextFragment(ctx, blockKey, msg?.session_id);
+    },
     onReasoning: ({ blockKey, text }) => {
       if (blockKey === null || blockKey === undefined) return;
       const entry = getOrCreateClaudeReasoningBlock(ctx, blockKey, msg?.session_id);
@@ -1350,7 +1357,6 @@ function getOrCreateClaudeTextFragment(ctx, blockKey, sessionId) {
 }
 
 function finalizeClaudeTextFragments(ctx, status) {
-  let emitted = 0;
   for (const [blockKey, fragment] of ctx.textFragments) {
     fragment.pacer.finishImmediate();
     emitAssistantTextFragmentTimeline(
@@ -1359,10 +1365,30 @@ function finalizeClaudeTextFragments(ctx, status) {
       fragment.sessionId,
       blockKey,
     );
-    emitted += 1;
+    ctx.textFragmentsEmittedCount += 1;
   }
   ctx.textFragments.clear();
-  return emitted;
+  return ctx.textFragmentsEmittedCount;
+}
+
+/**
+ * 单 block 收尾：dispatcher 的 onTextClose 触发，与 reasoning 的 close 对称。
+ * 同 turn 内文本 block 一旦结束就翻 success，UI 卡片立刻停掉 streaming 光标；
+ * 不再依赖 turn 末尾的 result 兜底——否则后面紧跟 tool_use / 二次 thinking 时，
+ * 回复卡会一直停在蓝色 streaming 状态。
+ */
+function closeClaudeTextFragment(ctx, blockKey, sessionId) {
+  const fragment = ctx.textFragments.get(blockKey);
+  if (!fragment) return;
+  fragment.pacer.finishImmediate();
+  emitAssistantTextFragmentTimeline(
+    fragment.accumulatedText,
+    "success",
+    sessionId || fragment.sessionId,
+    blockKey,
+  );
+  ctx.textFragments.delete(blockKey);
+  ctx.textFragmentsEmittedCount += 1;
 }
 
 /**
