@@ -47,11 +47,13 @@ function runDispatcher(events: StreamEvent[]) {
   const calls: Array<
     | { channel: "textStart"; index: number; blockKey: number | null; initialText: string }
     | { channel: "textDelta"; index: number; blockKey: number | null; text: string }
+    | { channel: "textClose"; index: number; blockKey: number | null }
     | { channel: "reasoning"; index: number; blockKey: number | null; text: string; blockType: string }
     | { channel: "reasoningClose"; index: number; blockKey: number | null; text: string; blockType: string }
   > = [];
   const textStarts: Array<{ index: number; blockKey: number | null; initialText: string }> = [];
   const textChunks: Array<{ index: number; blockKey: number | null; text: string }> = [];
+  const textCloses: Array<{ index: number; blockKey: number | null }> = [];
   const reasoningSnapshots: Array<{
     index: number;
     blockKey: number | null;
@@ -74,6 +76,12 @@ function runDispatcher(events: StreamEvent[]) {
     (info: { index: number; blockKey: number | null; text: string }) => {
       textChunks.push(info);
       calls.push({ channel: "textDelta", ...info });
+    },
+  );
+  const onTextClose = vi.fn(
+    (info: { index: number; blockKey: number | null }) => {
+      textCloses.push(info);
+      calls.push({ channel: "textClose", ...info });
     },
   );
   const onReasoning = vi.fn(
@@ -105,6 +113,7 @@ function runDispatcher(events: StreamEvent[]) {
       state,
       onTextStart,
       onTextDelta,
+      onTextClose,
       onReasoning,
       onReasoningClose,
     });
@@ -114,10 +123,12 @@ function runDispatcher(events: StreamEvent[]) {
     calls,
     textStarts,
     textChunks,
+    textCloses,
     reasoningSnapshots,
     reasoningCloses,
     onTextStart,
     onTextDelta,
+    onTextClose,
     onReasoning,
     onReasoningClose,
   };
@@ -257,6 +268,7 @@ describe("dispatchClaudeStreamEvent", () => {
     expect(calls.slice(1)).toEqual([
       { channel: "textDelta", index: 0, blockKey: calls[0].blockKey, text: "让我快速扫一下" },
       { channel: "textDelta", index: 0, blockKey: calls[0].blockKey, text: "项目现状。" },
+      { channel: "textClose", index: 0, blockKey: calls[0].blockKey },
     ]);
   });
 
@@ -274,6 +286,7 @@ describe("dispatchClaudeStreamEvent", () => {
       { channel: "textStart", index: 0, blockKey: 0, initialText: "首段" },
       { channel: "textDelta", index: 0, blockKey: 0, text: "首段" },
       { channel: "textDelta", index: 0, blockKey: 0, text: "增量" },
+      { channel: "textClose", index: 0, blockKey: 0 },
     ]);
   });
 
@@ -309,16 +322,40 @@ describe("dispatchClaudeStreamEvent", () => {
     expect(calls[calls.length - 1].channel).toBe("reasoningClose");
   });
 
-  it("text / 未知 block 的 content_block_stop 不触发 onReasoningClose", () => {
-    const { reasoningCloses } = runDispatcher([
+  it("text block 的 content_block_stop 触发 onTextClose，但不触发 onReasoningClose", () => {
+    // 与 onReasoningClose 对称：text block stop 时同步通知 runner finalize per-block
+    // pacer 并 emit 终态。否则同 turn 紧跟 tool_use 时，回复卡会一直停在蓝色
+    // streaming + 闪烁光标，直到 turn 末尾的 result 才解除。
+    const { textCloses, reasoningCloses, calls } = runDispatcher([
       startBlock(0, CLAUDE_BLOCK_TYPES.TEXT),
       textDelta(0, "hi"),
       stopBlock(0),
-      startBlock(1, "future_unknown_block_type"),
-      stopBlock(1),
     ]);
 
     expect(reasoningCloses).toEqual([]);
+    expect(textCloses).toEqual([{ index: 0, blockKey: 0 }]);
+    // 时序：onTextClose 一定是 text block 的最后一个回调。
+    expect(calls[calls.length - 1].channel).toBe("textClose");
+  });
+
+  it("未知 block 的 content_block_stop 既不触发 onTextClose 也不触发 onReasoningClose", () => {
+    const { textCloses, reasoningCloses } = runDispatcher([
+      startBlock(0, "future_unknown_block_type"),
+      stopBlock(0),
+    ]);
+
+    expect(textCloses).toEqual([]);
+    expect(reasoningCloses).toEqual([]);
+  });
+
+  it("thinking block 的 content_block_stop 不触发 onTextClose", () => {
+    const { textCloses } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.THINKING),
+      thinkingDelta(0, "想一下"),
+      stopBlock(0),
+    ]);
+
+    expect(textCloses).toEqual([]);
   });
 });
 
