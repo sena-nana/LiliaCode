@@ -308,7 +308,7 @@ function mergeTimelineEvents(
     if (!byId.has(event.id)) byId.set(event.id, event);
   }
   return [...byId.values()].sort((a, b) =>
-    a.createdAt - b.createdAt || a.order - b.order || a.id.localeCompare(b.id)
+    a.order - b.order || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
   );
 }
 

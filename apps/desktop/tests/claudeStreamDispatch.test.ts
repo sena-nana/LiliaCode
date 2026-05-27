@@ -9,6 +9,7 @@ import {
   extractClaudeTextDeltaText,
   extractClaudeThinkingDeltaText,
   finalizeClaudeReasoningBlocks,
+  getClaudeBlockKey,
   getClaudeBlockText,
   getClaudeBlockType,
   openClaudeBlock,
@@ -43,14 +44,28 @@ function textDelta(index: number, text: string): StreamEvent {
 
 function runDispatcher(events: StreamEvent[]) {
   const state = createClaudeStreamState();
-  const textChunks: string[] = [];
-  const reasoningSnapshots: Array<{ index: number; text: string; blockType: string }> = [];
-  const onTextDelta = vi.fn((t: string) => {
-    textChunks.push(t);
-  });
-  const onReasoning = vi.fn((info: { index: number; text: string; blockType: string }) => {
-    reasoningSnapshots.push({ index: info.index, text: info.text, blockType: info.blockType });
-  });
+  const textChunks: Array<{ index: number; blockKey: number | null; text: string }> = [];
+  const reasoningSnapshots: Array<{
+    index: number;
+    blockKey: number | null;
+    text: string;
+    blockType: string;
+  }> = [];
+  const onTextDelta = vi.fn(
+    (info: { index: number; blockKey: number | null; text: string }) => {
+      textChunks.push(info);
+    },
+  );
+  const onReasoning = vi.fn(
+    (info: { index: number; blockKey: number | null; text: string; blockType: string }) => {
+      reasoningSnapshots.push({
+        index: info.index,
+        blockKey: info.blockKey,
+        text: info.text,
+        blockType: info.blockType,
+      });
+    },
+  );
   for (const event of events) {
     dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoning });
   }
@@ -72,7 +87,7 @@ describe("dispatchClaudeStreamEvent", () => {
       stopBlock(1),
     ]);
 
-    expect(textChunks).toEqual(textParts);
+    expect(textChunks.map((c) => c.text)).toEqual(textParts);
 
     // 每条 thinking_delta 都产生一条累积快照。
     expect(reasoningSnapshots).toHaveLength(thinkingParts.length);
@@ -87,6 +102,13 @@ describe("dispatchClaudeStreamEvent", () => {
     for (const t of textParts) {
       expect(allReasoningText).not.toContain(t);
     }
+
+    // blockKey 跨 block 单调递增，dispatcher 维护跨 LLM turn 的稳定标识。
+    const thinkingKey = reasoningSnapshots[0].blockKey;
+    const textKey = textChunks[0].blockKey;
+    expect(thinkingKey).not.toBeNull();
+    expect(textKey).not.toBeNull();
+    expect(textKey).not.toBe(thinkingKey);
   });
 
   it("fixture B：未知 block 类型两边都不路由，不抛错", () => {
@@ -111,7 +133,7 @@ describe("dispatchClaudeStreamEvent", () => {
       stopBlock(0),
     ]);
 
-    expect(textChunks).toEqual(["正常 text", "继续正常 text"]);
+    expect(textChunks.map((c) => c.text)).toEqual(["正常 text", "继续正常 text"]);
     expect(reasoningSnapshots).toEqual([]);
     expect(getClaudeBlockText(state, 0)).toBe(""); // text block 不累积 text 到 state（pacer 负责）
   });
@@ -149,6 +171,25 @@ describe("dispatchClaudeStreamEvent", () => {
     expect(reasoningSnapshots[0].text).toBe("首段思考");
     expect(reasoningSnapshots[1].text).toBe("首段思考增量");
   });
+
+  it("跨 LLM turn 复用 SDK index=0 时 blockKey 不复用，避免 sourceId 冲突", () => {
+    // 同一 Claude session 内，多个 LLM turn 各自从 index 0 开始重排 content_block。
+    // dispatcher 必须给后一个 block 一个新的 blockKey，否则 runner 拼出的
+    // sourceId（如 `sid:text:0`）会让两个 turn 的文本互相覆盖。
+    const { textChunks } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.TEXT),
+      textDelta(0, "turn1"),
+      stopBlock(0),
+      startBlock(0, CLAUDE_BLOCK_TYPES.TEXT),
+      textDelta(0, "turn2"),
+      stopBlock(0),
+    ]);
+
+    expect(textChunks).toHaveLength(2);
+    expect(textChunks[0].blockKey).not.toBe(textChunks[1].blockKey);
+    expect(textChunks[0].text).toBe("turn1");
+    expect(textChunks[1].text).toBe("turn2");
+  });
 });
 
 describe("Claude block state machine", () => {
@@ -164,10 +205,23 @@ describe("Claude block state machine", () => {
     expect(getClaudeBlockText(state, 0)).toBe("abcdef");
     expect(getClaudeBlockText(state, 1)).toBe("xyz");
     expect(getClaudeBlockType(state, 0)).toBe(CLAUDE_BLOCK_TYPES.THINKING);
+    expect(getClaudeBlockKey(state, 0)).toBe(0);
+    expect(getClaudeBlockKey(state, 1)).toBe(1);
 
     closeClaudeBlock(state, 0);
     expect(getClaudeBlockType(state, 0)).toBe("");
     expect(getClaudeBlockText(state, 0)).toBe("");
+    expect(getClaudeBlockKey(state, 0)).toBeNull();
+  });
+
+  it("openClaudeBlock 跨 index 复用时分配新 blockKey", () => {
+    const state = createClaudeStreamState();
+    openClaudeBlock(state, 0, CLAUDE_BLOCK_TYPES.TEXT);
+    const firstKey = getClaudeBlockKey(state, 0);
+    closeClaudeBlock(state, 0);
+    openClaudeBlock(state, 0, CLAUDE_BLOCK_TYPES.TEXT);
+    const secondKey = getClaudeBlockKey(state, 0);
+    expect(firstKey).not.toBe(secondKey);
   });
 });
 
@@ -223,12 +277,14 @@ describe("finalizeClaudeReasoningBlocks", () => {
     appendClaudeBlockText(state, 0, "t0");
     appendClaudeBlockText(state, 2, "t2");
 
-    const seen: Array<{ index: number; text: string; blockType: string }> = [];
+    const seen: Array<{ index: number; blockKey: number | null; text: string; blockType: string }> = [];
     finalizeClaudeReasoningBlocks(state, (info) => seen.push(info));
 
     expect(seen.map((s) => s.index).sort()).toEqual([0, 2]);
     expect(seen.find((s) => s.index === 0)?.text).toBe("t0");
     expect(seen.find((s) => s.index === 2)?.text).toBe("t2");
+    expect(seen.find((s) => s.index === 0)?.blockKey).toBe(0);
+    expect(seen.find((s) => s.index === 2)?.blockKey).toBe(2);
     expect(state.streamBlocks.size).toBe(0);
   });
 });

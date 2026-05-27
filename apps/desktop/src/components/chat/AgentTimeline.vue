@@ -39,8 +39,6 @@ type TimelineEventEntry = {
   createdAt: number;
   order: number;
   event: AgentTimelineEvent;
-  processEvents?: AgentTimelineEvent[];
-  isProcessChild?: boolean;
 };
 
 type TimelineGroupEntry = {
@@ -53,7 +51,6 @@ type TimelineGroupEntry = {
   representative: AgentTimelineEvent;
   aggregatedStatus: AgentTimelineEventStatus;
   groupCount: number;
-  isProcessChild?: boolean;
 };
 
 type TimelineEntry = TimelineEventEntry | TimelineGroupEntry;
@@ -65,15 +62,7 @@ const props = defineProps<{
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
-const expandedProcessGroupIds = ref<Set<string>>(new Set());
 const expandedGroupIds = ref<Set<string>>(new Set());
-
-const finalReplyCollapseKey = computed(() =>
-  props.events
-    .filter(isTimelineFinalReply)
-    .map((event) => event.id)
-    .join("|"),
-);
 
 const visibleEvents = computed(() =>
   props.events.filter((event) => !isHiddenTimelineEvent(event)),
@@ -88,95 +77,20 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
       order: event.order,
       event,
     }))
+    // order 是 Rust 端落库时分配的稳定显示位置（runner 把 assistant 流式回复
+    // 按 text block 拆成多条 inline 事件，每条都用独立 sourceId，order 跟同 turn
+    // 工具/思考事件自然交错）。createdAt 只作为同 order tiebreaker，不参与主排序。
     .sort((a, b) =>
-      a.createdAt - b.createdAt || a.order - b.order || a.id.localeCompare(b.id)
+      a.order - b.order || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
     ),
 );
 
-const orderedEntries = computed<TimelineEntry[]>(() => {
-  const entries = chronologicalEntries.value;
-  const finalByTurnId = new Map<string, TimelineEventEntry>();
-  const reasoningByTurnId = new Map<string, TimelineEventEntry[]>();
-  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
-  const hiddenEventIds = new Set<string>();
-
-  for (const entry of entries) {
-    if (isTimelineAssistantMessage(entry.event) && entry.event.turnId) {
-      finalByTurnId.set(entry.event.turnId, entry);
-    }
-    if (isTimelineReasoning(entry.event) && entry.event.turnId) {
-      const list = reasoningByTurnId.get(entry.event.turnId) ?? [];
-      list.push(entry);
-      reasoningByTurnId.set(entry.event.turnId, list);
-    }
-  }
-
-  // 最终回复只折叠它前方、且不被 reasoning 分段隔开的尾部过程。
-  // reasoning 是模型公开思考正文，要按时间点内联显示；夹在多段 reasoning
-  // 之间的工具/命令也保留在原位置，避免真实时间线被一个最终回复摘要吞掉。
-  for (const entry of entries) {
-    if (!entry.event.turnId) continue;
-    if (isTimelineMessage(entry.event)) continue;
-    if (isTimelineReasoning(entry.event)) continue;
-    const finalEntry = finalByTurnId.get(entry.event.turnId);
-    if (!finalEntry) continue;
-    if (!isBeforeTimelineEntry(entry, finalEntry)) continue;
-    if (hasReasoningBetween(entry, finalEntry, reasoningByTurnId.get(entry.event.turnId) ?? [])) {
-      continue;
-    }
-    const list = processEventsByFinalId.get(finalEntry.event.id) ?? [];
-    if (!list.some((item) => item.id === entry.event.id)) list.push(entry.event);
-    processEventsByFinalId.set(finalEntry.event.id, list);
-    hiddenEventIds.add(entry.event.id);
-  }
-
-  const output: TimelineEventEntry[] = [];
-  for (const entry of entries) {
-    if (hiddenEventIds.has(entry.event.id)) continue;
-
-    if (isTimelineFinalReply(entry.event)) {
-      const processEvents = processEventsByFinalId.get(entry.event.id) ?? [];
-      if (processGroupExpanded(entry.event)) {
-        output.push(...processEvents.map((event): TimelineEventEntry => ({
-          type: "event",
-          id: `process:${entry.event.id}:${event.id}`,
-          createdAt: event.createdAt,
-          order: event.order + 1,
-          event,
-          isProcessChild: true,
-        })));
-      }
-      output.push({
-        ...entry,
-        processEvents,
-      });
-    } else {
-      output.push(entry);
-    }
-  }
-
-  return mergeAdjacentGroups(output);
-});
-
-function isBeforeTimelineEntry(a: TimelineEventEntry, b: TimelineEventEntry): boolean {
-  return compareTimelineEntryPosition(a, b) < 0;
-}
-
-function compareTimelineEntryPosition(a: TimelineEventEntry, b: TimelineEventEntry): number {
-  return a.createdAt - b.createdAt ||
-    a.order - b.order ||
-    a.event.id.localeCompare(b.event.id);
-}
-
-function hasReasoningBetween(
-  entry: TimelineEventEntry,
-  finalEntry: TimelineEventEntry,
-  reasoningEntries: TimelineEventEntry[],
-): boolean {
-  return reasoningEntries.some((reasoning) =>
-    isBeforeTimelineEntry(entry, reasoning) && isBeforeTimelineEntry(reasoning, finalEntry)
-  );
-}
+// runner 已经把 assistant 回复拆成 per-block 的 inline message 事件，UI 这层
+// 不再聚合「最终回复 + 折叠过程」——所有事件按 order 内联渲染，相邻同类工具
+// 走 mergeAdjacentGroups 折叠成一组以避免噪点。
+const orderedEntries = computed<TimelineEntry[]>(() =>
+  mergeAdjacentGroups(chronologicalEntries.value),
+);
 
 function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
   const result: TimelineEntry[] = [];
@@ -200,7 +114,6 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
         representative: first.event,
         aggregatedStatus: aggregateTimelineStatus(events),
         groupCount: events.reduce((total, event) => total + eventGroupCount(event), 0),
-        isProcessChild: first.isProcessChild,
       });
     }
     bucket = [];
@@ -277,16 +190,6 @@ watch(
   },
 );
 
-watch(
-  finalReplyCollapseKey,
-  (key, previousKey) => {
-    if (!key || key === previousKey) return;
-    toggledIds.value = new Set();
-    expandedProcessGroupIds.value = new Set();
-    expandedGroupIds.value = new Set();
-  },
-);
-
 function expanded(event: AgentTimelineEvent): boolean {
   return isTimelineExpanded(event, toggledIds.value);
 }
@@ -302,29 +205,6 @@ function canToggle(event: AgentTimelineEvent): boolean {
 function toggleEvent(event: AgentTimelineEvent) {
   if (!canToggle(event)) return;
   toggledIds.value = toggleTimelineExpandedId(toggledIds.value, event.id);
-}
-
-function processEventCount(entry: TimelineEntry): number {
-  if (entry.type !== "event") return 0;
-  return entry.processEvents?.length ?? 0;
-}
-
-function processGroupExpanded(event: AgentTimelineEvent): boolean {
-  return expandedProcessGroupIds.value.has(event.id);
-}
-
-function toggleProcessGroup(event: AgentTimelineEvent) {
-  const next = new Set(expandedProcessGroupIds.value);
-  if (next.has(event.id)) next.delete(event.id);
-  else next.add(event.id);
-  expandedProcessGroupIds.value = next;
-}
-
-function processGroupLabel(entry: TimelineEventEntry): string {
-  const count = processEventCount(entry);
-  const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
-  const summary = processEventsSummary(entry.processEvents ?? []);
-  return summary ? `${verb} ${count} 项 · ${summary}` : `${verb} ${count} 项`;
 }
 
 function eventComponent(event: AgentTimelineEvent): Component {
@@ -369,68 +249,8 @@ function kindClass(prefix: string, kind: string): string {
   return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-function processGroupTone(entry: TimelineEventEntry): "failed" | "running" | "done" {
-  const events = entry.processEvents ?? [];
-  if (events.some((event) => isFailedStatus(event.status))) return "failed";
-  if (events.some((event) => isRunningStatus(event.status))) return "running";
-  return "done";
-}
-
-function processGroupToneClass(entry: TimelineEventEntry): string {
-  return `agent-timeline__process-toggle--${processGroupTone(entry)}`;
-}
-
-function processEventsSummary(events: AgentTimelineEvent[]): string {
-  if (!events.length) return "";
-  const counts = new Map<string, { count: number; unit: string | null; order: number }>();
-  for (const event of events) {
-    const [key, count, unit] = processEventSummaryUnit(event);
-    const existing = counts.get(key);
-    counts.set(key, {
-      count: (existing?.count ?? 0) + count,
-      unit: existing?.unit ?? unit,
-      order: existing?.order ?? counts.size,
-    });
-  }
-
-  const parts = [...counts.entries()]
-    .sort((a, b) => a[1].order - b[1].order)
-    .map(([key, value]) => formatProcessSummaryCount(key, value.count, value.unit))
-    .filter(Boolean);
-
-  if (events.some((event) => isFailedStatus(event.status))) parts.push("有失败");
-  else if (events.some((event) => isRunningStatus(event.status))) parts.push("运行中");
-
-  return parts.join(" · ");
-}
-
-function processEventSummaryUnit(event: AgentTimelineEvent): [string, number, string | null] {
-  const declared = timelineDeclaredGroupUnit(event);
-  if (declared) return [declared.key, declared.count, declared.unit];
-  return ["other", 1, null];
-}
-
 function eventGroupCount(event: AgentTimelineEvent): number {
   return timelineDeclaredGroupUnit(event)?.count ?? 1;
-}
-
-function formatProcessSummaryCount(_key: string, count: number, unit: string | null = null): string {
-  if (count <= 0) return "";
-  if (!unit) return "";
-  return `${count} ${unit}`;
-}
-
-function isRunningStatus(status: AgentTimelineEventStatus): boolean {
-  return status === "pending" ||
-    status === "started" ||
-    status === "running" ||
-    status === "in_progress";
-}
-
-function isFailedStatus(status: AgentTimelineEventStatus): boolean {
-  return status === "failed" ||
-    status === "error" ||
-    status === "cancelled";
 }
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
@@ -507,7 +327,6 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             statusClass(entry.aggregatedStatus),
             {
               'is-compact': !groupExpanded(entry),
-              'is-process-child': entry.isProcessChild,
             },
           ]"
         >
@@ -635,7 +454,6 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             {
               'is-final-reply': isTimelineFinalReply(entry.event),
               'is-compact': isCompact(entry.event),
-              'is-process-child': entry.isProcessChild,
             },
           ]"
         >
@@ -652,11 +470,10 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             </div>
             <div class="agent-timeline__body">
               <header
-                v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
+                v-if="!isTimelineFinalReply(entry.event)"
                 class="agent-timeline__head"
               >
                 <button
-                  v-if="!isTimelineFinalReply(entry.event)"
                   type="button"
                   class="agent-timeline__title"
                   :aria-expanded="expanded(entry.event)"
@@ -678,22 +495,11 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
                 </button>
 
                 <p
-                  v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
+                  v-if="previewText(entry.event)"
                   class="agent-timeline__preview"
                 >
                   {{ previewText(entry.event) }}
                 </p>
-
-                <button
-                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
-                  type="button"
-                  class="agent-timeline__process-toggle"
-                  :class="processGroupToneClass(entry)"
-                  :aria-expanded="processGroupExpanded(entry.event)"
-                  @click="toggleProcessGroup(entry.event)"
-                >
-                  {{ processGroupLabel(entry) }}
-                </button>
               </header>
 
               <div

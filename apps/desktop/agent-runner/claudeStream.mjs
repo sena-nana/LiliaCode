@@ -23,14 +23,21 @@ export const CLAUDE_REASONING_BLOCK_TYPES = new Set([
 ]);
 
 export function createClaudeStreamState() {
-  return { streamBlocks: new Map() };
+  return { streamBlocks: new Map(), nextBlockKey: 0 };
 }
 
+// blockKey 是 dispatcher 维护的全局单调递增计数器，每开一个 content_block 分一个。
+// 这层 key 在「同 Claude session 内多个 LLM turn 都从 SDK index 0 开始重新计数」时
+// 给上层一个稳定、不冲突的 block 标识，方便 runner 拿来拼 sourceId（如
+// `${sessionId}:text:${blockKey}`）——直接用 SDK index 会让第二个 LLM turn 的
+// text:0 覆盖第一个 turn 的 text:0。
 export function openClaudeBlock(state, index, blockType) {
   if (!state || index === undefined || index === null) return;
+  const blockKey = state.nextBlockKey++;
   state.streamBlocks.set(index, {
     type: typeof blockType === "string" ? blockType : "",
     accumulatedText: "",
+    blockKey,
   });
 }
 
@@ -42,6 +49,12 @@ export function closeClaudeBlock(state, index) {
 export function getClaudeBlockType(state, index) {
   if (!state || index === undefined || index === null) return "";
   return state.streamBlocks.get(index)?.type || "";
+}
+
+export function getClaudeBlockKey(state, index) {
+  if (!state || index === undefined || index === null) return null;
+  const entry = state.streamBlocks.get(index);
+  return entry ? entry.blockKey : null;
 }
 
 export function appendClaudeBlockText(state, index, delta) {
@@ -92,11 +105,12 @@ export function extractClaudeBlockInitialText(streamEvent, blockType) {
 
 /**
  * 单一入口：把一条 SDK `stream_event` 按 block 类型路由出去。
- *   - text block → onTextDelta(text)
- *   - thinking / redacted_thinking block → onReasoning({ index, text, eventType, deltaType, blockType })
+ *   - text block → onTextDelta({ index, blockKey, text })
+ *   - thinking / redacted_thinking block → onReasoning({ index, blockKey, text, eventType, deltaType, blockType })
  *   - 未知 block / 顶层 message 事件 → 两边都不触发（含 tool_use 流式 partial JSON）
  *
  * dispatcher 不发 timeline、不知道 pacer、不知道 sessionId——这些组合在 runner 层完成。
+ * blockKey 与 index 同生命周期但跨 LLM turn 不复用，runner 用它做 sourceId 隔离。
  */
 export function dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoning }) {
   if (!event || typeof event !== "object") return;
@@ -106,12 +120,14 @@ export function dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoni
       ? event.content_block.type
       : "";
     openClaudeBlock(state, event.index, blockType);
+    const blockKey = getClaudeBlockKey(state, event.index);
     const initial = extractClaudeBlockInitialText(event, blockType);
     if (initial && CLAUDE_REASONING_BLOCK_TYPES.has(blockType)) {
       const accumulated = appendClaudeBlockText(state, event.index, initial);
       if (onReasoning) {
         onReasoning({
           index: event.index,
+          blockKey,
           text: accumulated,
           eventType: event.type,
           deltaType: null,
@@ -130,10 +146,13 @@ export function dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoni
   if (event.type !== "content_block_delta") return;
 
   const blockType = getClaudeBlockType(state, event.index);
+  const blockKey = getClaudeBlockKey(state, event.index);
 
   if (blockType === CLAUDE_BLOCK_TYPES.TEXT) {
     const text = extractClaudeTextDeltaText(event);
-    if (text && onTextDelta) onTextDelta(text);
+    if (text && onTextDelta) {
+      onTextDelta({ index: event.index, blockKey, text });
+    }
     return;
   }
 
@@ -144,6 +163,7 @@ export function dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoni
       if (onReasoning) {
         onReasoning({
           index: event.index,
+          blockKey,
           text: accumulated,
           eventType: event.type,
           deltaType: event.delta?.type,
@@ -167,6 +187,7 @@ export function finalizeClaudeReasoningBlocks(state, onReasoning) {
     if (onReasoning) {
       onReasoning({
         index,
+        blockKey: entry.blockKey,
         text: entry.accumulatedText,
         blockType: entry.type,
       });

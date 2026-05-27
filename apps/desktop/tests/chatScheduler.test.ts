@@ -354,10 +354,13 @@ describe("chat scheduler", () => {
     expect(finalContent.closest(".agent-timeline__item")).toHaveClass("is-final-reply");
   });
 
-  it("最终回复出现后默认折叠中间过程，只展开最终结果", async () => {
+  it("同 turn 内工具、最终回复按 order 内联渲染，最终回复不再吞掉前置工具", async () => {
+    // runner 现在按 text block 拆 inline 文本片段：工具事件不会被折叠到 final 卡
+    // 下面，而是按 order 各自占一行。这条 case 防止「final 卡跑到工具上方 / 吃掉
+    // 同 turn 工具」的回归。
     seedMockChatMessages("t-002", [
       {
-        id: "u-collapse-start",
+        id: "u-inline-start",
         taskId: "t-002",
         role: "user",
         content: "请执行完整验证",
@@ -394,13 +397,6 @@ describe("chat scheduler", () => {
         .toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
-    await waitFor(() => {
-      expect(view.getByText("验证输出详情")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /yarn verify/ }))
-        .toHaveAttribute("aria-expanded", "true");
-    });
-
     emitMockTimelineEvent("t-002", {
       id: "tl-final-collapse",
       kind: "message",
@@ -419,17 +415,8 @@ describe("chat scheduler", () => {
 
     await waitFor(() => {
       expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
-      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
-      expect(view.queryByText("验证输出详情")).toBeNull();
-      expect(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }))
-        .toHaveAttribute("aria-expanded", "false");
-    });
-
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }));
-    await waitFor(() => {
-      expect(view.getByRole("button", { name: /yarn verify/ }))
-        .toHaveAttribute("aria-expanded", "false");
-      expect(view.getByText(/正在运行完整验证/)).toBeInTheDocument();
+      // 工具事件仍可见、独立成行——没被折叠到 final 下。
+      expect(view.getByRole("button", { name: /yarn verify/ })).toBeInTheDocument();
     });
 
     const commandItem = view.getByRole("button", { name: /yarn verify/ })
@@ -438,7 +425,9 @@ describe("chat scheduler", () => {
       .closest(".agent-timeline__item");
     expect(commandItem).not.toBe(finalItem);
     expect(commandItem).not.toHaveClass("is-final-reply");
+    expect(finalItem).toHaveClass("is-final-reply");
 
+    // 按 order 排序：command(1) 在 final(2) 上方。
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn verify"))
       .toBeLessThan(timelineText.indexOf("最终结果完整展示。"));
@@ -451,7 +440,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("已有历史最终回复时，新一轮最终回复仍会折叠中间过程", async () => {
+  it("已有历史最终回复时，新一轮工具事件仍按 order 内联显示，不被新一轮 final 卡吞掉", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-after-history-final",
@@ -530,14 +519,14 @@ describe("chat scheduler", () => {
 
     await waitFor(() => {
       expect(view.getByText("新一轮最终回复。")).toBeInTheDocument();
-      expect(view.queryByRole("button", { name: /cargo check/ })).toBeNull();
-      expect(view.queryByText("Rust 验证输出详情")).toBeNull();
-      expect(view.getByRole("button", { name: /展开过程 1 项.*1 条命令.*运行中/ }))
-        .toHaveAttribute("aria-expanded", "false");
+      // 工具事件不再折叠到 final 下面——保持 inline 显示，展开态也不被重置。
+      expect(view.getByRole("button", { name: /cargo check/ }))
+        .toHaveAttribute("aria-expanded", "true");
+      expect(view.getByText("Rust 验证输出详情")).toBeInTheDocument();
     });
   });
 
-  it("最终回复后默认折叠用户消息到最终回复之间的过程事件", async () => {
+  it("最终回复之前的工具与计划事件按 order 内联显示，不被 final 卡折叠", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-turn-start",
@@ -552,7 +541,7 @@ describe("chat scheduler", () => {
       kind: "command",
       status: "success",
       title: "yarn test",
-      summary: "这条过程默认不应显示",
+      summary: "命令折叠态预览",
       payload: {
         command: "yarn test",
         stdout: "折叠后的命令详情",
@@ -567,7 +556,7 @@ describe("chat scheduler", () => {
       kind: "plan",
       status: "completed",
       title: "更新计划",
-      summary: "这条计划默认不应显示",
+      summary: "计划折叠态预览",
       payload: {
         plan: "折叠后的计划详情",
       },
@@ -597,22 +586,11 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("请实现时间线折叠")).toBeInTheDocument();
       expect(view.getByText("最终回复应该直接可见。")).toBeInTheDocument();
-      expect(view.queryByText("这条过程默认不应显示")).toBeNull();
-      expect(view.queryByText("这条计划默认不应显示")).toBeNull();
-      expect(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 项计划/ }))
-        .toHaveAttribute("aria-expanded", "false");
-    });
-
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 项计划/ }));
-    await waitFor(() => {
+      // 工具/计划事件按 order 内联展示，默认折叠（点开才看到详情）。
       expect(view.getByRole("button", { name: /yarn test/ }))
         .toHaveAttribute("aria-expanded", "false");
-      expect(view.getByText(/这条过程默认不应显示/)).toBeInTheDocument();
       expect(view.getByRole("button", { name: /更新计划/ }))
         .toHaveAttribute("aria-expanded", "false");
-      expect(view.getByText(/这条计划默认不应显示/)).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /收起过程 2 项.*1 条命令.*1 项计划/ }))
-        .toHaveAttribute("aria-expanded", "true");
     });
 
     const processItem = view.getByRole("button", { name: /yarn test/ })
@@ -622,6 +600,7 @@ describe("chat scheduler", () => {
     expect(processItem).not.toBe(finalItem);
     expect(processItem).not.toHaveClass("is-final-reply");
 
+    // 按 order 排：工具/计划（2、3）在 final（4）上方。
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn test"))
       .toBeLessThan(timelineText.indexOf("最终回复应该直接可见。"));
@@ -841,213 +820,6 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("折叠后的过程摘要会显示事件类型和异常状态", async () => {
-    seedMockChatMessages("t-002", [
-      {
-        id: "u-process-summary",
-        taskId: "t-002",
-        role: "user",
-        content: "请修复失败验证",
-        createdAt: 2000,
-      },
-    ]);
-    emitMockTimelineEvent("t-002", {
-      id: "tl-summary-command",
-      kind: "command",
-      status: "failed",
-      title: "yarn test",
-      summary: "测试失败",
-      payload: {
-        command: "yarn test",
-        stderr: "Expected true to be false",
-      },
-      turnId: "turn-summary",
-      createdAt: 2100,
-      updatedAt: 2100,
-      order: 2,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-summary-file",
-      kind: "file_change",
-      status: "success",
-      title: "更新测试",
-      summary: "修改测试文件",
-      payload: {
-        changes: [{ kind: "update", path: "apps/desktop/tests/chatScheduler.test.ts" }],
-      },
-      turnId: "turn-summary",
-      createdAt: 2200,
-      updatedAt: 2200,
-      order: 3,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-summary-final",
-      kind: "message",
-      status: "success",
-      title: "Assistant",
-      payload: {
-        backend: "claude",
-        role: "assistant",
-        content: "已经定位失败原因。",
-      },
-      turnId: "turn-summary",
-      createdAt: 2300,
-      updatedAt: 2300,
-      order: 4,
-    });
-
-    const view = await renderTaskDetail();
-
-    await waitFor(() => {
-      expect(view.getByText("已经定位失败原因。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /展开过程 2 项.*1 条命令.*1 个文件.*有失败/ }))
-        .toHaveAttribute("aria-expanded", "false");
-    });
-  });
-
-  it("折叠后的过程摘要按 deriveTimelineDisplay 推导的 bucket 与单位合并相邻同类事件", async () => {
-    // 之前这里依赖事件生产方自带 display.group 声明（如 unit: "次索引"），
-    // 现在 display 已被前端 deriveTimelineDisplay 现算：相邻同 kind 事件落入同一
-    // 派生分组，摘要使用派生 unit（command → "条命令"）。
-    seedMockChatMessages("t-002", [
-      {
-        id: "u-derived-process-summary",
-        taskId: "t-002",
-        role: "user",
-        content: "请连跑两条命令",
-        createdAt: 2000,
-      },
-    ]);
-    emitMockTimelineEvent("t-002", {
-      id: "tl-derived-process-a",
-      kind: "command",
-      status: "success",
-      title: "yarn lint",
-      summary: "lint 通过",
-      payload: { command: "yarn lint" },
-      turnId: "turn-derived-process",
-      createdAt: 2100,
-      updatedAt: 2100,
-      order: 2,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-derived-process-b",
-      kind: "command",
-      status: "success",
-      title: "yarn build",
-      summary: "build 通过",
-      payload: { command: "yarn build" },
-      turnId: "turn-derived-process",
-      createdAt: 2200,
-      updatedAt: 2200,
-      order: 3,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-derived-process-final",
-      kind: "message",
-      status: "success",
-      title: "Assistant",
-      payload: {
-        backend: "claude",
-        role: "assistant",
-        content: "两条命令都通过。",
-      },
-      turnId: "turn-derived-process",
-      createdAt: 2300,
-      updatedAt: 2300,
-      order: 4,
-    });
-
-    const view = await renderTaskDetail();
-
-    await waitFor(() => {
-      expect(view.getByText("两条命令都通过。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /展开过程 2 项.*2 条命令/ }))
-        .toHaveAttribute("aria-expanded", "false");
-    });
-  });
-
-  it("折叠后的过程摘要会把 Bash 和文件工具归入命令与文件", async () => {
-    seedMockChatMessages("t-002", [
-      {
-        id: "u-tool-process-summary",
-        taskId: "t-002",
-        role: "user",
-        content: "请检查文件并验证",
-        createdAt: 2000,
-      },
-    ]);
-    emitMockTimelineEvent("t-002", {
-      id: "tl-tool-summary-bash",
-      kind: "tool",
-      status: "success",
-      title: "Bash",
-      summary: "运行验证",
-      payload: {
-        toolName: "Bash",
-        input: { command: "yarn verify" },
-      },
-      turnId: "turn-tool-summary",
-      createdAt: 2100,
-      updatedAt: 2100,
-      order: 2,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-tool-summary-read",
-      kind: "tool",
-      status: "success",
-      title: "Read",
-      summary: "读取组件",
-      payload: {
-        toolName: "Read",
-        input: { path: "apps/desktop/src/components/chat/AgentTimeline.vue" },
-      },
-      turnId: "turn-tool-summary",
-      createdAt: 2200,
-      updatedAt: 2200,
-      order: 3,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-tool-summary-edit",
-      kind: "tool",
-      status: "success",
-      title: "Edit",
-      summary: "修改样式",
-      payload: {
-        toolName: "Edit",
-        input: { path: "apps/desktop/src/styles.css" },
-      },
-      turnId: "turn-tool-summary",
-      createdAt: 2300,
-      updatedAt: 2300,
-      order: 4,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-tool-summary-final",
-      kind: "message",
-      status: "success",
-      title: "Assistant",
-      payload: {
-        backend: "claude",
-        role: "assistant",
-        content: "文件检查完成。",
-      },
-      turnId: "turn-tool-summary",
-      createdAt: 2400,
-      updatedAt: 2400,
-      order: 5,
-    });
-
-    const view = await renderTaskDetail();
-
-    await waitFor(() => {
-      expect(view.getByText("文件检查完成。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /展开过程 3 项.*1 条命令.*2 个文件/ }))
-        .toHaveAttribute("aria-expanded", "false");
-      expect(view.queryByRole("button", { name: /3 个工具/ })).toBeNull();
-    });
-  });
-
   it("相邻事件分组展开后保留原始事件详情", async () => {
     const view = await renderTaskDetail();
     await expectInitialReasoning(view);
@@ -1103,7 +875,10 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("最终回复状态更新不会重置当前 turn 的过程展开状态", async () => {
+  it("最终回复状态更新不会重置同 turn 内已展开的工具事件", async () => {
+    // runner 现在按 text block 拆 inline 文本片段，原有的「展开过程」聚合按钮
+    // 已经删除——这里只验证文本片段更新（running → success）不影响同 turn 内
+    // 工具事件本身的 expand 状态。
     seedMockChatMessages("t-002", [
       {
         id: "u-stream-final",
@@ -1149,11 +924,10 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("正在整理结果")).toBeInTheDocument();
     });
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项.*1 条命令/ }));
     await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
     await waitFor(() => {
       expect(view.getByText("验证输出保持展开")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /收起过程 1 项.*1 条命令/ }))
+      expect(view.getByRole("button", { name: /yarn verify/ }))
         .toHaveAttribute("aria-expanded", "true");
     });
 
@@ -1176,7 +950,7 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("整理完成")).toBeInTheDocument();
       expect(view.getByText("验证输出保持展开")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /收起过程 1 项.*1 条命令/ }))
+      expect(view.getByRole("button", { name: /yarn verify/ }))
         .toHaveAttribute("aria-expanded", "true");
     });
   });

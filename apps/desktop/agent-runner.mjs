@@ -178,11 +178,13 @@ function emitTimeline(input) {
 }
 
 /**
- * Assistant 流式回复落到 message kind 的 timeline。
- * 用固定 sourceId="assistant"，Rust 端会拼成 `task:turn:assistant`，
- * 同一 turn 内反复 upsert 即可实现 token 级增量更新。
+ * 把 assistant 流式回复按 **block 级** 拆成多条 inline message timeline 事件，
+ * 每个 text block 用独立 sourceId（`{sessionId}:text:{blockKey}`）。
+ * 这样每段文本固定落在它实际发生的位置，与同 turn 的工具/思考按 order 自然交错；
+ * 旧的「整 turn 拼成单条 sourceId="assistant"」会让开场文本把整张回复卡的 order
+ * 锁在工具之前。
  */
-function emitAssistantMessageTimeline(text, status, backend) {
+function emitAssistantTextFragmentTimeline(text, status, sessionId, blockKey) {
   const content = typeof text === "string" ? text : "";
   emitTimeline({
     kind: "message",
@@ -192,10 +194,14 @@ function emitAssistantMessageTimeline(text, status, backend) {
     payload: {
       role: "assistant",
       content,
-      backend,
+      backend: "claude",
     },
-    sourceId: "assistant",
+    sourceId: claudeTextFragmentSourceId(sessionId, blockKey),
   });
+}
+
+function claudeTextFragmentSourceId(sessionId, blockKey) {
+  return `${sessionId || "claude"}:text:${blockKey}`;
 }
 
 /**
@@ -205,8 +211,8 @@ function emitAssistantMessageTimeline(text, status, backend) {
  * 就是平稳滚动的文本流。
  *
  * 终态调 `finishImmediate` 一次性提交剩余，上层紧接 emit success，保证
- * 最终态不被 pacer 延迟。`syncTo` 给 SDK 漏发 delta 但给完整 snapshot
- * （Claude case "assistant"）时补差量用。
+ * 最终态不被 pacer 延迟。`syncTo` 给只发完整 snapshot 不发增量 delta 的
+ * 上游补差量用（如 Codex 的 assistant_message item）。
  */
 function createTextPacer({ intervalMs = 33, flushDivisor = 6, emit }) {
   let buffer = "";
@@ -494,16 +500,6 @@ function finalizeClaudeReasoningTimeline(ctx, sessionId) {
       sourceId: claudeReasoningSourceId(sessionId, index),
     });
   });
-}
-
-/** 从 SDKAssistantMessage.message.content 里抽出全部 text 块拼接结果。 */
-function extractClaudeAssistantText(msg) {
-  const content = msg?.message?.content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((b) => b && b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text)
-    .join("");
 }
 
 function normalizeAskUserResult(value) {
@@ -1087,8 +1083,9 @@ async function runClaude(cmd) {
   let lastSessionId = null;
   const ctx = {
     claudeStream: createClaudeStreamState(),
-    assistantDeltaText: "",
-    assistantSnapshotText: "",
+    /** blockKey → { pacer, accumulatedText, sessionId }；每个 text block 一个独立
+     *  pacer，sourceId 也按 blockKey 拆开。结束 turn 时统一翻成 success。 */
+    textFragments: new Map(),
     /** 见过任何 type==="text" 的 assistant content block；用于 result 兜底判断是否
      *  该 emit 一张空 final 卡（vs 纯思考/纯 tool_use 的合法静默 turn）。 */
     sawAssistantTextBlock: false,
@@ -1096,9 +1093,6 @@ async function runClaude(cmd) {
     /** sourceId → { kind, title, display }，给未收到 tool_result 的工具做收尾用。 */
     activeTools: new Map(),
   };
-  const pacer = createTextPacer({
-    emit: (text) => emitAssistantMessageTimeline(text, "running", "claude"),
-  });
   for await (const msg of query({ prompt, options })) {
     if (msg.session_id) lastSessionId = msg.session_id;
 
@@ -1106,28 +1100,18 @@ async function runClaude(cmd) {
       mapClaudeSystemTimeline(msg);
       switch (msg.type) {
         case "stream_event": {
-          dispatchClaudeStreamEvent({
-            event: msg.event,
-            state: ctx.claudeStream,
-            onTextDelta: (text) => {
-              ctx.assistantDeltaText += text;
-              pacer.push(text);
-            },
-            onReasoning: (info) => emitClaudeReasoningSnapshot(info, msg?.session_id),
-          });
+          handleClaudeStreamEvent(msg, ctx);
           break;
         }
       case "assistant": {
-        // 含 tool_use 的 assistant 消息 text 是空串——跳过；纯文本块作为 delta 漏接时的兜底快照。
-        const text = extractClaudeAssistantText(msg);
-        if (text) {
-          ctx.assistantSnapshotText = text;
-          pacer.syncTo(text);
-        }
         const content = msg?.message?.content;
         if (Array.isArray(content)) {
           for (const b of content) {
             if (b && b.type === "text") {
+              // 仅记一个标志，不回填 pacer：SDK 把每个完成的 block 单发一条
+              // assistant 消息（新 block 永远落 content[0]），按数组 index 当
+              // sdkIndex 回填会跟 stream_event 的 blockKey 错位，产生 text:N /
+              // text:N+1 两份重复。文本真正的内容由 stream_event 通道独占。
               ctx.sawAssistantTextBlock = true;
             }
             if (b && b.type === "tool_use") {
@@ -1140,35 +1124,17 @@ async function runClaude(cmd) {
       }
       case "result": {
         ctx.resultSeen = true;
-        const finalText =
-          fullTextOrNull(msg.result) ||
-          fullTextOrNull(ctx.assistantDeltaText) ||
-          fullTextOrNull(ctx.assistantSnapshotText);
         const errorSummary = msg.is_error
           ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
           : "";
-        pacer.finishImmediate();
-        sweepActiveClaudeTools(ctx, msg.is_error ? "error" : "success", msg?.session_id);
+        const status = msg.is_error ? "error" : "success";
+        const fragmentsEmitted = finalizeClaudeTextFragments(ctx, status);
+        sweepActiveClaudeTools(ctx, status, msg?.session_id);
         finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
-        // finalText 非空 → 正常 emit；finalText 空但本 turn 出现过 assistant text block
-        // → emit 空内容 final 卡，让 UI 显式提示「最终回复为空」而不是无卡片，便于
-        // 发现 SDK 行为异常（纯思考/纯 tool_use 的合法 turn 走 else 分支静默）。
-        if (finalText) {
-          emitAssistantMessageTimeline(
-            finalText,
-            msg.is_error ? "error" : "success",
-            "claude",
-          );
-        } else if (ctx.sawAssistantTextBlock) {
-          emitAssistantMessageTimeline(
-            "",
-            msg.is_error ? "error" : "success",
-            "claude",
-          );
-        }
+        emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSessionId);
         emitTimeline({
           kind: "turn",
-          status: msg.is_error ? "error" : "success",
+          status,
           title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
           summary: errorSummary,
           payload: {
@@ -1227,17 +1193,10 @@ async function runClaude(cmd) {
   }
   if (lastSessionId && !ctx.resultSeen) {
     // 兜底：万一某些 result 路径没有触发 done 事件
-    const finalText =
-      fullTextOrNull(ctx.assistantDeltaText) ||
-      fullTextOrNull(ctx.assistantSnapshotText);
-    pacer.finishImmediate();
+    const fragmentsEmitted = finalizeClaudeTextFragments(ctx, "success");
     sweepActiveClaudeTools(ctx, "success", lastSessionId);
     finalizeClaudeReasoningTimeline(ctx, lastSessionId);
-    if (finalText) {
-      emitAssistantMessageTimeline(finalText, "success", "claude");
-    } else if (ctx.sawAssistantTextBlock) {
-      emitAssistantMessageTimeline("", "success", "claude");
-    }
+    emitClaudeTextResultFallback(ctx, null, "success", fragmentsEmitted, lastSessionId);
     emitTimeline({
       kind: "turn",
       status: "success",
@@ -1251,6 +1210,65 @@ async function runClaude(cmd) {
       sourceId: `${lastSessionId}:turn:done`,
     });
     emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
+  }
+}
+
+/** 把 stream_event 分到 per-block text pacer 与 reasoning 累加器。 */
+function handleClaudeStreamEvent(msg, ctx) {
+  dispatchClaudeStreamEvent({
+    event: msg?.event,
+    state: ctx.claudeStream,
+    onTextDelta: ({ blockKey, text }) => {
+      if (blockKey === null || blockKey === undefined) return;
+      const fragment = getOrCreateClaudeTextFragment(ctx, blockKey, msg?.session_id);
+      fragment.accumulatedText += text;
+      fragment.sessionId = msg?.session_id || fragment.sessionId;
+      fragment.pacer.push(text);
+    },
+    onReasoning: (info) => emitClaudeReasoningSnapshot(info, msg?.session_id),
+  });
+}
+
+function getOrCreateClaudeTextFragment(ctx, blockKey, sessionId) {
+  let fragment = ctx.textFragments.get(blockKey);
+  if (fragment) return fragment;
+  const sid = sessionId || "claude";
+  const pacer = createTextPacer({
+    emit: (text) => emitAssistantTextFragmentTimeline(text, "running", fragment.sessionId, blockKey),
+  });
+  fragment = { pacer, accumulatedText: "", sessionId: sid };
+  ctx.textFragments.set(blockKey, fragment);
+  return fragment;
+}
+
+function finalizeClaudeTextFragments(ctx, status) {
+  let emitted = 0;
+  for (const [blockKey, fragment] of ctx.textFragments) {
+    fragment.pacer.finishImmediate();
+    emitAssistantTextFragmentTimeline(
+      fragment.accumulatedText,
+      status,
+      fragment.sessionId,
+      blockKey,
+    );
+    emitted += 1;
+  }
+  ctx.textFragments.clear();
+  return emitted;
+}
+
+/**
+ * 兜底：流式 fragment 全为空时，用 msg.result 落最终回复；连 result 都没有
+ * 但本 turn 又见过 text block，就 emit 一条空卡，避免 UI 静默吞掉。
+ */
+function emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSessionId) {
+  if (fragmentsEmitted > 0) return;
+  const resultText = fullTextOrNull(msg?.result);
+  const sessionId = msg?.session_id || lastSessionId || "claude";
+  if (resultText) {
+    emitAssistantTextFragmentTimeline(resultText, status, sessionId, "result");
+  } else if (ctx.sawAssistantTextBlock) {
+    emitAssistantTextFragmentTimeline("", status, sessionId, "result");
   }
 }
 
