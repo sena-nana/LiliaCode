@@ -40,6 +40,10 @@ type TimelineEventEntry = {
   turnSeq: number;
   intraTurnOrder: number;
   event: AgentTimelineEvent;
+  /** Final reply 卡上挂着的、被折叠到它下面的过程事件（按原始顺序）。 */
+  processEvents?: AgentTimelineEvent[];
+  /** expanded 时从 processEvents 还原出来的子项。 */
+  isProcessChild?: boolean;
 };
 
 type TimelineGroupEntry = {
@@ -53,6 +57,7 @@ type TimelineGroupEntry = {
   representative: AgentTimelineEvent;
   aggregatedStatus: AgentTimelineEventStatus;
   groupCount: number;
+  isProcessChild?: boolean;
 };
 
 type TimelineEntry = TimelineEventEntry | TimelineGroupEntry;
@@ -65,11 +70,40 @@ const props = defineProps<{
 
 const toggledIds = ref<Set<string>>(new Set());
 const expandedGroupIds = ref<Set<string>>(new Set());
+const expandedProcessGroupIds = ref<Set<string>>(new Set());
+
+const TERMINAL_TURN_STATUSES = new Set<AgentTimelineEventStatus>([
+  "success",
+  "completed",
+  "done",
+  "error",
+  "failed",
+  "cancelled",
+]);
+
+/**
+ * Turn 结束的权威信号：runner 在 `case "result"` emit 的 `kind:"turn"` + 终态
+ * status。流式中 turn 未进集合 → 全部 inline；完成那一帧进集合 → 该 turn 的
+ * 过程事件折叠到最后一条 assistant message 下，避免「最后一条」随新 text
+ * block 漂移造成折叠抖动。
+ */
+const completedTurnIds = computed<Set<string>>(() => {
+  const set = new Set<string>();
+  for (const event of props.events) {
+    if (event.kind !== "turn") continue;
+    if (!event.turnId) continue;
+    if (!TERMINAL_TURN_STATUSES.has(event.status)) continue;
+    set.add(event.turnId);
+  }
+  return set;
+});
 
 const visibleEvents = computed(() =>
   props.events.filter((event) => !isHiddenTimelineEvent(event)),
 );
 
+// 主排序键 (turnSeq, intraTurnOrder) 由 Rust 落库时分配；createdAt / id 只兜
+// 同序碰撞（如 turnSeq=MAX 的乐观事件）。
 const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
   visibleEvents.value
     .map((event): TimelineEventEntry => ({
@@ -80,10 +114,6 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
       intraTurnOrder: event.intraTurnOrder,
       event,
     }))
-    // 主排序键 (turnSeq, intraTurnOrder) 由 Rust 端在落库时分配——turnSeq 按
-    // turn_id 首次出现单调递增，intraTurnOrder 按 turn 内事件落库顺序单调递增。
-    // 把"按 turn 隔离"做到 DB 层，前端只忠实地按 schema 提供的复合键展开即可；
-    // createdAt / id 仅作为同序兜底。
     .sort((a, b) =>
       a.turnSeq - b.turnSeq ||
       a.intraTurnOrder - b.intraTurnOrder ||
@@ -92,12 +122,67 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
     ),
 );
 
-// runner 已经把 assistant 回复拆成 per-block 的 inline message 事件，UI 这层
-// 不再聚合「最终回复 + 折叠过程」——所有事件按 order 内联渲染，相邻同类工具
-// 走 mergeAdjacentGroups 折叠成一组以避免噪点。
-const orderedEntries = computed<TimelineEntry[]>(() =>
-  mergeAdjacentGroups(chronologicalEntries.value),
-);
+// turn 完成后把同 turn 的非 message / 非 reasoning 事件折叠到「最后一条
+// assistant message」下面。reasoning 始终 inline（思考是公开叙事），但不阻断
+// 折叠——Claude 的典型流程「思考→工具→再思考→回复」要求收尾 reasoning 不
+// 充当分隔点，否则真实世界几乎所有 turn 都拿不到折叠。
+const orderedEntries = computed<TimelineEntry[]>(() => {
+  const entries = chronologicalEntries.value;
+  const completed = completedTurnIds.value;
+  const lastFinalByTurnId = new Map<string, TimelineEventEntry>();
+
+  for (const entry of entries) {
+    const turnId = entry.event.turnId;
+    if (!turnId || !completed.has(turnId)) continue;
+    // 同 turn 多条 assistant message 时取**最后一条**：SDK 在 stop_reason=
+    // end_turn 之前都可能再开新 text block。
+    if (isTimelineAssistantMessage(entry.event)) lastFinalByTurnId.set(turnId, entry);
+  }
+
+  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
+  const hiddenEventIds = new Set<string>();
+
+  for (const entry of entries) {
+    const turnId = entry.event.turnId;
+    if (!turnId || !completed.has(turnId)) continue;
+    if (isTimelineMessage(entry.event)) continue;
+    if (isTimelineReasoning(entry.event)) continue;
+    const finalEntry = lastFinalByTurnId.get(turnId);
+    if (!finalEntry) continue;
+    if (entry.intraTurnOrder >= finalEntry.intraTurnOrder) continue;
+    let list = processEventsByFinalId.get(finalEntry.event.id);
+    if (!list) {
+      list = [];
+      processEventsByFinalId.set(finalEntry.event.id, list);
+    }
+    list.push(entry.event);
+    hiddenEventIds.add(entry.event.id);
+  }
+
+  const output: TimelineEventEntry[] = [];
+  for (const entry of entries) {
+    if (hiddenEventIds.has(entry.event.id)) continue;
+    const processEvents = isTimelineFinalReply(entry.event)
+      ? processEventsByFinalId.get(entry.event.id)
+      : undefined;
+    if (processEvents && expandedProcessGroupIds.value.has(entry.event.id)) {
+      for (const event of processEvents) {
+        output.push({
+          type: "event",
+          id: `process:${entry.event.id}:${event.id}`,
+          createdAt: event.createdAt,
+          turnSeq: event.turnSeq,
+          intraTurnOrder: event.intraTurnOrder,
+          event,
+          isProcessChild: true,
+        });
+      }
+    }
+    output.push(processEvents ? { ...entry, processEvents } : entry);
+  }
+
+  return mergeAdjacentGroups(output);
+});
 
 function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
   const result: TimelineEntry[] = [];
@@ -122,6 +207,7 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
         representative: first.event,
         aggregatedStatus: aggregateTimelineStatus(events),
         groupCount: events.reduce((total, event) => total + eventGroupCount(event), 0),
+        isProcessChild: first.isProcessChild,
       });
     }
     bucket = [];
@@ -198,6 +284,19 @@ watch(
   },
 );
 
+// 用户切到另一个 task 或事件被裁掉时清理 expandedProcessGroupIds。
+watch(
+  () => visibleEvents.value.filter(isTimelineFinalReply).map((e) => e.id).join("|"),
+  () => {
+    const valid = new Set(
+      visibleEvents.value.filter(isTimelineFinalReply).map((e) => e.id),
+    );
+    expandedProcessGroupIds.value = new Set(
+      [...expandedProcessGroupIds.value].filter((id) => valid.has(id)),
+    );
+  },
+);
+
 function expanded(event: AgentTimelineEvent): boolean {
   return isTimelineExpanded(event, toggledIds.value);
 }
@@ -218,6 +317,68 @@ function toggleEvent(event: AgentTimelineEvent) {
 function eventComponent(event: AgentTimelineEvent): Component {
   if (isTimelineFinalReply(event)) return TimelineFinalReply;
   return TimelineDeclaredEvent;
+}
+
+function processEventCount(entry: TimelineEntry): number {
+  if (entry.type !== "event") return 0;
+  return entry.processEvents?.length ?? 0;
+}
+
+function processGroupExpanded(event: AgentTimelineEvent): boolean {
+  return expandedProcessGroupIds.value.has(event.id);
+}
+
+function toggleProcessGroup(event: AgentTimelineEvent) {
+  const next = new Set(expandedProcessGroupIds.value);
+  if (next.has(event.id)) next.delete(event.id);
+  else next.add(event.id);
+  expandedProcessGroupIds.value = next;
+}
+
+function processGroupTone(entry: TimelineEventEntry): "failed" | "running" | "done" {
+  const events = entry.processEvents ?? [];
+  if (events.some((event) => isFailedStatus(event.status))) return "failed";
+  if (events.some((event) => isRunningStatus(event.status))) return "running";
+  return "done";
+}
+
+function processGroupToneClass(entry: TimelineEventEntry): string {
+  return `agent-timeline__process-toggle--${processGroupTone(entry)}`;
+}
+
+function processGroupLabel(entry: TimelineEventEntry): string {
+  const count = processEventCount(entry);
+  const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
+  const summary = processEventsSummary(entry.processEvents ?? []);
+  return summary ? `${verb} ${count} 项 · ${summary}` : `${verb} ${count} 项`;
+}
+
+function processEventsSummary(events: AgentTimelineEvent[]): string {
+  const counts = new Map<string, { count: number; unit: string }>();
+  for (const event of events) {
+    const declared = timelineDeclaredGroupUnit(event);
+    if (!declared || !declared.unit) continue;
+    const existing = counts.get(declared.key);
+    if (existing) existing.count += declared.count;
+    else counts.set(declared.key, { count: declared.count, unit: declared.unit });
+  }
+  const parts = [...counts.values()].map(({ count, unit }) => `${count} ${unit}`);
+  if (events.some((e) => isFailedStatus(e.status))) parts.push("有失败");
+  else if (events.some((e) => isRunningStatus(e.status))) parts.push("运行中");
+  return parts.join(" · ");
+}
+
+function isRunningStatus(status: AgentTimelineEventStatus): boolean {
+  return status === "pending" ||
+    status === "started" ||
+    status === "running" ||
+    status === "in_progress";
+}
+
+function isFailedStatus(status: AgentTimelineEventStatus): boolean {
+  return status === "failed" ||
+    status === "error" ||
+    status === "cancelled";
 }
 
 function previewText(event: AgentTimelineEvent): string {
@@ -335,6 +496,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             statusClass(entry.aggregatedStatus),
             {
               'is-compact': !groupExpanded(entry),
+              'is-process-child': entry.isProcessChild,
             },
           ]"
         >
@@ -462,6 +624,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             {
               'is-final-reply': isTimelineFinalReply(entry.event),
               'is-compact': isCompact(entry.event),
+              'is-process-child': entry.isProcessChild,
             },
           ]"
         >
@@ -478,10 +641,11 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             </div>
             <div class="agent-timeline__body">
               <header
-                v-if="!isTimelineFinalReply(entry.event)"
+                v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
                 class="agent-timeline__head"
               >
                 <button
+                  v-if="!isTimelineFinalReply(entry.event)"
                   type="button"
                   class="agent-timeline__title"
                   :aria-expanded="expanded(entry.event)"
@@ -503,11 +667,22 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
                 </button>
 
                 <p
-                  v-if="previewText(entry.event)"
+                  v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
                   class="agent-timeline__preview"
                 >
                   {{ previewText(entry.event) }}
                 </p>
+
+                <button
+                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
+                  type="button"
+                  class="agent-timeline__process-toggle"
+                  :class="processGroupToneClass(entry)"
+                  :aria-expanded="processGroupExpanded(entry.event)"
+                  @click="toggleProcessGroup(entry.event)"
+                >
+                  {{ processGroupLabel(entry) }}
+                </button>
               </header>
 
               <div

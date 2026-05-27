@@ -8,6 +8,7 @@ import { allTasksReady } from "../src/data/tasks";
 import {
   completeMockAgentTurn,
   emitMockTimelineEvent,
+  emitMockTurnCompleted,
   emitTauriEvent,
   emitWebviewDragDropEvent,
   mockInvoke,
@@ -354,10 +355,11 @@ describe("chat scheduler", () => {
     expect(finalContent.closest(".agent-timeline__item")).toHaveClass("is-final-reply");
   });
 
-  it("同 turn 内工具、最终回复按 order 内联渲染，最终回复不再吞掉前置工具", async () => {
-    // runner 现在按 text block 拆 inline 文本片段：工具事件不会被折叠到 final 卡
-    // 下面，而是按 order 各自占一行。这条 case 防止「final 卡跑到工具上方 / 吃掉
-    // 同 turn 工具」的回归。
+  it("同 turn 内工具与最终回复：流式中按 order 内联，turn 完成后折叠到 final 下", async () => {
+    // runner 现在按 text block 拆 inline 文本片段；turn 未结束时所有事件 inline
+    // 显示——避免「最后一条」随新 text block 漂移导致折叠抖动。runner 在
+    // `case "result"` emit kind:"turn" status:success 那一帧，UI 才把过程折叠到
+    // 该 turn 的最后一条 assistant message 下面。
     seedMockChatMessages("t-002", [
       {
         id: "u-inline-start",
@@ -413,34 +415,39 @@ describe("chat scheduler", () => {
       order: 2,
     });
 
+    // 流式中（尚未 emit kind:"turn"）：command 仍 inline 显示，不被吞掉。
     await waitFor(() => {
       expect(view.getByText("最终结果完整展示。")).toBeInTheDocument();
-      // 工具事件仍可见、独立成行——没被折叠到 final 下。
       expect(view.getByRole("button", { name: /yarn verify/ })).toBeInTheDocument();
     });
-
-    const commandItem = view.getByRole("button", { name: /yarn verify/ })
-      .closest(".agent-timeline__item");
-    const finalItem = view.getByText("最终结果完整展示。")
-      .closest(".agent-timeline__item");
-    expect(commandItem).not.toBe(finalItem);
-    expect(commandItem).not.toHaveClass("is-final-reply");
-    expect(finalItem).toHaveClass("is-final-reply");
+    expect(view.queryByRole("button", { name: /展开过程/ })).toBeNull();
 
     // 按 order 排序：command(1) 在 final(2) 上方。
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn verify"))
       .toBeLessThan(timelineText.indexOf("最终结果完整展示。"));
 
+    // Runner 发出 turn 终结事件，UI 这才把命令折叠到 final 下、默认收起。
+    emitMockTurnCompleted("t-002", "turn-collapse");
+
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
+      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+
+    // 点开「展开过程」：命令复现在 final 上方，可继续展开看 stdout。
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /yarn verify/ })).toBeInTheDocument();
+    });
     await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
     await waitFor(() => {
       expect(view.getByText("验证输出详情")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /yarn verify/ }))
-        .toHaveAttribute("aria-expanded", "true");
     });
   });
 
-  it("已有历史最终回复时，新一轮工具事件仍按 order 内联显示，不被新一轮 final 卡吞掉", async () => {
+  it("历史 turn 已折叠时，新一轮 inline 事件不会被旧的 final 卡吞掉，新一轮 final 待 turn 完成才折叠", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-after-history-final",
@@ -465,6 +472,7 @@ describe("chat scheduler", () => {
       updatedAt: 1600,
       order: 1,
     });
+    emitMockTurnCompleted("t-002", "turn-history", "success", 1700);
 
     const view = await renderTaskDetail();
 
@@ -517,16 +525,26 @@ describe("chat scheduler", () => {
       order: 3,
     });
 
+    // 新一轮 turn 还没收到终结事件——cargo check 保持 inline，展开态不被重置。
     await waitFor(() => {
       expect(view.getByText("新一轮最终回复。")).toBeInTheDocument();
-      // 工具事件不再折叠到 final 下面——保持 inline 显示，展开态也不被重置。
       expect(view.getByRole("button", { name: /cargo check/ }))
         .toHaveAttribute("aria-expanded", "true");
       expect(view.getByText("Rust 验证输出详情")).toBeInTheDocument();
     });
+    expect(view.queryByRole("button", { name: /展开过程/ })).toBeNull();
+
+    // Runner 发新一轮 turn 终结，cargo check 折叠到新 final 下面，默认收起。
+    emitMockTurnCompleted("t-002", "turn-new", "success", 2300);
+
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: /cargo check/ })).toBeNull();
+      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
   });
 
-  it("最终回复之前的工具与计划事件按 order 内联显示，不被 final 卡折叠", async () => {
+  it("turn 完成后，最终回复之前的多个工具/计划事件折叠到 final 卡下，点开按钮才显出", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-turn-start",
@@ -580,27 +598,29 @@ describe("chat scheduler", () => {
       updatedAt: 2300,
       order: 4,
     });
+    emitMockTurnCompleted("t-002", "turn-fold", "success", 2400);
 
     const view = await renderTaskDetail();
 
     await waitFor(() => {
       expect(view.getByText("请实现时间线折叠")).toBeInTheDocument();
       expect(view.getByText("最终回复应该直接可见。")).toBeInTheDocument();
-      // 工具/计划事件按 order 内联展示，默认折叠（点开才看到详情）。
-      expect(view.getByRole("button", { name: /yarn test/ }))
-        .toHaveAttribute("aria-expanded", "false");
-      expect(view.getByRole("button", { name: /更新计划/ }))
-        .toHaveAttribute("aria-expanded", "false");
+      // 工具/计划事件被折叠到 final 下，inline 不再可见，只剩「展开过程」按钮。
+      expect(view.queryByRole("button", { name: /yarn test/ })).toBeNull();
+      expect(view.queryByRole("button", { name: /更新计划/ })).toBeNull();
+      const toggle = view.getByRole("button", { name: /展开过程 2 项/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    const processItem = view.getByRole("button", { name: /yarn test/ })
-      .closest(".agent-timeline__item");
-    const finalItem = view.getByText("最终回复应该直接可见。")
-      .closest(".agent-timeline__item");
-    expect(processItem).not.toBe(finalItem);
-    expect(processItem).not.toHaveClass("is-final-reply");
+    // 点开「展开过程」：命令/计划回到 final 上方。
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项/ }));
 
-    // 按 order 排：工具/计划（2、3）在 final（4）上方。
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /yarn test/ })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /更新计划/ })).toBeInTheDocument();
+    });
+
+    // 展开态下按 order 排：工具/计划（2、3）在 final（4）上方。
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn test"))
       .toBeLessThan(timelineText.indexOf("最终回复应该直接可见。"));
@@ -615,7 +635,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("多个思考事件之间的过程事件仍按时间线顺序显示", async () => {
+  it("turn 完成后，多段思考之间的工具仍被折叠到 final 下；reasoning 保持 inline", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-multi-reasoning",
@@ -683,36 +703,42 @@ describe("chat scheduler", () => {
       updatedAt: 2400,
       order: 5,
     });
+    // Claude 典型流程是 "思考→工具→再思考→回复"——收尾 reasoning 不能阻断折叠，
+    // 否则真实世界几乎所有 turn 都拿不到折叠。这里断言 turn 完成后命令被折叠
+    // 到 final 下、两段 reasoning 仍 inline 保留叙事。
+    emitMockTurnCompleted("t-002", "turn-multi-reasoning", "success", 2500);
 
     const view = await renderTaskDetail();
 
     await waitFor(() => {
       expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /yarn inspect/ }))
-        .toHaveAttribute("aria-expanded", "false");
       expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
+      // 命令被折叠：inline 不可见，只剩「展开过程 1 项」按钮。
+      expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
+      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
     const firstReasoningItem = view.getByText("第一段思考：先定位渲染归并规则。")
-      .closest(".agent-timeline__item");
-    const commandItem = view.getByRole("button", { name: /yarn inspect/ })
       .closest(".agent-timeline__item");
     const secondReasoningItem = view.getByText("第二段思考：再确认命令事件没有被吞掉。")
       .closest(".agent-timeline__item");
     const finalItem = view.getByText("已按真实顺序展示时间线。")
       .closest(".agent-timeline__item");
-
     expect(firstReasoningItem).not.toBeNull();
-    expect(commandItem).not.toBeNull();
     expect(secondReasoningItem).not.toBeNull();
     expect(finalItem).not.toBeNull();
-    expect(firstReasoningItem!.compareDocumentPosition(commandItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(commandItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(firstReasoningItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(secondReasoningItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
+
+    // 点开「展开过程」：命令回到 final 上方（在两段 reasoning 之间的原位置）。
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
+    });
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {
@@ -876,9 +902,8 @@ describe("chat scheduler", () => {
   });
 
   it("最终回复状态更新不会重置同 turn 内已展开的工具事件", async () => {
-    // runner 现在按 text block 拆 inline 文本片段，原有的「展开过程」聚合按钮
-    // 已经删除——这里只验证文本片段更新（running → success）不影响同 turn 内
-    // 工具事件本身的 expand 状态。
+    // 流式中 turn 还没收到终结事件，工具事件保持 inline。验证 assistant message
+    // 自身 running → success 的状态翻新不会顺手把已展开的工具事件 collapse 掉。
     seedMockChatMessages("t-002", [
       {
         id: "u-stream-final",

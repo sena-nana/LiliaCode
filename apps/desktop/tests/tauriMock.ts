@@ -318,6 +318,30 @@ export function emitMockTimelineEvent(
   return event;
 }
 
+/**
+ * Runner 在 `case "result"` 里 emit 的 `kind:"turn"` 终结事件——前端 UI 把这条
+ * 当作"该 turn 已结束"的权威信号，进而把过程折叠到最终回复下。
+ */
+export function emitMockTurnCompleted(
+  taskId: string,
+  turnId: string,
+  status: AgentTimelineEvent["status"] = "success",
+  createdAt?: number,
+) {
+  const at = createdAt ?? Date.now();
+  return emitMockTimelineEvent(taskId, {
+    id: `tl-turn-complete-${turnId}`,
+    kind: "turn",
+    status,
+    title: "Claude turn completed",
+    summary: "",
+    payload: { backend: "claude" },
+    turnId,
+    createdAt: at,
+    updatedAt: at,
+  });
+}
+
 export function seedMockChatMessages(taskId: string, messages: unknown[]) {
   const messageEvents = messages
     .map((message, index): AgentTimelineEvent | null => {

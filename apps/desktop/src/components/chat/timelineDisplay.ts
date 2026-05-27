@@ -8,7 +8,7 @@ import {
 
 export type MarkdownBlockTone = "default" | "muted";
 
-export const TIMELINE_SUMMARY_MAX_LENGTH = 220;
+const TIMELINE_SUMMARY_MAX_LENGTH = 220;
 
 export type TimelinePayloadRecord = Record<string, AgentTimelinePayload | undefined>;
 
@@ -18,7 +18,7 @@ export interface TimelineMarkdownView {
   singleLine: boolean;
 }
 
-export interface TimelineDeclaredGroupUnit {
+interface TimelineDeclaredGroupUnit {
   key: string;
   count: number;
   unit: string | null;
@@ -57,7 +57,7 @@ export function readTimelineDisplay(event: DisplayDerivableEvent): AgentTimeline
   });
 }
 
-export function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
+function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
   return payload && typeof payload === "object" && !Array.isArray(payload)
     ? payload as TimelinePayloadRecord
     : {};
@@ -105,18 +105,12 @@ export function isTimelineFinalReplyStreaming(
   return isTimelineAssistantMessage(event) && RUNNING_STATUSES.has(event.status);
 }
 
-export function timelineDefaultExpanded(
+function timelineDefaultExpanded(
   event: DisplayDerivableEvent,
 ): boolean {
   const display = readTimelineDisplay(event);
   if (typeof display?.defaultExpanded === "boolean") return display.defaultExpanded;
   return isTimelineFinalReply(event);
-}
-
-export function timelineDefaultCollapsed(
-  event: DisplayDerivableEvent,
-): boolean {
-  return !timelineDefaultExpanded(event);
 }
 
 export function isTimelineExpanded(
