@@ -15,6 +15,8 @@ import {
   seedMockChatMessages,
 } from "./tauriMock";
 
+const initialReasoningText = "从持久化时间线恢复的公开摘要。";
+
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push("/projects/lilia/tasks/t-002");
@@ -55,9 +57,13 @@ function setChatDropBounds(view: ReturnType<typeof render>) {
 
 async function expectInitialReasoning(view: ReturnType<typeof render>) {
   await waitFor(() => {
-    const node = view.getByText("从持久化时间线恢复的公开摘要。");
-    expect(node.closest(".agent-timeline__item--reasoning-inline"))
-      .not.toBeNull();
+    const button = view.getByRole("button", { name: initialReasoningText });
+    expect(button.closest(".agent-timeline__item--reasoning")).not.toBeNull();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(button.textContent ?? "").not.toContain("已思考");
+    expect(button.closest(".agent-timeline__head")?.querySelector(".agent-timeline__preview"))
+      .toBeNull();
+    expect(view.queryByText("已思考")).toBeNull();
   });
 }
 
@@ -291,6 +297,15 @@ describe("chat scheduler", () => {
 
     await expectInitialReasoning(view);
 
+    await fireEvent.click(view.getByRole("button", { name: initialReasoningText }));
+    await waitFor(() => {
+      const item = view.getByText(initialReasoningText).closest(".agent-timeline__item");
+      expect(item?.querySelectorAll(".agent-timeline__title span")).toHaveLength(1);
+      expect(item?.querySelector(".agent-timeline__content")).toBeNull();
+      expect(item?.textContent?.match(new RegExp(initialReasoningText, "g")) ?? [])
+        .toHaveLength(1);
+    });
+
     emitMockTimelineEvent("t-002", {
       id: "tl-single-line-command",
       kind: "command",
@@ -304,11 +319,36 @@ describe("chat scheduler", () => {
       order: 1,
     });
 
+    emitMockTimelineEvent("t-002", {
+      id: "tl-reasoning-full-text",
+      kind: "reasoning",
+      status: "success",
+      title: "已思考",
+      summary: "摘要：先看结构。",
+      payload: {
+        text: "摘要：先看结构。\n完整：再检查渲染，不要重复显示。",
+      },
+      order: 2,
+    });
+
     await waitFor(() => {
       expect(view.getByText("正在运行单测")).toBeInTheDocument();
       expect(view.queryByText("详细输出只在展开后出现")).toBeNull();
       expect(view.getByRole("button", { name: /pnpm test/ }))
         .toHaveAttribute("aria-expanded", "false");
+      expect(view.getByRole("button", { name: "摘要：先看结构。" }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByText(/完整：再检查渲染/)).toBeNull();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "摘要：先看结构。" }));
+    await waitFor(() => {
+      const button = view.getByRole("button", { name: /完整：再检查渲染/ });
+      const item = button.closest(".agent-timeline__item");
+      expect(button.textContent ?? "").toContain("摘要：先看结构。");
+      expect(button.textContent ?? "").toContain("完整：再检查渲染，不要重复显示。");
+      expect(item?.querySelector(".agent-timeline__content")).toBeNull();
+      expect(item?.textContent?.match(/完整：再检查渲染/g) ?? []).toHaveLength(1);
     });
 
     await fireEvent.click(view.getByRole("button", { name: /pnpm test/ }));
@@ -353,6 +393,10 @@ describe("chat scheduler", () => {
     const finalContent = view.getByText(/这是 Claude turn 完成后返回给用户的完整结果/);
     expect(finalContent.closest(".chat-bubble")).toBeNull();
     expect(finalContent.closest(".agent-timeline__item")).toHaveClass("is-final-reply");
+    expect(finalContent.closest(".agent-timeline__event")?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(finalContent.closest(".agent-timeline__event")?.querySelector(".agent-timeline__node"))
+      .not.toBeNull();
   });
 
   it("同 turn 内工具与最终回复：流式中按 order 内联，turn 完成后折叠到 final 下", async () => {
@@ -426,6 +470,18 @@ describe("chat scheduler", () => {
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn verify"))
       .toBeLessThan(timelineText.indexOf("最终结果完整展示。"));
+    expect(view.getByRole("button", { name: /yarn verify/ })
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(view.getByText("最终结果完整展示。")
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(view.getByText("最终结果完整展示。")
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__node"))
+      .not.toBeNull();
 
     // Runner 发出 turn 终结事件，UI 这才把命令折叠到 final 下、默认收起。
     emitMockTurnCompleted("t-002", "turn-collapse");
@@ -689,6 +745,21 @@ describe("chat scheduler", () => {
       order: 4,
     });
     emitMockTimelineEvent("t-002", {
+      id: "tl-middle-agent-reply",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "中间 Agent 回复片段。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2350,
+      updatedAt: 2350,
+      order: 5,
+    });
+    emitMockTimelineEvent("t-002", {
       id: "tl-multi-reasoning-final",
       kind: "message",
       status: "success",
@@ -701,29 +772,40 @@ describe("chat scheduler", () => {
       turnId: "turn-multi-reasoning",
       createdAt: 2400,
       updatedAt: 2400,
-      order: 5,
+      order: 6,
     });
     emitMockTurnCompleted("t-002", "turn-multi-reasoning", "success", 2500);
 
     const view = await renderTaskDetail();
 
-    // 折叠后：用户消息 + final 卡 + 「展开过程 3 项」按钮（2 段 reasoning + 1 个命令）。
+    // 折叠后：用户消息 + final 卡 + 「展开过程 4 项」按钮（2 段 reasoning + 1 个命令 + 1 段中间回复）。
     await waitFor(() => {
       expect(view.getByText("请分段思考并检查实现")).toBeInTheDocument();
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
       expect(view.queryByText("第一段思考：先定位渲染归并规则。")).toBeNull();
       expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
+      expect(view.queryByText("中间 Agent 回复片段。")).toBeNull();
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 3 项/ });
+      const toggle = view.getByRole("button", { name: /展开过程 4 项/ });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    // 展开后还原完整时间线顺序：reasoning₁ → command → reasoning₂ → final。
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 3 项/ }));
+    // 展开后还原完整时间线顺序：reasoning₁ → command → reasoning₂ → 中间回复 → final。
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 4 项/ }));
     await waitFor(() => {
       expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
       expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
+      expect(view.getByText("中间 Agent 回复片段。")).toBeInTheDocument();
       expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "第一段思考：先定位渲染归并规则。" }));
+    await waitFor(() => {
+      const button = view.getByRole("button", { name: "第一段思考：先定位渲染归并规则。" });
+      const item = button.closest(".agent-timeline__item");
+      expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(item?.querySelector(".agent-timeline__content")).toBeNull();
+      expect(item?.textContent?.match(/第一段思考/g) ?? []).toHaveLength(1);
     });
 
     const firstReasoningItem = view.getByText("第一段思考：先定位渲染归并规则。")
@@ -732,13 +814,21 @@ describe("chat scheduler", () => {
       .closest(".agent-timeline__item");
     const secondReasoningItem = view.getByText("第二段思考：再确认命令事件没有被吞掉。")
       .closest(".agent-timeline__item");
+    const middleReplyItem = view.getByText("中间 Agent 回复片段。")
+      .closest(".agent-timeline__item");
     const finalItem = view.getByText("已按真实顺序展示时间线。")
       .closest(".agent-timeline__item");
+    expect(middleReplyItem).toHaveClass("is-process-child");
+    expect(middleReplyItem?.querySelector(".agent-timeline__rail")).not.toBeNull();
+    expect(middleReplyItem?.querySelector(".agent-timeline__node")).toBeNull();
+    expect(finalItem?.querySelector(".agent-timeline__node")).not.toBeNull();
     expect(firstReasoningItem!.compareDocumentPosition(commandItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(commandItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(secondReasoningItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(secondReasoningItem!.compareDocumentPosition(middleReplyItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(middleReplyItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
   });
 

@@ -2044,6 +2044,34 @@ button.ghost:hover {
   font-weight: 500;
 }
 
+.agent-timeline__item--reasoning.is-compact .agent-timeline__title {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.agent-timeline__item--reasoning.is-compact .agent-timeline__title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-timeline__item--reasoning:not(.is-compact) .agent-timeline__title {
+  box-sizing: border-box;
+  display: inline-block;
+  min-height: 22px;
+  padding-top: calc((22px - 1.4em) / 2);
+  white-space: pre-wrap;
+}
+
+.agent-timeline__item--reasoning:not(.is-compact) .agent-timeline__title span {
+  white-space: pre-wrap;
+}
+
+.agent-timeline__item--reasoning:not(.is-compact) .agent-timeline__chevron {
+  vertical-align: text-bottom;
+}
+
 .agent-timeline__item:is(.is-status-running, .is-status-started, .is-status-in-progress) .agent-timeline__title {
   color: var(--text);
 }

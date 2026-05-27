@@ -9,6 +9,10 @@ function selectorIndex(selector: string): number {
   return styles.indexOf(selector);
 }
 
+function selectorLastIndex(selector: string): number {
+  return styles.lastIndexOf(selector);
+}
+
 function ruleTextAt(index: number): string {
   const end = styles.indexOf("}", index);
   return styles.slice(index, end + 1);
@@ -121,6 +125,39 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(titleHover)).not.toContain("color: var(--accent)");
     expect(ruleTextAt(chevronHover)).toContain("color: var(--accent)");
     expect(ruleTextAt(failedChevronHover)).toContain("color: var(--err)");
+  });
+
+  it("reasoning 折叠态给箭头保留空间，展开态箭头跟随完整文本", () => {
+    const collapsedTitle = selectorIndex(".agent-timeline__item--reasoning.is-compact .agent-timeline__title");
+    const collapsedText = selectorIndex(".agent-timeline__item--reasoning.is-compact .agent-timeline__title span");
+    const baseText = selectorLastIndex(".agent-timeline__title span {");
+    const expandedTitle = selectorIndex(".agent-timeline__item--reasoning:not(.is-compact) .agent-timeline__title");
+    const expandedText = selectorIndex(".agent-timeline__item--reasoning:not(.is-compact) .agent-timeline__title span");
+    const collapsedTitleRule = ruleTextAt(collapsedTitle);
+    const collapsedTextRule = ruleTextAt(collapsedText);
+    const baseTextRule = ruleTextAt(baseText);
+    const expandedTitleRule = ruleTextAt(expandedTitle);
+    const expandedTextRule = ruleTextAt(expandedText);
+
+    expect(collapsedTitle).toBeGreaterThan(-1);
+    expect(collapsedText).toBeGreaterThan(collapsedTitle);
+    expect(baseText).toBeGreaterThan(collapsedText);
+    expect(expandedTitle).toBeGreaterThan(collapsedText);
+    expect(expandedText).toBeGreaterThan(expandedTitle);
+    expect(collapsedTitleRule).toContain("width: 100%");
+    expect(collapsedTitleRule).toContain("display: flex");
+    expect(collapsedTitleRule).toContain("justify-content: space-between");
+    expect(collapsedTextRule).toContain("min-width: 0");
+    expect(collapsedTextRule).toContain("overflow: hidden");
+    expect(collapsedTextRule).toContain("text-overflow: ellipsis");
+    expect(baseTextRule).toContain("white-space: nowrap");
+    expect(expandedTitleRule).toContain("display: inline-block");
+    expect(expandedTitleRule).toContain("box-sizing: border-box");
+    expect(expandedTitleRule).toContain("min-height: 22px");
+    expect(expandedTitleRule).toContain("padding-top: calc((22px - 1.4em) / 2)");
+    expect(expandedTitleRule).not.toContain("align-items: flex-start");
+    expect(expandedTitleRule).not.toContain("justify-content: flex-start");
+    expect(expandedTextRule).toContain("white-space: pre-wrap");
   });
 
   it("失败折叠项 hover 时继续使用错误色", () => {
