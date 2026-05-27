@@ -1218,6 +1218,15 @@ function handleClaudeStreamEvent(msg, ctx) {
   dispatchClaudeStreamEvent({
     event: msg?.event,
     state: ctx.claudeStream,
+    onTextStart: ({ blockKey }) => {
+      if (blockKey === null || blockKey === undefined) return;
+      // 提前占住 timeline order：pacer 首次 tick 有 33ms 延迟，光等
+      // onTextDelta 会让短开场白被同 turn 的 tool_use 抢到更小的 order。
+      // 这里同步 emit 一条空 running 卡片，sourceId 立刻注册；后续 pacer 走
+      // 同 sourceId 的 upsert 把内容填进去，DB 行的 order 不会再变。
+      getOrCreateClaudeTextFragment(ctx, blockKey, msg?.session_id);
+      emitAssistantTextFragmentTimeline("", "running", msg?.session_id, blockKey);
+    },
     onTextDelta: ({ blockKey, text }) => {
       if (blockKey === null || blockKey === undefined) return;
       const fragment = getOrCreateClaudeTextFragment(ctx, blockKey, msg?.session_id);

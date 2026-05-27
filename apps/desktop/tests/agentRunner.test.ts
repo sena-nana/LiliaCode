@@ -28,6 +28,22 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).not.toMatch(/thinkingByIndex/);
   });
 
+  it("Claude text block 在 content_block_start 阶段提前占住 timeline order，避免被同 turn 的 tool_use 抢先", () => {
+    // 根因：pacer 33ms 节流让 onTextDelta 的首次回调晚于 SDK 顶层 assistant 消息
+    // 里的 tool_use emit，导致 message 的 INSERT 拿到比 Bash 更大的 order，UI 上
+    // 短开场白被挤到工具后面。修复方式是 dispatcher 的 onTextStart 回调一收到，
+    // runner 立刻 emit 一条空 running message 占住 sourceId / order，pacer 后续
+    // 走同 sourceId 的 upsert 把内容填进去。
+    const handler = runnerSource.match(
+      /function handleClaudeStreamEvent\([\s\S]*?\n\}/,
+    )?.[0];
+    expect(handler).toBeTruthy();
+    expect(handler).toMatch(/onTextStart:\s*\(\{\s*blockKey\s*\}\)\s*=>/);
+    expect(handler).toMatch(
+      /emitAssistantTextFragmentTimeline\(\s*"",\s*"running",\s*msg\?\.session_id,\s*blockKey\s*\)/,
+    );
+  });
+
   it("Claude result 阶段：finalText 缺失但出现过 text block 仍 emit 空 final 卡，便于发现 SDK 异常", () => {
     expect(runnerSource).toContain("sawAssistantTextBlock");
     expect(runnerSource).toMatch(/else if \(ctx\.sawAssistantTextBlock\)/);

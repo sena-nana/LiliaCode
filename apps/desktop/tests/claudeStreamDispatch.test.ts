@@ -44,6 +44,12 @@ function textDelta(index: number, text: string): StreamEvent {
 
 function runDispatcher(events: StreamEvent[]) {
   const state = createClaudeStreamState();
+  const calls: Array<
+    | { channel: "textStart"; index: number; blockKey: number | null; initialText: string }
+    | { channel: "textDelta"; index: number; blockKey: number | null; text: string }
+    | { channel: "reasoning"; index: number; blockKey: number | null; text: string; blockType: string }
+  > = [];
+  const textStarts: Array<{ index: number; blockKey: number | null; initialText: string }> = [];
   const textChunks: Array<{ index: number; blockKey: number | null; text: string }> = [];
   const reasoningSnapshots: Array<{
     index: number;
@@ -51,9 +57,16 @@ function runDispatcher(events: StreamEvent[]) {
     text: string;
     blockType: string;
   }> = [];
+  const onTextStart = vi.fn(
+    (info: { index: number; blockKey: number | null; initialText: string }) => {
+      textStarts.push(info);
+      calls.push({ channel: "textStart", ...info });
+    },
+  );
   const onTextDelta = vi.fn(
     (info: { index: number; blockKey: number | null; text: string }) => {
       textChunks.push(info);
+      calls.push({ channel: "textDelta", ...info });
     },
   );
   const onReasoning = vi.fn(
@@ -64,12 +77,28 @@ function runDispatcher(events: StreamEvent[]) {
         text: info.text,
         blockType: info.blockType,
       });
+      calls.push({
+        channel: "reasoning",
+        index: info.index,
+        blockKey: info.blockKey,
+        text: info.text,
+        blockType: info.blockType,
+      });
     },
   );
   for (const event of events) {
-    dispatchClaudeStreamEvent({ event, state, onTextDelta, onReasoning });
+    dispatchClaudeStreamEvent({ event, state, onTextStart, onTextDelta, onReasoning });
   }
-  return { state, textChunks, reasoningSnapshots, onTextDelta, onReasoning };
+  return {
+    state,
+    calls,
+    textStarts,
+    textChunks,
+    reasoningSnapshots,
+    onTextStart,
+    onTextDelta,
+    onReasoning,
+  };
 }
 
 describe("dispatchClaudeStreamEvent", () => {
@@ -189,6 +218,53 @@ describe("dispatchClaudeStreamEvent", () => {
     expect(textChunks[0].blockKey).not.toBe(textChunks[1].blockKey);
     expect(textChunks[0].text).toBe("turn1");
     expect(textChunks[1].text).toBe("turn2");
+  });
+
+  it("text block content_block_start 同步触发 onTextStart，先于任何 delta", () => {
+    // 关键不变量：上层 runner 用 onTextStart 抢在 tool_use 落库前占住 timeline order。
+    // 如果回调顺序错了（onTextDelta 先到），pacer 的 33ms 节流会让短开场白被
+    // 同 turn 的 tool_use 抢到更小的 order——这是 commit before this 的回归点。
+    const { calls } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.TEXT),
+      textDelta(0, "让我快速扫一下"),
+      textDelta(0, "项目现状。"),
+      stopBlock(0),
+    ]);
+
+    expect(calls[0]).toMatchObject({ channel: "textStart", index: 0, initialText: "" });
+    expect(calls.slice(1)).toEqual([
+      { channel: "textDelta", index: 0, blockKey: calls[0].blockKey, text: "让我快速扫一下" },
+      { channel: "textDelta", index: 0, blockKey: calls[0].blockKey, text: "项目现状。" },
+    ]);
+  });
+
+  it("text block 在 content_block_start 自带初始文本时，onTextStart 携带 initialText 且 onTextDelta 再补一刀", () => {
+    // SDK 偶尔把首段文本塞在 content_block.text 上；旧 dispatcher 直接丢弃，
+    // 现在 onTextStart 把 initialText 透传出去，同时通过 onTextDelta 把这段文本
+    // 喂给 pacer，保证累积内容不丢字。
+    const { calls } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.TEXT, { text: "首段" }),
+      textDelta(0, "增量"),
+      stopBlock(0),
+    ]);
+
+    expect(calls).toEqual([
+      { channel: "textStart", index: 0, blockKey: 0, initialText: "首段" },
+      { channel: "textDelta", index: 0, blockKey: 0, text: "首段" },
+      { channel: "textDelta", index: 0, blockKey: 0, text: "增量" },
+    ]);
+  });
+
+  it("reasoning / 未知 block 不触发 onTextStart", () => {
+    const { textStarts } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.THINKING),
+      thinkingDelta(0, "思考"),
+      stopBlock(0),
+      startBlock(1, "future_unknown_block_type"),
+      stopBlock(1),
+    ]);
+
+    expect(textStarts).toEqual([]);
   });
 });
 
