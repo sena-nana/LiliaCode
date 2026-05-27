@@ -89,6 +89,9 @@ struct PendingChatTurn {
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     message: ChatMessage,
+    /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
+    /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
+    turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -300,7 +303,6 @@ fn timeline_input_from_runtime_event(
         payload,
         created_at: None,
         updated_at: None,
-        order: None,
     })
 }
 
@@ -400,12 +402,15 @@ fn persist_and_emit_message_timeline_event(
     app_handle: &AppHandle,
     message: &ChatMessage,
     backend: &str,
+    turn_id: &str,
     queued: bool,
 ) {
     let input = AgentTimelineEventInput {
         id: Some(message.id.clone()),
         task_id: message.task_id.clone(),
-        turn_id: None,
+        // user message 与它触发的 agent turn 共享 turn_id，所以两者会被分到同一个
+        // turn_seq，user 消息天然落在 turn 内部第一位（intra_turn_order=0）。
+        turn_id: Some(turn_id.to_string()),
         backend: backend.to_string(),
         kind: "message".to_string(),
         status: if queued { "pending" } else { "success" }.to_string(),
@@ -419,7 +424,6 @@ fn persist_and_emit_message_timeline_event(
         }),
         created_at: Some(message.created_at as i64),
         updated_at: Some(now_millis() as i64),
-        order: Some(0),
     };
 
     persist_and_emit_input(app_handle, input);
@@ -445,7 +449,6 @@ fn persist_and_emit_error_timeline_event(
         payload: serde_json::json!({ "message": message }),
         created_at: Some(now as i64),
         updated_at: Some(now as i64),
-        order: None,
     };
 
     persist_and_emit_input(app_handle, input);
@@ -505,7 +508,8 @@ mod agent_event_sink_tests {
         assert_eq!(input.title, "Run tests");
         assert_eq!(input.summary, Some("17 passed".to_string()));
         assert_eq!(input.payload, json!({ "command": "cargo test" }));
-        assert_eq!(input.order, None);
+        assert_eq!(input.created_at, None);
+        assert_eq!(input.updated_at, None);
     }
 
     #[test]
@@ -573,18 +577,19 @@ mod agent_event_sink_tests {
               session_id TEXT NOT NULL
             );
             CREATE TABLE agent_timeline_events (
-              id          TEXT PRIMARY KEY,
-              task_id     TEXT NOT NULL,
-              turn_id     TEXT,
-              backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind        TEXT NOT NULL,
-              status      TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              summary     TEXT,
-              payload     TEXT NOT NULL,
-              created_at  INTEGER NOT NULL,
-              updated_at  INTEGER NOT NULL,
-              "order"     INTEGER NOT NULL
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
             );
             "#,
         )
@@ -614,7 +619,6 @@ mod agent_event_sink_tests {
                 payload: json!({ "sessionId": "codex-thread" }),
                 created_at: Some(200),
                 updated_at: Some(200),
-                order: Some(1),
             },
         )
         .unwrap();
@@ -687,6 +691,7 @@ fn queue_pending_turn(
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     message: ChatMessage,
+    turn_id: String,
 ) -> usize {
     let mut pending = store.pending_turns.lock().unwrap();
     let queue = pending.entry(task_id.to_string()).or_default();
@@ -696,6 +701,7 @@ fn queue_pending_turn(
         project_cwd,
         attachments,
         message,
+        turn_id,
     });
     queue.len()
 }
@@ -916,6 +922,7 @@ fn spawn_agent_turn(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    turn_id: String,
 ) {
     let backend = composer.backend.clone();
     let resume_session_id = {
@@ -942,7 +949,7 @@ fn spawn_agent_turn(
     let prompt_for_thread = content.clone();
     let attachments_for_thread = attachments.clone();
     let backend_for_thread = backend.clone();
-    let turn_id_for_thread = format!("turn-{}", now_millis());
+    let turn_id_for_thread = turn_id;
 
     thread::spawn(move || {
         let queued_count = {
@@ -1228,6 +1235,7 @@ fn finish_agent_turn(
             &app_handle,
             &turn.message,
             &turn.composer.backend,
+            &turn.turn_id,
             false,
         );
         spawn_agent_turn(
@@ -1237,6 +1245,7 @@ fn finish_agent_turn(
             turn.composer,
             turn.project_cwd,
             turn.attachments,
+            turn.turn_id,
         );
     }
 }
@@ -1319,6 +1328,9 @@ fn chat_send_message(
         attachments: attachments.clone(),
         created_at: now_millis(),
     };
+    // turn_id 在 user 消息入库前就分配，并与 agent turn 共享 —— 让两者落到同一个
+    // turn_seq，user 消息天然占据 turn 内 intra_turn_order=0 的位置。
+    let turn_id = format!("turn-{}", now_millis());
     // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
     store
         .composers
@@ -1338,11 +1350,13 @@ fn chat_send_message(
                 project_cwd,
                 attachments,
                 user_msg.clone(),
+                turn_id.clone(),
             );
             persist_and_emit_message_timeline_event(
                 &app,
                 &user_msg,
                 &composer.backend,
+                &turn_id,
                 true,
             );
             return Ok(ChatSendResult {
@@ -1354,7 +1368,7 @@ fn chat_send_message(
         running.insert(task_id.clone(), true);
     }
 
-    persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, false);
+    persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, &turn_id, false);
 
     spawn_agent_turn(
         app,
@@ -1363,6 +1377,7 @@ fn chat_send_message(
         composer,
         project_cwd,
         attachments,
+        turn_id,
     );
 
     Ok(ChatSendResult {

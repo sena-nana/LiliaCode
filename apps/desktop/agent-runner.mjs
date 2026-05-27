@@ -454,16 +454,20 @@ function buildClaudeSystemPrompt() {
   return append ? { ...base, append } : base;
 }
 
-function claudeReasoningSourceId(sessionId, index) {
-  return `${sessionId || "claude"}:thinking:${index}`;
+function claudeReasoningSourceId(sessionId, blockKey) {
+  // 用 dispatcher 全局递增的 blockKey，而不是 SDK 每个 LLM turn 都从 0 重置的
+  // content block index——否则第二个 turn 的 thinking 块会与第一个 turn 撞同一
+  // sourceId / DB id，命中 insert 的 ON CONFLICT 路径继承旧 order，
+  // 让后续 turn 的思考事件全部排到时间线最开头。
+  return `${sessionId || "claude"}:thinking:${blockKey}`;
 }
 
 /**
  * Reasoning timeline 卡片的统一出口：dispatcher 每收到一段思考增量都会回调
- * 这里，sourceId 与 block index 一一对应，UI 上看到的是一条平稳增长的
+ * 这里，sourceId 与 blockKey 一一对应，UI 上看到的是一条平稳增长的
  * "思考中"卡片，而不是每个 delta 一条噪点。
  */
-function emitClaudeReasoningSnapshot({ index, text, eventType, deltaType, blockType }, sessionId) {
+function emitClaudeReasoningSnapshot({ blockKey, text, eventType, deltaType, blockType }, sessionId) {
   emitTimeline({
     kind: "reasoning",
     status: "running",
@@ -477,7 +481,7 @@ function emitClaudeReasoningSnapshot({ index, text, eventType, deltaType, blockT
       sessionId,
       text,
     },
-    sourceId: claudeReasoningSourceId(sessionId, index),
+    sourceId: claudeReasoningSourceId(sessionId, blockKey),
   });
 }
 
@@ -486,7 +490,7 @@ function emitClaudeReasoningSnapshot({ index, text, eventType, deltaType, blockT
  * "正在思考" 变成 "已思考"，避免一直显示运行中。
  */
 function finalizeClaudeReasoningTimeline(ctx, sessionId) {
-  finalizeClaudeReasoningBlocks(ctx.claudeStream, ({ index, text }) => {
+  finalizeClaudeReasoningBlocks(ctx.claudeStream, ({ blockKey, text }) => {
     emitTimeline({
       kind: "reasoning",
       status: "success",
@@ -497,7 +501,7 @@ function finalizeClaudeReasoningTimeline(ctx, sessionId) {
         sessionId,
         text,
       },
-      sourceId: claudeReasoningSourceId(sessionId, index),
+      sourceId: claudeReasoningSourceId(sessionId, blockKey),
     });
   });
 }

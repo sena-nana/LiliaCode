@@ -333,8 +333,14 @@ export interface AgentTimelineEvent {
   payload: AgentTimelinePayload;
   createdAt: number;
   updatedAt: number;
-  /** 同一 task 内的显示顺序，越小越靠前。 */
-  order: number;
+  /**
+   * task 内 turn 的单调序号，按 turn_id 首次出现分配。turn 之间按 turn_seq 排序，
+   * 彻底与 createdAt / order 解耦——这是把排序"按 turn 隔离"的核心：sourceId
+   * 重叠最坏只能让同 turn 内事件互覆盖位置，不可能再跨 turn 跳位。
+   */
+  turnSeq: number;
+  /** turn 内事件的落库序号，按 (taskId, turnSeq) 单调递增。 */
+  intraTurnOrder: number;
 }
 
 export { deriveTimelineDisplay } from "./timelineDisplay";

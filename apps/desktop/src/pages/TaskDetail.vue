@@ -200,15 +200,13 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
       cwd,
       outgoingAttachments,
     );
+    // Rust 端 chat_send_message 已经同步落库 user message timeline 事件并
+    // emit 出来，前端 onAgentTimeline listener 自然会用带正确 (turnSeq,
+    // intraTurnOrder) 的真实事件 upsert。这里只摘掉 pending-* 占位即可——
+    // 千万不要再用本地构造的版本覆盖，否则乐观对象的 turnSeq=MAX 会把
+    // 真实事件踢到时间线末尾。
+    void result;
     removeTimelineEvent(optimistic.id);
-    upsertTimelineEvent(createMessageTimelineEvent({
-      id: result.message.id,
-      taskId: result.message.taskId,
-      content: result.message.content,
-      attachments: result.message.attachments,
-      createdAt: result.message.createdAt,
-      queued: result.dispatch === "queued",
-    }));
     attachments.value = [];
   } catch (err) {
     removeTimelineEvent(optimistic.id);
@@ -294,7 +292,11 @@ function createMessageTimelineEvent(input: {
     },
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
-    order: 0,
+    // 客户端乐观事件：排在末尾占位，等同 id 的 DB 事件回来后用真实
+    // turn_seq / intra_turn_order 覆盖。MAX_SAFE_INTEGER 保证乐观行不会
+    // 倒插到已存在事件之间，避免短暂闪烁。
+    turnSeq: Number.MAX_SAFE_INTEGER,
+    intraTurnOrder: 0,
   };
 }
 
@@ -308,7 +310,10 @@ function mergeTimelineEvents(
     if (!byId.has(event.id)) byId.set(event.id, event);
   }
   return [...byId.values()].sort((a, b) =>
-    a.order - b.order || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+    a.turnSeq - b.turnSeq ||
+    a.intraTurnOrder - b.intraTurnOrder ||
+    a.createdAt - b.createdAt ||
+    a.id.localeCompare(b.id)
   );
 }
 
@@ -326,7 +331,8 @@ function createErrorTimelineEvent(message: string): AgentTimelineEvent {
     payload: { message },
     createdAt: now,
     updatedAt: now,
-    order: Number.MAX_SAFE_INTEGER,
+    turnSeq: Number.MAX_SAFE_INTEGER,
+    intraTurnOrder: Number.MAX_SAFE_INTEGER,
   };
 }
 

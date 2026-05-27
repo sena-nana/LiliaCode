@@ -37,7 +37,8 @@ type TimelineEventEntry = {
   type: "event";
   id: string;
   createdAt: number;
-  order: number;
+  turnSeq: number;
+  intraTurnOrder: number;
   event: AgentTimelineEvent;
 };
 
@@ -45,7 +46,8 @@ type TimelineGroupEntry = {
   type: "group";
   id: string;
   createdAt: number;
-  order: number;
+  turnSeq: number;
+  intraTurnOrder: number;
   groupKey: string;
   events: AgentTimelineEvent[];
   representative: AgentTimelineEvent;
@@ -74,14 +76,19 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
       type: "event",
       id: `event:${event.id}`,
       createdAt: event.createdAt,
-      order: event.order,
+      turnSeq: event.turnSeq,
+      intraTurnOrder: event.intraTurnOrder,
       event,
     }))
-    // order 是 Rust 端落库时分配的稳定显示位置（runner 把 assistant 流式回复
-    // 按 text block 拆成多条 inline 事件，每条都用独立 sourceId，order 跟同 turn
-    // 工具/思考事件自然交错）。createdAt 只作为同 order tiebreaker，不参与主排序。
+    // 主排序键 (turnSeq, intraTurnOrder) 由 Rust 端在落库时分配——turnSeq 按
+    // turn_id 首次出现单调递增，intraTurnOrder 按 turn 内事件落库顺序单调递增。
+    // 把"按 turn 隔离"做到 DB 层，前端只忠实地按 schema 提供的复合键展开即可；
+    // createdAt / id 仅作为同序兜底。
     .sort((a, b) =>
-      a.order - b.order || a.createdAt - b.createdAt || a.id.localeCompare(b.id)
+      a.turnSeq - b.turnSeq ||
+      a.intraTurnOrder - b.intraTurnOrder ||
+      a.createdAt - b.createdAt ||
+      a.id.localeCompare(b.id)
     ),
 );
 
@@ -108,7 +115,8 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
         type: "group",
         id: `group:${bucketKey}:${first.event.id}`,
         createdAt: first.createdAt,
-        order: first.order,
+        turnSeq: first.turnSeq,
+        intraTurnOrder: first.intraTurnOrder,
         groupKey: bucketKey,
         events,
         representative: first.event,

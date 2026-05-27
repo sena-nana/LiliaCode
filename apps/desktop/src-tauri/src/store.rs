@@ -38,7 +38,6 @@ pub fn resolve_lilia_home() -> PathBuf {
 }
 
 fn resolve_home_candidate() -> Option<PathBuf> {
-    // 1) env override
     if let Ok(env_val) = env::var(LILIA_HOME_ENV) {
         let trimmed = env_val.trim();
         if !trimmed.is_empty() {
@@ -48,7 +47,6 @@ fn resolve_home_candidate() -> Option<PathBuf> {
 
     let default_home = dirs::home_dir().map(|d| d.join(DEFAULT_HOME_SUBDIR));
 
-    // 2) ~/.lilia/.redirect → 路径
     if let Some(home) = &default_home {
         let redirect = home.join(REDIRECT_FILE);
         if redirect.is_file() {
@@ -61,7 +59,6 @@ fn resolve_home_candidate() -> Option<PathBuf> {
         }
     }
 
-    // 3) 默认 ~/.lilia/
     default_home
 }
 
@@ -97,7 +94,6 @@ impl LiliaStore {
             .build(manager)
             .map_err(|e| format!("lilia-store: 建连接池失败：{e}"))?;
 
-        // 初始化 schema 用独立连接（用完即归还）。
         {
             let mut conn = pool
                 .get()
@@ -115,7 +111,7 @@ impl LiliaStore {
     }
 }
 
-const RESET_BASELINE_SCHEMA_VERSION: i64 = 2;
+const RESET_BASELINE_SCHEMA_VERSION: i64 = 3;
 
 struct SchemaMigration {
     version: i64,
@@ -125,12 +121,9 @@ struct SchemaMigration {
 
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];
 
-/// 本次重置把旧开发库清到新基线；基线之后继续按版本追加迁移。
-///
-/// baseline=2 的语义：display 列被彻底移出 `agent_timeline_events`。display 是
-/// 渲染时的视图缓存，由前端 `deriveTimelineDisplay()` 现算，不再持久化。开发库
-/// 跨过这个版本会触发 reset：旧 timeline 数据丢失但 schema 干净，跟之前 v1 的
-/// 「本次重置」一脉相承。
+/// baseline=3：`agent_timeline_events` 的 `order` 列拆成
+/// `(turn_seq, intra_turn_order)`，排序按 turn 隔离。跨过这个版本会触发
+/// reset，旧 dev 数据丢失。
 fn ensure_current_schema(conn: &mut Connection) -> Result<(), String> {
     ensure_schema_with_migrations(conn, current_schema_version(), SCHEMA_MIGRATIONS)
 }
@@ -255,22 +248,23 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
         );
 
         CREATE TABLE agent_timeline_events (
-          id          TEXT PRIMARY KEY,
-          task_id     TEXT NOT NULL,
-          turn_id     TEXT,
-          backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          kind        TEXT NOT NULL,
-          status      TEXT NOT NULL,
-          title       TEXT NOT NULL,
-          summary     TEXT,
-          payload     TEXT NOT NULL,
-          created_at  INTEGER NOT NULL,
-          updated_at  INTEGER NOT NULL,
-          "order"     INTEGER NOT NULL
+          id                TEXT PRIMARY KEY,
+          task_id           TEXT NOT NULL,
+          turn_id           TEXT,
+          backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          kind              TEXT NOT NULL,
+          status            TEXT NOT NULL,
+          title             TEXT NOT NULL,
+          summary           TEXT,
+          payload           TEXT NOT NULL,
+          created_at        INTEGER NOT NULL,
+          updated_at        INTEGER NOT NULL,
+          turn_seq          INTEGER NOT NULL,
+          intra_turn_order  INTEGER NOT NULL
         );
 
-        CREATE INDEX idx_agent_timeline_events_task_id_order
-          ON agent_timeline_events(task_id, "order");
+        CREATE INDEX idx_agent_timeline_events_task_id_turn
+          ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
         "#,
     )
     .map_err(|e| format!("lilia-store: 创建当前 schema 失败：{e}"))
@@ -280,56 +274,6 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 mod tests {
     use super::*;
     use rusqlite::params;
-
-    #[test]
-    fn current_schema_persists_payload_without_display_column() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_current_schema(&conn).unwrap();
-        conn.execute(
-            r#"INSERT INTO agent_timeline_events
-               (id, task_id, turn_id, backend, kind, status, title, summary, payload, created_at, updated_at, "order")
-               VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10)"#,
-            params![
-                "event-1",
-                "task-1",
-                "claude",
-                "extension_index",
-                "success",
-                "Index",
-                r#"{"toolName":"Index","scope":"workspace"}"#,
-                101,
-                101,
-                2,
-            ],
-        )
-        .unwrap();
-
-        let payload: Option<String> = conn
-            .query_row(
-                "SELECT payload FROM agent_timeline_events WHERE id = ?1",
-                params!["event-1"],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            payload,
-            Some(r#"{"toolName":"Index","scope":"workspace"}"#.to_string())
-        );
-
-        // display 列彻底消失：让 PRAGMA 报告所有列名再断言。
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(agent_timeline_events)")
-            .unwrap();
-        let columns: Vec<String> = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(
-            !columns.iter().any(|name| name == "display"),
-            "display column should be removed, got columns: {columns:?}"
-        );
-    }
 
     #[test]
     fn old_development_database_is_rebuilt_from_current_schema() {

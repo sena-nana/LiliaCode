@@ -38,7 +38,8 @@ interface AgentTimelineEvent {
   payload: unknown;
   createdAt: number;
   updatedAt: number;
-  order: number;
+  turnSeq: number;
+  intraTurnOrder: number;
 }
 
 const baseProjects: ProjectRow[] = [
@@ -154,7 +155,8 @@ export function resetTauriMockData() {
         payload: { source: "mock" },
         createdAt: 1500,
         updatedAt: 1500,
-        order: 0,
+        turnSeq: 0,
+        intraTurnOrder: 0,
       },
     ],
   };
@@ -305,7 +307,8 @@ export function emitMockTimelineEvent(
     payload: patch.payload ?? { command: "yarn test" },
     createdAt: patch.createdAt ?? Date.now(),
     updatedAt: patch.updatedAt ?? Date.now(),
-    order: patch.order ?? (timelineEvents[taskId]?.length ?? 0),
+    turnSeq: patch.turnSeq ?? 0,
+    intraTurnOrder: patch.intraTurnOrder ?? (timelineEvents[taskId]?.length ?? 0),
   };
   timelineEvents[taskId] = [
     ...(timelineEvents[taskId] ?? []).filter((item) => item.id !== event.id),
@@ -343,7 +346,8 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
         },
         createdAt,
         updatedAt: createdAt,
-        order: 0,
+        turnSeq: index,
+        intraTurnOrder: 0,
       };
     })
     .filter((event): event is AgentTimelineEvent => event !== null);
@@ -590,7 +594,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
         createdAt: message.createdAt,
         updatedAt: message.createdAt,
-        order: 0,
+        turnSeq: 0,
+        intraTurnOrder: 0,
       });
       if (queued) {
         chatQueued[taskId] = [...(chatQueued[taskId] ?? []), args];

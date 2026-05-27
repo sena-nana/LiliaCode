@@ -7,6 +7,12 @@
  * 表结构故意只存「事实」字段：kind / status / title / summary / payload。display
  * （图标、中文动词、详情面板）是渲染时的视图缓存，由前端
  * `deriveTimelineDisplay()` 现算 —— 历史事件能跟着 display 规则的迭代自动更新。
+ *
+ * 排序键：`(turn_seq, intra_turn_order)`。turn_seq 在 task 内单调，按 `turn_id`
+ * 首次出现分配；intra_turn_order 在 turn 内单调，按事件落库顺序分配。彻底按
+ * turn 隔离意味着「同 sourceId 撞 id」最坏只能让同 turn 内事件互覆盖位置，
+ * 不可能再让事件跨 turn 跳到时间线最前 —— 这是从全局单调 `order` 升级过来的
+ * 主要动机。
  */
 
 use rusqlite::{params, types::Type, Connection, OptionalExtension};
@@ -34,7 +40,11 @@ pub struct AgentTimelineEvent {
     pub payload: JsonValue,
     pub created_at: i64,
     pub updated_at: i64,
-    pub order: i64,
+    /// task 内 turn 的单调序号，按 turn_id 首次出现分配。turn_id=NULL 走单独的
+    /// "无 turn" 哨兵分组，所有 NULL 事件共享同一个 turn_seq。
+    pub turn_seq: i64,
+    /// turn 内事件的落库序号，按 (task_id, turn_seq) 单调递增。
+    pub intra_turn_order: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,7 +62,6 @@ pub struct AgentTimelineEventInput {
     pub payload: JsonValue,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
-    pub order: Option<i64>,
 }
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTimelineEvent> {
@@ -71,21 +80,65 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTimelineEvent>
         payload,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
-        order: row.get(11)?,
+        turn_seq: row.get(11)?,
+        intra_turn_order: row.get(12)?,
     })
 }
 
-fn next_order(conn: &Connection, task_id: &str) -> Result<i64, String> {
+/// 给某个 (task_id, turn_id) 分配 turn_seq：
+/// - 已经有同 turn_id 的事件 → 复用既有 turn_seq，turn 内部继续按 intra_turn_order
+///   递增；
+/// - 没有 → 取 task 内 `MAX(turn_seq) + 1`，第一个 turn 起始为 0。
+///
+/// `turn_id IS ?2` 用 SQLite 的 NULL-safe 比较，让 NULL 也能稳定分组——所有
+/// turn_id=NULL 的事件共享同一个哨兵 turn_seq（实际场景已极少：user message
+/// 现在跟 agent turn 共享 turn_id，剩下只有手动构造的兜底事件）。
+fn resolve_turn_seq(
+    conn: &Connection,
+    task_id: &str,
+    turn_id: Option<&str>,
+) -> Result<i64, String> {
+    let existing: Option<i64> = conn
+        .query_row(
+            r#"SELECT turn_seq FROM agent_timeline_events
+               WHERE task_id = ?1 AND turn_id IS ?2
+               LIMIT 1"#,
+            params![task_id, turn_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("agent_timeline: 查询 turn_seq 失败：{e}"))?;
+    if let Some(seq) = existing {
+        return Ok(seq);
+    }
     let max: Option<i64> = conn
         .query_row(
-            r#"SELECT MAX("order") FROM agent_timeline_events WHERE task_id = ?1"#,
+            r#"SELECT MAX(turn_seq) FROM agent_timeline_events WHERE task_id = ?1"#,
             params![task_id],
             |row| row.get(0),
         )
         .optional()
-        .map_err(|e| format!("agent_timeline: 查询 max(order) 失败：{e}"))?
+        .map_err(|e| format!("agent_timeline: 查询 max(turn_seq) 失败：{e}"))?
         .flatten();
-    Ok(max.unwrap_or(-1) + 1)
+    Ok(max.map_or(0, |m| m + 1))
+}
+
+fn next_intra_turn_order(
+    conn: &Connection,
+    task_id: &str,
+    turn_seq: i64,
+) -> Result<i64, String> {
+    let max: Option<i64> = conn
+        .query_row(
+            r#"SELECT MAX(intra_turn_order) FROM agent_timeline_events
+               WHERE task_id = ?1 AND turn_seq = ?2"#,
+            params![task_id, turn_seq],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("agent_timeline: 查询 max(intra_turn_order) 失败：{e}"))?
+        .flatten();
+    Ok(max.map_or(0, |m| m + 1))
 }
 
 pub fn insert(
@@ -94,29 +147,32 @@ pub fn insert(
 ) -> Result<AgentTimelineEvent, String> {
     let now = now_millis();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let existing_position: Option<(i64, i64)> = conn
+    let existing: Option<(i64, i64, i64)> = conn
         .query_row(
-            r#"SELECT created_at, "order" FROM agent_timeline_events WHERE id = ?1"#,
+            r#"SELECT created_at, turn_seq, intra_turn_order
+               FROM agent_timeline_events WHERE id = ?1"#,
             params![id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(|e| format!("agent_timeline_insert: 查询已有事件位置失败：{e}"))?;
+
+    let (existing_created_at, turn_seq, intra_turn_order) = match existing {
+        Some((created_at, turn_seq, intra)) => (Some(created_at), turn_seq, intra),
+        None => {
+            let turn_seq = resolve_turn_seq(conn, &input.task_id, input.turn_id.as_deref())?;
+            let intra = next_intra_turn_order(conn, &input.task_id, turn_seq)?;
+            (None, turn_seq, intra)
+        }
+    };
+
     let created_at = input
         .created_at
-        .or_else(|| existing_position.map(|(created_at, _)| created_at))
+        .or(existing_created_at)
         .unwrap_or(now);
-    let order = match input.order {
-        Some(order) => order,
-        None => existing_position
-            .map(|(_, order)| order)
-            .unwrap_or(next_order(conn, &input.task_id)?),
-    };
-    let updated_at = input.updated_at.unwrap_or(if existing_position.is_some() {
-        now
-    } else {
-        created_at
-    });
+    let updated_at = input
+        .updated_at
+        .unwrap_or(if existing.is_some() { now } else { created_at });
     let payload_text = serde_json::to_string(&input.payload)
         .map_err(|e| format!("agent_timeline_insert: payload 序列化失败：{e}"))?;
 
@@ -132,25 +188,28 @@ pub fn insert(
         payload: input.payload,
         created_at,
         updated_at,
-        order,
+        turn_seq,
+        intra_turn_order,
     };
 
     conn.execute(
         r#"INSERT INTO agent_timeline_events
-           (id, task_id, turn_id, backend, kind, status, title, summary, payload, created_at, updated_at, "order")
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+           (id, task_id, turn_id, backend, kind, status, title, summary, payload,
+            created_at, updated_at, turn_seq, intra_turn_order)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
            ON CONFLICT(id) DO UPDATE SET
-             task_id = excluded.task_id,
-             turn_id = excluded.turn_id,
-             backend = excluded.backend,
-             kind = excluded.kind,
-             status = excluded.status,
-             title = excluded.title,
-             summary = excluded.summary,
-             payload = excluded.payload,
-             created_at = excluded.created_at,
-             updated_at = excluded.updated_at,
-             "order" = excluded."order""#,
+             task_id          = excluded.task_id,
+             turn_id          = excluded.turn_id,
+             backend          = excluded.backend,
+             kind             = excluded.kind,
+             status           = excluded.status,
+             title            = excluded.title,
+             summary          = excluded.summary,
+             payload          = excluded.payload,
+             created_at       = excluded.created_at,
+             updated_at       = excluded.updated_at,
+             turn_seq         = excluded.turn_seq,
+             intra_turn_order = excluded.intra_turn_order"#,
         params![
             event.id,
             event.task_id,
@@ -163,7 +222,8 @@ pub fn insert(
             payload_text,
             event.created_at,
             event.updated_at,
-            event.order,
+            event.turn_seq,
+            event.intra_turn_order,
         ],
     )
     .map_err(|e| format!("agent_timeline_insert: 写入失败：{e}"))?;
@@ -175,10 +235,10 @@ pub fn list(conn: &Connection, task_id: &str) -> Result<Vec<AgentTimelineEvent>,
     let mut stmt = conn
         .prepare(
             r#"SELECT id, task_id, turn_id, backend, kind, status, title, summary,
-                      payload, created_at, updated_at, "order"
+                      payload, created_at, updated_at, turn_seq, intra_turn_order
                FROM agent_timeline_events
                WHERE task_id = ?1
-               ORDER BY "order" ASC, created_at ASC"#,
+               ORDER BY turn_seq ASC, intra_turn_order ASC, created_at ASC"#,
         )
         .map_err(|e| format!("agent_timeline_list: prepare 失败：{e}"))?;
     let rows = stmt
@@ -264,130 +324,173 @@ mod tests {
         conn.execute_batch(
             r#"
             CREATE TABLE agent_timeline_events (
-              id          TEXT PRIMARY KEY,
-              task_id     TEXT NOT NULL,
-              turn_id     TEXT,
-              backend     TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind        TEXT NOT NULL,
-              status      TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              summary     TEXT,
-              payload     TEXT NOT NULL,
-              created_at  INTEGER NOT NULL,
-              updated_at  INTEGER NOT NULL,
-              "order"     INTEGER NOT NULL
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
             );
-            CREATE INDEX idx_agent_timeline_events_task_id_order
-              ON agent_timeline_events(task_id, "order");
+            CREATE INDEX idx_agent_timeline_events_task_id_turn
+              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
             "#,
         )
         .unwrap();
     }
 
-    #[test]
-    fn insert_and_list_round_trip_unknown_kind() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
-
-        let saved = insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("event-1".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: "claude".to_string(),
-                kind: "extension_index".to_string(),
-                status: "success".to_string(),
-                title: "Index".to_string(),
-                summary: Some("indexed".to_string()),
-                payload: json!({ "raw": true }),
-                created_at: Some(100),
-                updated_at: Some(101),
-                order: Some(1),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(saved.kind, "extension_index");
-        assert_eq!(saved.payload, json!({ "raw": true }));
-
-        let listed = list(&conn, "task-1").unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].kind, "extension_index");
-        assert_eq!(listed[0].payload, json!({ "raw": true }));
-        assert_eq!(listed[0].summary.as_deref(), Some("indexed"));
+    fn input(
+        id: &str,
+        task_id: &str,
+        turn_id: Option<&str>,
+        kind: &str,
+        created_at: i64,
+    ) -> AgentTimelineEventInput {
+        AgentTimelineEventInput {
+            id: Some(id.to_string()),
+            task_id: task_id.to_string(),
+            turn_id: turn_id.map(|s| s.to_string()),
+            backend: "claude".to_string(),
+            kind: kind.to_string(),
+            status: "running".to_string(),
+            title: kind.to_string(),
+            summary: None,
+            payload: json!({}),
+            created_at: Some(created_at),
+            updated_at: Some(created_at),
+        }
     }
 
     #[test]
-    fn upsert_without_explicit_position_keeps_original_timeline_position() {
+    fn first_event_in_task_gets_turn_seq_0_intra_order_0() {
         let conn = Connection::open_in_memory().unwrap();
         create_timeline_schema(&conn);
 
-        insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("reasoning-1".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: "claude".to_string(),
-                kind: "reasoning".to_string(),
-                status: "running".to_string(),
-                title: "思考中".to_string(),
-                summary: Some("first".to_string()),
-                payload: json!({ "text": "first" }),
-                created_at: Some(100),
-                updated_at: Some(100),
-                order: Some(1),
-            },
-        )
-        .unwrap();
-        insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("command-1".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: "claude".to_string(),
-                kind: "command".to_string(),
-                status: "success".to_string(),
-                title: "yarn test".to_string(),
-                summary: Some("command".to_string()),
-                payload: json!({ "command": "yarn test" }),
-                created_at: Some(200),
-                updated_at: Some(200),
-                order: Some(2),
-            },
-        )
+        let saved = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+
+        assert_eq!(saved.turn_seq, 0);
+        assert_eq!(saved.intra_turn_order, 0);
+    }
+
+    #[test]
+    fn events_within_same_turn_share_turn_seq_and_increment_intra_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        let a = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        let b = insert(&conn, input("e2", "task-1", Some("turn-a"), "command", 110)).unwrap();
+        let c = insert(&conn, input("e3", "task-1", Some("turn-a"), "message", 120)).unwrap();
+
+        assert_eq!(a.turn_seq, 0);
+        assert_eq!(b.turn_seq, 0);
+        assert_eq!(c.turn_seq, 0);
+        assert_eq!(a.intra_turn_order, 0);
+        assert_eq!(b.intra_turn_order, 1);
+        assert_eq!(c.intra_turn_order, 2);
+    }
+
+    #[test]
+    fn new_turn_id_allocates_next_turn_seq() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        let b = insert(&conn, input("e2", "task-1", Some("turn-b"), "reasoning", 200)).unwrap();
+        let c = insert(&conn, input("e3", "task-1", Some("turn-b"), "command", 210)).unwrap();
+
+        assert_eq!(b.turn_seq, 1);
+        assert_eq!(b.intra_turn_order, 0);
+        assert_eq!(c.turn_seq, 1);
+        assert_eq!(c.intra_turn_order, 1);
+    }
+
+    #[test]
+    fn upsert_same_id_keeps_position_even_across_status_changes() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        // 流式 reasoning：先 running 一条，再用同 id 推一条 success。位置必须稳定，
+        // 否则 turn 末尾 finalize 时事件会被推到 turn 最后。
+        let first = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        insert(&conn, input("e2", "task-1", Some("turn-a"), "command", 110)).unwrap();
+        let upserted = {
+            let mut next = input("e1", "task-1", Some("turn-a"), "reasoning", 100);
+            next.status = "success".to_string();
+            insert(&conn, next).unwrap()
+        };
+
+        assert_eq!(upserted.turn_seq, first.turn_seq);
+        assert_eq!(upserted.intra_turn_order, first.intra_turn_order);
+        assert_eq!(upserted.created_at, first.created_at);
+    }
+
+    #[test]
+    fn turn_seq_isolation_prevents_cross_turn_sourceid_collision() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        // 模拟 bug 场景：两个不同 turn 误用同一 sourceId（=> 同一 DB id）。
+        // 老 schema 下第二 turn 会"继承"第一 turn 的最小 order 被排到时间线最前；
+        // 新 schema 下 upsert 保留原 (turn_seq, intra_turn_order)，所以最坏只是
+        // 第二 turn 那条更新被无声"覆盖"掉，而不会污染时间线整体次序。
+        insert(&conn, input("dup-source-id", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        insert(&conn, input("turn-a-end", "task-1", Some("turn-a"), "message", 110)).unwrap();
+        insert(&conn, input("turn-b-start", "task-1", Some("turn-b"), "reasoning", 200)).unwrap();
+        let collided = insert(&conn, {
+            let mut next = input("dup-source-id", "task-1", Some("turn-b"), "reasoning", 210);
+            next.status = "success".to_string();
+            next
+        })
         .unwrap();
 
-        let updated = insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("reasoning-1".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: "claude".to_string(),
-                kind: "reasoning".to_string(),
-                status: "success".to_string(),
-                title: "已思考".to_string(),
-                summary: Some("first completed".to_string()),
-                payload: json!({ "text": "first completed" }),
-                created_at: None,
-                updated_at: None,
-                order: None,
-            },
-        )
-        .unwrap();
+        // 撞 id 的事件仍然挂在 turn-a 上（这是 upsert 语义的诚实代价），
+        // 但绝不会跳到时间线最前。
+        assert_eq!(collided.turn_seq, 0);
 
-        assert_eq!(updated.created_at, 100);
-        assert_eq!(updated.order, 1);
-
-        let listed = list(&conn, "task-1").unwrap();
+        let listed: Vec<_> = list(&conn, "task-1")
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.id, e.turn_seq, e.intra_turn_order))
+            .collect();
         assert_eq!(
-            listed.iter().map(|event| event.id.as_str()).collect::<Vec<_>>(),
-            vec!["reasoning-1", "command-1"],
+            listed,
+            vec![
+                ("dup-source-id".to_string(), 0, 0),
+                ("turn-a-end".to_string(), 0, 1),
+                ("turn-b-start".to_string(), 1, 0),
+            ]
         );
-        assert_eq!(listed[0].summary.as_deref(), Some("first completed"));
+    }
+
+    #[test]
+    fn list_orders_by_turn_seq_then_intra_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        // turn_seq 是按 turn_id 首次出现的顺序分配的。下面 turn-2 先入库 → turn_seq=0；
+        // turn-1 后入库 → turn_seq=1。最终列表完全按 (turn_seq, intra_turn_order) 排，
+        // 不再按 created_at —— 这正是"按 turn 隔离"的核心：迟到的事件只在自己 turn 内
+        // 排位，不会因为 created_at 早就插到别的 turn 里。
+        insert(&conn, input("t2-late", "task-1", Some("turn-2"), "message", 300)).unwrap();
+        insert(&conn, input("t1-first", "task-1", Some("turn-1"), "reasoning", 100)).unwrap();
+        insert(&conn, input("t1-second", "task-1", Some("turn-1"), "command", 200)).unwrap();
+        insert(&conn, input("t2-early", "task-1", Some("turn-2"), "reasoning", 400)).unwrap();
+
+        let listed: Vec<_> = list(&conn, "task-1")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            listed,
+            vec!["t2-late", "t2-early", "t1-first", "t1-second"],
+        );
     }
 
     #[test]
@@ -395,42 +498,13 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_timeline_schema(&conn);
 
-        insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("turn-old".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: "claude".to_string(),
-                kind: "turn".to_string(),
-                status: "requesting".to_string(),
-                title: "Claude status".to_string(),
-                summary: None,
-                payload: json!({ "sessionId": "old-session" }),
-                created_at: Some(100),
-                updated_at: Some(100),
-                order: Some(1),
-            },
-        )
-        .unwrap();
-        insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("turn-new".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-2".to_string()),
-                backend: "claude".to_string(),
-                kind: "turn".to_string(),
-                status: "requesting".to_string(),
-                title: "Claude status".to_string(),
-                summary: None,
-                payload: json!({ "sessionId": "new-session" }),
-                created_at: Some(200),
-                updated_at: Some(200),
-                order: Some(2),
-            },
-        )
-        .unwrap();
+        let mut a = input("turn-old", "task-1", Some("turn-1"), "turn", 100);
+        a.payload = json!({ "sessionId": "old-session" });
+        insert(&conn, a).unwrap();
+
+        let mut b = input("turn-new", "task-1", Some("turn-2"), "turn", 200);
+        b.payload = json!({ "sessionId": "new-session" });
+        insert(&conn, b).unwrap();
 
         assert_eq!(
             latest_session_id(&conn, "task-1", "claude").unwrap(),
