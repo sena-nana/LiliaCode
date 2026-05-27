@@ -14,6 +14,6 @@
 
 ## 「过程折叠到最终回复」的触发时机
 
-UI 把同 turn 内非 message、非 reasoning 的事件折叠到「该 turn 最后一条 assistant message」下方时，只在 turn 已经收到终结信号后才生效。终结信号 = runner emit 的 `kind: "turn"` 事件且 `status ∈ {success, completed, done, error, failed, cancelled}`——对应 Claude SDK 的 `result` 消息那一帧。流式期间没有这个事件，所有过程事件按 `(turnSeq, intraTurnOrder)` inline 显示，避免「最后一条 assistant message」随新 text block 漂移导致折叠抖动。
+UI 把同 turn 内所有事件折叠到「该 turn 最后一条 assistant message」下方时，只在 turn 已经收到终结信号后才生效。终结信号 = runner emit 的 `kind: "turn"` 事件且 `status ∈ {success, completed, done, error, failed, cancelled}`——对应 Claude SDK 的 `result` 消息那一帧。流式期间没有这个事件，所有事件按 `(turnSeq, intraTurnOrder)` inline 显示，避免「最后一条 assistant message」随新 text block 漂移导致折叠抖动。
 
-reasoning 始终 inline 展示（思考是模型的公开叙事），但不阻断折叠。Claude 的典型流程是「思考→工具→再思考→回复」，把收尾 reasoning 当成分隔点会让真实世界几乎所有 turn 都拿不到折叠。
+折叠范围：用户消息（锚点）和最终回复（卡片）保留在外，**之间**的 reasoning / 中间 text block / 工具 / 计划全部进 processEvents。Claude 典型流程「思考→工具→再思考→回复」在视觉上压缩成「user msg → 展开过程 N 项 → final reply」，需要完整时间线时点开按钮还原。

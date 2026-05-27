@@ -15,7 +15,6 @@ import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import {
   aggregateTimelineStatus,
   isHiddenTimelineEvent,
-  isTimelineAssistantMessage,
   isTimelineExpanded,
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
@@ -122,10 +121,10 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
     ),
 );
 
-// turn 完成后把同 turn 的非 message / 非 reasoning 事件折叠到「最后一条
-// assistant message」下面。reasoning 始终 inline（思考是公开叙事），但不阻断
-// 折叠——Claude 的典型流程「思考→工具→再思考→回复」要求收尾 reasoning 不
-// 充当分隔点，否则真实世界几乎所有 turn 都拿不到折叠。
+// turn 完成后把同 turn 内所有事件折叠到「最后一条 assistant message」下面，
+// **只保留用户消息（锚点）和最终回复本身在外**。reasoning / 中间 text block /
+// 工具 / 计划全部进 processEvents——保证 user message 和最终回复之间视觉上只
+// 剩一个「展开过程 N 项」按钮，需要时点开还原完整时间线。
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
   const completed = completedTurnIds.value;
@@ -136,7 +135,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     if (!turnId || !completed.has(turnId)) continue;
     // 同 turn 多条 assistant message 时取**最后一条**：SDK 在 stop_reason=
     // end_turn 之前都可能再开新 text block。
-    if (isTimelineAssistantMessage(entry.event)) lastFinalByTurnId.set(turnId, entry);
+    if (isTimelineFinalReply(entry.event)) lastFinalByTurnId.set(turnId, entry);
   }
 
   const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
@@ -145,10 +144,10 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
   for (const entry of entries) {
     const turnId = entry.event.turnId;
     if (!turnId || !completed.has(turnId)) continue;
-    if (isTimelineMessage(entry.event)) continue;
-    if (isTimelineReasoning(entry.event)) continue;
+    if (isTimelineUserMessage(entry.event)) continue;
     const finalEntry = lastFinalByTurnId.get(turnId);
     if (!finalEntry) continue;
+    // intraTurnOrder >= finalEntry 自然排除 final 自身（同序）和 final 之后的事件。
     if (entry.intraTurnOrder >= finalEntry.intraTurnOrder) continue;
     let list = processEventsByFinalId.get(finalEntry.event.id);
     if (!list) {
@@ -191,7 +190,7 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
 
   const flush = () => {
     if (bucket.length === 0) return;
-    if (bucket.length === 1 || !bucketKey) {
+    if (bucket.length === 1) {
       result.push(...bucket);
     } else {
       const first = bucket[0];
@@ -202,7 +201,7 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
         createdAt: first.createdAt,
         turnSeq: first.turnSeq,
         intraTurnOrder: first.intraTurnOrder,
-        groupKey: bucketKey,
+        groupKey: bucketKey!,
         events,
         representative: first.event,
         aggregatedStatus: aggregateTimelineStatus(events),
@@ -216,9 +215,7 @@ function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
 
   for (const entry of entries) {
     const event = entry.event;
-    const key = isTimelineFinalReply(event) || isTimelineMessage(event)
-      ? null
-      : timelineGroupKey(event);
+    const key = isTimelineMessage(event) ? null : timelineGroupKey(event);
 
     if (!key) {
       flush();
@@ -254,15 +251,9 @@ const eventPreviewCache = computed(() => {
  */
 const showThinkingIndicator = computed(() => {
   if (!props.isThinking) return false;
-  return !visibleEvents.value.some((event) => {
-    if (!isTimelineAssistantMessage(event)) return false;
-    return (
-      event.status === "pending" ||
-      event.status === "started" ||
-      event.status === "running" ||
-      event.status === "in_progress"
-    );
-  });
+  return !visibleEvents.value.some((event) =>
+    isTimelineFinalReply(event) && isRunningStatus(event.status),
+  );
 });
 
 watch(
@@ -302,11 +293,11 @@ function expanded(event: AgentTimelineEvent): boolean {
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
-  return !isTimelineFinalReply(event) && !isTimelineMessage(event) && !expanded(event);
+  return !isTimelineMessage(event) && !expanded(event);
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return !isTimelineFinalReply(event) && !isTimelineMessage(event);
+  return !isTimelineMessage(event);
 }
 
 function toggleEvent(event: AgentTimelineEvent) {
@@ -441,16 +432,16 @@ function reasoningContent(event: AgentTimelineEvent): string {
 }
 
 function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
-  return isTimelineMessage(event) && !isTimelineAssistantMessage(event);
+  return isTimelineMessage(event) && !isTimelineFinalReply(event);
 }
 
 function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
-  const role = payload.role === "system" || payload.role === "assistant"
-    ? payload.role
-    : "user";
+  // 仅在 isTimelineUserMessage 命中后调用——assistant 走 final reply 卡，
+  // 不会落到 ChatBubble。这里只区分 user / system。
+  const role = payload.role === "system" ? "system" : "user";
   const content = typeof payload.content === "string"
     ? payload.content
     : event.summary ?? "";
@@ -606,7 +597,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
         <li
           v-else-if="isTimelineReasoning(entry.event) && reasoningContent(entry.event)"
           class="agent-timeline__item agent-timeline__item--reasoning-inline"
-          :class="[statusClass(entry.event.status)]"
+          :class="[statusClass(entry.event.status), { 'is-process-child': entry.isProcessChild }]"
         >
           <MarkdownBlock
             :content="reasoningContent(entry.event)"
@@ -686,7 +677,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
               </header>
 
               <div
-                v-if="expanded(entry.event) || isTimelineFinalReply(entry.event)"
+                v-if="expanded(entry.event)"
                 :id="`agent-timeline-details-${entry.event.id}`"
                 class="agent-timeline__content"
               >

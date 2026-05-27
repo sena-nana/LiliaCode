@@ -635,7 +635,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("turn 完成后，多段思考之间的工具仍被折叠到 final 下；reasoning 保持 inline", async () => {
+  it("turn 完成后，用户消息与最终回复之间的所有事件（含 reasoning）都折叠到 final 下", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-multi-reasoning",
@@ -703,42 +703,43 @@ describe("chat scheduler", () => {
       updatedAt: 2400,
       order: 5,
     });
-    // Claude 典型流程是 "思考→工具→再思考→回复"——收尾 reasoning 不能阻断折叠，
-    // 否则真实世界几乎所有 turn 都拿不到折叠。这里断言 turn 完成后命令被折叠
-    // 到 final 下、两段 reasoning 仍 inline 保留叙事。
     emitMockTurnCompleted("t-002", "turn-multi-reasoning", "success", 2500);
 
     const view = await renderTaskDetail();
 
+    // 折叠后：用户消息 + final 卡 + 「展开过程 3 项」按钮（2 段 reasoning + 1 个命令）。
     await waitFor(() => {
-      expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
-      expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
+      expect(view.getByText("请分段思考并检查实现")).toBeInTheDocument();
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
-      // 命令被折叠：inline 不可见，只剩「展开过程 1 项」按钮。
+      expect(view.queryByText("第一段思考：先定位渲染归并规则。")).toBeNull();
+      expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      const toggle = view.getByRole("button", { name: /展开过程 3 项/ });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
+    // 展开后还原完整时间线顺序：reasoning₁ → command → reasoning₂ → final。
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 3 项/ }));
+    await waitFor(() => {
+      expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
+      expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
+    });
+
     const firstReasoningItem = view.getByText("第一段思考：先定位渲染归并规则。")
+      .closest(".agent-timeline__item");
+    const commandItem = view.getByRole("button", { name: /yarn inspect/ })
       .closest(".agent-timeline__item");
     const secondReasoningItem = view.getByText("第二段思考：再确认命令事件没有被吞掉。")
       .closest(".agent-timeline__item");
     const finalItem = view.getByText("已按真实顺序展示时间线。")
       .closest(".agent-timeline__item");
-    expect(firstReasoningItem).not.toBeNull();
-    expect(secondReasoningItem).not.toBeNull();
-    expect(finalItem).not.toBeNull();
-    expect(firstReasoningItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(firstReasoningItem!.compareDocumentPosition(commandItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(commandItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(secondReasoningItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-
-    // 点开「展开过程」：命令回到 final 上方（在两段 reasoning 之间的原位置）。
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
-    await waitFor(() => {
-      expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
-    });
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {

@@ -71,7 +71,9 @@ export function timelineFinalText(event: Pick<AgentTimelineEvent, "kind" | "payl
   return typeof content === "string" ? content : "";
 }
 
-export function isTimelineAssistantMessage(
+/** 「最终回复」= assistant message。流式中（status=running）也算，避免 token
+ * 增量到达时组件树展开/折叠状态抖动。 */
+export function isTimelineFinalReply(
   event: Pick<AgentTimelineEvent, "kind" | "payload">,
 ): boolean {
   if (event.kind !== "message") return false;
@@ -89,20 +91,10 @@ export function isHiddenTimelineEvent(
   return event.kind === "turn";
 }
 
-/**
- * 「最终回复」= assistant message timeline。流式过程中（status=running）也算，
- * 这样组件树展开/折叠状态在 token 增量到达时不会抖动。
- */
-export function isTimelineFinalReply(
-  event: Pick<AgentTimelineEvent, "kind" | "payload">,
-): boolean {
-  return isTimelineAssistantMessage(event);
-}
-
 export function isTimelineFinalReplyStreaming(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
 ): boolean {
-  return isTimelineAssistantMessage(event) && RUNNING_STATUSES.has(event.status);
+  return isTimelineFinalReply(event) && RUNNING_STATUSES.has(event.status);
 }
 
 function timelineDefaultExpanded(
