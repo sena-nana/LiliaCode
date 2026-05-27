@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -331,8 +332,8 @@ fn persist_and_emit_input(app_handle: &AppHandle, input: AgentTimelineEventInput
 /// 这里把同 id 的 event 合并成「最新一帧」按 `interval` 发出，让镜像通道
 /// 既能跟上 token 速度，又不被高频小事件淹没 WebView2 IPC。
 ///
-/// 调用契约：`flush_all` 必须在 turn 结束前调用一次，保证 pending 的最后
-/// 一帧不滞留——`submit` 自己不会在静默期主动 flush。
+/// 调用契约：每次 `submit` 顺手 flush 一遍过期 pending；`spawn_agent_turn`
+/// 起 ticker 线程周期调 `flush_due_pending` 兜底；turn 末尾 `flush_all` 收尾。
 struct TimelineThrottle {
     interval: Duration,
     last_emit_at: HashMap<String, Instant>,
@@ -368,6 +369,11 @@ impl TimelineThrottle {
     }
 
     fn submit(&mut self, app_handle: &AppHandle, input: AgentTimelineEventInput) {
+        let now = Instant::now();
+        // 机会式 flush：burst 结束后没有同 id 后续 submit 时，思考末尾帧靠这里
+        // 跟着下一条 timeline 事件（典型是 tool_use）被带出去。
+        self.flush_due_pending(app_handle, now);
+
         let Some(id) = input.id.clone() else {
             // 没有稳定 id 的事件每条都是新行，节流无意义。
             persist_and_emit_input(app_handle, input);
@@ -375,7 +381,6 @@ impl TimelineThrottle {
         };
 
         let terminal = is_terminal_timeline_status(&input.status);
-        let now = Instant::now();
         let due = self
             .last_emit_at
             .get(&id)
@@ -387,6 +392,27 @@ impl TimelineThrottle {
             self.pending.remove(&id);
         } else {
             self.pending.insert(id, input);
+        }
+    }
+
+    /// 把所有 `last_emit_at + interval <= now` 的 pending 项立即 emit。
+    fn flush_due_pending(&mut self, app_handle: &AppHandle, now: Instant) {
+        let interval = self.interval;
+        let due_ids: Vec<String> = self
+            .pending
+            .keys()
+            .filter(|id| {
+                self.last_emit_at
+                    .get(*id)
+                    .map_or(true, |t| now.duration_since(*t) >= interval)
+            })
+            .cloned()
+            .collect();
+        for id in due_ids {
+            if let Some(input) = self.pending.remove(&id) {
+                persist_and_emit_input(app_handle, input);
+                self.last_emit_at.insert(id, now);
+            }
         }
     }
 
@@ -1052,7 +1078,23 @@ fn spawn_agent_turn(
         };
         let mut event_host = AgentEventHost::new();
         event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
-        let mut timeline_throttle = TimelineThrottle::new();
+        let timeline_throttle = Arc::new(Mutex::new(TimelineThrottle::new()));
+
+        // 兜底：burst 之后没有任何 submit 时，ticker 周期把过期 pending 吐出来，
+        // 避免思考末尾几句要拖到 turn 结束才显示。
+        let throttle_for_tick = Arc::clone(&timeline_throttle);
+        let app_for_tick = app_handle.clone();
+        let ticker_stopped = Arc::new(AtomicBool::new(false));
+        let ticker_stopped_clone = Arc::clone(&ticker_stopped);
+        let ticker = thread::spawn(move || {
+            while !ticker_stopped_clone.load(Ordering::Relaxed) {
+                thread::sleep(TIMELINE_EMIT_INTERVAL);
+                throttle_for_tick
+                    .lock()
+                    .unwrap()
+                    .flush_due_pending(&app_for_tick, Instant::now());
+            }
+        });
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
@@ -1075,7 +1117,7 @@ fn spawn_agent_turn(
                         if let Some(input) =
                             timeline_input_from_runtime_event(&event_ctx, &event)
                         {
-                            timeline_throttle.submit(&app_handle, input);
+                            timeline_throttle.lock().unwrap().submit(&app_handle, input);
                         }
                     }
                     AgentRuntimeEvent::ConsentRequest {
@@ -1125,7 +1167,7 @@ fn spawn_agent_turn(
                         }
                     }
                     AgentRuntimeEvent::Error { message } => {
-                        timeline_throttle.flush_all(&app_handle);
+                        timeline_throttle.lock().unwrap().flush_all(&app_handle);
                         persist_and_emit_error_timeline_event(
                             &app_handle,
                             &task_id_for_thread,
@@ -1139,7 +1181,10 @@ fn spawn_agent_turn(
         }
 
         // 流结束前确保 pending 的最后一帧落地——否则 turn 末尾的尾段文本会卡在节流窗口里。
-        timeline_throttle.flush_all(&app_handle);
+        timeline_throttle.lock().unwrap().flush_all(&app_handle);
+
+        ticker_stopped.store(true, Ordering::Relaxed);
+        let _ = ticker.join();
 
         // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
         // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
