@@ -48,10 +48,17 @@ function runDispatcher(events: StreamEvent[]) {
     | { channel: "textStart"; index: number; blockKey: number | null; initialText: string }
     | { channel: "textDelta"; index: number; blockKey: number | null; text: string }
     | { channel: "reasoning"; index: number; blockKey: number | null; text: string; blockType: string }
+    | { channel: "reasoningClose"; index: number; blockKey: number | null; text: string; blockType: string }
   > = [];
   const textStarts: Array<{ index: number; blockKey: number | null; initialText: string }> = [];
   const textChunks: Array<{ index: number; blockKey: number | null; text: string }> = [];
   const reasoningSnapshots: Array<{
+    index: number;
+    blockKey: number | null;
+    text: string;
+    blockType: string;
+  }> = [];
+  const reasoningCloses: Array<{
     index: number;
     blockKey: number | null;
     text: string;
@@ -86,8 +93,21 @@ function runDispatcher(events: StreamEvent[]) {
       });
     },
   );
+  const onReasoningClose = vi.fn(
+    (info: { index: number; blockKey: number | null; text: string; blockType: string }) => {
+      reasoningCloses.push(info);
+      calls.push({ channel: "reasoningClose", ...info });
+    },
+  );
   for (const event of events) {
-    dispatchClaudeStreamEvent({ event, state, onTextStart, onTextDelta, onReasoning });
+    dispatchClaudeStreamEvent({
+      event,
+      state,
+      onTextStart,
+      onTextDelta,
+      onReasoning,
+      onReasoningClose,
+    });
   }
   return {
     state,
@@ -95,9 +115,11 @@ function runDispatcher(events: StreamEvent[]) {
     textStarts,
     textChunks,
     reasoningSnapshots,
+    reasoningCloses,
     onTextStart,
     onTextDelta,
     onReasoning,
+    onReasoningClose,
   };
 }
 
@@ -265,6 +287,38 @@ describe("dispatchClaudeStreamEvent", () => {
     ]);
 
     expect(textStarts).toEqual([]);
+  });
+
+  it("thinking block 的 content_block_stop 触发 onReasoningClose 并带累计文本", () => {
+    // 走根本解决路径：上层 runner 拿到 onReasoningClose 就同步 emit success 终态，
+    // 不再依赖 turn 末尾 finalize；这是消除"思考末尾被冻住"的契约钩子。
+    const { reasoningCloses, calls } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.THINKING),
+      thinkingDelta(0, "想一下"),
+      thinkingDelta(0, "再想一下"),
+      stopBlock(0),
+    ]);
+
+    expect(reasoningCloses).toHaveLength(1);
+    expect(reasoningCloses[0]).toMatchObject({
+      index: 0,
+      text: "想一下再想一下",
+      blockType: CLAUDE_BLOCK_TYPES.THINKING,
+    });
+    // 触发时机：onReasoning 之后，整个序列的最后一个回调。
+    expect(calls[calls.length - 1].channel).toBe("reasoningClose");
+  });
+
+  it("text / 未知 block 的 content_block_stop 不触发 onReasoningClose", () => {
+    const { reasoningCloses } = runDispatcher([
+      startBlock(0, CLAUDE_BLOCK_TYPES.TEXT),
+      textDelta(0, "hi"),
+      stopBlock(0),
+      startBlock(1, "future_unknown_block_type"),
+      stopBlock(1),
+    ]);
+
+    expect(reasoningCloses).toEqual([]);
   });
 });
 

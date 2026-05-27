@@ -107,12 +107,17 @@ export function extractClaudeBlockInitialText(streamEvent, blockType) {
  * 单一入口：把一条 SDK `stream_event` 按 block 类型路由出去。
  *   - text block → onTextStart({ index, blockKey, initialText }) 一次，之后 onTextDelta({ index, blockKey, text })
  *   - thinking / redacted_thinking block → onReasoning({ index, blockKey, text, eventType, deltaType, blockType })
- *   - 未知 block / 顶层 message 事件 → 两边都不触发（含 tool_use 流式 partial JSON）
+ *   - thinking / redacted_thinking block 收到 content_block_stop 时 → onReasoningClose({ index, blockKey, text, blockType })
+ *   - 未知 block / 顶层 message 事件 → 不触发（含 tool_use 流式 partial JSON）
  *
  * `onTextStart` 在 `content_block_start` 时同步触发，给上层一次机会**抢在 tool_use
  * 落库前**注册 text fragment 的 sourceId / 占住 timeline order。pacer 的 33ms 节流
  * 决定了 onTextDelta 的首次回调必然延后，光等 onTextDelta 会让短开场白被同 turn
  * 的 tool_use 挤到后面。
+ *
+ * `onReasoningClose` 在 `content_block_stop` 时同步触发，让上层能在 block 真正结束的
+ * 那一刻 finalize 它的 per-block reasoning pacer（emit 终态 + cancel timer），不用
+ * 拖到 turn 末尾才出来。
  *
  * dispatcher 不发 timeline、不知道 pacer、不知道 sessionId——这些组合在 runner 层完成。
  * blockKey 与 index 同生命周期但跨 LLM turn 不复用，runner 用它做 sourceId 隔离。
@@ -123,6 +128,7 @@ export function dispatchClaudeStreamEvent({
   onTextStart,
   onTextDelta,
   onReasoning,
+  onReasoningClose,
 }) {
   if (!event || typeof event !== "object") return;
 
@@ -163,6 +169,15 @@ export function dispatchClaudeStreamEvent({
   }
 
   if (event.type === "content_block_stop") {
+    const entry = state?.streamBlocks?.get(event.index);
+    if (entry && CLAUDE_REASONING_BLOCK_TYPES.has(entry.type) && onReasoningClose) {
+      onReasoningClose({
+        index: event.index,
+        blockKey: entry.blockKey,
+        text: entry.accumulatedText,
+        blockType: entry.type,
+      });
+    }
     closeClaudeBlock(state, event.index);
     return;
   }

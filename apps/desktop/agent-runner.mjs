@@ -258,6 +258,60 @@ function createTextPacer({ intervalMs = 33, flushDivisor = 6, emit }) {
   };
 }
 
+/**
+ * Cumulative-snapshot 节流器：每次 push 整段累计文本，按 intervalMs 节奏吐出最新一帧。
+ * 给 reasoning 这种「每条 delta 都是全量快照」的来源用——这样到达 Rust 那一侧的
+ * timeline emit 间隔总是 ≥ intervalMs，Rust 的 throttle 永远走 due 分支立即落库，
+ * 不会再出现 pending 卡住等不到唤醒的烂局。
+ *
+ * 配 33ms 默认，跟 text pacer 一档；`cancel` 放弃 pending 但不 emit，用在 caller
+ * 紧接着自己 emit 终态（status='success'）的场景，避免一前一后两条相同 sourceId
+ * 的 emit 互相覆盖。
+ */
+function createSnapshotPacer({ intervalMs = 33, emit }) {
+  let pending = null;
+  let lastEmitAt = 0;
+  let timer = null;
+
+  const flush = () => {
+    timer = null;
+    if (pending === null) return;
+    const snapshot = pending;
+    pending = null;
+    lastEmitAt = Date.now();
+    emit(snapshot);
+  };
+
+  return {
+    push(snapshot) {
+      pending = snapshot;
+      if (timer) return;
+      const elapsed = Date.now() - lastEmitAt;
+      if (elapsed >= intervalMs) flush();
+      else timer = setTimeout(flush, intervalMs - elapsed);
+    },
+    finishImmediate() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (pending !== null) {
+        const snapshot = pending;
+        pending = null;
+        lastEmitAt = Date.now();
+        emit(snapshot);
+      }
+    },
+    cancel() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      pending = null;
+    },
+  };
+}
+
 function emitError(message, payload) {
   const text = shortText(message, 1200) || "unknown error";
   emit({ type: "error", message: text });
@@ -462,22 +516,15 @@ function claudeReasoningSourceId(sessionId, blockKey) {
   return `${sessionId || "claude"}:thinking:${blockKey}`;
 }
 
-/**
- * Reasoning timeline 卡片的统一出口：dispatcher 每收到一段思考增量都会回调
- * 这里，sourceId 与 blockKey 一一对应，UI 上看到的是一条平稳增长的
- * "思考中"卡片，而不是每个 delta 一条噪点。
- */
-function emitClaudeReasoningSnapshot({ blockKey, text, eventType, deltaType, blockType }, sessionId) {
+/** 单条 reasoning timeline emit 原语；status='success' 是终态，Rust throttle 会立即落库。 */
+function emitClaudeReasoningTimeline(text, status, sessionId, blockKey) {
   emitTimeline({
     kind: "reasoning",
-    status: "running",
+    status,
     title: "思考中",
     summary: text,
     payload: {
       backend: "claude",
-      eventType,
-      deltaType,
-      blockType,
       sessionId,
       text,
     },
@@ -486,24 +533,59 @@ function emitClaudeReasoningSnapshot({ blockKey, text, eventType, deltaType, blo
 }
 
 /**
- * Turn 结束时把所有思考块标记成已完成。状态改成 success 后 UI 标题从
- * "正在思考" 变成 "已思考"，避免一直显示运行中。
+ * 拿 / 新建一个 thinking block 的累计快照 pacer。runner 把每条 onReasoning
+ * 累计文本喂给它，pacer 按 33ms 节奏吐快照——到达 Rust 的 timeline emit 自然
+ * 都隔够间隔，throttle 永远走 due 立即落库，UI 看到的就是平稳滚动的"正在思考"。
+ */
+function getOrCreateClaudeReasoningBlock(ctx, blockKey, sessionId) {
+  let entry = ctx.reasoningBlocks.get(blockKey);
+  if (entry) return entry;
+  const sid = sessionId || "claude";
+  const pacer = createSnapshotPacer({
+    emit: (text) => emitClaudeReasoningTimeline(text, "running", entry.sessionId, blockKey),
+  });
+  entry = { pacer, lastText: "", sessionId: sid };
+  ctx.reasoningBlocks.set(blockKey, entry);
+  return entry;
+}
+
+/**
+ * 块结束（content_block_stop）：丢掉 pacer 还没吐的 running 帧，直接发一条终态
+ * snapshot（status='success'）。UI 标题从"正在思考"切到"已思考"，且 success
+ * 是终态会绕过 Rust throttle 立即落库。
+ */
+function closeClaudeReasoningBlock(ctx, blockKey, sessionId) {
+  const entry = ctx.reasoningBlocks.get(blockKey);
+  if (!entry) return;
+  entry.pacer.cancel();
+  emitClaudeReasoningTimeline(
+    entry.lastText,
+    "success",
+    sessionId || entry.sessionId,
+    blockKey,
+  );
+  ctx.reasoningBlocks.delete(blockKey);
+}
+
+/**
+ * Turn 结束时收尾所有还挂着的 reasoning block。正常路径下 content_block_stop
+ * 已经把每块翻成 success；走到这里多半是 turn 中断 / SDK 没发 stop 的边界场景。
+ * 顺便清理 dispatcher state 里的空 thinking block（content_block_start 没跟
+ * 任何 delta 就 turn 结束），避免下个 turn 复用 index 时状态错乱。
  */
 function finalizeClaudeReasoningTimeline(ctx, sessionId) {
-  finalizeClaudeReasoningBlocks(ctx.claudeStream, ({ blockKey, text }) => {
-    emitTimeline({
-      kind: "reasoning",
-      status: "success",
-      title: "思考中",
-      summary: text,
-      payload: {
-        backend: "claude",
-        sessionId,
-        text,
-      },
-      sourceId: claudeReasoningSourceId(sessionId, blockKey),
-    });
-  });
+  for (const [blockKey, entry] of ctx.reasoningBlocks) {
+    entry.pacer.cancel();
+    emitClaudeReasoningTimeline(
+      entry.lastText,
+      "success",
+      sessionId || entry.sessionId,
+      blockKey,
+    );
+  }
+  ctx.reasoningBlocks.clear();
+  // dispatcher 残留 block（空 thinking）的 state 清理；空内容 UI 会自然过滤掉。
+  finalizeClaudeReasoningBlocks(ctx.claudeStream, () => {});
 }
 
 function normalizeAskUserResult(value) {
@@ -1090,6 +1172,9 @@ async function runClaude(cmd) {
     /** blockKey → { pacer, accumulatedText, sessionId }；每个 text block 一个独立
      *  pacer，sourceId 也按 blockKey 拆开。结束 turn 时统一翻成 success。 */
     textFragments: new Map(),
+    /** blockKey → { pacer, lastText, sessionId }；每个 thinking block 一个独立
+     *  snapshot pacer，按 33ms 节奏吐累计快照；block stop 时直接 emit success。 */
+    reasoningBlocks: new Map(),
     /** 见过任何 type==="text" 的 assistant content block；用于 result 兜底判断是否
      *  该 emit 一张空 final 卡（vs 纯思考/纯 tool_use 的合法静默 turn）。 */
     sawAssistantTextBlock: false,
@@ -1217,7 +1302,7 @@ async function runClaude(cmd) {
   }
 }
 
-/** 把 stream_event 分到 per-block text pacer 与 reasoning 累加器。 */
+/** 把 stream_event 分到 per-block text / reasoning pacer。 */
 function handleClaudeStreamEvent(msg, ctx) {
   dispatchClaudeStreamEvent({
     event: msg?.event,
@@ -1238,7 +1323,17 @@ function handleClaudeStreamEvent(msg, ctx) {
       fragment.sessionId = msg?.session_id || fragment.sessionId;
       fragment.pacer.push(text);
     },
-    onReasoning: (info) => emitClaudeReasoningSnapshot(info, msg?.session_id),
+    onReasoning: ({ blockKey, text }) => {
+      if (blockKey === null || blockKey === undefined) return;
+      const entry = getOrCreateClaudeReasoningBlock(ctx, blockKey, msg?.session_id);
+      entry.sessionId = msg?.session_id || entry.sessionId;
+      entry.lastText = text;
+      entry.pacer.push(text);
+    },
+    onReasoningClose: ({ blockKey }) => {
+      if (blockKey === null || blockKey === undefined) return;
+      closeClaudeReasoningBlock(ctx, blockKey, msg?.session_id);
+    },
   });
 }
 
