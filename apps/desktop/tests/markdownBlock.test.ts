@@ -72,6 +72,47 @@ describe("MarkdownBlock", () => {
     expect(view.container.textContent).toContain("$$ a^2 + b^2 = c^2");
   });
 
+  it("把 markdown 主题分割线渲染为独立分割线", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "上文",
+          "---",
+          "下文",
+          "",
+          "***",
+          "___",
+          "- - -",
+        ].join("\n"),
+      },
+    });
+
+    const paragraphs = view.container.querySelectorAll(".markdown-block__paragraph");
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]).toHaveTextContent("上文");
+    expect(paragraphs[1]).toHaveTextContent("下文");
+    expect(view.container.querySelectorAll(".markdown-block__divider")).toHaveLength(4);
+  });
+
+  it("不会误判普通文本或 fenced code 里的横线", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "--",
+          "a --- b",
+          "",
+          "```",
+          "---",
+          "```",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.container.querySelector(".markdown-block__paragraph")).toHaveTextContent("-- a --- b");
+    expect(view.container.querySelector(".markdown-block__code")).toHaveTextContent("---");
+    expect(view.container.querySelector(".markdown-block__divider")).not.toBeInTheDocument();
+  });
+
   it("未闭合 mermaid fence 不触发图表渲染", () => {
     const view = render(MarkdownBlock, {
       props: {

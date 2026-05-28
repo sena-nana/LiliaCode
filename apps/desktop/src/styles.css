@@ -2478,6 +2478,13 @@ button.ghost:hover {
   color: var(--text-muted);
 }
 
+.markdown-block__divider {
+  height: 1px;
+  margin: 12px 0;
+  border: 0;
+  background: var(--border-soft);
+}
+
 .markdown-block__code {
   max-width: 100%;
   padding: 8px;

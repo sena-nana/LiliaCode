@@ -23,6 +23,7 @@ type MarkdownBlockType =
   | "quote"
   | "table"
   | "math"
+  | "divider"
   | "mermaid";
 
 interface MarkdownBlockNode {
@@ -154,6 +155,12 @@ function parseMarkdownBlocks(source: string): MarkdownBlockNode[] {
       continue;
     }
 
+    if (isThematicBreak(line)) {
+      parsedBlocks.push(makeBlock("divider", key));
+      index += 1;
+      continue;
+    }
+
     const heading = line.match(/^\s*(#{1,6})\s+(.+)$/);
     if (heading) {
       const level = Math.min(6, Math.max(4, (heading[1]?.length ?? 1) + 3)) as 4 | 5 | 6;
@@ -261,10 +268,15 @@ function parseFencedCodeBlock(lines: string[], startIndex: number): FencedCodeBl
 function isBlockStart(line: string, lines?: string[], index?: number): boolean {
   return /^\s*(```+|~~~+)/.test(line) ||
     isMathBlockStart(line) ||
+    isThematicBreak(line) ||
     (lines !== undefined && index !== undefined && isTableStart(lines, index)) ||
     /^\s*(#{1,6})\s+/.test(line) ||
     parseListItem(line) !== null ||
     /^\s*>\s?/.test(line);
+}
+
+function isThematicBreak(line: string): boolean {
+  return /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line);
 }
 
 function isMathBlockStart(line: string): boolean {
@@ -631,6 +643,12 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
           :block-key="block.key"
           :source="block.text"
         />
+
+        <hr
+          v-else-if="block.type === 'divider'"
+          class="markdown-block__divider"
+          aria-hidden="true"
+        >
 
         <div v-else-if="block.type === 'table'" class="markdown-block__table-wrap">
           <table class="markdown-block__table">
