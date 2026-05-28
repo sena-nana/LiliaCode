@@ -37,9 +37,9 @@ type TimelineEventEntry = {
   turnSeq: number;
   intraTurnOrder: number;
   event: AgentTimelineEvent;
-  /** Final reply 卡上挂着的、被折叠到它下面的过程事件（按原始顺序）。 */
+  /** 挂在 final reply 下的过程事件，保留原始顺序。 */
   processEvents?: AgentTimelineEvent[];
-  /** expanded 时从 processEvents 还原出来的子项。 */
+  /** 过程展开后还原出来的子项。 */
   isProcessChild?: boolean;
 };
 
@@ -78,12 +78,7 @@ const TERMINAL_TURN_STATUSES = new Set<AgentTimelineEventStatus>([
   "cancelled",
 ]);
 
-/**
- * Turn 结束的权威信号：runner 在 `case "result"` emit 的 `kind:"turn"` + 终态
- * status。流式中 turn 未进集合 → 全部 inline；完成那一帧进集合 → 该 turn 的
- * 过程事件折叠到最后一条 assistant message 下，避免「最后一条」随新 text
- * block 漂移造成折叠抖动。
- */
+/** runner 发出的终态 `kind:"turn"` 事件，决定该 turn 何时收拢到 final reply 下。 */
 const completedTurnIds = computed<Set<string>>(() => {
   const set = new Set<string>();
   for (const event of props.events) {
@@ -120,6 +115,8 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
 );
 
 // turn 完成后把同 turn 内可见过程折叠到最后一条 assistant message 下。
+// turn 完成后，只把用户消息和最后一条 assistant message 留在外层；
+// 其余同 turn 事件折进 final reply 的 processEvents，需要时再按原顺序展开。
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
   const completed = completedTurnIds.value;
@@ -128,8 +125,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
   for (const entry of entries) {
     const turnId = entry.event.turnId;
     if (!turnId || !completed.has(turnId)) continue;
-    // 同 turn 多条 assistant message 时取**最后一条**：SDK 在 stop_reason=
-    // end_turn 之前都可能再开新 text block。
+    // SDK 在 stop_reason=end_turn 前仍可能继续开新 text block，这里总是取最后一条。
     if (isTimelineFinalReply(entry.event)) lastFinalByTurnId.set(turnId, entry);
   }
 
@@ -142,7 +138,6 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     if (isTimelineUserMessage(entry.event)) continue;
     const finalEntry = lastFinalByTurnId.get(turnId);
     if (!finalEntry) continue;
-    // intraTurnOrder >= finalEntry 自然排除 final 自身（同序）和 final 之后的事件。
     if (entry.intraTurnOrder >= finalEntry.intraTurnOrder) continue;
     let list = processEventsByFinalId.get(finalEntry.event.id);
     if (!list) {
@@ -239,11 +234,7 @@ const eventPreviewCache = computed(() => {
   return cache;
 });
 
-/**
- * 「思考中」指示器只在 turn 在跑、且当前 turn 还没开始流式回复时出现。
- * 一旦有 running 状态的 assistant message（流式开头）落地，回复卡片本身
- * 的光标就够用了；这里只想覆盖 turn 启动 → 第一个 token 到达 之间的空窗。
- */
+/** 只覆盖 turn 启动到首个 assistant token 到达之间的空窗。 */
 const showThinkingIndicator = computed(() => {
   if (!props.isThinking) return false;
   return !visibleEvents.value.some((event) =>
@@ -361,6 +352,10 @@ function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
 }
 
+function shouldShowNodeIcon(entry: TimelineEventEntry): boolean {
+  return !entry.isProcessChild || !isTimelineFinalReply(entry.event);
+}
+
 function titleAriaLabel(event: AgentTimelineEvent): string {
   const label = timelineEventLabel(event);
   const object = readTimelineDisplay(event).object?.trim() ?? "";
@@ -410,8 +405,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
-  // 仅在 isTimelineUserMessage 命中后调用——assistant 走 final reply 卡，
-  // 不会落到 ChatBubble。这里只区分 user / system。
+  // 这里只会落到 user/system；assistant 已由 final reply 卡接管。
   const role = payload.role === "system" ? "system" : "user";
   const content = typeof payload.content === "string"
     ? payload.content
@@ -585,6 +579,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           >
             <div class="agent-timeline__rail">
               <TimelineNodeIcon
+                v-if="shouldShowNodeIcon(entry)"
                 :status="entry.event.status"
                 :icon="nodeIcon(entry.event)"
               />
