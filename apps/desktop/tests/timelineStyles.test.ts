@@ -123,17 +123,26 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(failedChevronHover)).toContain("color: var(--err)");
   });
 
-  it("失败折叠项 hover 时继续使用错误色，过程按钮没有失败色分支", () => {
+  it("失败折叠项 hover 时继续使用错误色，过程摘要没有失败色和横向分割条", () => {
     const titleHover = selectorIndex(".agent-timeline__title:hover:not(:disabled)");
     const failedTitleHover = selectorIndex(
       ".agent-timeline__item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__title:hover:not(:disabled)",
     );
+    const processToggle = selectorIndex(".agent-timeline__process-toggle {");
+    const processSummary = selectorIndex(".agent-timeline__process-summary");
+    const processDivider = selectorIndex(".agent-timeline__process-toggle::after");
     const processHover = selectorIndex(".agent-timeline__process-toggle:hover");
     const failedProcess = selectorIndex(".agent-timeline__process-toggle--failed");
 
     expect(titleHover).toBeGreaterThan(-1);
+    expect(processToggle).toBeGreaterThan(-1);
     expect(processHover).toBeGreaterThan(-1);
     expect(failedTitleHover).toBeGreaterThan(titleHover);
+    expect(processSummary).toBeGreaterThan(processToggle);
+    expect(processDivider).toBe(-1);
+    expect(ruleTextAt(processToggle)).toContain("flex: 0 1 auto");
+    expect(ruleTextAt(processToggle)).not.toContain("gap:");
+    expect(ruleTextAt(processSummary)).toContain("overflow: hidden");
     expect(failedProcess).toBe(-1);
     expect(ruleTextAt(failedTitleHover)).toContain("color: var(--err)");
   });
