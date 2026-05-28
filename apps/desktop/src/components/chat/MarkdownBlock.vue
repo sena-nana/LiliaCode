@@ -47,7 +47,7 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
     ]"
   >
     <span v-if="singleLine" class="markdown-block__line">
-      <MarkdownInline :tokens="inlineTokens" />
+      <MarkdownInline :tokens="inlineTokens" :render-images="false" />
     </span>
 
     <template v-else>

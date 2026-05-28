@@ -5,10 +5,18 @@ import type { MarkdownListNode } from "./markdownParser";
 defineProps<{
   list: MarkdownListNode;
 }>();
+
+function listStart(list: MarkdownListNode): number | undefined {
+  return list.ordered && list.start !== null ? list.start : undefined;
+}
 </script>
 
 <template>
-  <component :is="list.ordered ? 'ol' : 'ul'" class="markdown-block__list">
+  <component
+    :is="list.ordered ? 'ol' : 'ul'"
+    class="markdown-block__list"
+    :start="listStart(list)"
+  >
     <li
       v-for="(item, itemIndex) in list.items"
       :key="itemIndex"

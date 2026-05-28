@@ -6,6 +6,7 @@ export type InlineTokenType =
   | "strong"
   | "em"
   | "link"
+  | "image"
   | "math"
   | "delete"
   | "break";
@@ -32,6 +33,7 @@ export type MarkdownBlockType =
 
 export interface MarkdownListNode {
   ordered: boolean;
+  start: number | null;
   items: MarkdownListItem[];
 }
 
@@ -57,6 +59,7 @@ export interface MarkdownBlockNode {
 
 interface DraftMarkdownListNode {
   ordered: boolean;
+  start: number | null;
   items: DraftMarkdownListItem[];
 }
 
@@ -83,6 +86,7 @@ interface MathBlock {
 interface ParsedListItem {
   indent: number;
   ordered: boolean;
+  number: number | null;
   text: string;
   taskChecked: boolean | null;
 }
@@ -90,7 +94,7 @@ interface ParsedListItem {
 const MAX_MATH_SOURCE_LENGTH = 2_000;
 const MATH_RENDER_CACHE_LIMIT = 200;
 const mathRenderCache = new Map<string, string | null>();
-const INLINE_TOKEN_PATTERN = /`(?<code>[^`\n]+)`|\\\((?<parenMath>[^\n]*?)\\\)|\$(?<dollarMath>[^\s$\n](?:[^$\n]*?[^\s\\$])?)\$|~~(?<delete>[^~\n]+)~~|\*\*(?<strong>[^*\n]+)\*\*|_(?<underscoreEm>[^_\n]+)_|\*(?<starEm>[^*\n]+)\*|\[(?<linkText>[^\]\n]+)\]\((?<linkHref>[^)\s]+)\)|<(?<angleHref>(?:https?:\/\/|mailto:)[^<>\s]+)>/g;
+const INLINE_TOKEN_PATTERN = /`(?<code>[^`\n]+)`|!\[(?<imageAlt>[^\]\n]*)\]\((?<imageSrc>[^)\s]+)\)|\\\((?<parenMath>[^\n]*?)\\\)|\$(?<dollarMath>[^\s$\n](?:[^$\n]*?[^\s\\$])?)\$|~~(?<delete>[^~\n]+)~~|\*\*(?<starStrong>[^*\n]+)\*\*|__(?<underscoreStrong>[^_\n]+)__|_(?<underscoreEm>[^_\n]+)_|\*(?<starEm>[^*\n]+)\*|\[(?<linkText>[^\]\n]+)\]\((?<linkHref>[^)\s]+)\)|<(?<angleHref>(?:https?:\/\/|mailto:)[^<>\s]+)>/g;
 
 export function normalizeMarkdownSource(content: string | null | undefined): string {
   return (content ?? "").replace(/\r\n?/g, "\n").trim();
@@ -167,7 +171,7 @@ export function parseMarkdownBlocks(source: string): MarkdownBlockNode[] {
 
     const listItem = parseListItem(line);
     if (listItem) {
-      const list = parseListBlock(lines, index);
+      const list = parseListBlock(lines, index, listItem);
       parsedBlocks.push(makeBlock("list", key, { list: list.node }));
       index = list.nextIndex;
       continue;
@@ -259,6 +263,11 @@ function pushInlineMatch(tokens: InlineToken[], match: RegExpMatchArray) {
     return;
   }
 
+  if (groups.imageAlt !== undefined && groups.imageSrc !== undefined) {
+    pushImageToken(tokens, groups.imageAlt, groups.imageSrc, match[0]);
+    return;
+  }
+
   const math = groups.parenMath ?? groups.dollarMath;
   if (math !== undefined) {
     const html = renderMathToHtml(math, false);
@@ -275,8 +284,9 @@ function pushInlineMatch(tokens: InlineToken[], match: RegExpMatchArray) {
     return;
   }
 
-  if (groups.strong !== undefined) {
-    tokens.push(makeInlineToken("strong", groups.strong));
+  const strong = groups.starStrong ?? groups.underscoreStrong;
+  if (strong !== undefined) {
+    tokens.push(makeInlineToken("strong", strong));
     return;
   }
 
@@ -294,6 +304,13 @@ function pushInlineMatch(tokens: InlineToken[], match: RegExpMatchArray) {
   if (groups.angleHref !== undefined) {
     pushExplicitLinkToken(tokens, groups.angleHref, groups.angleHref);
   }
+}
+
+function pushImageToken(tokens: InlineToken[], alt: string, rawSrc: string, rawText: string) {
+  const src = normalizeImageSrc(rawSrc);
+  tokens.push(src
+    ? { type: "image", text: alt, href: src, html: "" }
+    : makeInlineToken("text", rawText));
 }
 
 function pushExplicitLinkToken(tokens: InlineToken[], text: string, rawHref: string) {
@@ -579,16 +596,9 @@ function normalizeTableCells(cells: string[], columnCount: number): string[] {
 function parseListBlock(
   lines: string[],
   startIndex: number,
+  first: ParsedListItem,
 ): { node: MarkdownListNode; nextIndex: number } {
-  const first = parseListItem(lines[startIndex] ?? "");
-  if (!first) {
-    return {
-      node: { ordered: false, items: [] },
-      nextIndex: startIndex + 1,
-    };
-  }
-
-  const root: DraftMarkdownListNode = { ordered: first.ordered, items: [] };
+  const root = makeDraftList(first.ordered, first.number);
   const stack: Array<{ indent: number; node: DraftMarkdownListNode }> = [
     { indent: first.indent, node: root },
   ];
@@ -599,7 +609,7 @@ function parseListBlock(
     const line = lines[index] ?? "";
     if (!line.trim()) break;
 
-    const item = parseListItem(line);
+    const item = index === startIndex ? first : parseListItem(line);
     if (item) {
       if (item.indent < first.indent) break;
 
@@ -610,7 +620,7 @@ function parseListBlock(
       let current = stack[stack.length - 1]!;
       if (item.indent > current.indent) {
         if (!lastItem) break;
-        const child: DraftMarkdownListNode = { ordered: item.ordered, items: [] };
+        const child = makeDraftList(item.ordered, item.number);
         lastItem.children.push(child);
         current = { indent: item.indent, node: child };
         stack.push(current);
@@ -642,9 +652,18 @@ function parseListBlock(
   };
 }
 
+function makeDraftList(ordered: boolean, start: number | null = null): DraftMarkdownListNode {
+  return {
+    ordered,
+    start: ordered ? start : null,
+    items: [],
+  };
+}
+
 function finalizeListNode(node: DraftMarkdownListNode): MarkdownListNode {
   return {
     ordered: node.ordered,
+    start: node.start,
     items: node.items.map((item) => ({
       inlines: parseInlineMarkdownLines(item.lines),
       taskChecked: item.taskChecked,
@@ -665,6 +684,7 @@ function parseListItem(line: string): ParsedListItem | null {
   return {
     indent: match[1]?.length ?? 0,
     ordered: match[2] !== undefined,
+    number: match[2] !== undefined ? Number.parseInt(match[2], 10) : null,
     text: task ? (task[2] ?? "").trim() : text,
     taskChecked: task ? (task[1] ?? "").toLowerCase() === "x" : null,
   };
@@ -721,5 +741,18 @@ function normalizeHref(href: string): string | null {
   if (!trimmed) return null;
   if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
   if (/^(#|\/|\.\/|\.\.\/)/.test(trimmed)) return trimmed;
+  return null;
+}
+
+function normalizeImageSrc(src: string): string | null {
+  const trimmed = src.trim();
+  if (!trimmed || /[\s\u0000-\u001F]/.test(trimmed)) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^(asset:|tauri:\/\/)/i.test(trimmed)) return trimmed;
+  if (/^(\/|\.\/|\.\.\/)/.test(trimmed)) return trimmed;
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return trimmed.replace(/\\/g, "/");
+  if (/^[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/.test(trimmed) && !trimmed.includes(":")) {
+    return trimmed;
+  }
   return null;
 }

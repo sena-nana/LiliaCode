@@ -2500,6 +2500,16 @@ button.ghost:hover {
   text-decoration-thickness: 1px;
 }
 
+.markdown-block__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
 .markdown-block__quote {
   padding-left: 10px;
   border-left: 2px solid var(--border-strong);

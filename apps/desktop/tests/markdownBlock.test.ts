@@ -171,6 +171,60 @@ describe("MarkdownBlock", () => {
       .toHaveAttribute("href", "https://example.com");
   });
 
+  it("渲染图片语法并在代码和单行模式中保持文本", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "图片 ![架构图](https://example.com/a.png)",
+          "相对 ![局部图](images/a.png)",
+          "非法 ![危险](javascript:alert(1))",
+          "",
+          "`![x](https://example.com/a.png)`",
+        ].join("\n"),
+      },
+    });
+
+    const image = view.getByAltText("架构图");
+    expect(image).toHaveAttribute("src", "https://example.com/a.png");
+    expect(image).toHaveAttribute("loading", "lazy");
+    expect(image).toHaveClass("markdown-block__image");
+    expect(view.getByAltText("局部图")).toHaveAttribute("src", "images/a.png");
+    expect(view.queryByAltText("危险")).not.toBeInTheDocument();
+    expect(view.container).toHaveTextContent("非法 ![危险](javascript:alert(1))");
+    expect(view.getByText("![x](https://example.com/a.png)").closest("code"))
+      .toBeInTheDocument();
+
+    const singleLineView = render(MarkdownBlock, {
+      props: {
+        content: "图片 ![架构图](https://example.com/a.png)",
+        singleLine: true,
+      },
+    });
+    expect(singleLineView.container.querySelector("img")).not.toBeInTheDocument();
+    expect(singleLineView.container).toHaveTextContent("图片 架构图");
+  });
+
+  it("支持双下划线加粗和有序列表起始编号", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "__重点__ 和 **继续**",
+          "",
+          "3. 第三步",
+          "4. 第四步",
+          "   7. 子步骤",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.getByText("重点").closest("strong")).toBeInTheDocument();
+    expect(view.getByText("继续").closest("strong")).toBeInTheDocument();
+
+    const orderedLists = view.container.querySelectorAll("ol.markdown-block__list");
+    expect(orderedLists[0]).toHaveAttribute("start", "3");
+    expect(orderedLists[1]).toHaveAttribute("start", "7");
+  });
+
   it("在标题、引用和表格中使用一致的自动链接规则", () => {
     const view = render(MarkdownBlock, {
       props: {
