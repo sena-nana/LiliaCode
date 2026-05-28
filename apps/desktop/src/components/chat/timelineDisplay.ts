@@ -81,14 +81,12 @@ export function isTimelineFinalReply(
 }
 
 /**
- * 时间线里的 `kind === "turn"` 事件全部由 runner 出于会话恢复/调试目的发出
- * （Claude session、Claude status、Claude turn completed、API retry...），对终端
- * 用户都是噪音。统一在 UI 这层过滤；持久化层仍保留它们，session resume 依赖。
+ * runner 会保留恢复/调试用的内部事件；主时间线只展示用户可操作的过程。
  */
 export function isHiddenTimelineEvent(
   event: Pick<AgentTimelineEvent, "kind">,
 ): boolean {
-  return event.kind === "turn";
+  return event.kind === "turn" || event.kind === "reasoning";
 }
 
 export function isTimelineFinalReplyStreaming(

@@ -119,10 +119,7 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
     ),
 );
 
-// turn 完成后把同 turn 内所有事件折叠到「最后一条 assistant message」下面，
-// **只保留用户消息（锚点）和最终回复本身在外**。reasoning / 中间 text block /
-// 工具 / 计划全部进 processEvents——保证 user message 和最终回复之间视觉上只
-// 剩一个「展开过程 N 项」按钮，需要时点开还原完整时间线。
+// turn 完成后把同 turn 内可见过程折叠到最后一条 assistant message 下。
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
   const completed = completedTurnIds.value;

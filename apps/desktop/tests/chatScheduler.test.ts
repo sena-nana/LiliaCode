@@ -53,12 +53,11 @@ function setChatDropBounds(view: ReturnType<typeof render>) {
   });
 }
 
-async function expectInitialReasoning(view: ReturnType<typeof render>) {
+async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {
   await waitFor(() => {
-    const node = view.getByText("从持久化时间线恢复的公开摘要。");
-    expect(node.closest(".agent-timeline__item--reasoning-inline"))
-      .not.toBeNull();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_timeline_list")).toBe(true);
   });
+  expect(view.queryByText("从持久化时间线恢复的公开摘要。")).toBeNull();
 }
 
 describe("chat scheduler", () => {
@@ -138,7 +137,7 @@ describe("chat scheduler", () => {
 
     await sendText(view, "页面刚打开时发送的用户消息");
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
     await waitFor(() => {
       expect(view.getByText("页面刚打开时发送的用户消息")).toBeInTheDocument();
     });
@@ -150,7 +149,7 @@ describe("chat scheduler", () => {
   it("会显示持久化和实时 Agent 工作过程", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-live-command",
@@ -168,50 +167,40 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("kind=turn 的 Claude session/status/turn completed 事件不在 timeline 中渲染", async () => {
+  it("kind=turn 和 reasoning 不在 timeline 中渲染", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
-      id: "tl-hidden-session",
-      kind: "turn",
-      status: "started",
-      title: "Claude session",
-      summary: "claude-sonnet-4-6",
-      payload: { backend: "claude", model: "claude-sonnet-4-6" },
-      order: 1,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-hidden-status",
-      kind: "turn",
-      status: "info",
-      title: "Claude status",
-      summary: "requesting",
-      payload: { backend: "claude", status: "requesting" },
-      order: 2,
-    });
-    emitMockTimelineEvent("t-002", {
-      id: "tl-hidden-turn-done",
+      id: "tl-hidden-turn",
       kind: "turn",
       status: "success",
       title: "Claude turn completed",
       summary: "",
       payload: { backend: "claude", sessionId: "session-x" },
-      order: 3,
+      order: 1,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-hidden-reasoning",
+      kind: "reasoning",
+      status: "running",
+      title: "思考中",
+      summary: "这段思考内容不应进入主时间线。",
+      payload: { text: "这段思考内容不应进入主时间线。" },
+      order: 2,
     });
 
     await waitFor(() => {
-      expect(view.queryByText("Claude session")).toBeNull();
-      expect(view.queryByText("Claude status")).toBeNull();
       expect(view.queryByText("Claude turn completed")).toBeNull();
+      expect(view.queryByText("这段思考内容不应进入主时间线。")).toBeNull();
     });
   });
 
   it("turn 在跑且尚未流式回复时，timeline 末尾显示「思考中…」指示器", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     await sendText(view, "去想一下怎么做");
     await waitFor(() => {
@@ -250,7 +239,7 @@ describe("chat scheduler", () => {
     // Claude normalizer 用空 payload.input 折出空 command 后回退到 output。
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-bash-result",
@@ -289,7 +278,7 @@ describe("chat scheduler", () => {
   it("过程事件默认显示为单行，点击后展开详情", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-single-line-command",
@@ -322,7 +311,7 @@ describe("chat scheduler", () => {
   it("最终回复显示在 timeline 中，不再创建 assistant 普通气泡", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     await sendText(view, "实现 timeline 最终回复");
     await waitFor(() => {
@@ -372,7 +361,7 @@ describe("chat scheduler", () => {
 
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
     await waitFor(() => {
       expect(view.getByText("请执行完整验证")).toBeInTheDocument();
     });
@@ -635,7 +624,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("turn 完成后，用户消息与最终回复之间的所有事件（含 reasoning）都折叠到 final 下", async () => {
+  it("turn 完成后，reasoning 不计入最终回复下的过程项", async () => {
     seedMockChatMessages("t-002", [
       {
         id: "u-multi-reasoning",
@@ -650,9 +639,9 @@ describe("chat scheduler", () => {
       kind: "reasoning",
       status: "success",
       title: "已思考",
-      summary: "第一段思考：先定位渲染归并规则。",
+      summary: "这段思考内容不应计入过程项。",
       payload: {
-        text: "第一段思考：先定位渲染归并规则。",
+        text: "这段思考内容不应计入过程项。",
       },
       turnId: "turn-multi-reasoning",
       createdAt: 2100,
@@ -675,20 +664,6 @@ describe("chat scheduler", () => {
       order: 3,
     });
     emitMockTimelineEvent("t-002", {
-      id: "tl-reasoning-second",
-      kind: "reasoning",
-      status: "success",
-      title: "已思考",
-      summary: "第二段思考：再确认命令事件没有被吞掉。",
-      payload: {
-        text: "第二段思考：再确认命令事件没有被吞掉。",
-      },
-      turnId: "turn-multi-reasoning",
-      createdAt: 2300,
-      updatedAt: 2300,
-      order: 4,
-    });
-    emitMockTimelineEvent("t-002", {
       id: "tl-multi-reasoning-final",
       kind: "message",
       status: "success",
@@ -701,45 +676,26 @@ describe("chat scheduler", () => {
       turnId: "turn-multi-reasoning",
       createdAt: 2400,
       updatedAt: 2400,
-      order: 5,
+      order: 4,
     });
     emitMockTurnCompleted("t-002", "turn-multi-reasoning", "success", 2500);
 
     const view = await renderTaskDetail();
 
-    // 折叠后：用户消息 + final 卡 + 「展开过程 3 项」按钮（2 段 reasoning + 1 个命令）。
     await waitFor(() => {
       expect(view.getByText("请分段思考并检查实现")).toBeInTheDocument();
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
-      expect(view.queryByText("第一段思考：先定位渲染归并规则。")).toBeNull();
-      expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
+      expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 3 项/ });
+      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    // 展开后还原完整时间线顺序：reasoning₁ → command → reasoning₂ → final。
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 3 项/ }));
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
     await waitFor(() => {
-      expect(view.getByText("第一段思考：先定位渲染归并规则。")).toBeInTheDocument();
-      expect(view.getByText("第二段思考：再确认命令事件没有被吞掉。")).toBeInTheDocument();
+      expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
       expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
     });
-
-    const firstReasoningItem = view.getByText("第一段思考：先定位渲染归并规则。")
-      .closest(".agent-timeline__item");
-    const commandItem = view.getByRole("button", { name: /yarn inspect/ })
-      .closest(".agent-timeline__item");
-    const secondReasoningItem = view.getByText("第二段思考：再确认命令事件没有被吞掉。")
-      .closest(".agent-timeline__item");
-    const finalItem = view.getByText("已按真实顺序展示时间线。")
-      .closest(".agent-timeline__item");
-    expect(firstReasoningItem!.compareDocumentPosition(commandItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(commandItem!.compareDocumentPosition(secondReasoningItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(secondReasoningItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {
@@ -770,7 +726,7 @@ describe("chat scheduler", () => {
 
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
     await waitFor(() => {
       expect(view.getByText("插在过程中的用户消息")).toBeInTheDocument();
       expect(view.getByText("用户消息之后的最终回复")).toBeInTheDocument();
@@ -786,7 +742,7 @@ describe("chat scheduler", () => {
   it("agent 错误走 timeline 错误事件，不再创建 system 普通气泡", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-agent-error",
@@ -814,7 +770,7 @@ describe("chat scheduler", () => {
   it("未知 kind 仍能由 payload 推导出可用的标题、预览和详情", async () => {
     const view = await renderTaskDetail();
 
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     // 持久层不再有 display 字段；事件生产方只塞 payload，前端 deriveTimelineDisplay
     // 命中 default (tool) 分支：kind 不是 "tool" 时动词降级为「处理」，
@@ -849,7 +805,7 @@ describe("chat scheduler", () => {
 
   it("相邻事件分组展开后保留原始事件详情", async () => {
     const view = await renderTaskDetail();
-    await expectInitialReasoning(view);
+    await expectInitialReasoningHidden(view);
 
     emitMockTimelineEvent("t-002", {
       id: "tl-group-command-1",
