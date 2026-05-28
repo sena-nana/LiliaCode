@@ -342,6 +342,10 @@ describe("chat scheduler", () => {
     const finalContent = view.getByText(/这是 Claude turn 完成后返回给用户的完整结果/);
     expect(finalContent.closest(".chat-bubble")).toBeNull();
     expect(finalContent.closest(".agent-timeline__item")).toHaveClass("is-final-reply");
+    expect(finalContent.closest(".agent-timeline__event")?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(finalContent.closest(".agent-timeline__event")?.querySelector(".agent-timeline__node"))
+      .not.toBeNull();
   });
 
   it("同 turn 内工具与最终回复：流式中按 order 内联，turn 完成后折叠到 final 下", async () => {
@@ -415,6 +419,18 @@ describe("chat scheduler", () => {
     const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
     expect(timelineText.indexOf("yarn verify"))
       .toBeLessThan(timelineText.indexOf("最终结果完整展示。"));
+    expect(view.getByRole("button", { name: /yarn verify/ })
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(view.getByText("最终结果完整展示。")
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__rail"))
+      .not.toBeNull();
+    expect(view.getByText("最终结果完整展示。")
+      .closest(".agent-timeline__event")
+      ?.querySelector(".agent-timeline__node"))
+      .not.toBeNull();
 
     // Runner 发出 turn 终结事件，UI 这才把命令折叠到 final 下、默认收起。
     emitMockTurnCompleted("t-002", "turn-collapse");
@@ -666,6 +682,35 @@ describe("chat scheduler", () => {
       order: 3,
     });
     emitMockTimelineEvent("t-002", {
+      id: "tl-reasoning-second",
+      kind: "reasoning",
+      status: "success",
+      title: "已思考",
+      summary: "第二段思考：再确认命令事件没有被吞掉。",
+      payload: {
+        text: "第二段思考：再确认命令事件没有被吞掉。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2300,
+      updatedAt: 2300,
+      order: 4,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-middle-agent-reply",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "中间 Agent 回复片段。",
+      },
+      turnId: "turn-multi-reasoning",
+      createdAt: 2350,
+      updatedAt: 2350,
+      order: 5,
+    });
+    emitMockTimelineEvent("t-002", {
       id: "tl-multi-reasoning-final",
       kind: "message",
       status: "success",
@@ -678,7 +723,7 @@ describe("chat scheduler", () => {
       turnId: "turn-multi-reasoning",
       createdAt: 2400,
       updatedAt: 2400,
-      order: 4,
+      order: 6,
     });
     emitMockTurnCompleted("t-002", "turn-multi-reasoning", "success", 2500);
 
@@ -688,16 +733,35 @@ describe("chat scheduler", () => {
       expect(view.getByText("请分段思考并检查实现")).toBeInTheDocument();
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
       expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
+      expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
+      expect(view.queryByText("中间 Agent 回复片段。")).toBeNull();
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      const toggle = view.getByRole("button", { name: /展开过程 2 项/ });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
+    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项/ }));
     await waitFor(() => {
       expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
+      expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
       expect(view.getByRole("button", { name: /yarn inspect/ })).toBeInTheDocument();
+      expect(view.getByText("中间 Agent 回复片段。")).toBeInTheDocument();
     });
+
+    const commandItem = view.getByRole("button", { name: /yarn inspect/ })
+      .closest(".agent-timeline__item");
+    const middleReplyItem = view.getByText("中间 Agent 回复片段。")
+      .closest(".agent-timeline__item");
+    const finalItem = view.getByText("已按真实顺序展示时间线。")
+      .closest(".agent-timeline__item");
+    expect(middleReplyItem).toHaveClass("is-process-child");
+    expect(middleReplyItem?.querySelector(".agent-timeline__rail")).not.toBeNull();
+    expect(middleReplyItem?.querySelector(".agent-timeline__node")).toBeNull();
+    expect(finalItem?.querySelector(".agent-timeline__node")).not.toBeNull();
+    expect(commandItem!.compareDocumentPosition(middleReplyItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(middleReplyItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("用户消息按时间插入 Agent timeline，而不是固定显示在顶部", async () => {
