@@ -94,7 +94,7 @@ interface ParsedListItem {
 const MAX_MATH_SOURCE_LENGTH = 2_000;
 const MATH_RENDER_CACHE_LIMIT = 200;
 const mathRenderCache = new Map<string, string | null>();
-const INLINE_TOKEN_PATTERN = /`(?<code>[^`\n]+)`|!\[(?<imageAlt>[^\]\n]*)\]\((?<imageSrc>[^)\s]+)\)|\\\((?<parenMath>[^\n]*?)\\\)|\$(?<dollarMath>[^\s$\n](?:[^$\n]*?[^\s\\$])?)\$|~~(?<delete>[^~\n]+)~~|\*\*(?<starStrong>[^*\n]+)\*\*|__(?<underscoreStrong>[^_\n]+)__|_(?<underscoreEm>[^_\n]+)_|\*(?<starEm>[^*\n]+)\*|\[(?<linkText>[^\]\n]+)\]\((?<linkHref>[^)\s]+)\)|<(?<angleHref>(?:https?:\/\/|mailto:)[^<>\s]+)>/g;
+const INLINE_TOKEN_PATTERN = /`(?<code>[^`\n]+)`|!\[(?<imageAlt>[^\]\n]*)\]\((?<imageSrc>[^)\s]+)\)|\\\((?<parenMath>[^\n]*?)\\\)|~~(?<delete>[^~\n]+)~~|\*\*(?<starStrong>[^*\n]+)\*\*|__(?<underscoreStrong>[^_\n]+)__|_(?<underscoreEm>[^_\n]+)_|\*(?<starEm>[^*\n]+)\*|\[(?<linkText>[^\]\n]+)\]\((?<linkHref>[^)\s]+)\)|<(?<angleHref>(?:https?:\/\/|mailto:)[^<>\s]+)>/g;
 
 export function normalizeMarkdownSource(content: string | null | undefined): string {
   return (content ?? "").replace(/\r\n?/g, "\n").trim();
@@ -268,11 +268,10 @@ function pushInlineMatch(tokens: InlineToken[], match: RegExpMatchArray) {
     return;
   }
 
-  const math = groups.parenMath ?? groups.dollarMath;
-  if (math !== undefined) {
-    const html = renderMathToHtml(math, false);
+  if (groups.parenMath !== undefined) {
+    const html = renderMathToHtml(groups.parenMath, false);
     if (html) {
-      tokens.push(makeInlineToken("math", math, { html }));
+      tokens.push(makeInlineToken("math", groups.parenMath, { html }));
     } else {
       pushTextToken(tokens, match[0]);
     }

@@ -25,7 +25,7 @@ describe("MarkdownBlock", () => {
         content: [
           "| 名称 | 数量 | 比例 | 状态 |",
           "| :--- | ---: | :---: | --- |",
-          "| **Alpha** | 42 | $\\frac{1}{2}$ | `ok` |",
+          "| **Alpha** | 42 | \\(\\frac{1}{2}\\) | `ok` |",
         ].join("\n"),
       },
     });
@@ -39,11 +39,11 @@ describe("MarkdownBlock", () => {
     expect(view.container.querySelector(".markdown-block__table .katex")).toBeInTheDocument();
   });
 
-  it("渲染行内和块级 LaTeX", () => {
+  it("渲染明确边界的行内和块级 LaTeX", () => {
     const view = render(MarkdownBlock, {
       props: {
         content: [
-          "行内公式 $E=mc^2$ 与 \\(\\frac{1}{2}\\)。",
+          "行内公式 \\(E=mc^2\\) 与 \\(\\frac{1}{2}\\)。",
           "",
           "$$",
           "a^2 + b^2 = c^2",
@@ -56,6 +56,17 @@ describe("MarkdownBlock", () => {
       .toHaveLength(2);
     expect(view.container.querySelector(".markdown-block__math-block .katex-display"))
       .toBeInTheDocument();
+  });
+
+  it("不把单美元内容当作行内 LaTeX 渲染", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: "价格 $5，环境变量 $PATH，文本 $E=mc^2$ 保持原样。",
+      },
+    });
+
+    expect(view.container.querySelector(".markdown-block__math-inline")).not.toBeInTheDocument();
+    expect(view.container).toHaveTextContent("$E=mc^2$");
   });
 
   it("未闭合块级 LaTeX 先按文本显示", () => {
