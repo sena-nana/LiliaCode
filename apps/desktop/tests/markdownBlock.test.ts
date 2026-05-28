@@ -113,6 +113,90 @@ describe("MarkdownBlock", () => {
     expect(view.container.querySelector(".markdown-block__divider")).not.toBeInTheDocument();
   });
 
+  it("渲染任务列表并支持嵌套与续行", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "- [ ] 待办",
+          "  续行说明",
+          "  - 子项",
+          "- [x] 完成",
+        ].join("\n"),
+      },
+    });
+
+    const checkboxes = view.container.querySelectorAll<HTMLInputElement>(
+      ".markdown-block__task-checkbox",
+    );
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]).toBeDisabled();
+    expect(checkboxes[0]?.checked).toBe(false);
+    expect(checkboxes[1]?.checked).toBe(true);
+    expect(view.container.querySelector(".markdown-block__list .markdown-block__list"))
+      .toHaveTextContent("子项");
+    expect(view.container.querySelector(".markdown-block__list li")).toHaveTextContent(
+      "待办 续行说明",
+    );
+  });
+
+  it("渲染硬换行、删除线和自动链接", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "第一行\\",
+          "第二行  ",
+          "第三行",
+          "",
+          "删除 ~~旧内容~~，链接 https://example.com/path).",
+          "<mailto:test@example.com> 和 `https://code.example`",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.container.querySelectorAll(".markdown-block__paragraph br")).toHaveLength(2);
+    expect(view.container.querySelector("del")).toHaveTextContent("旧内容");
+    expect(view.getByRole("link", { name: "https://example.com/path" }))
+      .toHaveAttribute("href", "https://example.com/path");
+    expect(view.getByRole("link", { name: "mailto:test@example.com" }))
+      .toHaveAttribute("href", "mailto:test@example.com");
+    expect(view.getByText("https://code.example").closest("code")).toBeInTheDocument();
+
+    const singleLineView = render(MarkdownBlock, {
+      props: {
+        content: "单行 https://example.com",
+        singleLine: true,
+      },
+    });
+    expect(singleLineView.getByRole("link", { name: "https://example.com" }))
+      .toHaveAttribute("href", "https://example.com");
+  });
+
+  it("在标题、引用和表格中使用一致的自动链接规则", () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "## 标题 https://heading.example",
+          "",
+          "> 引用 https://quote.example",
+          "",
+          "| 位置 | 链接 |",
+          "| --- | --- |",
+          "| 表格 | https://table.example |",
+          "",
+          "`https://code.example`",
+        ].join("\n"),
+      },
+    });
+
+    expect(view.getByRole("link", { name: "https://heading.example" }))
+      .toHaveAttribute("href", "https://heading.example");
+    expect(view.getByRole("link", { name: "https://quote.example" }))
+      .toHaveAttribute("href", "https://quote.example");
+    expect(view.getByRole("link", { name: "https://table.example" }))
+      .toHaveAttribute("href", "https://table.example");
+    expect(view.getByText("https://code.example").closest("code")).toBeInTheDocument();
+  });
+
   it("未闭合 mermaid fence 不触发图表渲染", () => {
     const view = render(MarkdownBlock, {
       props: {

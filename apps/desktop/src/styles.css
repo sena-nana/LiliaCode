@@ -2472,6 +2472,34 @@ button.ghost:hover {
   padding-left: 18px;
 }
 
+.markdown-block__list .markdown-block__list {
+  margin: 3px 0 0;
+}
+
+.markdown-block__list-item--task {
+  list-style: none;
+}
+
+.markdown-block__list-item-content {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.markdown-block__task-checkbox {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.markdown-block del {
+  color: var(--text-muted);
+  text-decoration-thickness: 1px;
+}
+
 .markdown-block__quote {
   padding-left: 10px;
   border-left: 2px solid var(--border-strong);
