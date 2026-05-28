@@ -214,4 +214,11 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(codeBlock)).toContain("overflow-wrap: anywhere");
     expect(ruleTextAt(codeBlockCode)).toContain("white-space: inherit");
   });
+
+  it("组内工具展开内容与缩略行保持间距", () => {
+    const groupDetailContent = selectorIndex(".agent-timeline__group-head + .agent-timeline__content");
+
+    expect(groupDetailContent).toBeGreaterThan(-1);
+    expect(ruleTextAt(groupDetailContent)).toContain("margin-top: 7px");
+  });
 });

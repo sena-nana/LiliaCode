@@ -2182,6 +2182,10 @@ button.ghost:hover {
   font-size: 12px;
 }
 
+.agent-timeline__group-head + .agent-timeline__content {
+  margin-top: 7px;
+}
+
 .agent-timeline__process-toggle:hover {
   background: transparent;
   color: var(--accent);
