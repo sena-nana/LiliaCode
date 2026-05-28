@@ -27,6 +27,7 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
       <ProjectTreeItem
         :project="project"
         :is-expanded="true"
+        @toggle="$emit('toggle', $event)"
         @error="emitError"
         @archived="emitArchived"
       />
@@ -64,6 +65,22 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
 }
 
 describe("ProjectTreeItem", () => {
+  it("项目名称进入项目中枢，文件夹图标才触发展开折叠", async () => {
+    const view = await renderProjectTreeItem("/projects/tools");
+    const projectLink = view.getByRole("link", { name: "Lilia" });
+    const collapseButton = view.getByLabelText("折叠项目");
+
+    expect(projectLink).toHaveAttribute("href", "/projects/lilia");
+
+    await fireEvent.click(collapseButton);
+
+    expect(view.emitted("toggle")).toEqual([["lilia"]]);
+
+    await fireEvent.click(projectLink);
+
+    expect(view.emitted("toggle")).toEqual([["lilia"]]);
+  });
+
   it("session 置顶按钮显示在归档按钮左侧并触发切换", async () => {
     const view = await renderProjectTreeItem();
     const sessionRow = view.getByText("接入 Claude Code 会话发现")

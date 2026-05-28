@@ -66,12 +66,10 @@ const emit = defineEmits<{
 
 const route = useRoute();
 
-// --- Inline rename ---
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 
-// --- Session 归档确认 ---
 const confirmingId = ref<string | null>(null);
 
 async function onArchiveClick(e: MouseEvent, taskId: string) {
@@ -144,7 +142,6 @@ function bindEditingInput(el: unknown) {
   editingInput.value = (el as HTMLInputElement | null) ?? null;
 }
 
-// --- Actions ---
 async function openInExplorer() {
   if (!props.project.cwd) return;
   try {
@@ -196,6 +193,11 @@ function isActiveTask(taskId: string) {
   return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
 }
 
+function isActiveProject() {
+  return String(route.params.projectId ?? "") === props.project.id &&
+    !route.params.taskId;
+}
+
 function isSameTreeRow(
   marker: TreeDragMarker | TreeDropMarker | null | undefined,
   kind: TreeDragKind,
@@ -228,7 +230,6 @@ function treeRowStateClass(
   };
 }
 
-// --- Context menu ---
 function buildMenu(): ContextMenuItem[] {
   const hasCwd = !!props.project.cwd;
   return [
@@ -292,21 +293,28 @@ function onMoreClick(e: MouseEvent) {
   <div class="sb-tree__group">
     <div class="sb-tree__row sb-tree__row--project"
       :class="[
-        { 'is-open': isExpanded, 'is-editing': editingId === project.id },
+        {
+          'is-editing': editingId === project.id,
+          'is-active': isActiveProject(),
+        },
         treeRowStateClass('project', project.id, null),
       ]"
       data-tree-kind="project"
       :data-project-id="project.id"
       :data-pinned="project.pinned ? 'true' : 'false'"
-      :role="editingId === project.id ? undefined : 'button'"
-      :tabindex="editingId === project.id ? -1 : 0"
-      :aria-expanded="isExpanded"
       v-context-menu="() => buildMenu()"
-      @click="editingId === project.id ? null : emit('toggle', project.id)"
-      @keydown.enter.prevent="editingId === project.id ? null : emit('toggle', project.id)"
-      @keydown.space.prevent="editingId === project.id ? null : emit('toggle', project.id)">
-      <Folder :size="14" aria-hidden="true" />
-      <Pin v-if="project.pinned" :size="12" class="sb-tree__pin-icon" aria-hidden="true" />
+    >
+      <button
+        type="button"
+        class="sb-icon-btn"
+        :title="isExpanded ? '折叠项目' : '展开项目'"
+        :aria-label="isExpanded ? '折叠项目' : '展开项目'"
+        :aria-expanded="isExpanded"
+        @click.stop="emit('toggle', project.id)"
+      >
+        <FolderOpen v-if="isExpanded" :size="14" aria-hidden="true" />
+        <Folder v-else :size="14" aria-hidden="true" />
+      </button>
       <input
         v-if="editingId === project.id"
         :ref="bindEditingInput"
@@ -319,7 +327,16 @@ function onMoreClick(e: MouseEvent) {
         @keydown="onEditingKeydown"
         @blur="commitRename"
       />
-      <span v-else class="sb-tree__name">{{ project.name }}</span>
+      <RouterLink
+        v-else
+        :to="`/projects/${project.id}`"
+        class="sb-tree__link"
+        draggable="false"
+        @dragstart.prevent
+      >
+        <span class="sb-tree__name">{{ project.name }}</span>
+        <Pin v-if="project.pinned" :size="12" class="sb-tree__pin-icon" aria-hidden="true" />
+      </RouterLink>
       <div v-if="editingId !== project.id" class="sb-tree__hover-tools" @click.stop>
         <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="onMoreClick">
           <MoreHorizontal :size="13" aria-hidden="true" />

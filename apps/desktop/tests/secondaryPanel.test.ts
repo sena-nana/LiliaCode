@@ -34,12 +34,18 @@ async function renderSecondaryPanel(initialRoute = "/") {
   return { ...view, router };
 }
 
-function getProjectToggle(view: ReturnType<typeof render>, projectName: string): HTMLElement {
+function getProjectRow(view: ReturnType<typeof render>, projectName: string): HTMLElement {
   const row = view.getByText(projectName).closest(".sb-tree__row--project");
   if (!(row instanceof HTMLElement)) {
     throw new Error(`未找到项目行：${projectName}`);
   }
   return row;
+}
+
+function getProjectToggle(view: ReturnType<typeof render>, projectName: string): HTMLElement {
+  return within(getProjectRow(view, projectName)).getByRole("button", {
+    name: /展开项目|折叠项目/,
+  });
 }
 
 function getConversationRow(view: ReturnType<typeof render>, title: string): HTMLElement {
@@ -199,7 +205,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("归档当前项目对话后会进入该项目的新对话", async () => {
     const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
-    const lilia = getProjectToggle(view, "Lilia");
+    const lilia = getProjectRow(view, "Lilia");
 
     await fireEvent.click(within(lilia).getByRole("button", { name: "更多" }));
     await fireEvent.click(await view.findByText("归档所有对话"));
@@ -214,7 +220,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("在项目页归档全部对话时不会自动进入新对话", async () => {
     const view = await renderSecondaryPanel("/projects/lilia");
-    const lilia = getProjectToggle(view, "Lilia");
+    const lilia = getProjectRow(view, "Lilia");
 
     await fireEvent.click(within(lilia).getByRole("button", { name: "更多" }));
     await fireEvent.click(await view.findByText("归档所有对话"));
@@ -255,8 +261,8 @@ describe("SecondaryPanel project tree drag", () => {
 
   it("项目拖动时显示落点指示，松手后更新同置顶分组顺序", async () => {
     const view = await renderSecondaryPanel();
-    const lilia = getProjectToggle(view, "Lilia");
-    const tools = getProjectToggle(view, "工具箱");
+    const lilia = getProjectRow(view, "Lilia");
+    const tools = getProjectRow(view, "工具箱");
     lilia.getBoundingClientRect = () => box(0, 28);
     tools.getBoundingClientRect = () => box(40, 68);
 
@@ -294,7 +300,7 @@ describe("SecondaryPanel project tree drag", () => {
     const view = await renderSecondaryPanel();
     const source = getConversationRow(view, "打通 tsconfig paths 搜索");
     const sourceTitle = view.getByText("打通 tsconfig paths 搜索");
-    const targetProject = getProjectToggle(view, "工具箱");
+    const targetProject = getProjectRow(view, "工具箱");
     source.getBoundingClientRect = () => box(30, 58);
     targetProject.getBoundingClientRect = () => box(90, 118);
 
@@ -334,8 +340,8 @@ describe("SecondaryPanel project tree drag", () => {
   it("跨置顶分组拖动项目时显示不可投放，并且不会发排序命令", async () => {
     setMockProjectPinned("tools", true);
     const view = await renderSecondaryPanel();
-    const lilia = getProjectToggle(view, "Lilia");
-    const tools = getProjectToggle(view, "工具箱");
+    const lilia = getProjectRow(view, "Lilia");
+    const tools = getProjectRow(view, "工具箱");
     lilia.getBoundingClientRect = () => box(40, 68);
     tools.getBoundingClientRect = () => box(0, 28);
 
