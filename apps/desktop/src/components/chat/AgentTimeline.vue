@@ -321,15 +321,8 @@ function toggleProcessGroup(event: AgentTimelineEvent) {
   expandedProcessGroupIds.value = next;
 }
 
-function processGroupTone(entry: TimelineEventEntry): "failed" | "running" | "done" {
-  const events = entry.processEvents ?? [];
-  if (events.some((event) => isFailedStatus(event.status))) return "failed";
-  if (events.some((event) => isRunningStatus(event.status))) return "running";
-  return "done";
-}
-
-function processGroupToneClass(entry: TimelineEventEntry): string {
-  return `agent-timeline__process-toggle--${processGroupTone(entry)}`;
+function processGroupRunning(entry: TimelineEventEntry): boolean {
+  return hasRunningEvent(entry.processEvents ?? []);
 }
 
 function processGroupLabel(entry: TimelineEventEntry): string {
@@ -349,9 +342,12 @@ function processEventsSummary(events: AgentTimelineEvent[]): string {
     else counts.set(declared.key, { count: declared.count, unit: declared.unit });
   }
   const parts = [...counts.values()].map(({ count, unit }) => `${count} ${unit}`);
-  if (events.some((e) => isFailedStatus(e.status))) parts.push("有失败");
-  else if (events.some((e) => isRunningStatus(e.status))) parts.push("运行中");
+  if (hasRunningEvent(events)) parts.push("运行中");
   return parts.join(" · ");
+}
+
+function hasRunningEvent(events: AgentTimelineEvent[]): boolean {
+  return events.some((event) => isRunningStatus(event.status));
 }
 
 function isRunningStatus(status: AgentTimelineEventStatus): boolean {
@@ -359,12 +355,6 @@ function isRunningStatus(status: AgentTimelineEventStatus): boolean {
     status === "started" ||
     status === "running" ||
     status === "in_progress";
-}
-
-function isFailedStatus(status: AgentTimelineEventStatus): boolean {
-  return status === "failed" ||
-    status === "error" ||
-    status === "cancelled";
 }
 
 function previewText(event: AgentTimelineEvent): string {
@@ -637,7 +627,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
                   v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
                   type="button"
                   class="agent-timeline__process-toggle"
-                  :class="processGroupToneClass(entry)"
+                  :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
                   :aria-expanded="processGroupExpanded(entry.event)"
                   @click="toggleProcessGroup(entry.event)"
                 >

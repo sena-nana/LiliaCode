@@ -2149,14 +2149,6 @@ button.ghost:hover {
   color: var(--accent);
 }
 
-.agent-timeline__process-toggle--failed {
-  color: var(--err);
-}
-
-.agent-timeline__process-toggle--failed:hover {
-  color: var(--err);
-}
-
 .agent-timeline__content {
   min-width: 0;
 }

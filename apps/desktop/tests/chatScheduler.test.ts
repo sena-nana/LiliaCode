@@ -546,7 +546,7 @@ describe("chat scheduler", () => {
     emitMockTimelineEvent("t-002", {
       id: "tl-hidden-process-command",
       kind: "command",
-      status: "success",
+      status: "error",
       title: "yarn test",
       summary: "命令折叠态预览",
       payload: {
@@ -598,6 +598,8 @@ describe("chat scheduler", () => {
       expect(view.queryByRole("button", { name: /yarn test/ })).toBeNull();
       expect(view.queryByRole("button", { name: /更新计划/ })).toBeNull();
       const toggle = view.getByRole("button", { name: /展开过程 2 项/ });
+      expect(toggle).not.toHaveTextContent("有失败");
+      expect(toggle).not.toHaveClass("agent-timeline__process-toggle--failed");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 

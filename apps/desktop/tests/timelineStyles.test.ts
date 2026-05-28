@@ -123,19 +123,18 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(failedChevronHover)).toContain("color: var(--err)");
   });
 
-  it("失败折叠项 hover 时继续使用错误色", () => {
+  it("失败折叠项 hover 时继续使用错误色，过程按钮没有失败色分支", () => {
     const titleHover = selectorIndex(".agent-timeline__title:hover:not(:disabled)");
     const failedTitleHover = selectorIndex(
       ".agent-timeline__item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__title:hover:not(:disabled)",
     );
     const processHover = selectorIndex(".agent-timeline__process-toggle:hover");
-    const failedProcessHover = selectorIndex(".agent-timeline__process-toggle--failed:hover");
+    const failedProcess = selectorIndex(".agent-timeline__process-toggle--failed");
 
     expect(titleHover).toBeGreaterThan(-1);
     expect(processHover).toBeGreaterThan(-1);
     expect(failedTitleHover).toBeGreaterThan(titleHover);
-    expect(failedProcessHover).toBeGreaterThan(processHover);
+    expect(failedProcess).toBe(-1);
     expect(ruleTextAt(failedTitleHover)).toContain("color: var(--err)");
-    expect(ruleTextAt(failedProcessHover)).toContain("color: var(--err)");
   });
 });
