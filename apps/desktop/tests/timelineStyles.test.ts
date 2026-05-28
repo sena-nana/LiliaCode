@@ -146,4 +146,32 @@ describe("agent timeline styles", () => {
     expect(failedProcess).toBe(-1);
     expect(ruleTextAt(failedTitleHover)).toContain("color: var(--err)");
   });
+
+  it("最终回复过程组使用侧边栏同款 grid 折叠动画", () => {
+    const processCollapse = selectorIndex(".agent-timeline__process-collapse {");
+    const processOpen = selectorIndex(".agent-timeline__process-collapse.is-open {");
+    const processInner = selectorIndex(".agent-timeline__process-collapse-inner {");
+    const processOpenInner = selectorIndex(
+      ".agent-timeline__process-collapse.is-open .agent-timeline__process-collapse-inner",
+    );
+
+    expect(processCollapse).toBeGreaterThan(-1);
+    expect(processOpen).toBeGreaterThan(processCollapse);
+    expect(processInner).toBeGreaterThan(processOpen);
+    expect(processOpenInner).toBeGreaterThan(processInner);
+    expect(ruleTextAt(processCollapse)).toContain("display: grid");
+    expect(ruleTextAt(processCollapse)).toContain("grid-template-rows: 0fr");
+    expect(ruleTextAt(processCollapse)).toContain("margin-left: calc(-1 * var(--agent-timeline-rail-offset))");
+    expect(ruleTextAt(processCollapse)).toContain("width: calc(100% + var(--agent-timeline-rail-offset))");
+    expect(ruleTextAt(processCollapse)).toContain(
+      "transition: grid-template-rows 0.26s cubic-bezier(0.65, 0, 0.35, 1)",
+    );
+    expect(ruleTextAt(processOpen)).toContain("grid-template-rows: 1fr");
+    expect(ruleTextAt(processInner)).toContain("overflow: hidden");
+    expect(ruleTextAt(processInner)).toContain("min-height: 0");
+    expect(ruleTextAt(processInner)).toContain(
+      "transition: opacity 0.2s cubic-bezier(0.65, 0, 0.35, 1)",
+    );
+    expect(ruleTextAt(processOpenInner)).toContain("opacity: 1");
+  });
 });

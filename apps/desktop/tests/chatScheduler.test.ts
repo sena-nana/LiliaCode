@@ -619,15 +619,28 @@ describe("chat scheduler", () => {
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
+    const finalItem = view.getByText("最终回复应该直接可见。")
+      .closest(".agent-timeline__item");
+    const processCollapse = finalItem?.querySelector(".agent-timeline__process-collapse");
+    expect(processCollapse).not.toBeNull();
+    expect(processCollapse).toHaveAttribute("aria-hidden", "true");
+    expect(processCollapse).toHaveAttribute("inert");
+    expect(processCollapse).not.toHaveClass("is-open");
+    expect(processCollapse?.querySelectorAll(".agent-timeline__item.is-process-child"))
+      .toHaveLength(2);
+
     await fireEvent.click(view.getByRole("button", { name: "命令执行、计划更新 · 6 秒" }));
 
     await waitFor(() => {
+      expect(processCollapse).toHaveAttribute("aria-hidden", "false");
+      expect(processCollapse).not.toHaveAttribute("inert");
+      expect(processCollapse).toHaveClass("is-open");
       expect(view.getByRole("button", { name: /yarn test/ })).toBeInTheDocument();
       expect(view.getByRole("button", { name: /更新计划/ })).toBeInTheDocument();
     });
 
     // 展开态下按 order 排：工具/计划（2、3）在 final（4）上方。
-    const timelineText = view.getByLabelText("Agent 工作过程").textContent ?? "";
+    const timelineText = finalItem?.textContent ?? "";
     expect(timelineText.indexOf("yarn test"))
       .toBeLessThan(timelineText.indexOf("最终回复应该直接可见。"));
     expect(timelineText.indexOf("更新计划"))
@@ -786,7 +799,13 @@ describe("chat scheduler", () => {
       expect(view.getByText("已按真实顺序展示时间线。")).toBeInTheDocument();
       expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
       expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
-      expect(view.queryByText("中间 Agent 回复片段。")).toBeNull();
+      const middleReply = view.getByText("中间 Agent 回复片段。");
+      expect(middleReply.closest(".agent-timeline__process-collapse"))
+        .toHaveAttribute("aria-hidden", "true");
+      expect(middleReply.closest(".agent-timeline__process-collapse"))
+        .toHaveAttribute("inert");
+      expect(middleReply.closest(".agent-timeline__process-collapse"))
+        .not.toHaveClass("is-open");
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
       const toggle = view.getByRole("button", { name: "命令执行 · 1 秒" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -810,9 +829,12 @@ describe("chat scheduler", () => {
     expect(middleReplyItem?.querySelector(".agent-timeline__rail")).not.toBeNull();
     expect(middleReplyItem?.querySelector(".agent-timeline__node")).toBeNull();
     expect(finalItem?.querySelector(".agent-timeline__node")).not.toBeNull();
+    expect(commandItem).toHaveClass("is-process-child");
+    expect(finalItem).toContainElement(commandItem);
+    expect(finalItem).toContainElement(middleReplyItem);
     expect(commandItem!.compareDocumentPosition(middleReplyItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
-    expect(middleReplyItem!.compareDocumentPosition(finalItem!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(middleReplyItem!.compareDocumentPosition(view.getByText("已按真实顺序展示时间线。")) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
   });
 

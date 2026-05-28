@@ -2119,6 +2119,45 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
+.agent-timeline__process-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-left: calc(-1 * var(--agent-timeline-rail-offset));
+  width: calc(100% + var(--agent-timeline-rail-offset));
+  transition: grid-template-rows 0.26s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.agent-timeline__process-collapse.is-open {
+  grid-template-rows: 1fr;
+}
+
+.agent-timeline__process-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.agent-timeline__process-collapse.is-open .agent-timeline__process-collapse-inner {
+  opacity: 1;
+}
+
+.agent-timeline__process-collapse .agent-timeline__item {
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.agent-timeline__process-collapse .agent-timeline__item:first-child {
+  padding-top: 0;
+}
+
+.agent-timeline__process-collapse .agent-timeline__item:last-child {
+  padding-bottom: 4px;
+}
+
 .agent-timeline__group-list {
   list-style: none;
   margin: 4px 0 0;

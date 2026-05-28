@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, type Component } from "vue";
-import { ChevronDown, ChevronRight } from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
 import type {
   AgentTimelineEvent,
   AgentTimelineEventStatus,
@@ -8,60 +7,29 @@ import type {
   ChatMessage,
 } from "@lilia/contracts";
 import ChatBubble from "./ChatBubble.vue";
-import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
-import TimelineFinalReply from "./TimelineFinalReply.vue";
+import TimelineEntryItem from "./TimelineEntryItem.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import {
-  aggregateTimelineStatus,
+  mergeAdjacentTimelineGroups,
+  processGroupEntries,
+  type TimelineEntry,
+  type TimelineEventEntry,
+  type TimelineGroupEntry,
+} from "./timelineEntries";
+import {
   isHiddenTimelineEvent,
   isTimelineExpanded,
   isTimelineFinalReply,
-  isTimelineFinalReplyStreaming,
-  readTimelineDisplay,
   timelineInlinePreview,
   pruneTimelineExpandedIds,
   timelineDeclaredGroupUnit,
-  timelineDisplayIcon,
-  timelineEventLabel,
-  timelineGroupKey,
-  timelineGroupLabel,
   toggleTimelineExpandedId,
 } from "./timelineDisplay";
 
 type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
 
-type TimelineEventEntry = {
-  type: "event";
-  id: string;
-  createdAt: number;
-  turnSeq: number;
-  intraTurnOrder: number;
-  event: AgentTimelineEvent;
-  /** 挂在 final reply 下的过程事件，保留原始顺序。 */
-  processEvents?: AgentTimelineEvent[];
-  /** 过程展开后还原出来的子项。 */
-  isProcessChild?: boolean;
-};
-
-type TimelineGroupEntry = {
-  type: "group";
-  id: string;
-  createdAt: number;
-  turnSeq: number;
-  intraTurnOrder: number;
-  groupKey: string;
-  events: AgentTimelineEvent[];
-  representative: AgentTimelineEvent;
-  aggregatedStatus: AgentTimelineEventStatus;
-  groupCount: number;
-  isProcessChild?: boolean;
-};
-
-type TimelineEntry = TimelineEventEntry | TimelineGroupEntry;
-
 const props = defineProps<{
   events: AgentTimelineEvent[];
-  /** Turn 正在跑、但还没有最终回复时，在时间线末尾显示「思考中…」指示器。 */
   isThinking?: boolean;
 }>();
 
@@ -78,7 +46,6 @@ const TERMINAL_TURN_STATUSES = new Set<AgentTimelineEventStatus>([
   "cancelled",
 ]);
 
-/** runner 发出的终态 `kind:"turn"` 事件，决定该 turn 何时收拢到 final reply 下。 */
 const completedTurnIds = computed<Set<string>>(() => {
   const set = new Set<string>();
   for (const event of props.events) {
@@ -94,8 +61,6 @@ const visibleEvents = computed(() =>
   props.events.filter((event) => !isHiddenTimelineEvent(event)),
 );
 
-// 主排序键 (turnSeq, intraTurnOrder) 由 Rust 落库时分配；createdAt / id 只兜
-// 同序碰撞（如 turnSeq=MAX 的乐观事件）。
 const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
   visibleEvents.value
     .map((event): TimelineEventEntry => ({
@@ -114,9 +79,6 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
     ),
 );
 
-// turn 完成后把同 turn 内可见过程折叠到最后一条 assistant message 下。
-// turn 完成后，只把用户消息和最后一条 assistant message 留在外层；
-// 其余同 turn 事件折进 final reply 的 processEvents，需要时再按原顺序展开。
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
   const completed = completedTurnIds.value;
@@ -125,7 +87,6 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
   for (const entry of entries) {
     const turnId = entry.event.turnId;
     if (!turnId || !completed.has(turnId)) continue;
-    // SDK 在 stop_reason=end_turn 前仍可能继续开新 text block，这里总是取最后一条。
     if (isTimelineFinalReply(entry.event)) lastFinalByTurnId.set(turnId, entry);
   }
 
@@ -154,77 +115,11 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
     const processEvents = isTimelineFinalReply(entry.event)
       ? processEventsByFinalId.get(entry.event.id)
       : undefined;
-    if (processEvents && expandedProcessGroupIds.value.has(entry.event.id)) {
-      for (const event of processEvents) {
-        output.push({
-          type: "event",
-          id: `process:${entry.event.id}:${event.id}`,
-          createdAt: event.createdAt,
-          turnSeq: event.turnSeq,
-          intraTurnOrder: event.intraTurnOrder,
-          event,
-          isProcessChild: true,
-        });
-      }
-    }
     output.push(processEvents ? { ...entry, processEvents } : entry);
   }
 
-  return mergeAdjacentGroups(output);
+  return mergeAdjacentTimelineGroups(output);
 });
-
-function mergeAdjacentGroups(entries: TimelineEventEntry[]): TimelineEntry[] {
-  const result: TimelineEntry[] = [];
-  let bucket: TimelineEventEntry[] = [];
-  let bucketKey: string | null = null;
-
-  const flush = () => {
-    if (bucket.length === 0) return;
-    if (bucket.length === 1) {
-      result.push(...bucket);
-    } else {
-      const first = bucket[0];
-      const events = bucket.map((b) => b.event);
-      result.push({
-        type: "group",
-        id: `group:${bucketKey}:${first.event.id}`,
-        createdAt: first.createdAt,
-        turnSeq: first.turnSeq,
-        intraTurnOrder: first.intraTurnOrder,
-        groupKey: bucketKey!,
-        events,
-        representative: first.event,
-        aggregatedStatus: aggregateTimelineStatus(events),
-        groupCount: events.reduce((total, event) => total + eventGroupCount(event), 0),
-        isProcessChild: first.isProcessChild,
-      });
-    }
-    bucket = [];
-    bucketKey = null;
-  };
-
-  for (const entry of entries) {
-    const event = entry.event;
-    const key = isTimelineMessage(event) ? null : timelineGroupKey(event);
-
-    if (!key) {
-      flush();
-      result.push(entry);
-      continue;
-    }
-
-    if (bucketKey === key) {
-      bucket.push(entry);
-    } else {
-      flush();
-      bucket = [entry];
-      bucketKey = key;
-    }
-  }
-  flush();
-
-  return result;
-}
 
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
@@ -234,7 +129,6 @@ const eventPreviewCache = computed(() => {
   return cache;
 });
 
-/** 只覆盖 turn 启动到首个 assistant token 到达之间的空窗。 */
 const showThinkingIndicator = computed(() => {
   if (!props.isThinking) return false;
   return !visibleEvents.value.some((event) =>
@@ -252,16 +146,13 @@ watch(
 watch(
   orderedEntries,
   (entries) => {
-    const valid = new Set(
-      entries.filter((entry): entry is TimelineGroupEntry => entry.type === "group").map((entry) => entry.id),
-    );
+    const valid = timelineGroupEntryIds(entries);
     expandedGroupIds.value = new Set(
       [...expandedGroupIds.value].filter((id) => valid.has(id)),
     );
   },
 );
 
-// 用户切到另一个 task 或事件被裁掉时清理 expandedProcessGroupIds。
 watch(
   () => visibleEvents.value.filter(isTimelineFinalReply).map((e) => e.id).join("|"),
   () => {
@@ -278,27 +169,9 @@ function expanded(event: AgentTimelineEvent): boolean {
   return isTimelineExpanded(event, toggledIds.value);
 }
 
-function isCompact(event: AgentTimelineEvent): boolean {
-  return !isTimelineMessage(event) && !expanded(event);
-}
-
-function canToggle(event: AgentTimelineEvent): boolean {
-  return !isTimelineMessage(event);
-}
-
 function toggleEvent(event: AgentTimelineEvent) {
-  if (!canToggle(event)) return;
+  if (isTimelineMessage(event)) return;
   toggledIds.value = toggleTimelineExpandedId(toggledIds.value, event.id);
-}
-
-function eventComponent(event: AgentTimelineEvent): Component {
-  if (isTimelineFinalReply(event)) return TimelineFinalReply;
-  return TimelineDeclaredEvent;
-}
-
-function processEventCount(entry: TimelineEntry): number {
-  if (entry.type !== "event") return 0;
-  return entry.processEvents?.length ?? 0;
 }
 
 function processGroupExpanded(event: AgentTimelineEvent): boolean {
@@ -318,6 +191,22 @@ function processGroupRunning(entry: TimelineEventEntry): boolean {
 
 function processGroupLabel(entry: TimelineEventEntry): string {
   return processEventsSummary(entry.processEvents ?? [], entry.event);
+}
+
+function timelineGroupEntryIds(entries: TimelineEntry[]): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type === "group") {
+      ids.add(entry.id);
+      continue;
+    }
+    if (entry.processEvents?.length) {
+      for (const processEntry of processGroupEntries(entry)) {
+        if (processEntry.type === "group") ids.add(processEntry.id);
+      }
+    }
+  }
+  return ids;
 }
 
 const PROCESS_CATEGORY_LABELS: Record<string, string> = {
@@ -396,16 +285,6 @@ function previewText(event: AgentTimelineEvent): string {
   return eventPreviewCache.value.get(event.id) ?? "";
 }
 
-function shouldShowNodeIcon(entry: TimelineEventEntry): boolean {
-  return !entry.isProcessChild || !isTimelineFinalReply(entry.event);
-}
-
-function titleAriaLabel(event: AgentTimelineEvent): string {
-  const label = timelineEventLabel(event);
-  const object = readTimelineDisplay(event).object?.trim() ?? "";
-  return object ? `${label} ${object}` : label;
-}
-
 function groupExpanded(entry: TimelineGroupEntry): boolean {
   return expandedGroupIds.value.has(entry.id);
 }
@@ -415,26 +294,6 @@ function toggleGroup(entry: TimelineGroupEntry) {
   if (next.has(entry.id)) next.delete(entry.id);
   else next.add(entry.id);
   expandedGroupIds.value = next;
-}
-
-function groupLabelText(entry: TimelineGroupEntry): string {
-  return timelineGroupLabel(entry.representative, entry.groupCount, entry.aggregatedStatus);
-}
-
-function nodeIcon(event: AgentTimelineEvent) {
-  return timelineDisplayIcon(event);
-}
-
-function statusClass(status: AgentTimelineEventStatus): string {
-  return `is-status-${status.replace(/_/g, "-")}`;
-}
-
-function kindClass(prefix: string, kind: string): string {
-  return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-}
-
-function eventGroupCount(event: AgentTimelineEvent): number {
-  return timelineDeclaredGroupUnit(event)?.count ?? 1;
 }
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
@@ -449,7 +308,6 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
     ? event.payload as Record<string, unknown>
     : {};
-  // 这里只会落到 user/system；assistant 已由 final reply 卡接管。
   const role = payload.role === "system" ? "system" : "user";
   const content = typeof payload.content === "string"
     ? payload.content
@@ -489,111 +347,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
     <ol class="agent-timeline__list">
       <template v-for="entry in orderedEntries" :key="entry.id">
         <li
-          v-if="entry.type === 'group'"
-          class="agent-timeline__item agent-timeline__item--group"
-          :class="[
-            kindClass('agent-timeline__item--', entry.representative.kind),
-            statusClass(entry.aggregatedStatus),
-            {
-              'is-compact': !groupExpanded(entry),
-              'is-process-child': entry.isProcessChild,
-            },
-          ]"
-        >
-          <article
-            class="agent-timeline__event"
-            :aria-labelledby="`agent-timeline-title-${entry.id}`"
-          >
-            <div class="agent-timeline__rail">
-              <TimelineNodeIcon
-                :status="entry.aggregatedStatus"
-                :icon="nodeIcon(entry.representative)"
-              />
-            </div>
-            <div class="agent-timeline__body">
-              <header class="agent-timeline__head">
-                <button
-                  type="button"
-                  class="agent-timeline__title"
-                  :aria-expanded="groupExpanded(entry)"
-                  :aria-controls="`agent-timeline-details-${entry.id}`"
-                  @click="toggleGroup(entry)"
-                >
-                  <span :id="`agent-timeline-title-${entry.id}`">
-                    {{ groupLabelText(entry) }}
-                  </span>
-                  <component
-                    :is="groupExpanded(entry) ? ChevronDown : ChevronRight"
-                    class="agent-timeline__chevron"
-                    :size="12"
-                    aria-hidden="true"
-                  />
-                </button>
-              </header>
-
-              <ul
-                v-if="groupExpanded(entry)"
-                :id="`agent-timeline-details-${entry.id}`"
-                class="agent-timeline__group-list"
-              >
-                <li
-                  v-for="event in entry.events"
-                  :key="event.id"
-                  class="agent-timeline__group-item"
-                  :class="[kindClass('agent-timeline__group-item--', event.kind), statusClass(event.status)]"
-                >
-                  <article class="agent-timeline__group-event">
-                    <header class="agent-timeline__head agent-timeline__group-head">
-                      <button
-                        type="button"
-                        class="agent-timeline__title agent-timeline__group-title"
-                        :aria-expanded="expanded(event)"
-                        :aria-controls="`agent-timeline-details-${event.id}`"
-                        :aria-label="titleAriaLabel(event)"
-                        :disabled="!canToggle(event)"
-                        @click="toggleEvent(event)"
-                      >
-                        <span :id="`agent-timeline-title-${event.id}`">
-                          {{ timelineEventLabel(event) }}
-                        </span>
-                        <component
-                          v-if="canToggle(event)"
-                          :is="expanded(event) ? ChevronDown : ChevronRight"
-                          class="agent-timeline__chevron"
-                          :size="12"
-                          aria-hidden="true"
-                        />
-                      </button>
-
-                      <p
-                        v-if="previewText(event)"
-                        class="agent-timeline__preview"
-                      >
-                        {{ previewText(event) }}
-                      </p>
-                    </header>
-
-                    <div
-                      v-if="expanded(event)"
-                      :id="`agent-timeline-details-${event.id}`"
-                      class="agent-timeline__content"
-                    >
-                      <component
-                        :is="eventComponent(event)"
-                        :event="event"
-                        :expanded="expanded(event)"
-                        :compact="isCompact(event)"
-                      />
-                    </div>
-                  </article>
-                </li>
-              </ul>
-            </div>
-          </article>
-        </li>
-
-        <li
-          v-else-if="isTimelineUserMessage(entry.event)"
+          v-if="entry.type === 'event' && isTimelineUserMessage(entry.event)"
           class="agent-timeline__message-row"
           :class="[
             `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,
@@ -603,100 +357,20 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           <ChatBubble :message="messageFromEvent(entry.event)" />
         </li>
 
-        <li
+        <TimelineEntryItem
           v-else
-          class="agent-timeline__item"
-          :class="[
-            kindClass('agent-timeline__item--', entry.event.kind),
-            statusClass(entry.event.status),
-            {
-              'is-final-reply': isTimelineFinalReply(entry.event),
-              'is-compact': isCompact(entry.event),
-              'is-process-child': entry.isProcessChild,
-            },
-          ]"
-        >
-          <article
-            class="agent-timeline__event"
-            :aria-labelledby="isTimelineFinalReply(entry.event) ? undefined : `agent-timeline-title-${entry.event.id}`"
-            :aria-label="isTimelineFinalReply(entry.event) ? 'Agent 回复' : undefined"
-          >
-            <div class="agent-timeline__rail">
-              <TimelineNodeIcon
-                v-if="shouldShowNodeIcon(entry)"
-                :status="entry.event.status"
-                :icon="nodeIcon(entry.event)"
-              />
-            </div>
-            <div class="agent-timeline__body">
-              <header
-                v-if="!isTimelineFinalReply(entry.event) || processEventCount(entry) > 0"
-                class="agent-timeline__head"
-              >
-                <button
-                  v-if="!isTimelineFinalReply(entry.event)"
-                  type="button"
-                  class="agent-timeline__title"
-                  :aria-expanded="expanded(entry.event)"
-                  :aria-controls="`agent-timeline-details-${entry.event.id}`"
-                  :aria-label="titleAriaLabel(entry.event)"
-                  :disabled="!canToggle(entry.event)"
-                  @click="toggleEvent(entry.event)"
-                >
-                  <span :id="`agent-timeline-title-${entry.event.id}`">
-                    {{ timelineEventLabel(entry.event) }}
-                  </span>
-                  <component
-                    v-if="canToggle(entry.event)"
-                    :is="expanded(entry.event) ? ChevronDown : ChevronRight"
-                    class="agent-timeline__chevron"
-                    :size="12"
-                    aria-hidden="true"
-                  />
-                </button>
-
-                <p
-                  v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
-                  class="agent-timeline__preview"
-                >
-                  {{ previewText(entry.event) }}
-                </p>
-
-                <button
-                  v-if="isTimelineFinalReply(entry.event) && processEventCount(entry) > 0"
-                  type="button"
-                  class="agent-timeline__process-toggle"
-                  :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
-                  :aria-expanded="processGroupExpanded(entry.event)"
-                  @click="toggleProcessGroup(entry.event)"
-                >
-                  <span class="agent-timeline__process-summary">
-                    {{ processGroupLabel(entry) }}
-                  </span>
-                </button>
-              </header>
-
-              <div
-                v-if="expanded(entry.event)"
-                :id="`agent-timeline-details-${entry.event.id}`"
-                class="agent-timeline__content"
-              >
-                <TimelineFinalReply
-                  v-if="isTimelineFinalReply(entry.event)"
-                  :event="entry.event"
-                  :streaming="isTimelineFinalReplyStreaming(entry.event)"
-                />
-                <component
-                  v-else
-                  :is="eventComponent(entry.event)"
-                  :event="entry.event"
-                  :expanded="expanded(entry.event)"
-                  :compact="isCompact(entry.event)"
-                />
-              </div>
-            </div>
-          </article>
-        </li>
+          :entry="entry"
+          :expanded="expanded"
+          :group-expanded="groupExpanded"
+          :process-group-expanded="processGroupExpanded"
+          :process-group-label="processGroupLabel"
+          :process-group-running="processGroupRunning"
+          :process-entries-for="processGroupEntries"
+          :preview-text="previewText"
+          @toggle-event="toggleEvent"
+          @toggle-group="toggleGroup"
+          @toggle-process-group="toggleProcessGroup"
+        />
       </template>
       <li
         v-if="showThinkingIndicator"
