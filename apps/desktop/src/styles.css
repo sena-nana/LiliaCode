@@ -2150,10 +2150,6 @@ button.ghost:hover {
   padding: 7px 0;
 }
 
-.agent-timeline__process-collapse .agent-timeline__item:first-child {
-  padding-top: 0;
-}
-
 .agent-timeline__process-collapse .agent-timeline__item:last-child {
   padding-bottom: 4px;
 }

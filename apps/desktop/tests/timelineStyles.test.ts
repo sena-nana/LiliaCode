@@ -154,11 +154,14 @@ describe("agent timeline styles", () => {
     const processOpenInner = selectorIndex(
       ".agent-timeline__process-collapse.is-open .agent-timeline__process-collapse-inner",
     );
+    const processItem = selectorIndex(".agent-timeline__process-collapse .agent-timeline__item {");
+    const processFirstItem = selectorIndex(".agent-timeline__process-collapse .agent-timeline__item:first-child");
 
     expect(processCollapse).toBeGreaterThan(-1);
     expect(processOpen).toBeGreaterThan(processCollapse);
     expect(processInner).toBeGreaterThan(processOpen);
     expect(processOpenInner).toBeGreaterThan(processInner);
+    expect(processItem).toBeGreaterThan(processOpenInner);
     expect(ruleTextAt(processCollapse)).toContain("display: grid");
     expect(ruleTextAt(processCollapse)).toContain("grid-template-rows: 0fr");
     expect(ruleTextAt(processCollapse)).toContain("margin-left: calc(-1 * var(--agent-timeline-rail-offset))");
@@ -173,5 +176,7 @@ describe("agent timeline styles", () => {
       "transition: opacity 0.2s cubic-bezier(0.65, 0, 0.35, 1)",
     );
     expect(ruleTextAt(processOpenInner)).toContain("opacity: 1");
+    expect(ruleTextAt(processItem)).toContain("padding: 7px 0");
+    expect(processFirstItem).toBe(-1);
   });
 });
