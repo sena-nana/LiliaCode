@@ -317,24 +317,68 @@ function processGroupRunning(entry: TimelineEventEntry): boolean {
 }
 
 function processGroupLabel(entry: TimelineEventEntry): string {
-  const count = processEventCount(entry);
-  const verb = processGroupExpanded(entry.event) ? "收起过程" : "展开过程";
-  const summary = processEventsSummary(entry.processEvents ?? []);
-  return summary ? `${verb} ${count} 项 · ${summary}` : `${verb} ${count} 项`;
+  return processEventsSummary(entry.processEvents ?? [], entry.event);
 }
 
-function processEventsSummary(events: AgentTimelineEvent[]): string {
-  const counts = new Map<string, { count: number; unit: string }>();
+const PROCESS_CATEGORY_LABELS: Record<string, string> = {
+  command: "命令执行",
+  file: "文件处理",
+  mcp: "MCP 调用",
+  plan: "计划更新",
+  search: "搜索",
+  subagent: "子代理任务",
+  todo: "待办更新",
+  tool: "工具调用",
+};
+
+function processEventsSummary(
+  events: AgentTimelineEvent[],
+  finalEvent: AgentTimelineEvent,
+): string {
+  const labels: string[] = [];
+  const seen = new Set<string>();
   for (const event of events) {
-    const declared = timelineDeclaredGroupUnit(event);
-    if (!declared || !declared.unit) continue;
-    const existing = counts.get(declared.key);
-    if (existing) existing.count += declared.count;
-    else counts.set(declared.key, { count: declared.count, unit: declared.unit });
+    const label = processEventCategoryLabel(event);
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    labels.push(label);
   }
-  const parts = [...counts.values()].map(({ count, unit }) => `${count} ${unit}`);
-  if (hasRunningEvent(events)) parts.push("运行中");
-  return parts.join(" · ");
+  const duration = formatProcessDuration(processEventsElapsedMs(events, finalEvent));
+  if (labels.length > 0) return [labels.join("、"), duration].filter(Boolean).join(" · ");
+  if (duration) return `已处理 ${duration}`;
+  return "处理中";
+}
+
+function processEventCategoryLabel(event: AgentTimelineEvent): string {
+  const declared = timelineDeclaredGroupUnit(event);
+  const key = declared?.key ?? event.kind;
+  return PROCESS_CATEGORY_LABELS[key] ?? PROCESS_CATEGORY_LABELS[event.kind] ?? "";
+}
+
+function processEventsElapsedMs(
+  events: AgentTimelineEvent[],
+  finalEvent: AgentTimelineEvent,
+): number | null {
+  let start = Number.POSITIVE_INFINITY;
+  let processEnd = Number.NEGATIVE_INFINITY;
+  let hasProcessDuration = false;
+  for (const event of events) {
+    if (!Number.isFinite(event.createdAt)) continue;
+    const updatedAt = Number.isFinite(event.updatedAt) ? event.updatedAt : event.createdAt;
+    start = Math.min(start, event.createdAt);
+    processEnd = Math.max(processEnd, updatedAt, event.createdAt);
+    if (updatedAt > event.createdAt) hasProcessDuration = true;
+  }
+  const end = hasProcessDuration || !Number.isFinite(finalEvent.createdAt)
+    ? processEnd
+    : Math.max(processEnd, finalEvent.createdAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return end - start;
+}
+
+function formatProcessDuration(elapsedMs: number | null): string {
+  if (elapsedMs === null) return "";
+  return `${Math.max(1, Math.ceil(elapsedMs / 1000))} 秒`;
 }
 
 function hasRunningEvent(events: AgentTimelineEvent[]): boolean {
@@ -626,7 +670,9 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
                   :aria-expanded="processGroupExpanded(entry.event)"
                   @click="toggleProcessGroup(entry.event)"
                 >
-                  {{ processGroupLabel(entry) }}
+                  <span class="agent-timeline__process-summary">
+                    {{ processGroupLabel(entry) }}
+                  </span>
                 </button>
               </header>
 

@@ -2095,10 +2095,10 @@ button.ghost:hover {
 }
 
 .agent-timeline__process-toggle {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
-  /* 与 rail 列节点同高,这样按钮文本和图标真正落在同一条中线上 */
+  min-width: 0;
   height: 22px;
   padding: 0;
   border: 0;
@@ -2109,6 +2109,14 @@ button.ghost:hover {
   font-weight: 500;
   line-height: 1.3;
   filter: none;
+}
+
+.agent-timeline__process-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-timeline__group-list {

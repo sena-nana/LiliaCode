@@ -382,7 +382,7 @@ describe("chat scheduler", () => {
       },
       turnId: "turn-collapse",
       createdAt: 2100,
-      updatedAt: 2100,
+      updatedAt: 5100,
       order: 1,
     });
 
@@ -403,8 +403,8 @@ describe("chat scheduler", () => {
         content: "## 完成\n\n最终结果完整展示。",
       },
       turnId: "turn-collapse",
-      createdAt: 2200,
-      updatedAt: 2200,
+      createdAt: 5200,
+      updatedAt: 5200,
       order: 2,
     });
 
@@ -437,12 +437,12 @@ describe("chat scheduler", () => {
 
     await waitFor(() => {
       expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      const toggle = view.getByRole("button", { name: "命令执行 · 3 秒" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).not.toHaveTextContent(/展开过程|查看过程|1 项/);
     });
 
-    // 点开「展开过程」：命令复现在 final 上方，可继续展开看 stdout。
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 1 项/ }));
+    await fireEvent.click(view.getByRole("button", { name: "命令执行 · 3 秒" }));
     await waitFor(() => {
       expect(view.getByRole("button", { name: /yarn verify/ })).toBeInTheDocument();
     });
@@ -498,7 +498,7 @@ describe("chat scheduler", () => {
       },
       turnId: "turn-new",
       createdAt: 2100,
-      updatedAt: 2100,
+      updatedAt: 4100,
       order: 2,
     });
 
@@ -525,8 +525,8 @@ describe("chat scheduler", () => {
         content: "新一轮最终回复。",
       },
       turnId: "turn-new",
-      createdAt: 2200,
-      updatedAt: 2200,
+      createdAt: 4200,
+      updatedAt: 4200,
       order: 3,
     });
 
@@ -540,11 +540,11 @@ describe("chat scheduler", () => {
     expect(view.queryByRole("button", { name: /展开过程/ })).toBeNull();
 
     // Runner 发新一轮 turn 终结，cargo check 折叠到新 final 下面，默认收起。
-    emitMockTurnCompleted("t-002", "turn-new", "success", 2300);
+    emitMockTurnCompleted("t-002", "turn-new", "success", 4300);
 
     await waitFor(() => {
       expect(view.queryByRole("button", { name: /cargo check/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 1 项/ });
+      const toggle = view.getByRole("button", { name: "命令执行 · 2 秒" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
   });
@@ -571,7 +571,7 @@ describe("chat scheduler", () => {
       },
       turnId: "turn-fold",
       createdAt: 2100,
-      updatedAt: 2100,
+      updatedAt: 3100,
       order: 2,
     });
     emitMockTimelineEvent("t-002", {
@@ -584,8 +584,8 @@ describe("chat scheduler", () => {
         plan: "折叠后的计划详情",
       },
       turnId: "turn-fold",
-      createdAt: 2200,
-      updatedAt: 2200,
+      createdAt: 6200,
+      updatedAt: 8100,
       order: 3,
     });
     emitMockTimelineEvent("t-002", {
@@ -599,28 +599,27 @@ describe("chat scheduler", () => {
         content: "最终回复应该直接可见。",
       },
       turnId: "turn-fold",
-      createdAt: 2300,
-      updatedAt: 2300,
+      createdAt: 8200,
+      updatedAt: 8200,
       order: 4,
     });
-    emitMockTurnCompleted("t-002", "turn-fold", "success", 2400);
+    emitMockTurnCompleted("t-002", "turn-fold", "success", 8300);
 
     const view = await renderTaskDetail();
 
     await waitFor(() => {
       expect(view.getByText("请实现时间线折叠")).toBeInTheDocument();
       expect(view.getByText("最终回复应该直接可见。")).toBeInTheDocument();
-      // 工具/计划事件被折叠到 final 下，inline 不再可见，只剩「展开过程」按钮。
       expect(view.queryByRole("button", { name: /yarn test/ })).toBeNull();
       expect(view.queryByRole("button", { name: /更新计划/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 2 项/ });
+      const toggle = view.getByRole("button", { name: "命令执行、计划更新 · 6 秒" });
       expect(toggle).not.toHaveTextContent("有失败");
+      expect(toggle).not.toHaveTextContent(/展开过程|查看过程|2 项/);
       expect(toggle).not.toHaveClass("agent-timeline__process-toggle--failed");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    // 点开「展开过程」：命令/计划回到 final 上方。
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项/ }));
+    await fireEvent.click(view.getByRole("button", { name: "命令执行、计划更新 · 6 秒" }));
 
     await waitFor(() => {
       expect(view.getByRole("button", { name: /yarn test/ })).toBeInTheDocument();
@@ -639,6 +638,59 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("折叠后的命令详情")).toBeInTheDocument();
       expect(view.getByText("折叠后的计划详情")).toBeInTheDocument();
+    });
+  });
+
+  it("无法归类的过程折叠后用已处理时长兜底", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-unknown-process",
+        taskId: "t-002",
+        role: "user",
+        content: "请处理无法归类的过程",
+        createdAt: 2000,
+      },
+    ]);
+    emitMockTimelineEvent("t-002", {
+      id: "tl-unknown-process",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      summary: "扩展事件摘要",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "无法归类的过程详情",
+      },
+      turnId: "turn-unknown-process",
+      createdAt: 2100,
+      updatedAt: 2100,
+      order: 2,
+    });
+    emitMockTimelineEvent("t-002", {
+      id: "tl-unknown-process-final",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      payload: {
+        backend: "claude",
+        role: "assistant",
+        content: "未知过程也已完成。",
+      },
+      turnId: "turn-unknown-process",
+      createdAt: 6100,
+      updatedAt: 6100,
+      order: 3,
+    });
+    emitMockTurnCompleted("t-002", "turn-unknown-process", "success", 6200);
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("未知过程也已完成。")).toBeInTheDocument();
+      const toggle = view.getByRole("button", { name: "已处理 4 秒" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).not.toHaveTextContent(/展开过程|查看过程|1 项|执行过程/);
     });
   });
 
@@ -736,11 +788,11 @@ describe("chat scheduler", () => {
       expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
       expect(view.queryByText("中间 Agent 回复片段。")).toBeNull();
       expect(view.queryByRole("button", { name: /yarn inspect/ })).toBeNull();
-      const toggle = view.getByRole("button", { name: /展开过程 2 项/ });
+      const toggle = view.getByRole("button", { name: "命令执行 · 1 秒" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /展开过程 2 项/ }));
+    await fireEvent.click(view.getByRole("button", { name: "命令执行 · 1 秒" }));
     await waitFor(() => {
       expect(view.queryByText("这段思考内容不应计入过程项。")).toBeNull();
       expect(view.queryByText("第二段思考：再确认命令事件没有被吞掉。")).toBeNull();
