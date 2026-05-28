@@ -112,6 +112,11 @@ export function readFirstString(
   keys: string[],
   max: number,
 ): string;
+export function readFirstText(
+  payload: Record<string, unknown>,
+  keys: string[],
+  max: number,
+): string;
 export function displayField(
   label: string,
   value: unknown,

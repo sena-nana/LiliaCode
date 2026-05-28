@@ -24,9 +24,14 @@ describe("tool consent prompt styles", () => {
 
     expect(ruleTextAt(card)).toContain("max-width: 100%");
     expect(ruleTextAt(card)).toContain("min-width: 0");
+    expect(ruleTextAt(card)).toContain("gap: 6px");
     expect(ruleTextAt(row)).toContain("min-width: 0");
     expect(ruleTextAt(details)).toContain("min-width: 0");
     expect(ruleTextAt(details)).toContain("max-width: 100%");
+    expect(ruleTextAt(details)).toContain("padding: 8px 10px");
+    expect(ruleTextAt(details)).toContain("border-radius: 6px");
+    expect(ruleTextAt(details)).toContain("line-height: 1.45");
+    expect(ruleTextAt(details)).toContain("max-height: 176px");
     expect(ruleTextAt(details)).toContain("white-space: pre-wrap");
     expect(ruleTextAt(details)).toContain("overflow-wrap: anywhere");
   });

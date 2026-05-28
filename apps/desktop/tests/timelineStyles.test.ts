@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const styles = readFileSync("src/styles.css", "utf8");
 const chatTranscript = readFileSync("src/components/chat/ChatTranscript.vue", "utf8");
+const timelineDeclaredEvent = readFileSync("src/components/chat/TimelineDeclaredEvent.vue", "utf8");
 const taskDetail = readFileSync("src/pages/TaskDetail.vue", "utf8");
 
 function selectorIndex(selector: string): number {
@@ -178,5 +179,39 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(processOpenInner)).toContain("opacity: 1");
     expect(ruleTextAt(processItem)).toContain("padding: 7px 0");
     expect(processFirstItem).toBe(-1);
+  });
+
+  it("工具展开详情使用紧凑层级，字段组不复用外层详情容器", () => {
+    const details = selectorIndex(".timeline-card__details {");
+    const fieldList = selectorIndex(".timeline-card__field-list {");
+    const codeSection = selectorIndex(".timeline-card__section--code");
+    const listSection = selectorIndex(".timeline-card__section--list");
+    const field = selectorIndex(".timeline-card__field {");
+    const codeBlock = selectorIndex(".timeline-code-block {");
+    const codeBlockCode = selectorIndex(".timeline-code-block code {");
+
+    expect(details).toBeGreaterThan(-1);
+    expect(fieldList).toBeGreaterThan(details);
+    expect(codeSection).toBeGreaterThan(details);
+    expect(listSection).toBeGreaterThan(codeSection);
+    expect(field).toBeGreaterThan(fieldList);
+    expect(codeBlock).toBeGreaterThan(field);
+    expect(codeBlockCode).toBeGreaterThan(codeBlock);
+
+    expect(timelineDeclaredEvent).toContain('class="timeline-card__field-list"');
+    expect(timelineDeclaredEvent).toContain('class="timeline-card__section timeline-card__section--code"');
+    expect(timelineDeclaredEvent).toContain('class="timeline-card__section timeline-card__section--list"');
+    expect(ruleTextAt(details)).toContain("gap: 6px");
+    expect(ruleTextAt(fieldList)).toContain("gap: 3px");
+    expect(ruleTextAt(fieldList)).toContain("padding-left: 8px");
+    expect(ruleTextAt(fieldList)).toContain("border-left: 1px solid var(--border-soft)");
+    expect(ruleTextAt(field)).toContain("line-height: 1.45");
+    expect(ruleTextAt(codeBlock)).toContain("max-width: 100%");
+    expect(ruleTextAt(codeBlock)).toContain("padding: 7px 8px");
+    expect(ruleTextAt(codeBlock)).toContain("border-radius: 5px");
+    expect(ruleTextAt(codeBlock)).toContain("line-height: 1.5");
+    expect(ruleTextAt(codeBlock)).toContain("white-space: pre-wrap");
+    expect(ruleTextAt(codeBlock)).toContain("overflow-wrap: anywhere");
+    expect(ruleTextAt(codeBlockCode)).toContain("white-space: inherit");
   });
 });

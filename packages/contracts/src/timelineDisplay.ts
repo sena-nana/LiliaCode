@@ -14,6 +14,7 @@ import {
   compactLine,
   pick,
   readFirstString,
+  readFirstText,
   readRecord,
   readTodoItems,
   displayField,
@@ -129,15 +130,7 @@ function finishToolDisplay(
   summary: string,
 ): AgentTimelineDisplay | null {
   if (!display) return null;
-  // summary 是事件生产方的人工旁白（如 "正在运行完整验证"），优先于派生器自动算的
-  // object 当 preview。runner 在工具完成时已不再把 output 写进 summary，所以这条
-  // 回退链不会再被结果文本覆盖掉 command/path 之类的派生预览。
-  // 派生器 preview 紧跟其后，title 兜底；不把 output 当 preview，否则折叠态会
-  // 把「这一步在做什么」替换成「这一步的结果是什么」。
   const preview = summary || display.preview || title;
-  // 派生器只读 payload；当 payload 没给出可用 object 时回退到事件 title。
-  // 主要服务于 plan / todo_list 这类 payload 没有"目标对象"的事件，让 aria-label
-  // 能拼出 "已更新待办 + title"。
   const object = display.object?.trim() ? display.object : title;
   return {
     ...display,
@@ -165,8 +158,6 @@ function isLegacyToolKind(kind: string): boolean {
     kind === "web_search"
   );
 }
-
-// ---------- kind 分支 ----------
 
 interface KindBuildInput {
   kind: string;
@@ -206,9 +197,6 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
       };
     }
     case "command": {
-      // 旧 DB 事件（runner 直接 emit kind=command，但还没 normalize 到 lilia 协议字段）
-      // 兜底：从 payload 里取 command/output/stderr 这些字段拼显示，
-      // 与 liliaTools.command.default 的渲染保持一致。
       const nestedInput = readRecord(payload.input);
       const command =
         readFirstString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
@@ -218,7 +206,17 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
         6000,
       );
+      const outputDetail = readFirstText(
+        payload,
+        ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
+        6000,
+      );
       const stderr = readFirstString(
+        payload,
+        ["stderr", "errorOutput", "message", "error"],
+        6000,
+      );
+      const stderrDetail = readFirstText(
         payload,
         ["stderr", "errorOutput", "message", "error"],
         6000,
@@ -236,7 +234,7 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
             displayField("duration", formatDuration(payload)),
           ]),
           codeDetail("COMMAND", command, "shell"),
-          codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
+          codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", outputDetail || stderrDetail),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
       };
@@ -408,8 +406,6 @@ function fallbackDisplay(kind: string, title: string, summary: string): AgentTim
     },
   };
 }
-
-// ---------- TS-only helper（不需要跨到 runner） ----------
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

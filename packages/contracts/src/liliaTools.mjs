@@ -20,8 +20,6 @@
 // 这是 .mjs 而非 .ts：runner 由 Tauri 直接 `node agent-runner.mjs` 拉起，
 // 不经过任何构建步骤；TS 端通过同目录 liliaTools.d.mts 拿到类型。
 
-// ---------- helper ----------
-
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -73,6 +71,14 @@ export function compactLine(value, max) {
 export function readFirstString(payload, keys, max) {
   for (const key of keys) {
     const text = compactLine(payload[key], max);
+    if (text) return text;
+  }
+  return "";
+}
+
+export function readFirstText(payload, keys, max) {
+  for (const key of keys) {
+    const text = shortText(stringOrNull(payload[key])?.trim() ?? "", max);
     if (text) return text;
   }
   return "";
@@ -158,17 +164,6 @@ export function readTodoItems(payload) {
     .filter((item) => item !== null);
 }
 
-// ---------- display 派生规则（按 kind + subkind 分发） ----------
-
-/**
- * 注册表：kind → {default, subkinds?}。每条规则给出渲染参数：
- *  - action: 泛指动词（"运行"/"读取"/"修改"...）
- *  - icon:   lucide 图标名
- *  - bucket: 折叠分组桶
- *  - unit:   折叠分组单位
- *  - objectInLabel: 是否把 object 拼进标题（true → "已调用工具 Edit"）
- *  - build:  (payload, ctx) => 返回 { object, details, preview? }
- */
 const LILIA_TOOL_REGISTRY = {
   command: {
     default: {
@@ -178,8 +173,8 @@ const LILIA_TOOL_REGISTRY = {
       unit: "条命令",
       build(payload) {
         const command = compactLine(pick(payload, ["command"]), 1200);
-        const output = readFirstString(payload, ["output", "stdout"], 6000);
-        const stderr = readFirstString(payload, ["stderr"], 6000);
+        const output = readFirstText(payload, ["output", "stdout"], 6000);
+        const stderr = readFirstText(payload, ["stderr"], 6000);
         return {
           object: command,
           details: [
@@ -400,10 +395,8 @@ const LILIA_TOOL_REGISTRY = {
   },
 };
 
-/** 工具范畴的 kind 列表：deriveTimelineDisplay 仅对它们查工具规则。 */
 export const LILIA_TOOL_KINDS = Object.freeze(Object.keys(LILIA_TOOL_REGISTRY));
 
-/** 按 kind+subkind 取规则；找不到返回 null。 */
 export function getLiliaToolRule(kind, subkind) {
   const slot = LILIA_TOOL_REGISTRY[kind];
   if (!slot) return null;
@@ -411,13 +404,6 @@ export function getLiliaToolRule(kind, subkind) {
   return slot.default || null;
 }
 
-/**
- * 按协议派生 display。入参：{kind, subkind?, payload, title}
- * 返回 AgentTimelineDisplay 形状的对象；找不到规则返回 null。
- *
- * 派生器只看 payload，不依赖事件生产方写入的 summary / title 字段
- * （title 仅用于 group key 兜底）。
- */
 export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
   const rule = getLiliaToolRule(kind, subkind);
   if (!rule) return null;
@@ -443,8 +429,6 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
     },
   };
 }
-
-// ---------- build helper（被多个 subkind 共用） ----------
 
 function buildFileChangeDisplay(payload) {
   const path = compactLine(pick(payload, ["path"]), 1200);

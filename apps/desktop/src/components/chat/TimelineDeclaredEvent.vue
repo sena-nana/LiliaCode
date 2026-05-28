@@ -33,7 +33,6 @@ const compactView = computed(() =>
     { forceSingleLine: true, singleLineTone: "muted" },
   ),
 );
-// 展开后若有 details 就让 details 接管，避免「标题」「单行预览」连续出现两次。
 const expandedFallbackView = computed(() =>
   details.value.length
     ? null
@@ -130,7 +129,7 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
 
           <div
             v-else-if="detail.type === 'fields' && visibleFields(detail).length"
-            class="timeline-card__details"
+            class="timeline-card__field-list"
           >
             <p
               v-for="field in visibleFields(detail)"
@@ -144,7 +143,7 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
 
           <section
             v-else-if="detail.type === 'code' && detail.content.trim()"
-            class="timeline-card__section"
+            class="timeline-card__section timeline-card__section--code"
           >
             <p v-if="detail.label" class="timeline-card__label">
               {{ detail.label }}
@@ -154,7 +153,7 @@ function visibleItems(detail: AgentTimelineDisplayDetail): AgentTimelineDisplayL
 
           <section
             v-else-if="detail.type === 'list' && visibleItems(detail).length"
-            class="timeline-card__section"
+            class="timeline-card__section timeline-card__section--list"
           >
             <component
               :is="detail.ordered ? 'ol' : 'ul'"

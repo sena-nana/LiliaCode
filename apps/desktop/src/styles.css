@@ -2254,11 +2254,18 @@ button.ghost:hover {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .timeline-card__section {
   min-width: 0;
+}
+
+.timeline-card__section--code,
+.timeline-card__section--list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .timeline-card__label,
@@ -2270,15 +2277,24 @@ button.ghost:hover {
   line-height: 1.3;
 }
 
+.timeline-card__field-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+}
+
 .timeline-card__field {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .timeline-card__field > span {
@@ -2395,15 +2411,15 @@ button.ghost:hover {
   min-width: 0;
   max-width: 100%;
   margin: 0;
-  padding: 8px;
+  padding: 7px 8px;
   overflow: auto;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--bg-subtle);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -2782,7 +2798,7 @@ button.ghost:hover {
   box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tool-consent__row {
@@ -2908,15 +2924,15 @@ button.ghost:hover {
   max-width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--bg-subtle);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.5;
-  max-height: 200px;
+  line-height: 1.45;
+  max-height: 176px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
