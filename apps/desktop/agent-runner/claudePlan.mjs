@@ -73,18 +73,6 @@ export function normalizeClaudePermissionMode(permission) {
   }
 }
 
-export function permissionLabel(permission) {
-  switch (permission) {
-    case "full":
-      return "完全访问";
-    case "readonly":
-      return "只读";
-    case "ask":
-    default:
-      return "询问";
-  }
-}
-
 export function readPlanAllowedPrompts(input) {
   const prompts = Array.isArray(input?.allowedPrompts) ? input.allowedPrompts : [];
   return prompts
@@ -112,6 +100,7 @@ export function extractPlanResult(output) {
     hasTaskTool: parsed.hasTaskTool === true,
     planWasEdited: parsed.planWasEdited === true,
     awaitingLeaderApproval: parsed.awaitingLeaderApproval === true,
+    revisionRequest: readFirstString(parsed, ["revisionRequest", "revision_request"], 6000),
   };
 }
 
@@ -125,6 +114,9 @@ export function buildPlanPayload({
 }) {
   const result = extractPlanResult(output);
   const inputPlan = extractPlanTextFromInput(input);
+  const revisionRequest =
+    result.revisionRequest ||
+    readFirstString(input, ["revisionRequest", "revision_request"], 6000);
   const plan = result.plan || inputPlan || fallbackPlan || "";
   return {
     source,
@@ -132,6 +124,7 @@ export function buildPlanPayload({
     allowedPrompts: readPlanAllowedPrompts(input),
     approved,
     executionPermission,
+    ...(revisionRequest ? { revisionRequest } : {}),
     ...(result.filePath ? { filePath: result.filePath } : {}),
     ...(result.planWasEdited ? { planWasEdited: true } : {}),
     ...(result.awaitingLeaderApproval ? { awaitingLeaderApproval: true } : {}),
@@ -140,20 +133,17 @@ export function buildPlanPayload({
   };
 }
 
-export function buildPlanApprovalSpec({ executionPermission, plan }) {
-  const label = permissionLabel(executionPermission);
-  const preview = compactLine(plan, 360);
+export function buildPlanApprovalSpec() {
   return {
     title: "确认 Claude 计划",
     source: "Claude Plan",
+    intent: "plan_approval",
     dismissable: true,
     questions: [
       {
         id: PLAN_APPROVAL_QUESTION_ID,
         header: "计划确认",
-        question: preview
-          ? `Claude 已给出计划：${preview}\n\n确认后将按「${label}」权限继续执行。是否按这份计划执行？`
-          : `Claude 已给出计划。确认后将按「${label}」权限继续执行。是否按这份计划执行？`,
+        question: "",
         mode: "confirm",
         confirmLabel: "按计划执行",
         cancelLabel: "先不执行",
@@ -167,4 +157,22 @@ export function isPlanApprovalAccepted(result) {
   const answers = isRecord(result.answers) ? result.answers : {};
   const answer = answers[PLAN_APPROVAL_QUESTION_ID];
   return isRecord(answer) && answer.value === "yes";
+}
+
+export function readPlanRevisionRequest(result) {
+  if (!isRecord(result) || result.cancelled === true) return "";
+  const answers = isRecord(result.answers) ? result.answers : {};
+  const answer = answers[PLAN_APPROVAL_QUESTION_ID];
+  if (!isRecord(answer)) return "";
+  if (answer.value === "yes" || answer.value === "no") return "";
+  return compactLine(answer.notes, 6000);
+}
+
+export function buildPlanRevisionDenyMessage(revisionRequest) {
+  const request = compactLine(revisionRequest, 6000);
+  return [
+    "用户要求修改计划，暂不执行当前计划。",
+    request ? `修改要求：${request}` : "",
+    "请根据这条修改要求调整计划，然后再次调用 ExitPlanMode 请求确认。",
+  ].filter(Boolean).join("\n");
 }

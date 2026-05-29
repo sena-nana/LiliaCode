@@ -46,10 +46,12 @@ import {
 import {
   buildPlanApprovalSpec,
   buildPlanPayload,
+  buildPlanRevisionDenyMessage,
   isClaudePlanTool,
   isPlanApprovalAccepted,
   isReadonlyDeniedClaudeTool,
   normalizeClaudePermissionMode,
+  readPlanRevisionRequest,
 } from "./agent-runner/claudePlan.mjs";
 
 const TIMELINE_RESERVED_KEYS = new Set([
@@ -569,7 +571,7 @@ function emitClaudePlanTimeline({
     kind: "plan",
     status,
     title: toolName,
-    summary: oneLineSummary(planPayload.plan),
+    summary: oneLineSummary(planPayload.revisionRequest || planPayload.plan),
     payload: {
       backend: "claude",
       toolName,
@@ -612,12 +614,23 @@ async function handleClaudePlanPermission(toolName, input, opts, ctx) {
     status: "requires_action",
     sourceId,
   });
-  const result = await requestAskUser(
-    buildPlanApprovalSpec({
+  const result = await requestAskUser(buildPlanApprovalSpec());
+  const revisionRequest = readPlanRevisionRequest(result);
+  if (revisionRequest) {
+    emitClaudePlanTimeline({
+      ctx,
+      toolName,
+      input: { ...pendingPayload, revisionRequest },
+      approved: false,
       executionPermission,
-      plan: pendingPayload.plan,
-    }),
-  );
+      status: "cancelled",
+      sourceId,
+    });
+    return {
+      behavior: "deny",
+      message: buildPlanRevisionDenyMessage(revisionRequest),
+    };
+  }
   if (!isPlanApprovalAccepted(result)) {
     emitClaudePlanTimeline({
       ctx,
@@ -958,6 +971,7 @@ function emitClaudeToolTimeline(block, msg, ctx) {
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
   if (isClaudePlanTool(name)) {
     const cached = sourceId ? ctx?.activeTools?.get(sourceId) : null;
+    const cachedPayload = isRecord(cached?.payload) ? cached.payload : {};
     const approved = typeof cached?.payload?.approved === "boolean"
       ? cached.payload.approved
       : null;
@@ -967,7 +981,7 @@ function emitClaudeToolTimeline(block, msg, ctx) {
     emitClaudePlanTimeline({
       ctx,
       toolName: name,
-      input,
+      input: { ...input, ...cachedPayload },
       fallbackPlan: ctx?.latestAssistantText || "",
       approved,
       executionPermission: ctx?.executionPermission || "ask",
@@ -1063,6 +1077,9 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
         source: cachedPayload.source || "ExitPlanMode",
       })
     : null;
+  const status = kind === "plan" && planPayload?.revisionRequest
+    ? "cancelled"
+    : askUserCancelled ? "cancelled" : isError ? "error" : "success";
   const payload = {
     backend: "claude",
     toolName: name,
@@ -1072,11 +1089,16 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
     sessionId: msg?.session_id,
   };
   if (subkind) payload.subkind = subkind;
+  const timelineSummary = kind === "plan"
+    ? planPayload?.revisionRequest
+      ? oneLineSummary(planPayload.revisionRequest)
+      : !isError ? oneLineSummary(payload.plan) : summary
+    : summary;
   emitTimeline({
     kind,
-    status: askUserCancelled ? "cancelled" : isError ? "error" : "success",
+    status,
     title: name,
-    summary: kind === "plan" && !isError ? oneLineSummary(payload.plan) : summary,
+    summary: timelineSummary,
     payload,
     sourceId,
   });
@@ -1102,6 +1124,9 @@ async function* singleClaudePromptStream(prompt) {
 function sweepActiveClaudeTools(ctx, status, sessionId) {
   if (!ctx?.activeTools || ctx.activeTools.size === 0) return;
   for (const [sourceId, info] of ctx.activeTools) {
+    const statusForTool = info.kind === "plan" && info.payload?.revisionRequest
+      ? "cancelled"
+      : status;
     const payload = {
       backend: "claude",
       toolName: info.name,
@@ -1112,9 +1137,9 @@ function sweepActiveClaudeTools(ctx, status, sessionId) {
     if (info.subkind) payload.subkind = info.subkind;
     emitTimeline({
       kind: info.kind,
-      status,
+      status: statusForTool,
       title: info.name,
-      summary: info.kind === "plan" ? oneLineSummary(payload.plan) : "",
+      summary: info.kind === "plan" ? oneLineSummary(payload.revisionRequest || payload.plan) : "",
       payload,
       sourceId,
     });

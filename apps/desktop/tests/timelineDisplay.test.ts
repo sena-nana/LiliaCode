@@ -181,4 +181,26 @@ describe("timeline display derivation", () => {
     expect(deriveTimelineDisplay(accepted).defaultExpanded).toBeUndefined();
     expect(timelineEventLabel(cancelled)).toBe("已取消计划");
   });
+
+  it("计划修改要求显示明确标签并在详情保留原计划和要求", () => {
+    const event = {
+      kind: "plan",
+      status: "cancelled" as const,
+      title: "ExitPlanMode",
+      summary: "",
+      payload: {
+        plan: "## 当前计划\n- 先改 runner\n- 再补测试",
+        revisionRequest: "把文档边界也写清楚",
+        approved: false,
+        executionPermission: "ask",
+      },
+    };
+    const display = deriveTimelineDisplay(event);
+
+    expect(timelineEventLabel(event)).toBe("要求修改计划");
+    expect(timelineInlinePreview(event)).toBe("修改要求：把文档边界也写清楚");
+    expect(markdownItems(display.details)).toContain("## 当前计划\n- 先改 runner\n- 再补测试");
+    expect(markdownItems(display.details)).toContain("把文档边界也写清楚");
+    expect(display.group?.bucket).toBe("plan");
+  });
 });

@@ -33,6 +33,12 @@ const titleText = computed(() => {
   return total.value > 1 ? `Lilia 想确认 ${total.value} 件事` : "Lilia 想确认一下";
 });
 
+const isPlanApprovalPrompt = computed(() =>
+  props.spec.intent === "plan_approval" &&
+  total.value === 1 &&
+  current.value?.mode === "confirm",
+);
+
 const optionsWithId = computed<(AskUserOption & { id: string })[]>(() => {
   const q = current.value;
   if (!q || !q.options) return [];
@@ -242,7 +248,10 @@ function onKeydown(e: KeyboardEvent) {
       v-if="current"
       ref="cardEl"
       class="ask-user"
-      :class="{ 'ask-user--danger': current.danger }"
+      :class="{
+        'ask-user--danger': current.danger,
+        'ask-user--plan-approval': isPlanApprovalPrompt,
+      }"
       role="region"
       aria-live="assertive"
       :aria-label="titleText"
@@ -270,7 +279,7 @@ function onKeydown(e: KeyboardEvent) {
         </button>
       </header>
 
-      <div class="ask-user__body">
+      <div v-if="!isPlanApprovalPrompt" class="ask-user__body">
         <div class="ask-user__question">
           <span
             v-if="current.header"

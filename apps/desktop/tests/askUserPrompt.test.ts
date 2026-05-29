@@ -29,6 +29,22 @@ const multiStepSpec: AskUserSpec = {
   ],
 };
 
+const planApprovalSpec: AskUserSpec = {
+  title: "确认 Claude 计划",
+  source: "Claude Plan",
+  intent: "plan_approval",
+  questions: [
+    {
+      id: "approve-plan",
+      header: "计划确认",
+      question: "",
+      mode: "confirm",
+      confirmLabel: "按计划执行",
+      cancelLabel: "先不执行",
+    },
+  ],
+};
+
 describe("AskUserPrompt", () => {
   it("从问题 2 回到问题 1 后再前进，会保留问题 2 已选项", async () => {
     const view = render(AskUserPrompt, {
@@ -48,5 +64,19 @@ describe("AskUserPrompt", () => {
 
     expect(view.getByRole("checkbox", { name: "保留选择" }))
       .toHaveAttribute("aria-checked", "true");
+  });
+
+  it("计划确认提示使用一行紧凑样式", () => {
+    const view = render(AskUserPrompt, {
+      props: {
+        spec: planApprovalSpec,
+      },
+    });
+
+    const prompt = view.getByRole("region", { name: "确认 Claude 计划" });
+    expect(prompt).toHaveClass("ask-user--plan-approval");
+    expect(view.queryByText(/确认后将按/)).toBeNull();
+    expect(view.getByRole("button", { name: "按计划执行" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "先不执行" })).toBeInTheDocument();
   });
 });

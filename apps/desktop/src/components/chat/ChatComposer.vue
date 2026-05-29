@@ -21,6 +21,7 @@ const props = defineProps<{
   attachments?: ChatAttachment[];
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
+  planRevisionMode?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +35,21 @@ const text = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
 
 const canSend = computed(() =>
-  text.value.trim().length > 0 || (props.attachments?.length ?? 0) > 0,
+  props.planRevisionMode
+    ? text.value.trim().length > 0
+    : text.value.trim().length > 0 || (props.attachments?.length ?? 0) > 0,
+);
+
+const sendTitle = computed(() =>
+  props.planRevisionMode
+    ? "发送计划修改要求（Enter）"
+    : props.sending ? "加入调度队列（Enter）" : "发送（Enter）",
+);
+
+const sendAriaLabel = computed(() =>
+  props.planRevisionMode
+    ? "发送计划修改要求"
+    : props.sending ? "加入调度队列" : "发送",
 );
 
 const permissionOptions = [
@@ -61,7 +76,7 @@ function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
 function send() {
   const value = text.value.trim();
-  const attachments = props.attachments ?? [];
+  const attachments = props.planRevisionMode ? [] : props.attachments ?? [];
   if (!value && attachments.length === 0) return;
   emit("send", value, attachments);
   text.value = "";
@@ -167,8 +182,8 @@ watch(text, async () => {
         type="button"
         class="chat-composer__send"
         :disabled="!canSend"
-        :title="sending ? '加入调度队列（Enter）' : '发送（Enter）'"
-        :aria-label="sending ? '加入调度队列' : '发送'"
+        :title="sendTitle"
+        :aria-label="sendAriaLabel"
         @click="send"
       >
         <ArrowUp :size="16" aria-hidden="true" />

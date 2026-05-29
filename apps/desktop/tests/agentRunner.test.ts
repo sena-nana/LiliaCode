@@ -38,6 +38,21 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toContain("singleClaudePromptStream");
   });
 
+  it("Claude plan 修改要求回写为非 interrupt deny，普通取消仍中断", () => {
+    const branch = runnerSource.match(
+      /async function handleClaudePlanPermission\([\s\S]*?\n\}/,
+    )?.[0];
+    expect(branch).toBeTruthy();
+    expect(branch).toContain("readPlanRevisionRequest(result)");
+    expect(branch).toContain("buildPlanRevisionDenyMessage(revisionRequest)");
+    expect(branch).toMatch(
+      /if \(revisionRequest\)[\s\S]*?return \{\s*behavior: "deny",\s*message: buildPlanRevisionDenyMessage\(revisionRequest\),\s*\}/,
+    );
+    expect(branch).toMatch(
+      /if \(!isPlanApprovalAccepted\(result\)\)[\s\S]*?interrupt: true/,
+    );
+  });
+
   it("只读权限由 Lilia canUseTool 门禁拒绝可写或不可判定工具", () => {
     expect(runnerSource).toContain("isReadonlyDeniedClaudeTool");
     expect(runnerSource).toContain('ctx.executionPermission === "readonly"');
@@ -89,9 +104,8 @@ describe("agent-runner Claude stream", () => {
     expect(branch).toMatch(
       /const\s+summary\s*=\s*isError\s*&&\s*!askUserCancelled\s*\?\s*shortText\(text,\s*400\)[^;]*:\s*""/,
     );
-    expect(branch).toMatch(
-      /status:\s*askUserCancelled\s*\?\s*"cancelled"\s*:\s*isError\s*\?\s*"error"\s*:\s*"success"/,
-    );
+    expect(branch).toContain("planPayload?.revisionRequest");
+    expect(branch).toContain('askUserCancelled ? "cancelled" : isError ? "error" : "success"');
     expect(branch).not.toMatch(/const\s+summary\s*=\s*shortText\(text,\s*400\)\s*\|\|\s*""/);
   });
 

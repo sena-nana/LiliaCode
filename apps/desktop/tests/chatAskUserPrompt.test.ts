@@ -55,6 +55,31 @@ function emitAskUserRequest(taskId: string) {
   });
 }
 
+function emitPlanApprovalRequest(taskId: string) {
+  emitTauriEvent("chat:ask-user-request", {
+    taskId,
+    turnId: "turn-plan",
+    backend: "claude",
+    requestId: `ask-${taskId}`,
+    spec: {
+      title: "确认 Claude 计划",
+      source: "Claude Plan",
+      intent: "plan_approval",
+      dismissable: true,
+      questions: [
+        {
+          id: "approve-plan",
+          header: "计划确认",
+          question: "",
+          mode: "confirm",
+          confirmLabel: "按计划执行",
+          cancelLabel: "先不执行",
+        },
+      ],
+    },
+  });
+}
+
 function emitSnakeCaseAskUserRequest(taskId: string) {
   emitTauriEvent("chat:ask-user-request", {
     task_id: taskId,
@@ -118,6 +143,40 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("radio", { name: "B" }));
 
     await expectAskUserResponse("t-002");
+  });
+
+  it("计划确认挂起时，输入框发送文本会回写为计划修改要求而不是新消息", async () => {
+    const view = await renderTaskDetail();
+
+    emitPlanApprovalRequest("t-002");
+
+    const prompt = await view.findByRole("region", { name: "确认 Claude 计划" });
+    expect(prompt).toHaveClass("ask-user", "ask-user--plan-approval");
+    expect(view.getByRole("button", { name: "按计划执行" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "先不执行" })).toBeInTheDocument();
+
+    const input = await view.findByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件");
+    await fireEvent.update(input, "请把测试计划拆细");
+    await fireEvent.click(view.getByRole("button", { name: "发送计划修改要求" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+        taskId: "t-002",
+        requestId: "ask-t-002",
+        result: {
+          cancelled: false,
+          answers: {
+            "approve-plan": {
+              questionId: "approve-plan",
+              value: "revision_request",
+              notes: "请把测试计划拆细",
+            },
+          },
+        },
+      }, undefined);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(view.queryByText("请把测试计划拆细")).toBeNull();
   });
 
   it("不会在当前对话显示其他 task 的 Agent 提问", async () => {

@@ -23,3 +23,10 @@ UI 把同 turn 内所有事件折叠到「该 turn 最后一条 assistant messag
 `planMode` 是本轮先进入 Claude 原生计划模式的工作流开关，`permission` 是计划确认后的执行权限，二者正交。计划待确认时，runner 镜像 `ExitPlanMode` 为 `kind: "plan"` / `status: "requires_action"`，通过现有 AskUser 通道请求用户确认；用户确认后，runner 恢复发送时已经选择的执行权限（`full` / `ask` / `readonly`），不改 composer 默认值，也不把只读伪装成 Claude plan mode。
 
 Claude 仍拥有原生 Plan 内容，Lilia 只负责镜像、确认、恢复权限和记录时间线事实。只读权限在执行阶段由 Lilia 的 `canUseTool` 门禁拒绝可写或无法判定的工具，并把拒绝原因写入时间线。
+
+计划模式的 UI 边界：
+
+- 计划正文只出现在时间线 `kind: "plan"` 事件里，待确认状态默认展开，仍走 `AgentTimeline` 的通用渲染、折叠和详情块。
+- composer 上方的 inline AskUser 卡片只保留标题和确认动作；卡片不复制计划正文，也不展示执行权限提示。
+- 计划确认挂起时，用户从 composer 输入并发送的文本被视为计划修改要求，回写到当前 `plan_approval` ask-user 的 `AskUserAnswer.notes`，不创建新 turn，也不进入调度队列。
+- 带 `revisionRequest` 的计划事件显示为“要求修改计划”，详情保留原计划正文和用户修改要求，runner 返回 deny 但不设置 interrupt，让 Claude 在同一轮重新给出计划并再次调用 `ExitPlanMode`。

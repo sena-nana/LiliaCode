@@ -3480,6 +3480,14 @@ button.ghost:hover {
   gap: 10px;
 }
 
+.ask-user--plan-approval {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
 .ask-user:focus {
   outline: none;
 }
@@ -3490,6 +3498,12 @@ button.ghost:hover {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.ask-user--plan-approval .ask-user__header {
+  flex: 0 1 auto;
+  grid-template-columns: 18px minmax(0, auto) auto;
+  gap: 6px;
 }
 
 .ask-user__icon {
@@ -3517,6 +3531,11 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
+.ask-user--plan-approval .ask-user__title {
+  max-width: 140px;
+  font-size: 12px;
+}
+
 .ask-user__source {
   grid-column: 3;
   height: 20px;
@@ -3529,6 +3548,11 @@ button.ghost:hover {
   font-weight: 500;
   display: inline-flex;
   align-items: center;
+}
+
+.ask-user--plan-approval .ask-user__source,
+.ask-user--plan-approval .ask-user__progress {
+  display: none;
 }
 
 .ask-user__progress {
@@ -3552,6 +3576,12 @@ button.ghost:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.ask-user--plan-approval .ask-user__close {
+  grid-column: 3;
+  width: 22px;
+  height: 22px;
 }
 
 .ask-user__close:hover {
@@ -3811,12 +3841,23 @@ button.ghost:hover {
   min-width: 0;
 }
 
+.ask-user--plan-approval .ask-user__actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  gap: 6px;
+}
+
 .ask-user__btn {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
   font-weight: 600;
   border-radius: 6px;
+}
+
+.ask-user--plan-approval .ask-user__btn {
+  height: 26px;
+  padding: 0 10px;
 }
 
 .ask-user__skip {
@@ -3832,6 +3873,10 @@ button.ghost:hover {
 
 .ask-user__spacer {
   flex: 1;
+}
+
+.ask-user--plan-approval .ask-user__spacer {
+  display: none;
 }
 
 .ask-user-enter-active,
@@ -3868,6 +3913,18 @@ button.ghost:hover {
   }
   .ask-user__actions {
     flex-wrap: wrap;
+  }
+  .ask-user--plan-approval {
+    gap: 6px;
+  }
+  .ask-user--plan-approval .ask-user__title {
+    max-width: 96px;
+  }
+  .ask-user--plan-approval .ask-user__actions {
+    flex-wrap: nowrap;
+  }
+  .ask-user--plan-approval .ask-user__btn {
+    padding: 0 8px;
   }
 }
 

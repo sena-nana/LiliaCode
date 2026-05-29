@@ -61,6 +61,7 @@ export interface LiliaToolPayload {
   allowedPrompts?: Array<{ tool?: string; prompt?: string }>;
   approved?: boolean | null;
   executionPermission?: string;
+  revisionRequest?: string;
   // todo_list
   items?: Array<{ text: string; completed?: boolean; status?: string } | string>;
   // tool 兜底

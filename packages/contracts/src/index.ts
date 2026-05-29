@@ -586,6 +586,8 @@ export interface AskUserSpec {
   title?: string;
   /** 来源标签，渲染在标题旁的小 chip，例如 agent 名 / 工具名。 */
   source?: string;
+  /** 特定业务意图；缺省按普通 ask-user 处理。 */
+  intent?: "plan_approval";
   /** 是否允许整体取消（按 Esc / 点击遮罩 / 右上 X 关闭）；默认 true。 */
   dismissable?: boolean;
   questions: AskUserQuestion[];
@@ -599,7 +601,7 @@ export interface AskUserAnswer {
    * multi： option.id 数组；含 'other' 时配合 notes
    */
   value: "yes" | "no" | "other" | string | string[];
-  /** allowOther 时用户填的自定义文本。 */
+  /** allowOther 时用户填的自定义文本；plan_approval 场景承载计划修改要求。 */
   notes?: string;
   /** 用户主动跳过本题。 */
   skipped?: boolean;

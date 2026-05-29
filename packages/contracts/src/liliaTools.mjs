@@ -10,7 +10,7 @@
 // | search        | query          | path / glob                                   | glob / grep / web   |
 // | web_fetch     | url            | —                                             | —                   |
 // | subagent      | agentType      | description / prompt / result                 | —                   |
-// | plan          | plan           | —                                             | —                   |
+// | plan          | plan           | approved / allowedPrompts / revisionRequest  | —                   |
 // | todo_list     | items[]        | —                                             | —                   |
 // | ask_user      | questions[]    | output / result / cancelled                   | —                   |
 // | tool          | toolName       | input / output                                | —（兜底）           |
@@ -448,7 +448,10 @@ const LILIA_TOOL_REGISTRY = {
       unit: "项计划",
       build(payload) {
         const plan = readFirstText(payload, ["plan"], 6000);
-        const preview = compactLine(plan, 600);
+        const revisionRequest = readFirstText(payload, ["revisionRequest"], 6000);
+        const preview = revisionRequest
+          ? `修改要求：${compactLine(revisionRequest, 600)}`
+          : compactLine(plan, 600);
         const approved = payload.approved;
         const allowedPrompts = (Array.isArray(payload.allowedPrompts) ? payload.allowedPrompts : [])
           .filter(isRecord)
@@ -458,7 +461,9 @@ const LILIA_TOOL_REGISTRY = {
             return [tool, prompt].filter(Boolean).join("：");
           })
           .filter(Boolean);
-        const label = approved === null
+        const label = revisionRequest
+          ? "要求修改计划"
+          : approved === null
           ? "等待确认计划"
           : approved === true
             ? "已确认计划"
@@ -472,6 +477,7 @@ const LILIA_TOOL_REGISTRY = {
           defaultExpanded: approved === null ? true : undefined,
           details: [
             markdownDetail(plan),
+            markdownDetail(revisionRequest, "muted"),
             allowedPrompts.length ? listDetail(allowedPrompts, true) : null,
           ],
         };

@@ -35,4 +35,16 @@ describe("ask user prompt styles", () => {
     expect(ruleTextAt(preview)).toContain("grid-template-columns");
     expect(ruleTextAt(transition)).toContain("transform 0.18s");
   });
+
+  it("计划确认面板压缩为单行，为时间线计划正文留空间", () => {
+    const compact = selectorIndex(".ask-user--plan-approval {");
+    const compactActions = selectorIndex(".ask-user--plan-approval .ask-user__actions {");
+
+    expect(compact).toBeGreaterThan(-1);
+    expect(compactActions).toBeGreaterThan(compact);
+    expect(ruleTextAt(compact)).toContain("flex-direction: row");
+    expect(ruleTextAt(compact)).toContain("align-items: center");
+    expect(ruleTextAt(compactActions)).toContain("flex: 0 0 auto");
+    expect(ruleTextAt(compactActions)).toContain("margin-left: auto");
+  });
 });

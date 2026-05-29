@@ -313,14 +313,28 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
     }
     case "plan": {
       const plan = readFirstString(payload, ["plan", "content", "text"], 6000);
+      const revisionRequest = readFirstString(payload, ["revisionRequest"], 6000);
+      const approved = payload.approved;
+      const label = revisionRequest
+        ? "要求修改计划"
+        : approved === null
+          ? "等待确认计划"
+          : approved === true
+            ? "已确认计划"
+            : approved === false
+              ? "已取消计划"
+              : undefined;
       return {
         icon: "list-ordered",
         action: "制定计划",
         object: title,
-        preview: summary || plan,
-        details: [markdownDetail(plan || summary)].filter(
-          (d): d is AgentTimelineDisplayDetail => d !== null,
-        ),
+        label,
+        preview: summary || revisionRequest || plan,
+        defaultExpanded: approved === null ? true : undefined,
+        details: [
+          markdownDetail(plan || (revisionRequest ? "" : summary)),
+          markdownDetail(revisionRequest, "muted"),
+        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: "kind:plan", bucket: "plan", unit: "项计划", count: 1 },
       };
     }

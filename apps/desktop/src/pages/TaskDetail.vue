@@ -26,6 +26,7 @@ import ChatComposer from "../components/chat/ChatComposer.vue";
 import ToolConsentPrompt from "../components/chat/ToolConsentPrompt.vue";
 import AskUserHost from "../components/AskUserHost.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
+import { resolveAskUser, useAskUser } from "../composables/useAskUser";
 import {
   getComposerState,
   listAgentTimeline,
@@ -81,6 +82,16 @@ const branches = ref<ChatBranchOption[]>([]);
 const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
 const attachments = ref<ChatAttachment[]>([]);
+const { state: askUserState } = useAskUser();
+
+const pendingPlanApproval = computed(() => {
+  const ask = askUserState.current;
+  if (!ask) return null;
+  if (ask.taskId !== null && ask.taskId !== props.taskId) return null;
+  if (ask.spec.intent !== "plan_approval") return null;
+  const question = ask.spec.questions[0];
+  return question ? { questionId: question.id } : null;
+});
 
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
@@ -173,6 +184,23 @@ function removeAttachment(attachmentId: string) {
 }
 
 async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
+  const planApproval = pendingPlanApproval.value;
+  if (planApproval) {
+    const revisionRequest = content.trim();
+    if (!revisionRequest) return;
+    resolveAskUser({
+      cancelled: false,
+      answers: {
+        [planApproval.questionId]: {
+          questionId: planApproval.questionId,
+          value: "revision_request",
+          notes: revisionRequest,
+        },
+      },
+    });
+    return;
+  }
+
   if (!hasContext.value) return;
   if (!content.trim() && outgoingAttachments.length === 0) return;
 
@@ -458,6 +486,7 @@ watch(
               :branches="branches"
               :attachments="attachments"
               :sending="isTurnRunning"
+              :plan-revision-mode="pendingPlanApproval !== null"
               @send="onSend"
               @update:state="onComposerUpdate"
               @remove-attachment="removeAttachment"
