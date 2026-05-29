@@ -270,6 +270,12 @@ pre code {
 /* ---------------- Secondary panel ---------------- */
 
 .secondary-panel {
+  --sb-row-padding-x: 10px;
+  --sb-project-row-padding-x: 6px;
+  --sb-row-gap: 6px;
+  --sb-project-text-start: 30px;
+  --sb-project-icon-slot: calc(var(--sb-project-text-start) - var(--sb-project-row-padding-x) - var(--sb-row-gap));
+
   grid-area: secondary;
   background: var(--bg-elev);
   display: flex;
@@ -302,14 +308,15 @@ pre code {
   flex: 1;
   min-width: 0;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 var(--sb-row-padding-x) 0 var(--sb-project-row-padding-x);
   border-radius: 6px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: var(--sb-project-icon-slot) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sb-row-gap);
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.12s ease, color 0.12s ease;
@@ -644,9 +651,9 @@ pre code {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sb-row-gap);
   height: 28px;
-  padding: 0 10px;
+  padding: 0 var(--sb-row-padding-x);
   border-radius: 6px;
   color: var(--text);
   text-decoration: none;
@@ -723,7 +730,7 @@ pre code {
 }
 
 .sb-tree__row--child {
-  padding-left: 30px;
+  padding-left: var(--sb-project-text-start);
   color: var(--text-muted);
 }
 
@@ -737,6 +744,7 @@ pre code {
 }
 
 .sb-tree__row--project {
+  padding-left: var(--sb-project-row-padding-x);
   cursor: pointer;
   user-select: none;
 }
@@ -746,14 +754,14 @@ pre code {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sb-row-gap);
   color: inherit;
   text-decoration: none;
 }
 
 .sb-tree__project-icon {
-  flex: 0 0 22px;
-  width: 22px;
+  flex: 0 0 var(--sb-project-icon-slot);
+  width: var(--sb-project-icon-slot);
   height: 22px;
   display: inline-flex;
   align-items: center;
