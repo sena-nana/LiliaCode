@@ -111,6 +111,12 @@ export function isTimelineExpanded(
   return toggledIds.has(event.id) ? !defaultExpanded : defaultExpanded;
 }
 
+export function timelineCanExpand(event: DisplayDerivableEvent): boolean {
+  if (isTimelineFinalReply(event)) return true;
+  const details = readTimelineDisplay(event).details ?? [];
+  return details.length > 0;
+}
+
 export function toggleTimelineExpandedId(
   toggledIds: ReadonlySet<string>,
   eventId: string,
