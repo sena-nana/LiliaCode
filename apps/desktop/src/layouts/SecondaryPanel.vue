@@ -16,6 +16,7 @@ import {
   X,
   Archive,
   Pin,
+  LayoutGrid,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import {
@@ -119,6 +120,7 @@ function loadProjectTreeExpansion(): Partial<ProjectTreeExpansionSnapshot> {
 const savedTreeExpansion = loadProjectTreeExpansion();
 const expanded = reactive<Record<string, boolean>>({});
 const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
+const searchActive = ref(false);
 
 function isProjectExpanded(projectId: string): boolean {
   return expanded[projectId] !== false;
@@ -206,8 +208,6 @@ onBeforeUnmount(() => {
 });
 
 // ── Orphan inbox ──
-
-const searchActive = ref(false);
 
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
@@ -307,9 +307,12 @@ function openProjectChat(projectId: string) {
   router.push(`/projects/${projectId}/tasks/${draft.id}`);
 }
 
-function onSearchSelect(r: { route: string }) {
-  searchActive.value = false;
-  router.push(r.route);
+function onSearchSelect(result: { route: string }) {
+  router.push(result.route);
+}
+
+function openProjectsOverview() {
+  router.push("/projects");
 }
 
 // ── Add project menu ──
@@ -715,7 +718,6 @@ onBeforeUnmount(() => {
     @pointerdown="onTreePointerDown"
     @click.capture="onTreeClickCapture"
   >
-    <!-- Actions: new chat + search -->
     <div class="sb-section sb-section--actions">
       <button
         v-if="!searchActive"
@@ -731,11 +733,19 @@ onBeforeUnmount(() => {
       <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
     </div>
 
-    <!-- Project tree -->
     <div class="sb-section">
       <div class="sb-section__header">
         <span class="sb-section__title">项目</span>
         <div class="sb-section__tools">
+          <button
+            type="button"
+            class="sb-icon-btn"
+            title="项目总览"
+            aria-label="项目总览"
+            @click="openProjectsOverview"
+          >
+            <LayoutGrid :size="14" aria-hidden="true" />
+          </button>
           <button type="button" class="sb-icon-btn"
             :title="allExpanded ? '全部折叠' : '全部展开'"
             :aria-label="allExpanded ? '全部折叠' : '全部展开'"
@@ -778,7 +788,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Orphan inbox -->
     <div class="sb-section">
       <div class="sb-section__header">
         <span class="sb-section__title">收集箱</span>
@@ -834,7 +843,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Footer -->
     <div class="sb-footer">
       <RouterLink to="/settings" class="sb-footer__btn" active-class="is-active" title="设置" aria-label="设置">
         <Settings :size="14" aria-hidden="true" />

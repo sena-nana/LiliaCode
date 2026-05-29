@@ -268,19 +268,20 @@ const LILIA_TOOL_REGISTRY = {
       icon: "terminal",
       bucket: "command",
       unit: "条命令",
-      build(payload) {
+      build(payload, status) {
         const command = compactLine(pick(payload, ["command"]), 1200);
         const output = readFirstText(payload, ["output", "stdout"], 6000);
         const stderr = readFirstText(payload, ["stderr"], 6000);
+        const shouldShowCommand = command.length > 180 || Boolean(output || stderr);
         return {
           object: command,
           details: [
-            fieldsDetail([
+            isFailureStatus(status) ? fieldsDetail([
               displayField("cwd", pick(payload, ["cwd"])),
               displayField("exit", pick(payload, ["exit", "exitCode"])),
               displayField("duration", pick(payload, ["duration"])),
-            ]),
-            codeDetail("COMMAND", command, "shell"),
+            ]) : null,
+            shouldShowCommand ? codeDetail("COMMAND", command, "shell") : null,
             codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
           ],
         };
@@ -293,17 +294,11 @@ const LILIA_TOOL_REGISTRY = {
       icon: "book-open",
       bucket: "file",
       unit: "个文件",
-      build(payload) {
+      build(payload, status) {
         const path = compactLine(pick(payload, ["path"]), 1200);
         return {
           object: path,
-          details: [
-            fieldsDetail([
-              displayField("文件", path),
-              displayField("offset", pick(payload, ["offset"])),
-              displayField("limit", pick(payload, ["limit"])),
-            ]),
-          ],
+          details: [errorOutputDetail(payload, status)],
         };
       },
     },
@@ -329,19 +324,7 @@ const LILIA_TOOL_REGISTRY = {
         icon: "file-pen",
         bucket: "file",
         unit: "个文件",
-        build(payload) {
-          const path = compactLine(pick(payload, ["path"]), 1200);
-          const editCount = pick(payload, ["editCount"]);
-          return {
-            object: path,
-            details: [
-              fieldsDetail([
-                displayField("文件", path),
-                displayField("编辑数", editCount),
-              ]),
-            ],
-          };
-        },
+        build: buildFileChangeDisplay,
       },
       write: {
         action: "写入",
@@ -355,13 +338,7 @@ const LILIA_TOOL_REGISTRY = {
         icon: "file-pen",
         bucket: "file",
         unit: "个文件",
-        build(payload) {
-          const path = compactLine(pick(payload, ["path"]), 1200);
-          return {
-            object: path,
-            details: [fieldsDetail([displayField("笔记本", path)])],
-          };
-        },
+        build: buildFileChangeDisplay,
       },
     },
   },
@@ -393,13 +370,7 @@ const LILIA_TOOL_REGISTRY = {
         icon: "search",
         bucket: "search",
         unit: "次搜索",
-        build(payload) {
-          const query = compactLine(pick(payload, ["query"]), 1200);
-          return {
-            object: query,
-            details: [fieldsDetail([displayField("查询", query)])],
-          };
-        },
+        build: buildSearchDisplay,
       },
     },
   },
@@ -409,11 +380,11 @@ const LILIA_TOOL_REGISTRY = {
       icon: "globe",
       bucket: "search",
       unit: "次搜索",
-      build(payload) {
+      build(payload, status) {
         const url = compactLine(pick(payload, ["url"]), 1200);
         return {
           object: url,
-          details: [fieldsDetail([displayField("URL", url)])],
+          details: [errorOutputDetail(payload, status)],
         };
       },
     },
@@ -433,7 +404,7 @@ const LILIA_TOOL_REGISTRY = {
           object: agentType,
           details: [
             markdownDetail(description, "default"),
-            markdownDetail(prompt, "default"),
+            !description && !result ? markdownDetail(prompt, "default") : null,
             markdownDetail(result, "default"),
           ],
         };
@@ -541,7 +512,6 @@ const LILIA_TOOL_REGISTRY = {
         return {
           object: toolName,
           details: [
-            fieldsDetail([displayField("工具", toolName)]),
             codeDetail("INPUT", pick(payload, ["input"])),
             codeDetail("OUTPUT", pick(payload, ["output"])),
           ],
@@ -560,11 +530,11 @@ export function getLiliaToolRule(kind, subkind) {
   return slot.default || null;
 }
 
-export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
+export function deriveLiliaToolDisplay({ kind, subkind, payload, title, status }) {
   const rule = getLiliaToolRule(kind, subkind);
   if (!rule) return null;
   const safePayload = readRecord(payload);
-  const built = rule.build(safePayload) ?? {};
+  const built = rule.build(safePayload, status) ?? {};
   const object = compactLine(built.object, 1200);
   const details = Array.isArray(built.details)
     ? built.details.filter((d) => d !== null && d !== undefined)
@@ -591,24 +561,71 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
   };
 }
 
-function buildFileChangeDisplay(payload) {
+function buildFileChangeDisplay(payload, status) {
   const path = compactLine(pick(payload, ["path"]), 1200);
+  const changes = readFileChanges(payload);
+  const changeItems = changes.length > 1
+    ? listDetail(changes.map((change) => `${change.kind} ${change.path}`))
+    : null;
   return {
-    object: path,
-    details: [fieldsDetail([displayField("文件", path)])],
+    object: path || changes[0]?.path || "",
+    details: [changeItems, errorOutputDetail(payload, status)],
   };
 }
 
-function buildSearchDisplay(payload) {
+function buildSearchDisplay(payload, status) {
   const query = compactLine(pick(payload, ["query"]), 1200);
   return {
     object: query,
-    details: [
-      fieldsDetail([
-        displayField("查询", query),
-        displayField("path", pick(payload, ["path"])),
-        displayField("glob", pick(payload, ["glob"])),
-      ]),
-    ],
+    details: [errorOutputDetail(payload, status)],
   };
+}
+
+export function isFailureStatus(status) {
+  return status === "failed" ||
+    status === "error" ||
+    status === "cancelled";
+}
+
+export function errorOutputDetail(payload, status) {
+  if (!isFailureStatus(status)) return null;
+  const output = readFirstText(payload, [
+    "aggregatedOutput",
+    "combinedOutput",
+    "outputText",
+    "stderr",
+    "errorOutput",
+    "stdout",
+    "output",
+    "error",
+    "message",
+  ], 6000);
+  return codeDetail("ERROR / OUTPUT", output);
+}
+
+export function readFileChanges(payload) {
+  const input = readRecord(payload.input);
+  const args = readRecord(payload.args);
+  const parameters = readRecord(payload.parameters);
+  const raw =
+    (Array.isArray(payload.changes) && payload.changes) ||
+    (Array.isArray(input.changes) && input.changes) ||
+    (Array.isArray(args.changes) && args.changes) ||
+    (Array.isArray(parameters.changes) && parameters.changes) ||
+    [];
+  return raw
+    .map((change) => {
+      if (!isRecord(change)) return null;
+      const path = readFirstString(
+        change,
+        ["path", "filePath", "relativePath", "targetPath", "name"],
+        600,
+      );
+      if (!path) return null;
+      return {
+        kind: readFirstString(change, ["kind", "operation", "type", "status"], 80) || "update",
+        path,
+      };
+    })
+    .filter((change) => change !== null);
 }

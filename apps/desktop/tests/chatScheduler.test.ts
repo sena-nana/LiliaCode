@@ -978,9 +978,6 @@ describe("chat scheduler", () => {
 
     await expectInitialReasoningHidden(view);
 
-    // 持久层不再有 display 字段；事件生产方只塞 payload，前端 deriveTimelineDisplay
-    // 命中 default (tool) 分支：kind 不是 "tool" 时动词降级为「处理」，
-    // payload.toolName 进入标题，input/output 自动渲染为 INPUT / OUTPUT 代码块。
     emitMockTimelineEvent("t-002", {
       id: "tl-derived-custom",
       kind: "extension_index",
@@ -1003,8 +1000,10 @@ describe("chat scheduler", () => {
 
     await fireEvent.click(view.getByRole("button", { name: /已处理 Index/ }));
     await waitFor(() => {
-      expect(view.getByText("工具")).toBeInTheDocument();
-      expect(view.getByText("Index")).toBeInTheDocument();
+      expect(view.queryByText("工具")).not.toBeInTheDocument();
+      expect(view.getByText("INPUT")).toBeInTheDocument();
+      expect(view.getByText(/"scope": "workspace"/)).toBeInTheDocument();
+      expect(view.getByText("OUTPUT")).toBeInTheDocument();
       expect(view.getByText("indexed 42 files")).toBeInTheDocument();
     });
   });

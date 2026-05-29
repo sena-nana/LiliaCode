@@ -17,9 +17,12 @@ const props = defineProps<{
   event: AgentTimelineEvent;
   expanded: boolean;
   compact?: boolean;
+  projectCwd?: string | null;
 }>();
 
-const display = computed(() => readTimelineDisplay(props.event));
+const display = computed(() =>
+  readTimelineDisplay(props.event, { projectCwd: props.projectCwd }),
+);
 const details = computed(() => display.value.details ?? []);
 const collapsed = computed(() => props.compact === true || !props.expanded);
 const summaryLine = computed(() =>

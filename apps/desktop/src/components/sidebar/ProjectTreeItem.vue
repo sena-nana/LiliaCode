@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Folder,
   FolderOpen,
+  LayoutGrid,
   MoreHorizontal,
   Plus,
   Pencil,
@@ -65,6 +66,7 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
+const router = useRouter();
 
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
@@ -234,6 +236,12 @@ function buildMenu(): ContextMenuItem[] {
   const hasCwd = !!props.project.cwd;
   return [
     {
+      id: "open-project",
+      label: "进入项目",
+      icon: LayoutGrid,
+      onSelect: () => router.push(`/projects/${props.project.id}`),
+    },
+    {
       id: "pin",
       label: props.project.pinned ? "取消置顶" : "置顶项目",
       icon: Pin,
@@ -302,19 +310,17 @@ function onMoreClick(e: MouseEvent) {
       data-tree-kind="project"
       :data-project-id="project.id"
       :data-pinned="project.pinned ? 'true' : 'false'"
+      :aria-expanded="isExpanded"
       v-context-menu="() => buildMenu()"
+      @click="emit('toggle', project.id)"
     >
-      <button
-        type="button"
-        class="sb-icon-btn"
-        :title="isExpanded ? '折叠项目' : '展开项目'"
-        :aria-label="isExpanded ? '折叠项目' : '展开项目'"
-        :aria-expanded="isExpanded"
-        @click.stop="emit('toggle', project.id)"
+      <span
+        class="sb-tree__project-icon"
+        aria-hidden="true"
       >
         <FolderOpen v-if="isExpanded" :size="14" aria-hidden="true" />
         <Folder v-else :size="14" aria-hidden="true" />
-      </button>
+      </span>
       <input
         v-if="editingId === project.id"
         :ref="bindEditingInput"
@@ -327,16 +333,13 @@ function onMoreClick(e: MouseEvent) {
         @keydown="onEditingKeydown"
         @blur="commitRename"
       />
-      <RouterLink
+      <span
         v-else
-        :to="`/projects/${project.id}`"
         class="sb-tree__link"
-        draggable="false"
-        @dragstart.prevent
       >
         <span class="sb-tree__name">{{ project.name }}</span>
         <Pin v-if="project.pinned" :size="12" class="sb-tree__pin-icon" aria-hidden="true" />
-      </RouterLink>
+      </span>
       <div v-if="editingId !== project.id" class="sb-tree__hover-tools" @click.stop>
         <button type="button" class="sb-icon-btn" title="更多" aria-label="更多" @click="onMoreClick">
           <MoreHorizontal :size="13" aria-hidden="true" />

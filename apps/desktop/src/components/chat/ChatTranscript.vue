@@ -14,6 +14,7 @@ const props = defineProps<{
   emptyHeadline: string;
   /** Turn 正在跑——传给 AgentTimeline 后用来在末尾叠一个「思考中…」指示器。 */
   isThinking?: boolean;
+  projectCwd?: string | null;
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -131,7 +132,11 @@ onBeforeUnmount(() => {
       {{ emptyHeadline }}
     </div>
     <template v-else>
-      <AgentTimeline :events="timelineEvents" :is-thinking="isThinking" />
+      <AgentTimeline
+        :events="timelineEvents"
+        :is-thinking="isThinking"
+        :project-cwd="projectCwd"
+      />
     </template>
     <div class="chat-controls-wrap">
       <slot name="controls" />

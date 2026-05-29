@@ -42,12 +42,6 @@ function getProjectRow(view: ReturnType<typeof render>, projectName: string): HT
   return row;
 }
 
-function getProjectToggle(view: ReturnType<typeof render>, projectName: string): HTMLElement {
-  return within(getProjectRow(view, projectName)).getByRole("button", {
-    name: /展开项目|折叠项目/,
-  });
-}
-
 function getConversationRow(view: ReturnType<typeof render>, title: string): HTMLElement {
   const row = view.getByText(title).closest(".sb-tree__row");
   if (!(row instanceof HTMLElement)) {
@@ -106,14 +100,14 @@ describe("SecondaryPanel project tree expansion", () => {
 
     const view = await renderSecondaryPanel();
 
-    const liliaToggle = getProjectToggle(view, "Lilia");
-    const toolsToggle = getProjectToggle(view, "工具箱");
+    const liliaRow = getProjectRow(view, "Lilia");
+    const toolsRow = getProjectRow(view, "工具箱");
     const orphansToggle = view.getByRole("button", {
       name: "展开收集箱",
     });
 
-    expect(liliaToggle).toHaveAttribute("aria-expanded", "false");
-    expect(toolsToggle).toHaveAttribute("aria-expanded", "true");
+    expect(liliaRow).toHaveAttribute("aria-expanded", "false");
+    expect(toolsRow).toHaveAttribute("aria-expanded", "true");
     expect(orphansToggle).toBeInTheDocument();
   });
 
@@ -127,7 +121,7 @@ describe("SecondaryPanel project tree expansion", () => {
     });
 
     const view = await renderSecondaryPanel();
-    await fireEvent.click(getProjectToggle(view, "Lilia"));
+    await fireEvent.click(getProjectRow(view, "Lilia"));
     await fireEvent.click(view.getByRole("button", { name: "折叠收集箱" }));
 
     await waitFor(() => {
@@ -162,7 +156,7 @@ describe("SecondaryPanel project tree expansion", () => {
     await fireEvent.click(view.getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
-      expect(getProjectToggle(view, "临时分类")).toHaveAttribute(
+      expect(getProjectRow(view, "临时分类")).toHaveAttribute(
         "aria-expanded",
         "true",
       );
@@ -201,6 +195,48 @@ describe("SecondaryPanel project chat navigation", () => {
         /^\/projects\/p-3\/tasks\/t-draft-/,
       );
     });
+  });
+
+  it("项目分区右侧总览按钮进入所有项目总览", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
+    const projectTools = view.getByText("项目")
+      .closest(".sb-section__header")
+      ?.querySelector(".sb-section__tools");
+
+    expect(projectTools).toContainElement(
+      view.getByRole("button", { name: "项目总览" }),
+    );
+
+    await fireEvent.click(view.getByRole("button", { name: "项目总览" }));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/projects");
+    });
+  });
+
+  it("顶部搜索会话后点击结果进入对应对话并关闭搜索", async () => {
+    const view = await renderSecondaryPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: "搜索会话" }));
+    await fireEvent.update(
+      view.getByPlaceholderText("搜索会话…"),
+      "tsconfig",
+    );
+
+    const listbox = await view.findByRole("listbox");
+    await fireEvent.click(
+      within(listbox).getByRole("option", {
+        name: /打通 tsconfig paths 搜索/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe(
+        "/projects/lilia/tasks/t-002",
+      );
+    });
+    expect(view.queryByPlaceholderText("搜索会话…")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();
   });
 
   it("归档当前项目对话后会进入该项目的新对话", async () => {

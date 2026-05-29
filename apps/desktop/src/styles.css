@@ -270,6 +270,12 @@ pre code {
 /* ---------------- Secondary panel ---------------- */
 
 .secondary-panel {
+  --sb-row-padding-x: 10px;
+  --sb-project-row-padding-x: 6px;
+  --sb-row-gap: 6px;
+  --sb-project-text-start: 30px;
+  --sb-project-icon-slot: calc(var(--sb-project-text-start) - var(--sb-project-row-padding-x) - var(--sb-row-gap));
+
   grid-area: secondary;
   background: var(--bg-elev);
   display: flex;
@@ -295,27 +301,25 @@ pre code {
   align-items: center;
   gap: 6px;
   padding: 2px 2px 0;
-  /* 搜索下拉以本容器为锚点向下浮出 */
   position: relative;
 }
 
-/* 第一区域主按钮：「新对话」。flex:1 占满搜索按钮以外的全部宽度。 */
 .sb-primary-btn {
   flex: 1;
   min-width: 0;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 var(--sb-row-padding-x) 0 var(--sb-project-row-padding-x);
   border-radius: 6px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: var(--sb-project-icon-slot) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sb-row-gap);
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.12s ease, color 0.12s ease;
-  /* 反转 input/button 全局默认的 1px 边框 */
   border: 0;
 }
 
@@ -333,7 +337,6 @@ pre code {
   white-space: nowrap;
 }
 
-/* 第一区域的右侧图标按钮（搜索 / 关闭搜索） */
 .sb-icon-action {
   flex: 0 0 auto;
   width: 30px;
@@ -356,7 +359,6 @@ pre code {
   filter: none;
 }
 
-/* 内联搜索框：占据原本「新对话」按钮的位置，focus-within 时高亮 accent 边线。 */
 .sb-search {
   flex: 1;
   min-width: 0;
@@ -367,9 +369,7 @@ pre code {
   border: 1px solid var(--border);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  transition: border-color 0.12s ease, background-color 0.12s ease;
+  gap: 7px;
 }
 
 .sb-search:focus-within {
@@ -379,28 +379,25 @@ pre code {
 
 .sb-search__leading {
   flex: 0 0 auto;
+  color: var(--text-muted);
 }
 
 .sb-search__input {
   flex: 1;
   min-width: 0;
-  /* 覆盖全局 input 的高度/边框/背景 */
   height: 22px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  outline: 0;
+  outline: none;
 }
 
 .sb-search__input::placeholder {
   color: var(--text-faint);
 }
 
-/* 搜索下拉：浮在项目树之上的浮层，限制在侧栏宽度内不影响主区。 */
 .sb-search-dd {
   position: absolute;
   top: calc(100% + 6px);
@@ -409,19 +406,16 @@ pre code {
   z-index: 30;
   max-height: min(60vh, 420px);
   overflow-y: auto;
-  /* 项目内部强制 ellipsis，绝不让侧栏出现横向滚动条 */
-  overflow-x: hidden;
   padding: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  background: var(--bg-elev);
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.45);
 }
 
 .sb-search-dd__item {
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -432,13 +426,10 @@ pre code {
   color: var(--text);
   cursor: pointer;
   text-align: left;
-  font-weight: 500;
-  /* 覆盖全局 button 的 32px 默认高度 */
-  height: 28px;
-  overflow: hidden;
 }
 
-.sb-search-dd__item.is-active {
+.sb-search-dd__item.is-active,
+.sb-search-dd__item:hover {
   background: var(--bg-hover);
   filter: none;
 }
@@ -460,7 +451,6 @@ pre code {
   padding: 0 2px;
 }
 
-/* 右侧项目名：orphan 类型没有 projectName，模板里直接不渲染本节点。 */
 .sb-search-dd__scope {
   flex: 0 1 auto;
   max-width: 45%;
@@ -482,8 +472,8 @@ pre code {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  width: 100%;
 }
-
 
 .sb-section__header {
   display: flex;
@@ -563,7 +553,6 @@ pre code {
   color: var(--accent);
 }
 
-/* 「+ 添加项目」contextmenu：Teleport 到 body 后 z-index 抬到搜索下拉之上。 */
 .sb-menu {
   position: fixed;
   z-index: 1100;
@@ -662,9 +651,9 @@ pre code {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sb-row-gap);
   height: 28px;
-  padding: 0 10px;
+  padding: 0 var(--sb-row-padding-x);
   border-radius: 6px;
   color: var(--text);
   text-decoration: none;
@@ -741,7 +730,7 @@ pre code {
 }
 
 .sb-tree__row--child {
-  padding-left: 30px;
+  padding-left: var(--sb-project-text-start);
   color: var(--text-muted);
 }
 
@@ -755,6 +744,7 @@ pre code {
 }
 
 .sb-tree__row--project {
+  padding-left: var(--sb-project-row-padding-x);
   cursor: pointer;
   user-select: none;
 }
@@ -764,9 +754,19 @@ pre code {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sb-row-gap);
   color: inherit;
   text-decoration: none;
+}
+
+.sb-tree__project-icon {
+  flex: 0 0 var(--sb-project-icon-slot);
+  width: var(--sb-project-icon-slot);
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
 }
 
 .sb-tree__name {

@@ -8,6 +8,7 @@ import AppShell from "./layouts/AppShell.vue";
 import TaskDetail from "./pages/TaskDetail.vue";
 import Settings from "./pages/Settings.vue";
 import Plugins from "./pages/Plugins.vue";
+import ProjectsOverview from "./pages/project/ProjectsOverview.vue";
 import ProjectShell from "./pages/project/ProjectShell.vue";
 import SessionsView from "./pages/project/SessionsView.vue";
 import RoadmapView from "./pages/project/RoadmapView.vue";
@@ -34,6 +35,7 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
         component: AppShell,
         children: [
           { path: "", component: Home },
+          { path: "projects", component: ProjectsOverview },
           // 项目主区：ViewTabs 在这里渲染；子路由互斥呈现 sessions / roadmap / memory。
           {
             path: "projects/:projectId",

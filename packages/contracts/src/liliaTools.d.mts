@@ -4,6 +4,7 @@ import type {
   AgentTimelineDisplayDetail,
   AgentTimelineDisplayField,
   AgentTimelineDisplayListItem,
+  AgentTimelineEventStatus,
   AgentTimelinePayload,
 } from "./index";
 
@@ -87,6 +88,7 @@ export interface LiliaToolRule {
   objectInLabel?: boolean;
   build: (
     payload: Record<string, unknown>,
+    status?: AgentTimelineEventStatus,
   ) => {
     object: string;
     details: Array<AgentTimelineDisplayDetail | null>;
@@ -107,6 +109,7 @@ export function deriveLiliaToolDisplay(input: {
   subkind?: string | null;
   payload: unknown;
   title?: string;
+  status?: AgentTimelineEventStatus;
 }): LiliaToolDisplay | null;
 
 // ---------- helper（被派生器闭包内部使用，TS 端复用） ----------
@@ -152,4 +155,15 @@ export interface ParsedTodoItem {
   status?: string;
 }
 
+export interface ParsedFileChange {
+  kind: string;
+  path: string;
+}
+
 export function readTodoItems(payload: Record<string, unknown>): ParsedTodoItem[];
+export function isFailureStatus(status?: AgentTimelineEventStatus): boolean;
+export function errorOutputDetail(
+  payload: Record<string, unknown>,
+  status?: AgentTimelineEventStatus,
+): AgentTimelineDisplayDetail | null;
+export function readFileChanges(payload: Record<string, unknown>): ParsedFileChange[];
