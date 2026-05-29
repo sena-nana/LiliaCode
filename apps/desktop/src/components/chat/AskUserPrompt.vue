@@ -155,6 +155,13 @@ function buildAnswer(): AskUserAnswer | null {
   };
 }
 
+function saveNavigableAnswer() {
+  const q = current.value;
+  if (!q || q.mode === "confirm" || !canSubmit.value) return;
+  const ans = buildAnswer();
+  if (ans) answers.value[ans.questionId] = ans;
+}
+
 function confirmAnswerNo() {
   const q = current.value;
   if (!q) return;
@@ -178,7 +185,9 @@ function skip() {
 }
 
 function back() {
-  if (canGoPrev.value) index.value -= 1;
+  if (!canGoPrev.value) return;
+  saveNavigableAnswer();
+  index.value -= 1;
 }
 
 function advance() {
