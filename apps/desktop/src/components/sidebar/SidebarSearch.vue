@@ -1,24 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { Search, X, FileText } from "lucide-vue-next";
+import { FileText, Search, X } from "lucide-vue-next";
 import { searchSessions, type SearchResult } from "../../services/sessionSearch";
 
-interface Segment { text: string; mark: boolean; }
+interface Segment {
+  text: string;
+  mark: boolean;
+}
 
 const props = defineProps<{
-  modelValue?: boolean
+  modelValue?: boolean;
 }>();
 
 const emit = defineEmits<{
-  select: [result: SearchResult]
-  'update:modelValue': [value: boolean]
+  select: [result: SearchResult];
+  "update:modelValue": [value: boolean];
 }>();
-
-// ── Search state ──
 
 const active = computed({
   get: () => props.modelValue ?? false,
-  set: (val) => emit('update:modelValue', val)
+  set: (value) => emit("update:modelValue", value),
 });
 const query = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
@@ -28,7 +29,9 @@ const results = computed<SearchResult[]>(() =>
   searchSessions(query.value, "hybrid").slice(0, 12),
 );
 
-watch(results, () => { selectedIdx.value = 0; });
+watch(results, () => {
+  selectedIdx.value = 0;
+});
 
 async function openSearch() {
   active.value = true;
@@ -44,59 +47,76 @@ function closeSearch() {
   selectedIdx.value = 0;
 }
 
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape") {
-    e.preventDefault();
+function selectResult(result: SearchResult) {
+  emit("select", result);
+  closeSearch();
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
     closeSearch();
     return;
   }
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
     if (results.value.length) {
       selectedIdx.value = (selectedIdx.value + 1) % results.value.length;
     }
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
     if (results.value.length) {
       selectedIdx.value =
         (selectedIdx.value - 1 + results.value.length) % results.value.length;
     }
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    const r = results.value[selectedIdx.value];
-    if (r) {
-      emit("select", r);
-      closeSearch();
-    }
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    const result = results.value[selectedIdx.value];
+    if (result) selectResult(result);
   }
 }
 
-// ── Highlight helper ──
-
-function highlightSegments(text: string, ranges: Array<[number, number]>): Segment[] {
+function highlightSegments(
+  text: string,
+  ranges: Array<[number, number]>,
+): Segment[] {
   if (!ranges.length) return [{ text, mark: false }];
   const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
   const merged: Array<[number, number]> = [];
-  for (const [s, e] of sorted) {
+  for (const [start, end] of sorted) {
     const last = merged[merged.length - 1];
-    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
-    else merged.push([s, e]);
+    if (last && start <= last[1]) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
   }
-  const out: Segment[] = [];
-  let cur = 0;
-  for (const [s, e] of merged) {
-    if (cur < s) out.push({ text: text.slice(cur, s), mark: false });
-    out.push({ text: text.slice(s, e), mark: true });
-    cur = e;
+
+  const segments: Segment[] = [];
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    if (cursor < start) {
+      segments.push({ text: text.slice(cursor, start), mark: false });
+    }
+    segments.push({ text: text.slice(start, end), mark: true });
+    cursor = end;
   }
-  if (cur < text.length) out.push({ text: text.slice(cur), mark: false });
-  return out;
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor), mark: false });
+  }
+  return segments;
 }
 </script>
 
 <template>
   <template v-if="!active">
-    <button type="button" class="sb-icon-action" title="搜索会话" aria-label="搜索会话" @click="openSearch">
+    <button
+      type="button"
+      class="sb-icon-action"
+      title="搜索会话"
+      aria-label="搜索会话"
+      @click="openSearch"
+    >
       <Search :size="15" aria-hidden="true" />
     </button>
   </template>
@@ -104,25 +124,51 @@ function highlightSegments(text: string, ranges: Array<[number, number]>): Segme
   <template v-else>
     <div class="sb-search">
       <Search :size="14" aria-hidden="true" class="sb-search__leading" />
-      <input ref="inputRef" v-model="query" type="text" class="sb-search__input" placeholder="搜索会话…"
-        spellcheck="false" @keydown="onKeydown" />
+      <input
+        ref="inputRef"
+        v-model="query"
+        type="text"
+        class="sb-search__input"
+        placeholder="搜索会话…"
+        spellcheck="false"
+        @keydown="onKeydown"
+      />
     </div>
-    <button type="button" class="sb-icon-action" title="关闭搜索 (Esc)" aria-label="关闭搜索" @click="closeSearch">
+    <button
+      type="button"
+      class="sb-icon-action"
+      title="关闭搜索 (Esc)"
+      aria-label="关闭搜索"
+      @click="closeSearch"
+    >
       <X :size="15" aria-hidden="true" />
     </button>
 
     <div class="sb-search-dd" role="listbox">
       <template v-if="results.length">
-        <button v-for="(r, i) in results" :key="r.route" type="button" class="sb-search-dd__item"
-          :class="{ 'is-active': i === selectedIdx }" role="option" :aria-selected="i === selectedIdx"
-          @mouseenter="selectedIdx = i" @click="emit('select', r); closeSearch()">
+        <button
+          v-for="(result, index) in results"
+          :key="result.route"
+          type="button"
+          class="sb-search-dd__item"
+          :class="{ 'is-active': index === selectedIdx }"
+          role="option"
+          :aria-selected="index === selectedIdx"
+          @mouseenter="selectedIdx = index"
+          @click="selectResult(result)"
+        >
           <span class="sb-search-dd__title">
-            <template v-for="(seg, j) in highlightSegments(r.title, r.highlights)" :key="j">
-              <mark v-if="seg.mark">{{ seg.text }}</mark>
-              <template v-else>{{ seg.text }}</template>
+            <template
+              v-for="(segment, segmentIndex) in highlightSegments(result.title, result.highlights)"
+              :key="segmentIndex"
+            >
+              <mark v-if="segment.mark">{{ segment.text }}</mark>
+              <template v-else>{{ segment.text }}</template>
             </template>
           </span>
-          <span v-if="r.projectName" class="sb-search-dd__scope">{{ r.projectName }}</span>
+          <span v-if="result.projectName" class="sb-search-dd__scope">
+            {{ result.projectName }}
+          </span>
         </button>
       </template>
       <p v-else-if="query.trim()" class="sb-search-dd__empty">没有匹配</p>
