@@ -126,4 +126,59 @@ describe("timeline display derivation", () => {
     expect(listItems(display.details)).toContain("方案 · 选哪个方案？：方案 A");
     expect(markdownItems(display.details)).toContain("用户取消了提问。");
   });
+
+  it("Claude ExitPlanMode 派生为待确认计划事件", () => {
+    const normalized = normalizeClaudeTool("ExitPlanMode", {
+      plan: "## 修改计划\n- 接线 runner\n- 补测试",
+      allowedPrompts: [{ tool: "Bash", prompt: "yarn test" }],
+    });
+
+    const event = {
+      kind: normalized.kind,
+      status: "requires_action" as const,
+      title: "ExitPlanMode",
+      summary: "",
+      payload: {
+        toolName: "ExitPlanMode",
+        ...normalized.payload,
+        approved: null,
+        executionPermission: "ask",
+      },
+    };
+    const display = deriveTimelineDisplay(event);
+
+    expect(normalized.kind).toBe("plan");
+    expect(timelineEventLabel(event)).toBe("等待确认计划");
+    expect(timelineInlinePreview(event)).toBe("## 修改计划 - 接线 runner - 补测试");
+    expect(display.defaultExpanded).toBe(true);
+    expect(markdownItems(display.details)).toContain("## 修改计划\n- 接线 runner\n- 补测试");
+    expect(listItems(display.details)).toContain("Bash：yarn test");
+  });
+
+  it("计划确认和取消使用明确标签并保持 plan bucket", () => {
+    const accepted = {
+      kind: "plan",
+      status: "success" as const,
+      title: "ExitPlanMode",
+      summary: "",
+      payload: {
+        plan: "按计划执行",
+        approved: true,
+        executionPermission: "full",
+      },
+    };
+    const cancelled = {
+      ...accepted,
+      status: "cancelled" as const,
+      payload: {
+        ...accepted.payload,
+        approved: false,
+      },
+    };
+
+    expect(timelineEventLabel(accepted)).toBe("已确认计划");
+    expect(deriveTimelineDisplay(accepted).group?.bucket).toBe("plan");
+    expect(deriveTimelineDisplay(accepted).defaultExpanded).toBeUndefined();
+    expect(timelineEventLabel(cancelled)).toBe("已取消计划");
+  });
 });

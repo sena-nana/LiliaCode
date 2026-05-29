@@ -116,6 +116,10 @@ function mergeToolPayload(
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = { ...normalized };
   for (const [key, value] of Object.entries(original)) {
+    if (key === "approved" && value === null) {
+      merged[key] = value;
+      continue;
+    }
     if (value === undefined || value === null || value === "") continue;
     merged[key] = value;
   }

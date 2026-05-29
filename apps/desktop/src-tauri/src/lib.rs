@@ -111,6 +111,8 @@ struct ChatComposerState {
     backend: String,
     model: String,
     branch: String,
+    #[serde(default)]
+    plan_mode: bool,
     /// "full" | "ask" | "readonly"
     permission: String,
 }
@@ -705,6 +707,7 @@ fn default_composer(task_id: &str) -> ChatComposerState {
         backend: BACKEND_CLAUDE.to_string(),
         model: "claude-sonnet-4-6".to_string(),
         branch: "main".to_string(),
+        plan_mode: false,
         permission: "ask".to_string(),
     }
 }
@@ -1004,6 +1007,7 @@ fn spawn_agent_turn(
             "attachments": attachments_for_thread,
             "model": composer_for_thread.model,
             "resumeSessionId": resume_session_id,
+            "planMode": composer_for_thread.plan_mode,
             "permission": composer_for_thread.permission,
         });
 

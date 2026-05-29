@@ -75,6 +75,16 @@ function normalizeAskUserQuestionTool(input) {
   };
 }
 
+function readPlanAllowedPrompts(input) {
+  return (Array.isArray(input?.allowedPrompts) ? input.allowedPrompts : [])
+    .filter(isRecord)
+    .map((item) => ({
+      tool: compactLine(item.tool, 80) || "tool",
+      prompt: compactLine(item.prompt, 400),
+    }))
+    .filter((item) => item.prompt);
+}
+
 /**
  * Claude 工具名 → lilia 协议规范化器。
  *
@@ -220,11 +230,15 @@ export const CLAUDE_TO_LILIA = {
     };
   },
   ExitPlanMode: (input) => {
-    const plan = pickString(input, ["plan"]);
+    const plan = pickString(input, ["plan", "content", "text", "markdown"]);
     return {
       kind: "plan",
-      payload: { plan },
-      summary: "",
+      payload: {
+        source: "ExitPlanMode",
+        plan,
+        allowedPrompts: readPlanAllowedPrompts(input),
+      },
+      summary: shortText(plan.replace(/\s+/g, " ").trim(), 200),
     };
   },
 };

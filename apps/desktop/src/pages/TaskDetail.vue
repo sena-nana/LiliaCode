@@ -73,6 +73,7 @@ const composer = ref<ChatComposerState>({
   backend: "claude",
   model: "claude-sonnet-4-6",
   branch: "main",
+  planMode: false,
   permission: "ask",
 });
 const models = ref<ChatModelOption[]>([]);

@@ -17,3 +17,9 @@
 UI 把同 turn 内所有事件折叠到「该 turn 最后一条 assistant message」下方时，只在 turn 已经收到终结信号后才生效。终结信号 = runner emit 的 `kind: "turn"` 事件且 `status ∈ {success, completed, done, error, failed, cancelled}`——对应 Claude SDK 的 `result` 消息那一帧。流式期间没有这个事件，所有事件按 `(turnSeq, intraTurnOrder)` inline 显示，避免「最后一条 assistant message」随新 text block 漂移导致折叠抖动。
 
 折叠范围：用户消息（锚点）和最终回复（卡片）保留在外，**之间**的可见过程事件（工具 / 计划 / 中间 text block 等）全部进 processEvents。`reasoning` 和 `turn` 仍可持久化供调试/恢复使用，但默认 UI 不渲染，也不计入「展开过程 N 项」。
+
+## Claude Plan 与权限
+
+`planMode` 是本轮先进入 Claude 原生计划模式的工作流开关，`permission` 是计划确认后的执行权限，二者正交。计划待确认时，runner 镜像 `ExitPlanMode` 为 `kind: "plan"` / `status: "requires_action"`，通过现有 AskUser 通道请求用户确认；用户确认后，runner 恢复发送时已经选择的执行权限（`full` / `ask` / `readonly`），不改 composer 默认值，也不把只读伪装成 Claude plan mode。
+
+Claude 仍拥有原生 Plan 内容，Lilia 只负责镜像、确认、恢复权限和记录时间线事实。只读权限在执行阶段由 Lilia 的 `canUseTool` 门禁拒绝可写或无法判定的工具，并把拒绝原因写入时间线。

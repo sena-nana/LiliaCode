@@ -58,6 +58,9 @@ export interface LiliaToolPayload {
   result?: string;
   // plan
   plan?: string;
+  allowedPrompts?: Array<{ tool?: string; prompt?: string }>;
+  approved?: boolean | null;
+  executionPermission?: string;
   // todo_list
   items?: Array<{ text: string; completed?: boolean; status?: string } | string>;
   // tool 兜底
@@ -86,8 +89,10 @@ export interface LiliaToolRule {
   ) => {
     object: string;
     details: Array<AgentTimelineDisplayDetail | null>;
+    label?: string;
     preview?: string;
     count?: number;
+    defaultExpanded?: boolean;
   };
 }
 

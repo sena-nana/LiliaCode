@@ -6,7 +6,7 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import { Paperclip, ShieldCheck, GitBranch, ArrowUp, X } from "lucide-vue-next";
+import { ArrowUp, GitBranch, ListChecks, Paperclip, ShieldCheck, X } from "lucide-vue-next";
 import type {
   ChatAttachment,
   ChatBranchOption,
@@ -57,6 +57,7 @@ function patch(next: Partial<ChatComposerState>) {
 
 function setBranch(v: string) { patch({ branch: v }); }
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
+function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
 function send() {
   const value = text.value.trim();
@@ -143,6 +144,17 @@ watch(text, async () => {
           :icon="ShieldCheck"
           @update:model-value="setPermission"
         />
+        <button
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :class="{ 'is-open': state.planMode }"
+          :title="state.planMode ? '本轮先制定计划' : '直接执行'"
+          :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
+          :aria-pressed="state.planMode"
+          @click="togglePlanMode"
+        >
+          <ListChecks :size="14" aria-hidden="true" />
+        </button>
         <Dropdown
           :model-value="state.branch"
           :options="branchOptions"

@@ -24,6 +24,28 @@ describe("agent-runner Claude stream", () => {
     );
   });
 
+  it("Claude plan mode 先进入计划，确认后恢复原执行权限", () => {
+    expect(runnerSource).toContain("normalizeClaudePermissionMode");
+    expect(runnerSource).toContain("mapClaudeInitialPermission(permission, planMode)");
+    expect(runnerSource).toMatch(
+      /permissionMode:\s*planMode\s*\?\s*"plan"\s*:\s*execution\.permissionMode/,
+    );
+    expect(runnerSource).toContain("handleClaudePlanPermission");
+    expect(runnerSource).toContain("buildPlanApprovalSpec");
+    expect(runnerSource).toContain('status: "requires_action"');
+    expect(runnerSource).toContain("scheduleClaudePermissionModeRestore(ctx, mode)");
+    expect(runnerSource).toContain('updatedPermissions: [{ type: "setMode", mode, destination: "session" }]');
+    expect(runnerSource).toContain("singleClaudePromptStream");
+  });
+
+  it("只读权限由 Lilia canUseTool 门禁拒绝可写或不可判定工具", () => {
+    expect(runnerSource).toContain("isReadonlyDeniedClaudeTool");
+    expect(runnerSource).toContain('ctx.executionPermission === "readonly"');
+    expect(runnerSource).toContain("当前权限为只读，禁止写操作");
+    expect(runnerSource).toContain("permissionDenied: true");
+    expect(runnerSource).toContain('reason: "readonly"');
+  });
+
   it("Claude thinking 与最终回复走互斥通道，由 block 类型权威路由", () => {
     // 行为细节走 claudeStreamDispatch.test.ts；这里只断言 runner 主文件确实
     // 把 stream_event 处理外包给了子模块 dispatcher，没有遗留 substring 猜测代码。

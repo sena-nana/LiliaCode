@@ -9,6 +9,7 @@
 //         "prompt": "...",
 //         "model": "...",
 //         "resumeSessionId": "...|null",
+//         "planMode": true|false,
 //         "permission": "full|ask|readonly"
 //       }
 //   - stdin 后续行：父进程对此前发出的 control_request 的响应，目前包括：
@@ -42,6 +43,14 @@ import {
   dispatchClaudeStreamEvent,
   finalizeClaudeReasoningBlocks,
 } from "./agent-runner/claudeStream.mjs";
+import {
+  buildPlanApprovalSpec,
+  buildPlanPayload,
+  isClaudePlanTool,
+  isPlanApprovalAccepted,
+  isReadonlyDeniedClaudeTool,
+  normalizeClaudePermissionMode,
+} from "./agent-runner/claudePlan.mjs";
 
 const TIMELINE_RESERVED_KEYS = new Set([
   "taskId",
@@ -436,28 +445,40 @@ function handleControlLine(line) {
  * （title / description / displayName / blockedPath / decisionReason / toolUseID）
  * 透传给父进程，让 UI 用最合适的文案渲染。
  */
-async function claudeCanUseTool(toolName, input, opts) {
-  const safeInput = input ?? {};
-  if (isLiliaAskUserTool(toolName)) {
-    return { behavior: "allow", updatedInput: safeInput };
-  }
-  const { decision, message } = await requestUserConsent({
-    toolName,
-    input: safeInput,
-    toolUseID: stringOrNull(opts?.toolUseID),
-    title: stringOrNull(opts?.title),
-    displayName: stringOrNull(opts?.displayName),
-    description: stringOrNull(opts?.description),
-    blockedPath: stringOrNull(opts?.blockedPath),
-    decisionReason: stringOrNull(opts?.decisionReason),
-  });
-  if (decision === "allow") {
-    // Claude Code 二进制端 Zod 校验要求 allow 必须带 updatedInput——SDK 的 d.ts
-    // 把它标成 optional 但底层 schema 实际 required。不填会被当作工具调用失败，
-    // Agent 收到 is_error 结果会无限重试 canUseTool。原样回填即可。
-    return { behavior: "allow", updatedInput: safeInput };
-  }
-  return { behavior: "deny", message: message || "用户拒绝了此次工具调用" };
+function createClaudeCanUseTool(ctx) {
+  return async function claudeCanUseTool(toolName, input, opts) {
+    const safeInput = isRecord(input) ? input : {};
+    if (isLiliaAskUserTool(toolName)) {
+      return { behavior: "allow", updatedInput: safeInput };
+    }
+    if (isClaudePlanTool(toolName)) {
+      return handleClaudePlanPermission(toolName, safeInput, opts, ctx);
+    }
+    if (ctx.executionPermission === "readonly" && isReadonlyDeniedClaudeTool(toolName)) {
+      emitReadonlyDeniedClaudeTool(toolName, safeInput, opts, ctx);
+      return {
+        behavior: "deny",
+        message: "当前权限为只读，禁止写操作",
+      };
+    }
+    const { decision, message } = await requestUserConsent({
+      toolName,
+      input: safeInput,
+      toolUseID: stringOrNull(opts?.toolUseID),
+      title: stringOrNull(opts?.title),
+      displayName: stringOrNull(opts?.displayName),
+      description: stringOrNull(opts?.description),
+      blockedPath: stringOrNull(opts?.blockedPath),
+      decisionReason: stringOrNull(opts?.decisionReason),
+    });
+    if (decision === "allow") {
+      // Claude Code 二进制端 Zod 校验要求 allow 必须带 updatedInput——SDK 的 d.ts
+      // 把它标成 optional 但底层 schema 实际 required。不填会被当作工具调用失败，
+      // Agent 收到 is_error 结果会无限重试 canUseTool。原样回填即可。
+      return { behavior: "allow", updatedInput: safeInput };
+    }
+    return { behavior: "deny", message: message || "用户拒绝了此次工具调用" };
+  };
 }
 
 function normalizeTimelineStatus(status) {
@@ -479,21 +500,188 @@ function fullTextOrNull(value) {
 
 // ---------- Claude ----------
 
-function mapClaudePermission(p) {
-  // Lilia 的三档语义 → Claude SDK 的 PermissionMode。
-  // - full：直接放行所有工具调用，不弹窗。SDK 要求显式 opt-in。
-  // - ask：SDK 默认行为；敏感工具走 canUseTool 回调（见 claudeCanUseTool），
-  //        我们把请求通过 stdout 转交父进程，由 Lilia AskUser 浮层收用户决策。
-  // - readonly：plan 模式，禁止写入。
-  switch (p) {
-    case "full":
-      return { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true };
-    case "readonly":
-      return { permissionMode: "plan" };
-    case "ask":
-    default:
-      return { permissionMode: "default" };
+function mapClaudeExecutionPermission(permission) {
+  const permissionMode = normalizeClaudePermissionMode(permission);
+  return {
+    permissionMode,
+    ...(permission === "full" ? { allowDangerouslySkipPermissions: true } : {}),
+  };
+}
+
+function mapClaudeInitialPermission(permission, planMode) {
+  const execution = mapClaudeExecutionPermission(permission);
+  return {
+    ...execution,
+    permissionMode: planMode ? "plan" : execution.permissionMode,
+  };
+}
+
+function rememberClaudeTool(ctx, sourceId, patch) {
+  if (!ctx?.activeTools || !sourceId) return null;
+  const current = ctx.activeTools.get(sourceId) || {};
+  const payload = {
+    ...(isRecord(current.payload) ? current.payload : {}),
+    ...(isRecord(patch.payload) ? patch.payload : {}),
+  };
+  const next = {
+    ...current,
+    ...patch,
+    payload,
+  };
+  ctx.activeTools.set(sourceId, next);
+  return next;
+}
+
+function oneLineSummary(value, max = 400) {
+  const text = stringOrNull(value);
+  if (!text) return "";
+  return shortText(text.replace(/\s+/g, " ").trim(), max) || "";
+}
+
+function emitClaudePlanTimeline({
+  ctx,
+  toolName = "ExitPlanMode",
+  input,
+  output,
+  fallbackPlan = "",
+  approved = null,
+  executionPermission,
+  status,
+  sourceId,
+  sessionId,
+}) {
+  const planPayload = buildPlanPayload({
+    input,
+    output,
+    fallbackPlan,
+    approved,
+    executionPermission,
+    source: "ExitPlanMode",
+  });
+  rememberClaudeTool(ctx, sourceId, {
+    name: toolName,
+    kind: "plan",
+    subkind: null,
+    status,
+    payload: planPayload,
+  });
+  emitTimeline({
+    kind: "plan",
+    status,
+    title: toolName,
+    summary: oneLineSummary(planPayload.plan),
+    payload: {
+      backend: "claude",
+      toolName,
+      ...planPayload,
+      sessionId,
+    },
+    sourceId,
+  });
+  return planPayload;
+}
+
+function scheduleClaudePermissionModeRestore(ctx, mode) {
+  if (typeof ctx.query?.setPermissionMode !== "function") return;
+  setTimeout(() => {
+    ctx.query.setPermissionMode(mode).catch((err) => {
+      emitTimeline({
+        kind: "error",
+        status: "error",
+        title: "Claude permission restore",
+        summary: err?.message || String(err),
+        payload: {
+          backend: "claude",
+          permissionMode: mode,
+        },
+      });
+    });
+  }, 0);
+}
+
+async function handleClaudePlanPermission(toolName, input, opts, ctx) {
+  const sourceId = stringOrNull(opts?.toolUseID);
+  const executionPermission = ctx.executionPermission;
+  const pendingPayload = emitClaudePlanTimeline({
+    ctx,
+    toolName,
+    input,
+    fallbackPlan: ctx.latestAssistantText || "",
+    approved: null,
+    executionPermission,
+    status: "requires_action",
+    sourceId,
+  });
+  const result = await requestAskUser(
+    buildPlanApprovalSpec({
+      executionPermission,
+      plan: pendingPayload.plan,
+    }),
+  );
+  if (!isPlanApprovalAccepted(result)) {
+    emitClaudePlanTimeline({
+      ctx,
+      toolName,
+      input: pendingPayload,
+      approved: false,
+      executionPermission,
+      status: "cancelled",
+      sourceId,
+    });
+    ctx?.activeTools?.delete(sourceId);
+    return {
+      behavior: "deny",
+      message: "用户暂未确认计划",
+      interrupt: true,
+    };
   }
+
+  const mode = normalizeClaudePermissionMode(executionPermission);
+  scheduleClaudePermissionModeRestore(ctx, mode);
+  emitClaudePlanTimeline({
+    ctx,
+    toolName,
+    input: pendingPayload,
+    approved: true,
+    executionPermission,
+    status: "success",
+    sourceId,
+  });
+  return {
+    behavior: "allow",
+    updatedInput: input,
+    updatedPermissions: [{ type: "setMode", mode, destination: "session" }],
+  };
+}
+
+function emitReadonlyDeniedClaudeTool(toolName, input, opts, ctx) {
+  const sourceId = stringOrNull(opts?.toolUseID);
+  const reason = "当前权限为只读，禁止写操作";
+  const normalized = normalizeClaudeTool(toolName, input, {
+    subagent_type: opts?.agentID,
+  });
+  const payload = {
+    backend: "claude",
+    toolName,
+    ...normalized.payload,
+    input,
+    permissionDenied: true,
+    reason: "readonly",
+    message: reason,
+  };
+  if (normalized.subkind) payload.subkind = normalized.subkind;
+  if (sourceId) {
+    ctx.deniedTools.set(sourceId, { reason: "readonly", message: reason });
+  }
+  emitTimeline({
+    kind: normalized.kind,
+    status: "error",
+    title: toolName,
+    summary: reason,
+    payload,
+    sourceId,
+  });
+  ctx?.activeTools?.delete(sourceId);
 }
 
 /**
@@ -768,25 +956,57 @@ function emitClaudeToolTimeline(block, msg, ctx) {
   const name = stringOrNull(block?.name) || "tool";
   const input = isRecord(block?.input) ? block.input : {};
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
+  if (isClaudePlanTool(name)) {
+    const cached = sourceId ? ctx?.activeTools?.get(sourceId) : null;
+    const approved = typeof cached?.payload?.approved === "boolean"
+      ? cached.payload.approved
+      : null;
+    const status = cached?.status || (
+      approved === false ? "cancelled" : approved === true ? "success" : "requires_action"
+    );
+    emitClaudePlanTimeline({
+      ctx,
+      toolName: name,
+      input,
+      fallbackPlan: ctx?.latestAssistantText || "",
+      approved,
+      executionPermission: ctx?.executionPermission || "ask",
+      status,
+      sourceId,
+      sessionId: msg?.session_id,
+    });
+    return;
+  }
   const normalized = normalizeClaudeTool(name, input, {
     subagent_type: msg?.subagent_type,
     task_description: msg?.task_description,
   });
+  const denied = sourceId ? ctx?.deniedTools?.get(sourceId) : null;
   const payload = {
     backend: "claude",
     toolName: name,
     ...normalized.payload,
+    ...(denied ? {
+      permissionDenied: true,
+      reason: denied.reason,
+      message: denied.message,
+    } : {}),
     sessionId: msg?.session_id,
   };
   if (normalized.subkind) payload.subkind = normalized.subkind;
-  if (ctx?.activeTools && sourceId) {
-    ctx.activeTools.set(sourceId, { name, kind: normalized.kind, subkind: normalized.subkind, payload: normalized.payload });
+  if (!denied) {
+    rememberClaudeTool(ctx, sourceId, {
+      name,
+      kind: normalized.kind,
+      subkind: normalized.subkind,
+      payload: normalized.payload,
+    });
   }
   emitTimeline({
     kind: normalized.kind,
-    status: "started",
+    status: denied ? "error" : "started",
     title: name,
-    summary: normalized.summary,
+    summary: denied?.message || normalized.summary,
     payload,
     sourceId,
   });
@@ -831,10 +1051,22 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   // 折叠预览能直接看到失败原因。
   const askUserCancelled = kind === "ask_user" && isAskUserCancelledOutput(text);
   const summary = isError && !askUserCancelled ? shortText(text, 400) || "" : "";
+  const planPayload = kind === "plan"
+    ? buildPlanPayload({
+        input: cachedPayload,
+        output: text,
+        fallbackPlan: cachedPayload.plan,
+        approved: typeof cachedPayload.approved === "boolean"
+          ? cachedPayload.approved
+          : !isError,
+        executionPermission: cachedPayload.executionPermission,
+        source: cachedPayload.source || "ExitPlanMode",
+      })
+    : null;
   const payload = {
     backend: "claude",
     toolName: name,
-    ...cachedPayload,
+    ...(planPayload || cachedPayload),
     isError,
     output: text,
     sessionId: msg?.session_id,
@@ -844,11 +1076,23 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
     kind,
     status: askUserCancelled ? "cancelled" : isError ? "error" : "success",
     title: name,
-    summary,
+    summary: kind === "plan" && !isError ? oneLineSummary(payload.plan) : summary,
     payload,
     sourceId,
   });
   ctx?.activeTools?.delete(sourceId);
+  ctx?.deniedTools?.delete(sourceId);
+}
+
+async function* singleClaudePromptStream(prompt) {
+  yield {
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+    },
+    parent_tool_use_id: null,
+  };
 }
 
 /**
@@ -870,7 +1114,7 @@ function sweepActiveClaudeTools(ctx, status, sessionId) {
       kind: info.kind,
       status,
       title: info.name,
-      summary: "",
+      summary: info.kind === "plan" ? oneLineSummary(payload.plan) : "",
       payload,
       sourceId,
     });
@@ -1160,16 +1404,43 @@ function mapClaudeSystemTimeline(msg) {
 }
 
 async function runClaude(cmd) {
-  const { cwd, prompt, model, resumeSessionId, permission } = cmd;
-  const permOpts = mapClaudePermission(permission);
+  const { cwd, prompt, model, resumeSessionId } = cmd;
+  const permission = cmd.permission === "full" || cmd.permission === "readonly"
+    ? cmd.permission
+    : "ask";
+  const planMode = cmd.planMode === true;
+  const permOpts = mapClaudeInitialPermission(permission, planMode);
+  let lastSessionId = null;
+  const ctx = {
+    claudeStream: createClaudeStreamState(),
+    executionPermission: permission,
+    query: null,
+    latestAssistantText: "",
+    deniedTools: new Map(),
+    /** blockKey → { pacer, accumulatedText, sessionId }；每个 text block 一个独立
+     *  pacer，sourceId 也按 blockKey 拆开。block stop 时立刻翻 success（onTextClose
+     *  路径），turn 末尾 finalize 只兜剩下的；textFragmentsEmittedCount 累计两条
+     *  路径的总和，供 result 兜底判断是否还需要补一张 final 卡。 */
+    textFragments: new Map(),
+    textFragmentsEmittedCount: 0,
+    /** blockKey → { pacer, lastText, sessionId }；每个 thinking block 一个独立
+     *  snapshot pacer，按 33ms 节奏吐累计快照；block stop 时直接 emit success。 */
+    reasoningBlocks: new Map(),
+    /** 见过任何 type==="text" 的 assistant content block；用于 result 兜底判断是否
+     *  该 emit 一张空 final 卡（vs 纯思考/纯 tool_use 的合法静默 turn）。 */
+    sawAssistantTextBlock: false,
+    resultSeen: false,
+    /** sourceId → { name, kind, payload }，给未收到 tool_result 的工具做收尾用。 */
+    activeTools: new Map(),
+  };
   const options = {
     cwd: cwd || process.cwd(),
     model: model || undefined,
     resume: resumeSessionId || undefined,
     includePartialMessages: true,
-    // 注：full/readonly 也注册 canUseTool 是无副作用的 —— SDK 在 bypass/plan
-    // 模式下不会触发回调；ask 模式下才会把请求转给我们。
-    canUseTool: claudeCanUseTool,
+    // canUseTool 同时承载询问、计划确认和 Lilia 只读门禁；是否触发由 Claude
+    // 当前 permissionMode 决定。
+    canUseTool: createClaudeCanUseTool(ctx),
     // SDK 1.0 默认不注入任何 system prompt——既丢了 Claude Code 内置的工具说明，
     // 也让模型不知道当前平台/shell，于是在 Windows 上偶尔会发 PowerShell 命令进
     // Bash 工具。启用 claude_code 预设拿回基础上下文，Windows 上 append 一段
@@ -1189,26 +1460,9 @@ async function runClaude(cmd) {
     // 「Lilia 是 Claude Code 的图形外壳」这一定位要的——不裁剪 tools。
   };
 
-  let lastSessionId = null;
-  const ctx = {
-    claudeStream: createClaudeStreamState(),
-    /** blockKey → { pacer, accumulatedText, sessionId }；每个 text block 一个独立
-     *  pacer，sourceId 也按 blockKey 拆开。block stop 时立刻翻 success（onTextClose
-     *  路径），turn 末尾 finalize 只兜剩下的；textFragmentsEmittedCount 累计两条
-     *  路径的总和，供 result 兜底判断是否还需要补一张 final 卡。 */
-    textFragments: new Map(),
-    textFragmentsEmittedCount: 0,
-    /** blockKey → { pacer, lastText, sessionId }；每个 thinking block 一个独立
-     *  snapshot pacer，按 33ms 节奏吐累计快照；block stop 时直接 emit success。 */
-    reasoningBlocks: new Map(),
-    /** 见过任何 type==="text" 的 assistant content block；用于 result 兜底判断是否
-     *  该 emit 一张空 final 卡（vs 纯思考/纯 tool_use 的合法静默 turn）。 */
-    sawAssistantTextBlock: false,
-    resultSeen: false,
-    /** sourceId → { kind, title, display }，给未收到 tool_result 的工具做收尾用。 */
-    activeTools: new Map(),
-  };
-  for await (const msg of query({ prompt, options })) {
+  const claudeQuery = query({ prompt: singleClaudePromptStream(prompt), options });
+  ctx.query = claudeQuery;
+  for await (const msg of claudeQuery) {
     if (msg.session_id) lastSessionId = msg.session_id;
 
     try {
@@ -1228,6 +1482,9 @@ async function runClaude(cmd) {
               // sdkIndex 回填会跟 stream_event 的 blockKey 错位，产生 text:N /
               // text:N+1 两份重复。文本真正的内容由 stream_event 通道独占。
               ctx.sawAssistantTextBlock = true;
+              if (typeof b.text === "string" && b.text.trim()) {
+                ctx.latestAssistantText = b.text;
+              }
             }
             if (b && b.type === "tool_use") {
               emit({ type: "tool_use", name: b.name, input: b.input });
@@ -1346,6 +1603,7 @@ function handleClaudeStreamEvent(msg, ctx) {
       if (blockKey === null || blockKey === undefined) return;
       const fragment = getOrCreateClaudeTextFragment(ctx, blockKey, msg?.session_id);
       fragment.accumulatedText += text;
+      ctx.latestAssistantText = fragment.accumulatedText;
       fragment.sessionId = msg?.session_id || fragment.sessionId;
       fragment.pacer.push(text);
     },

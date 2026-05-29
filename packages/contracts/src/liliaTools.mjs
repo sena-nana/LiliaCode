@@ -447,10 +447,33 @@ const LILIA_TOOL_REGISTRY = {
       bucket: "plan",
       unit: "项计划",
       build(payload) {
-        const plan = readFirstString(payload, ["plan"], 6000);
+        const plan = readFirstText(payload, ["plan"], 6000);
+        const preview = compactLine(plan, 600);
+        const approved = payload.approved;
+        const allowedPrompts = (Array.isArray(payload.allowedPrompts) ? payload.allowedPrompts : [])
+          .filter(isRecord)
+          .map((item) => {
+            const tool = compactLine(pick(item, ["tool"]), 80);
+            const prompt = compactLine(pick(item, ["prompt"]), 400);
+            return [tool, prompt].filter(Boolean).join("：");
+          })
+          .filter(Boolean);
+        const label = approved === null
+          ? "等待确认计划"
+          : approved === true
+            ? "已确认计划"
+            : approved === false
+              ? "已取消计划"
+              : undefined;
         return {
           object: "",
-          details: [markdownDetail(plan)],
+          label,
+          preview,
+          defaultExpanded: approved === null ? true : undefined,
+          details: [
+            markdownDetail(plan),
+            allowedPrompts.length ? listDetail(allowedPrompts, true) : null,
+          ],
         };
       },
     },
@@ -546,6 +569,7 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
     : 1;
   return {
     icon: rule.icon,
+    label: built.label,
     action: rule.action,
     object,
     objectInLabel: rule.objectInLabel === true ? true : undefined,
@@ -557,6 +581,7 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
       unit: rule.unit,
       count,
     },
+    defaultExpanded: built.defaultExpanded,
   };
 }
 
