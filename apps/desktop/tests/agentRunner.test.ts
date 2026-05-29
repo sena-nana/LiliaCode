@@ -17,6 +17,13 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/toolAliases:\s*\{\s*AskUserQuestion:/);
   });
 
+  it("Claude AskUserQuestion 不再先触发工具权限申请", () => {
+    expect(runnerSource).toContain("LILIA_ASK_USER_TOOL_NAMES");
+    expect(runnerSource).toMatch(
+      /if \(isLiliaAskUserTool\(toolName\)\) \{\s*return \{ behavior: "allow", updatedInput: safeInput \};\s*\}/,
+    );
+  });
+
   it("Claude thinking 与最终回复走互斥通道，由 block 类型权威路由", () => {
     // 行为细节走 claudeStreamDispatch.test.ts；这里只断言 runner 主文件确实
     // 把 stream_event 处理外包给了子模块 dispatcher，没有遗留 substring 猜测代码。

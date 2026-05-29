@@ -1,19 +1,24 @@
 <script setup lang="ts">
-/**
- * 全局问询宿主：监听 useAskUser 的当前 spec，挂一份 AskUserDialog。
- * 与 ContextMenuHost 同模式，需在 App 根渲染一次。
- */
-import AskUserDialog from "./AskUserDialog.vue";
+import { computed } from "vue";
+import AskUserPrompt from "./chat/AskUserPrompt.vue";
 import { resolveAskUser, useAskUser } from "../composables/useAskUser";
 
+const props = defineProps<{ taskId: string }>();
 const { state } = useAskUser();
+
+const current = computed(() => {
+  const ask = state.current;
+  if (!ask) return null;
+  if (ask.taskId == null || ask.taskId === props.taskId) return ask;
+  return null;
+});
 </script>
 
 <template>
-  <AskUserDialog
-    v-if="state.current"
-    :key="state.current.spec.questions.map((q) => q.id).join('|')"
-    :spec="state.current.spec"
+  <AskUserPrompt
+    v-if="current"
+    :key="current.id"
+    :spec="current.spec"
     @resolve="resolveAskUser"
   />
 </template>

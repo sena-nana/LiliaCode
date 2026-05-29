@@ -379,6 +379,11 @@ const consentPending = new Map();
 let consentSeq = 1;
 const askUserPending = new Map();
 let askUserSeq = 1;
+const LILIA_ASK_USER_TOOL_NAMES = new Set([
+  "AskUserQuestion",
+  "ask_user_question",
+  "mcp__lilia__ask_user_question",
+]);
 
 function requestUserConsent(payload) {
   const id = `consent-${consentSeq++}`;
@@ -394,6 +399,10 @@ function requestAskUser(spec) {
   return new Promise((resolve) => {
     askUserPending.set(id, resolve);
   });
+}
+
+function isLiliaAskUserTool(toolName) {
+  return LILIA_ASK_USER_TOOL_NAMES.has(String(toolName || ""));
 }
 
 function handleControlLine(line) {
@@ -429,6 +438,9 @@ function handleControlLine(line) {
  */
 async function claudeCanUseTool(toolName, input, opts) {
   const safeInput = input ?? {};
+  if (isLiliaAskUserTool(toolName)) {
+    return { behavior: "allow", updatedInput: safeInput };
+  }
   const { decision, message } = await requestUserConsent({
     toolName,
     input: safeInput,

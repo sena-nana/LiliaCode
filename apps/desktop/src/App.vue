@@ -2,7 +2,6 @@
 import { onBeforeUnmount, onMounted } from "vue";
 import { RouterView } from "vue-router";
 import ContextMenuHost from "./components/ContextMenuHost.vue";
-import AskUserHost from "./components/AskUserHost.vue";
 import { installAgentAskUserBridge } from "./composables/useAgentAskUserBridge";
 import { installToolConsentBridge } from "./composables/useToolConsentBridge";
 
@@ -29,5 +28,4 @@ onBeforeUnmount(() => {
 <template>
   <RouterView />
   <ContextMenuHost />
-  <AskUserHost />
 </template>

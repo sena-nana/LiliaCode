@@ -3465,46 +3465,65 @@ button.ghost:hover {
   }
 }
 
-/* ---------------- Ask User dialog ---------------- *
- * Agent 反向问询用户的浮层。复用 .search-palette 背板 + .dialog__card 几何，
- * 在其上加：步进 chip、单/多选选项块、可选 preview 副栏、Other 自填。
- *
- * 关键设计点：
- * - .ask-user__card 比默认 dialog 略宽（720px）；带 preview 时再放大到 960px
- *   并切成左右两栏（options | preview）。
- * - 选项块用 .ask-user__option，hover/focus 走 .is-active 提色，多选打钩走
- *   .is-picked 描边，推荐项给 .is-recommended 微提色。
- * - 步进 chip 只在多问题时显示，单题时整张卡退化成普通确认框。
- */
+/* ---------------- Ask User inline prompt ---------------- */
 
-.ask-user__card {
-  width: min(720px, 94vw);
-  max-height: min(78vh, 760px);
-}
-
-.ask-user__card--with-preview {
-  width: min(960px, 96vw);
-}
-
-.ask-user__header {
+.ask-user {
+  max-width: 100%;
+  min-width: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
-.ask-user__title {
-  flex: 0 1 auto;
+.ask-user:focus {
+  outline: none;
+}
+
+.ask-user__header {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+}
+
+.ask-user__icon {
+  grid-column: 1;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.ask-user--danger .ask-user__icon {
+  color: var(--err);
+}
+
+.ask-user__title {
+  grid-column: 2;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ask-user__source {
-  flex: 0 0 auto;
+  grid-column: 3;
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
   background: var(--bg-subtle);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
@@ -3513,16 +3532,16 @@ button.ghost:hover {
 }
 
 .ask-user__progress {
-  margin-left: auto;
+  grid-column: 4;
+  justify-self: end;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.4px;
 }
 
 .ask-user__close {
-  /* 反掉全局 button 的 32 高 + accent 背景。 */
+  grid-column: 5;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -3533,7 +3552,6 @@ button.ghost:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
 }
 
 .ask-user__close:hover {
@@ -3545,9 +3563,9 @@ button.ghost:hover {
 .ask-user__body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 14px 16px 4px;
-  min-height: 0;
+  gap: 10px;
+  min-width: 0;
+  max-height: min(46vh, 420px);
   overflow-y: auto;
 }
 
@@ -3555,9 +3573,9 @@ button.ghost:hover {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
-/* 题前小角标：和 sb-section__title 同款大写小字距风格。 */
 .ask-user__chip {
   align-self: flex-start;
   height: 18px;
@@ -3567,31 +3585,31 @@ button.ghost:hover {
   color: var(--accent);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  letter-spacing: 0.4px;
   display: inline-flex;
   align-items: center;
 }
 
 .ask-user__qtext {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .ask-user__main {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-height: 0;
+  gap: 10px;
+  min-width: 0;
 }
 
 .ask-user__main--with-preview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.85fr);
+  gap: 10px;
   align-items: stretch;
 }
 
@@ -3606,18 +3624,16 @@ button.ghost:hover {
 }
 
 .ask-user__option {
-  /* 用 li 当布局容器，按钮在内部全占；外层 li 负责 :is-* class 状态切换。 */
   position: relative;
 }
 
 .ask-user__option-btn {
-  /* 反掉全局 button 默认。 */
   width: 100%;
   height: auto;
-  padding: 10px 12px;
+  padding: 9px 10px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
   align-items: flex-start;
   text-align: left;
   border: 1px solid var(--border);
@@ -3657,11 +3673,9 @@ button.ghost:hover {
   border-color: var(--err);
 }
 
-/* 左侧 indicator：单选时是圆点，多选时是方框 + Check 图标。
- * 通过 li 的 :is-picked / :is-active 决定填色，按钮内部只放 Check 图标。 */
 .ask-user__option-indicator {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   margin-top: 2px;
   border: 1.5px solid var(--border-strong);
   background: var(--bg);
@@ -3673,7 +3687,6 @@ button.ghost:hover {
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
-/* 默认 radio 样式 */
 [role="radiogroup"] .ask-user__option-indicator {
   border-radius: 50%;
 }
@@ -3681,11 +3694,9 @@ button.ghost:hover {
 [role="radiogroup"] .ask-user__option.is-active .ask-user__option-indicator {
   border-color: var(--accent);
   background: var(--accent);
-  /* 用 inset shadow 模拟 radio 内圆点 */
   box-shadow: inset 0 0 0 3px var(--bg);
 }
 
-/* checkbox 样式 */
 [role="group"] .ask-user__option-indicator {
   border-radius: 4px;
 }
@@ -3708,8 +3719,9 @@ button.ghost:hover {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   color: inherit;
+  overflow-wrap: anywhere;
 }
 
 .ask-user__option-desc {
@@ -3733,13 +3745,11 @@ button.ghost:hover {
   color: var(--accent);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
 }
 
-/* 「其他…」自填项的 textarea：选中时才展开，不抢视觉重心。 */
 .ask-user__other-input {
   width: 100%;
   margin-top: 8px;
@@ -3760,7 +3770,6 @@ button.ghost:hover {
   background: var(--bg);
 }
 
-/* 右侧 preview 副栏：等宽字体 + 与选项同高的卡片，给 mockup/diff 比较用。 */
 .ask-user__preview {
   display: flex;
   flex-direction: column;
@@ -3773,30 +3782,41 @@ button.ghost:hover {
 
 .ask-user__preview-pre {
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   background: transparent;
   border: 0;
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.5;
   color: var(--text);
   overflow: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   flex: 1 1 auto;
   min-height: 0;
 }
 
 .ask-user__preview-empty {
   margin: 0;
-  padding: 20px 14px;
+  padding: 18px 12px;
   color: var(--text-faint);
   font-size: 12px;
   text-align: center;
 }
 
-/* 底部操作栏：左跳过、右继续；中间 spacer 把按钮组顶到右侧。 */
 .ask-user__actions {
+  display: flex;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask-user__btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
 }
 
 .ask-user__skip {
@@ -3814,15 +3834,40 @@ button.ghost:hover {
   flex: 1;
 }
 
+.ask-user-enter-active,
+.ask-user-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ask-user-enter-from,
+.ask-user-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-user-enter-active,
+  .ask-user-leave-active {
+    transition: none;
+  }
+  .ask-user-enter-from,
+  .ask-user-leave-to {
+    transform: none;
+  }
+}
+
 @media (max-width: 720px) {
-  .ask-user__card--with-preview {
-    width: min(720px, 96vw);
+  .ask-user__source {
+    display: none;
   }
   .ask-user__main--with-preview {
     grid-template-columns: minmax(0, 1fr);
   }
   .ask-user__preview {
     min-height: 120px;
+  }
+  .ask-user__actions {
+    flex-wrap: wrap;
   }
 }
 
