@@ -218,6 +218,7 @@ const PROCESS_CATEGORY_LABELS: Record<string, string> = {
   subagent: "子代理任务",
   todo: "待办更新",
   tool: "工具调用",
+  ask_user: "用户提问",
 };
 
 function processEventsSummary(

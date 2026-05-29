@@ -65,7 +65,10 @@ describe("agent-runner Claude stream", () => {
     )?.[0];
     expect(branch).toBeTruthy();
     expect(branch).toMatch(
-      /const\s+summary\s*=\s*isError\s*\?\s*shortText\(text,\s*400\)[^;]*:\s*""/,
+      /const\s+summary\s*=\s*isError\s*&&\s*!askUserCancelled\s*\?\s*shortText\(text,\s*400\)[^;]*:\s*""/,
+    );
+    expect(branch).toMatch(
+      /status:\s*askUserCancelled\s*\?\s*"cancelled"\s*:\s*isError\s*\?\s*"error"\s*:\s*"success"/,
     );
     expect(branch).not.toMatch(/const\s+summary\s*=\s*shortText\(text,\s*400\)\s*\|\|\s*""/);
   });

@@ -87,6 +87,7 @@ export interface LiliaToolRule {
     object: string;
     details: Array<AgentTimelineDisplayDetail | null>;
     preview?: string;
+    count?: number;
   };
 }
 
