@@ -306,6 +306,22 @@ fn timeline_input_from_runtime_event(
     })
 }
 
+fn assistant_error_text(input: &AgentTimelineEventInput) -> Option<String> {
+    if input.kind != "message" || !matches!(input.status.as_str(), "error" | "failed") {
+        return None;
+    }
+    let obj = input.payload.as_object()?;
+    if obj.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+        return None;
+    }
+    let text = normalize_timeline_text(obj.get("content")?.as_str()?);
+    (!text.is_empty()).then_some(text)
+}
+
+fn normalize_timeline_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// 直接落库 + emit 一条 timeline 输入，不做节流。
 /// 任何调用方（throttle、用户消息、错误事件）都共用同一条物理路径，
 /// 保证「emit 的 payload = DB 写入的快照」始终成立。
@@ -557,6 +573,37 @@ mod agent_event_sink_tests {
         assert_eq!(input.status, "running");
         assert_eq!(input.title, "思考中");
         assert_eq!(input.payload, JsonValue::Null);
+    }
+
+    #[test]
+    fn runner_error_duplicate_detection_uses_assistant_error_message() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!({
+                    "kind": "message",
+                    "status": "error",
+                    "title": "Assistant",
+                    "payload": {
+                        "role": "assistant",
+                        "content": "API Error: 503 所有供应商已熔断，无可用渠道."
+                    }
+                }),
+            },
+        )
+        .unwrap();
+        let assistant_text = assistant_error_text(&input);
+
+        assert_eq!(
+            assistant_text.as_deref(),
+            Some("API Error: 503 所有供应商已熔断，无可用渠道.")
+        );
+        let assistant_text = assistant_text.unwrap();
+        assert!(normalize_timeline_text(
+            "Claude Code returned an error result: API Error: 503 所有供应商已熔断，无可用渠道.",
+        )
+        .contains(&assistant_text));
+        assert!(!normalize_timeline_text("无法启动 node 子进程").contains(&assistant_text));
     }
 
     #[test]
@@ -1079,6 +1126,7 @@ fn spawn_agent_turn(
         let mut event_host = AgentEventHost::new();
         event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
         let mut timeline_throttle = TimelineThrottle::new();
+        let mut last_assistant_error_text: Option<String> = None;
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
@@ -1101,6 +1149,9 @@ fn spawn_agent_turn(
                         if let Some(input) =
                             timeline_input_from_runtime_event(&event_ctx, &event)
                         {
+                            if let Some(text) = assistant_error_text(&input) {
+                                last_assistant_error_text = Some(text);
+                            }
                             timeline_throttle.submit(&app_handle, input);
                         }
                     }
@@ -1152,6 +1203,12 @@ fn spawn_agent_turn(
                     }
                     AgentRuntimeEvent::Error { message } => {
                         timeline_throttle.flush_all(&app_handle);
+                        if last_assistant_error_text
+                            .as_deref()
+                            .is_some_and(|text| normalize_timeline_text(message).contains(text))
+                        {
+                            continue;
+                        }
                         persist_and_emit_error_timeline_event(
                             &app_handle,
                             &task_id_for_thread,
