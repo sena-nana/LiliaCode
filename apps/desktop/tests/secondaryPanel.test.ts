@@ -42,12 +42,6 @@ function getProjectRow(view: ReturnType<typeof render>, projectName: string): HT
   return row;
 }
 
-function getProjectToggle(view: ReturnType<typeof render>, projectName: string): HTMLElement {
-  return within(getProjectRow(view, projectName)).getByRole("button", {
-    name: /展开项目|折叠项目/,
-  });
-}
-
 function getConversationRow(view: ReturnType<typeof render>, title: string): HTMLElement {
   const row = view.getByText(title).closest(".sb-tree__row");
   if (!(row instanceof HTMLElement)) {
@@ -106,14 +100,14 @@ describe("SecondaryPanel project tree expansion", () => {
 
     const view = await renderSecondaryPanel();
 
-    const liliaToggle = getProjectToggle(view, "Lilia");
-    const toolsToggle = getProjectToggle(view, "工具箱");
+    const liliaRow = getProjectRow(view, "Lilia");
+    const toolsRow = getProjectRow(view, "工具箱");
     const orphansToggle = view.getByRole("button", {
       name: "展开收集箱",
     });
 
-    expect(liliaToggle).toHaveAttribute("aria-expanded", "false");
-    expect(toolsToggle).toHaveAttribute("aria-expanded", "true");
+    expect(liliaRow).toHaveAttribute("aria-expanded", "false");
+    expect(toolsRow).toHaveAttribute("aria-expanded", "true");
     expect(orphansToggle).toBeInTheDocument();
   });
 
@@ -127,7 +121,7 @@ describe("SecondaryPanel project tree expansion", () => {
     });
 
     const view = await renderSecondaryPanel();
-    await fireEvent.click(getProjectToggle(view, "Lilia"));
+    await fireEvent.click(getProjectRow(view, "Lilia"));
     await fireEvent.click(view.getByRole("button", { name: "折叠收集箱" }));
 
     await waitFor(() => {
@@ -162,7 +156,7 @@ describe("SecondaryPanel project tree expansion", () => {
     await fireEvent.click(view.getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
-      expect(getProjectToggle(view, "临时分类")).toHaveAttribute(
+      expect(getProjectRow(view, "临时分类")).toHaveAttribute(
         "aria-expanded",
         "true",
       );
@@ -200,6 +194,16 @@ describe("SecondaryPanel project chat navigation", () => {
       expect(view.router.currentRoute.value.path).toMatch(
         /^\/projects\/p-3\/tasks\/t-draft-/,
       );
+    });
+  });
+
+  it("顶部项目按钮进入所有项目总览", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
+
+    await fireEvent.click(view.getByRole("button", { name: "项目" }));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/projects");
     });
   });
 

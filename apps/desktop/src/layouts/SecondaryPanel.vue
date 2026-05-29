@@ -16,6 +16,7 @@ import {
   X,
   Archive,
   Pin,
+  LayoutGrid,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import {
@@ -37,7 +38,6 @@ import {
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { pickFolder } from "../services/projects";
 
-import SidebarSearch from "../components/sidebar/SidebarSearch.vue";
 import ProjectTreeItem from "../components/sidebar/ProjectTreeItem.vue";
 import CloneRepoDialog from "../components/sidebar/CloneRepoDialog.vue";
 import CategoryDialog from "../components/sidebar/CategoryDialog.vue";
@@ -207,8 +207,6 @@ onBeforeUnmount(() => {
 
 // ── Orphan inbox ──
 
-const searchActive = ref(false);
-
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
   persistProjectTreeExpansion();
@@ -307,9 +305,8 @@ function openProjectChat(projectId: string) {
   router.push(`/projects/${projectId}/tasks/${draft.id}`);
 }
 
-function onSearchSelect(r: { route: string }) {
-  searchActive.value = false;
-  router.push(r.route);
+function openProjectsOverview() {
+  router.push("/projects");
 }
 
 // ── Add project menu ──
@@ -715,10 +712,8 @@ onBeforeUnmount(() => {
     @pointerdown="onTreePointerDown"
     @click.capture="onTreeClickCapture"
   >
-    <!-- Actions: new chat + search -->
     <div class="sb-section sb-section--actions">
       <button
-        v-if="!searchActive"
         type="button"
         class="sb-primary-btn"
         title="新对话"
@@ -728,10 +723,11 @@ onBeforeUnmount(() => {
         <MessageSquarePlus :size="15" aria-hidden="true" />
         <span class="sb-primary-btn__label">新对话</span>
       </button>
-      <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
+      <button type="button" class="sb-icon-action" title="项目" aria-label="项目" @click="openProjectsOverview">
+        <LayoutGrid :size="15" aria-hidden="true" />
+      </button>
     </div>
 
-    <!-- Project tree -->
     <div class="sb-section">
       <div class="sb-section__header">
         <span class="sb-section__title">项目</span>
@@ -778,7 +774,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Orphan inbox -->
     <div class="sb-section">
       <div class="sb-section__header">
         <span class="sb-section__title">收集箱</span>
@@ -834,7 +829,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Footer -->
     <div class="sb-footer">
       <RouterLink to="/settings" class="sb-footer__btn" active-class="is-active" title="设置" aria-label="设置">
         <Settings :size="14" aria-hidden="true" />

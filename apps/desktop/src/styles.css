@@ -295,11 +295,9 @@ pre code {
   align-items: center;
   gap: 6px;
   padding: 2px 2px 0;
-  /* 搜索下拉以本容器为锚点向下浮出 */
   position: relative;
 }
 
-/* 第一区域主按钮：「新对话」。flex:1 占满搜索按钮以外的全部宽度。 */
 .sb-primary-btn {
   flex: 1;
   min-width: 0;
@@ -315,7 +313,6 @@ pre code {
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.12s ease, color 0.12s ease;
-  /* 反转 input/button 全局默认的 1px 边框 */
   border: 0;
 }
 
@@ -333,7 +330,6 @@ pre code {
   white-space: nowrap;
 }
 
-/* 第一区域的右侧图标按钮（搜索 / 关闭搜索） */
 .sb-icon-action {
   flex: 0 0 auto;
   width: 30px;
@@ -355,135 +351,6 @@ pre code {
   color: var(--text);
   filter: none;
 }
-
-/* 内联搜索框：占据原本「新对话」按钮的位置，focus-within 时高亮 accent 边线。 */
-.sb-search {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  transition: border-color 0.12s ease, background-color 0.12s ease;
-}
-
-.sb-search:focus-within {
-  border-color: var(--accent);
-  background: var(--bg);
-}
-
-.sb-search__leading {
-  flex: 0 0 auto;
-}
-
-.sb-search__input {
-  flex: 1;
-  min-width: 0;
-  /* 覆盖全局 input 的高度/边框/背景 */
-  height: 22px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  outline: 0;
-}
-
-.sb-search__input::placeholder {
-  color: var(--text-faint);
-}
-
-/* 搜索下拉：浮在项目树之上的浮层，限制在侧栏宽度内不影响主区。 */
-.sb-search-dd {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 30;
-  max-height: min(60vh, 420px);
-  overflow-y: auto;
-  /* 项目内部强制 ellipsis，绝不让侧栏出现横向滚动条 */
-  overflow-x: hidden;
-  padding: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.sb-search-dd__item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  font-weight: 500;
-  /* 覆盖全局 button 的 32px 默认高度 */
-  height: 28px;
-  overflow: hidden;
-}
-
-.sb-search-dd__item.is-active {
-  background: var(--bg-hover);
-  filter: none;
-}
-
-.sb-search-dd__title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-search-dd__title mark {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 3px;
-  padding: 0 2px;
-}
-
-/* 右侧项目名：orphan 类型没有 projectName，模板里直接不渲染本节点。 */
-.sb-search-dd__scope {
-  flex: 0 1 auto;
-  max-width: 45%;
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-search-dd__empty,
-.sb-search-dd__hint {
-  margin: 0;
-  padding: 14px 12px;
-  color: var(--text-muted);
-  text-align: center;
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
 
 .sb-section__header {
   display: flex;
@@ -563,7 +430,6 @@ pre code {
   color: var(--accent);
 }
 
-/* 「+ 添加项目」contextmenu：Teleport 到 body 后 z-index 抬到搜索下拉之上。 */
 .sb-menu {
   position: fixed;
   z-index: 1100;
@@ -767,6 +633,16 @@ pre code {
   gap: 6px;
   color: inherit;
   text-decoration: none;
+}
+
+.sb-tree__project-icon {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
 }
 
 .sb-tree__name {

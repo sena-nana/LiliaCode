@@ -11,6 +11,7 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: { template: "<div />" } },
+      { path: "/projects", component: { template: "<div />" } },
       { path: "/projects/:projectId", component: { template: "<div />" } },
       {
         path: "/projects/:projectId/tasks/:taskId",
@@ -54,7 +55,7 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
     },
   });
 
-  return render(Wrapper, {
+  const view = render(Wrapper, {
     global: {
       plugins: [router],
       directives: {
@@ -62,23 +63,36 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
       },
     },
   });
+  return { ...view, router };
 }
 
 describe("ProjectTreeItem", () => {
-  it("项目名称进入项目中枢，文件夹图标才触发展开折叠", async () => {
+  it("项目行主体点击会展开折叠，项目名称不再直接导航", async () => {
     const view = await renderProjectTreeItem("/projects/tools");
-    const projectLink = view.getByRole("link", { name: "Lilia" });
-    const collapseButton = view.getByLabelText("折叠项目");
+    const projectRow = view.getByText("Lilia").closest(".sb-tree__row--project");
 
-    expect(projectLink).toHaveAttribute("href", "/projects/lilia");
+    expect(view.queryByRole("link", { name: "Lilia" })).not.toBeInTheDocument();
+    expect(view.queryByLabelText("折叠项目")).not.toBeInTheDocument();
+    expect(projectRow).toHaveAttribute("aria-expanded", "true");
 
-    await fireEvent.click(collapseButton);
-
-    expect(view.emitted("toggle")).toEqual([["lilia"]]);
-
-    await fireEvent.click(projectLink);
+    await fireEvent.click(projectRow!);
 
     expect(view.emitted("toggle")).toEqual([["lilia"]]);
+  });
+
+  it("项目右键菜单第一项进入对应项目", async () => {
+    const view = await renderProjectTreeItem("/projects/tools");
+
+    await fireEvent.click(view.getByLabelText("更多"));
+
+    const menuItems = await view.findAllByRole("menuitem");
+    expect(menuItems[0]).toHaveTextContent("进入项目");
+
+    await fireEvent.click(menuItems[0]);
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/projects/lilia");
+    });
   });
 
   it("session 置顶按钮显示在归档按钮左侧并触发切换", async () => {
