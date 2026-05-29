@@ -22,7 +22,11 @@ import {
   codeDetail,
   markdownDetail,
   listDetail,
+  errorOutputDetail,
+  isFailureStatus,
+  readFileChanges,
   type ParsedTodoItem,
+  type ParsedFileChange,
 } from "./liliaTools.mjs";
 import { normalizeClaudeTool } from "./claudeTools.mjs";
 import type {
@@ -47,7 +51,7 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
   const summary = compactLine(input.summary ?? "", 1200);
   const payload = readRecord(input.payload);
 
-  const toolDisplay = tryDeriveToolDisplay(kind, payload, title, summary);
+  const toolDisplay = tryDeriveToolDisplay(kind, payload, title, summary, input.status);
   if (toolDisplay) {
     return cleanDisplay(toolDisplay) ?? fallbackDisplay(kind, title, summary);
   }
@@ -73,6 +77,7 @@ function tryDeriveToolDisplay(
   payload: Record<string, unknown>,
   title: string,
   summary: string,
+  status: AgentTimelineEventStatus,
 ): AgentTimelineDisplay | null {
   const toolName = readFirstString(payload, ["toolName", "tool", "name"], 200);
   if (toolName && isLegacyToolKind(kind)) {
@@ -86,6 +91,7 @@ function tryDeriveToolDisplay(
         subkind: normalized.subkind,
         payload: mergedPayload,
         title,
+        status,
       });
       const finished = finishToolDisplay(display, payload, title, summary);
       if (finished) return finished;
@@ -98,6 +104,7 @@ function tryDeriveToolDisplay(
       subkind: asString(payload.subkind),
       payload,
       title,
+      status,
     });
     return finishToolDisplay(display, payload, title, summary);
   }
@@ -167,7 +174,7 @@ interface KindBuildInput {
   payload: Record<string, unknown>;
 }
 
-function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTimelineDisplay {
+function buildByKind({ kind, status, title, summary, payload }: KindBuildInput): AgentTimelineDisplay {
   switch (kind) {
     case "message": {
       const role = readFirstString(payload, ["role"], 80);
@@ -201,11 +208,6 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
       const command =
         readFirstString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
         readFirstString(nestedInput, ["command", "cmd", "shellCommand", "script", "argv"], 1200);
-      const output = readFirstString(
-        payload,
-        ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
-        6000,
-      );
       const outputDetail = readFirstText(
         payload,
         ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
@@ -221,19 +223,20 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         ["stderr", "errorOutput", "message", "error"],
         6000,
       );
+      const hasOutput = Boolean(outputDetail || stderrDetail);
+      const shouldShowCommand = command.length > 180 || hasOutput;
       return {
         icon: "terminal",
         action: "运行",
         object: command,
-        preview: summary || command || output || stderr,
+        preview: summary || command || outputDetail || stderr,
         details: [
-          lineDetail(summary),
-          fieldsDetail([
+          isFailureStatus(status) ? fieldsDetail([
             displayField("cwd", pick(payload, ["cwd", "workdir", "workingDirectory"])),
             displayField("exit", pick(payload, ["exitCode", "code", "statusCode", "exit"])),
             displayField("duration", formatDuration(payload)),
-          ]),
-          codeDetail("COMMAND", command, "shell"),
+          ]) : null,
+          shouldShowCommand ? codeDetail("COMMAND", command, "shell") : null,
           codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", outputDetail || stderrDetail),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
@@ -248,8 +251,8 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         object: fileChangeObject(changes, payload) || usefulObject(title, ["file change", "file changes"]),
         preview: summary || fileChangePreview(changes, payload),
         details: [
-          lineDetail(summary),
-          listDetail(changes.map((change) => `${change.kind} ${change.path}`)),
+          changes.length > 1 ? listDetail(changes.map((change) => `${change.kind} ${change.path}`)) : null,
+          errorOutputDetail(payload, status),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: "kind:file_change", bucket: "file", unit: "个文件", count },
       };
@@ -268,10 +271,18 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         objectInLabel: true,
         preview: summary || target,
         details: [
-          fieldsDetail([
-            displayField("服务", pick(payload, ["server", "serverName", "mcpServer"])),
-            displayField("工具", pick(payload, ["tool", "toolName", "name"])),
-          ]),
+          codeDetail("INPUT", pickValue(payload, [
+            "input",
+            "arguments",
+            "args",
+            "parameters",
+            "params",
+            "request",
+          ])),
+          codeDetail(
+            isFailureStatus(status) ? "ERROR / OUTPUT" : "OUTPUT",
+            pickValue(payload, ["result", "response", "output", "text", "content", "error", "message"]),
+          ),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: {
           key: `mcp:${readFirstString(payload, ["server", "serverName", "mcpServer"], 120) || "default"}`,
@@ -282,7 +293,6 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
       };
     }
     case "subagent": {
-      // 旧 DB 兜底（同 command/file_change）；新协议事件会先命中 lilia 工具规则。
       const name =
         readFirstString(
           payload,
@@ -291,9 +301,10 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         ) || usefulObject(title, ["task", "agent"]);
       const task = readFirstString(
         payload,
-        ["taskDescription", "description", "prompt", "task"],
+        ["taskDescription", "description", "task"],
         1200,
       );
+      const prompt = readFirstString(payload, ["prompt"], 6000);
       const result = readFirstString(payload, ["result", "output", "summary"], 1200);
       return {
         icon: "bot",
@@ -302,6 +313,7 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         preview: summary || [name, task].filter(Boolean).join(": "),
         details: [
           markdownDetail(task, "default"),
+          !task && !result ? markdownDetail(prompt, "default") : null,
           markdownDetail(result, "default"),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: "kind:subagent", bucket: "subagent", unit: "个子代理", count: 1 },
@@ -379,12 +391,8 @@ function buildByKind({ kind, title, summary, payload }: KindBuildInput): AgentTi
         preview:
           summary || tool || readFirstString(payload, ["query", "path", "command"], 600),
         details: [
-          fieldsDetail([
-            displayField("工具", tool),
-            displayField("服务", pick(payload, ["server", "serverName", "mcpServer"])),
-          ]),
           codeDetail("INPUT", input),
-          codeDetail("OUTPUT", output),
+          codeDetail(isFailureStatus(status) ? "ERROR / OUTPUT" : "OUTPUT", output),
         ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
         group: { key: `tool:${tool || title || kind}`, bucket: "tool", unit: "个工具", count: 1 },
       };
@@ -405,10 +413,6 @@ function fallbackDisplay(kind: string, title: string, summary: string): AgentTim
       count: 1,
     },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function pickValue(record: Record<string, unknown>, keys: string[]): unknown {
@@ -448,39 +452,7 @@ function todoPreview(items: ParsedTodoItem[]): string {
   return `${done}/${items.length} 已完成${next ? ` · ${next}` : ""}`;
 }
 
-interface FileChange {
-  kind: string;
-  path: string;
-}
-
-function readFileChanges(payload: Record<string, unknown>): FileChange[] {
-  const input = readRecord(payload.input);
-  const args = readRecord(payload.args);
-  const parameters = readRecord(payload.parameters);
-  const raw =
-    (Array.isArray(payload.changes) && payload.changes) ||
-    (Array.isArray(input.changes) && input.changes) ||
-    (Array.isArray(args.changes) && args.changes) ||
-    (Array.isArray(parameters.changes) && parameters.changes) ||
-    [];
-  return raw
-    .map((change: unknown): FileChange | null => {
-      if (!isRecord(change)) return null;
-      const path = readFirstString(
-        change,
-        ["path", "filePath", "relativePath", "targetPath", "name"],
-        600,
-      );
-      if (!path) return null;
-      return {
-        kind: readFirstString(change, ["kind", "operation", "type", "status"], 80) || "update",
-        path,
-      };
-    })
-    .filter((change): change is FileChange => change !== null);
-}
-
-function fileChangeObject(changes: FileChange[], payload: Record<string, unknown>): string {
+function fileChangeObject(changes: ParsedFileChange[], payload: Record<string, unknown>): string {
   if (changes.length) return changes[0].path;
   return readFirstString(
     payload,
@@ -489,7 +461,7 @@ function fileChangeObject(changes: FileChange[], payload: Record<string, unknown
   );
 }
 
-function fileChangePreview(changes: FileChange[], payload: Record<string, unknown>): string {
+function fileChangePreview(changes: ParsedFileChange[], payload: Record<string, unknown>): string {
   if (changes.length) {
     const first = changes[0];
     const suffix = changes.length > 1 ? ` 等 ${changes.length} 个文件` : "";

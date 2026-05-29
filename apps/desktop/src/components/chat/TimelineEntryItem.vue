@@ -9,6 +9,7 @@ import {
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
   readTimelineDisplay,
+  timelineCanExpand,
   timelineDisplayIcon,
   timelineEventLabel,
   timelineGroupLabel,
@@ -36,7 +37,7 @@ function isTimelineMessage(event: AgentTimelineEvent): boolean {
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return !isTimelineMessage(event);
+  return timelineCanExpand(event);
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
@@ -161,7 +162,7 @@ function kindClass(prefix: string, kind: string): string {
               </header>
 
               <div
-                v-if="expanded(event)"
+                v-if="canToggle(event) && expanded(event)"
                 :id="`agent-timeline-details-${event.id}`"
                 class="agent-timeline__content"
               >
@@ -278,7 +279,7 @@ function kindClass(prefix: string, kind: string): string {
         </div>
 
         <div
-          v-if="expanded(entry.event)"
+          v-if="canToggle(entry.event) && expanded(entry.event)"
           :id="`agent-timeline-details-${entry.event.id}`"
           class="agent-timeline__content"
         >
