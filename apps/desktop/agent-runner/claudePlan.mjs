@@ -90,9 +90,7 @@ export function extractPlanTextFromInput(input) {
 
 export function extractPlanResult(output) {
   const parsed = parseJsonLike(output);
-  const plan =
-    readFirstString(parsed, ["plan", "content", "text", "markdown"], 12000) ||
-    (typeof output === "string" ? output.trim() : "");
+  const plan = readFirstString(parsed, ["plan", "content", "text", "markdown"], 12000);
   return {
     plan,
     filePath: readFirstString(parsed, ["filePath", "file_path"], 1200) || undefined,
@@ -117,7 +115,10 @@ export function buildPlanPayload({
   const revisionRequest =
     result.revisionRequest ||
     readFirstString(input, ["revisionRequest", "revision_request"], 6000);
-  const plan = result.plan || inputPlan || fallbackPlan || "";
+  const preserveInputPlan = Boolean(revisionRequest) || approved === false;
+  const plan = preserveInputPlan
+    ? inputPlan || fallbackPlan || result.plan || ""
+    : result.plan || inputPlan || fallbackPlan || "";
   return {
     source,
     plan,

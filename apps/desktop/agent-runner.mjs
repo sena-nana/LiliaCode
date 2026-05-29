@@ -818,7 +818,7 @@ function normalizeClaudeAskUserQuestions(input) {
   return rawQuestions
     .map((question, questionIndex) => {
       if (!isRecord(question)) return null;
-      const options = Array.isArray(question.options) ? question.options.slice(0, 6) : [];
+      const options = Array.isArray(question.options) ? question.options.slice(0, 4) : [];
       const normalizedOptions = options
         .map((option, optionIndex) => {
           if (!isRecord(option)) return null;

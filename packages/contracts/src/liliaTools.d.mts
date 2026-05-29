@@ -20,6 +20,7 @@ export type LiliaToolKind =
   | "subagent"
   | "plan"
   | "todo_list"
+  | "ask_user"
   | "tool";
 
 /** 子分类：仅在 file_change / search 下有意义。其余 kind subkind 应留空。 */
@@ -65,6 +66,17 @@ export interface LiliaToolPayload {
   revisionRequest?: string;
   // todo_list
   items?: Array<{ text: string; completed?: boolean; status?: string } | string>;
+  // ask_user
+  questions?: Array<{
+    id?: string;
+    header?: string;
+    question?: string;
+    title?: string;
+    text?: string;
+    options?: Array<{ id?: string; label?: string; description?: string; preview?: string }>;
+  }>;
+  cancelled?: boolean;
+  structuredContent?: unknown;
   // tool 兜底
   toolName?: string;
   input?: unknown;

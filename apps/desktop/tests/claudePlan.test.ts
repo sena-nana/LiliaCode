@@ -50,6 +50,57 @@ describe("claudePlan helpers", () => {
     });
   });
 
+  it("普通文本工具结果不会被当作新的计划正文", () => {
+    const result = extractPlanResult(
+      "用户要求修改计划，暂不执行当前计划。\n修改要求：先补充失败回滚方案",
+    );
+
+    expect(result.plan).toBe("");
+  });
+
+  it("计划修改要求不会用 deny 文本覆盖原计划", () => {
+    const payload = buildPlanPayload({
+      input: {
+        plan: "## 当前计划\n- 先改 runner\n- 再补测试",
+        revisionRequest: "先补充失败回滚方案",
+        allowedPrompts: [{ tool: "Bash", prompt: "yarn test" }],
+      },
+      output: "用户要求修改计划，暂不执行当前计划。\n修改要求：先补充失败回滚方案",
+      approved: false,
+      executionPermission: "ask",
+    });
+
+    expect(payload).toMatchObject({
+      plan: "## 当前计划\n- 先改 runner\n- 再补测试",
+      revisionRequest: "先补充失败回滚方案",
+      approved: false,
+      executionPermission: "ask",
+      allowedPrompts: [{ tool: "Bash", prompt: "yarn test" }],
+    });
+  });
+
+  it("结构化工具结果仍可更新计划元数据", () => {
+    const payload = buildPlanPayload({
+      input: {
+        plan: "旧计划",
+      },
+      output: JSON.stringify({
+        plan: "确认后的计划",
+        filePath: "plans/current.md",
+        planWasEdited: true,
+      }),
+      approved: true,
+      executionPermission: "full",
+    });
+
+    expect(payload).toMatchObject({
+      plan: "确认后的计划",
+      filePath: "plans/current.md",
+      planWasEdited: true,
+      approved: true,
+    });
+  });
+
   it("确认规格只保留标题和动作，不内联计划正文或权限提示", () => {
     const spec = buildPlanApprovalSpec();
 

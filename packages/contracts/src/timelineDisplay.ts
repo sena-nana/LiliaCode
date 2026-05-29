@@ -14,19 +14,12 @@ import {
   compactLine,
   pick,
   readFirstString,
-  readFirstText,
   readRecord,
-  readTodoItems,
   displayField,
   fieldsDetail,
   codeDetail,
   markdownDetail,
-  listDetail,
-  errorOutputDetail,
   isFailureStatus,
-  readFileChanges,
-  type ParsedTodoItem,
-  type ParsedFileChange,
 } from "./liliaTools.mjs";
 import { normalizeClaudeTool } from "./claudeTools.mjs";
 import type {
@@ -197,71 +190,6 @@ function buildByKind({ kind, status, title, summary, payload }: KindBuildInput):
         details: [markdownDetail(summary || pick(payload, ["text", "summary"]), "muted")]
           .filter((d): d is AgentTimelineDisplayDetail => d !== null),
       };
-    case "todo_list": {
-      const items = readTodoItems(payload);
-      return {
-        icon: "list-checks",
-        action: "更新待办",
-        preview: summary || todoPreview(items),
-        details: [lineDetail(summary), listDetail(items)]
-          .filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:todo_list", bucket: "todo", unit: "次待办", count: 1 },
-      };
-    }
-    case "command": {
-      const nestedInput = readRecord(payload.input);
-      const command =
-        readFirstString(payload, ["command", "cmd", "shellCommand", "script", "argv"], 1200) ||
-        readFirstString(nestedInput, ["command", "cmd", "shellCommand", "script", "argv"], 1200);
-      const outputDetail = readFirstText(
-        payload,
-        ["aggregatedOutput", "combinedOutput", "outputText", "stdout", "output"],
-        6000,
-      );
-      const stderr = readFirstString(
-        payload,
-        ["stderr", "errorOutput", "message", "error"],
-        6000,
-      );
-      const stderrDetail = readFirstText(
-        payload,
-        ["stderr", "errorOutput", "message", "error"],
-        6000,
-      );
-      const hasOutput = Boolean(outputDetail || stderrDetail);
-      const shouldShowCommand = command.length > 180 || hasOutput;
-      return {
-        icon: "terminal",
-        action: "运行",
-        object: command,
-        preview: summary || command || outputDetail || stderr,
-        details: [
-          isFailureStatus(status) ? fieldsDetail([
-            displayField("cwd", pick(payload, ["cwd", "workdir", "workingDirectory"])),
-            displayField("exit", pick(payload, ["exitCode", "code", "statusCode", "exit"])),
-            displayField("duration", formatDuration(payload)),
-          ]) : null,
-          shouldShowCommand ? codeDetail("COMMAND", command, "shell") : null,
-          codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", outputDetail || stderrDetail),
-        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:command", bucket: "command", unit: "条命令", count: 1 },
-      };
-    }
-    case "file_change": {
-      const changes = readFileChanges(payload);
-      const count = changes.length || 1;
-      return {
-        icon: "file-pen",
-        action: "修改",
-        object: fileChangeObject(changes, payload) || usefulObject(title, ["file change", "file changes"]),
-        preview: summary || fileChangePreview(changes, payload),
-        details: [
-          changes.length > 1 ? listDetail(changes.map((change) => `${change.kind} ${change.path}`)) : null,
-          errorOutputDetail(payload, status),
-        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:file_change", bucket: "file", unit: "个文件", count },
-      };
-    }
     case "mcp": {
       const target = [
         readFirstString(payload, ["server", "serverName", "mcpServer"], 200),
@@ -295,60 +223,6 @@ function buildByKind({ kind, status, title, summary, payload }: KindBuildInput):
           unit: "次 MCP",
           count: 1,
         },
-      };
-    }
-    case "subagent": {
-      const name =
-        readFirstString(
-          payload,
-          ["agentType", "subagentType", "agentName", "taskType", "name", "type"],
-          200,
-        ) || usefulObject(title, ["task", "agent"]);
-      const task = readFirstString(
-        payload,
-        ["taskDescription", "description", "task"],
-        1200,
-      );
-      const prompt = readFirstString(payload, ["prompt"], 6000);
-      const result = readFirstString(payload, ["result", "output", "summary"], 1200);
-      return {
-        icon: "bot",
-        action: "调用子代理",
-        object: name,
-        preview: summary || [name, task].filter(Boolean).join(": "),
-        details: [
-          markdownDetail(task, "default"),
-          !task && !result ? markdownDetail(prompt, "default") : null,
-          markdownDetail(result, "default"),
-        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:subagent", bucket: "subagent", unit: "个子代理", count: 1 },
-      };
-    }
-    case "plan": {
-      const plan = readFirstString(payload, ["plan", "content", "text"], 6000);
-      const revisionRequest = readFirstString(payload, ["revisionRequest"], 6000);
-      const approved = payload.approved;
-      const label = revisionRequest
-        ? "要求修改计划"
-        : approved === null
-          ? "等待确认计划"
-          : approved === true
-            ? "已确认计划"
-            : approved === false
-              ? "已取消计划"
-              : undefined;
-      return {
-        icon: "list-ordered",
-        action: "制定计划",
-        object: title,
-        label,
-        preview: summary || revisionRequest || plan,
-        defaultExpanded: approved === null ? true : undefined,
-        details: [
-          markdownDetail(plan || (revisionRequest ? "" : summary)),
-          markdownDetail(revisionRequest, "muted"),
-        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        group: { key: "kind:plan", bucket: "plan", unit: "项计划", count: 1 },
       };
     }
     case "error": {
@@ -571,42 +445,6 @@ function usefulObject(title: string, generic: string[]): string {
   if (!text) return "";
   const normalized = text.toLowerCase();
   return generic.map((g) => g.toLowerCase()).includes(normalized) ? "" : text;
-}
-
-function formatDuration(payload: Record<string, unknown>): string {
-  const raw = pickValue(payload, ["durationMs", "elapsedMs", "duration"]);
-  if (typeof raw === "number") {
-    return raw >= 1000 ? `${(raw / 1000).toFixed(1)}s` : `${raw}ms`;
-  }
-  return compactLine(raw, 80);
-}
-
-function todoPreview(items: ParsedTodoItem[]): string {
-  if (!items.length) return "";
-  const done = items.filter((item) => item.completed).length;
-  const next = items.find((item) => !item.completed)?.text ?? "";
-  return `${done}/${items.length} 已完成${next ? ` · ${next}` : ""}`;
-}
-
-function fileChangeObject(changes: ParsedFileChange[], payload: Record<string, unknown>): string {
-  if (changes.length) return changes[0].path;
-  return readFirstString(
-    payload,
-    ["path", "filePath", "relativePath", "targetPath", "name"],
-    600,
-  );
-}
-
-function fileChangePreview(changes: ParsedFileChange[], payload: Record<string, unknown>): string {
-  if (changes.length) {
-    const first = changes[0];
-    const suffix = changes.length > 1 ? ` 等 ${changes.length} 个文件` : "";
-    return `${first.kind} ${first.path}${suffix}`;
-  }
-  const path = fileChangeObject(changes, payload);
-  if (!path) return "";
-  const kind = readFirstString(payload, ["kind", "operation", "type", "status"], 80) || "update";
-  return `${kind} ${path}`;
 }
 
 function cleanDisplay(display: AgentTimelineDisplay | null): AgentTimelineDisplay | null {
