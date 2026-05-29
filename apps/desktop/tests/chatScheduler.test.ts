@@ -275,6 +275,72 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("AskUserQuestion 时间线折叠态显示提问标题，展开后显示用户选择", async () => {
+    const view = await renderTaskDetail();
+
+    await expectInitialReasoningHidden(view);
+
+    const askUserPayload = {
+      toolName: "AskUserQuestion",
+      questions: [
+        {
+          id: "q-1",
+          header: "方案",
+          question: "选哪个方案？",
+          options: [{ label: "方案 A" }, { label: "方案 B" }],
+        },
+      ],
+    };
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-ask-user-question",
+      kind: "ask_user",
+      status: "started",
+      title: "AskUserQuestion",
+      summary: "",
+      payload: askUserPayload,
+      order: 1,
+    });
+
+    await waitFor(() => {
+      const button = view.getByRole("button", { name: /正在提问/ });
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      const preview = button
+        .closest(".agent-timeline__head")
+        ?.querySelector(".agent-timeline__preview");
+      expect(preview?.textContent ?? "").toContain("方案 · 选哪个方案？");
+      expect(view.queryByText(/方案 B（备注：保留回滚入口）/)).toBeNull();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-ask-user-question",
+      kind: "ask_user",
+      status: "success",
+      title: "AskUserQuestion",
+      summary: "",
+      payload: {
+        ...askUserPayload,
+        output: JSON.stringify({
+          answers: { "选哪个方案？": "方案 B" },
+          annotations: { "选哪个方案？": { notes: "保留回滚入口" } },
+          cancelled: false,
+        }),
+      },
+      order: 1,
+    });
+
+    await waitFor(() => {
+      const button = view.getByRole("button", { name: /已提问/ });
+      expect(button).toHaveAttribute("aria-expanded", "false");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /已提问/ }));
+    await waitFor(() => {
+      expect(view.getByText("方案 · 选哪个方案？：方案 B（备注：保留回滚入口）"))
+        .toBeInTheDocument();
+    });
+  });
+
   it("过程事件默认显示为单行，点击后展开详情", async () => {
     const view = await renderTaskDetail();
 

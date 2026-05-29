@@ -41,6 +41,40 @@ function shortText(value, max) {
 
 const FILE_PATH_KEYS = ["file_path", "path"];
 
+function compactLine(value, max) {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function readAskUserQuestions(input) {
+  return (Array.isArray(input?.questions) ? input.questions : [])
+    .filter(isRecord);
+}
+
+function askUserQuestionTitle(question, index) {
+  const header = compactLine(question?.header, 40);
+  const text = compactLine(question?.question, 240);
+  if (header && text) return `${header} · ${text}`;
+  return text || header || `问题 ${index + 1}`;
+}
+
+function askUserPreview(questions) {
+  if (!questions.length) return "用户提问";
+  const title = askUserQuestionTitle(questions[0], 0);
+  if (questions.length <= 1) return title;
+  return `${title} 等 ${questions.length} 个问题`;
+}
+
+function normalizeAskUserQuestionTool(input) {
+  const questions = readAskUserQuestions(input);
+  return {
+    kind: "ask_user",
+    payload: { questions },
+    summary: shortText(askUserPreview(questions), 200),
+  };
+}
+
 /**
  * Claude 工具名 → lilia 协议规范化器。
  *
@@ -53,6 +87,9 @@ const FILE_PATH_KEYS = ["file_path", "path"];
  * 适配器只挑感兴趣的字段往 lilia payload 上拷。
  */
 export const CLAUDE_TO_LILIA = {
+  AskUserQuestion: normalizeAskUserQuestionTool,
+  ask_user_question: normalizeAskUserQuestionTool,
+  mcp__lilia__ask_user_question: normalizeAskUserQuestionTool,
   Bash: (input) => {
     const command = pickString(input, ["command"]);
     return {

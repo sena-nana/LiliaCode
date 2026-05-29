@@ -12,6 +12,7 @@
 // | subagent      | agentType      | description / prompt / result                 | —                   |
 // | plan          | plan           | —                                             | —                   |
 // | todo_list     | items[]        | —                                             | —                   |
+// | ask_user      | questions[]    | output / result / cancelled                   | —                   |
 // | tool          | toolName       | input / output                                | —（兜底）           |
 //
 // 派生 display 走 `deriveLiliaToolDisplay({kind, subkind, payload, ...})` —— 渲染时
@@ -162,6 +163,102 @@ export function readTodoItems(payload) {
       };
     })
     .filter((item) => item !== null);
+}
+
+function readAskUserQuestions(payload) {
+  const nestedInput = readRecord(payload.input);
+  const raw =
+    (Array.isArray(payload.questions) && payload.questions) ||
+    (Array.isArray(nestedInput.questions) && nestedInput.questions) ||
+    [];
+  return raw
+    .map((question) => isRecord(question) ? question : null)
+    .filter((question) => question !== null);
+}
+
+function askUserQuestionTitle(question, index) {
+  const header = compactLine(pick(question, ["header"]), 40);
+  const text = compactLine(pick(question, ["question", "title", "text"]), 1200);
+  if (header && text) return `${header} · ${text}`;
+  return text || header || `问题 ${index + 1}`;
+}
+
+function askUserPreviewFromQuestions(questions) {
+  if (!questions.length) return "用户提问";
+  const title = askUserQuestionTitle(questions[0], 0);
+  return questions.length > 1 ? `${title} 等 ${questions.length} 个问题` : title;
+}
+
+function parseRecordJson(value) {
+  if (isRecord(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readAskUserResult(payload) {
+  for (const key of ["result", "structuredContent", "output"]) {
+    const result = parseRecordJson(payload[key]);
+    if (result) return result;
+  }
+  return {};
+}
+
+function findAskUserQuestion(questions, key, fallbackIndex) {
+  const matchedIndex = questions.findIndex((question, index) => {
+    const id = compactLine(pick(question, ["id"]), 120);
+    const text = compactLine(pick(question, ["question", "title", "text"]), 1200);
+    return key === id || key === text || key === askUserQuestionTitle(question, index);
+  });
+  const index = matchedIndex >= 0 ? matchedIndex : fallbackIndex;
+  return questions[index] ? { question: questions[index], index } : null;
+}
+
+function formatAskUserAnswerValue(answer) {
+  const answerRecord = readRecord(answer);
+  if (answerRecord.skipped === true) return "已跳过";
+  const value = answerRecord.value !== undefined ? answerRecord.value : answer;
+  const valueText = Array.isArray(value)
+    ? value.map((item) => compactLine(item, 1200)).filter(Boolean).join("、")
+    : compactLine(value, 1200);
+  const noteText = compactLine(pick(answerRecord, ["notes"]), 1200);
+  if (valueText === "other" && noteText) return noteText;
+  return noteText && valueText && !valueText.includes(noteText)
+    ? `${valueText}（备注：${noteText}）`
+    : valueText || noteText;
+}
+
+function askUserAnswerItems(payload) {
+  const result = readAskUserResult(payload);
+  const answers = readRecord(result.answers);
+  const annotations = readRecord(result.annotations);
+  const questions = readAskUserQuestions(payload);
+
+  return Object.entries(answers)
+    .map(([key, answer], index) => {
+      const questionEntry = findAskUserQuestion(questions, key, index);
+      const question = questionEntry?.question ?? {};
+      const title = questionEntry
+        ? askUserQuestionTitle(question, questionEntry.index)
+        : compactLine(key, 1200) || `问题 ${index + 1}`;
+      const annotation = readRecord(annotations[key]);
+      const valueText = formatAskUserAnswerValue(answer);
+      const noteText = compactLine(pick(annotation, ["notes"]), 1200);
+      const answerText = noteText && valueText && !valueText.includes(noteText)
+        ? `${valueText}（备注：${noteText}）`
+        : valueText || noteText;
+      return answerText ? `${title}：${answerText}` : title;
+    })
+    .filter(Boolean);
+}
+
+function askUserCancelled(payload) {
+  const result = readAskUserResult(payload);
+  return payload.cancelled === true || result.cancelled === true;
 }
 
 const LILIA_TOOL_REGISTRY = {
@@ -373,6 +470,36 @@ const LILIA_TOOL_REGISTRY = {
       },
     },
   },
+  ask_user: {
+    default: {
+      action: "提问",
+      icon: "circle-help",
+      bucket: "ask_user",
+      unit: "个问题",
+      build(payload) {
+        const questions = readAskUserQuestions(payload);
+        const preview = askUserPreviewFromQuestions(questions);
+        const answers = askUserAnswerItems(payload);
+        const questionItems = questions.map((question, index) =>
+          askUserQuestionTitle(question, index)
+        );
+        const result = readAskUserResult(payload);
+        const hasResult = Object.keys(result).length > 0;
+        return {
+          object: preview,
+          preview,
+          count: Math.max(1, questions.length),
+          details: [
+            answers.length ? listDetail(answers, true) : listDetail(questionItems, true),
+            askUserCancelled(payload)
+              ? markdownDetail("用户取消了提问。", "muted", true)
+              : null,
+            hasResult ? null : codeDetail("OUTPUT", pick(payload, ["output"])),
+          ],
+        };
+      },
+    },
+  },
   tool: {
     default: {
       action: "调用工具",
@@ -414,6 +541,9 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
     ? built.details.filter((d) => d !== null && d !== undefined)
     : [];
   const groupKey = subkind ? `${kind}:${subkind}` : `kind:${kind}`;
+  const count = typeof built.count === "number" && Number.isFinite(built.count) && built.count > 0
+    ? built.count
+    : 1;
   return {
     icon: rule.icon,
     action: rule.action,
@@ -425,7 +555,7 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title }) {
       key: groupKey,
       bucket: rule.bucket,
       unit: rule.unit,
-      count: 1,
+      count,
     },
   };
 }

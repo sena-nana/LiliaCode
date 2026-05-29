@@ -792,6 +792,16 @@ function emitClaudeToolTimeline(block, msg, ctx) {
   });
 }
 
+function isAskUserCancelledOutput(text) {
+  if (!text || typeof text !== "string") return false;
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) && parsed.cancelled === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Claude SDK 把工具结果放在「user」消息的 tool_result 块里，自带
  * `tool_use_id` 关联到原 tool_use。这里按相同 sourceId upsert 一条终态事件，
@@ -819,7 +829,8 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   // lilia 协议从 payload 派生（command → command 文本，file_read → path…），输出
   // 用 payload.output 留给展开态的 OUTPUT 代码块。错误信息仍保留进 summary，
   // 折叠预览能直接看到失败原因。
-  const summary = isError ? shortText(text, 400) || "" : "";
+  const askUserCancelled = kind === "ask_user" && isAskUserCancelledOutput(text);
+  const summary = isError && !askUserCancelled ? shortText(text, 400) || "" : "";
   const payload = {
     backend: "claude",
     toolName: name,
@@ -831,7 +842,7 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   if (subkind) payload.subkind = subkind;
   emitTimeline({
     kind,
-    status: isError ? "error" : "success",
+    status: askUserCancelled ? "cancelled" : isError ? "error" : "success",
     title: name,
     summary,
     payload,
