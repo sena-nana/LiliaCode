@@ -29,6 +29,13 @@ function markdownContents(
     .map((item) => item.type === "markdown" ? item.content : "") ?? [];
 }
 
+function listItems(
+  details: ReturnType<typeof deriveTimelineDisplay>["details"],
+): string[] {
+  const detail = details?.find((item) => item.type === "list");
+  return detail?.type === "list" ? detail.items.map((item) => item.text) : [];
+}
+
 describe("timeline display derivation", () => {
   it("命令输出详情保留原始分行", () => {
     const display = deriveTimelineDisplay({
@@ -325,6 +332,122 @@ describe("timeline display derivation", () => {
     expect(codeContent(readDisplay.details, "ERROR / OUTPUT")).toBe("File not found");
     expect(codeContent(searchDisplay.details, "ERROR / OUTPUT")).toBe("grep failed");
   });
+
+  it("项目内文件路径在展示态缩短为相对路径", () => {
+    const display = deriveTimelineDisplay({
+      kind: "file_read",
+      status: "success",
+      title: "Read",
+      summary: "C:\\Files\\workspace\\Lilia\\apps\\desktop\\src\\App.vue",
+      payload: {
+        path: "C:\\Files\\workspace\\Lilia\\apps\\desktop\\src\\App.vue",
+      },
+      projectCwd: "c:\\files\\workspace\\lilia",
+    });
+
+    expect(display.object).toBe("apps/desktop/src/App.vue");
+    expect(display.preview).toBe("apps/desktop/src/App.vue");
+  });
+
+  it("项目外路径、相似前缀路径和已有相对路径不被改写", () => {
+    const outsideDisplay = deriveTimelineDisplay({
+      kind: "file_read",
+      status: "success",
+      title: "Read",
+      summary: "C:\\Files\\workspace\\Other\\src\\App.vue",
+      payload: { path: "C:\\Files\\workspace\\Other\\src\\App.vue" },
+      projectCwd: "c:\\files\\workspace\\lilia",
+    });
+    const prefixDisplay = deriveTimelineDisplay({
+      kind: "file_read",
+      status: "success",
+      title: "Read",
+      summary: "C:\\Files\\workspace\\LiliaNext\\src\\App.vue",
+      payload: { path: "C:\\Files\\workspace\\LiliaNext\\src\\App.vue" },
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+    });
+    const relativeDisplay = deriveTimelineDisplay({
+      kind: "file_read",
+      status: "success",
+      title: "Read",
+      summary: "src/App.vue",
+      payload: { path: "src/App.vue" },
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+    });
+
+    expect(outsideDisplay.preview).toBe("C:\\Files\\workspace\\Other\\src\\App.vue");
+    expect(prefixDisplay.preview).toBe("C:\\Files\\workspace\\LiliaNext\\src\\App.vue");
+    expect(relativeDisplay.preview).toBe("src/App.vue");
+  });
+
+  it("多文件修改详情列表显示项目相对路径", () => {
+    const display = deriveTimelineDisplay({
+      kind: "file_change",
+      status: "success",
+      title: "MultiEdit",
+      summary: "",
+      payload: {
+        changes: [
+          { kind: "edit", path: "C:/Files/workspace/Lilia/packages/contracts/src/index.ts" },
+          { kind: "edit", path: "C:/Files/workspace/Lilia/apps/desktop/src/App.vue" },
+        ],
+      },
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+    });
+
+    expect(display.object).toBe("packages/contracts/src/index.ts");
+    expect(display.preview).toBe("packages/contracts/src/index.ts");
+    expect(listItems(display.details)).toEqual([
+      "edit packages/contracts/src/index.ts",
+      "edit apps/desktop/src/App.vue",
+    ]);
+  });
+
+  it("path 和 cwd 字段详情显示项目相对路径", () => {
+    const errorDisplay = deriveTimelineDisplay({
+      kind: "error",
+      status: "error",
+      title: "错误",
+      summary: "读取失败",
+      payload: {
+        path: "C:\\Files\\workspace\\Lilia\\packages\\contracts\\src\\index.ts",
+      },
+      projectCwd: "c:\\files\\workspace\\lilia",
+    });
+    const commandDisplay = deriveTimelineDisplay({
+      kind: "command",
+      status: "error",
+      title: "pwd",
+      summary: "failed",
+      payload: {
+        command: "pwd",
+        cwd: "C:\\Files\\workspace\\Lilia",
+        exitCode: 1,
+        stderr: "failed",
+      },
+      projectCwd: "c:\\files\\workspace\\lilia",
+    });
+
+    expect(fieldValue(errorDisplay.details, "path")).toBe("packages/contracts/src/index.ts");
+    expect(fieldValue(commandDisplay.details, "cwd")).toBe(".");
+  });
+
+  it("命令代码块不改写项目内路径", () => {
+    const command = "Get-Content -LiteralPath 'C:\\Files\\workspace\\Lilia\\package.json'";
+    const display = deriveTimelineDisplay({
+      kind: "command",
+      status: "success",
+      title: command,
+      summary: "",
+      payload: {
+        command,
+        output: "ok",
+      },
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+    });
+
+    expect(codeContent(display.details, "COMMAND")).toBe(command);
+  });
 });
 
 function timelineEvent(
@@ -464,5 +587,30 @@ describe("timeline event expansion", () => {
     await fireEvent.click(longView.getByRole("button", { name: `已运行 ${longCommand}` }));
     expect(longView.getByText("COMMAND")).toBeInTheDocument();
     expect(longView.getByText(longCommand)).toBeInTheDocument();
+  });
+
+  it("传入项目路径后折叠态显示相对路径", async () => {
+    const view = render(AgentTimeline, {
+      props: {
+        projectCwd: "C:\\Files\\workspace\\Lilia",
+        events: [
+          timelineEvent({
+            id: "read-absolute",
+            kind: "file_read",
+            title: "Read",
+            summary: "C:\\Files\\workspace\\Lilia\\apps\\desktop\\src\\App.vue",
+            payload: {
+              path: "C:\\Files\\workspace\\Lilia\\apps\\desktop\\src\\App.vue",
+            },
+          }),
+        ],
+      },
+    });
+
+    expect(view.getByRole("button", { name: "已读取 apps/desktop/src/App.vue" }))
+      .toBeInTheDocument();
+    expect(view.getByText("apps/desktop/src/App.vue")).toBeInTheDocument();
+    expect(view.queryByText("C:\\Files\\workspace\\Lilia\\apps\\desktop\\src\\App.vue"))
+      .not.toBeInTheDocument();
   });
 });

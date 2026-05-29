@@ -24,6 +24,10 @@ interface TimelineDeclaredGroupUnit {
   unit: string | null;
 }
 
+export interface TimelineDisplayContext {
+  projectCwd?: string | null;
+}
+
 const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
   "pending",
   "started",
@@ -47,13 +51,17 @@ export function readTimelinePayloadRecord(
  * 不读 DB 上的旧 `display` 列，也不允许任何 caller 自己拼。换 display 规则
  * 时历史事件自动跟着变 —— 这是把 display 移出 DB 的全部动机。
  */
-export function readTimelineDisplay(event: DisplayDerivableEvent): AgentTimelineDisplay {
+export function readTimelineDisplay(
+  event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
+): AgentTimelineDisplay {
   return deriveTimelineDisplay({
     kind: event.kind,
     status: event.status,
     title: event.title,
     summary: event.summary,
     payload: event.payload,
+    projectCwd: context.projectCwd,
   });
 }
 
@@ -97,8 +105,9 @@ export function isTimelineFinalReplyStreaming(
 
 function timelineDefaultExpanded(
   event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
 ): boolean {
-  const display = readTimelineDisplay(event);
+  const display = readTimelineDisplay(event, context);
   if (typeof display?.defaultExpanded === "boolean") return display.defaultExpanded;
   return isTimelineFinalReply(event);
 }
@@ -106,14 +115,18 @@ function timelineDefaultExpanded(
 export function isTimelineExpanded(
   event: DisplayDerivableEvent & Pick<AgentTimelineEvent, "id">,
   toggledIds: ReadonlySet<string>,
+  context: TimelineDisplayContext = {},
 ): boolean {
-  const defaultExpanded = timelineDefaultExpanded(event);
+  const defaultExpanded = timelineDefaultExpanded(event, context);
   return toggledIds.has(event.id) ? !defaultExpanded : defaultExpanded;
 }
 
-export function timelineCanExpand(event: DisplayDerivableEvent): boolean {
+export function timelineCanExpand(
+  event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
+): boolean {
   if (isTimelineFinalReply(event)) return true;
-  const details = readTimelineDisplay(event).details ?? [];
+  const details = readTimelineDisplay(event, context).details ?? [];
   return details.length > 0;
 }
 
@@ -135,8 +148,11 @@ export function pruneTimelineExpandedIds(
   return new Set([...toggledIds].filter((id) => currentIds.has(id)));
 }
 
-export function timelineEventLabel(event: DisplayDerivableEvent): string {
-  const display = readTimelineDisplay(event);
+export function timelineEventLabel(
+  event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
+): string {
+  const display = readTimelineDisplay(event, context);
   const label = display.label?.trim();
   if (label) return label;
   const action = display.action?.trim();
@@ -172,8 +188,9 @@ export function timelineGroupLabel(
   representative: DisplayDerivableEvent,
   count: number,
   status: AgentTimelineEventStatus,
+  context: TimelineDisplayContext = {},
 ): string {
-  const display = readTimelineDisplay(representative);
+  const display = readTimelineDisplay(representative, context);
   const group = display.group;
   if (group?.key) {
     const unit = group.unit?.trim() || "项";
@@ -186,8 +203,11 @@ export function timelineGroupLabel(
   return `事件 ${count} 项`;
 }
 
-export function timelineDisplayIcon(event: DisplayDerivableEvent): string | null {
-  return readTimelineDisplay(event).icon ?? null;
+export function timelineDisplayIcon(
+  event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
+): string | null {
+  return readTimelineDisplay(event, context).icon ?? null;
 }
 
 export function timelineDeclaredGroupUnit(
@@ -233,9 +253,12 @@ function formatTimelineActionLabel(
   }
 }
 
-export function timelineInlinePreview(event: DisplayDerivableEvent): string {
+export function timelineInlinePreview(
+  event: DisplayDerivableEvent,
+  context: TimelineDisplayContext = {},
+): string {
   if (isTimelineFinalReply(event)) return "";
-  const display = readTimelineDisplay(event);
+  const display = readTimelineDisplay(event, context);
   const declaredPreview = display.preview?.trim();
   if (declaredPreview) return truncateTimelineText(toSingleLineText(declaredPreview), 180);
   return "";

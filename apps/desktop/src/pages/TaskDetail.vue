@@ -445,6 +445,7 @@ watch(
         :timeline-events="timelineEvents"
         :empty-headline="emptyHeadline"
         :is-thinking="isTurnRunning"
+        :project-cwd="project?.cwd ?? null"
       >
         <template #controls>
           <div class="chat-controls">

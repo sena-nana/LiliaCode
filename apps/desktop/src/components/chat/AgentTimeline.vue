@@ -31,6 +31,7 @@ type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean }
 const props = defineProps<{
   events: AgentTimelineEvent[];
   isThinking?: boolean;
+  projectCwd?: string | null;
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -124,7 +125,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
   for (const event of visibleEvents.value) {
-    cache.set(event.id, timelineInlinePreview(event));
+    cache.set(event.id, timelineInlinePreview(event, { projectCwd: props.projectCwd }));
   }
   return cache;
 });
@@ -166,7 +167,7 @@ watch(
 );
 
 function expanded(event: AgentTimelineEvent): boolean {
-  return isTimelineExpanded(event, toggledIds.value);
+  return isTimelineExpanded(event, toggledIds.value, { projectCwd: props.projectCwd });
 }
 
 function toggleEvent(event: AgentTimelineEvent) {
@@ -367,6 +368,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           :process-group-running="processGroupRunning"
           :process-entries-for="processGroupEntries"
           :preview-text="previewText"
+          :project-cwd="projectCwd"
           @toggle-event="toggleEvent"
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"

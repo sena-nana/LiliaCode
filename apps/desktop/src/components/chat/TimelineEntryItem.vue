@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
@@ -13,6 +14,7 @@ import {
   timelineDisplayIcon,
   timelineEventLabel,
   timelineGroupLabel,
+  type TimelineDisplayContext,
 } from "./timelineDisplay";
 
 const props = defineProps<{
@@ -24,6 +26,7 @@ const props = defineProps<{
   processGroupRunning: (entry: TimelineEventEntry) => boolean;
   processEntriesFor: (entry: TimelineEventEntry) => TimelineEntry[];
   previewText: (event: AgentTimelineEvent) => string;
+  projectCwd?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -32,12 +35,14 @@ const emit = defineEmits<{
   toggleProcessGroup: [event: AgentTimelineEvent];
 }>();
 
+const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
+
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
   return event.kind === "message";
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return timelineCanExpand(event);
+  return timelineCanExpand(event, displayContext.value);
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
@@ -53,17 +58,27 @@ function shouldShowNodeIcon(entry: TimelineEventEntry): boolean {
 }
 
 function titleAriaLabel(event: AgentTimelineEvent): string {
-  const label = timelineEventLabel(event);
-  const object = readTimelineDisplay(event).object?.trim() ?? "";
+  const context = displayContext.value;
+  const label = timelineEventLabel(event, context);
+  const object = readTimelineDisplay(event, context).object?.trim() ?? "";
   return object ? `${label} ${object}` : label;
 }
 
 function groupLabelText(entry: TimelineGroupEntry): string {
-  return timelineGroupLabel(entry.representative, entry.groupCount, entry.aggregatedStatus);
+  return timelineGroupLabel(
+    entry.representative,
+    entry.groupCount,
+    entry.aggregatedStatus,
+    displayContext.value,
+  );
 }
 
 function nodeIcon(event: AgentTimelineEvent) {
-  return timelineDisplayIcon(event);
+  return timelineDisplayIcon(event, displayContext.value);
+}
+
+function labelText(event: AgentTimelineEvent): string {
+  return timelineEventLabel(event, displayContext.value);
 }
 
 function statusClass(status: AgentTimelineEventStatus): string {
@@ -142,7 +157,7 @@ function kindClass(prefix: string, kind: string): string {
                   @click="emit('toggleEvent', event)"
                 >
                   <span :id="`agent-timeline-title-${event.id}`">
-                    {{ timelineEventLabel(event) }}
+                    {{ labelText(event) }}
                   </span>
                   <component
                     v-if="canToggle(event)"
@@ -170,6 +185,7 @@ function kindClass(prefix: string, kind: string): string {
                   :event="event"
                   :expanded="expanded(event)"
                   :compact="isCompact(event)"
+                  :project-cwd="projectCwd"
                 />
               </div>
             </article>
@@ -220,7 +236,7 @@ function kindClass(prefix: string, kind: string): string {
             @click="emit('toggleEvent', entry.event)"
           >
             <span :id="`agent-timeline-title-${entry.event.id}`">
-              {{ timelineEventLabel(entry.event) }}
+              {{ labelText(entry.event) }}
             </span>
             <component
               v-if="canToggle(entry.event)"
@@ -271,6 +287,7 @@ function kindClass(prefix: string, kind: string): string {
               :process-group-running="processGroupRunning"
               :process-entries-for="processEntriesFor"
               :preview-text="previewText"
+              :project-cwd="projectCwd"
               @toggle-event="emit('toggleEvent', $event)"
               @toggle-group="emit('toggleGroup', $event)"
               @toggle-process-group="emit('toggleProcessGroup', $event)"
@@ -293,6 +310,7 @@ function kindClass(prefix: string, kind: string): string {
             :event="entry.event"
             :expanded="expanded(entry.event)"
             :compact="isCompact(entry.event)"
+            :project-cwd="projectCwd"
           />
         </div>
       </div>
