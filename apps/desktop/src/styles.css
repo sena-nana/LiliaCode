@@ -1075,12 +1075,6 @@ pre code {
   filter: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .view-tabs-zone {
-    transition: none;
-  }
-}
-
 /* ---------------- Titlebar ---------------- *
  * 横通栏 36px。[面包屑] [drag spacer] [窗控按钮]。 */
 
@@ -1179,7 +1173,6 @@ pre code {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-
 .titlebar__btn:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -1201,13 +1194,6 @@ pre code {
 .tb-crumbs-enter-from,
 .tb-crumbs-leave-to {
   opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tb-crumbs-enter-active,
-  .tb-crumbs-leave-active {
-    transition: none;
-  }
 }
 
 /* ---------------- 通用 ---------------- */
@@ -3412,8 +3398,8 @@ button.ghost:hover {
 .chat-composer__input {
   /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;
-  min-height: 22px;
-  max-height: 176px;
+  min-height: 30px;
+  max-height: 74px;
   padding: 4px 6px;
   background: transparent;
   border: 0;
@@ -3425,6 +3411,19 @@ button.ghost:hover {
   resize: none;
   overflow-y: hidden;
   transition: height 0.16s ease;
+}
+
+.chat-composer__input-measure {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  height: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: -1;
 }
 
 .chat-composer__input::placeholder {
@@ -3504,11 +3503,6 @@ button.ghost:hover {
 }
 
 .chat-composer__entry-row .chat-composer__input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.chat-composer__input--pending {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -4076,19 +4070,6 @@ button.ghost:hover {
   transform: translateY(0);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-composer__input,
-  .chat-composer-pending-panel-enter-active,
-  .chat-composer-pending-panel-leave-active,
-  .chat-composer-entry-actions-enter-active,
-  .chat-composer-entry-actions-leave-active,
-  .chat-composer-stack-enter-active,
-  .chat-composer-stack-leave-active {
-    transition: none;
-    will-change: auto;
-  }
-}
-
 @media (max-width: 720px) {
   .chat-composer__entry-row {
     flex-wrap: wrap;
@@ -4619,19 +4600,6 @@ button.ghost:hover {
 .search-palette-leave-to .search-palette__card {
   opacity: 0;
   transform: translateY(-8px) scale(0.98);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .search-palette-enter-active,
-  .search-palette-leave-active,
-  .search-palette-enter-active .search-palette__card,
-  .search-palette-leave-active .search-palette__card {
-    transition: none;
-  }
-  .search-palette-enter-from .search-palette__card,
-  .search-palette-leave-to .search-palette__card {
-    transform: none;
-  }
 }
 
 /* ================ 插件 / 技能管理 ================ */

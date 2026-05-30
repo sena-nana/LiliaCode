@@ -32,10 +32,6 @@ describe("ask user prompt styles", () => {
     const stackTransition = selectorIndex(".chat-composer-stack-enter-active,");
     const stackFrom = selectorIndex(".chat-composer-stack-enter-from,");
     const stackTo = selectorIndex(".chat-composer-stack-enter-to,");
-    const reducedPanelTransition = selectorIndex(
-      ".chat-composer-pending-panel-enter-active,",
-      panelTransition + 1,
-    );
 
     expect(input).toBeGreaterThan(-1);
     expect(prompt).toBeGreaterThan(-1);
@@ -55,14 +51,15 @@ describe("ask user prompt styles", () => {
     expect(stackTransition).toBeGreaterThan(entryActionsTo);
     expect(stackFrom).toBeGreaterThan(stackTransition);
     expect(stackTo).toBeGreaterThan(stackFrom);
-    expect(reducedPanelTransition).toBeGreaterThan(stackTo);
 
+    expect(styles).not.toContain("prefers-reduced-motion");
     expect(styles).not.toContain(".search-palette.ask-user");
     expect(styles).not.toContain(".ask-user {");
     expect(styles).not.toContain(".composer-inline__card");
     expect(styles).not.toContain(".chat-composer__mode");
     expect(styles).not.toContain(".chat-composer-mode");
     expect(styles).not.toContain(".chat-composer-inline-enter-active");
+    expect(ruleTextAt(input)).toContain("max-height: 74px");
     expect(ruleTextAt(input)).toContain("transition: height 0.16s");
     expect(ruleTextAt(panelInner)).toContain("overflow: hidden");
     expect(ruleTextAt(panel)).toContain("display: grid");
@@ -90,10 +87,6 @@ describe("ask user prompt styles", () => {
     expect(ruleTextAt(stackTransition)).toContain("opacity 0.18s");
     expect(ruleTextAt(stackFrom)).toContain("max-height: 0");
     expect(ruleTextAt(stackTo)).toContain("max-height: 260px");
-    expect(ruleTextAt(reducedPanelTransition)).toContain("transition: none");
-    expect(ruleTextAt(reducedPanelTransition)).toContain("will-change: auto");
-    expect(ruleTextAt(reducedPanelTransition)).toContain(".chat-composer-entry-actions-enter-active");
-    expect(ruleTextAt(reducedPanelTransition)).toContain(".chat-composer-stack-enter-active");
   });
 
   it("计划确认扩展压缩为单行，为时间线计划正文留空间", () => {

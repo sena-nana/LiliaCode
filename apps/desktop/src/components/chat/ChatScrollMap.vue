@@ -6,7 +6,6 @@ import BaseScrollMap from "./BaseScrollMap.vue";
 import {
   clamp,
   markerTopForElement,
-  prefersReducedMotion,
   type ScrollMapGeometry,
   type ScrollMapMetrics,
 } from "./useScrollMap";
@@ -240,7 +239,7 @@ function jumpTo(marker: ScrollMarker, scrollTo: (top: number, behavior: ScrollBe
   const scrollerRect = scroller.getBoundingClientRect();
   const anchorRect = anchor.getBoundingClientRect();
   const targetTop = anchorRect.top - scrollerRect.top + scroller.scrollTop - SCROLL_TARGET_OFFSET;
-  scrollTo(targetTop, prefersReducedMotion() ? "auto" : "smooth");
+  scrollTo(targetTop, "smooth");
 }
 
 defineExpose({ show });
