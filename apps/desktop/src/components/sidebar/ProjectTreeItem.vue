@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Folder,
@@ -13,7 +13,7 @@ import {
   Code2,
   Pin,
 } from "lucide-vue-next";
-import type { Project } from "@lilia/contracts";
+import type { Project, Task } from "@lilia/contracts";
 import { vContextMenu } from "../../directives/contextMenu";
 import {
   openContextMenuAt,
@@ -50,12 +50,15 @@ interface TreeDropMarker {
   valid: boolean;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   project: Project;
   isExpanded: boolean;
   dragSource?: TreeDragMarker | null;
   dropTarget?: TreeDropMarker | null;
-}>();
+  treeActivityToken?: number;
+}>(), {
+  treeActivityToken: 0,
+});
 
 const emit = defineEmits<{
   toggle: [projectId: string];
@@ -68,11 +71,107 @@ const emit = defineEmits<{
 const route = useRoute();
 const router = useRouter();
 
+const PROJECT_CONVERSATION_COLLAPSE_LIMIT = 4;
+const PROJECT_CONVERSATION_IDLE_MS = 30_000;
+
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 
 const confirmingId = ref<string | null>(null);
+const overflowExpanded = ref(false);
+let overflowCollapseTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+const projectConversations = computed(() =>
+  listProjectConversations(props.project.id)
+);
+
+const activeTaskId = computed(() => {
+  const taskId = route.params.taskId;
+  return String(route.params.projectId ?? "") === props.project.id &&
+    typeof taskId === "string"
+    ? taskId
+    : null;
+});
+
+function collapsedConversations(conversations: Task[]): Task[] {
+  if (conversations.length <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
+    return conversations;
+  }
+  const first = conversations.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT);
+  const activeId = activeTaskId.value;
+  if (!activeId || first.some((conversation) => conversation.id === activeId)) {
+    return first;
+  }
+  const active = conversations.find((conversation) => conversation.id === activeId);
+  if (!active) return first;
+  return [
+    ...first.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT - 1),
+    active,
+  ];
+}
+
+const visibleProjectConversations = computed(() =>
+  overflowExpanded.value
+    ? projectConversations.value
+    : collapsedConversations(projectConversations.value)
+);
+
+const showConversationOverflow = computed(() =>
+  !overflowExpanded.value &&
+  visibleProjectConversations.value.length < projectConversations.value.length
+);
+
+function clearOverflowCollapseTimer() {
+  if (overflowCollapseTimer === null) return;
+  window.clearTimeout(overflowCollapseTimer);
+  overflowCollapseTimer = null;
+}
+
+function collapseConversationOverflow() {
+  overflowExpanded.value = false;
+  clearOverflowCollapseTimer();
+}
+
+function scheduleOverflowCollapse() {
+  clearOverflowCollapseTimer();
+  if (!overflowExpanded.value || !props.isExpanded) return;
+  overflowCollapseTimer = window.setTimeout(() => {
+    collapseConversationOverflow();
+  }, PROJECT_CONVERSATION_IDLE_MS);
+}
+
+function revealConversationOverflow() {
+  overflowExpanded.value = true;
+  scheduleOverflowCollapse();
+}
+
+watch(
+  () => props.treeActivityToken,
+  scheduleOverflowCollapse,
+);
+
+watch(
+  () => props.isExpanded,
+  (isExpanded) => {
+    if (!isExpanded) {
+      collapseConversationOverflow();
+    }
+  },
+);
+
+watch(
+  () => projectConversations.value.length,
+  (conversationCount) => {
+    if (conversationCount <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
+      collapseConversationOverflow();
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  clearOverflowCollapseTimer();
+});
 
 async function onArchiveClick(e: MouseEvent, taskId: string) {
   e.preventDefault();
@@ -353,7 +452,7 @@ function onMoreClick(e: MouseEvent) {
 
     <div class="sb-collapse" :class="{ 'is-open': isExpanded }" :aria-hidden="!isExpanded">
       <div class="sb-collapse__inner">
-        <RouterLink v-for="c in listProjectConversations(project.id)" :key="c.id"
+        <RouterLink v-for="c in visibleProjectConversations" :key="c.id"
           :to="`/projects/${project.id}/tasks/${c.id}`" class="sb-tree__row sb-tree__row--child"
           :class="[
             { 'is-active': isActiveTask(c.id) },
@@ -383,7 +482,17 @@ function onMoreClick(e: MouseEvent) {
             </button>
           </div>
         </RouterLink>
-        <p v-if="listProjectConversations(project.id).length === 0" class="sb-tree__empty">
+        <button
+          v-if="showConversationOverflow"
+          type="button"
+          class="sb-tree__row sb-tree__row--child sb-tree__row--more"
+          title="显示剩余对话"
+          aria-label="显示剩余对话"
+          @click="revealConversationOverflow"
+        >
+          ...
+        </button>
+        <p v-if="projectConversations.length === 0" class="sb-tree__empty">
           还没有对话
         </p>
       </div>

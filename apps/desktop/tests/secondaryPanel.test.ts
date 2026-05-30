@@ -1,12 +1,13 @@
 import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
+import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
+import { allTasksReady, TASKS } from "../src/data/tasks";
 import { mockInvoke, setMockProjectPinned } from "./tauriMock";
 
 function seedTreeExpansionState(state: unknown) {
@@ -64,6 +65,29 @@ function box(top: number, bottom: number): DOMRect {
   } as DOMRect;
 }
 
+function projectConversation(id: string, title: string, index: number): Task {
+  return {
+    id,
+    projectId: "lilia",
+    sessionId: `session-${id}`,
+    title,
+    status: "done",
+    createdAt: 1000 + index,
+    pinned: false,
+    parentId: null,
+    dependsOn: [],
+  };
+}
+
+function seedSecondaryPanelOverflowConversations() {
+  TASKS.value = {
+    ...TASKS.value,
+    lilia: Array.from({ length: 6 }, (_, index) =>
+      projectConversation(`t-overflow-${index + 1}`, `溢出对话 ${index + 1}`, index)
+    ),
+  };
+}
+
 async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: number) {
   await fireEvent.pointerDown(source, {
     button: 0,
@@ -82,6 +106,10 @@ async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: num
     clientY: targetY,
   });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("SecondaryPanel project tree expansion", () => {
   beforeEach(async () => {
@@ -170,6 +198,45 @@ describe("SecondaryPanel project tree expansion", () => {
     expect(parsed.projects?.lilia).toBe(false);
     expect(parsed.projects?.tools).toBe(false);
     expect(Object.values(parsed.projects ?? {}).some(Boolean)).toBe(true);
+  });
+});
+
+describe("SecondaryPanel project conversation overflow activity", () => {
+  beforeEach(async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    localStorage.clear();
+  });
+
+  it("项目树交互会刷新已展开剩余对话的自动折叠计时，侧栏非树操作不会", async () => {
+    seedSecondaryPanelOverflowConversations();
+    const view = await renderSecondaryPanel();
+    vi.useFakeTimers();
+
+    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
+    expect(view.getByText("溢出对话 5")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    await fireEvent.pointerMove(getProjectRow(view, "Lilia"), {
+      pointerId: 1,
+      clientY: 24,
+    });
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(view.getByText("溢出对话 5")).toBeInTheDocument();
+
+    const panel = view.container.querySelector(".secondary-panel");
+    if (!(panel instanceof HTMLElement)) {
+      throw new Error("未找到侧边栏");
+    }
+    panel.getBoundingClientRect = () => box(100, 500);
+    await fireEvent.pointerMove(panel, {
+      pointerId: 1,
+      clientY: 400,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await nextTick();
+    expect(view.queryByText("溢出对话 5")).not.toBeInTheDocument();
   });
 });
 

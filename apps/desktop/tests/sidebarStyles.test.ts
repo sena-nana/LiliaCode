@@ -41,4 +41,13 @@ describe("sidebar project tree styles", () => {
     expect(orphanRow).toContain("padding-left: 8px");
     expect(orphanRow).not.toContain("--sb-project-text-start");
   });
+
+  it("项目对话折叠省略行重置按钮外观", () => {
+    const moreRow = rule(".sb-tree__row--more {");
+
+    expect(moreRow).toContain("border: 0");
+    expect(moreRow).toContain("appearance: none");
+    expect(moreRow).toContain("background: transparent");
+    expect(moreRow).toContain("text-align: left");
+  });
 });

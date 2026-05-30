@@ -1,10 +1,35 @@
 import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { describe, expect, it } from "vitest";
-import { defineComponent } from "vue";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, nextTick } from "vue";
+import type { Task } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
+import { TASKS } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
+
+function projectConversation(id: string, title: string, index: number): Task {
+  return {
+    id,
+    projectId: "lilia",
+    sessionId: `session-${id}`,
+    title,
+    status: "done",
+    createdAt: 1000 + index,
+    pinned: false,
+    parentId: null,
+    dependsOn: [],
+  };
+}
+
+function seedProjectConversations(count: number) {
+  TASKS.value = {
+    ...TASKS.value,
+    lilia: Array.from({ length: count }, (_, index) =>
+      projectConversation(`t-overflow-${index + 1}`, `对话 ${index + 1}`, index)
+    ),
+  };
+}
 
 async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
   const router = createRouter({
@@ -24,10 +49,21 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
 
   const Wrapper = defineComponent({
     components: { ProjectTreeItem, ContextMenuHost },
+    props: {
+      isExpanded: {
+        type: Boolean,
+        default: true,
+      },
+      treeActivityToken: {
+        type: Number,
+        default: 0,
+      },
+    },
     template: `
       <ProjectTreeItem
         :project="project"
-        :is-expanded="true"
+        :is-expanded="isExpanded"
+        :tree-activity-token="treeActivityToken"
         @toggle="$emit('toggle', $event)"
         @error="emitError"
         @archived="emitArchived"
@@ -56,6 +92,10 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
   });
 
   const view = render(Wrapper, {
+    props: {
+      isExpanded: true,
+      treeActivityToken: 0,
+    },
     global: {
       plugins: [router],
       directives: {
@@ -65,6 +105,10 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
   });
   return { ...view, router };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("ProjectTreeItem", () => {
   it("项目行主体点击会展开折叠，项目名称不再直接导航", async () => {
@@ -143,5 +187,88 @@ describe("ProjectTreeItem", () => {
       expect(view.emitted("archived")).toHaveLength(1);
     });
     expect(view.emitted("error")).toBeUndefined();
+  });
+
+  it("项目对话超过四条时用省略行折叠剩余对话，并可点击展开", async () => {
+    seedProjectConversations(6);
+
+    const view = await renderProjectTreeItem();
+
+    expect(view.getByText("对话 1")).toBeInTheDocument();
+    expect(view.getByText("对话 4")).toBeInTheDocument();
+    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
+    expect(view.queryByText("对话 6")).not.toBeInTheDocument();
+
+    const more = view.getByRole("button", { name: "显示剩余对话" });
+    expect(more).toHaveTextContent("...");
+    expect(more).toHaveClass("sb-tree__row--child");
+
+    await fireEvent.click(more);
+
+    expect(view.getByText("对话 5")).toBeInTheDocument();
+    expect(view.getByText("对话 6")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "显示剩余对话" })).not.toBeInTheDocument();
+  });
+
+  it("展开剩余对话后 30 秒无树内活动会恢复折叠", async () => {
+    seedProjectConversations(5);
+    const view = await renderProjectTreeItem();
+    vi.useFakeTimers();
+
+    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
+    expect(view.getByText("对话 5")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(view.getByText("对话 5")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await nextTick();
+    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "显示剩余对话" })).toBeInTheDocument();
+  });
+
+  it("树内活动会刷新展开剩余对话后的自动折叠计时", async () => {
+    seedProjectConversations(5);
+    const view = await renderProjectTreeItem();
+    vi.useFakeTimers();
+
+    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
+    await vi.advanceTimersByTimeAsync(20_000);
+    await view.rerender({ isExpanded: true, treeActivityToken: 1 });
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(view.getByText("对话 5")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await nextTick();
+    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
+  });
+
+  it("折叠项目后会重置项目内对话折叠状态", async () => {
+    seedProjectConversations(5);
+    const view = await renderProjectTreeItem();
+
+    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
+    expect(view.getByText("对话 5")).toBeInTheDocument();
+
+    await view.rerender({ isExpanded: false, treeActivityToken: 0 });
+    await view.rerender({ isExpanded: true, treeActivityToken: 0 });
+
+    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "显示剩余对话" })).toBeInTheDocument();
+  });
+
+  it("当前打开的隐藏对话会在折叠态占用第四个可见位置", async () => {
+    seedProjectConversations(6);
+
+    const view = await renderProjectTreeItem("/projects/lilia/tasks/t-overflow-6");
+
+    expect(view.getByText("对话 1")).toBeInTheDocument();
+    expect(view.getByText("对话 2")).toBeInTheDocument();
+    expect(view.getByText("对话 3")).toBeInTheDocument();
+    expect(view.queryByText("对话 4")).not.toBeInTheDocument();
+    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
+    expect(view.getByText("对话 6")).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "显示剩余对话" })).toBeInTheDocument();
   });
 });

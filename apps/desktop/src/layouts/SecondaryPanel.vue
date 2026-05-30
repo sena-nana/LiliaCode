@@ -216,6 +216,11 @@ function toggleOrphans() {
 
 // --- 孤儿 session 归档确认 ---
 const confirmingOrphanId = ref<string | null>(null);
+const projectTreeActivityToken = ref(0);
+
+function markProjectTreeActivity() {
+  projectTreeActivityToken.value += 1;
+}
 
 function onOrphanArchiveClick(e: MouseEvent, orphanId: string) {
   e.preventDefault();
@@ -671,6 +676,7 @@ function onTreePointerDown(event: PointerEvent) {
 function onTreePointerMove(event: PointerEvent) {
   const source = treeDrag.value;
   if (!source || source.pointerId !== event.pointerId) return;
+  markProjectTreeActivity();
   const moved = Math.hypot(event.clientX - source.startX, event.clientY - source.startY);
   if (!source.active && moved < DRAG_THRESHOLD) return;
   if (!source.active) {
@@ -769,7 +775,13 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="sb-tree">
+      <div
+        class="sb-tree"
+        @pointerdown="markProjectTreeActivity"
+        @pointermove="markProjectTreeActivity"
+        @focusin="markProjectTreeActivity"
+        @keydown="markProjectTreeActivity"
+      >
         <ProjectTreeItem
           v-for="p in projects"
           :key="p.id"
@@ -777,6 +789,7 @@ onBeforeUnmount(() => {
           :is-expanded="isProjectExpanded(p.id)"
           :drag-source="treeDrag"
           :drop-target="treeDropTarget"
+          :tree-activity-token="projectTreeActivityToken"
           @toggle="toggle"
           @new-chat="newProjectChat"
           @error="(msg: string) => projectError = msg"

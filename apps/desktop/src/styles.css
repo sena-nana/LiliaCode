@@ -734,6 +734,22 @@ pre code {
   color: var(--text-muted);
 }
 
+.sb-tree__row--more {
+  width: 100%;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sb-tree__row--more:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .sb-tree__row--child.is-active {
   color: var(--accent);
 }
