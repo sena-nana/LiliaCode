@@ -23,6 +23,7 @@ import {
 import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
+import ChatSidebarHost from "../components/chat/ChatSidebarHost.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
 import { resolveAskUser, useAskUserForTask } from "../composables/useAskUser";
 import {
@@ -477,34 +478,43 @@ watch(
     class="chat-page"
   >
     <div class="chat">
-      <ChatTranscript
-        :timeline-events="timelineEvents"
-        :empty-headline="emptyHeadline"
-        :is-thinking="isTurnRunning"
-        :project-cwd="project?.cwd ?? null"
-        :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
-        :force-scroll-bottom-key="userSendScrollKey"
-      >
-        <template #controls>
-          <div class="chat-controls">
-            <TodoFloat v-if="taskId" :task-id="taskId" />
-            <ChatComposer
-              :state="composer"
-              :attachments="attachments"
-              :sending="isTurnRunning"
-              :pending-ask="pendingAskUser"
-              :tool-consent="pendingToolConsent"
-              @send="onSend"
-              @interrupt="onInterrupt"
-              @update:state="onComposerUpdate"
-              @remove-attachment="removeAttachment"
-              @pick-attachments="onPickAttachments"
-              @resolve-ask-user="onResolveAskUser"
-              @resolve-tool-consent="onResolveToolConsent"
-            />
-          </div>
-        </template>
-      </ChatTranscript>
+      <div class="chat-layout">
+        <div class="chat-layout__main">
+          <ChatTranscript
+            :timeline-events="timelineEvents"
+            :empty-headline="emptyHeadline"
+            :is-thinking="isTurnRunning"
+            :project-cwd="project?.cwd ?? null"
+            :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
+            :force-scroll-bottom-key="userSendScrollKey"
+          >
+            <template #controls>
+              <div class="chat-controls">
+                <TodoFloat v-if="taskId" :task-id="taskId" />
+                <ChatComposer
+                  :state="composer"
+                  :attachments="attachments"
+                  :sending="isTurnRunning"
+                  :pending-ask="pendingAskUser"
+                  :tool-consent="pendingToolConsent"
+                  @send="onSend"
+                  @interrupt="onInterrupt"
+                  @update:state="onComposerUpdate"
+                  @remove-attachment="removeAttachment"
+                  @pick-attachments="onPickAttachments"
+                  @resolve-ask-user="onResolveAskUser"
+                  @resolve-tool-consent="onResolveToolConsent"
+                />
+              </div>
+            </template>
+          </ChatTranscript>
+        </div>
+        <ChatSidebarHost
+          :task-id="taskId"
+          :project-id="projectId"
+          :project-cwd="project?.cwd ?? null"
+        />
+      </div>
     </div>
   </section>
 

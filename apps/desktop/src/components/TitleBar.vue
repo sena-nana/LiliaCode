@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { Minus, Square, Copy, X, ChevronRight } from "lucide-vue-next";
+import {
+  Minus,
+  Square,
+  Copy,
+  X,
+  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
+} from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
   getTask,
 } from "../services/tasksStore";
 import { getProject } from "../services/projectsStore";
+import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
 
 const route = useRoute();
 
@@ -18,6 +27,11 @@ function paramAsString(value: string | string[] | undefined): string | undefined
 
 const projectId = computed(() => paramAsString(route.params.projectId));
 const taskId = computed(() => paramAsString(route.params.taskId));
+const chatSidebar = useChatSidebar();
+
+const canToggleChatSidebar = computed(() =>
+  !!taskId.value && (route.path.startsWith("/chats/") || !!projectId.value),
+);
 
 interface Crumb {
   text: string;
@@ -109,6 +123,10 @@ async function onToggleMaximize() {
 async function onClose() {
   await appWindow.close();
 }
+
+function onToggleChatSidebar() {
+  toggleChatSidebar();
+}
 </script>
 
 <template>
@@ -160,6 +178,27 @@ async function onClose() {
     </div>
 
     <div class="titlebar__controls">
+      <button
+        v-if="canToggleChatSidebar"
+        type="button"
+        class="titlebar__btn titlebar__chat-sidebar-btn"
+        :class="{ 'is-active': chatSidebar.state.open }"
+        :aria-label="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
+        :title="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
+        :aria-pressed="chatSidebar.state.open"
+        @click="onToggleChatSidebar"
+      >
+        <PanelRightClose
+          v-if="chatSidebar.state.open"
+          :size="15"
+          aria-hidden="true"
+        />
+        <PanelRightOpen
+          v-else
+          :size="15"
+          aria-hidden="true"
+        />
+      </button>
       <button
         type="button"
         class="titlebar__btn"
