@@ -23,5 +23,7 @@
 
 ## 验证
 
-- 按影响范围运行最小必要验证: `yarn verify:desktop:test`、`yarn verify:desktop:build`、`yarn verify:tauri`、`yarn verify:contracts` 或 `yarn verify`。
-- 若验证无法运行,要在最终说明里写清楚原因和剩余风险。
+- 功能实现后先按影响范围运行最小必要测试: `yarn verify:desktop:test`、`yarn verify:contracts` 或相关定向测试。
+- 测试通过后先要求用户确认功能是否已经实现,不要急于直接跑完整构建。
+- 完整构建或全量验证,如 `yarn verify:desktop:build`、`yarn verify:tauri` 或 `yarn verify`,在用户确认功能实现后,或改动范围和风险确实需要时再运行。
+- 若测试、构建或验证无法运行,要在最终说明里写清楚原因和剩余风险。
