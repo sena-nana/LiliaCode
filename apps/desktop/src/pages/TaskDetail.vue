@@ -82,6 +82,7 @@ const branches = ref<ChatBranchOption[]>([]);
 const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
 const attachments = ref<ChatAttachment[]>([]);
+const userSendScrollKey = ref(0);
 const { state: askUserState } = useAskUser();
 
 const pendingPlanApproval = computed(() => {
@@ -222,6 +223,7 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
     queued: true,
   });
   upsertTimelineEvent(optimistic);
+  userSendScrollKey.value += 1;
   try {
     const result = await sendMessage(
       props.taskId,
@@ -476,6 +478,7 @@ watch(
         :empty-headline="emptyHeadline"
         :is-thinking="isTurnRunning"
         :project-cwd="project?.cwd ?? null"
+        :force-scroll-bottom-key="userSendScrollKey"
       >
         <template #controls>
           <div class="chat-controls">

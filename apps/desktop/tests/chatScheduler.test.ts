@@ -53,6 +53,33 @@ function setChatDropBounds(view: ReturnType<typeof render>) {
   });
 }
 
+function chatTranscriptElement(view: ReturnType<typeof render>): HTMLElement {
+  const transcript = view.container.querySelector(".chat-transcript");
+  if (!(transcript instanceof HTMLElement)) {
+    throw new Error("未找到聊天记录滚动容器");
+  }
+  return transcript;
+}
+
+function mockChatScrollGeometry(
+  element: HTMLElement,
+  values: {
+    clientHeight: number;
+    scrollHeight: number;
+    scrollTop: number;
+  },
+) {
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    value: values.clientHeight,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: values.scrollHeight,
+  });
+  element.scrollTop = values.scrollTop;
+}
+
 async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {
   await waitFor(() => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_timeline_list")).toBe(true);
@@ -144,6 +171,25 @@ describe("chat scheduler", () => {
 
     expect(view.getByText("页面刚打开时发送的用户消息").closest(".chat-bubble"))
       .toHaveAttribute("data-role", "user");
+  });
+
+  it("用户停在历史位置时，发送普通消息后自动滚动到底部", async () => {
+    const view = await renderTaskDetail();
+    await expectInitialReasoningHidden(view);
+    const transcript = chatTranscriptElement(view);
+    mockChatScrollGeometry(transcript, {
+      clientHeight: 240,
+      scrollHeight: 1000,
+      scrollTop: 100,
+    });
+
+    await fireEvent.scroll(transcript);
+    await sendText(view, "发送后应该贴到底部");
+
+    await waitFor(() => {
+      expect(view.getByText("发送后应该贴到底部")).toBeInTheDocument();
+      expect(transcript.scrollTop).toBe(1000);
+    });
   });
 
   it("会显示持久化和实时 Agent 工作过程", async () => {

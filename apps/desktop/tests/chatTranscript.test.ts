@@ -1,4 +1,5 @@
 import { fireEvent, render } from "@testing-library/vue";
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import ChatTranscript from "../src/components/chat/ChatTranscript.vue";
@@ -130,6 +131,11 @@ async function flushScrollMapFrame() {
   await Promise.resolve();
 }
 
+async function flushTranscriptScroll() {
+  await nextTick();
+  await nextTick();
+}
+
 describe("ChatTranscript scrollbar visibility", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -181,6 +187,64 @@ describe("ChatTranscript scrollbar visibility", () => {
     expect(transcript).toHaveClass("is-scrollbar-visible");
     await vi.advanceTimersByTimeAsync(1);
     expect(transcript).not.toHaveClass("is-scrollbar-visible");
+  });
+
+  it("用户发送触发强制滚动时，即使当前不贴底也会滚到底部并恢复跟随", async () => {
+    const events = [
+      timelineEvent({
+        id: "user-1",
+        kind: "message",
+        payload: { role: "user", content: "第一条消息" },
+      }),
+    ];
+    const view = render(ChatTranscript, {
+      props: {
+        timelineEvents: events,
+        emptyHeadline: "今天想做什么？",
+        isThinking: false,
+        forceScrollBottomKey: 0,
+      },
+    });
+    const transcript = transcriptElement(view.container);
+    mockScrollGeometry(transcript, {
+      clientHeight: 240,
+      scrollHeight: 1000,
+      scrollTop: 100,
+    });
+
+    await fireEvent.scroll(transcript);
+    await view.rerender({
+      timelineEvents: events,
+      emptyHeadline: "今天想做什么？",
+      isThinking: false,
+      forceScrollBottomKey: 1,
+    });
+    await flushTranscriptScroll();
+
+    expect(transcript.scrollTop).toBe(1000);
+
+    mockScrollGeometry(transcript, {
+      clientHeight: 240,
+      scrollHeight: 1200,
+      scrollTop: transcript.scrollTop,
+    });
+    await view.rerender({
+      timelineEvents: [
+        ...events,
+        timelineEvent({
+          id: "assistant-1",
+          kind: "message",
+          payload: { role: "assistant", content: "跟随回复" },
+          intraTurnOrder: 2,
+        }),
+      ],
+      emptyHeadline: "今天想做什么？",
+      isThinking: false,
+      forceScrollBottomKey: 1,
+    });
+    await flushTranscriptScroll();
+
+    expect(transcript.scrollTop).toBe(1200);
   });
 
   it("滚动地图 thumb 精确覆盖未被输入区遮挡的可见对话区域", async () => {

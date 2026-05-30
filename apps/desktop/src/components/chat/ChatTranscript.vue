@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /**
- * Transcript：消息滚动容器。auto-scroll 阈值 24px，给 macOS 弹性滚动留余地——
- * 用户贴底时新消息进来自动跟到底，向上翻了就不打断阅读。
+ * Transcript：消息滚动容器。贴底时跟随新事件，用户发送后由父级信号强制贴底。
  */
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
@@ -16,6 +15,7 @@ const props = defineProps<{
   /** Turn 正在跑——传给 AgentTimeline 后用来在末尾叠一个「思考中…」指示器。 */
   isThinking?: boolean;
   projectCwd?: string | null;
+  forceScrollBottomKey?: number;
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -91,6 +91,7 @@ async function scrollToBottom() {
   const el = scroller.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
+  isPinnedToBottom.value = true;
 }
 
 watch(
@@ -105,6 +106,11 @@ watch(
   async () => {
     if (isPinnedToBottom.value) await scrollToBottom();
   },
+);
+
+watch(
+  () => props.forceScrollBottomKey,
+  () => scrollToBottom(),
 );
 
 const isEmpty = computed(() =>
