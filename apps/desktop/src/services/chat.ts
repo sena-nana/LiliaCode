@@ -91,6 +91,10 @@ export function sendMessage(
   });
 }
 
+export function interruptTurn(taskId: string): Promise<void> {
+  return invoke<void>("chat_interrupt_turn", { taskId });
+}
+
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
   return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
 }

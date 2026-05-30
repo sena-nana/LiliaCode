@@ -291,6 +291,17 @@ export function completeMockAgentTurn(taskId: string) {
   }
 }
 
+function currentChatTurnId(taskId: string): string {
+  const event = [...(timelineEvents[taskId] ?? [])].reverse().find((candidate) => {
+    const payload = candidate.payload as Record<string, unknown> | null;
+    return candidate.kind === "message" &&
+      typeof candidate.turnId === "string" &&
+      payload?.role === "user" &&
+      payload?.queued !== true;
+  });
+  return event?.turnId ?? `turn-interrupted-${Date.now()}`;
+}
+
 export function emitMockTimelineEvent(
   taskId: string,
   patch: Partial<AgentTimelineEvent> = {},
@@ -626,9 +637,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         attachments,
         createdAt: Date.now(),
       };
+      const turnId = queued
+        ? `turn-queued-${message.id}`
+        : `turn-${message.id}`;
       emitMockTimelineEvent(taskId, {
         id: message.id,
-        turnId: null,
+        turnId,
         kind: "message",
         status: queued ? "pending" : "success",
         title: "用户输入",
@@ -664,6 +678,37 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         dispatch: "started",
         queuedCount: 0,
       };
+    }
+
+    case "chat_interrupt_turn": {
+      const taskId = String(args.taskId);
+      const turnId = currentChatTurnId(taskId);
+      const message = "用户打断了当前 Agent 运行";
+      chatQueued[taskId] = [];
+      if (chatRunning[taskId] === true) {
+        emitMockTimelineEvent(taskId, {
+          id: `tl-interrupted-${turnId}`,
+          kind: "error",
+          status: "error",
+          title: "Agent 已打断",
+          summary: message,
+          payload: {
+            backend: "claude",
+            interrupted: true,
+            message,
+          },
+          turnId,
+        });
+        chatRunning[taskId] = false;
+        queueMicrotask(() => {
+          emitTauriEvent("chat:done", {
+            taskId,
+            sessionId: null,
+            subtype: null,
+          });
+        });
+      }
+      return undefined;
     }
 
     case "plugin:event|listen": {

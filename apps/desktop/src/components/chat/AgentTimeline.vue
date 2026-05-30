@@ -18,6 +18,7 @@ import {
 } from "./timelineEntries";
 import {
   isHiddenTimelineEvent,
+  isTimelineInterruptEvent,
   isTimelineExpanded,
   isTimelineFinalReply,
   timelineInlinePreview,
@@ -44,7 +45,7 @@ const toggledIds = ref<Set<string>>(new Set());
 const expandedGroupIds = ref<Set<string>>(new Set());
 const expandedProcessGroupIds = ref<Set<string>>(new Set());
 
-const TERMINAL_TURN_STATUSES = new Set<AgentTimelineEventStatus>([
+const TERMINAL_STATUSES = new Set<AgentTimelineEventStatus>([
   "success",
   "completed",
   "done",
@@ -53,15 +54,21 @@ const TERMINAL_TURN_STATUSES = new Set<AgentTimelineEventStatus>([
   "cancelled",
 ]);
 
-const completedTurnIds = computed<Set<string>>(() => {
-  const set = new Set<string>();
+const turnState = computed(() => {
+  const completed = new Set<string>();
+  const interrupted = new Set<string>();
   for (const event of props.events) {
-    if (event.kind !== "turn") continue;
     if (!event.turnId) continue;
-    if (!TERMINAL_TURN_STATUSES.has(event.status)) continue;
-    set.add(event.turnId);
+    if (isTimelineInterruptEvent(event)) {
+      completed.add(event.turnId);
+      interrupted.add(event.turnId);
+      continue;
+    }
+    if (event.kind !== "turn") continue;
+    if (!TERMINAL_STATUSES.has(event.status)) continue;
+    completed.add(event.turnId);
   }
-  return set;
+  return { completed, interrupted };
 });
 
 const visibleEvents = computed(() =>
@@ -93,29 +100,29 @@ const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
 
 const orderedEntries = computed<TimelineEntry[]>(() => {
   const entries = chronologicalEntries.value;
-  const completed = completedTurnIds.value;
-  const lastFinalByTurnId = new Map<string, TimelineEventEntry>();
+  const completed = turnState.value.completed;
+  const lastAnchorByTurnId = new Map<string, TimelineEventEntry>();
 
   for (const entry of entries) {
     const turnId = entry.event.turnId;
     if (!turnId || !completed.has(turnId)) continue;
-    if (isTimelineFinalReply(entry.event)) lastFinalByTurnId.set(turnId, entry);
+    if (isProcessAnchor(entry.event)) lastAnchorByTurnId.set(turnId, entry);
   }
 
-  const processEventsByFinalId = new Map<string, AgentTimelineEvent[]>();
+  const processEventsByAnchorId = new Map<string, AgentTimelineEvent[]>();
   const hiddenEventIds = new Set<string>();
 
   for (const entry of entries) {
     const turnId = entry.event.turnId;
     if (!turnId || !completed.has(turnId)) continue;
     if (isTimelineUserMessage(entry.event)) continue;
-    const finalEntry = lastFinalByTurnId.get(turnId);
-    if (!finalEntry) continue;
-    if (entry.intraTurnOrder >= finalEntry.intraTurnOrder) continue;
-    let list = processEventsByFinalId.get(finalEntry.event.id);
+    const anchorEntry = lastAnchorByTurnId.get(turnId);
+    if (!anchorEntry) continue;
+    if (entry.intraTurnOrder >= anchorEntry.intraTurnOrder) continue;
+    let list = processEventsByAnchorId.get(anchorEntry.event.id);
     if (!list) {
       list = [];
-      processEventsByFinalId.set(finalEntry.event.id, list);
+      processEventsByAnchorId.set(anchorEntry.event.id, list);
     }
     list.push(entry.event);
     hiddenEventIds.add(entry.event.id);
@@ -124,8 +131,8 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
   const output: TimelineEventEntry[] = [];
   for (const entry of entries) {
     if (hiddenEventIds.has(entry.event.id)) continue;
-    const processEvents = isTimelineFinalReply(entry.event)
-      ? processEventsByFinalId.get(entry.event.id)
+    const processEvents = isProcessAnchor(entry.event)
+      ? processEventsByAnchorId.get(entry.event.id)
       : undefined;
     output.push(processEvents ? { ...entry, processEvents } : entry);
   }
@@ -166,13 +173,32 @@ watch(
 );
 
 watch(
-  () => visibleEvents.value.filter(isTimelineFinalReply).map((e) => e.id).join("|"),
+  () => visibleEvents.value.filter(isProcessAnchor).map((e) => e.id).join("|"),
   () => {
     const valid = new Set(
-      visibleEvents.value.filter(isTimelineFinalReply).map((e) => e.id),
+      visibleEvents.value.filter(isProcessAnchor).map((e) => e.id),
     );
     expandedProcessGroupIds.value = new Set(
       [...expandedProcessGroupIds.value].filter((id) => valid.has(id)),
+    );
+  },
+);
+
+watch(
+  () => [...turnState.value.interrupted].join("|"),
+  () => {
+    const turnIds = turnState.value.interrupted;
+    if (turnIds.size === 0) return;
+    const interruptedEventIds = new Set(
+      visibleEvents.value
+        .filter((event) => event.turnId && turnIds.has(event.turnId))
+        .map((event) => event.id),
+    );
+    toggledIds.value = new Set(
+      [...toggledIds.value].filter((id) => !interruptedEventIds.has(id)),
+    );
+    expandedProcessGroupIds.value = new Set(
+      [...expandedProcessGroupIds.value].filter((id) => !interruptedEventIds.has(id)),
     );
   },
 );
@@ -200,6 +226,7 @@ function toggleProcessGroup(event: AgentTimelineEvent) {
 }
 
 function processGroupRunning(entry: TimelineEventEntry): boolean {
+  if (TERMINAL_STATUSES.has(entry.event.status)) return false;
   return hasRunningEvent(entry.processEvents ?? []);
 }
 
@@ -313,6 +340,10 @@ function toggleGroup(entry: TimelineGroupEntry) {
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
   return event.kind === "message";
+}
+
+function isProcessAnchor(event: AgentTimelineEvent): boolean {
+  return isTimelineFinalReply(event) || isTimelineInterruptEvent(event);
 }
 
 function isTimelineUserMessage(event: AgentTimelineEvent): boolean {

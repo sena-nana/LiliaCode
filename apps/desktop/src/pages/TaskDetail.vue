@@ -37,6 +37,7 @@ import {
   onDone,
   onTurnStarted,
   describeAttachments,
+  interruptTurn,
   pickAttachmentFiles,
   sendMessage,
   setComposerState,
@@ -227,6 +228,15 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
     removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
     upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`));
+  }
+}
+
+async function onInterrupt() {
+  if (!hasContext.value || !isTurnRunning.value) return;
+  try {
+    await interruptTurn(props.taskId);
+  } catch (err) {
+    upsertTimelineEvent(createErrorTimelineEvent(`打断失败：${String(err)}`));
   }
 }
 
@@ -485,6 +495,7 @@ watch(
               :pending-ask="pendingAskUser"
               :tool-consent="pendingToolConsent"
               @send="onSend"
+              @interrupt="onInterrupt"
               @update:state="onComposerUpdate"
               @remove-attachment="removeAttachment"
               @pick-attachments="onPickAttachments"

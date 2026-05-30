@@ -1,9 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::env;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -92,6 +92,12 @@ struct PendingChatTurn {
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
     turn_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct RunningTurn {
+    turn_id: String,
+    backend: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -636,6 +642,54 @@ mod agent_event_sink_tests {
         assert_ne!(first, "u-0");
     }
 
+    fn pending_turn(id: &str) -> PendingChatTurn {
+        PendingChatTurn {
+            content: format!("content {id}"),
+            composer: default_composer("task-1"),
+            project_cwd: "D:\\PROJECT\\workspace\\Lilia".to_string(),
+            attachments: Vec::new(),
+            message: ChatMessage {
+                id: format!("u-{id}"),
+                task_id: "task-1".to_string(),
+                role: "user".to_string(),
+                content: format!("content {id}"),
+                attachments: Vec::new(),
+                created_at: 100,
+            },
+            turn_id: format!("turn-{id}"),
+        }
+    }
+
+    #[test]
+    fn clearing_pending_turns_removes_executable_queue() {
+        let store = ChatStore::default();
+        {
+            let mut pending = store.pending_turns.lock().unwrap();
+            pending
+                .entry("task-1".to_string())
+                .or_default()
+                .push_back(pending_turn("queued"));
+        }
+
+        assert_eq!(clear_pending_turns(&store, "task-1"), 1);
+        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn interrupted_exit_does_not_emit_runner_error() {
+        assert!(!should_emit_runner_exit_error(
+            true,
+            true,
+            "agent 进程被终止",
+        ));
+        assert!(should_emit_runner_exit_error(
+            false,
+            true,
+            "agent 进程异常退出",
+        ));
+        assert!(!should_emit_runner_exit_error(false, true, "   "));
+    }
+
     fn create_resume_schema(conn: &Connection) {
         conn.execute_batch(
             r#"
@@ -710,6 +764,9 @@ struct ChatStore {
     sdk_sessions: Mutex<HashMap<String, String>>,
     running_tasks: Mutex<HashMap<String, bool>>,
     pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
+    running_turns: Mutex<HashMap<String, RunningTurn>>,
+    running_children: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
+    interrupted_turns: Mutex<HashMap<String, RunningTurn>>,
     /// 仍在运行的 runner 子进程 stdin。key = task_id，turn 结束时移除（Drop 即关 stdin）。
     /// 让 chat_respond_tool_consent 命令能把决策写回给 runner。
     running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
@@ -771,6 +828,112 @@ fn queue_pending_turn(
         turn_id,
     });
     queue.len()
+}
+
+fn clear_pending_turns(store: &ChatStore, task_id: &str) -> usize {
+    store
+        .pending_turns
+        .lock()
+        .unwrap()
+        .remove(task_id)
+        .map(|queue| queue.len())
+        .unwrap_or(0)
+}
+
+fn take_next_pending_turn(
+    store: &ChatStore,
+    task_id: &str,
+    advance_queue: bool,
+) -> Option<PendingChatTurn> {
+    let mut running = store.running_tasks.lock().unwrap();
+    if !advance_queue {
+        running.remove(task_id);
+        return None;
+    }
+
+    let mut pending = store.pending_turns.lock().unwrap();
+    let mut should_remove_queue = false;
+    let next = if let Some(queue) = pending.get_mut(task_id) {
+        let turn = queue.pop_front();
+        should_remove_queue = queue.is_empty();
+        turn
+    } else {
+        None
+    };
+    if should_remove_queue {
+        pending.remove(task_id);
+    }
+    if next.is_none() {
+        running.remove(task_id);
+    }
+    next
+}
+
+fn should_emit_runner_exit_error(interrupted: bool, nonzero: bool, stderr_text: &str) -> bool {
+    !interrupted && nonzero && !stderr_text.trim().is_empty()
+}
+
+fn persist_and_emit_interrupted_timeline_event(
+    app_handle: &AppHandle,
+    task_id: &str,
+    backend: &str,
+    turn_id: &str,
+) {
+    let now = now_millis() as i64;
+    let message = "用户打断了当前 Agent 运行";
+    persist_and_emit_input(
+        app_handle,
+        AgentTimelineEventInput {
+            id: Some(format!("{turn_id}:interrupted")),
+            task_id: task_id.to_string(),
+            turn_id: Some(turn_id.to_string()),
+            backend: backend.to_string(),
+            kind: "error".to_string(),
+            status: "error".to_string(),
+            title: "Agent 已打断".to_string(),
+            summary: Some(message.to_string()),
+            payload: serde_json::json!({
+                "backend": backend,
+                "interrupted": true,
+                "message": message,
+            }),
+            created_at: Some(now),
+            updated_at: Some(now),
+        },
+    );
+}
+
+fn kill_child(child: &mut Child) -> Result<(), String> {
+    match child.kill() {
+        Ok(()) => Ok(()),
+        Err(err) if matches!(err.kind(), ErrorKind::InvalidInput | ErrorKind::NotFound) => Ok(()),
+        Err(err) => Err(format!("终止 agent 进程失败：{err}")),
+    }
+}
+
+#[cfg(windows)]
+fn terminate_agent_child(child: &mut Child) -> Result<(), String> {
+    let pid = child.id().to_string();
+    let taskkill = Command::new("taskkill")
+        .args(["/PID", pid.as_str(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match taskkill {
+        Ok(status) if status.success() => Ok(()),
+        _ => kill_child(child),
+    }
+}
+
+#[cfg(not(windows))]
+fn terminate_agent_child(child: &mut Child) -> Result<(), String> {
+    let pid = child.id().to_string();
+    let _ = Command::new("pkill")
+        .args(["-TERM", "-P", pid.as_str()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    kill_child(child)
 }
 
 // ---------- 连接解析 ----------
@@ -1030,13 +1193,6 @@ fn spawn_agent_turn(
                 .unwrap_or(0);
             count
         };
-        let _ = app_handle.emit(
-            "chat:turn-started",
-            TurnStartedEvent {
-                task_id: task_id_for_thread.clone(),
-                queued_count,
-            },
-        );
 
         let stdin_payload = serde_json::json!({
             "backend": backend_for_thread,
@@ -1084,14 +1240,45 @@ fn spawn_agent_turn(
                     task_id_for_thread,
                     backend_for_thread,
                     None,
+                    true,
                 );
                 return;
             }
         };
 
+        let child_stdout = child.stdout.take();
+        let child_stderr = child.stderr.take();
+        let child_handle = Arc::new(Mutex::new(child));
+        {
+            let store = app_handle.state::<ChatStore>();
+            store.running_children.lock().unwrap().insert(
+                task_id_for_thread.clone(),
+                child_handle.clone(),
+            );
+            store.running_turns.lock().unwrap().insert(
+                task_id_for_thread.clone(),
+                RunningTurn {
+                    turn_id: turn_id_for_thread.clone(),
+                    backend: backend_for_thread.clone(),
+                },
+            );
+        }
+
+        let _ = app_handle.emit(
+            "chat:turn-started",
+            TurnStartedEvent {
+                task_id: task_id_for_thread.clone(),
+                queued_count,
+            },
+        );
+
         // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 consent_response
         // 还要通过它写回 runner。stdin 存到 ChatStore，turn 结束时移除（Drop 关闭）。
-        let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child.stdin.take() {
+        let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child_handle
+            .lock()
+            .ok()
+            .and_then(|mut child| child.stdin.take())
+        {
             Some(mut stdin) => {
                 let mut bytes = serde_json::to_vec(&stdin_payload).unwrap_or_default();
                 bytes.push(b'\n');
@@ -1123,7 +1310,7 @@ fn spawn_agent_turn(
         let mut timeline_throttle = TimelineThrottle::new();
         let mut last_assistant_error_text: Option<String> = None;
 
-        if let Some(stdout) = child.stdout.take() {
+        if let Some(stdout) = child_stdout {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
                 let line = match line {
@@ -1222,20 +1409,40 @@ fn spawn_agent_turn(
         // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
         // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
         drop(stdin_handle);
-        {
+        let interrupted = {
             let store = app_handle.state::<ChatStore>();
             store
                 .running_stdins
                 .lock()
                 .unwrap()
                 .remove(&task_id_for_thread);
-        }
+            store
+                .running_children
+                .lock()
+                .unwrap()
+                .remove(&task_id_for_thread);
+            store
+                .running_turns
+                .lock()
+                .unwrap()
+                .remove(&task_id_for_thread);
+            let was_interrupted = store
+                .interrupted_turns
+                .lock()
+                .unwrap()
+                .remove(&task_id_for_thread)
+                .is_some_and(|turn| {
+                    turn.turn_id == turn_id_for_thread && turn.backend == backend_for_thread
+                });
+            was_interrupted
+        };
 
         // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
-        let exit_status = child.wait();
-        let stderr_text = child
-            .stderr
-            .take()
+        let exit_status = child_handle
+            .lock()
+            .map_err(|err| std::io::Error::new(ErrorKind::Other, err.to_string()))
+            .and_then(|mut child| child.wait());
+        let stderr_text = child_stderr
             .and_then(|mut s| {
                 let mut buf = String::new();
                 use std::io::Read;
@@ -1243,8 +1450,17 @@ fn spawn_agent_turn(
             })
             .unwrap_or_default();
 
+        if interrupted {
+            persist_and_emit_interrupted_timeline_event(
+                &app_handle,
+                &task_id_for_thread,
+                &backend_for_thread,
+                &turn_id_for_thread,
+            );
+        }
+
         let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
-        if nonzero && !stderr_text.trim().is_empty() {
+        if should_emit_runner_exit_error(interrupted, nonzero, &stderr_text) {
             persist_and_emit_error_timeline_event(
                 &app_handle,
                 &task_id_for_thread,
@@ -1259,6 +1475,7 @@ fn spawn_agent_turn(
             task_id_for_thread,
             backend_for_thread,
             last_session_id,
+            !interrupted,
         );
     });
 }
@@ -1268,6 +1485,7 @@ fn finish_agent_turn(
     task_id: String,
     backend: String,
     last_session_id: Option<String>,
+    advance_queue: bool,
 ) {
     // 记下 session id 供下一轮 resume。
     if let Some(sid) = last_session_id.clone() {
@@ -1290,23 +1508,7 @@ fn finish_agent_turn(
 
     let next = {
         let store = app_handle.state::<ChatStore>();
-        let mut running = store.running_tasks.lock().unwrap();
-        let mut pending = store.pending_turns.lock().unwrap();
-        let mut should_remove_queue = false;
-        let next = if let Some(queue) = pending.get_mut(&task_id) {
-            let turn = queue.pop_front();
-            should_remove_queue = queue.is_empty();
-            turn
-        } else {
-            None
-        };
-        if should_remove_queue {
-            pending.remove(&task_id);
-        }
-        if next.is_none() {
-            running.remove(&task_id);
-        }
-        next
+        take_next_pending_turn(&store, &task_id, advance_queue)
     };
     if let Some(turn) = next {
         persist_and_emit_message_timeline_event(
@@ -1465,6 +1667,35 @@ fn chat_send_message(
     })
 }
 
+#[tauri::command]
+fn chat_interrupt_turn(task_id: String, store: State<'_, ChatStore>) -> Result<(), String> {
+    let running_turn = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(&task_id).cloned()
+    };
+    let Some(running_turn) = running_turn else {
+        return Ok(());
+    };
+
+    clear_pending_turns(&store, &task_id);
+    store
+        .interrupted_turns
+        .lock()
+        .unwrap()
+        .insert(task_id.clone(), running_turn);
+
+    let child_handle = {
+        let children = store.running_children.lock().unwrap();
+        children.get(&task_id).cloned()
+    };
+    let Some(child_handle) = child_handle else {
+        return Ok(());
+    };
+
+    let mut child = child_handle.lock().map_err(|err| err.to_string())?;
+    terminate_agent_child(&mut child)
+}
+
 /// 把用户对一次工具调用的决策（allow / deny）写回 runner 的 stdin。
 /// 通过 ChatStore.running_stdins 找到该 task 当前的 runner 子进程；若进程已退出
 /// （比如用户拖太久 turn 已 timeout / cancel），静默返回——SDK 端的 promise 也
@@ -1604,6 +1835,10 @@ fn chat_reset_session(
     drop(sessions);
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
     chat_store.pending_turns.lock().unwrap().remove(&task_id);
+    chat_store.running_turns.lock().unwrap().remove(&task_id);
+    chat_store.running_children.lock().unwrap().remove(&task_id);
+    chat_store.interrupted_turns.lock().unwrap().remove(&task_id);
+    chat_store.running_stdins.lock().unwrap().remove(&task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
         if let Err(err) = store
             .conn()
@@ -2153,6 +2388,7 @@ pub fn run() {
             ping,
             chat_describe_attachments,
             chat_send_message,
+            chat_interrupt_turn,
             chat_respond_tool_consent,
             chat_respond_ask_user,
             chat_list_models,

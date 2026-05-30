@@ -159,6 +159,35 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("空输入打断当前 turn 后不自动执行 queued 消息", async () => {
+    const view = await renderTaskDetail();
+
+    await sendText(view, "先检查当前实现");
+    await waitFor(() => {
+      expect(view.getByText("先检查当前实现")).toBeInTheDocument();
+    });
+
+    await sendText(view, "补充：优先看调度器");
+    await waitFor(() => {
+      expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
+        .toHaveClass("is-queued");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "chat_interrupt_turn" && args.taskId === "t-002"
+        ),
+      ).toBe(true);
+      expect(view.getByRole("button", { name: /Agent 已打断/ }))
+        .toBeInTheDocument();
+    });
+    expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
+      .toHaveClass("is-queued");
+  });
+
   it("初始加载完成后仍保留刚发送的用户气泡", async () => {
     const view = await renderTaskDetail();
 
@@ -240,6 +269,81 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.queryByText("Claude turn completed")).toBeNull();
       expect(view.queryByText("这段思考内容不应进入主时间线。")).toBeNull();
+    });
+  });
+
+  it("Agent 打断以错误事件显示，并折叠同 turn 过程", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-interrupt",
+        taskId: "t-002",
+        role: "user",
+        content: "请运行验证",
+        createdAt: 2000,
+      },
+    ]);
+
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(view.getByText("请运行验证")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-interrupt-command",
+      kind: "command",
+      status: "running",
+      title: "yarn verify",
+      summary: "正在运行完整验证",
+      payload: {
+        command: "yarn verify",
+        stdout: "验证输出详情",
+      },
+      turnId: "turn-interrupt",
+      createdAt: 2100,
+      updatedAt: 3100,
+      order: 1,
+    });
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "false");
+    });
+    await fireEvent.click(view.getByRole("button", { name: /yarn verify/ }));
+    await waitFor(() => {
+      expect(view.getByText("验证输出详情")).toBeInTheDocument();
+    });
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-interrupt-error",
+      kind: "error",
+      status: "error",
+      title: "Agent 已打断",
+      summary: "用户打断了当前 Agent 运行",
+      payload: {
+        backend: "claude",
+        interrupted: true,
+        message: "用户打断了当前 Agent 运行",
+      },
+      turnId: "turn-interrupt",
+      createdAt: 3200,
+      updatedAt: 3200,
+      order: 2,
+    });
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /Agent 已打断/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.getByRole("button", { name: "命令执行 · 1 秒" }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByRole("button", { name: /yarn verify/ })).toBeNull();
+      expect(view.queryByText("验证输出详情")).toBeNull();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "命令执行 · 1 秒" }));
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /yarn verify/ }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(view.queryByText("验证输出详情")).toBeNull();
     });
   });
 

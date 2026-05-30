@@ -89,6 +89,12 @@ export function isTimelineFinalReply(
   return readTimelinePayloadRecord(event).role === "assistant";
 }
 
+export function isTimelineInterruptEvent(
+  event: Pick<AgentTimelineEvent, "kind" | "payload">,
+): boolean {
+  return event.kind === "error" && readTimelinePayloadRecord(event).interrupted === true;
+}
+
 /**
  * runner 会保留恢复/调试用的内部事件；主时间线只展示用户可操作的过程。
  */

@@ -53,7 +53,51 @@ const toolConsent: ToolConsentRequest = {
   toolUseId: null,
 };
 
+function renderRunningComposer() {
+  return render(ChatComposer, {
+    props: {
+      state: baseState,
+      attachments: [],
+      sending: true,
+    },
+  });
+}
+
 describe("ChatComposer", () => {
+  it("Agent 运行且空输入时发送按钮切为打断", async () => {
+    const view = renderRunningComposer();
+
+    const interrupt = view.getByRole("button", { name: "打断 Agent" });
+    expect(interrupt).not.toBeDisabled();
+
+    await fireEvent.click(interrupt);
+
+    expect(view.emitted("interrupt")).toHaveLength(1);
+    expect(view.emitted("send")).toBeUndefined();
+  });
+
+  it("Agent 运行但有输入时仍发送到调度队列", async () => {
+    const view = renderRunningComposer();
+
+    await fireEvent.update(view.getByRole("textbox"), "补充上下文");
+    await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
+
+    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", []]);
+    expect(view.emitted("interrupt")).toBeUndefined();
+  });
+
+  it("Agent 运行且空输入时 textarea Enter 不触发打断", async () => {
+    const view = renderRunningComposer();
+
+    await fireEvent.keyDown(view.getByRole("textbox"), {
+      key: "Enter",
+      code: "Enter",
+    });
+
+    expect(view.emitted("interrupt")).toBeUndefined();
+    expect(view.emitted("send")).toBeUndefined();
+  });
+
   it("计划模式独立于执行权限切换", async () => {
     const view = render(ChatComposer, {
       props: {

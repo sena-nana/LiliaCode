@@ -3245,6 +3245,11 @@ button.ghost:hover {
   filter: brightness(1.08);
 }
 
+.chat-composer__send--interrupt {
+  background: var(--err);
+  color: var(--accent-text);
+}
+
 .chat-composer__send:disabled {
   background: var(--bg-active);
   color: var(--text-faint);

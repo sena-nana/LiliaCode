@@ -281,7 +281,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             </p>
 
             <button
-              v-if="isTimelineFinalReply(entry.event) && hasProcessEvents(entry)"
+              v-if="hasProcessEvents(entry)"
               type="button"
               class="agent-timeline__process-toggle"
               :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
@@ -295,7 +295,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
           </header>
 
           <div
-            v-if="isTimelineFinalReply(entry.event) && hasProcessEvents(entry)"
+            v-if="hasProcessEvents(entry)"
             class="agent-timeline__process-collapse"
             :class="{ 'is-open': processGroupExpanded(entry.event) }"
             :aria-hidden="!processGroupExpanded(entry.event)"

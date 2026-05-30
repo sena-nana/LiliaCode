@@ -21,6 +21,7 @@ import {
   Paperclip,
   Search,
   ShieldCheck,
+  Square,
   Terminal,
   Wrench,
   X,
@@ -57,6 +58,7 @@ const emit = defineEmits<{
   "pick-attachments": [];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [decision: ToolConsentDecision, message?: string];
+  interrupt: [];
 }>();
 
 const OTHER_ANSWER_VALUE = "other";
@@ -238,12 +240,21 @@ const canSend = computed(() => {
   return messageText.value.trim().length > 0 || (props.attachments?.length ?? 0) > 0;
 });
 
+const canInterrupt = computed(() =>
+  props.sending === true &&
+  !hasPending.value &&
+  !canSend.value,
+);
+
+const canSubmitEntry = computed(() => canSend.value || canInterrupt.value);
+
 const sendTitle = computed(() => {
   if (activeToolConsent.value) return "发送拒绝备注（Enter）";
   if (activeAsk.value) {
     if (askIsPlanApproval.value) return "发送计划修改要求（Enter）";
     return "发送取消原因（Enter）";
   }
+  if (canInterrupt.value) return "打断 Agent";
   return props.sending ? "加入调度队列（Enter）" : "发送（Enter）";
 });
 
@@ -253,6 +264,7 @@ const sendAriaLabel = computed(() => {
     if (askIsPlanApproval.value) return "发送计划修改要求";
     return "发送取消原因";
   }
+  if (canInterrupt.value) return "打断 Agent";
   return props.sending ? "加入调度队列" : "发送";
 });
 
@@ -300,6 +312,14 @@ function send() {
   emit("send", value, attachments);
   messageText.value = "";
   resize();
+}
+
+function submitEntry() {
+  if (canInterrupt.value) {
+    emit("interrupt");
+    return;
+  }
+  send();
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -856,12 +876,13 @@ watch(
             v-if="!askUsesInputActions"
             type="button"
             class="chat-composer__send"
-            :disabled="!canSend"
+            :class="{ 'chat-composer__send--interrupt': canInterrupt }"
+            :disabled="!canSubmitEntry"
             :title="sendTitle"
             :aria-label="sendAriaLabel"
-            @click="send"
+            @click="submitEntry"
           >
-            <ArrowUp :size="16" aria-hidden="true" />
+            <component :is="canInterrupt ? Square : ArrowUp" :size="16" aria-hidden="true" />
           </button>
         </div>
       </Transition>
@@ -927,12 +948,13 @@ watch(
         <button
           type="button"
           class="chat-composer__send"
-          :disabled="!canSend"
+          :class="{ 'chat-composer__send--interrupt': canInterrupt }"
+          :disabled="!canSubmitEntry"
           :title="sendTitle"
           :aria-label="sendAriaLabel"
-          @click="send"
+          @click="submitEntry"
         >
-          <ArrowUp :size="16" aria-hidden="true" />
+          <component :is="canInterrupt ? Square : ArrowUp" :size="16" aria-hidden="true" />
         </button>
       </div>
     </Transition>
