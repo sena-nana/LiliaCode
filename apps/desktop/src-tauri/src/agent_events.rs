@@ -17,6 +17,10 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         input: JsonValue,
     },
+    TodoList {
+        #[serde(default)]
+        items: Vec<JsonValue>,
+    },
     Timeline {
         #[serde(default)]
         event: JsonValue,
@@ -69,6 +73,15 @@ impl AgentRuntimeEvent {
                 let input = value.get("input").cloned().unwrap_or(JsonValue::Null);
                 Some(Self::ToolUse { name, input })
             }
+            "todo_list" => {
+                let items = value
+                    .get("items")
+                    .or_else(|| value.get("todos"))
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                Some(Self::TodoList { items })
+            }
             "timeline" => value
                 .get("event")
                 .cloned()
@@ -81,12 +94,8 @@ impl AgentRuntimeEvent {
                     .unwrap_or("")
                     .to_string();
                 let input = value.get("input").cloned().unwrap_or(JsonValue::Null);
-                let opt_str = |k: &str| {
-                    value
-                        .get(k)
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                };
+                let opt_str =
+                    |k: &str| value.get(k).and_then(|v| v.as_str()).map(|s| s.to_string());
                 Some(Self::ConsentRequest {
                     id,
                     tool_name,
@@ -400,28 +409,41 @@ mod tests {
             })
         );
         assert_eq!(
-            AgentRuntimeEvent::from_runner_json(
-                &json!({
-                    "type": "ask_user_request",
-                    "id": "ask-1",
-                    "spec": {
-                        "title": "Claude 想确认一下",
-                        "source": "Claude",
-                        "questions": [
-                            {
-                                "id": "q-1",
-                                "header": "方案",
-                                "question": "选哪个方案？",
-                                "mode": "single",
-                                "options": [
-                                    { "id": "o-1", "label": "A" },
-                                    { "id": "o-2", "label": "B" }
-                                ]
-                            }
-                        ]
-                    }
-                })
-            ),
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "todo_list",
+                "items": [
+                    { "text": "Mirror provider todo", "completed": true },
+                    { "content": "Keep Claude compatibility", "status": "pending" }
+                ]
+            })),
+            Some(AgentRuntimeEvent::TodoList {
+                items: vec![
+                    json!({ "text": "Mirror provider todo", "completed": true }),
+                    json!({ "content": "Keep Claude compatibility", "status": "pending" })
+                ],
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "ask_user_request",
+                "id": "ask-1",
+                "spec": {
+                    "title": "Claude 想确认一下",
+                    "source": "Claude",
+                    "questions": [
+                        {
+                            "id": "q-1",
+                            "header": "方案",
+                            "question": "选哪个方案？",
+                            "mode": "single",
+                            "options": [
+                                { "id": "o-1", "label": "A" },
+                                { "id": "o-2", "label": "B" }
+                            ]
+                        }
+                    ]
+                }
+            })),
             Some(AgentRuntimeEvent::AskUserRequest {
                 id: "ask-1".to_string(),
                 spec: json!({
@@ -459,9 +481,9 @@ mod tests {
         );
         // 未知/历史 type 直接降级为 None，runner 端如果发了 `chunk`/`assistant_done`
         // 这类已淘汰的帧也不会让主循环 panic。
-        assert!(AgentRuntimeEvent::from_runner_json(
-            &json!({ "type": "chunk", "text": "hi" })
-        )
-        .is_none());
+        assert!(
+            AgentRuntimeEvent::from_runner_json(&json!({ "type": "chunk", "text": "hi" }))
+                .is_none()
+        );
     }
 }

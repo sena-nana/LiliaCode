@@ -124,6 +124,15 @@ describe("agent-runner Claude stream", () => {
     );
   });
 
+  it("Codex todo_list item 同时发 timeline 和 provider todo 事件", () => {
+    expect(runnerSource).toContain('case "todo_list":');
+    expect(runnerSource).toContain('return { kind: "todo_list" };');
+    expect(runnerSource).toContain(
+      'if (kind === "todo_list" && Array.isArray(item?.items))',
+    );
+    expect(runnerSource).toContain('emit({ type: "todo_list", items: item.items });');
+  });
+
   it("本轮附件会作为路径上下文注入 Claude/Codex prompt", () => {
     expect(runnerSource).toContain("function buildPromptWithAttachments");
     expect(runnerSource).toContain("用户随本轮消息附加的本地路径");

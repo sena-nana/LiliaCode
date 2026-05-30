@@ -1879,6 +1879,9 @@ function emitCodexItemTimeline(eventType, item) {
     payload: codexTimelinePayload(kind, subkind, item, eventType),
     sourceId: item?.id,
   });
+  if (kind === "todo_list" && Array.isArray(item?.items)) {
+    emit({ type: "todo_list", items: item.items });
+  }
 }
 
 function emitCodexTurnTimeline(eventType, ev, ctx) {

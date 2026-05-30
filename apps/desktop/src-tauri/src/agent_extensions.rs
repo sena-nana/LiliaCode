@@ -4,45 +4,39 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::agent_events::{AgentEventEffect, AgentExtension, AgentRuntimeEvent, AgentTurnContext};
 use crate::store::LiliaStore;
-use crate::todos::{self, AgentTodoItem};
+use crate::todos;
 
-pub fn apply_todo_tool_event(
+fn todo_event_items(event: &AgentRuntimeEvent) -> Option<&[JsonValue]> {
+    match event {
+        AgentRuntimeEvent::TodoList { items } => Some(items.as_slice()),
+        AgentRuntimeEvent::ToolUse { name, input } if name == "TodoWrite" => input
+            .get("todos")
+            .and_then(|value| value.as_array())
+            .map(Vec::as_slice),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn apply_todo_runtime_event(
     conn: &Connection,
     task_id: &str,
-    name: &str,
-    input: &JsonValue,
+    event: &AgentRuntimeEvent,
 ) -> Result<bool, String> {
-    if name != "TodoWrite" {
-        return Ok(false);
-    }
-
-    let Some(todos) = input.get("todos").and_then(|value| value.as_array()) else {
+    let Some(items) = todo_event_items(event) else {
         return Ok(false);
     };
-
-    let parsed: Vec<AgentTodoItem> = todos
-        .iter()
-        .filter_map(|value| serde_json::from_value::<AgentTodoItem>(value.clone()).ok())
-        .collect();
-    todos::apply_agent_event_impl(conn, task_id, &parsed)?;
+    apply_todo_event_items(conn, task_id, items)?;
     Ok(true)
 }
 
-pub fn apply_todo_tool_event_and_notify<F>(
+fn apply_todo_event_items(
     conn: &Connection,
     task_id: &str,
-    name: &str,
-    input: &JsonValue,
-    mut notify: F,
-) -> Result<bool, String>
-where
-    F: FnMut(&str) -> Result<(), String>,
-{
-    let handled = apply_todo_tool_event(conn, task_id, name, input)?;
-    if handled {
-        notify(task_id)?;
-    }
-    Ok(handled)
+    items: &[JsonValue],
+) -> Result<(), String> {
+    let parsed = todos::parse_agent_todo_items(items);
+    todos::apply_agent_event_impl(conn, task_id, &parsed).map(|_| ())
 }
 
 pub struct TodoMirrorExtension<R: Runtime> {
@@ -65,27 +59,23 @@ impl<R: Runtime> AgentExtension for TodoMirrorExtension<R> {
         ctx: &AgentTurnContext,
         event: &AgentRuntimeEvent,
     ) -> Result<AgentEventEffect, String> {
-        let AgentRuntimeEvent::ToolUse { name, input } = event else {
+        let Some(items) = todo_event_items(event) else {
             return Ok(AgentEventEffect::default());
         };
-        if name != "TodoWrite" {
-            return Ok(AgentEventEffect::default());
-        }
 
         let Some(store) = self.app.try_state::<LiliaStore>() else {
             return Err("LiliaStore is not available".to_string());
         };
         let conn = store.conn()?;
-        apply_todo_tool_event_and_notify(&conn, &ctx.task_id, name, input, |task_id| {
-            self.app
-                .emit(
-                    "todo-changed",
-                    serde_json::json!({
-                        "taskId": task_id,
-                    }),
-                )
-                .map_err(|err| format!("todo-changed emit failed: {err}"))
-        })?;
+        apply_todo_event_items(&conn, &ctx.task_id, items)?;
+        self.app
+            .emit(
+                "todo-changed",
+                serde_json::json!({
+                    "taskId": ctx.task_id,
+                }),
+            )
+            .map_err(|err| format!("todo-changed emit failed: {err}"))?;
 
         Ok(AgentEventEffect::default())
     }
@@ -120,16 +110,18 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_task_todos_schema(&conn);
 
-        let handled = apply_todo_tool_event(
+        let handled = apply_todo_runtime_event(
             &conn,
             "task-1",
-            "TodoWrite",
-            &json!({
-                "todos": [
-                    { "content": "Draft event kernel", "status": "completed" },
-                    { "content": "Wire extension host", "status": "pending" }
-                ]
-            }),
+            &AgentRuntimeEvent::ToolUse {
+                name: "TodoWrite".to_string(),
+                input: json!({
+                    "todos": [
+                        { "content": "Draft event kernel", "status": "completed" },
+                        { "content": "Wire extension host", "status": "pending" }
+                    ]
+                }),
+            },
         )
         .unwrap();
 
@@ -159,15 +151,61 @@ mod tests {
     }
 
     #[test]
+    fn provider_todo_list_event_updates_task_todos() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_task_todos_schema(&conn);
+
+        let handled = apply_todo_runtime_event(
+            &conn,
+            "task-1",
+            &AgentRuntimeEvent::TodoList {
+                items: vec![
+                    json!({ "text": "Mirror provider todo", "completed": true }),
+                    json!({ "content": "Keep Claude shape", "status": "pending" }),
+                    json!({ "text": "Done alias", "done": true }),
+                ],
+            },
+        )
+        .unwrap();
+
+        assert!(handled);
+        let rows: Vec<(String, i64, String)> = {
+            let mut stmt = conn
+                .prepare(
+                    r#"SELECT text, done, source
+                       FROM task_todos WHERE task_id = ?1 ORDER BY "order" ASC"#,
+                )
+                .unwrap();
+            stmt.query_map(params!["task-1"], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        };
+
+        assert_eq!(
+            rows,
+            vec![
+                ("Mirror provider todo".to_string(), 1, "agent".to_string()),
+                ("Keep Claude shape".to_string(), 0, "agent".to_string()),
+                ("Done alias".to_string(), 1, "agent".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn non_todo_write_tool_event_does_not_update_task_todos() {
         let conn = Connection::open_in_memory().unwrap();
         create_task_todos_schema(&conn);
 
-        let handled = apply_todo_tool_event(
+        let handled = apply_todo_runtime_event(
             &conn,
             "task-1",
-            "Read",
-            &json!({ "file": "README.md" }),
+            &AgentRuntimeEvent::ToolUse {
+                name: "Read".to_string(),
+                input: json!({ "file": "README.md" }),
+            },
         )
         .unwrap();
 
@@ -177,35 +215,5 @@ mod tests {
 
         assert!(!handled);
         assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn todo_write_tool_event_notifies_after_update() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_task_todos_schema(&conn);
-        let mut notifications = Vec::new();
-
-        let handled = apply_todo_tool_event_and_notify(
-            &conn,
-            "task-1",
-            "TodoWrite",
-            &json!({
-                "todos": [
-                    { "content": "Mirror todo", "status": "pending" }
-                ]
-            }),
-            |task_id| {
-                notifications.push(task_id.to_string());
-                Ok(())
-            },
-        )
-        .unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM task_todos", [], |row| row.get(0))
-            .unwrap();
-        assert!(handled);
-        assert_eq!(count, 1);
-        assert_eq!(notifications, vec!["task-1".to_string()]);
     }
 }
