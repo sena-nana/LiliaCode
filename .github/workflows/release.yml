@@ -1,0 +1,56 @@
+name: Release Gate
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 要验证的 tag、branch 或 commit。留空时使用当前默认 ref。
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify release ref
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve ref
+        id: release_ref
+        shell: pwsh
+        run: |
+          $ref = "${{ github.event.release.tag_name }}"
+          if (-not $ref) {
+            $ref = "${{ inputs.ref }}"
+          }
+          if ($ref) {
+            "ref=$ref" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_ref.outputs.ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Verify workspace
+        run: corepack yarn verify

@@ -1,0 +1,71 @@
+name: BUG
+description: 记录一个需要修掉的问题
+title: "[BUG] "
+labels:
+  - bug
+  - needs triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        把 BUG 当作修复 todo 使用：先写现象，有复现路径或日志再补。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题
+      description: 实际发生了什么？
+      placeholder: 例如：启动后没有恢复上一次打开的会话。
+    validations:
+      required: true
+  - type: textarea
+    id: clues
+    attributes:
+      label: 复现 / 线索
+      description: 写已知复现步骤、触发条件、相关提交或怀疑范围。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: 修好以后
+      description: 怎样判断这个问题已经修掉？
+      placeholder: |
+        - 不再出现...
+        - 能通过...
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 影响程度
+      options:
+        - 阻断主要流程
+        - 影响常用流程
+        - 影响局部体验
+        - 轻微问题
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: 如果和本机环境有关，再填写这些信息。
+      value: |
+        - OS:
+        - Lilia 版本 / commit:
+        - Backend: Claude / Codex / 其他
+        - 相关配置:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 粘贴相关日志、错误栈、截图或录屏。敏感信息请先脱敏。
+      render: shell
+    validations:
+      required: false

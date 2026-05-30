@@ -1,0 +1,62 @@
+name: 开发任务
+description: 记录一个可以进入路线图或直接开发的 todo
+title: "[任务] "
+labels:
+  - enhancement
+  - needs triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        把 Issue 当作开发 todo 使用：先写清楚要做什么，再按需要补充清单、完成条件和上下文。
+  - type: textarea
+    id: task
+    attributes:
+      label: 要做什么
+      description: 用一两句话写清楚这张 todo 要完成的结果。
+      placeholder: 例如：让 milestone 进度模板更适合直接作为开发 todo 清单。
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: 任务清单
+      description: 可以先粗略拆几项，后续开发时再补。
+      value: |
+        - [ ] 待拆分
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: 完成条件
+      description: 怎样判断这张 todo 可以关掉？
+      placeholder: |
+        - 能看到...
+        - 能通过...
+        - 不再出现...
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      description: 选择最主要的影响区域。
+      options:
+        - 桌面端界面
+        - Tauri / Rust 后端
+        - 数据契约
+        - Agent / 会话调度
+        - Roadmap / Milestone
+        - Memory
+        - 文档 / 工作流
+        - 其他
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: 备注
+      description: 相关链接、截图、设计文档、前置任务或不做的范围。
+    validations:
+      required: false
