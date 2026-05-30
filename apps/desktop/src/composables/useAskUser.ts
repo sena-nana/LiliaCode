@@ -5,6 +5,7 @@ interface PendingAsk {
   id: number;
   spec: AskUserSpec;
   taskId: string | null;
+  turnId: string | null;
   resolve: (result: AskUserResult) => void;
 }
 
@@ -32,9 +33,16 @@ export function askUser(spec: AskUserSpec): Promise<AskUserResult> {
 export function askUserForTask(
   taskId: string | null,
   spec: AskUserSpec,
+  turnId: string | null = null,
 ): Promise<AskUserResult> {
   return new Promise((resolve) => {
-    state.queue.push({ id: askSeq++, spec, taskId, resolve });
+    state.queue.push({
+      id: askSeq++,
+      spec,
+      taskId,
+      turnId,
+      resolve,
+    });
     pumpNext();
   });
 }

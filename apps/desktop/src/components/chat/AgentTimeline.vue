@@ -24,6 +24,7 @@ import {
   pruneTimelineExpandedIds,
   timelineDeclaredGroupUnit,
   toggleTimelineExpandedId,
+  type TimelineDisplayContext,
 } from "./timelineDisplay";
 
 type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
@@ -32,6 +33,7 @@ const props = defineProps<{
   events: AgentTimelineEvent[];
   isThinking?: boolean;
   projectCwd?: string | null;
+  activePlanApprovalTurnId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -65,6 +67,11 @@ const completedTurnIds = computed<Set<string>>(() => {
 const visibleEvents = computed(() =>
   props.events.filter((event) => !isHiddenTimelineEvent(event)),
 );
+
+const displayContext = computed<TimelineDisplayContext>(() => ({
+  projectCwd: props.projectCwd,
+  activePlanApprovalTurnId: props.activePlanApprovalTurnId,
+}));
 
 const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
   visibleEvents.value
@@ -129,7 +136,7 @@ const orderedEntries = computed<TimelineEntry[]>(() => {
 const eventPreviewCache = computed(() => {
   const cache = new Map<string, string>();
   for (const event of visibleEvents.value) {
-    cache.set(event.id, timelineInlinePreview(event, { projectCwd: props.projectCwd }));
+    cache.set(event.id, timelineInlinePreview(event, displayContext.value));
   }
   return cache;
 });
@@ -171,7 +178,7 @@ watch(
 );
 
 function expanded(event: AgentTimelineEvent): boolean {
-  return isTimelineExpanded(event, toggledIds.value, { projectCwd: props.projectCwd });
+  return isTimelineExpanded(event, toggledIds.value, displayContext.value);
 }
 
 function toggleEvent(event: AgentTimelineEvent) {

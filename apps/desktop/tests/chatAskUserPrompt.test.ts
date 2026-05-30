@@ -9,6 +9,7 @@ import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
 import {
   emitTauriEvent,
+  emitMockTimelineEvent,
   mockInvoke,
 } from "./tauriMock";
 
@@ -177,6 +178,56 @@ describe("chat AskUser prompt", () => {
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
     expect(view.queryByText("请把测试计划拆细")).toBeNull();
+  });
+
+  it("加载历史对话时不会展开待确认计划卡片", async () => {
+    emitMockTimelineEvent("t-002", {
+      id: "plan-loaded",
+      kind: "plan",
+      status: "requires_action",
+      title: "ExitPlanMode",
+      turnId: "turn-loaded",
+      payload: {
+        plan: "## 已加载计划\n- 等待确认上下文",
+        approved: null,
+        executionPermission: "ask",
+      },
+    });
+
+    const view = await renderTaskDetail();
+    const toggle = await view.findByRole("button", { name: /等待确认计划/ });
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(view.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-collapsed");
+  });
+
+  it("当前计划确认请求匹配时才展开计划卡片", async () => {
+    emitMockTimelineEvent("t-002", {
+      id: "plan-active",
+      kind: "plan",
+      status: "requires_action",
+      title: "ExitPlanMode",
+      turnId: "turn-plan",
+      payload: {
+        plan: "## 当前计划\n- 等用户确认",
+        approved: null,
+        executionPermission: "ask",
+      },
+    });
+    const view = await renderTaskDetail();
+
+    const toggle = await view.findByRole("button", { name: /等待确认计划/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    emitPlanApprovalRequest("t-002");
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /等待确认计划/ }))
+        .toHaveAttribute("aria-expanded", "true");
+      expect(view.container.querySelector(".timeline-card--plan"))
+        .toHaveClass("is-expanded");
+    });
   });
 
   it("不会在当前对话显示其他 task 的 Agent 提问", async () => {

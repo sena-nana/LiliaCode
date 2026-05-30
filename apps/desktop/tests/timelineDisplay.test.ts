@@ -209,7 +209,7 @@ describe("timeline display derivation", () => {
     expect(normalized.kind).toBe("plan");
     expect(timelineEventLabel(event)).toBe("等待确认计划");
     expect(timelineInlinePreview(event)).toBe("## 修改计划 - 接线 runner - 补测试");
-    expect(display.defaultExpanded).toBe(true);
+    expect(display.defaultExpanded).toBeUndefined();
     expect(markdownContents(display.details)).toContain("## 修改计划\n- 接线 runner\n- 补测试");
     expect(listItems(display.details)).toContain("Bash：yarn test");
   });
@@ -667,7 +667,7 @@ function timelineEvent(
   return {
     id: patch.id,
     taskId: "task-1",
-    turnId: null,
+    turnId: patch.turnId ?? null,
     backend: "claude",
     kind: patch.kind,
     status: patch.status ?? "success",
@@ -729,15 +729,46 @@ describe("timeline event expansion", () => {
       .toHaveClass("agent-timeline__item");
   });
 
-  it("待确认计划默认展开并使用专用计划卡片", () => {
+  it("历史待确认计划默认折叠", () => {
     const view = render(AgentTimeline, {
       props: {
+        events: [
+          timelineEvent({
+            id: "plan-pending-history",
+            kind: "plan",
+            status: "requires_action",
+            title: "ExitPlanMode",
+            turnId: "turn-history",
+            payload: {
+              plan: "## 加载的计划\n- 保持折叠",
+              approved: null,
+              executionPermission: "ask",
+            },
+          }),
+        ],
+      },
+    });
+
+    const card = view.container.querySelector(".timeline-card--plan");
+    const toggle = view.getByRole("button", { name: /等待确认计划/ });
+
+    expect(card).toHaveClass("is-collapsed");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(view.getByText("## 加载的计划 - 保持折叠")).toBeInTheDocument();
+    expect(view.queryByText("加载的计划")).not.toBeInTheDocument();
+  });
+
+  it("活跃计划确认默认展开并使用专用计划卡片", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        activePlanApprovalTurnId: "turn-plan",
         events: [
           timelineEvent({
             id: "plan-pending",
             kind: "plan",
             status: "requires_action",
             title: "ExitPlanMode",
+            turnId: "turn-plan",
             payload: {
               plan: "## 修改计划\n- 接线 runner\n- 补测试",
               allowedPrompts: [{ tool: "Bash", prompt: "yarn test" }],
@@ -767,12 +798,14 @@ describe("timeline event expansion", () => {
     const scrollTo = vi.fn();
     const view = render(AgentTimeline, {
       props: {
+        activePlanApprovalTurnId: "turn-outline",
         events: [
           timelineEvent({
             id: "plan-outline",
             kind: "plan",
             status: "requires_action",
             title: "ExitPlanMode",
+            turnId: "turn-outline",
             payload: {
               plan: [
                 "# 阶段一",
@@ -845,12 +878,14 @@ describe("timeline event expansion", () => {
       });
       const view = render(AgentTimeline, {
         props: {
+          activePlanApprovalTurnId: "turn-scrollbar",
           events: [
             timelineEvent({
               id: "plan-scrollbar",
               kind: "plan",
               status: "requires_action",
               title: "ExitPlanMode",
+              turnId: "turn-scrollbar",
               payload: {
                 plan: "正文\n\n".repeat(80),
                 approved: null,
@@ -922,12 +957,14 @@ describe("timeline event expansion", () => {
   it("不为未溢出计划或非主计划标题生成内层滚动节点", async () => {
     const shortView = render(AgentTimeline, {
       props: {
+        activePlanApprovalTurnId: "turn-short",
         events: [
           timelineEvent({
             id: "plan-short",
             kind: "plan",
             status: "requires_action",
             title: "ExitPlanMode",
+            turnId: "turn-short",
             payload: {
               plan: "## 简短计划\n- 一屏内可见",
               approved: null,
