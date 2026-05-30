@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * Composer：textarea 自动撑高（最多 8 行）+ 一排 chip。
+ * Composer：textarea 自动撑高（最多 3 行）+ 一排 chip。
  * 挂起态会把工具授权、Agent 提问和计划确认收进输入框内部。
  */
 
-import { computed, nextTick, ref, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -62,10 +62,20 @@ const emit = defineEmits<{
 }>();
 
 const OTHER_ANSWER_VALUE = "other";
+const COMPOSER_INPUT_LINE_HEIGHT = 22;
+const COMPOSER_INPUT_VERTICAL_PADDING = 8;
+const COMPOSER_INPUT_MAX_ROWS = 3;
+const COMPOSER_INPUT_MIN_HEIGHT = COMPOSER_INPUT_LINE_HEIGHT + COMPOSER_INPUT_VERTICAL_PADDING;
+const COMPOSER_INPUT_MAX_HEIGHT =
+  COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_INPUT_MAX_ROWS + COMPOSER_INPUT_VERTICAL_PADDING;
+const COMPOSER_INPUT_TRANSITION_MS = 160;
 
 const messageText = ref("");
 const pendingText = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
+const textareaMeasure = ref<HTMLTextAreaElement | null>(null);
+let resizeFrameId: number | null = null;
+let overflowTimerId: number | null = null;
 
 const askIndex = ref(0);
 const askAnswers = ref<Record<string, AskUserAnswer>>({});
@@ -311,7 +321,6 @@ function send() {
   if (!value && attachments.length === 0) return;
   emit("send", value, attachments);
   messageText.value = "";
-  resize();
 }
 
 function submitEntry() {
@@ -329,15 +338,51 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+function queueResize() {
+  if (resizeFrameId !== null) return;
+  resizeFrameId = window.requestAnimationFrame(() => {
+    resizeFrameId = null;
+    resize();
+  });
+}
+
+function measureInputScrollHeight(el: HTMLTextAreaElement): number {
+  const measure = textareaMeasure.value;
+  if (!measure) return el.scrollHeight;
+  measure.value = el.value || " ";
+  measure.style.width = `${el.clientWidth || el.getBoundingClientRect().width}px`;
+
+  return measure.scrollHeight;
+}
+
 function resize() {
   const el = textarea.value;
   if (!el) return;
-  el.style.height = "auto";
-  const lineHeight = 22;
-  const maxHeight = lineHeight * 8;
-  const nextHeight = Math.min(Math.max(el.scrollHeight, lineHeight), maxHeight);
+  const currentHeight =
+    el.getBoundingClientRect().height ||
+    Number.parseFloat(el.style.height) ||
+    COMPOSER_INPUT_MIN_HEIGHT;
+  const scrollHeight = measureInputScrollHeight(el);
+  const nextHeight = Math.min(
+    Math.max(scrollHeight, COMPOSER_INPUT_MIN_HEIGHT),
+    COMPOSER_INPUT_MAX_HEIGHT,
+  );
+  el.style.height = `${currentHeight}px`;
+  void el.offsetHeight;
   el.style.height = `${nextHeight}px`;
-  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+
+  if (overflowTimerId !== null) window.clearTimeout(overflowTimerId);
+  overflowTimerId = null;
+  el.style.overflowY = "hidden";
+  el.scrollTop = 0;
+  if (scrollHeight > COMPOSER_INPUT_MAX_HEIGHT) {
+    overflowTimerId = window.setTimeout(() => {
+      if (textarea.value !== el) return;
+      el.style.overflowY = "auto";
+      el.scrollTop = scrollHeight;
+      overflowTimerId = null;
+    }, COMPOSER_INPUT_TRANSITION_MS);
+  }
 }
 
 function focusOption(id: string) {
@@ -522,12 +567,11 @@ function decideToolConsent(decision: ToolConsentDecision, explicitMessage?: stri
   if (decision === "deny") pendingText.value = "";
 }
 
-watch(inputValue, async () => {
-  await nextTick();
-  resize();
+watch(inputValue, () => {
+  void nextTick(queueResize);
 });
 
-watch(pendingKey, async () => {
+watch(pendingKey, () => {
   askIndex.value = 0;
   askAnswers.value = {};
   singleFocus.value = null;
@@ -537,8 +581,7 @@ watch(pendingKey, async () => {
   pendingText.value = "";
   toolExpanded.value = false;
   toolSubmitting.value = null;
-  await nextTick();
-  resize();
+  void nextTick(queueResize);
 }, { immediate: true });
 
 watch(
@@ -576,10 +619,21 @@ watch(
       }
     }
 
-    nextTick(() => resize());
+    void nextTick(queueResize);
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  if (resizeFrameId !== null) {
+    window.cancelAnimationFrame(resizeFrameId);
+    resizeFrameId = null;
+  }
+  if (overflowTimerId !== null) {
+    window.clearTimeout(overflowTimerId);
+    overflowTimerId = null;
+  }
+});
 </script>
 
 <template>
@@ -789,14 +843,19 @@ watch(
       :class="{ 'chat-composer__entry-row--pending': hasPending }"
     >
       <textarea
+        ref="textareaMeasure"
+        class="chat-composer__input chat-composer__input-measure"
+        rows="1"
+        tabindex="-1"
+        aria-hidden="true"
+      />
+      <textarea
         ref="textarea"
         v-model="inputValue"
         class="chat-composer__input"
-        :class="{ 'chat-composer__input--pending': hasPending }"
         rows="1"
         :placeholder="inputPlaceholder"
         @keydown="onKeydown"
-        @input="resize"
       />
 
       <Transition name="chat-composer-entry-actions" mode="out-in">

@@ -7,7 +7,6 @@ import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineCardDetails from "./TimelineCardDetails.vue";
 import {
   markerTopForElement,
-  prefersReducedMotion,
   type ScrollMapMetrics,
 } from "./useScrollMap";
 import {
@@ -187,7 +186,7 @@ function jumpToHeading(
   const headingRect = heading.getBoundingClientRect();
   scrollTo(
     body.scrollTop + headingRect.top - bodyRect.top - HEADING_SCROLL_OFFSET,
-    prefersReducedMotion() ? "auto" : "smooth",
+    "smooth",
   );
 }
 

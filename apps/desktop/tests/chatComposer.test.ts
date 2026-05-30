@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/vue";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
@@ -62,6 +62,41 @@ function renderRunningComposer() {
     },
   });
 }
+
+const scrollHeights: number[] = [];
+let scrollHeightDescriptor: PropertyDescriptor | undefined;
+
+function setMeasuredScrollHeight(scrollHeight: number) {
+  scrollHeights.push(scrollHeight);
+}
+
+async function flushComposerResize() {
+  await vi.advanceTimersByTimeAsync(16);
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  scrollHeights.length = 0;
+
+  const textareaProto = HTMLTextAreaElement.prototype;
+  scrollHeightDescriptor = Object.getOwnPropertyDescriptor(textareaProto, "scrollHeight");
+  Object.defineProperty(textareaProto, "scrollHeight", {
+    configurable: true,
+    get() {
+      return scrollHeights.shift() ?? 30;
+    },
+  });
+});
+
+afterEach(() => {
+  const textareaProto = HTMLTextAreaElement.prototype;
+  if (scrollHeightDescriptor) {
+    Object.defineProperty(textareaProto, "scrollHeight", scrollHeightDescriptor);
+  } else {
+    delete (textareaProto as { scrollHeight?: number }).scrollHeight;
+  }
+  vi.useRealTimers();
+});
 
 describe("ChatComposer", () => {
   it("Agent 运行且空输入时发送按钮切为打断", async () => {
@@ -173,6 +208,72 @@ describe("ChatComposer", () => {
     const restoredInput = view.getByRole("textbox");
     expect(restoredInput).toBe(input);
     expect(restoredInput).toHaveValue("先保留这段输入");
+  });
+
+  it("输入超过一行时向上扩展，最多三行后滚动", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLTextAreaElement;
+
+    setMeasuredScrollHeight(30);
+    await fireEvent.update(input, "一行");
+    await flushComposerResize();
+    expect(input.style.height).toBe("30px");
+    expect(input.style.overflowY).toBe("hidden");
+
+    setMeasuredScrollHeight(52);
+    await fireEvent.update(input, "第一行\n第二行");
+    await flushComposerResize();
+    expect(input.style.height).toBe("52px");
+    expect(input.style.overflowY).toBe("hidden");
+
+    setMeasuredScrollHeight(96);
+    input.scrollTop = 22;
+    await fireEvent.update(input, "第一行\n第二行\n第三行\n第四行");
+    await flushComposerResize();
+    expect(input.style.height).toBe("74px");
+    expect(input.style.overflowY).toBe("hidden");
+    expect(input.scrollTop).toBe(0);
+    await vi.advanceTimersByTimeAsync(160);
+    expect(input.style.overflowY).toBe("auto");
+    expect(input.scrollTop).toBe(96);
+
+    input.scrollTop = 22;
+    setMeasuredScrollHeight(30);
+    await fireEvent.update(input, "缩回一行");
+    await flushComposerResize();
+    expect(input.style.height).toBe("30px");
+    expect(input.style.overflowY).toBe("hidden");
+    expect(input.scrollTop).toBe(0);
+  });
+
+  it("发送后输入框通过高度动画缩回一行", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLTextAreaElement;
+
+    setMeasuredScrollHeight(74);
+    await fireEvent.update(input, "第一行\n第二行\n第三行");
+    await flushComposerResize();
+    expect(input.style.height).toBe("74px");
+
+    setMeasuredScrollHeight(30);
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+    await flushComposerResize();
+
+    expect(view.emitted("send")?.[0]).toEqual(["第一行\n第二行\n第三行", []]);
+    expect(input).toHaveValue("");
+    expect(input.style.height).toBe("30px");
+    expect(input.style.overflowY).toBe("hidden");
+    expect(input.scrollTop).toBe(0);
   });
 
   it("pending AskUser 中输入文本后，完成按钮会作为 other 回答返回", async () => {
