@@ -210,6 +210,7 @@ pre code {
 .shell {
   /* --sidebar-width 由 AppShell.vue 注入；这里给个兜底避免首屏闪烁时塌成 0 宽。 */
   --sidebar-width: 220px;
+  --sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1);
 
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
@@ -220,6 +221,7 @@ pre code {
   height: 100%;
   background: var(--bg-elev);
   position: relative;
+  transition: grid-template-columns 0.24s var(--sidebar-easing);
 }
 
 .shell>.titlebar {
@@ -248,6 +250,9 @@ pre code {
   z-index: 5;
   touch-action: none;
   user-select: none;
+  transition:
+    left 0.24s var(--sidebar-easing),
+    visibility 0s linear 0s;
 }
 
 .shell__resizer::before {
@@ -260,11 +265,21 @@ pre code {
 .shell.is-resizing {
   cursor: col-resize;
   user-select: none;
+  transition: none;
+}
+
+.shell.is-resizing .shell__resizer {
+  transition: none;
 }
 
 .shell.is-resizing .shell__main,
 .shell.is-resizing .secondary-panel {
   pointer-events: none;
+}
+
+.shell.is-sidebar-collapsed .shell__resizer {
+  pointer-events: none;
+  visibility: hidden;
 }
 
 /* ---------------- Secondary panel ---------------- */
@@ -282,8 +297,21 @@ pre code {
   flex-direction: column;
   padding: 10px 8px 10px 12px;
   gap: 14px;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+  transition:
+    opacity 0.2s var(--sidebar-easing),
+    transform 0.24s var(--sidebar-easing),
+    visibility 0s linear 0s;
+}
+
+.shell.is-sidebar-collapsed .secondary-panel {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-12px);
+  pointer-events: none;
+  transition-delay: 0s, 0s, 0.22s;
 }
 
 /* ---------------- Sidebar 三区域结构 ---------------- *
@@ -1113,6 +1141,15 @@ pre code {
   color: var(--text-faint);
 }
 
+.titlebar__left-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  justify-self: start;
+  -webkit-app-region: no-drag;
+}
+
 .titlebar__spacer {
   min-width: 0;
 }
@@ -1142,14 +1179,6 @@ pre code {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.titlebar__chat-sidebar-btn.is-active {
-  color: var(--accent);
-}
-
-.titlebar__chat-sidebar-btn.is-active:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
 
 .titlebar__btn:hover {
   background: var(--bg-hover);
@@ -1707,7 +1736,7 @@ button.ghost:hover {
 }
 
 .chat-layout {
-  --chat-sidebar-width: clamp(280px, 28vw, 360px);
+  --chat-sidebar-width: 340px;
   --chat-sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1);
 
   display: flex;
@@ -1732,6 +1761,7 @@ button.ghost:hover {
 }
 
 .chat-sidebar {
+  position: relative;
   flex: 0 0 0;
   width: 0;
   min-width: 0;
@@ -1750,6 +1780,40 @@ button.ghost:hover {
     transform 0.26s var(--chat-sidebar-easing),
     visibility 0s linear 0.24s;
   will-change: flex-basis, width, opacity, transform;
+}
+
+.chat-sidebar__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-sidebar__resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.chat-sidebar:not(.is-open) .chat-sidebar__resizer {
+  pointer-events: none;
+}
+
+.chat-sidebar.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+
+.chat-sidebar.is-resizing .chat-sidebar__inner {
+  pointer-events: none;
 }
 
 .chat-sidebar.is-open {
