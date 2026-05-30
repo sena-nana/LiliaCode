@@ -38,6 +38,22 @@ const multiStepSpec: AskUserSpec = {
   ],
 };
 
+const recommendedSingleSpec: AskUserSpec = {
+  title: "Lilia 想确认一下",
+  questions: [
+    {
+      id: "q-recommended",
+      header: "入口",
+      question: "选一个入口。",
+      mode: "single",
+      options: [
+        { id: "alpha", label: "Alpha", recommended: true },
+        { id: "beta", label: "Beta" },
+      ],
+    },
+  ],
+};
+
 const planApprovalSpec: AskUserSpec = {
   title: "确认 Claude 计划",
   source: "Claude Plan",
@@ -74,6 +90,12 @@ function renderComposer(spec: AskUserSpec) {
   });
 }
 
+function optionItem(button: HTMLElement): HTMLElement {
+  const item = button.closest(".composer-inline__option");
+  expect(item).not.toBeNull();
+  return item as HTMLElement;
+}
+
 describe("ChatComposer AskUser pending prompt", () => {
   it("从问题 2 回到问题 1 后再前进，会保留问题 2 已选项", async () => {
     const view = renderComposer(multiStepSpec);
@@ -99,6 +121,33 @@ describe("ChatComposer AskUser pending prompt", () => {
 
     expect(view.getByRole("checkbox", { name: "保留选择" }))
       .toHaveAttribute("aria-checked", "true");
+  });
+
+  it("推荐单选项不默认高亮，鼠标离开后清除临时高亮", async () => {
+    const view = renderComposer(recommendedSingleSpec);
+    const alpha = view.getByRole("radio", { name: /Alpha/ });
+    const beta = view.getByRole("radio", { name: "Beta" });
+    const alphaItem = optionItem(alpha);
+    const betaItem = optionItem(beta);
+
+    expect(alphaItem).toHaveClass("is-recommended");
+    expect(alphaItem).not.toHaveClass("is-active");
+    expect(betaItem).not.toHaveClass("is-active");
+
+    await fireEvent.mouseEnter(beta);
+    expect(betaItem).toHaveClass("is-active");
+    await fireEvent.mouseLeave(beta);
+    expect(betaItem).not.toHaveClass("is-active");
+
+    await fireEvent.mouseEnter(beta);
+    await fireEvent.click(beta);
+    expect(beta).toHaveAttribute("aria-checked", "true");
+    expect(betaItem).toHaveClass("is-picked", "is-active");
+
+    await fireEvent.mouseLeave(beta);
+    expect(betaItem).not.toHaveClass("is-active");
+    expect(betaItem).toHaveClass("is-picked");
+    expect(beta).toHaveAttribute("aria-checked", "true");
   });
 
   it("计划确认提示作为 composer 内部一行紧凑扩展", () => {

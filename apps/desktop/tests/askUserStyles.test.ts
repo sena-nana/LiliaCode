@@ -76,4 +76,14 @@ describe("ask user prompt styles", () => {
     expect(ruleTextAt(previewOptions)).toContain("overflow-y: auto");
     expect(ruleTextAt(previewPre)).toContain("overflow: auto");
   });
+
+  it("推荐项只通过徽标提示，不给按钮默认描边", () => {
+    const badge = selectorIndex(".composer-inline__badge {");
+    const recommendedButton = selectorIndex(
+      ".composer-inline__option.is-recommended .composer-inline__option-btn",
+    );
+
+    expect(badge).toBeGreaterThan(-1);
+    expect(recommendedButton).toBe(-1);
+  });
 });

@@ -68,6 +68,7 @@ const textarea = ref<HTMLTextAreaElement | null>(null);
 const askIndex = ref(0);
 const askAnswers = ref<Record<string, AskUserAnswer>>({});
 const singleFocus = ref<string | null>(null);
+const activeAskOptionId = ref<string | null>(null);
 const singlePick = ref<string | null>(null);
 const multiPicks = ref<Set<string>>(new Set());
 const toolExpanded = ref(false);
@@ -312,6 +313,17 @@ function focusOption(id: string) {
   singleFocus.value = id;
 }
 
+function highlightOption(id: string) {
+  singleFocus.value = id;
+  activeAskOptionId.value = id;
+}
+
+function clearOptionHighlight(id: string) {
+  if (activeAskOptionId.value !== id) return;
+  activeAskOptionId.value = null;
+  singleFocus.value = singlePick.value ?? null;
+}
+
 function selectSingleOption(id: string) {
   singleFocus.value = id;
   singlePick.value = id;
@@ -451,14 +463,14 @@ function onInlineKeydown(e: KeyboardEvent) {
   const list = askOptionsWithId.value;
   const allIds = list.map((o) => o.id);
   if (allIds.length === 0) return;
-  const cur = singleFocus.value ?? allIds[0];
+  const cur = singleFocus.value ?? singlePick.value ?? allIds[0];
   const i = allIds.indexOf(cur);
   if (e.key === "ArrowDown") {
     e.preventDefault();
-    focusOption(allIds[(i + 1) % allIds.length]);
+    highlightOption(allIds[(i + 1) % allIds.length]);
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
-    focusOption(allIds[(i - 1 + allIds.length) % allIds.length]);
+    highlightOption(allIds[(i - 1 + allIds.length) % allIds.length]);
   } else if (e.key === " " && q.mode === "single") {
     e.preventDefault();
     selectSingleOption(cur);
@@ -488,6 +500,7 @@ watch(pendingKey, async () => {
   askIndex.value = 0;
   askAnswers.value = {};
   singleFocus.value = null;
+  activeAskOptionId.value = null;
   singlePick.value = null;
   multiPicks.value = new Set();
   pendingText.value = "";
@@ -505,6 +518,8 @@ watch(
     const q = askQuestion.value!;
 
     multiPicks.value = new Set();
+    singleFocus.value = null;
+    activeAskOptionId.value = null;
     singlePick.value = null;
     pendingText.value = "";
 
@@ -512,18 +527,12 @@ watch(
       if (prior && typeof prior.value === "string") {
         if (prior.value === OTHER_ANSWER_VALUE) {
           pendingText.value = prior.notes ?? "";
-          const recommended = askOptionsWithId.value.find((o) => o.recommended);
-          singleFocus.value = (recommended ?? askOptionsWithId.value[0])?.id ?? null;
         } else {
           singleFocus.value = prior.value;
           singlePick.value = prior.value;
         }
-      } else {
-        const recommended = askOptionsWithId.value.find((o) => o.recommended);
-        singleFocus.value = (recommended ?? askOptionsWithId.value[0])?.id ?? null;
       }
     } else if (q.mode === "multi") {
-      singleFocus.value = askOptionsWithId.value[0]?.id ?? null;
       if (prior && Array.isArray(prior.value)) {
         if (prior.value.includes(OTHER_ANSWER_VALUE)) {
           multiPicks.value = new Set(
@@ -534,8 +543,6 @@ watch(
           multiPicks.value = new Set(prior.value);
         }
       }
-    } else {
-      singleFocus.value = null;
     }
 
     nextTick(() => resize());
@@ -609,7 +616,7 @@ watch(
                 :key="opt.id"
                 class="composer-inline__option"
                 :class="{
-                  'is-active': singleFocus === opt.id,
+                  'is-active': activeAskOptionId === opt.id,
                   'is-picked': askQuestion.mode === 'single'
                     ? singlePick === opt.id
                     : multiPicks.has(opt.id),
@@ -624,7 +631,8 @@ watch(
                   :aria-checked="askQuestion.mode === 'single'
                     ? singlePick === opt.id
                     : multiPicks.has(opt.id)"
-                  @mouseenter="focusOption(opt.id)"
+                  @mouseenter="highlightOption(opt.id)"
+                  @mouseleave="clearOptionHighlight(opt.id)"
                   @focus="focusOption(opt.id)"
                   @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
                 >

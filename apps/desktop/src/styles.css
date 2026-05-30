@@ -3514,10 +3514,6 @@ button.ghost:hover {
   color: var(--text);
 }
 
-.composer-inline__option.is-recommended .composer-inline__option-btn {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-}
-
 .composer-inline__option.is-danger .composer-inline__option-btn {
   border-color: color-mix(in srgb, var(--err) 50%, var(--border));
   color: var(--err);
