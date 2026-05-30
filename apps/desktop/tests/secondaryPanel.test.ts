@@ -356,6 +356,39 @@ describe("SecondaryPanel project chat navigation", () => {
   });
 });
 
+describe("SecondaryPanel footer trigger", () => {
+  beforeEach(async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    localStorage.clear();
+  });
+
+  it("鼠标进入侧边栏最下方四分之一区时显示左下角按钮区，离开侧边栏后收起", async () => {
+    const view = await renderSecondaryPanel();
+    const panel = view.container.querySelector(".secondary-panel");
+    if (!(panel instanceof HTMLElement)) {
+      throw new Error("未找到侧边栏");
+    }
+    panel.getBoundingClientRect = () => box(100, 500);
+
+    await fireEvent.pointerMove(panel, {
+      pointerId: 1,
+      clientY: 399,
+    });
+    expect(panel).not.toHaveClass("is-footer-hot");
+
+    await fireEvent.pointerMove(panel, {
+      pointerId: 1,
+      clientY: 400,
+    });
+    expect(panel).toHaveClass("is-footer-hot");
+
+    await fireEvent.pointerLeave(panel, {
+      pointerId: 1,
+    });
+    expect(panel).not.toHaveClass("is-footer-hot");
+  });
+});
+
 describe("SecondaryPanel project tree drag", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);

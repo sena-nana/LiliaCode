@@ -50,4 +50,12 @@ describe("sidebar project tree styles", () => {
     expect(moreRow).toContain("background: transparent");
     expect(moreRow).toContain("text-align: left");
   });
+
+  it("左下角按钮区跟随侧边栏底部四分之一区触发态显示", () => {
+    const footerButtonsVisible = rule(".secondary-panel.is-footer-hot .sb-footer__btn,");
+    const footerBadgeVisible = rule(".secondary-panel.is-footer-hot .sb-conn,");
+
+    expect(footerButtonsVisible).toContain("opacity: 1");
+    expect(footerBadgeVisible).toContain("opacity: 1");
+  });
 });
