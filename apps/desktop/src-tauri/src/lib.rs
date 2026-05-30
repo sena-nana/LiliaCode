@@ -110,7 +110,6 @@ struct ChatComposerState {
     /// "claude" | "codex"
     backend: String,
     model: String,
-    branch: String,
     #[serde(default)]
     plan_mode: bool,
     /// "full" | "ask" | "readonly"
@@ -123,13 +122,6 @@ struct ChatModelOption {
     id: String,
     label: String,
     backend: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ChatBranchOption {
-    name: String,
-    current: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -753,7 +745,6 @@ fn default_composer(task_id: &str) -> ChatComposerState {
         task_id: task_id.to_string(),
         backend: BACKEND_CLAUDE.to_string(),
         model: "claude-sonnet-4-6".to_string(),
-        branch: "main".to_string(),
         plan_mode: false,
         permission: "ask".to_string(),
     }
@@ -1579,21 +1570,6 @@ fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
 }
 
 #[tauri::command]
-fn chat_list_branches(_project_id: String) -> Vec<ChatBranchOption> {
-    // 第一阶段不读真实 git。
-    vec![
-        ChatBranchOption {
-            name: "main".to_string(),
-            current: true,
-        },
-        ChatBranchOption {
-            name: "dev".to_string(),
-            current: false,
-        },
-    ]
-}
-
-#[tauri::command]
 fn chat_get_composer_state(
     task_id: String,
     store: State<'_, ChatStore>,
@@ -2180,7 +2156,6 @@ pub fn run() {
             chat_respond_tool_consent,
             chat_respond_ask_user,
             chat_list_models,
-            chat_list_branches,
             chat_get_composer_state,
             chat_set_composer_state,
             chat_reset_session,

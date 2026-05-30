@@ -13,7 +13,6 @@ import type {
   CCSwitchConfig,
   CCSwitchStatus,
   ChatBackendKind,
-  ChatBranchOption,
   ChatAttachment,
   ChatComposerState,
   AgentTimelineEvent,
@@ -110,10 +109,6 @@ export async function pickAttachmentFiles(): Promise<string[]> {
 
 export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {
   return invoke<ChatModelOption[]>("chat_list_models", { backend });
-}
-
-export function listBranches(projectId: string): Promise<ChatBranchOption[]> {
-  return invoke<ChatBranchOption[]>("chat_list_branches", { projectId });
 }
 
 export function getComposerState(taskId: string): Promise<ChatComposerState> {

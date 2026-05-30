@@ -7,7 +7,6 @@ const baseState: ChatComposerState = {
   taskId: "task-1",
   backend: "claude",
   model: "claude-sonnet-4-6",
-  branch: "main",
   planMode: false,
   permission: "full",
 };
@@ -17,7 +16,6 @@ describe("ChatComposer", () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
-        branches: [{ name: "main", current: true }],
         attachments: [],
       },
     });
