@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AgentInteractionSettings,
   AssistantAIConfig,
   AssistantAITestResult,
   BackendEnvStatus,
@@ -27,6 +28,7 @@ import type {
 } from "@lilia/contracts";
 
 export type {
+  AgentInteractionSettings,
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
@@ -121,6 +123,16 @@ export function getComposerState(taskId: string): Promise<ChatComposerState> {
 
 export function setComposerState(state: ChatComposerState): Promise<void> {
   return invoke<void>("chat_set_composer_state", { state });
+}
+
+export function getAgentInteractionSettings(): Promise<AgentInteractionSettings> {
+  return invoke<AgentInteractionSettings>("agent_interaction_get_settings");
+}
+
+export function setAgentInteractionSettings(
+  settings: AgentInteractionSettings,
+): Promise<void> {
+  return invoke<void>("agent_interaction_set_settings", { settings });
 }
 
 /** 让下一次发送从全新 SDK session 开始（同时清掉前端可见的消息历史）。 */

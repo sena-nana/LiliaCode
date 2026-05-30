@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
+import type {
+  PendingAgentAction,
+  PendingAgentActionResolution,
+} from "../../composables/usePendingAgentActions";
 import AgentTimeline from "./AgentTimeline.vue";
 import ChatScrollMap from "./ChatScrollMap.vue";
 
@@ -11,6 +15,12 @@ const props = defineProps<{
   projectCwd?: string | null;
   activePlanApprovalTurnId?: string | null;
   forceScrollBottomKey?: number;
+  pendingAgentActions?: PendingAgentAction[];
+  showExpiredPendingActions?: boolean;
+}>();
+
+const emit = defineEmits<{
+  resolvePendingAgentAction: [resolution: PendingAgentActionResolution];
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -148,7 +158,10 @@ const isEmpty = computed(() =>
           :is-thinking="isThinking"
           :project-cwd="projectCwd"
           :active-plan-approval-turn-id="activePlanApprovalTurnId"
+          :pending-actions="pendingAgentActions"
+          :show-expired-pending-actions="showExpiredPendingActions"
           @event-toggled="onTimelineEventToggled"
+          @resolve-pending-action="emit('resolvePendingAgentAction', $event)"
         />
       </template>
       <div class="chat-controls-wrap">

@@ -6,6 +6,14 @@ import type {
   ChatAttachment,
   ChatMessage,
 } from "@lilia/contracts";
+import type {
+  PendingAgentAction,
+  PendingAgentActionResolution,
+} from "../../composables/usePendingAgentActions";
+import {
+  pendingActionForTimelineEvent,
+  timelineEventRequiresAgentAction,
+} from "../../composables/usePendingAgentActions";
 import ChatBubble from "./ChatBubble.vue";
 import TimelineEntryItem from "./TimelineEntryItem.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
@@ -35,10 +43,13 @@ const props = defineProps<{
   isThinking?: boolean;
   projectCwd?: string | null;
   activePlanApprovalTurnId?: string | null;
+  pendingActions?: PendingAgentAction[];
+  showExpiredPendingActions?: boolean;
 }>();
 
 const emit = defineEmits<{
   eventToggled: [payload: { event: AgentTimelineEvent; expanded: boolean }];
+  resolvePendingAction: [resolution: PendingAgentActionResolution];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -204,6 +215,8 @@ watch(
 );
 
 function expanded(event: AgentTimelineEvent): boolean {
+  if (pendingActionForTimelineEvent(event, pendingActions.value)) return true;
+  if (expiredPendingAction(event)) return true;
   return isTimelineExpanded(event, toggledIds.value, displayContext.value);
 }
 
@@ -328,6 +341,11 @@ function previewText(event: AgentTimelineEvent): string {
 }
 
 function groupExpanded(entry: TimelineGroupEntry): boolean {
+  if (entry.events.some((event) =>
+    pendingActionForTimelineEvent(event, pendingActions.value) || expiredPendingAction(event)
+  )) {
+    return true;
+  }
   return expandedGroupIds.value.has(entry.id);
 }
 
@@ -348,6 +366,14 @@ function isProcessAnchor(event: AgentTimelineEvent): boolean {
 
 function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
   return isTimelineMessage(event) && !isTimelineFinalReply(event);
+}
+
+const pendingActions = computed(() => props.pendingActions ?? []);
+
+function expiredPendingAction(event: AgentTimelineEvent): boolean {
+  if (props.showExpiredPendingActions !== true) return false;
+  if (pendingActionForTimelineEvent(event, pendingActions.value)) return false;
+  return timelineEventRequiresAgentAction(event);
 }
 
 function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
@@ -415,9 +441,12 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           :process-entries-for="processGroupEntries"
           :preview-text="previewText"
           :project-cwd="projectCwd"
+          :pending-actions="pendingActions"
+          :show-expired-pending-actions="showExpiredPendingActions"
           @toggle-event="toggleEvent"
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"
+          @resolve-pending-action="emit('resolvePendingAction', $event)"
         />
       </template>
       <li

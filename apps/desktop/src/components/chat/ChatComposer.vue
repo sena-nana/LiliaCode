@@ -4,38 +4,31 @@
  * 挂起态会把工具授权、Agent 提问和计划确认收进输入框内部。
  */
 
-import { computed, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Bot,
   Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
-  FilePen,
-  Globe,
   ListChecks,
   Paperclip,
-  Search,
   ShieldCheck,
   Square,
-  Terminal,
-  Wrench,
   X,
 } from "lucide-vue-next";
 import type {
-  AskUserAnswer,
-  AskUserOption,
-  AskUserQuestion,
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
   PermissionMode,
 } from "@lilia/contracts";
+import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
 import type { PendingAsk } from "../../composables/useAskUser";
+import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
@@ -61,7 +54,6 @@ const emit = defineEmits<{
   interrupt: [];
 }>();
 
-const OTHER_ANSWER_VALUE = "other";
 const COMPOSER_INPUT_LINE_HEIGHT = 22;
 const COMPOSER_INPUT_VERTICAL_PADDING = 8;
 const COMPOSER_INPUT_MAX_ROWS = 3;
@@ -77,12 +69,6 @@ const textareaMeasure = ref<HTMLTextAreaElement | null>(null);
 let resizeFrameId: number | null = null;
 let overflowTimerId: number | null = null;
 
-const askIndex = ref(0);
-const askAnswers = ref<Record<string, AskUserAnswer>>({});
-const singleFocus = ref<string | null>(null);
-const activeAskOptionId = ref<string | null>(null);
-const singlePick = ref<string | null>(null);
-const multiPicks = ref<Set<string>>(new Set());
 const toolExpanded = ref(false);
 const toolSubmitting = ref<ToolConsentDecision | null>(null);
 
@@ -105,28 +91,42 @@ const inputValue = computed({
   },
 });
 
-const askTotal = computed(() => activeAsk.value?.spec.questions.length ?? 0);
-const askQuestion = computed<AskUserQuestion | null>(() =>
-  activeAsk.value?.spec.questions[askIndex.value] ?? null,
+const {
+  askIndex,
+  askTotal,
+  askQuestion,
+  askDismissable,
+  askIsLast,
+  canGoPrev,
+  askTitle,
+  askIsPlanApproval,
+  askOptionsWithId,
+  askHasPreview,
+  askFocusedOption,
+  canAskSubmit,
+  singleFocus,
+  activeOptionId: activeAskOptionId,
+  singlePick,
+  multiPicks,
+  focusOption,
+  highlightOption,
+  clearOptionHighlight,
+  selectSingleOption,
+  toggleMulti,
+  submitAsk,
+  submitAskFreeform,
+  confirmAskNo,
+  skipAsk,
+  backAsk,
+  cancelAsk,
+} = useAskUserInteraction(
+  activeAsk,
+  pendingText,
+  (result) => emit("resolve-ask-user", result),
 );
+
 const hasPendingPanel = computed(() =>
   !!(activeAsk.value && askQuestion.value) || !!activeToolConsent.value,
-);
-const askDismissable = computed(() => activeAsk.value?.spec.dismissable !== false);
-const askIsLast = computed(() => askIndex.value >= askTotal.value - 1);
-const canGoPrev = computed(() => askIndex.value > 0);
-
-const askTitle = computed(() => {
-  const ask = activeAsk.value;
-  if (!ask) return "";
-  if (ask.spec.title) return ask.spec.title;
-  return askTotal.value > 1 ? `Lilia 想确认 ${askTotal.value} 件事` : "Lilia 想确认一下";
-});
-
-const askIsPlanApproval = computed(() =>
-  activeAsk.value?.spec.intent === "plan_approval" &&
-  askTotal.value === 1 &&
-  askQuestion.value?.mode === "confirm",
 );
 const askUsesInputActions = computed(() =>
   !!activeAsk.value && askQuestion.value?.mode !== "confirm",
@@ -139,100 +139,14 @@ const pendingEntryActionsKey = computed(() => {
   return "none";
 });
 
-const askOptionsWithId = computed<(AskUserOption & { id: string })[]>(() => {
-  const q = askQuestion.value;
-  if (!q || !q.options) return [];
-  return q.options.map((opt, i) => ({ ...opt, id: opt.id ?? opt.label ?? `opt-${i}` }));
-});
-
-const askHasPreview = computed(() => askOptionsWithId.value.some((opt) => !!opt.preview));
-const askFocusedOption = computed(() =>
-  askOptionsWithId.value.find((opt) => opt.id === singleFocus.value) ?? null,
-);
-
-const canAskSubmit = computed(() => {
-  const q = askQuestion.value;
-  if (!q) return false;
-  if (q.mode === "confirm") return true;
-  const hasFreeform = pendingText.value.trim().length > 0;
-  if (q.mode === "single") {
-    return hasFreeform || !!singlePick.value;
-  }
-  const min = q.minSelections ?? 1;
-  return multiPicks.value.size + (hasFreeform ? 1 : 0) >= min;
-});
-
-const DANGEROUS_BASH_RE =
-  /\b(rm\s+-[a-z]*r|rmdir\s+\/s|sudo\b|doas\b|chmod\s+-R|chown\s+-R|mkfs\b|dd\s+if=|fdisk\b|format\s+[a-z]:|del\s+\/[fsq]|rd\s+\/s|kill(all)?\s+-9|pkill\b|shutdown\b|reboot\b|halt\b|drop\s+(database|table|schema)|truncate\s+table|:\(\)\{\s*:\|:&\s*\};:)/i;
-
-const TOOL_ICON_MAP: Record<string, Component> = {
-  Bash: Terminal,
-  Write: FilePen,
-  Edit: FilePen,
-  MultiEdit: FilePen,
-  NotebookEdit: FilePen,
-  WebFetch: Globe,
-  WebSearch: Search,
-  Grep: Search,
-  Glob: Search,
-  Read: FilePen,
-  Agent: Bot,
-  Task: Bot,
-};
-
-const toolDanger = computed(() => {
-  const c = activeToolConsent.value;
-  if (!c || c.toolName !== "Bash") return false;
-  const cmd = (c.input as Record<string, unknown> | null | undefined)?.command;
-  return typeof cmd === "string" && DANGEROUS_BASH_RE.test(cmd);
-});
-
-const toolIcon = computed<Component>(() => {
-  const name = activeToolConsent.value?.toolName ?? "";
-  return TOOL_ICON_MAP[name] ?? Wrench;
-});
-
-const toolHeadline = computed(() => {
-  const c = activeToolConsent.value;
-  if (!c) return "";
-  const tool = c.displayName?.trim() || c.toolName || "工具";
-  if (c.title?.trim()) return c.title.trim();
-  return toolDanger.value ? `想执行 ${tool}` : `想使用 ${tool}`;
-});
-
-const toolInlinePreview = computed(() => {
-  const c = activeToolConsent.value;
-  if (!c) return "";
-  const obvious = pickObvious(c.input);
-  if (obvious) return obvious;
-  try {
-    const text = JSON.stringify(c.input);
-    if (!text || text === "{}") return "";
-    return text.length > 160 ? `${text.slice(0, 160)}...` : text;
-  } catch {
-    return "";
-  }
-});
-
-const toolInputJson = computed(() => {
-  const c = activeToolConsent.value;
-  if (!c) return "";
-  try {
-    return JSON.stringify(c.input, null, 2);
-  } catch {
-    return String(c.input);
-  }
-});
-
-const toolSubtitle = computed(() => {
-  const c = activeToolConsent.value;
-  if (!c) return "";
-  const bits: string[] = [];
-  if (c.description?.trim()) bits.push(c.description.trim());
-  if (c.blockedPath?.trim()) bits.push(`涉及路径：${c.blockedPath.trim()}`);
-  if (c.decisionReason?.trim()) bits.push(`触发原因：${c.decisionReason.trim()}`);
-  return bits.join(" · ");
-});
+const {
+  toolDanger,
+  toolIcon,
+  toolHeadline,
+  toolInlinePreview,
+  toolInputJson,
+  toolSubtitle,
+} = useToolConsentPresentation(activeToolConsent);
 
 const inputPlaceholder = computed(() => {
   if (activeToolConsent.value) return "输入拒绝理由，Enter 拒绝此次调用";
@@ -290,19 +204,6 @@ function patch(next: Partial<ChatComposerState>) {
 
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
-
-function pickObvious(input: Record<string, unknown> | null | undefined): string {
-  if (!input || typeof input !== "object") return "";
-  const candidates = ["command", "file_path", "path", "url", "pattern", "query"];
-  for (const key of candidates) {
-    const v = (input as Record<string, unknown>)[key];
-    if (typeof v === "string" && v.trim()) {
-      const text = v.trim();
-      return text.length > 160 ? `${text.slice(0, 160)}...` : text;
-    }
-  }
-  return "";
-}
 
 function send() {
   const value = inputValue.value.trim();
@@ -385,142 +286,6 @@ function resize() {
   }
 }
 
-function focusOption(id: string) {
-  singleFocus.value = id;
-}
-
-function highlightOption(id: string) {
-  singleFocus.value = id;
-  activeAskOptionId.value = id;
-}
-
-function clearOptionHighlight(id: string) {
-  if (activeAskOptionId.value !== id) return;
-  activeAskOptionId.value = null;
-  singleFocus.value = singlePick.value ?? null;
-}
-
-function selectSingleOption(id: string) {
-  singleFocus.value = id;
-  singlePick.value = id;
-}
-
-function toggleMulti(id: string) {
-  const next = new Set(multiPicks.value);
-  if (next.has(id)) next.delete(id);
-  else {
-    const q = askQuestion.value;
-    if (q?.maxSelections && next.size >= q.maxSelections) {
-      const first = next.values().next();
-      if (!first.done) next.delete(first.value);
-    }
-    next.add(id);
-  }
-  multiPicks.value = next;
-  singleFocus.value = id;
-}
-
-function buildAskAnswer(): AskUserAnswer | null {
-  const q = askQuestion.value;
-  if (!q) return null;
-  if (q.mode === "confirm") {
-    return { questionId: q.id, value: "yes" };
-  }
-  if (q.mode === "single") {
-    const id = singlePick.value;
-    if (!id) return null;
-    return { questionId: q.id, value: id };
-  }
-  return {
-    questionId: q.id,
-    value: [...multiPicks.value],
-  };
-}
-
-function buildFreeformAnswer(value: string): AskUserAnswer | null {
-  const q = askQuestion.value;
-  if (!q || !value) return null;
-  if (askIsPlanApproval.value) {
-    return { questionId: q.id, value: "revision_request", notes: value };
-  }
-  if (q.mode === "confirm") {
-    return { questionId: q.id, value: "no", notes: value };
-  }
-  if (q.mode === "single") {
-    return { questionId: q.id, value: OTHER_ANSWER_VALUE, notes: value };
-  }
-  const picked = new Set(multiPicks.value);
-  picked.delete(OTHER_ANSWER_VALUE);
-  picked.add(OTHER_ANSWER_VALUE);
-  return { questionId: q.id, value: [...picked], notes: value };
-}
-
-function buildCurrentAskAnswer(): AskUserAnswer | null {
-  const q = askQuestion.value;
-  const freeform = q?.mode !== "confirm" ? pendingText.value.trim() : "";
-  return freeform ? buildFreeformAnswer(freeform) : buildAskAnswer();
-}
-
-function saveNavigableAnswer() {
-  const q = askQuestion.value;
-  if (!q || q.mode === "confirm" || !canAskSubmit.value) return;
-  const ans = buildCurrentAskAnswer();
-  if (ans) askAnswers.value[ans.questionId] = ans;
-}
-
-function confirmAskNo() {
-  const q = askQuestion.value;
-  if (!q) return;
-  const notes = pendingText.value.trim();
-  askAnswers.value[q.id] = {
-    questionId: q.id,
-    value: "no",
-    notes: notes || undefined,
-  };
-  advanceAsk();
-}
-
-function submitAsk() {
-  if (!canAskSubmit.value) return;
-  const ans = buildCurrentAskAnswer();
-  if (!ans) return;
-  askAnswers.value[ans.questionId] = ans;
-  advanceAsk();
-}
-
-function submitAskFreeform(value: string) {
-  const ans = buildFreeformAnswer(value);
-  if (!ans) return;
-  askAnswers.value[ans.questionId] = ans;
-  advanceAsk();
-}
-
-function skipAsk() {
-  const q = askQuestion.value;
-  if (!q) return;
-  delete askAnswers.value[q.id];
-  advanceAsk();
-}
-
-function backAsk() {
-  if (!canGoPrev.value) return;
-  saveNavigableAnswer();
-  askIndex.value -= 1;
-}
-
-function advanceAsk() {
-  if (askIsLast.value) {
-    emit("resolve-ask-user", { answers: { ...askAnswers.value }, cancelled: false });
-    return;
-  }
-  askIndex.value += 1;
-}
-
-function cancelAsk() {
-  if (!askDismissable.value) return;
-  emit("resolve-ask-user", { answers: { ...askAnswers.value }, cancelled: true });
-}
-
 function onInlineKeydown(e: KeyboardEvent) {
   const q = askQuestion.value;
   if (!q) return;
@@ -572,13 +337,7 @@ watch(inputValue, () => {
 });
 
 watch(pendingKey, () => {
-  askIndex.value = 0;
-  askAnswers.value = {};
-  singleFocus.value = null;
-  activeAskOptionId.value = null;
-  singlePick.value = null;
-  multiPicks.value = new Set();
-  pendingText.value = "";
+  if (!activeAsk.value) pendingText.value = "";
   toolExpanded.value = false;
   toolSubmitting.value = null;
   void nextTick(queueResize);
@@ -586,39 +345,7 @@ watch(pendingKey, () => {
 
 watch(
   () => askQuestion.value?.id,
-  (qid) => {
-    if (!qid) return;
-    const prior = askAnswers.value[qid];
-    const q = askQuestion.value!;
-
-    multiPicks.value = new Set();
-    singleFocus.value = null;
-    activeAskOptionId.value = null;
-    singlePick.value = null;
-    pendingText.value = "";
-
-    if (q.mode === "single") {
-      if (prior && typeof prior.value === "string") {
-        if (prior.value === OTHER_ANSWER_VALUE) {
-          pendingText.value = prior.notes ?? "";
-        } else {
-          singleFocus.value = prior.value;
-          singlePick.value = prior.value;
-        }
-      }
-    } else if (q.mode === "multi") {
-      if (prior && Array.isArray(prior.value)) {
-        if (prior.value.includes(OTHER_ANSWER_VALUE)) {
-          multiPicks.value = new Set(
-            prior.value.filter((value) => value !== OTHER_ANSWER_VALUE),
-          );
-          pendingText.value = prior.notes ?? "";
-        } else {
-          multiPicks.value = new Set(prior.value);
-        }
-      }
-    }
-
+  () => {
     void nextTick(queueResize);
   },
   { immediate: true },

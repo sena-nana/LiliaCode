@@ -49,6 +49,15 @@ export function useToolConsentForTask(
   return computed(() => pending[readTaskId(taskId)] ?? null);
 }
 
+export function usePendingToolConsentsForTask(
+  taskId: TaskIdSource,
+): ComputedRef<ToolConsentRequest[]> {
+  return computed(() => {
+    const request = pending[readTaskId(taskId)];
+    return request ? [request] : [];
+  });
+}
+
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */
 export async function respondConsent(
   taskId: string,

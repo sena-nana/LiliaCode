@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
+import type {
+  PendingAgentAction,
+  PendingAgentActionResolution,
+} from "../../composables/usePendingAgentActions";
+import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineCardDetails from "./TimelineCardDetails.vue";
+import TimelinePendingAction from "./TimelinePendingAction.vue";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
@@ -13,6 +19,12 @@ const props = defineProps<{
   expanded: boolean;
   compact?: boolean;
   projectCwd?: string | null;
+  pendingAction?: PendingAgentAction | null;
+  actionExpired?: boolean;
+}>();
+
+const emit = defineEmits<{
+  resolvePendingAction: [resolution: PendingAgentActionResolution];
 }>();
 
 const display = computed(() =>
@@ -60,5 +72,18 @@ const expandedFallbackView = computed(() =>
         :fallback-view="expandedFallbackView"
       />
     </template>
+
+    <TimelinePendingAction
+      v-if="props.pendingAction"
+      :action="props.pendingAction"
+      @resolve="emit('resolvePendingAction', $event)"
+    />
+    <section
+      v-else-if="props.actionExpired"
+      class="timeline-pending-action timeline-pending-action--expired"
+      role="note"
+    >
+      已失效
+    </section>
   </article>
 </template>

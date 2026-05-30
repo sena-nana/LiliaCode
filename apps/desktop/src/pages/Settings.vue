@@ -7,8 +7,10 @@ import {
 import { useTheme } from "../composables/useTheme";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import {
+  getAgentInteractionSettings,
   getAssistantAIConfig,
   getCCSwitchConfig,
+  setAgentInteractionSettings,
   setAssistantAIConfig,
   setCCSwitchConfig,
   setRouterMode,
@@ -20,6 +22,7 @@ import {
   setProjectSettings,
 } from "../services/projects";
 import type {
+  AgentInteractionSettings,
   AssistantAIConfig,
   AssistantAITestResult,
   CCSwitchConfig,
@@ -143,6 +146,36 @@ async function testAssistantAI() {
   } finally { testingAssistantAI.value = false; }
 }
 
+// ---- Agent 交互 ----
+const agentInteraction = ref<AgentInteractionSettings>({ nonInterruptMode: false });
+const savingAgentInteraction = ref(false);
+const agentInteractionError = ref<string | null>(null);
+
+async function loadAgentInteraction() {
+  try {
+    agentInteraction.value = await getAgentInteractionSettings();
+  } catch (err) {
+    agentInteractionError.value = `读取 Agent 交互设置失败：${String(err)}`;
+  }
+}
+
+async function setNonInterruptMode(nonInterruptMode: boolean) {
+  if (agentInteraction.value.nonInterruptMode === nonInterruptMode) return;
+  savingAgentInteraction.value = true;
+  agentInteractionError.value = null;
+  const previous = agentInteraction.value;
+  const next: AgentInteractionSettings = { ...previous, nonInterruptMode };
+  agentInteraction.value = next;
+  try {
+    await setAgentInteractionSettings(next);
+  } catch (err) {
+    agentInteraction.value = previous;
+    agentInteractionError.value = `保存 Agent 交互设置失败：${String(err)}`;
+  } finally {
+    savingAgentInteraction.value = false;
+  }
+}
+
 // ---- 项目偏好 ----
 const projectSettings = ref<ProjectSettings>({ cloneParentDir: null });
 const savingProject = ref(false);
@@ -184,7 +217,13 @@ async function persistProjectSettings() {
 
 onMounted(async () => {
   await lockRouters();
-  await Promise.all([loadConfig(), loadAssistantAI(), loadProjectSettings(), refresh()]);
+  await Promise.all([
+    loadConfig(),
+    loadAssistantAI(),
+    loadAgentInteraction(),
+    loadProjectSettings(),
+    refresh(),
+  ]);
 });
 </script>
 
@@ -389,6 +428,52 @@ onMounted(async () => {
         <div>
           <div class="conn-banner__title">{{ assistantAIResult.ok ? "可达" : "不可达" }}</div>
           <div class="conn-banner__hint">{{ assistantAIBannerHint }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>
+        <span class="card-h2__title">
+          <Sparkles :size="14" aria-hidden="true" />
+          Agent 交互
+        </span>
+      </h2>
+
+      <div class="settings-row">
+        <div class="settings-row__label">
+          <div>非打断模式</div>
+          <div class="settings-row__hint">权限、提问和计划确认留在时间线卡片中处理。</div>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="非打断模式">
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="!agentInteraction.nonInterruptMode"
+            :class="{ 'is-active': !agentInteraction.nonInterruptMode }"
+            :disabled="savingAgentInteraction"
+            @click="setNonInterruptMode(false)"
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.nonInterruptMode"
+            :class="{ 'is-active': agentInteraction.nonInterruptMode }"
+            :disabled="savingAgentInteraction"
+            @click="setNonInterruptMode(true)"
+          >
+            开启
+          </button>
+        </div>
+      </div>
+
+      <div v-if="agentInteractionError" class="conn-banner conn-banner--err">
+        <AlertTriangle :size="16" aria-hidden="true" />
+        <div>
+          <div class="conn-banner__title">Agent 交互</div>
+          <div class="conn-banner__hint">{{ agentInteractionError }}</div>
         </div>
       </div>
     </div>

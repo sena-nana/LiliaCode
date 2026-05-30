@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { AskUserSpec } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { installAgentAskUserBridge } from "../src/composables/useAgentAskUserBridge";
 import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
@@ -8,13 +9,14 @@ import { installToolConsentBridge } from "../src/composables/useToolConsentBridg
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
+import { setAgentInteractionSettings } from "../src/services/chat";
 import {
   emitTauriEvent,
   emitMockTimelineEvent,
   mockInvoke,
 } from "./tauriMock";
 
-const askUserSpec = {
+const askUserSpec: AskUserSpec = {
   title: "Claude 想确认一下",
   source: "Claude",
   questions: [
@@ -31,12 +33,39 @@ const askUserSpec = {
   ],
 };
 
+const multiAskUserSpec: AskUserSpec = {
+  title: "Claude 想确认 2 件事",
+  source: "Claude",
+  questions: [
+    {
+      id: "q-1",
+      header: "方案",
+      question: "选哪个方案？",
+      mode: "single",
+      options: [
+        { id: "o-1", label: "A" },
+        { id: "o-2", label: "B" },
+      ],
+    },
+    {
+      id: "q-2",
+      header: "范围",
+      question: "要包含哪些内容？",
+      mode: "multi",
+      options: [
+        { id: "cache", label: "缓存" },
+        { id: "tests", label: "测试" },
+      ],
+    },
+  ],
+};
+
 async function renderTaskDetail(taskId = "t-002") {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(`/projects/lilia/tasks/${taskId}`);
   await router.isReady();
 
-  return render(TaskDetail, {
+  const view = render(TaskDetail, {
     props: {
       projectId: "lilia",
       taskId,
@@ -45,15 +74,53 @@ async function renderTaskDetail(taskId = "t-002") {
       plugins: [router],
     },
   });
+  await waitFor(() => {
+    expect(mockInvoke.mock.calls.some(([cmd]) =>
+      cmd === "agent_interaction_get_settings"
+    )).toBe(true);
+  });
+  await Promise.resolve();
+  return view;
 }
 
-function emitAskUserRequest(taskId: string) {
+async function enableNonInterruptMode() {
+  await setAgentInteractionSettings({ nonInterruptMode: true });
+  mockInvoke.mockClear();
+}
+
+function emitAskUserRequest(
+  taskId: string,
+  spec: AskUserSpec = askUserSpec,
+  turnId = "turn-ask",
+) {
   emitTauriEvent("chat:ask-user-request", {
     taskId,
-    turnId: "turn-ask",
+    turnId,
     backend: "claude",
     requestId: `ask-${taskId}`,
-    spec: askUserSpec,
+    spec,
+  });
+}
+
+function emitAskUserTimelineEvent(
+  taskId: string,
+  spec: AskUserSpec = askUserSpec,
+  turnId = "turn-ask",
+) {
+  emitMockTimelineEvent(taskId, {
+    id: `ask-card-${taskId}`,
+    kind: "ask_user",
+    status: "requires_action",
+    title: spec.title ?? "AskUserQuestion",
+    summary: spec.questions[0]?.question ?? "",
+    turnId,
+    payload: {
+      backend: "claude",
+      interaction: "ask_user",
+      requestId: `ask-${taskId}`,
+      questions: spec.questions,
+      spec,
+    },
   });
 }
 
@@ -82,6 +149,22 @@ function emitPlanApprovalRequest(taskId: string) {
   });
 }
 
+function emitPlanTimelineEvent(taskId: string) {
+  emitMockTimelineEvent(taskId, {
+    id: `plan-card-${taskId}`,
+    kind: "plan",
+    status: "requires_action",
+    title: "ExitPlanMode",
+    summary: "当前计划等待确认",
+    turnId: "turn-plan",
+    payload: {
+      plan: "## 当前计划\n- 先改 runner\n- 再补测试",
+      approved: null,
+      executionPermission: "ask",
+    },
+  });
+}
+
 function emitSnakeCaseAskUserRequest(taskId: string) {
   emitTauriEvent("chat:ask-user-request", {
     task_id: taskId,
@@ -106,6 +189,26 @@ function emitToolConsentRequest(taskId: string) {
     blockedPath: null,
     decisionReason: null,
     toolUseId: null,
+  });
+}
+
+function emitToolConsentTimelineEvent(taskId: string) {
+  emitMockTimelineEvent(taskId, {
+    id: `tool-card-${taskId}`,
+    kind: "file_change",
+    status: "requires_action",
+    title: "Write",
+    summary: "src/main.ts",
+    turnId: "turn-tool",
+    payload: {
+      backend: "claude",
+      interaction: "tool_consent",
+      requestId: `tool-${taskId}`,
+      toolName: "Write",
+      input: { file_path: "src/main.ts" },
+      path: "src/main.ts",
+      permissionRequest: true,
+    },
   });
 }
 
@@ -166,6 +269,84 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "完成" }));
 
     await expectAskUserResponse("t-002");
+  });
+
+  it("非打断模式把 Agent 提问留在时间线卡片，composer 仍可加入调度队列", async () => {
+    await enableNonInterruptMode();
+    const view = await renderTaskDetail();
+
+    emitAskUserRequest("t-002");
+    emitAskUserTimelineEvent("t-002");
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer .composer-inline--ask")).toBeNull();
+    });
+    const prompt = view.container.querySelector(".timeline-pending-action.composer-inline--ask");
+    expect(prompt).not.toBeNull();
+    expect(prompt).toHaveClass("timeline-pending-action");
+    expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
+    expect(view.getByRole("button", { name: "添加附件" })).toBeInTheDocument();
+
+    emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
+    await fireEvent.update(
+      view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"),
+      "补充上下文",
+    );
+    await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_send_message", expect.objectContaining({
+        taskId: "t-002",
+        content: "补充上下文",
+      }), undefined);
+    });
+
+    await fireEvent.click(view.getByRole("radio", { name: "B" }));
+    await fireEvent.click(view.getByRole("button", { name: "完成" }));
+
+    await expectAskUserResponse("t-002");
+  });
+
+  it("非打断模式的多题提问在时间线卡片中保留前后题回答", async () => {
+    await enableNonInterruptMode();
+    const view = await renderTaskDetail();
+
+    emitAskUserRequest("t-002", multiAskUserSpec);
+    emitAskUserTimelineEvent("t-002", multiAskUserSpec);
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".timeline-pending-action.composer-inline--ask"))
+        .not.toBeNull();
+    });
+    await fireEvent.click(view.getByRole("radio", { name: "B" }));
+    await waitFor(() => {
+      expect(view.getByRole("radio", { name: "B" })).toHaveAttribute("aria-checked", "true");
+    });
+    await fireEvent.click(view.getByRole("button", { name: "继续" }));
+    await fireEvent.click(view.getByRole("checkbox", { name: "缓存" }));
+    await fireEvent.click(view.getByRole("checkbox", { name: "测试" }));
+    await fireEvent.click(view.getByRole("button", { name: "上一题" }));
+
+    expect(view.getByRole("radio", { name: "B" })).toHaveAttribute("aria-checked", "true");
+
+    await fireEvent.click(view.getByRole("button", { name: "继续" }));
+    expect(view.getByRole("checkbox", { name: "缓存" })).toHaveAttribute("aria-checked", "true");
+    expect(view.getByRole("checkbox", { name: "测试" })).toHaveAttribute("aria-checked", "true");
+    await fireEvent.click(view.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+        taskId: "t-002",
+        requestId: "ask-t-002",
+        result: {
+          cancelled: false,
+          answers: {
+            "q-1": { questionId: "q-1", value: "o-2" },
+            "q-2": { questionId: "q-2", value: ["cache", "tests"] },
+          },
+        },
+      }, undefined);
+    });
   });
 
   it("计划确认挂起时，输入框发送文本会回写为计划修改要求而不是新消息", async () => {
@@ -231,6 +412,46 @@ describe("chat AskUser prompt", () => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
   });
 
+  it("非打断模式把工具授权留在时间线卡片并从卡片回写拒绝理由", async () => {
+    await enableNonInterruptMode();
+    const view = await renderTaskDetail();
+
+    emitToolConsentRequest("t-002");
+    emitToolConsentTimelineEvent("t-002");
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer .composer-inline--tool")).toBeNull();
+    });
+    const prompt = view.container.querySelector(".timeline-pending-action.composer-inline--tool");
+    expect(prompt).not.toBeNull();
+    expect(prompt).toHaveClass("timeline-pending-action");
+    expect(view.getByRole("button", { name: "添加附件" })).toBeInTheDocument();
+
+    await fireEvent.update(view.getByPlaceholderText("拒绝理由"), "先不要写这个文件");
+    await fireEvent.click(view.getByRole("button", { name: "忽略" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
+        taskId: "t-002",
+        requestId: "tool-t-002",
+        decision: "deny",
+        message: "先不要写这个文件",
+      }, undefined);
+    });
+  });
+
+  it("非打断模式下没有运行时 pending 的待处理卡片显示已失效", async () => {
+    await enableNonInterruptMode();
+    emitToolConsentTimelineEvent("t-002");
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("已失效")).toBeInTheDocument();
+    });
+    expect(view.queryByPlaceholderText("拒绝理由")).toBeNull();
+    expect(view.container.querySelector(".chat-composer .composer-inline--tool")).toBeNull();
+  });
+
   it("加载历史对话时不会展开待确认计划卡片", async () => {
     emitMockTimelineEvent("t-002", {
       id: "plan-loaded",
@@ -279,6 +500,71 @@ describe("chat AskUser prompt", () => {
       expect(view.container.querySelector(".timeline-card--plan"))
         .toHaveClass("is-expanded");
     });
+  });
+
+  it("非打断模式把计划确认留在计划卡片并可同意", async () => {
+    await enableNonInterruptMode();
+    emitPlanTimelineEvent("t-002");
+    const view = await renderTaskDetail();
+
+    emitPlanApprovalRequest("t-002");
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer .composer-inline--plan")).toBeNull();
+    });
+    const action = view.container.querySelector(".timeline-pending-action--plan");
+    expect(action).not.toBeNull();
+    expect(action).toHaveClass("timeline-pending-action");
+    expect(view.getByRole("region", { name: "确认 Claude 计划" })).toBe(action);
+    expect(view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"))
+      .toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+        taskId: "t-002",
+        requestId: "ask-t-002",
+        result: {
+          cancelled: false,
+          answers: {
+            "approve-plan": { questionId: "approve-plan", value: "yes" },
+          },
+        },
+      }, undefined);
+    });
+  });
+
+  it("非打断模式的计划卡片可提交修改要求", async () => {
+    await enableNonInterruptMode();
+    emitPlanTimelineEvent("t-002");
+    const view = await renderTaskDetail();
+
+    emitPlanApprovalRequest("t-002");
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".timeline-pending-action--plan")).not.toBeNull();
+    });
+    await fireEvent.update(view.getByPlaceholderText("修改要求"), "请把测试计划拆细");
+    await fireEvent.click(view.getByRole("button", { name: "提交修改要求" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+        taskId: "t-002",
+        requestId: "ask-t-002",
+        result: {
+          cancelled: false,
+          answers: {
+            "approve-plan": {
+              questionId: "approve-plan",
+              value: "revision_request",
+              notes: "请把测试计划拆细",
+            },
+          },
+        },
+      }, undefined);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
   });
 
   it("不会在当前对话显示其他 task 的 Agent 提问", async () => {

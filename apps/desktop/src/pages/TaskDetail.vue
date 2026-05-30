@@ -25,12 +25,22 @@ import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
 import ChatSidebarHost from "../components/chat/ChatSidebarHost.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
-import { resolveAskUser, useAskUserForTask } from "../composables/useAskUser";
+import {
+  resolveAskUserById,
+  useAskUserForTask,
+  usePendingAsksForTask,
+} from "../composables/useAskUser";
+import {
+  usePendingAgentActionsForTask,
+  type PendingAgentActionResolution,
+} from "../composables/usePendingAgentActions";
 import {
   respondConsent,
+  usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../composables/useToolConsentBridge";
 import {
+  getAgentInteractionSettings,
   getComposerState,
   listAgentTimeline,
   listModels,
@@ -46,6 +56,7 @@ import {
 } from "../services/chat";
 import type {
   AskUserResult,
+  AgentInteractionSettings,
   AgentTimelineEvent,
   AgentTimelinePayload,
   ChatAttachment,
@@ -86,10 +97,23 @@ const chatPageRef = ref<HTMLElement | null>(null);
 const attachments = ref<ChatAttachment[]>([]);
 const userSendScrollKey = ref(0);
 const pendingAskUser = useAskUserForTask(() => props.taskId);
+const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
 const pendingToolConsent = useToolConsentForTask(() => props.taskId);
+const pendingToolConsents = usePendingToolConsentsForTask(() => props.taskId);
+const runtimePendingAgentActions = usePendingAgentActionsForTask(
+  pendingAskUsers,
+  pendingToolConsents,
+);
+const agentInteractionSettings = ref<AgentInteractionSettings>({ nonInterruptMode: false });
+const nonInterruptMode = computed(() => agentInteractionSettings.value.nonInterruptMode);
+const pendingAgentActions = computed(() =>
+  nonInterruptMode.value ? runtimePendingAgentActions.value : [],
+);
 
 const pendingPlanApproval = computed(() => {
-  const ask = pendingAskUser.value;
+  const ask = nonInterruptMode.value
+    ? pendingAskUsers.value.find((item) => item.spec.intent === "plan_approval") ?? null
+    : pendingAskUser.value;
   if (!ask) return null;
   if (ask.spec.intent !== "plan_approval") return null;
   const question = ask.spec.questions[0];
@@ -242,7 +266,9 @@ async function onInterrupt() {
 }
 
 function onResolveAskUser(result: AskUserResult) {
-  resolveAskUser(result);
+  const ask = pendingAskUser.value;
+  if (!ask) return;
+  resolveAskUserById(ask.id, result);
 }
 
 async function onResolveToolConsent(
@@ -256,6 +282,27 @@ async function onResolveToolConsent(
   } catch (err) {
     console.error("[tool-consent] respond failed", err);
   }
+}
+
+async function onResolvePendingAgentAction(resolution: PendingAgentActionResolution) {
+  if (resolution.kind === "tool_consent") {
+    const request = pendingToolConsents.value.find(
+      (item) => item.requestId === resolution.requestId,
+    );
+    if (!request) return;
+    try {
+      await respondConsent(
+        request.taskId,
+        request.requestId,
+        resolution.decision,
+        resolution.message,
+      );
+    } catch (err) {
+      console.error("[tool-consent] respond failed", err);
+    }
+    return;
+  }
+  resolveAskUserById(resolution.askId, resolution.result);
 }
 
 async function onComposerUpdate(next: ChatComposerState) {
@@ -405,6 +452,14 @@ async function loadAll() {
   await reloadModelsForBackend(comp.backend);
 }
 
+async function loadAgentInteractionSettings() {
+  try {
+    agentInteractionSettings.value = await getAgentInteractionSettings();
+  } catch (err) {
+    console.error("[settings] load agent interaction settings failed", err);
+  }
+}
+
 const unlisteners: UnlistenFn[] = [];
 
 onMounted(async () => {
@@ -450,7 +505,7 @@ onMounted(async () => {
       isTurnRunning.value = false;
     }),
   );
-  await Promise.all([loadAll()]);
+  await Promise.all([loadAll(), loadAgentInteractionSettings()]);
 });
 
 onUnmounted(async () => {
@@ -466,7 +521,7 @@ watch(
     isTurnRunning.value = false;
     timelineEvents.value = [];
     attachments.value = [];
-    await loadAll();
+    await Promise.all([loadAll(), loadAgentInteractionSettings()]);
   },
 );
 </script>
@@ -487,6 +542,9 @@ watch(
             :project-cwd="project?.cwd ?? null"
             :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
             :force-scroll-bottom-key="userSendScrollKey"
+            :pending-agent-actions="pendingAgentActions"
+            :show-expired-pending-actions="nonInterruptMode"
+            @resolve-pending-agent-action="onResolvePendingAgentAction"
           >
             <template #controls>
               <div class="chat-controls">
@@ -495,8 +553,8 @@ watch(
                   :state="composer"
                   :attachments="attachments"
                   :sending="isTurnRunning"
-                  :pending-ask="pendingAskUser"
-                  :tool-consent="pendingToolConsent"
+                  :pending-ask="nonInterruptMode ? null : pendingAskUser"
+                  :tool-consent="nonInterruptMode ? null : pendingToolConsent"
                   @send="onSend"
                   @interrupt="onInterrupt"
                   @update:state="onComposerUpdate"

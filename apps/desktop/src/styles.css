@@ -2676,6 +2676,10 @@ button.ghost:hover {
   color: var(--warn);
 }
 
+.timeline-plan-card__badge--expired {
+  color: var(--text-faint);
+}
+
 .timeline-plan-card__badge--approved {
   border-color: color-mix(in srgb, var(--ok) 34%, var(--border-soft));
   background: var(--ok-soft);
@@ -3999,6 +4003,75 @@ button.ghost:hover {
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.timeline-pending-action {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-soft) 58%, var(--bg));
+}
+
+.timeline-card--plan > .timeline-pending-action {
+  margin: 0;
+  border-width: 1px 0 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0 0 5px 5px;
+  background: var(--bg);
+}
+
+.timeline-pending-action__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.timeline-pending-action__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  max-height: 132px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.timeline-pending-action__input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.timeline-pending-action--plan {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.timeline-pending-action--expired {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.timeline-pending-action .composer-inline__options {
+  max-height: min(220px, 34vh);
+}
+
+.timeline-pending-action .composer-inline__actions {
+  justify-content: flex-end;
 }
 
 .chat-composer-pending-panel-enter-active,

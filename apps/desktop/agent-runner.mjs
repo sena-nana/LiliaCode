@@ -398,17 +398,97 @@ const LILIA_ASK_USER_TOOL_NAMES = new Set([
 
 function requestUserConsent(payload) {
   const id = `consent-${consentSeq++}`;
+  emitToolConsentTimeline(id, payload, "requires_action");
   emit({ type: "consent_request", id, ...payload });
   return new Promise((resolve) => {
-    consentPending.set(id, resolve);
+    consentPending.set(id, (response) => resolve({ id, ...response }));
   });
 }
 
-function requestAskUser(spec) {
+function requestAskUser(spec, options = {}) {
   const id = `ask-${askUserSeq++}`;
-  emit({ type: "ask_user_request", id, spec });
+  const emitTimelineEvent =
+    options.emitTimelineEvent !== false && spec?.intent !== "plan_approval";
+  if (emitTimelineEvent) emitAskUserTimeline(id, spec, "requires_action");
   return new Promise((resolve) => {
-    askUserPending.set(id, resolve);
+    askUserPending.set(id, (result) => {
+      if (emitTimelineEvent) {
+        emitAskUserTimeline(id, spec, result?.cancelled === true ? "cancelled" : "success", result);
+      }
+      resolve(result);
+    });
+    emit({ type: "ask_user_request", id, spec });
+  });
+}
+
+function consentTimelineSourceId(id, payload) {
+  return stringOrNull(payload?.toolUseID) || id;
+}
+
+function emitToolConsentTimeline(id, payload, status, decisionMessage = "") {
+  const toolName = stringOrNull(payload?.toolName) || "tool";
+  const input = isRecord(payload?.input) ? payload.input : {};
+  const normalized = normalizeClaudeTool(toolName, input);
+  const summary = decisionMessage ||
+    oneLineSummary(payload?.description) ||
+    normalized.summary ||
+    oneLineSummary(payload?.title) ||
+    oneLineSummary(payload?.displayName) ||
+    toolName;
+  const eventPayload = {
+    backend: "claude",
+    interaction: "tool_consent",
+    requestId: id,
+    toolName,
+    ...normalized.payload,
+    input,
+    permissionRequest: true,
+    toolUseId: stringOrNull(payload?.toolUseID),
+    title: stringOrNull(payload?.title),
+    displayName: stringOrNull(payload?.displayName),
+    description: stringOrNull(payload?.description),
+    blockedPath: stringOrNull(payload?.blockedPath),
+    decisionReason: stringOrNull(payload?.decisionReason),
+  };
+  if (normalized.subkind) eventPayload.subkind = normalized.subkind;
+  if (decisionMessage) eventPayload.decisionMessage = decisionMessage;
+  emitTimeline({
+    kind: normalized.kind || "tool",
+    status,
+    title: toolName,
+    summary,
+    payload: eventPayload,
+    sourceId: consentTimelineSourceId(id, payload),
+  });
+}
+
+function askUserTimelineSummary(spec) {
+  const questions = Array.isArray(spec?.questions) ? spec.questions : [];
+  const first = questions[0];
+  const question = oneLineSummary(first?.question || first?.header || spec?.title || "用户提问");
+  if (questions.length <= 1) return question;
+  return `${question} 等 ${questions.length} 个问题`;
+}
+
+function emitAskUserTimeline(id, spec, status, result = null) {
+  const questions = Array.isArray(spec?.questions) ? spec.questions : [];
+  emitTimeline({
+    kind: "ask_user",
+    status,
+    title: stringOrNull(spec?.title) || "AskUserQuestion",
+    summary: askUserTimelineSummary(spec),
+    payload: {
+      backend: "claude",
+      interaction: "ask_user",
+      requestId: id,
+      title: stringOrNull(spec?.title),
+      source: stringOrNull(spec?.source),
+      questions,
+      spec,
+      ...(result ? { result } : {}),
+      cancelled: result?.cancelled === true,
+    },
+    sourceId: id,
   });
 }
 
@@ -463,7 +543,7 @@ function createClaudeCanUseTool(ctx) {
         message: "当前权限为只读，禁止写操作",
       };
     }
-    const { decision, message } = await requestUserConsent({
+    const consentPayload = {
       toolName,
       input: safeInput,
       toolUseID: stringOrNull(opts?.toolUseID),
@@ -472,13 +552,16 @@ function createClaudeCanUseTool(ctx) {
       description: stringOrNull(opts?.description),
       blockedPath: stringOrNull(opts?.blockedPath),
       decisionReason: stringOrNull(opts?.decisionReason),
-    });
+    };
+    const { id, decision, message } = await requestUserConsent(consentPayload);
     if (decision === "allow") {
+      emitToolConsentTimeline(id, consentPayload, "success", "用户已同意此次工具调用");
       // Claude Code 二进制端 Zod 校验要求 allow 必须带 updatedInput——SDK 的 d.ts
       // 把它标成 optional 但底层 schema 实际 required。不填会被当作工具调用失败，
       // Agent 收到 is_error 结果会无限重试 canUseTool。原样回填即可。
       return { behavior: "allow", updatedInput: safeInput };
     }
+    emitToolConsentTimeline(id, consentPayload, "cancelled", message || "用户拒绝了此次工具调用");
     return { behavior: "deny", message: message || "用户拒绝了此次工具调用" };
   };
 }
@@ -604,6 +687,7 @@ function scheduleClaudePermissionModeRestore(ctx, mode) {
 async function handleClaudePlanPermission(toolName, input, opts, ctx) {
   const sourceId = stringOrNull(opts?.toolUseID);
   const executionPermission = ctx.executionPermission;
+  const approvalSpec = buildPlanApprovalSpec();
   const pendingPayload = emitClaudePlanTimeline({
     ctx,
     toolName,
@@ -614,7 +698,7 @@ async function handleClaudePlanPermission(toolName, input, opts, ctx) {
     status: "requires_action",
     sourceId,
   });
-  const result = await requestAskUser(buildPlanApprovalSpec());
+  const result = await requestAskUser(approvalSpec, { emitTimelineEvent: false });
   const revisionRequest = readPlanRevisionRequest(result);
   if (revisionRequest) {
     emitClaudePlanTimeline({
@@ -969,6 +1053,16 @@ function emitClaudeToolTimeline(block, msg, ctx) {
   const name = stringOrNull(block?.name) || "tool";
   const input = isRecord(block?.input) ? block.input : {};
   const sourceId = stringOrNull(block?.id || block?.tool_use_id || msg?.uuid);
+  if (isLiliaAskUserTool(name)) {
+    rememberClaudeTool(ctx, sourceId, {
+      name,
+      kind: "ask_user",
+      subkind: null,
+      hiddenAskUserTool: true,
+      payload: {},
+    });
+    return;
+  }
   if (isClaudePlanTool(name)) {
     const cached = sourceId ? ctx?.activeTools?.get(sourceId) : null;
     const cachedPayload = isRecord(cached?.payload) ? cached.payload : {};
@@ -1045,6 +1139,10 @@ function emitClaudeToolResultTimeline(block, msg, ctx) {
   const sourceId = stringOrNull(block?.tool_use_id);
   if (!sourceId) return;
   const cached = ctx?.activeTools?.get(sourceId);
+  if (cached?.hiddenAskUserTool === true) {
+    ctx?.activeTools?.delete(sourceId);
+    return;
+  }
   const name = cached?.name || "tool";
   const cachedPayload = cached?.payload || {};
   const kind = cached?.kind || "tool";

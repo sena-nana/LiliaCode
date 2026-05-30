@@ -365,6 +365,14 @@ export interface ChatModelOption {
 }
 
 /**
+ * Agent 交互偏好。全局生效，不跟随单个 task 的 composer state。
+ */
+export interface AgentInteractionSettings {
+  /** 开启后，权限请求、Agent 提问和计划确认不再占用输入框。 */
+  nonInterruptMode: boolean;
+}
+
+/**
  * 单个 backend 的路由模式。每个 backend 独立选择，可分别走不同路由。
  * - cc-switch：经 CCSwitchConfig 的代理 URL 转发
  * - direct：用 ProviderConfig 的 baseUrl + apiKey 直连真实 API

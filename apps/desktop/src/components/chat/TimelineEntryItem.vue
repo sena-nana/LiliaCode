@@ -2,6 +2,12 @@
 import { computed } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
+import {
+  pendingActionForTimelineEvent,
+  timelineEventRequiresAgentAction,
+  type PendingAgentAction,
+  type PendingAgentActionResolution,
+} from "../../composables/usePendingAgentActions";
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
@@ -28,22 +34,28 @@ const props = defineProps<{
   processEntriesFor: (entry: TimelineEventEntry) => TimelineEntry[];
   previewText: (event: AgentTimelineEvent) => string;
   projectCwd?: string | null;
+  pendingActions?: PendingAgentAction[];
+  showExpiredPendingActions?: boolean;
 }>();
 
 const emit = defineEmits<{
   toggleEvent: [event: AgentTimelineEvent];
   toggleGroup: [entry: TimelineGroupEntry];
   toggleProcessGroup: [event: AgentTimelineEvent];
+  resolvePendingAction: [resolution: PendingAgentActionResolution];
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
+const pendingActions = computed(() => props.pendingActions ?? []);
 
 function isTimelineMessage(event: AgentTimelineEvent): boolean {
   return event.kind === "message";
 }
 
 function canToggle(event: AgentTimelineEvent): boolean {
-  return timelineCanExpand(event, displayContext.value);
+  return timelineCanExpand(event, displayContext.value) ||
+    !!pendingAction(event) ||
+    expiredPendingAction(event);
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
@@ -88,6 +100,16 @@ function statusClass(status: AgentTimelineEventStatus): string {
 
 function kindClass(prefix: string, kind: string): string {
   return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function pendingAction(event: AgentTimelineEvent): PendingAgentAction | null {
+  return pendingActionForTimelineEvent(event, pendingActions.value);
+}
+
+function expiredPendingAction(event: AgentTimelineEvent): boolean {
+  if (props.showExpiredPendingActions !== true) return false;
+  if (pendingAction(event)) return false;
+  return timelineEventRequiresAgentAction(event);
 }
 
 function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
@@ -158,7 +180,10 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               :expanded="expanded(event)"
               :can-toggle="canToggle(event)"
               :project-cwd="projectCwd"
+              :pending-action="pendingAction(event)"
+              :action-expired="expiredPendingAction(event)"
               @toggle="emit('toggleEvent', $event)"
+              @resolve-pending-action="emit('resolvePendingAction', $event)"
             />
             <article v-else class="agent-timeline__group-event">
               <header class="agent-timeline__head agent-timeline__group-head">
@@ -201,6 +226,9 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                   :expanded="expanded(event)"
                   :compact="isCompact(event)"
                   :project-cwd="projectCwd"
+                  :pending-action="pendingAction(event)"
+                  :action-expired="expiredPendingAction(event)"
+                  @resolve-pending-action="emit('resolvePendingAction', $event)"
                 />
               </div>
             </article>
@@ -243,7 +271,10 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
           :expanded="expanded(entry.event)"
           :can-toggle="canToggle(entry.event)"
           :project-cwd="projectCwd"
+          :pending-action="pendingAction(entry.event)"
+          :action-expired="expiredPendingAction(entry.event)"
           @toggle="emit('toggleEvent', $event)"
+          @resolve-pending-action="emit('resolvePendingAction', $event)"
         />
 
         <template v-else>
@@ -314,9 +345,12 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 :process-entries-for="processEntriesFor"
                 :preview-text="previewText"
                 :project-cwd="projectCwd"
+                :pending-actions="pendingActions"
+                :show-expired-pending-actions="showExpiredPendingActions"
                 @toggle-event="emit('toggleEvent', $event)"
                 @toggle-group="emit('toggleGroup', $event)"
                 @toggle-process-group="emit('toggleProcessGroup', $event)"
+                @resolve-pending-action="emit('resolvePendingAction', $event)"
               />
             </ol>
           </div>
@@ -337,6 +371,9 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               :expanded="expanded(entry.event)"
               :compact="isCompact(entry.event)"
               :project-cwd="projectCwd"
+              :pending-action="pendingAction(entry.event)"
+              :action-expired="expiredPendingAction(entry.event)"
+              @resolve-pending-action="emit('resolvePendingAction', $event)"
             />
           </div>
         </template>

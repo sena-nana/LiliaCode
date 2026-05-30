@@ -30,7 +30,7 @@ async function answer(req: AgentAskUserRequest) {
 
   let result: AskUserResult;
   try {
-    result = await askUserForTask(taskId, spec, turnId || null);
+    result = await askUserForTask(taskId, spec, turnId || null, requestId);
   } catch {
     result = { answers: {}, cancelled: true };
   }

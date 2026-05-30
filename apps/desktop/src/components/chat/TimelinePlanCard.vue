@@ -2,9 +2,14 @@
 import { computed, ref, type CSSProperties } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
+import type {
+  PendingAgentAction,
+  PendingAgentActionResolution,
+} from "../../composables/usePendingAgentActions";
 import BaseScrollMap from "./BaseScrollMap.vue";
 import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineCardDetails from "./TimelineCardDetails.vue";
+import TimelinePendingAction from "./TimelinePendingAction.vue";
 import {
   markerTopForElement,
   type ScrollMapMetrics,
@@ -16,7 +21,14 @@ import {
   truncateTimelineText,
 } from "./timelineDisplay";
 
-type PlanStatusKind = "pending" | "revision" | "approved" | "rejected" | "cancelled" | "neutral";
+type PlanStatusKind =
+  | "pending"
+  | "revision"
+  | "approved"
+  | "rejected"
+  | "cancelled"
+  | "expired"
+  | "neutral";
 
 interface HeadingMarker {
   index: number;
@@ -32,6 +44,7 @@ const STATUS_LABELS: Record<PlanStatusKind, string> = {
   approved: "已同意",
   rejected: "已拒绝",
   cancelled: "已取消",
+  expired: "已失效",
   neutral: "计划",
 };
 
@@ -40,10 +53,13 @@ const props = defineProps<{
   expanded: boolean;
   canToggle: boolean;
   projectCwd?: string | null;
+  pendingAction?: PendingAgentAction | null;
+  actionExpired?: boolean;
 }>();
 
 const emit = defineEmits<{
   toggle: [event: AgentTimelineEvent];
+  resolvePendingAction: [resolution: PendingAgentActionResolution];
 }>();
 
 const bodyEl = ref<HTMLElement | null>(null);
@@ -71,6 +87,7 @@ const hasStructuredBody = computed(() =>
 );
 const eventTitle = computed(() => props.event.title?.trim() ?? "");
 const statusKind = computed<PlanStatusKind>(() => {
+  if (props.actionExpired) return "expired";
   if (revisionRequest.value) return "revision";
   if (payload.value.approved === null) return "pending";
   if (payload.value.approved === true) return "approved";
@@ -339,5 +356,18 @@ function compactHeadingLabel(value: string | null): string {
         </template>
       </BaseScrollMap>
     </div>
+
+    <TimelinePendingAction
+      v-if="props.pendingAction"
+      :action="props.pendingAction"
+      @resolve="emit('resolvePendingAction', $event)"
+    />
+    <section
+      v-else-if="props.actionExpired"
+      class="timeline-pending-action timeline-pending-action--expired"
+      role="note"
+    >
+      已失效
+    </section>
   </article>
 </template>
