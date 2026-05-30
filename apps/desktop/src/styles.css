@@ -2488,6 +2488,12 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
+.timeline-plan-card__body-shell {
+  position: relative;
+  min-width: 0;
+  border-top: 1px solid var(--border-soft);
+}
+
 .timeline-plan-card__body {
   min-width: 0;
   max-height: min(52vh, 560px);
@@ -2495,7 +2501,146 @@ button.ghost:hover {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  border-top: 1px solid var(--border-soft);
+  scrollbar-width: none;
+}
+
+.timeline-plan-card__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.timeline-plan-card__scroll-map {
+  position: absolute;
+  top: 8px;
+  right: 0;
+  bottom: 8px;
+  z-index: 1;
+  width: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--chat-scrollbar-transition-duration, 0.48s) ease;
+}
+
+.timeline-plan-card__scroll-map.is-visible,
+.timeline-plan-card__scroll-map.is-dragging {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-plan-card__scroll-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: default;
+}
+
+.timeline-plan-card__scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+}
+
+.timeline-plan-card__scroll-thumb::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.timeline-plan-card__scroll-track:hover .timeline-plan-card__scroll-thumb::before,
+.timeline-plan-card__scroll-map.is-dragging .timeline-plan-card__scroll-thumb::before {
+  background: var(--text-faint);
+}
+
+.timeline-plan-card__heading-marker {
+  position: absolute;
+  right: 0;
+  width: 10px;
+  height: 8px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  filter: none;
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+
+.timeline-plan-card__heading-marker--level-4 {
+  color: var(--accent);
+}
+
+.timeline-plan-card__heading-marker--level-5 {
+  color: var(--warn);
+}
+
+.timeline-plan-card__heading-marker--level-6 {
+  color: var(--ok);
+}
+
+.timeline-plan-card__heading-marker-dot {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 9px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+
+.timeline-plan-card__heading-marker-tooltip {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  max-width: min(240px, calc(100vw - 56px));
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-elev);
+  box-shadow: 0 8px 24px -18px rgba(0, 0, 0, 0.65);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  transform: translate(4px, -50%);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.timeline-plan-card__heading-marker:hover {
+  z-index: 2;
+  filter: none;
+}
+
+.timeline-plan-card__heading-marker:hover .timeline-plan-card__heading-marker-dot,
+.timeline-plan-card__heading-marker:focus-visible .timeline-plan-card__heading-marker-dot {
+  height: 4px;
+}
+
+.timeline-plan-card__heading-marker:hover .timeline-plan-card__heading-marker-tooltip,
+.timeline-plan-card__heading-marker:focus-visible .timeline-plan-card__heading-marker-tooltip {
+  opacity: 1;
+  transform: translate(0, -50%);
+  visibility: visible;
+}
+
+.timeline-plan-card__heading-marker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .timeline-plan-card__content {
@@ -2507,6 +2652,18 @@ button.ghost:hover {
 
 .timeline-plan-card__markdown {
   min-width: 0;
+}
+
+.timeline-plan-card__markdown--plan h4.markdown-block__heading {
+  color: var(--accent);
+}
+
+.timeline-plan-card__markdown--plan h5.markdown-block__heading {
+  color: var(--warn);
+}
+
+.timeline-plan-card__markdown--plan h6.markdown-block__heading {
+  color: var(--ok);
 }
 
 .timeline-plan-card__section {
