@@ -12,6 +12,14 @@ function transcriptElement(container: HTMLElement): HTMLElement {
   return element;
 }
 
+function scrollMapElement(container: HTMLElement): HTMLElement {
+  const element = container.querySelector(".chat-scroll-map");
+  if (!(element instanceof HTMLElement)) {
+    throw new Error("chat scroll map element not found");
+  }
+  return element;
+}
+
 function mockTranscriptRect(element: HTMLElement) {
   vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
     x: 0,
@@ -173,47 +181,39 @@ describe("ChatTranscript scrollbar visibility", () => {
   });
 
   it("滚动时显示滚动条，并在滚动结束后短暂延时再隐藏", async () => {
-    const view = render(ChatTranscript, {
-      props: {
-        timelineEvents: [],
-        emptyHeadline: "今天想做什么？",
-        isThinking: false,
-      },
-    });
-    const transcript = transcriptElement(view.container);
+    const { controls, transcript, view } = renderTranscriptWithControls([]);
+    mockTranscriptViewport(transcript, controls);
+    await flushScrollMapFrame();
 
-    expect(transcript).not.toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).not.toHaveClass("is-visible");
 
     await fireEvent.scroll(transcript);
+    await flushScrollMapFrame();
 
-    expect(transcript).toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).toHaveClass("is-visible");
     await fireEvent(transcript, new Event("scrollend"));
     await vi.advanceTimersByTimeAsync(179);
-    expect(transcript).toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).toHaveClass("is-visible");
     await vi.advanceTimersByTimeAsync(1);
-    expect(transcript).not.toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).not.toHaveClass("is-visible");
   });
 
   it("鼠标移动到滚动条区域时显示，离开区域后短暂延时再隐藏", async () => {
-    const view = render(ChatTranscript, {
-      props: {
-        timelineEvents: [],
-        emptyHeadline: "今天想做什么？",
-        isThinking: false,
-      },
-    });
-    const transcript = transcriptElement(view.container);
-    mockTranscriptRect(transcript);
+    const { controls, transcript, view } = renderTranscriptWithControls([]);
+    const frame = view.container.querySelector(".chat-transcript-frame");
+    expect(frame).toBeInstanceOf(HTMLElement);
+    mockTranscriptViewport(transcript, controls);
+    await flushScrollMapFrame();
 
-    await fireEvent.mouseMove(transcript, { clientX: 92, clientY: 20 });
+    await fireEvent.mouseMove(frame as HTMLElement, { clientX: 92, clientY: 20 });
 
-    expect(transcript).toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).toHaveClass("is-visible");
 
-    await fireEvent.mouseMove(transcript, { clientX: 40, clientY: 20 });
+    await fireEvent.mouseMove(frame as HTMLElement, { clientX: 40, clientY: 20 });
     await vi.advanceTimersByTimeAsync(179);
-    expect(transcript).toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).toHaveClass("is-visible");
     await vi.advanceTimersByTimeAsync(1);
-    expect(transcript).not.toHaveClass("is-scrollbar-visible");
+    expect(scrollMapElement(view.container)).not.toHaveClass("is-visible");
   });
 
   it("用户发送触发强制滚动时，即使当前不贴底也会滚到底部并恢复跟随", async () => {

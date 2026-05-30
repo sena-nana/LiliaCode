@@ -875,6 +875,7 @@ describe("timeline event expansion", () => {
         scrollTop: 20,
       });
       mockElementRect(body, { top: 100, right: 100, bottom: 300, height: 200 });
+      await flushPlanMeasure();
 
       await fireEvent.scroll(body);
       await flushPlanMeasure();

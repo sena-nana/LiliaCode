@@ -1,0 +1,467 @@
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import type { CSSProperties, ComputedRef, Ref } from "vue";
+
+export interface ScrollMapGeometry {
+  bottomOffset?: number;
+  domainHeight: number;
+  visibleHeight: number;
+}
+
+export interface ScrollMapMetrics {
+  bottomOffset: number;
+  domainHeight: number;
+  scrollable: boolean;
+  thumbHeight: number;
+  thumbTop: number;
+  trackHeight: number;
+  visibleHeight: number;
+}
+
+export interface ScrollMapController {
+  isDragging: Ref<boolean>;
+  metrics: Ref<ScrollMapMetrics>;
+  scheduleMeasure: () => void;
+  scrollTo: (top: number, behavior: ScrollBehavior) => void;
+  setTrackElement: (element: unknown) => void;
+  shouldRender: ComputedRef<boolean>;
+  thumbStyle: ComputedRef<CSSProperties>;
+  onThumbPointerDown: (event: PointerEvent) => void;
+  onTrackPointerDown: (event: PointerEvent) => void;
+}
+
+interface ScrollDragState {
+  pointerId: number;
+  startScrollTop: number;
+  startY: number;
+  metrics: ScrollMapMetrics;
+}
+
+interface UseScrollMapOptions {
+  enabled?: Ref<boolean> | ComputedRef<boolean>;
+  observeTargets?: (scroller: HTMLElement) => HTMLElement[];
+  readGeometry?: (scroller: HTMLElement) => ScrollMapGeometry;
+  scheduleMode?: "frame" | "tick";
+  scroller: Ref<HTMLElement | null> | ComputedRef<HTMLElement | null>;
+  trackEdgePadding?: number;
+}
+
+interface UseScrollMapVisibilityOptions {
+  enabled?: Ref<boolean> | ComputedRef<boolean>;
+  hideDelay?: number;
+  hotZone?: number;
+  hoverTarget?: Ref<HTMLElement | null> | ComputedRef<HTMLElement | null>;
+  isDragging?: Ref<boolean> | ComputedRef<boolean>;
+  scroller: Ref<HTMLElement | null> | ComputedRef<HTMLElement | null>;
+}
+
+const DEFAULT_HIDE_DELAY = 180;
+const DEFAULT_HOT_ZONE = 18;
+const DEFAULT_TRACK_EDGE_PADDING = 8;
+
+const EMPTY_METRICS: ScrollMapMetrics = {
+  bottomOffset: 0,
+  domainHeight: 0,
+  scrollable: false,
+  thumbHeight: 0,
+  thumbTop: 0,
+  trackHeight: 0,
+  visibleHeight: 0,
+};
+
+export function useScrollMap(options: UseScrollMapOptions): ScrollMapController {
+  const track = ref<HTMLElement | null>(null);
+  const metrics = ref<ScrollMapMetrics>({ ...EMPTY_METRICS });
+  const isDragging = ref(false);
+  const observedTargets = new Set<HTMLElement>();
+
+  let frameId: number | null = null;
+  let measurePending = false;
+  let resizeObserver: ResizeObserver | null = null;
+  let dragState: ScrollDragState | null = null;
+
+  const thumbStyle = computed<CSSProperties>(() => ({
+    transform: `translateY(${metrics.value.thumbTop}px)`,
+    height: `${metrics.value.thumbHeight}px`,
+  }));
+  const shouldRender = computed(() =>
+    metrics.value.scrollable && metrics.value.thumbHeight > 0,
+  );
+
+  watch(
+    () => [options.scroller.value, isEnabled()] as const,
+    (nextState, previousState) => {
+      const [next, enabled] = nextState;
+      const previous = previousState?.[0] ?? null;
+      if (previous) previous.removeEventListener("scroll", scheduleMeasure);
+      disconnectResizeObserver();
+
+      if (next && enabled) {
+        next.addEventListener("scroll", scheduleMeasure, { passive: true });
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(scheduleMeasure);
+          resizeObserver.observe(next);
+          refreshResizeTargets(next);
+        }
+        scheduleMeasure();
+      } else {
+        resetMeasurements();
+      }
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(() => {
+    if (frameId !== null) window.cancelAnimationFrame(frameId);
+    options.scroller.value?.removeEventListener("scroll", scheduleMeasure);
+    clearDragListeners();
+    disconnectResizeObserver();
+  });
+
+  function isEnabled(): boolean {
+    return options.enabled?.value ?? true;
+  }
+
+  function disconnectResizeObserver() {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    observedTargets.clear();
+  }
+
+  function refreshResizeTargets(scroller: HTMLElement) {
+    if (!resizeObserver || !options.observeTargets) return;
+
+    const nextTargets = new Set(options.observeTargets(scroller));
+    for (const target of observedTargets) {
+      if (!nextTargets.has(target)) resizeObserver.unobserve(target);
+    }
+    for (const target of nextTargets) {
+      if (!observedTargets.has(target)) resizeObserver.observe(target);
+    }
+    observedTargets.clear();
+    for (const target of nextTargets) observedTargets.add(target);
+  }
+
+  function scheduleMeasure() {
+    if (measurePending) return;
+    measurePending = true;
+    if (options.scheduleMode === "frame") {
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        void nextTick(runPendingMeasure);
+      });
+      return;
+    }
+
+    void nextTick(runPendingMeasure);
+  }
+
+  function runPendingMeasure() {
+    measurePending = false;
+    measure();
+  }
+
+  function measure() {
+    const scroller = options.scroller.value;
+    if (!scroller || !isEnabled()) {
+      resetMeasurements();
+      return;
+    }
+
+    refreshResizeTargets(scroller);
+    const geometry = options.readGeometry?.(scroller) ?? readDefaultGeometry(scroller);
+    const visibleHeight = Math.max(0, geometry.visibleHeight);
+    const domainHeight = Math.max(visibleHeight, geometry.domainHeight);
+    const trackHeight = readTrackHeight(visibleHeight);
+    const visibleTop = clamp(scroller.scrollTop, 0, Math.max(0, domainHeight - visibleHeight));
+    const scrollable = domainHeight - visibleHeight > 1;
+
+    metrics.value = {
+      bottomOffset: geometry.bottomOffset ?? 0,
+      domainHeight,
+      scrollable,
+      thumbHeight: domainHeight > 0 ? trackHeight * visibleHeight / domainHeight : 0,
+      thumbTop: domainHeight > 0 ? trackHeight * visibleTop / domainHeight : 0,
+      trackHeight,
+      visibleHeight,
+    };
+  }
+
+  function resetMeasurements() {
+    metrics.value = { ...EMPTY_METRICS };
+    isDragging.value = false;
+  }
+
+  function readTrackHeight(visibleHeight: number): number {
+    const rectHeight = track.value?.getBoundingClientRect().height ?? 0;
+    if (rectHeight > 0) return rectHeight;
+    return Math.max(0, visibleHeight - (options.trackEdgePadding ?? DEFAULT_TRACK_EDGE_PADDING) * 2);
+  }
+
+  function setTrackElement(element: unknown) {
+    const next = element instanceof HTMLElement ? element : null;
+    if (track.value === next) return;
+    track.value = next;
+    scheduleMeasure();
+  }
+
+  function scrollTo(top: number, behavior: ScrollBehavior) {
+    const scroller = options.scroller.value;
+    if (!scroller) return;
+
+    const nextTop = clamp(top, 0, maxScrollTop(scroller));
+    if (typeof scroller.scrollTo === "function") {
+      scroller.scrollTo({ top: nextTop, behavior });
+    } else {
+      scroller.scrollTop = nextTop;
+    }
+    scheduleMeasure();
+  }
+
+  function onTrackPointerDown(event: PointerEvent) {
+    const scroller = options.scroller.value;
+    const trackElement = track.value;
+    if (!scroller || !trackElement) return;
+
+    const currentMetrics = metrics.value;
+    if (!currentMetrics.scrollable) return;
+
+    const trackRect = trackElement.getBoundingClientRect();
+    const y = event.clientY - trackRect.top;
+    const thumbBottom = currentMetrics.thumbTop + currentMetrics.thumbHeight;
+    if (y >= currentMetrics.thumbTop && y <= thumbBottom) return;
+
+    event.preventDefault();
+    scrollTo(
+      scroller.scrollTop + (y < currentMetrics.thumbTop
+        ? -currentMetrics.visibleHeight
+        : currentMetrics.visibleHeight),
+      "auto",
+    );
+  }
+
+  function onThumbPointerDown(event: PointerEvent) {
+    const scroller = options.scroller.value;
+    const currentMetrics = metrics.value;
+    if (!scroller || !currentMetrics.scrollable || currentMetrics.trackHeight <= 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    dragState = {
+      pointerId: event.pointerId,
+      startScrollTop: scroller.scrollTop,
+      startY: event.clientY,
+      metrics: currentMetrics,
+    };
+    isDragging.value = true;
+    window.addEventListener("pointermove", onWindowPointerMove);
+    window.addEventListener("pointerup", onWindowPointerEnd);
+    window.addEventListener("pointercancel", onWindowPointerEnd);
+  }
+
+  function onWindowPointerMove(event: PointerEvent) {
+    const scroller = options.scroller.value;
+    if (!scroller || !dragState || event.pointerId !== dragState.pointerId) return;
+
+    event.preventDefault();
+    const deltaY = event.clientY - dragState.startY;
+    scroller.scrollTop = clamp(
+      dragState.startScrollTop +
+        deltaY * dragState.metrics.domainHeight / dragState.metrics.trackHeight,
+      0,
+      maxScrollTop(scroller),
+    );
+    scheduleMeasure();
+  }
+
+  function onWindowPointerEnd(event: PointerEvent) {
+    if (dragState && event.pointerId !== dragState.pointerId) return;
+    clearDragListeners();
+  }
+
+  function clearDragListeners() {
+    dragState = null;
+    isDragging.value = false;
+    window.removeEventListener("pointermove", onWindowPointerMove);
+    window.removeEventListener("pointerup", onWindowPointerEnd);
+    window.removeEventListener("pointercancel", onWindowPointerEnd);
+  }
+
+  return {
+    isDragging,
+    metrics,
+    scheduleMeasure,
+    scrollTo,
+    setTrackElement,
+    shouldRender,
+    thumbStyle,
+    onThumbPointerDown,
+    onTrackPointerDown,
+  };
+}
+
+export function useScrollMapVisibility(options: UseScrollMapVisibilityOptions) {
+  const isVisible = ref(false);
+  const isPointerInZone = ref(false);
+  let hideTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+  watch(
+    () => [options.scroller.value, isEnabled()] as const,
+    ([next, enabled], previousState) => {
+      const previous = previousState?.[0] ?? null;
+      if (previous) {
+        previous.removeEventListener("scroll", onScroll);
+        previous.removeEventListener("scrollend", onScrollEnd);
+      }
+      if (next && enabled) {
+        next.addEventListener("scroll", onScroll, { passive: true });
+        next.addEventListener("scrollend", onScrollEnd);
+      }
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => [options.hoverTarget?.value ?? options.scroller.value, isEnabled()] as const,
+    ([next, enabled], previousState) => {
+      const previous = previousState?.[0] ?? null;
+      if (previous) {
+        previous.removeEventListener("mousemove", onMouseMove);
+        previous.removeEventListener("mouseleave", onMouseLeave);
+      }
+      if (next && enabled) {
+        next.addEventListener("mousemove", onMouseMove);
+        next.addEventListener("mouseleave", onMouseLeave);
+      }
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => isEnabled(),
+    (enabled) => {
+      if (!enabled) {
+        isPointerInZone.value = false;
+        hide();
+      }
+    },
+  );
+
+  watch(
+    () => options.isDragging?.value ?? false,
+    (dragging, wasDragging) => {
+      if (dragging) {
+        show();
+        return;
+      }
+      if (wasDragging && !isPointerInZone.value) hideSoon();
+    },
+  );
+
+  onBeforeUnmount(() => {
+    options.scroller.value?.removeEventListener("scroll", onScroll);
+    options.scroller.value?.removeEventListener("scrollend", onScrollEnd);
+    const hoverTarget = options.hoverTarget?.value ?? options.scroller.value;
+    hoverTarget?.removeEventListener("mousemove", onMouseMove);
+    hoverTarget?.removeEventListener("mouseleave", onMouseLeave);
+    clearHideTimer();
+  });
+
+  function isEnabled(): boolean {
+    return options.enabled?.value ?? true;
+  }
+
+  function clearHideTimer() {
+    if (hideTimer === null) return;
+    window.clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+
+  function show() {
+    clearHideTimer();
+    isVisible.value = true;
+  }
+
+  function hide() {
+    clearHideTimer();
+    isVisible.value = false;
+  }
+
+  function hideSoon() {
+    if (hideTimer !== null) return;
+    hideTimer = window.setTimeout(() => {
+      if (!isPointerInZone.value && !(options.isDragging?.value ?? false)) {
+        isVisible.value = false;
+      }
+      hideTimer = null;
+    }, options.hideDelay ?? DEFAULT_HIDE_DELAY);
+  }
+
+  function onScroll() {
+    show();
+  }
+
+  function onScrollEnd() {
+    if (!isPointerInZone.value) hideSoon();
+  }
+
+  function onMouseMove(event: MouseEvent) {
+    const inZone = isInZone(event);
+    isPointerInZone.value = inZone;
+    if (inZone) {
+      show();
+      return;
+    }
+    if (isVisible.value) hideSoon();
+  }
+
+  function onMouseLeave() {
+    isPointerInZone.value = false;
+    if (isVisible.value) hideSoon();
+  }
+
+  function isInZone(event: MouseEvent): boolean {
+    const scroller = options.scroller.value;
+    if (!scroller) return false;
+    const rect = scroller.getBoundingClientRect();
+    const hotZone = options.hotZone ?? DEFAULT_HOT_ZONE;
+    return event.clientX >= rect.right - hotZone && event.clientX <= rect.right;
+  }
+
+  return {
+    hide,
+    isVisible,
+    show,
+  };
+}
+
+export function markerTopForElement(
+  scroller: HTMLElement,
+  element: HTMLElement,
+  metrics: ScrollMapMetrics,
+): number {
+  const scrollerRect = scroller.getBoundingClientRect();
+  const elementRect = element.getBoundingClientRect();
+  const contentTop = elementRect.top - scrollerRect.top + scroller.scrollTop;
+  return clamp(metrics.trackHeight * contentTop / metrics.domainHeight, 0, metrics.trackHeight);
+}
+
+export function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function readDefaultGeometry(scroller: HTMLElement): ScrollMapGeometry {
+  const visibleHeight = scroller.clientHeight;
+  return {
+    domainHeight: Math.max(visibleHeight, scroller.scrollHeight),
+    visibleHeight,
+  };
+}
+
+function maxScrollTop(scroller: HTMLElement): number {
+  return Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+}
