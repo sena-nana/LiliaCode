@@ -99,9 +99,9 @@ export function listTasks(projectId: string): Task[] {
 }
 
 export function getTask(projectId: string, taskId: string): Task | undefined {
+  const persisted = (TASKS.value[projectId] ?? []).find((t) => t.id === taskId);
   const draft = DRAFT_TASKS.get(taskId);
-  if (draft && draft.projectId === projectId) return draft;
-  return (TASKS.value[projectId] ?? []).find((t) => t.id === taskId);
+  return draft?.projectId === projectId ? draft : persisted;
 }
 
 /** 供侧栏直接绑定用。 */
@@ -233,7 +233,8 @@ export function listOrphanConversations(): OrphanConversation[] {
 }
 
 export function getOrphanConversation(id: string): OrphanConversation | undefined {
-  return DRAFT_ORPHANS.get(id) ?? ORPHAN_LIST.value.find((o) => o.id === id);
+  const persisted = ORPHAN_LIST.value.find((o) => o.id === id);
+  return DRAFT_ORPHANS.get(id) ?? persisted;
 }
 
 export function isDraftOrphan(id: string): boolean {

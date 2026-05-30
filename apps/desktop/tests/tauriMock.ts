@@ -461,6 +461,29 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return pinned;
     }
 
+    case "task_promote": {
+      const id = String(args.id);
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      const title = String(args.title ?? "新对话");
+      const dependsOn = Array.isArray(args.dependsOn) ? args.dependsOn.map(String) : [];
+      const sortOrder = tasks.filter((task) => task.projectId === projectId).length;
+      const row: TaskRow = {
+        id,
+        projectId,
+        sessionId: id,
+        title,
+        status: "running",
+        createdAt: Date.now(),
+        parentId: null,
+        dependsOn,
+        sortOrder,
+        pinned: false,
+      };
+      tasks = [row, ...tasks.filter((task) => task.id !== id)];
+      refreshSessionCounts();
+      return cloneTask(row);
+    }
+
     case "task_reorder": {
       const projectId = args.projectId as string | null | undefined;
       const targetProjectId = projectId ?? null;
