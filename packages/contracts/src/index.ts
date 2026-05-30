@@ -353,8 +353,6 @@ export interface ChatComposerState {
   backend: ChatBackendKind;
   /** 模型 id 的语义由 backend 决定（claude-* / gpt-5-codex 等）。 */
   model: string;
-  /** 当前 git 分支名。 */
-  branch: string;
   /** 是否让本轮先进入 agent 原生计划模式；确认后仍按 permission 执行。 */
   planMode: boolean;
   permission: PermissionMode;
@@ -364,11 +362,6 @@ export interface ChatModelOption {
   id: string;
   label: string;
   backend: ChatBackendKind;
-}
-
-export interface ChatBranchOption {
-  name: string;
-  current: boolean;
 }
 
 /**

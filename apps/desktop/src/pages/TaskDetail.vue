@@ -30,7 +30,6 @@ import { resolveAskUser, useAskUser } from "../composables/useAskUser";
 import {
   getComposerState,
   listAgentTimeline,
-  listBranches,
   listModels,
   onAgentTimeline,
   onDone,
@@ -44,7 +43,6 @@ import type {
   AgentTimelineEvent,
   AgentTimelinePayload,
   ChatAttachment,
-  ChatBranchOption,
   ChatComposerState,
   ChatModelOption,
 } from "@lilia/contracts";
@@ -73,12 +71,10 @@ const composer = ref<ChatComposerState>({
   taskId: props.taskId,
   backend: "claude",
   model: "claude-sonnet-4-6",
-  branch: "main",
   planMode: false,
   permission: "ask",
 });
 const models = ref<ChatModelOption[]>([]);
-const branches = ref<ChatBranchOption[]>([]);
 const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
 const attachments = ref<ChatAttachment[]>([]);
@@ -383,19 +379,13 @@ async function loadAll() {
   const seq = ++loadSeq;
   const taskId = props.taskId;
   const projectId = props.projectId;
-  // orphan 模式没有项目分支概念，给 branches 一个空数组。
-  const branchesPromise = projectId
-    ? listBranches(projectId)
-    : Promise.resolve<ChatBranchOption[]>([]);
-  const [events, comp, brs] = await Promise.all([
+  const [events, comp] = await Promise.all([
     loadTimelineEvents(taskId),
     getComposerState(taskId),
-    branchesPromise,
   ]);
   if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
   timelineEvents.value = mergeTimelineEvents(events, timelineEvents.value);
   composer.value = comp;
-  branches.value = brs;
   // models 依赖 backend，单独拉。
   await reloadModelsForBackend(comp.backend);
 }
@@ -488,7 +478,6 @@ watch(
             <ToolConsentPrompt :task-id="taskId" />
             <ChatComposer
               :state="composer"
-              :branches="branches"
               :attachments="attachments"
               :sending="isTurnRunning"
               :plan-revision-mode="pendingPlanApproval !== null"

@@ -6,10 +6,9 @@
  */
 
 import { computed, nextTick, ref, watch } from "vue";
-import { ArrowUp, GitBranch, ListChecks, Paperclip, ShieldCheck, X } from "lucide-vue-next";
+import { ArrowUp, ListChecks, Paperclip, ShieldCheck, X } from "lucide-vue-next";
 import type {
   ChatAttachment,
-  ChatBranchOption,
   ChatComposerState,
   PermissionMode,
 } from "@lilia/contracts";
@@ -17,7 +16,6 @@ import Dropdown from "../Dropdown.vue";
 
 const props = defineProps<{
   state: ChatComposerState;
-  branches: ChatBranchOption[];
   attachments?: ChatAttachment[];
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
@@ -58,19 +56,10 @@ const permissionOptions = [
   { value: "readonly" as PermissionMode, label: "只读", hint: "禁止写操作" },
 ];
 
-const branchOptions = computed(() =>
-  props.branches.map((b) => ({
-    value: b.name,
-    label: b.name,
-    hint: b.current ? "当前" : undefined,
-  })),
-);
-
 function patch(next: Partial<ChatComposerState>) {
   emit("update:state", { ...props.state, ...next });
 }
 
-function setBranch(v: string) { patch({ branch: v }); }
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
@@ -170,12 +159,6 @@ watch(text, async () => {
         >
           <ListChecks :size="14" aria-hidden="true" />
         </button>
-        <Dropdown
-          :model-value="state.branch"
-          :options="branchOptions"
-          :icon="GitBranch"
-          @update:model-value="setBranch"
-        />
       </div>
 
       <button
