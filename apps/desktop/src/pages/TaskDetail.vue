@@ -91,7 +91,7 @@ const pendingPlanApproval = computed(() => {
   if (ask.taskId !== null && ask.taskId !== props.taskId) return null;
   if (ask.spec.intent !== "plan_approval") return null;
   const question = ask.spec.questions[0];
-  return question ? { questionId: question.id } : null;
+  return question ? { questionId: question.id, turnId: ask.turnId } : null;
 });
 
 /** orphan 模式下的 fallback cwd——延迟解析。 */
@@ -478,6 +478,7 @@ watch(
         :empty-headline="emptyHeadline"
         :is-thinking="isTurnRunning"
         :project-cwd="project?.cwd ?? null"
+        :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
         :force-scroll-bottom-key="userSendScrollKey"
       >
         <template #controls>

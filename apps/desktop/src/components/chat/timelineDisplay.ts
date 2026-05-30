@@ -26,6 +26,7 @@ interface TimelineDeclaredGroupUnit {
 
 export interface TimelineDisplayContext {
   projectCwd?: string | null;
+  activePlanApprovalTurnId?: string | null;
 }
 
 const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
@@ -38,7 +39,7 @@ const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
 type DisplayDerivableEvent = Pick<
   AgentTimelineEvent,
   "kind" | "status" | "title" | "summary" | "payload"
->;
+> & Partial<Pick<AgentTimelineEvent, "turnId">>;
 
 export function readTimelinePayloadRecord(
   event: Pick<AgentTimelineEvent, "payload">,
@@ -107,6 +108,12 @@ function timelineDefaultExpanded(
   event: DisplayDerivableEvent,
   context: TimelineDisplayContext = {},
 ): boolean {
+  if (event.kind === "plan" && readTimelinePayloadRecord(event).approved === null) {
+    return Boolean(
+      context.activePlanApprovalTurnId &&
+      event.turnId === context.activePlanApprovalTurnId
+    );
+  }
   const display = readTimelineDisplay(event, context);
   if (typeof display?.defaultExpanded === "boolean") return display.defaultExpanded;
   return isTimelineFinalReply(event);

@@ -9,6 +9,7 @@ const props = defineProps<{
   emptyHeadline: string;
   isThinking?: boolean;
   projectCwd?: string | null;
+  activePlanApprovalTurnId?: string | null;
   forceScrollBottomKey?: number;
 }>();
 
@@ -146,6 +147,7 @@ const isEmpty = computed(() =>
           :events="timelineEvents"
           :is-thinking="isThinking"
           :project-cwd="projectCwd"
+          :active-plan-approval-turn-id="activePlanApprovalTurnId"
           @event-toggled="onTimelineEventToggled"
         />
       </template>

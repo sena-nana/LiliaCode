@@ -445,7 +445,6 @@ const LILIA_TOOL_REGISTRY = {
           object: "",
           label,
           preview,
-          defaultExpanded: approved === null ? true : undefined,
           details: [
             markdownDetail(plan),
             markdownDetail(revisionRequest, "muted"),

@@ -23,13 +23,14 @@ function specField(row: Record<string, unknown>): AskUserSpec | null {
 async function answer(req: AgentAskUserRequest) {
   const row = req as unknown as Record<string, unknown>;
   const taskId = stringField(row, "taskId", "task_id");
+  const turnId = stringField(row, "turnId", "turn_id");
   const requestId = stringField(row, "requestId", "request_id");
   const spec = specField(row);
   if (!taskId || !requestId || !spec) return;
 
   let result: AskUserResult;
   try {
-    result = await askUserForTask(taskId, spec);
+    result = await askUserForTask(taskId, spec, turnId || null);
   } catch {
     result = { answers: {}, cancelled: true };
   }
