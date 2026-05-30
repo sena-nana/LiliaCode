@@ -16,6 +16,27 @@ function rule(selector: string): string {
 }
 
 describe("sidebar project tree styles", () => {
+  it("shell 左侧栏折叠使用列宽动画并禁用拖拽线", () => {
+    const shell = rule(".shell {");
+    const resizer = rule(".shell__resizer {");
+    const collapsedResizer = rule(".shell.is-sidebar-collapsed .shell__resizer {");
+    const panel = rule(".secondary-panel {");
+    const collapsedPanel = rule(".shell.is-sidebar-collapsed .secondary-panel {");
+
+    expect(shell).toContain("--sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1)");
+    expect(shell).toContain("transition: grid-template-columns 0.24s var(--sidebar-easing)");
+    expect(resizer).toContain("transition:");
+    expect(rule(".shell.is-resizing {")).toContain("transition: none");
+    expect(rule(".shell.is-resizing .shell__resizer {")).toContain("transition: none");
+    expect(collapsedResizer).toContain("pointer-events: none");
+    expect(collapsedResizer).toContain("visibility: hidden");
+    expect(panel).toContain("min-width: 0");
+    expect(panel).toContain("transition:");
+    expect(collapsedPanel).toContain("opacity: 0");
+    expect(collapsedPanel).toContain("visibility: hidden");
+    expect(collapsedPanel).toContain("pointer-events: none");
+  });
+
   it("项目区的新对话、项目名和对话标题共用同一文本列，收集箱保持独立缩进", () => {
     const panel = rule(".secondary-panel {");
     const primaryButton = rule(".sb-primary-btn {");

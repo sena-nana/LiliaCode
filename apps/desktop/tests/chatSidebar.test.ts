@@ -12,6 +12,7 @@ import {
   closeChatSidebar,
   openChatSidebar,
   registerChatSidebarPanel,
+  setChatSidebarWidth,
   type ChatSidebarPanel,
 } from "../src/composables/useChatSidebar";
 
@@ -26,6 +27,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 const STORAGE_KEY = "lilia.chatSidebar.open";
+const WIDTH_STORAGE_KEY = "lilia.chatSidebar.width";
 const PROJECT_CWD = "D:\\PROJECT\\workspace\\Lilia";
 
 const cleanups: Array<() => void> = [];
@@ -85,6 +87,14 @@ function sidebarElement(container: HTMLElement): HTMLElement {
   return sidebar;
 }
 
+function sidebarResizer(container: HTMLElement): HTMLElement {
+  const resizer = container.querySelector(".chat-sidebar__resizer");
+  if (!(resizer instanceof HTMLElement)) {
+    throw new Error("未找到对话侧栏拖拽线");
+  }
+  return resizer;
+}
+
 async function renderTaskDetail() {
   await Promise.all([projectsReady, allTasksReady]);
   const router = createLiliaRouter(createMemoryHistory());
@@ -117,6 +127,7 @@ function titlebarSidebarButton(container: HTMLElement): HTMLButtonElement {
 beforeEach(() => {
   localStorage.clear();
   closeChatSidebar();
+  setChatSidebarWidth(340);
 });
 
 afterEach(() => {
@@ -184,6 +195,69 @@ describe("chat sidebar host", () => {
 
     expect(view.getByTestId("second-panel")).toBeInTheDocument();
   });
+
+  it("可从左边缘拖动调整宽度并在松手后写回本地存储", async () => {
+    openChatSidebar();
+    const view = renderHost();
+    const sidebar = sidebarElement(view.container);
+    const resizer = sidebarResizer(view.container);
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("340px");
+    expect(resizer).toHaveAttribute("aria-valuemin", "180");
+    expect(resizer).toHaveAttribute("aria-valuenow", "340");
+
+    await fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 600,
+      pointerId: 1,
+    });
+    await fireEvent.pointerMove(window, {
+      clientX: 500,
+      pointerId: 1,
+    });
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("440px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "440");
+
+    await fireEvent.pointerMove(window, {
+      clientX: 200,
+      pointerId: 1,
+    });
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("520px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "520");
+
+    await fireEvent.pointerMove(window, {
+      clientX: 900,
+      pointerId: 1,
+    });
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("180px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "180");
+
+    await fireEvent.pointerUp(window, {
+      clientX: 900,
+      pointerId: 1,
+    });
+
+    expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("180");
+  });
+
+  it("对话侧栏宽度可双击恢复默认值", async () => {
+    localStorage.setItem(WIDTH_STORAGE_KEY, "480");
+    openChatSidebar();
+
+    const view = renderHost();
+    const sidebar = sidebarElement(view.container);
+    const resizer = sidebarResizer(view.container);
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("480px");
+
+    await fireEvent.dblClick(resizer);
+
+    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("340px");
+    expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("340");
+  });
 });
 
 describe("TaskDetail chat sidebar toggle", () => {
@@ -198,6 +272,7 @@ describe("TaskDetail chat sidebar toggle", () => {
     await fireEvent.click(toggle);
 
     expect(sidebar).toHaveClass("is-open");
+    expect(toggle).not.toHaveClass("is-active");
     expect(toggle).toHaveAttribute("aria-label", "关闭对话侧栏");
     expect(localStorage.getItem(STORAGE_KEY)).toBe("1");
 

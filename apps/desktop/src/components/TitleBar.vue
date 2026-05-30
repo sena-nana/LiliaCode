@@ -7,6 +7,8 @@ import {
   Copy,
   X,
   ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-vue-next";
@@ -17,6 +19,14 @@ import {
 } from "../services/tasksStore";
 import { getProject } from "../services/projectsStore";
 import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
+
+defineProps<{
+  leftSidebarCollapsed?: boolean;
+}>();
+
+defineEmits<{
+  toggleLeftSidebar: [];
+}>();
 
 const route = useRoute();
 
@@ -131,7 +141,27 @@ function onToggleChatSidebar() {
 
 <template>
   <header class="titlebar" data-tauri-drag-region>
-    <div class="titlebar__spacer" data-tauri-drag-region></div>
+    <div class="titlebar__left-controls">
+      <button
+        type="button"
+        class="titlebar__btn titlebar__left-sidebar-btn"
+        :aria-label="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
+        :title="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
+        :aria-pressed="leftSidebarCollapsed"
+        @click="$emit('toggleLeftSidebar')"
+      >
+        <PanelLeftOpen
+          v-if="leftSidebarCollapsed"
+          :size="15"
+          aria-hidden="true"
+        />
+        <PanelLeftClose
+          v-else
+          :size="15"
+          aria-hidden="true"
+        />
+      </button>
+    </div>
 
     <div class="titlebar__crumbs" data-tauri-drag-region>
       <!-- 非叶子段（项目名等）：同项目内 prefixKey 不变 → 不动；跨项目变 → 走过渡。 -->
@@ -182,7 +212,6 @@ function onToggleChatSidebar() {
         v-if="canToggleChatSidebar"
         type="button"
         class="titlebar__btn titlebar__chat-sidebar-btn"
-        :class="{ 'is-active': chatSidebar.state.open }"
         :aria-label="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :title="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :aria-pressed="chatSidebar.state.open"

@@ -35,7 +35,9 @@ describe("chat sidebar styles", () => {
     expect(chatSidebarHost).not.toContain("chat-sidebar__close");
     expect(chatSidebarHost).not.toContain("chat-sidebar__title");
     expect(chatSidebarHost).not.toContain("activeTitle");
-    expect(layout).toContain("--chat-sidebar-width: clamp(280px, 28vw, 360px)");
+    expect(chatSidebarHost).toContain("chat-sidebar__resizer");
+    expect(titleBar).not.toContain("is-active");
+    expect(layout).toContain("--chat-sidebar-width: 340px");
     expect(layout).toContain("--chat-sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1)");
     expect(layout).toContain("display: flex");
     expect(layout).toContain("overflow: hidden");
@@ -59,7 +61,7 @@ describe("chat sidebar styles", () => {
     expect(sidebarOpen).toContain("pointer-events: auto");
   });
 
-  it("侧栏开关有渐入渐出动画，且不被 reduced-motion 偏好关闭", () => {
+  it("侧栏开关有渐入渐出动画", () => {
     const sidebar = rule(".chat-sidebar {");
 
     expect(sidebar).toContain("transition:");
@@ -70,7 +72,28 @@ describe("chat sidebar styles", () => {
     expect(sidebar).toContain("transform 0.26s var(--chat-sidebar-easing)");
     expect(styles).not.toContain(".titlebar:hover .titlebar__chat-sidebar-btn");
     expect(styles).not.toContain(".titlebar:focus-within .titlebar__chat-sidebar-btn");
+    expect(styles).not.toContain(".titlebar__chat-sidebar-btn.is-active");
     expect(rule(".titlebar__btn {")).toContain("transition:");
-    expect(styles).not.toContain("@media (prefers-reduced-motion: reduce) {\n  .chat-sidebar");
+  });
+
+  it("对话侧栏拖拽时关闭宽度动画，跟随鼠标位置", () => {
+    const resizing = rule(".chat-sidebar.is-resizing {");
+
+    expect(resizing).toContain("cursor: col-resize");
+    expect(resizing).toContain("transition: none");
+  });
+
+  it("对话侧栏拖拽线只提供透明命中区", () => {
+    const resizer = rule(".chat-sidebar__resizer {");
+    const hitArea = rule(".chat-sidebar__resizer::before {");
+    const closed = rule(".chat-sidebar:not(.is-open) .chat-sidebar__resizer {");
+
+    expect(resizer).toContain("position: absolute");
+    expect(resizer).toContain("left: 0");
+    expect(resizer).toContain("width: 1px");
+    expect(resizer).toContain("background: transparent");
+    expect(resizer).toContain("cursor: col-resize");
+    expect(hitArea).toContain("inset: 0 -4px");
+    expect(closed).toContain("pointer-events: none");
   });
 });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import {
   useChatSidebar,
   type ChatSidebarContext,
@@ -11,22 +11,67 @@ const sidebar = useChatSidebar();
 const panels = sidebar.panels;
 const activePanel = sidebar.activePanel;
 const sidebarState = sidebar.state;
+const isResizing = ref(false);
+
+let startX = 0;
+let startWidth = 0;
 
 const sidebarContext = computed<ChatSidebarContext>(() => ({
   taskId: props.taskId,
   projectId: props.projectId,
   projectCwd: props.projectCwd,
 }));
+
+function onPointerMove(event: PointerEvent) {
+  sidebar.setWidth(startWidth + (startX - event.clientX));
+}
+
+function onPointerUp(event: PointerEvent) {
+  isResizing.value = false;
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+  (event.target as Element | null)?.releasePointerCapture?.(event.pointerId);
+  sidebar.persistWidth();
+}
+
+function startResize(event: PointerEvent) {
+  if (!sidebarState.open || event.button !== 0) return;
+  event.preventDefault();
+  isResizing.value = true;
+  startX = event.clientX;
+  startWidth = sidebarState.width;
+  (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+});
 </script>
 
 <template>
   <aside
     class="chat-sidebar"
-    :class="{ 'is-open': sidebarState.open }"
+    :class="{ 'is-open': sidebarState.open, 'is-resizing': isResizing }"
+    :style="{ '--chat-sidebar-width': sidebarState.width + 'px' }"
     aria-label="对话侧栏"
     :aria-hidden="sidebarState.open ? undefined : 'true'"
     :inert="sidebarState.open ? undefined : true"
   >
+    <div
+      class="chat-sidebar__resizer"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-disabled="sidebarState.open ? undefined : 'true'"
+      :aria-valuenow="sidebarState.width"
+      :aria-valuemin="sidebar.minWidth"
+      :aria-valuemax="sidebar.maxWidth"
+      title="拖动调整对话侧栏宽度（双击恢复默认）"
+      @pointerdown="startResize"
+      @dblclick="sidebar.resetWidth"
+    />
     <div class="chat-sidebar__inner">
       <header
         v-if="panels.length > 1"
