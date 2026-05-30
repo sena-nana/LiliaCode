@@ -1699,9 +1699,18 @@ button.ghost:hover {
   gap: 12px;
 }
 
-.chat-transcript {
+.chat-transcript-frame {
   --chat-scrollbar-transition-duration: 0.48s;
 
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.chat-transcript {
+  flex: 1 1 auto;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1709,33 +1718,106 @@ button.ghost:hover {
   padding: 8px 4px 0;
   min-height: 0;
   position: relative;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color var(--chat-scrollbar-transition-duration) ease;
+  scrollbar-gutter: stable;
+  scrollbar-width: none;
 }
 
 .chat-transcript.is-empty {
   justify-content: flex-end;
 }
 
-.chat-transcript:not(.is-scrollbar-visible) {
-  scrollbar-color: transparent transparent;
+.chat-transcript::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
-.chat-transcript.is-scrollbar-visible {
-  scrollbar-color: var(--border-strong) transparent;
+.chat-scroll-map {
+  --chat-scroll-map-bottom-offset: 0px;
+
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  bottom: calc(8px + var(--chat-scroll-map-bottom-offset));
+  z-index: 4;
+  width: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--chat-scrollbar-transition-duration) ease;
 }
 
-.chat-transcript::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  transition: background-color var(--chat-scrollbar-transition-duration) ease;
+.chat-scroll-map.is-visible,
+.chat-scroll-map.is-dragging {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb {
-  background-color: var(--border-strong);
+.chat-scroll-map__track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: default;
 }
 
-.chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb:hover {
-  background-color: var(--text-faint);
+.chat-scroll-map__thumb {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: ns-resize;
+  pointer-events: auto;
+}
+
+.chat-scroll-map.is-dragging .chat-scroll-map__thumb {
+  background: var(--text-faint);
+}
+
+.chat-scroll-map__marker {
+  position: absolute;
+  right: 0;
+  width: 10px;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  filter: none;
+  transform: translateY(-50%);
+  pointer-events: auto;
+}
+
+.chat-scroll-map__marker::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 9px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+
+.chat-scroll-map__marker--plan {
+  color: var(--warn);
+}
+
+.chat-scroll-map__marker--error {
+  color: var(--err);
+}
+
+.chat-scroll-map__marker:hover::before,
+.chat-scroll-map__marker:focus-visible::before {
+  height: 4px;
+}
+
+.chat-scroll-map__marker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .chat-empty {

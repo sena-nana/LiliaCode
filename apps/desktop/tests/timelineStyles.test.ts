@@ -64,30 +64,70 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(controlsWrap)).toContain("z-index: 2");
   });
 
-  it("聊天滚动条默认隐藏，滚动或进入滚动条区域时再显示", () => {
+  it("聊天原生滚动条隐藏，滚动或进入热区时改由滚动地图显示", () => {
     const transcript = selectorIndex(".chat-transcript {");
-    const hiddenThumb = selectorIndex(".chat-transcript::-webkit-scrollbar-thumb");
-    const visibleThumb = selectorIndex(".chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb");
-    const hiddenFirefox = selectorIndex(".chat-transcript:not(.is-scrollbar-visible)");
-    const visibleFirefox = selectorIndex(".chat-transcript.is-scrollbar-visible");
+    const nativeScrollbar = selectorIndex(".chat-transcript::-webkit-scrollbar {");
+    const oldVisibleThumb = selectorIndex(".chat-transcript.is-scrollbar-visible::-webkit-scrollbar-thumb");
 
     expect(transcript).toBeGreaterThan(-1);
-    expect(hiddenThumb).toBeGreaterThan(transcript);
-    expect(visibleThumb).toBeGreaterThan(hiddenThumb);
-    expect(ruleTextAt(transcript)).toContain("--chat-scrollbar-transition-duration: 0.48s");
-    expect(ruleTextAt(transcript)).toContain("transition: scrollbar-color var(--chat-scrollbar-transition-duration) ease");
-    expect(ruleTextAt(transcript)).toContain("scrollbar-color: transparent transparent");
-    expect(ruleTextAt(hiddenThumb)).toContain("background-color: transparent");
-    expect(ruleTextAt(hiddenThumb)).toContain("transition: background-color var(--chat-scrollbar-transition-duration) ease");
-    expect(ruleTextAt(visibleThumb)).toContain("background-color: var(--border-strong)");
-    expect(ruleTextAt(hiddenFirefox)).toContain("scrollbar-color: transparent transparent");
-    expect(ruleTextAt(visibleFirefox)).toContain("scrollbar-color: var(--border-strong) transparent");
+    expect(nativeScrollbar).toBeGreaterThan(transcript);
+    expect(oldVisibleThumb).toBe(-1);
+    expect(ruleTextAt(transcript)).toContain("scrollbar-width: none");
+    expect(ruleTextAt(transcript)).not.toContain("scrollbar-color");
+    expect(ruleTextAt(transcript)).not.toContain("scrollbar-color var(");
+    expect(ruleTextAt(nativeScrollbar)).toContain("width: 0");
+    expect(ruleTextAt(nativeScrollbar)).toContain("height: 0");
     expect(chatTranscript).toContain("is-scrollbar-visible");
     expect(chatTranscript).toContain("@scrollend=\"onScrollEnd\"");
     expect(chatTranscript).toContain("@mousemove=\"onMouseMove\"");
     expect(chatTranscript).toContain("@mouseleave=\"onMouseLeave\"");
     expect(chatTranscript).toContain("const SCROLLBAR_HIDE_DELAY = 180");
     expect(chatTranscript).toContain("setTimeout");
+  });
+
+  it("滚动地图作为覆盖层显示视口 thumb 和关键节点 marker", () => {
+    const frame = selectorIndex(".chat-transcript-frame {");
+    const transcript = selectorIndex(".chat-transcript {");
+    const scrollMap = selectorIndex(".chat-scroll-map {");
+    const visibleScrollMap = selectorIndex(".chat-scroll-map.is-visible");
+    const track = selectorIndex(".chat-scroll-map__track {");
+    const thumb = selectorIndex(".chat-scroll-map__thumb {");
+    const draggingThumb = selectorIndex(".chat-scroll-map.is-dragging .chat-scroll-map__thumb");
+    const marker = selectorIndex(".chat-scroll-map__marker {");
+    const markerBefore = selectorIndex(".chat-scroll-map__marker::before");
+    const planMarker = selectorIndex(".chat-scroll-map__marker--plan");
+    const errorMarker = selectorIndex(".chat-scroll-map__marker--error");
+
+    expect(frame).toBeGreaterThan(-1);
+    expect(transcript).toBeGreaterThan(frame);
+    expect(scrollMap).toBeGreaterThan(transcript);
+    expect(visibleScrollMap).toBeGreaterThan(scrollMap);
+    expect(track).toBeGreaterThan(visibleScrollMap);
+    expect(thumb).toBeGreaterThan(track);
+    expect(draggingThumb).toBeGreaterThan(thumb);
+    expect(marker).toBeGreaterThan(draggingThumb);
+    expect(markerBefore).toBeGreaterThan(marker);
+    expect(planMarker).toBeGreaterThan(markerBefore);
+    expect(errorMarker).toBeGreaterThan(planMarker);
+    expect(ruleTextAt(frame)).toContain("position: relative");
+    expect(ruleTextAt(frame)).toContain("--chat-scrollbar-transition-duration: 0.48s");
+    expect(ruleTextAt(transcript)).toContain("scrollbar-gutter: stable");
+    expect(ruleTextAt(scrollMap)).toContain("position: absolute");
+    expect(ruleTextAt(scrollMap)).toContain("bottom: calc(8px + var(--chat-scroll-map-bottom-offset))");
+    expect(ruleTextAt(scrollMap)).toContain("opacity: 0");
+    expect(ruleTextAt(scrollMap)).toContain("pointer-events: none");
+    expect(ruleTextAt(scrollMap)).toContain("transition: opacity var(--chat-scrollbar-transition-duration) ease");
+    expect(ruleTextAt(visibleScrollMap)).toContain("opacity: 1");
+    expect(ruleTextAt(visibleScrollMap)).toContain("pointer-events: auto");
+    expect(ruleTextAt(thumb)).toContain("background: var(--border-strong)");
+    expect(ruleTextAt(thumb)).toContain("cursor: ns-resize");
+    expect(ruleTextAt(thumb)).toContain("pointer-events: auto");
+    expect(ruleTextAt(draggingThumb)).toContain("background: var(--text-faint)");
+    expect(ruleTextAt(marker)).toContain("pointer-events: auto");
+    expect(ruleTextAt(marker)).toContain("color: var(--accent)");
+    expect(ruleTextAt(planMarker)).toContain("color: var(--warn)");
+    expect(ruleTextAt(errorMarker)).toContain("color: var(--err)");
+    expect(chatTranscript).toContain("<ChatScrollMap");
   });
 
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {

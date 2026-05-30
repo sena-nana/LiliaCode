@@ -88,12 +88,17 @@ function statusClass(status: AgentTimelineEventStatus): string {
 function kindClass(prefix: string, kind: string): string {
   return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
+
+function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
+  return entry.events.map((event) => event.id).join(" ");
+}
 </script>
 
 <template>
   <li
     v-if="entry.type === 'group'"
     class="agent-timeline__item agent-timeline__item--group"
+    :data-scroll-anchor-ids="groupScrollAnchorIds(entry)"
     :class="[
       kindClass('agent-timeline__item--', entry.representative.kind),
       statusClass(entry.aggregatedStatus),
@@ -143,6 +148,7 @@ function kindClass(prefix: string, kind: string): string {
             v-for="event in entry.events"
             :key="event.id"
             class="agent-timeline__group-item"
+            :data-scroll-anchor-id="event.id"
             :class="[kindClass('agent-timeline__group-item--', event.kind), statusClass(event.status)]"
           >
             <article class="agent-timeline__group-event">
@@ -198,6 +204,7 @@ function kindClass(prefix: string, kind: string): string {
   <li
     v-else
     class="agent-timeline__item"
+    :data-scroll-anchor-id="entry.event.id"
     :class="[
       kindClass('agent-timeline__item--', entry.event.kind),
       statusClass(entry.event.status),

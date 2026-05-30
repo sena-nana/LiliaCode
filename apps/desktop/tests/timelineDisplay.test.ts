@@ -643,6 +643,53 @@ function timelineEvent(
 }
 
 describe("timeline event expansion", () => {
+  it("为滚动地图保留用户消息、分组事件和错误事件的定位锚点", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "user-1",
+            kind: "message",
+            payload: { role: "user", content: "开始" },
+            intraTurnOrder: 1,
+          }),
+          timelineEvent({
+            id: "plan-1",
+            kind: "plan",
+            payload: { plan: "第一步" },
+            createdAt: 2,
+            updatedAt: 2,
+            intraTurnOrder: 2,
+          }),
+          timelineEvent({
+            id: "plan-2",
+            kind: "plan",
+            payload: { plan: "第二步" },
+            createdAt: 3,
+            updatedAt: 3,
+            intraTurnOrder: 3,
+          }),
+          timelineEvent({
+            id: "error-1",
+            kind: "command",
+            status: "failed",
+            payload: { command: "yarn test", error: "boom" },
+            createdAt: 4,
+            updatedAt: 4,
+            intraTurnOrder: 4,
+          }),
+        ],
+      },
+    });
+
+    expect(view.container.querySelector('[data-scroll-anchor-id="user-1"]'))
+      .toHaveClass("agent-timeline__message-row");
+    expect(view.container.querySelector('[data-scroll-anchor-ids~="plan-1"]'))
+      .toHaveAttribute("data-scroll-anchor-ids", "plan-1 plan-2");
+    expect(view.container.querySelector('[data-scroll-anchor-id="error-1"]'))
+      .toHaveClass("agent-timeline__item");
+  });
+
   it("无详情的读取和搜索事件不提供展开入口", async () => {
     const view = render(AgentTimeline, {
       props: {

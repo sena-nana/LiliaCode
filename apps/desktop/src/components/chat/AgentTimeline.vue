@@ -351,6 +351,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
         <li
           v-if="entry.type === 'event' && isTimelineUserMessage(entry.event)"
           class="agent-timeline__message-row"
+          :data-scroll-anchor-id="entry.event.id"
           :class="[
             `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,
             { 'is-queued': messageFromEvent(entry.event).queued },

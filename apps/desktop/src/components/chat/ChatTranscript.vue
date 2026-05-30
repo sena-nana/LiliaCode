@@ -7,6 +7,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import AgentTimeline from "./AgentTimeline.vue";
+import ChatScrollMap from "./ChatScrollMap.vue";
 
 const props = defineProps<{
   timelineEvents: AgentTimelineEvent[];
@@ -117,29 +118,38 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    ref="scroller"
-    class="chat-transcript"
-    :class="{
-      'is-empty': isEmpty,
-      'is-scrollbar-visible': isScrollbarVisible,
-    }"
-    @scroll="onScroll"
-    @scrollend="onScrollEnd"
+    class="chat-transcript-frame"
     @mousemove="onMouseMove"
     @mouseleave="onMouseLeave"
   >
-    <div v-if="isEmpty" class="chat-empty">
-      {{ emptyHeadline }}
+    <div
+      ref="scroller"
+      class="chat-transcript"
+      :class="{
+        'is-empty': isEmpty,
+        'is-scrollbar-visible': isScrollbarVisible,
+      }"
+      @scroll="onScroll"
+      @scrollend="onScrollEnd"
+    >
+      <div v-if="isEmpty" class="chat-empty">
+        {{ emptyHeadline }}
+      </div>
+      <template v-else>
+        <AgentTimeline
+          :events="timelineEvents"
+          :is-thinking="isThinking"
+          :project-cwd="projectCwd"
+        />
+      </template>
+      <div class="chat-controls-wrap">
+        <slot name="controls" />
+      </div>
     </div>
-    <template v-else>
-      <AgentTimeline
-        :events="timelineEvents"
-        :is-thinking="isThinking"
-        :project-cwd="projectCwd"
-      />
-    </template>
-    <div class="chat-controls-wrap">
-      <slot name="controls" />
-    </div>
+    <ChatScrollMap
+      :events="timelineEvents"
+      :scroller="scroller"
+      :visible="isScrollbarVisible"
+    />
   </div>
 </template>
