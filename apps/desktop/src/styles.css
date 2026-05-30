@@ -1737,41 +1737,34 @@ button.ghost:hover {
   height: 0;
 }
 
-.chat-scroll-map {
-  --chat-scroll-map-bottom-offset: 0px;
-
-  position: absolute;
-  top: 8px;
-  right: 2px;
-  bottom: calc(8px + var(--chat-scroll-map-bottom-offset));
-  z-index: 4;
+.scroll-map {
   width: 10px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--chat-scrollbar-transition-duration) ease;
+  transition: opacity var(--chat-scrollbar-transition-duration, 0.48s) ease;
 }
 
-.chat-scroll-map.is-visible,
-.chat-scroll-map.is-dragging {
+.scroll-map.is-visible,
+.scroll-map.is-dragging {
   opacity: 1;
   pointer-events: auto;
 }
 
-.chat-scroll-map__track {
+.scroll-map__track {
   position: relative;
   width: 100%;
   height: 100%;
   cursor: default;
 }
 
-.chat-scroll-map__thumb {
+.scroll-map__thumb {
   position: absolute;
   top: 0;
   right: 0;
   width: 100%;
 }
 
-.chat-scroll-map__thumb::before {
+.scroll-map__thumb::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1782,9 +1775,19 @@ button.ghost:hover {
   background: var(--border-strong);
 }
 
-.chat-scroll-map__track:hover .chat-scroll-map__thumb::before,
-.chat-scroll-map.is-dragging .chat-scroll-map__thumb::before {
+.scroll-map__track:hover .scroll-map__thumb::before,
+.scroll-map.is-dragging .scroll-map__thumb::before {
   background: var(--text-faint);
+}
+
+.chat-scroll-map {
+  --chat-scroll-map-bottom-offset: 0px;
+
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  bottom: calc(8px + var(--chat-scroll-map-bottom-offset));
+  z-index: 4;
 }
 
 .chat-scroll-map__marker {
@@ -2515,46 +2518,6 @@ button.ghost:hover {
   right: 0;
   bottom: 8px;
   z-index: 1;
-  width: 10px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--chat-scrollbar-transition-duration, 0.48s) ease;
-}
-
-.timeline-plan-card__scroll-map.is-visible,
-.timeline-plan-card__scroll-map.is-dragging {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.timeline-plan-card__scroll-track {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  cursor: default;
-}
-
-.timeline-plan-card__scroll-thumb {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 100%;
-}
-
-.timeline-plan-card__scroll-thumb::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 3px;
-  bottom: 0;
-  width: 4px;
-  border-radius: 999px;
-  background: var(--border-strong);
-}
-
-.timeline-plan-card__scroll-track:hover .timeline-plan-card__scroll-thumb::before,
-.timeline-plan-card__scroll-map.is-dragging .timeline-plan-card__scroll-thumb::before {
-  background: var(--text-faint);
 }
 
 .timeline-plan-card__heading-marker {

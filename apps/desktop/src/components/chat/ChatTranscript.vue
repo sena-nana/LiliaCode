@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import AgentTimeline from "./AgentTimeline.vue";
 import ChatScrollMap from "./ChatScrollMap.vue";
@@ -13,34 +13,14 @@ const props = defineProps<{
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
+const frameEl = ref<HTMLElement | null>(null);
+const scrollMap = ref<{ show: () => void } | null>(null);
 const isPinnedToBottom = ref(true);
-const isScrollbarVisible = ref(false);
-const isPointerInScrollbarZone = ref(false);
-let scrollbarHideTimer: ReturnType<typeof window.setTimeout> | null = null;
 
-const SCROLLBAR_HOT_ZONE = 18;
-const SCROLLBAR_HIDE_DELAY = 180;
 const PLAN_REVEAL_PADDING = 8;
 
-function clearScrollbarHideTimer() {
-  if (scrollbarHideTimer === null) return;
-  window.clearTimeout(scrollbarHideTimer);
-  scrollbarHideTimer = null;
-}
-
 function showScrollbar() {
-  clearScrollbarHideTimer();
-  isScrollbarVisible.value = true;
-}
-
-function hideScrollbarSoon() {
-  if (scrollbarHideTimer !== null) return;
-  scrollbarHideTimer = window.setTimeout(() => {
-    if (!isPointerInScrollbarZone.value) {
-      isScrollbarVisible.value = false;
-    }
-    scrollbarHideTimer = null;
-  }, SCROLLBAR_HIDE_DELAY);
+  scrollMap.value?.show();
 }
 
 function checkPinned() {
@@ -52,33 +32,6 @@ function checkPinned() {
 
 function onScroll() {
   checkPinned();
-  showScrollbar();
-}
-
-function onScrollEnd() {
-  if (!isPointerInScrollbarZone.value) hideScrollbarSoon();
-}
-
-function isInScrollbarZone(event: MouseEvent): boolean {
-  const el = scroller.value;
-  if (!el) return false;
-  const rect = el.getBoundingClientRect();
-  return event.clientX >= rect.right - SCROLLBAR_HOT_ZONE && event.clientX <= rect.right;
-}
-
-function onMouseMove(event: MouseEvent) {
-  const inZone = isInScrollbarZone(event);
-  isPointerInScrollbarZone.value = inZone;
-  if (inZone) {
-    showScrollbar();
-    return;
-  }
-  if (isScrollbarVisible.value) hideScrollbarSoon();
-}
-
-function onMouseLeave() {
-  isPointerInScrollbarZone.value = false;
-  if (isScrollbarVisible.value) hideScrollbarSoon();
 }
 
 async function scrollToBottom() {
@@ -170,27 +123,20 @@ watch(
 const isEmpty = computed(() =>
   props.timelineEvents.length === 0 && !props.isThinking,
 );
-
-onBeforeUnmount(() => {
-  clearScrollbarHideTimer();
-});
 </script>
 
 <template>
   <div
+    ref="frameEl"
     class="chat-transcript-frame"
-    @mousemove="onMouseMove"
-    @mouseleave="onMouseLeave"
   >
     <div
       ref="scroller"
       class="chat-transcript"
       :class="{
         'is-empty': isEmpty,
-        'is-scrollbar-visible': isScrollbarVisible,
       }"
       @scroll="onScroll"
-      @scrollend="onScrollEnd"
     >
       <div v-if="isEmpty" class="chat-empty">
         {{ emptyHeadline }}
@@ -208,10 +154,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <ChatScrollMap
+      ref="scrollMap"
       :events="timelineEvents"
+      :hover-target="frameEl"
       :project-cwd="projectCwd"
       :scroller="scroller"
-      :visible="isScrollbarVisible"
     />
   </div>
 </template>
