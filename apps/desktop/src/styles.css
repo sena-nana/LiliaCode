@@ -1761,15 +1761,23 @@ button.ghost:hover {
 .chat-scroll-map__thumb {
   position: absolute;
   top: 0;
+  right: 0;
+  width: 100%;
+}
+
+.chat-scroll-map__thumb::before {
+  content: "";
+  position: absolute;
+  top: 0;
   right: 3px;
+  bottom: 0;
   width: 4px;
   border-radius: 999px;
   background: var(--border-strong);
-  cursor: ns-resize;
-  pointer-events: auto;
 }
 
-.chat-scroll-map.is-dragging .chat-scroll-map__thumb {
+.chat-scroll-map__track:hover .chat-scroll-map__thumb::before,
+.chat-scroll-map.is-dragging .chat-scroll-map__thumb::before {
   background: var(--text-faint);
 }
 
