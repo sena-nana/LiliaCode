@@ -1820,6 +1820,70 @@ button.ghost:hover {
   outline-offset: 2px;
 }
 
+.chat-scroll-map__tooltip {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 48px));
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(4px, -50%);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+}
+
+.chat-scroll-map__marker:hover .chat-scroll-map__tooltip,
+.chat-scroll-map__marker:focus-visible .chat-scroll-map__tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+}
+
+.chat-scroll-map__tooltip-item {
+  display: grid;
+  gap: 2px;
+}
+
+.chat-scroll-map__tooltip-title,
+.chat-scroll-map__tooltip-summary,
+.chat-scroll-map__tooltip-more {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.chat-scroll-map__tooltip-title {
+  -webkit-line-clamp: 1;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-scroll-map__tooltip-summary {
+  -webkit-line-clamp: 2;
+  color: var(--text-muted);
+}
+
+.chat-scroll-map__tooltip-more {
+  -webkit-line-clamp: 1;
+  color: var(--text-muted);
+}
+
 .chat-empty {
   position: absolute;
   left: 50%;

@@ -148,6 +148,7 @@ onBeforeUnmount(() => {
     </div>
     <ChatScrollMap
       :events="timelineEvents"
+      :project-cwd="projectCwd"
       :scroller="scroller"
       :visible="isScrollbarVisible"
     />

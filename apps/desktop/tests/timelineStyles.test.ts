@@ -97,6 +97,11 @@ describe("agent timeline styles", () => {
     const markerBefore = selectorIndex(".chat-scroll-map__marker::before");
     const planMarker = selectorIndex(".chat-scroll-map__marker--plan");
     const errorMarker = selectorIndex(".chat-scroll-map__marker--error");
+    const tooltip = selectorIndex(".chat-scroll-map__tooltip {");
+    const visibleTooltip = selectorIndex(".chat-scroll-map__marker:hover .chat-scroll-map__tooltip");
+    const tooltipItem = selectorIndex(".chat-scroll-map__tooltip-item {");
+    const tooltipTitle = selectorIndex(".chat-scroll-map__tooltip-title {");
+    const tooltipSummary = selectorIndex(".chat-scroll-map__tooltip-summary {");
 
     expect(frame).toBeGreaterThan(-1);
     expect(transcript).toBeGreaterThan(frame);
@@ -109,6 +114,11 @@ describe("agent timeline styles", () => {
     expect(markerBefore).toBeGreaterThan(marker);
     expect(planMarker).toBeGreaterThan(markerBefore);
     expect(errorMarker).toBeGreaterThan(planMarker);
+    expect(tooltip).toBeGreaterThan(errorMarker);
+    expect(visibleTooltip).toBeGreaterThan(tooltip);
+    expect(tooltipItem).toBeGreaterThan(visibleTooltip);
+    expect(tooltipTitle).toBeGreaterThan(tooltipItem);
+    expect(tooltipSummary).toBeGreaterThan(tooltipTitle);
     expect(ruleTextAt(frame)).toContain("position: relative");
     expect(ruleTextAt(frame)).toContain("--chat-scrollbar-transition-duration: 0.48s");
     expect(ruleTextAt(transcript)).toContain("scrollbar-gutter: stable");
@@ -127,7 +137,18 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(marker)).toContain("color: var(--accent)");
     expect(ruleTextAt(planMarker)).toContain("color: var(--warn)");
     expect(ruleTextAt(errorMarker)).toContain("color: var(--err)");
+    expect(ruleTextAt(tooltip)).toContain("right: 14px");
+    expect(ruleTextAt(tooltip)).toContain("max-width: min(320px, calc(100vw - 48px))");
+    expect(ruleTextAt(tooltip)).toContain("background: var(--bg-elev)");
+    expect(ruleTextAt(tooltip)).toContain("border: 1px solid var(--border)");
+    expect(ruleTextAt(tooltip)).toContain("visibility: hidden");
+    expect(ruleTextAt(tooltip)).toContain("pointer-events: none");
+    expect(ruleTextAt(visibleTooltip)).toContain("opacity: 1");
+    expect(ruleTextAt(visibleTooltip)).toContain("visibility: visible");
+    expect(ruleTextAt(tooltipTitle)).toContain("-webkit-line-clamp: 1");
+    expect(ruleTextAt(tooltipSummary)).toContain("-webkit-line-clamp: 2");
     expect(chatTranscript).toContain("<ChatScrollMap");
+    expect(chatTranscript).toContain(":project-cwd=\"projectCwd\"");
   });
 
   it("内容列右侧保留与左侧时间线槽位对应的补偿边距", () => {

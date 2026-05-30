@@ -5,17 +5,25 @@ import type { AgentTimelineEvent } from "@lilia/contracts";
 import {
   readTimelinePayloadRecord,
   timelineDeclaredGroupUnit,
+  timelineEventLabel,
+  timelineInlinePreview,
+  type TimelineDisplayContext,
 } from "./timelineDisplay";
 
 type ScrollMarkerKind = "user" | "plan" | "error";
+
+interface ScrollMarkerTooltipItem {
+  id: string;
+  summary: string;
+  title: string;
+}
 
 interface ScrollMarker {
   id: string;
   kind: ScrollMarkerKind;
   anchorId: string;
   top: number;
-  count: number;
-  label: string;
+  tooltipItems: ScrollMarkerTooltipItem[];
 }
 
 interface ScrollMetrics {
@@ -37,6 +45,7 @@ interface ScrollDragState {
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
+  projectCwd?: string | null;
   scroller: HTMLElement | null;
   visible: boolean;
 }>();
@@ -52,6 +61,7 @@ const thumbHeight = ref(0);
 const TRACK_EDGE_PADDING = 8;
 const MARKER_CLUSTER_DISTANCE = 4;
 const SCROLL_TARGET_OFFSET = 16;
+const TOOLTIP_ITEM_LIMIT = 4;
 const MARKER_LABELS: Record<ScrollMarkerKind, string> = {
   error: "错误位置",
   plan: "计划位置",
@@ -76,6 +86,10 @@ const thumbStyle = computed<CSSProperties>(() => ({
 
 const mapStyle = computed<CSSProperties>(() => ({
   "--chat-scroll-map-bottom-offset": `${bottomOffset.value}px`,
+}));
+
+const displayContext = computed<TimelineDisplayContext>(() => ({
+  projectCwd: props.projectCwd,
 }));
 
 const shouldRender = computed(() => isScrollable.value && thumbHeight.value > 0);
@@ -104,8 +118,9 @@ watch(
 
 watch(
   () => [
+    props.projectCwd ?? "",
     props.visible,
-    props.events.map((event) => `${event.id}:${event.kind}:${event.status}`).join("|"),
+    props.events.map(markerEventSignature).join("|"),
   ],
   () => scheduleMeasure(),
   { flush: "post" },
@@ -235,12 +250,28 @@ function buildMarkers(scroller: HTMLElement, metrics: ScrollMetrics): ScrollMark
       kind,
       anchorId: event.id,
       top: markerTop(scroller, anchor, metrics),
-      count: 1,
-      label: MARKER_LABELS[kind],
+      tooltipItems: [markerTooltipItem(event)],
     });
   }
 
   return mergeNearbyMarkers(raw);
+}
+
+function markerTooltipItem(event: AgentTimelineEvent): ScrollMarkerTooltipItem {
+  const title = timelineEventLabel(event, displayContext.value);
+  const summary = timelineInlinePreview(event, displayContext.value);
+  return {
+    id: event.id,
+    title,
+    summary: summary && summary !== title ? summary : "",
+  };
+}
+
+function markerEventSignature(event: AgentTimelineEvent): string {
+  const kind = markerKind(event);
+  if (!kind) return `${event.id}:${event.kind}:${event.status}`;
+  const item = markerTooltipItem(event);
+  return `${event.id}:${kind}:${event.status}:${item.title}:${item.summary}`;
 }
 
 function markerTop(scroller: HTMLElement, anchor: HTMLElement, metrics: ScrollMetrics): number {
@@ -287,11 +318,10 @@ function mergeNearbyMarkers(rawMarkers: ScrollMarker[]): ScrollMarker[] {
       continue;
     }
 
-    previous.count += marker.count;
+    previous.tooltipItems.push(...marker.tooltipItems);
     if (markerPriority(marker.kind) > markerPriority(previous.kind)) {
       previous.kind = marker.kind;
       previous.anchorId = marker.anchorId;
-      previous.label = marker.label;
       previous.id = marker.id;
       previous.top = marker.top;
     }
@@ -304,10 +334,22 @@ function markerPriority(kind: ScrollMarkerKind): number {
   return MARKER_PRIORITIES[kind];
 }
 
+function visibleTooltipItems(marker: ScrollMarker): ScrollMarkerTooltipItem[] {
+  return marker.tooltipItems.slice(0, TOOLTIP_ITEM_LIMIT);
+}
+
+function hiddenTooltipItemCount(marker: ScrollMarker): number {
+  return Math.max(0, marker.tooltipItems.length - TOOLTIP_ITEM_LIMIT);
+}
+
 function markerButtonStyle(marker: ScrollMarker): CSSProperties {
   return {
     top: `${marker.top}px`,
   };
+}
+
+function markerTooltipId(marker: ScrollMarker): string {
+  return `chat-scroll-map-tooltip-${marker.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
 function onTrackPointerDown(event: PointerEvent) {
@@ -379,8 +421,10 @@ function clearDragListeners() {
 }
 
 function markerAriaLabel(marker: ScrollMarker): string {
-  if (marker.count <= 1) return `跳到${marker.label}`;
-  return `跳到${marker.count} 个关键位置中的${marker.label}`;
+  const count = marker.tooltipItems.length;
+  const label = MARKER_LABELS[marker.kind];
+  if (count <= 1) return `跳到${label}`;
+  return `跳到${count} 个关键位置中的${label}`;
 }
 
 function jumpTo(marker: ScrollMarker) {
@@ -435,15 +479,39 @@ function maxScrollTop(scroller: HTMLElement): number {
       />
       <button
         v-for="marker in markers"
-        :key="`${marker.kind}:${marker.id}:${marker.count}`"
+        :key="`${marker.kind}:${marker.id}:${marker.tooltipItems.length}`"
         type="button"
         class="chat-scroll-map__marker"
         :class="`chat-scroll-map__marker--${marker.kind}`"
         :style="markerButtonStyle(marker)"
         :aria-label="markerAriaLabel(marker)"
+        :aria-describedby="markerTooltipId(marker)"
         @pointerdown.stop
         @click.stop="jumpTo(marker)"
-      />
+      >
+        <span
+          :id="markerTooltipId(marker)"
+          role="tooltip"
+          class="chat-scroll-map__tooltip"
+        >
+          <span
+            v-for="item in visibleTooltipItems(marker)"
+            :key="item.id"
+            class="chat-scroll-map__tooltip-item"
+          >
+            <span class="chat-scroll-map__tooltip-title">{{ item.title }}</span>
+            <span v-if="item.summary" class="chat-scroll-map__tooltip-summary">
+              {{ item.summary }}
+            </span>
+          </span>
+          <span
+            v-if="hiddenTooltipItemCount(marker) > 0"
+            class="chat-scroll-map__tooltip-more"
+          >
+            另有 {{ hiddenTooltipItemCount(marker) }} 个位置
+          </span>
+        </span>
+      </button>
     </div>
   </div>
 </template>
