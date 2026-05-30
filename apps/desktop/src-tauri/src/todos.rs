@@ -2,13 +2,14 @@
  * Todo 命令组：任务内 checklist，定位是「AI 思考过程可视化」。
  *
  * - 数据全部走 [`crate::store::LiliaStore`]，schema 由当前开发库基线创建。
- * - 自动通道：聊天事件流里 `tool_use { name: "TodoWrite" }` → [`apply_agent_event_impl`]
- *   会按 `text` 匹配现有 source="agent" 的行做 upsert，并删掉本次没出现的 agent 行；
- *   `source="user"` 的行不受影响。
+ * - 自动通道：provider `todo_list` 运行时事件 → [`apply_agent_event_impl`]；兼容
+ *   Claude `tool_use { name: "TodoWrite" }`。落库时按 `text` 匹配现有 source="agent"
+ *   的行做 upsert，并删掉本次没出现的 agent 行；`source="user"` 的行不受影响。
  */
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tauri::State;
 use uuid::Uuid;
 
@@ -29,16 +30,53 @@ pub struct TaskTodo {
     pub updated_at: i64,
 }
 
-/// SDK TodoWrite 工具事件携带的单条 todo。
-/// Anthropic 官方字段：`content / status / activeForm`。
+/// Provider todo 事件携带的单条 todo；兼容 Claude `content/status` 与 Codex `text/completed`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTodoItem {
+    #[serde(alias = "text", alias = "title", alias = "description")]
     pub content: String,
     /// "pending" | "in_progress" | "completed"
+    #[serde(default)]
     pub status: String,
     #[serde(default)]
-    pub active_form: Option<String>,
+    pub completed: Option<bool>,
+    #[serde(default)]
+    pub done: Option<bool>,
+}
+
+impl AgentTodoItem {
+    fn is_done(&self) -> bool {
+        self.completed.unwrap_or(false)
+            || self.done.unwrap_or(false)
+            || self.status.eq_ignore_ascii_case("completed")
+    }
+}
+
+pub(crate) fn parse_agent_todo_items(values: &[JsonValue]) -> Vec<AgentTodoItem> {
+    values
+        .iter()
+        .filter_map(|value| {
+            if let Some(text) = value
+                .as_str()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+            {
+                return Some(AgentTodoItem {
+                    content: text.to_string(),
+                    status: "pending".to_string(),
+                    completed: None,
+                    done: None,
+                });
+            }
+            let mut item = serde_json::from_value::<AgentTodoItem>(value.clone()).ok()?;
+            item.content = item.content.trim().to_string();
+            if item.content.is_empty() {
+                return None;
+            }
+            Some(item)
+        })
+        .collect()
 }
 
 fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskTodo> {
@@ -85,10 +123,7 @@ fn next_order(conn: &Connection, task_id: &str) -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn todo_list(
-    task_id: String,
-    store: State<'_, LiliaStore>,
-) -> Result<Vec<TaskTodo>, String> {
+pub fn todo_list(task_id: String, store: State<'_, LiliaStore>) -> Result<Vec<TaskTodo>, String> {
     let conn = store.conn()?;
     select_by_task(&conn, &task_id)
 }
@@ -177,7 +212,7 @@ pub fn todo_delete(id: String, store: State<'_, LiliaStore>) -> Result<(), Strin
     Ok(())
 }
 
-/// 把 SDK TodoWrite 事件落库。复用规则：
+/// 把标准化 agent todo 列表落库。复用规则：
 /// - 按 `text` 等值匹配现有 `source="agent"` 行；命中则保留 id、更新 done/order/updatedAt
 /// - 未命中的新条目以 `source="agent"` 插入
 /// - 本次没出现的 agent 行删除（保持 agent 列表 = 最新 SDK 状态）
@@ -210,8 +245,8 @@ pub fn apply_agent_event_impl(
             })
             .map_err(|e| format!("apply_agent_event: query 失败：{e}"))?;
         for r in rows {
-            let (id, text, order, created_at) = r
-                .map_err(|e| format!("apply_agent_event: row 失败：{e}"))?;
+            let (id, text, order, created_at) =
+                r.map_err(|e| format!("apply_agent_event: row 失败：{e}"))?;
             existing.insert(text, (id, order, created_at));
         }
     }
@@ -230,8 +265,11 @@ pub fn apply_agent_event_impl(
     let mut seen_texts: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (idx, item) in todos.iter().enumerate() {
-        let text = item.content.clone();
-        let done = item.status.as_str() == "completed";
+        let text = item.content.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        let done = item.is_done();
         let order = user_max + 1 + (idx as i64);
         seen_texts.insert(text.clone());
 

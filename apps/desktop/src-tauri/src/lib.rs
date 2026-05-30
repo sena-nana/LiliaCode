@@ -1326,7 +1326,7 @@ fn spawn_agent_turn(
                 };
                 log_agent_event_effect(event_host.dispatch(&event_ctx, &event));
                 match &event {
-                    AgentRuntimeEvent::ToolUse { .. } => {}
+                    AgentRuntimeEvent::ToolUse { .. } | AgentRuntimeEvent::TodoList { .. } => {}
                     AgentRuntimeEvent::Timeline { .. } => {
                         if let Some(input) =
                             timeline_input_from_runtime_event(&event_ctx, &event)
