@@ -690,6 +690,125 @@ describe("timeline event expansion", () => {
       .toHaveClass("agent-timeline__item");
   });
 
+  it("待确认计划默认展开并使用专用计划卡片", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "plan-pending",
+            kind: "plan",
+            status: "requires_action",
+            title: "ExitPlanMode",
+            payload: {
+              plan: "## 修改计划\n- 接线 runner\n- 补测试",
+              allowedPrompts: [{ tool: "Bash", prompt: "yarn test" }],
+              approved: null,
+              executionPermission: "ask",
+            },
+          }),
+        ],
+      },
+    });
+
+    const card = view.container.querySelector(".timeline-card--plan");
+    const toggle = view.getByRole("button", { name: /等待确认计划/ });
+
+    expect(card).toHaveClass("is-expanded");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(view.queryByText("## 修改计划 - 接线 runner - 补测试"))
+      .not.toBeInTheDocument();
+    expect(view.getByText("修改计划")).toBeInTheDocument();
+    expect(view.getByText("Bash：yarn test")).toBeInTheDocument();
+  });
+
+  it("处理后的计划默认折叠并可再次展开", async () => {
+    const acceptedView = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "plan-accepted",
+            kind: "plan",
+            status: "success",
+            title: "ExitPlanMode",
+            payload: {
+              plan: "## 已确认计划\n- 执行改动",
+              approved: true,
+              executionPermission: "full",
+            },
+          }),
+        ],
+      },
+    });
+    expect(acceptedView.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-collapsed");
+    expect(acceptedView.getByRole("button", { name: /已确认计划/ }))
+      .toHaveAttribute("aria-expanded", "false");
+    acceptedView.unmount();
+
+    const cancelledView = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "plan-cancelled",
+            kind: "plan",
+            status: "cancelled",
+            title: "ExitPlanMode",
+            payload: {
+              plan: "## 已取消计划\n- 暂不执行",
+              approved: false,
+              executionPermission: "ask",
+            },
+          }),
+        ],
+      },
+    });
+    expect(cancelledView.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-collapsed");
+    expect(cancelledView.getByRole("button", { name: /已取消计划/ }))
+      .toHaveAttribute("aria-expanded", "false");
+    cancelledView.unmount();
+
+    const revisionView = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "plan-revision",
+            kind: "plan",
+            status: "cancelled",
+            title: "ExitPlanMode",
+            payload: {
+              plan: "## 当前计划\n- 先改 runner\n- 再补测试",
+              revisionRequest: "把文档边界也写清楚",
+              approved: false,
+              executionPermission: "ask",
+            },
+          }),
+        ],
+      },
+    });
+    const revisionToggle = revisionView.getByRole("button", { name: /要求修改计划/ });
+
+    expect(revisionView.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-collapsed");
+    expect(revisionToggle).toHaveAttribute("aria-expanded", "false");
+    expect(revisionView.getByText("修改要求：把文档边界也写清楚")).toBeInTheDocument();
+    expect(revisionView.queryByText("先改 runner")).not.toBeInTheDocument();
+
+    await fireEvent.click(revisionToggle);
+
+    expect(revisionView.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-expanded");
+    expect(revisionToggle).toHaveAttribute("aria-expanded", "true");
+    expect(revisionView.getByText("先改 runner")).toBeInTheDocument();
+    expect(revisionView.getByText("把文档边界也写清楚")).toBeInTheDocument();
+
+    await fireEvent.click(revisionToggle);
+
+    expect(revisionView.container.querySelector(".timeline-card--plan"))
+      .toHaveClass("is-collapsed");
+    expect(revisionToggle).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("无详情的读取和搜索事件不提供展开入口", async () => {
     const view = render(AgentTimeline, {
       props: {

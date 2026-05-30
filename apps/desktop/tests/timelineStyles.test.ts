@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 const styles = readFileSync("src/styles.css", "utf8");
 const chatTranscript = readFileSync("src/components/chat/ChatTranscript.vue", "utf8");
 const timelineDeclaredEvent = readFileSync("src/components/chat/TimelineDeclaredEvent.vue", "utf8");
+const timelineCardDetails = readFileSync("src/components/chat/TimelineCardDetails.vue", "utf8");
+const timelinePlanCard = readFileSync("src/components/chat/TimelinePlanCard.vue", "utf8");
 const taskDetail = readFileSync("src/pages/TaskDetail.vue", "utf8");
 
 function selectorIndex(selector: string): number {
@@ -177,6 +179,36 @@ describe("agent timeline styles", () => {
     expect(ruleTextAt(finalReplyCode)).toContain("font-weight: 500");
   });
 
+  it("计划结果使用灰色卡片，折叠态仍保留摘要和卡片外观", () => {
+    const planCard = selectorIndex(".timeline-card--plan {");
+    const planNode = selectorIndex(".agent-timeline__item--plan .agent-timeline__node");
+    const planHead = selectorIndex(".timeline-plan-card__head {");
+    const planSummary = selectorIndex(".timeline-plan-card__summary {");
+    const planBody = selectorIndex(".timeline-plan-card__body {");
+    const mobilePlanCard = selectorIndex("@media (max-width: 720px)");
+
+    expect(planCard).toBeGreaterThan(-1);
+    expect(planNode).toBeGreaterThan(planCard);
+    expect(planHead).toBeGreaterThan(planNode);
+    expect(planSummary).toBeGreaterThan(planHead);
+    expect(planBody).toBeGreaterThan(planSummary);
+    expect(ruleTextAt(planCard)).toContain("background: var(--bg-subtle)");
+    expect(ruleTextAt(planCard)).toContain("border: 1px solid var(--border-soft)");
+    expect(ruleTextAt(planCard)).not.toContain("border-left");
+    expect(ruleTextAt(planCard)).toContain("border-radius: 6px");
+    expect(ruleTextAt(planNode)).toContain("background: transparent");
+    expect(ruleTextAt(planNode)).toContain("color: var(--text-muted)");
+    expect(ruleTextAt(planHead)).toContain("width: 100%");
+    expect(ruleTextAt(planHead)).toContain("background: transparent");
+    expect(ruleTextAt(planSummary)).toContain("display: block");
+    expect(ruleTextAt(planSummary)).toContain("text-overflow: ellipsis");
+    expect(ruleTextAt(planSummary)).toContain("white-space: nowrap");
+    expect(ruleTextAt(planBody)).toContain("border-top: 1px solid var(--border-soft)");
+    expect(mobilePlanCard).toBeGreaterThan(planBody);
+    expect(timelinePlanCard).toContain('class="timeline-card timeline-card--plan"');
+    expect(timelinePlanCard).toContain(":aria-expanded=\"expanded\"");
+  });
+
   it("折叠项 hover 时只高亮箭头，不改写标题文本颜色", () => {
     const titleHover = selectorIndex(".agent-timeline__title:hover:not(:disabled)");
     const chevronHover = selectorIndex(".agent-timeline__title:hover:not(:disabled) .agent-timeline__chevron");
@@ -266,9 +298,9 @@ describe("agent timeline styles", () => {
     expect(codeBlock).toBeGreaterThan(field);
     expect(codeBlockCode).toBeGreaterThan(codeBlock);
 
-    expect(timelineDeclaredEvent).toContain('class="timeline-card__field-list"');
-    expect(timelineDeclaredEvent).toContain('class="timeline-card__section timeline-card__section--code"');
-    expect(timelineDeclaredEvent).toContain('class="timeline-card__section timeline-card__section--list"');
+    expect(timelineCardDetails).toContain('class="timeline-card__field-list"');
+    expect(timelineCardDetails).toContain('class="timeline-card__section timeline-card__section--code"');
+    expect(timelineCardDetails).toContain('class="timeline-card__section timeline-card__section--list"');
     expect(ruleTextAt(details)).toContain("gap: 6px");
     expect(ruleTextAt(fieldList)).toContain("gap: 3px");
     expect(ruleTextAt(fieldList)).toContain("padding-left: 8px");

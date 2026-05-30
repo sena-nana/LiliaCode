@@ -5,6 +5,7 @@ import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contra
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
+import TimelinePlanCard from "./TimelinePlanCard.vue";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
 import {
   isTimelineFinalReply,
@@ -151,7 +152,15 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             :data-scroll-anchor-id="event.id"
             :class="[kindClass('agent-timeline__group-item--', event.kind), statusClass(event.status)]"
           >
-            <article class="agent-timeline__group-event">
+            <TimelinePlanCard
+              v-if="event.kind === 'plan'"
+              :event="event"
+              :expanded="expanded(event)"
+              :can-toggle="canToggle(event)"
+              :project-cwd="projectCwd"
+              @toggle="emit('toggleEvent', $event)"
+            />
+            <article v-else class="agent-timeline__group-event">
               <header class="agent-timeline__head agent-timeline__group-head">
                 <button
                   type="button"
@@ -228,98 +237,109 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
         />
       </div>
       <div class="agent-timeline__body">
-        <header
-          v-if="!isTimelineFinalReply(entry.event) || hasProcessEvents(entry)"
-          class="agent-timeline__head"
-        >
-          <button
-            v-if="!isTimelineFinalReply(entry.event)"
-            type="button"
-            class="agent-timeline__title"
-            :aria-expanded="expanded(entry.event)"
-            :aria-controls="`agent-timeline-details-${entry.event.id}`"
-            :aria-label="titleAriaLabel(entry.event)"
-            :disabled="!canToggle(entry.event)"
-            @click="emit('toggleEvent', entry.event)"
-          >
-            <span :id="`agent-timeline-title-${entry.event.id}`">
-              {{ labelText(entry.event) }}
-            </span>
-            <component
-              v-if="canToggle(entry.event)"
-              :is="expanded(entry.event) ? ChevronDown : ChevronRight"
-              class="agent-timeline__chevron"
-              :size="12"
-              aria-hidden="true"
-            />
-          </button>
+        <TimelinePlanCard
+          v-if="entry.event.kind === 'plan'"
+          :event="entry.event"
+          :expanded="expanded(entry.event)"
+          :can-toggle="canToggle(entry.event)"
+          :project-cwd="projectCwd"
+          @toggle="emit('toggleEvent', $event)"
+        />
 
-          <p
-            v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
-            class="agent-timeline__preview"
+        <template v-else>
+          <header
+            v-if="!isTimelineFinalReply(entry.event) || hasProcessEvents(entry)"
+            class="agent-timeline__head"
           >
-            {{ previewText(entry.event) }}
-          </p>
+            <button
+              v-if="!isTimelineFinalReply(entry.event)"
+              type="button"
+              class="agent-timeline__title"
+              :aria-expanded="expanded(entry.event)"
+              :aria-controls="`agent-timeline-details-${entry.event.id}`"
+              :aria-label="titleAriaLabel(entry.event)"
+              :disabled="!canToggle(entry.event)"
+              @click="emit('toggleEvent', entry.event)"
+            >
+              <span :id="`agent-timeline-title-${entry.event.id}`">
+                {{ labelText(entry.event) }}
+              </span>
+              <component
+                v-if="canToggle(entry.event)"
+                :is="expanded(entry.event) ? ChevronDown : ChevronRight"
+                class="agent-timeline__chevron"
+                :size="12"
+                aria-hidden="true"
+              />
+            </button>
 
-          <button
+            <p
+              v-if="!isTimelineFinalReply(entry.event) && previewText(entry.event)"
+              class="agent-timeline__preview"
+            >
+              {{ previewText(entry.event) }}
+            </p>
+
+            <button
+              v-if="isTimelineFinalReply(entry.event) && hasProcessEvents(entry)"
+              type="button"
+              class="agent-timeline__process-toggle"
+              :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
+              :aria-expanded="processGroupExpanded(entry.event)"
+              @click="emit('toggleProcessGroup', entry.event)"
+            >
+              <span class="agent-timeline__process-summary">
+                {{ processGroupLabel(entry) }}
+              </span>
+            </button>
+          </header>
+
+          <div
             v-if="isTimelineFinalReply(entry.event) && hasProcessEvents(entry)"
-            type="button"
-            class="agent-timeline__process-toggle"
-            :class="{ 'agent-timeline__process-toggle--running': processGroupRunning(entry) }"
-            :aria-expanded="processGroupExpanded(entry.event)"
-            @click="emit('toggleProcessGroup', entry.event)"
+            class="agent-timeline__process-collapse"
+            :class="{ 'is-open': processGroupExpanded(entry.event) }"
+            :aria-hidden="!processGroupExpanded(entry.event)"
+            :inert="!processGroupExpanded(entry.event) ? true : undefined"
           >
-            <span class="agent-timeline__process-summary">
-              {{ processGroupLabel(entry) }}
-            </span>
-          </button>
-        </header>
+            <ol class="agent-timeline__process-collapse-inner">
+              <TimelineEntryItem
+                v-for="processEntry in processEntriesFor(entry)"
+                :key="processEntry.id"
+                :entry="processEntry"
+                :expanded="expanded"
+                :group-expanded="groupExpanded"
+                :process-group-expanded="processGroupExpanded"
+                :process-group-label="processGroupLabel"
+                :process-group-running="processGroupRunning"
+                :process-entries-for="processEntriesFor"
+                :preview-text="previewText"
+                :project-cwd="projectCwd"
+                @toggle-event="emit('toggleEvent', $event)"
+                @toggle-group="emit('toggleGroup', $event)"
+                @toggle-process-group="emit('toggleProcessGroup', $event)"
+              />
+            </ol>
+          </div>
 
-        <div
-          v-if="isTimelineFinalReply(entry.event) && hasProcessEvents(entry)"
-          class="agent-timeline__process-collapse"
-          :class="{ 'is-open': processGroupExpanded(entry.event) }"
-          :aria-hidden="!processGroupExpanded(entry.event)"
-          :inert="!processGroupExpanded(entry.event) ? true : undefined"
-        >
-          <ol class="agent-timeline__process-collapse-inner">
-            <TimelineEntryItem
-              v-for="processEntry in processEntriesFor(entry)"
-              :key="processEntry.id"
-              :entry="processEntry"
-              :expanded="expanded"
-              :group-expanded="groupExpanded"
-              :process-group-expanded="processGroupExpanded"
-              :process-group-label="processGroupLabel"
-              :process-group-running="processGroupRunning"
-              :process-entries-for="processEntriesFor"
-              :preview-text="previewText"
-              :project-cwd="projectCwd"
-              @toggle-event="emit('toggleEvent', $event)"
-              @toggle-group="emit('toggleGroup', $event)"
-              @toggle-process-group="emit('toggleProcessGroup', $event)"
+          <div
+            v-if="canToggle(entry.event) && expanded(entry.event)"
+            :id="`agent-timeline-details-${entry.event.id}`"
+            class="agent-timeline__content"
+          >
+            <TimelineFinalReply
+              v-if="isTimelineFinalReply(entry.event)"
+              :event="entry.event"
+              :streaming="isTimelineFinalReplyStreaming(entry.event)"
             />
-          </ol>
-        </div>
-
-        <div
-          v-if="canToggle(entry.event) && expanded(entry.event)"
-          :id="`agent-timeline-details-${entry.event.id}`"
-          class="agent-timeline__content"
-        >
-          <TimelineFinalReply
-            v-if="isTimelineFinalReply(entry.event)"
-            :event="entry.event"
-            :streaming="isTimelineFinalReplyStreaming(entry.event)"
-          />
-          <TimelineDeclaredEvent
-            v-else
-            :event="entry.event"
-            :expanded="expanded(entry.event)"
-            :compact="isCompact(entry.event)"
-            :project-cwd="projectCwd"
-          />
-        </div>
+            <TimelineDeclaredEvent
+              v-else
+              :event="entry.event"
+              :expanded="expanded(entry.event)"
+              :compact="isCompact(entry.event)"
+              :project-cwd="projectCwd"
+            />
+          </div>
+        </template>
       </div>
     </article>
   </li>

@@ -884,8 +884,6 @@ pre code {
   opacity: 1;
 }
 
-/* 侧栏底部触发热区压成「贴左下角的小矩形」：footer 用 width: max-content
- * 收到内容宽度，::before 向上抠 16px 透明缓冲补足太矮的瞄准区。 */
 .sb-footer {
   margin-top: auto;
   padding: 0;
@@ -895,16 +893,6 @@ pre code {
   min-width: 0;
   width: max-content;
   max-width: 100%;
-  position: relative;
-}
-
-.sb-footer::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -16px;
-  height: 16px;
 }
 
 .sb-footer__btn {
@@ -922,6 +910,7 @@ pre code {
   flex-shrink: 0;
 }
 
+.secondary-panel.is-footer-hot .sb-footer__btn,
 .sb-footer:hover .sb-footer__btn,
 .sb-footer:focus-within .sb-footer__btn,
 .sb-footer__btn.is-active {
@@ -956,6 +945,7 @@ pre code {
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
 }
 
+.secondary-panel.is-footer-hot .sb-conn,
 .sb-footer:hover .sb-conn,
 .sb-footer:focus-within .sb-conn {
   opacity: 1;
@@ -2381,6 +2371,111 @@ button.ghost:hover {
   gap: 8px;
 }
 
+.timeline-card--plan {
+  gap: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.agent-timeline__item--plan .agent-timeline__node,
+.agent-timeline__group-item--plan .agent-timeline__node {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.timeline-plan-card__head {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: left;
+  filter: none;
+}
+
+.timeline-plan-card__head:hover:not(:disabled) {
+  background: transparent;
+  filter: none;
+}
+
+.timeline-plan-card__head:hover:not(:disabled) .timeline-plan-card__chevron {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.timeline-plan-card__head:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.timeline-plan-card__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-plan-card__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-plan-card__badge {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.timeline-plan-card__chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-faint);
+  opacity: 0.75;
+  transition: color 0.12s ease, opacity 0.12s ease;
+}
+
+.timeline-plan-card__summary {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-plan-card__body {
+  min-width: 0;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
 .timeline-card--final-reply {
   font-size: 14px;
 }
@@ -2866,6 +2961,18 @@ button.ghost:hover {
 @media (max-width: 720px) {
   .chat-transcript > .agent-timeline {
     width: 100%;
+  }
+
+  .timeline-card--plan {
+    padding: 8px;
+  }
+
+  .timeline-plan-card__title-row {
+    gap: 5px;
+  }
+
+  .timeline-plan-card__badge {
+    padding: 1px 5px;
   }
 }
 
