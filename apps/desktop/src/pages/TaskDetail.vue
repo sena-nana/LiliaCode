@@ -23,10 +23,12 @@ import {
 import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
-import ToolConsentPrompt from "../components/chat/ToolConsentPrompt.vue";
-import AskUserHost from "../components/AskUserHost.vue";
 import TodoFloat from "../components/todo/TodoFloat.vue";
-import { resolveAskUser, useAskUser } from "../composables/useAskUser";
+import { resolveAskUser, useAskUserForTask } from "../composables/useAskUser";
+import {
+  respondConsent,
+  useToolConsentForTask,
+} from "../composables/useToolConsentBridge";
 import {
   getComposerState,
   listAgentTimeline,
@@ -38,8 +40,10 @@ import {
   pickAttachmentFiles,
   sendMessage,
   setComposerState,
+  type ToolConsentDecision,
 } from "../services/chat";
 import type {
+  AskUserResult,
   AgentTimelineEvent,
   AgentTimelinePayload,
   ChatAttachment,
@@ -79,12 +83,12 @@ const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
 const attachments = ref<ChatAttachment[]>([]);
 const userSendScrollKey = ref(0);
-const { state: askUserState } = useAskUser();
+const pendingAskUser = useAskUserForTask(() => props.taskId);
+const pendingToolConsent = useToolConsentForTask(() => props.taskId);
 
 const pendingPlanApproval = computed(() => {
-  const ask = askUserState.current;
+  const ask = pendingAskUser.value;
   if (!ask) return null;
-  if (ask.taskId !== null && ask.taskId !== props.taskId) return null;
   if (ask.spec.intent !== "plan_approval") return null;
   const question = ask.spec.questions[0];
   return question ? { questionId: question.id, turnId: ask.turnId } : null;
@@ -181,23 +185,6 @@ function removeAttachment(attachmentId: string) {
 }
 
 async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
-  const planApproval = pendingPlanApproval.value;
-  if (planApproval) {
-    const revisionRequest = content.trim();
-    if (!revisionRequest) return;
-    resolveAskUser({
-      cancelled: false,
-      answers: {
-        [planApproval.questionId]: {
-          questionId: planApproval.questionId,
-          value: "revision_request",
-          notes: revisionRequest,
-        },
-      },
-    });
-    return;
-  }
-
   if (!hasContext.value) return;
   if (!content.trim() && outgoingAttachments.length === 0) return;
 
@@ -240,6 +227,23 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
     removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
     upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`));
+  }
+}
+
+function onResolveAskUser(result: AskUserResult) {
+  resolveAskUser(result);
+}
+
+async function onResolveToolConsent(
+  decision: ToolConsentDecision,
+  message?: string,
+) {
+  const request = pendingToolConsent.value;
+  if (!request) return;
+  try {
+    await respondConsent(request.taskId, request.requestId, decision, message);
+  } catch (err) {
+    console.error("[tool-consent] respond failed", err);
   }
 }
 
@@ -474,17 +478,18 @@ watch(
         <template #controls>
           <div class="chat-controls">
             <TodoFloat v-if="taskId" :task-id="taskId" />
-            <AskUserHost :task-id="taskId" />
-            <ToolConsentPrompt :task-id="taskId" />
             <ChatComposer
               :state="composer"
               :attachments="attachments"
               :sending="isTurnRunning"
-              :plan-revision-mode="pendingPlanApproval !== null"
+              :pending-ask="pendingAskUser"
+              :tool-consent="pendingToolConsent"
               @send="onSend"
               @update:state="onComposerUpdate"
               @remove-attachment="removeAttachment"
               @pick-attachments="onPickAttachments"
+              @resolve-ask-user="onResolveAskUser"
+              @resolve-tool-consent="onResolveToolConsent"
             />
           </div>
         </template>

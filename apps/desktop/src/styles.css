@@ -3251,42 +3251,71 @@ button.ghost:hover {
   opacity: 0.85;
 }
 
-/* ----- Tool-consent inline prompt ----- *
- * 工具调用授权卡，贴在 composer 上方。视觉几何与 composer 同体：
- *   bg-elev + 14px 圆角 + 软阴影 + 1px border。
- * 不用 modal，理由：授权是日常高频动作，弹窗会打断聊天节奏；inline 卡片
- * 既能强调"现在需要你拍板"，又不抢走输入焦点。
- *
- * danger 仅在调用本身具有破坏性时启用（当前规则：Bash 命令命中破坏性模式）：
- *   AlertTriangle 图标染 --err + 主按钮换 ghost danger，仅此两处。
- *   不加红条 / 不染边框 / 不染图标背景——保持与 composer 同款纯卡片观感。
- *   写文件/抓网页这些 coding agent 的常规活不再算 danger，否则红色会被脱敏。
- */
-/* 与 composer / todo-float 共用的卡片几何（bg-elev + 14px 圆角 + 轻阴影），
- * 不加色块/光晕等装饰；danger 状态只通过 AlertTriangle 图标颜色与
- * 主按钮的 ghost danger 表达，不再染边框/染图标背景/加左侧红条。 */
-.tool-consent {
-  max-width: 100%;
-  min-width: 0;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px 12px;
-  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tool-consent__row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto auto;
-  align-items: center;
-  min-width: 0;
+.chat-composer--pending {
   gap: 10px;
 }
 
-.tool-consent__icon {
+.chat-composer__pending-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-composer__input--pending {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-composer__pending-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.chat-composer__pending-row .composer-inline__btn {
+  white-space: nowrap;
+}
+
+.chat-composer__pending-row .composer-inline__skip {
+  margin-right: 0;
+}
+
+.composer-inline {
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+.composer-inline--plan {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-inline:focus {
+  outline: none;
+}
+
+.composer-inline__header {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-inline--plan .composer-inline__header {
+  flex: 0 1 auto;
+  grid-template-columns: 18px minmax(0, auto) auto;
+  gap: 6px;
+}
+
+.composer-inline__icon {
   width: 18px;
   height: 18px;
   display: inline-flex;
@@ -3296,38 +3325,12 @@ button.ghost:hover {
   flex: 0 0 auto;
 }
 
-.tool-consent--danger .tool-consent__icon {
+.composer-inline--danger .composer-inline__icon {
   color: var(--err);
 }
 
-.tool-consent__main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tool-consent__head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.tool-consent__tool {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-soft);
-}
-
-.tool-consent__headline {
-  flex: 1 1 auto;
+.composer-inline__title,
+.composer-inline__headline {
   min-width: 0;
   font-size: 13px;
   font-weight: 600;
@@ -3337,8 +3340,363 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
-/* 单行入参摘要：等宽字 + 截尾省略号，扫一眼就知道要跑什么。 */
-.tool-consent__preview {
+.composer-inline--plan .composer-inline__title {
+  max-width: 140px;
+  font-size: 12px;
+}
+
+.composer-inline__source,
+.composer-inline__tool-name {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-inline__tool-name {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.composer-inline--plan .composer-inline__source,
+.composer-inline--plan .composer-inline__progress {
+  display: none;
+}
+
+.composer-inline__progress {
+  justify-self: end;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-inline__close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-inline--plan .composer-inline__close {
+  width: 22px;
+  height: 22px;
+}
+
+.composer-inline__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.composer-inline__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+}
+
+.composer-inline__question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-inline__chip {
+  align-self: flex-start;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.composer-inline__qtext {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.composer-inline__main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.composer-inline__main--with-preview {
+  --composer-inline-preview-height: clamp(148px, 26vh, 280px);
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.85fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.composer-inline__main--with-preview .composer-inline__options,
+.composer-inline__main--with-preview .composer-inline__preview {
+  height: var(--composer-inline-preview-height);
+  min-height: 0;
+}
+
+.composer-inline__options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-inline__main--with-preview .composer-inline__options {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.composer-inline__option {
+  position: relative;
+}
+
+.composer-inline__option-btn {
+  width: 100%;
+  height: auto;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 500;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.composer-inline__option-btn:hover,
+.composer-inline__option.is-active .composer-inline__option-btn {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  filter: none;
+}
+
+.composer-inline__option.is-picked .composer-inline__option-btn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.composer-inline__option.is-recommended .composer-inline__option-btn {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.composer-inline__option.is-danger .composer-inline__option-btn {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  color: var(--err);
+}
+
+.composer-inline__option.is-danger.is-active .composer-inline__option-btn,
+.composer-inline__option.is-danger.is-picked .composer-inline__option-btn {
+  background: var(--err-soft);
+  border-color: var(--err);
+}
+
+.composer-inline__option-indicator {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-text);
+  flex: 0 0 auto;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+[role="radiogroup"] .composer-inline__option-indicator {
+  border-radius: 50%;
+}
+
+[role="radiogroup"] .composer-inline__option.is-active .composer-inline__option-indicator {
+  border-color: var(--accent);
+}
+
+[role="radiogroup"] .composer-inline__option.is-picked .composer-inline__option-indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg);
+}
+
+[role="group"] .composer-inline__option-indicator {
+  border-radius: 4px;
+}
+
+[role="group"] .composer-inline__option.is-picked .composer-inline__option-indicator {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.composer-inline__option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.composer-inline__option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.composer-inline__option-desc {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.composer-inline__option.is-picked .composer-inline__option-desc {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.composer-inline__badge {
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.composer-inline__preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.composer-inline__preview-pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.composer-inline__preview-empty {
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+.composer-inline__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composer-inline__btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.composer-inline__skip {
+  margin-right: auto;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+
+.composer-inline__skip:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.composer-inline__spacer {
+  flex: 1;
+}
+
+.composer-inline__tool-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.composer-inline__tool-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-inline__tool-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-inline__preview-line {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -3349,7 +3707,7 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
-.tool-consent__subtitle {
+.composer-inline__subtitle {
   margin: 0;
   font-size: 11px;
   line-height: 1.4;
@@ -3359,8 +3717,7 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
-/* 「查看入参」纯文本 chevron 按钮，不抢主操作按钮的视觉。 */
-.tool-consent__toggle {
+.composer-inline__toggle {
   height: 24px;
   padding: 0 8px;
   border: 0;
@@ -3376,28 +3733,13 @@ button.ghost:hover {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
-.tool-consent__toggle:hover {
+.composer-inline__toggle:hover {
   background: var(--bg-hover);
   color: var(--text);
   filter: none;
 }
 
-.tool-consent__actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.tool-consent__btn {
-  /* 反掉全局 button 的 32px 高度——这里要紧凑些贴合卡片高度。 */
-  height: 28px;
-  padding: 0 14px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 6px;
-}
-
-/* 展开后的完整 input JSON：等宽 code block，最高 200px 内滚。 */
-.tool-consent__details {
+.composer-inline__details {
   max-width: 100%;
   min-width: 0;
   margin: 0;
@@ -3415,26 +3757,59 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
-/* 进出动效：从下方 4px 滑入，淡出。与 search-palette 的曲线一致以保持手感统一。 */
-.tool-consent-enter-active,
-.tool-consent-leave-active {
+.chat-composer-inline-enter-active,
+.chat-composer-inline-leave-active {
   transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.tool-consent-enter-from,
-.tool-consent-leave-to {
+.chat-composer-inline-enter-from,
+.chat-composer-inline-leave-to {
   opacity: 0;
   transform: translateY(4px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tool-consent-enter-active,
-  .tool-consent-leave-active {
+  .chat-composer-inline-enter-active,
+  .chat-composer-inline-leave-active {
     transition: none;
   }
-  .tool-consent-enter-from,
-  .tool-consent-leave-to {
+  .chat-composer-inline-enter-from,
+  .chat-composer-inline-leave-to {
     transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .composer-inline__source {
+    display: none;
+  }
+  .composer-inline__main--with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .composer-inline__main--with-preview .composer-inline__options {
+    height: auto;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+  .composer-inline__main--with-preview .composer-inline__preview {
+    height: 120px;
+    min-height: 120px;
+  }
+  .composer-inline__actions {
+    flex-wrap: wrap;
+  }
+  .composer-inline--plan {
+    gap: 6px;
+  }
+  .composer-inline--plan .composer-inline__title {
+    max-width: 96px;
+  }
+  .composer-inline__tool-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .composer-inline__toggle {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 
@@ -3935,469 +4310,6 @@ button.ghost:hover {
   .search-palette-enter-from .search-palette__card,
   .search-palette-leave-to .search-palette__card {
     transform: none;
-  }
-}
-
-/* ---------------- Ask User inline prompt ---------------- */
-
-.ask-user {
-  max-width: 100%;
-  min-width: 0;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 10px 12px;
-  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ask-user--plan-approval {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-}
-
-.ask-user:focus {
-  outline: none;
-}
-
-.ask-user__header {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto auto auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.ask-user--plan-approval .ask-user__header {
-  flex: 0 1 auto;
-  grid-template-columns: 18px minmax(0, auto) auto;
-  gap: 6px;
-}
-
-.ask-user__icon {
-  grid-column: 1;
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.ask-user--danger .ask-user__icon {
-  color: var(--err);
-}
-
-.ask-user__title {
-  grid-column: 2;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ask-user--plan-approval .ask-user__title {
-  max-width: 140px;
-  font-size: 12px;
-}
-
-.ask-user__source {
-  grid-column: 3;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-soft);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-}
-
-.ask-user--plan-approval .ask-user__source,
-.ask-user--plan-approval .ask-user__progress {
-  display: none;
-}
-
-.ask-user__progress {
-  grid-column: 4;
-  justify-self: end;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.ask-user__close {
-  grid-column: 5;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ask-user--plan-approval .ask-user__close {
-  grid-column: 3;
-  width: 22px;
-  height: 22px;
-}
-
-.ask-user__close:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-  filter: none;
-}
-
-.ask-user__body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  max-height: min(46vh, 420px);
-  overflow-y: auto;
-}
-
-.ask-user__question {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ask-user__chip {
-  align-self: flex-start;
-  height: 18px;
-  padding: 0 8px;
-  border-radius: 4px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.ask-user__qtext {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-.ask-user__main {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-.ask-user__main--with-preview {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.85fr);
-  gap: 10px;
-  align-items: stretch;
-}
-
-.ask-user__options {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ask-user__option {
-  position: relative;
-}
-
-.ask-user__option-btn {
-  width: 100%;
-  height: auto;
-  padding: 9px 10px;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 9px;
-  align-items: flex-start;
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-subtle);
-  color: var(--text);
-  cursor: pointer;
-  font-weight: 500;
-  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
-}
-
-.ask-user__option-btn:hover,
-.ask-user__option.is-active .ask-user__option-btn {
-  border-color: var(--accent);
-  background: var(--bg-hover);
-  filter: none;
-}
-
-.ask-user__option.is-picked .ask-user__option-btn {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--text);
-}
-
-.ask-user__option.is-recommended .ask-user__option-btn {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-}
-
-.ask-user__option.is-danger .ask-user__option-btn {
-  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
-  color: var(--err);
-}
-
-.ask-user__option.is-danger.is-active .ask-user__option-btn,
-.ask-user__option.is-danger.is-picked .ask-user__option-btn {
-  background: var(--err-soft);
-  border-color: var(--err);
-}
-
-.ask-user__option-indicator {
-  width: 15px;
-  height: 15px;
-  margin-top: 2px;
-  border: 1.5px solid var(--border-strong);
-  background: var(--bg);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-text);
-  flex: 0 0 auto;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-}
-
-[role="radiogroup"] .ask-user__option-indicator {
-  border-radius: 50%;
-}
-
-[role="radiogroup"] .ask-user__option.is-active .ask-user__option-indicator {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: inset 0 0 0 3px var(--bg);
-}
-
-[role="group"] .ask-user__option-indicator {
-  border-radius: 4px;
-}
-
-[role="group"] .ask-user__option.is-picked .ask-user__option-indicator {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.ask-user__option-main {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.ask-user__option-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: inherit;
-  overflow-wrap: anywhere;
-}
-
-.ask-user__option-desc {
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.45;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-.ask-user__option.is-picked .ask-user__option-desc {
-  color: var(--text);
-  opacity: 0.85;
-}
-
-.ask-user__badge {
-  height: 16px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-}
-
-.ask-user__other-input {
-  width: 100%;
-  margin-top: 8px;
-  font: inherit;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-strong);
-  background: var(--bg-subtle);
-  color: var(--text);
-  resize: vertical;
-  min-height: 52px;
-  transition: border-color 0.12s ease;
-}
-
-.ask-user__other-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: var(--bg);
-}
-
-.ask-user__preview {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--bg-subtle);
-  overflow: hidden;
-}
-
-.ask-user__preview-pre {
-  margin: 0;
-  padding: 10px 12px;
-  background: transparent;
-  border: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text);
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.ask-user__preview-empty {
-  margin: 0;
-  padding: 18px 12px;
-  color: var(--text-faint);
-  font-size: 12px;
-  text-align: center;
-}
-
-.ask-user__actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ask-user--plan-approval .ask-user__actions {
-  flex: 0 0 auto;
-  margin-left: auto;
-  gap: 6px;
-}
-
-.ask-user__btn {
-  height: 28px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 6px;
-}
-
-.ask-user--plan-approval .ask-user__btn {
-  height: 26px;
-  padding: 0 10px;
-}
-
-.ask-user__skip {
-  margin-right: auto;
-  color: var(--text-muted);
-  border-color: transparent;
-}
-
-.ask-user__skip:hover {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-
-.ask-user__spacer {
-  flex: 1;
-}
-
-.ask-user--plan-approval .ask-user__spacer {
-  display: none;
-}
-
-.ask-user-enter-active,
-.ask-user-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.ask-user-enter-from,
-.ask-user-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ask-user-enter-active,
-  .ask-user-leave-active {
-    transition: none;
-  }
-  .ask-user-enter-from,
-  .ask-user-leave-to {
-    transform: none;
-  }
-}
-
-@media (max-width: 720px) {
-  .ask-user__source {
-    display: none;
-  }
-  .ask-user__main--with-preview {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ask-user__preview {
-    min-height: 120px;
-  }
-  .ask-user__actions {
-    flex-wrap: wrap;
-  }
-  .ask-user--plan-approval {
-    gap: 6px;
-  }
-  .ask-user--plan-approval .ask-user__title {
-    max-width: 96px;
-  }
-  .ask-user--plan-approval .ask-user__actions {
-    flex-wrap: nowrap;
-  }
-  .ask-user--plan-approval .ask-user__btn {
-    padding: 0 8px;
   }
 }
 

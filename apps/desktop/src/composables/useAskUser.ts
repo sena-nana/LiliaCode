@@ -1,7 +1,7 @@
-import { reactive } from "vue";
+import { computed, reactive, type ComputedRef } from "vue";
 import type { AskUserResult, AskUserSpec } from "@lilia/contracts";
 
-interface PendingAsk {
+export interface PendingAsk {
   id: number;
   spec: AskUserSpec;
   taskId: string | null;
@@ -19,6 +19,12 @@ const state = reactive<AskUserState>({
   queue: [],
 });
 let askSeq = 1;
+
+type TaskIdSource = string | (() => string);
+
+function readTaskId(source: TaskIdSource): string {
+  return typeof source === "function" ? source() : source;
+}
 
 function pumpNext() {
   if (state.current) return;
@@ -53,6 +59,18 @@ export function resolveAskUser(result: AskUserResult) {
   state.current = null;
   current.resolve(result);
   pumpNext();
+}
+
+export function useAskUserForTask(
+  taskId: TaskIdSource,
+): ComputedRef<PendingAsk | null> {
+  return computed(() => {
+    const ask = state.current;
+    if (!ask) return null;
+    const currentTaskId = readTaskId(taskId);
+    if (ask.taskId == null || ask.taskId === currentTaskId) return ask;
+    return null;
+  });
 }
 
 export function useAskUser() {

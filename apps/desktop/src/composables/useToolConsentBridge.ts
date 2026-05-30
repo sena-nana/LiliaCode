@@ -1,7 +1,7 @@
 /**
  * Tool-consent bridge：把 runner 通过 `chat:tool-consent-request` 推过来的工具
- * 授权请求收进一个按 taskId 索引的 reactive map，供 ToolConsentPrompt 组件
- * 在各自任务的 ChatComposer 上方 inline 渲染。
+ * 授权请求收进一个按 taskId 索引的 reactive map，供 ChatComposer 在
+ * 各自任务的输入框内部 inline 渲染。
  *
  * 这里只做"收事件 + 写回决策"两件事，不接 askUser/弹窗；inline 卡片决定一切
  * 视觉与交互。
@@ -22,6 +22,12 @@ const pending = reactive<Record<string, ToolConsentRequest>>({});
 let installed = false;
 let unlisten: (() => void) | null = null;
 
+type TaskIdSource = string | (() => string);
+
+function readTaskId(source: TaskIdSource): string {
+  return typeof source === "function" ? source() : source;
+}
+
 /** 在 App 启动时调用一次。返回 unlisten；重复 install 时返回 noop。 */
 export async function installToolConsentBridge(): Promise<() => void> {
   if (installed) return () => {};
@@ -38,9 +44,9 @@ export async function installToolConsentBridge(): Promise<() => void> {
 
 /** 给某个 task 订阅当前待决策项（没有就是 null）。 */
 export function useToolConsentForTask(
-  taskId: string,
+  taskId: TaskIdSource,
 ): ComputedRef<ToolConsentRequest | null> {
-  return computed(() => pending[taskId] ?? null);
+  return computed(() => pending[readTaskId(taskId)] ?? null);
 }
 
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */

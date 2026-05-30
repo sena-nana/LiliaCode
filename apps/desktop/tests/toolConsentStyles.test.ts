@@ -13,18 +13,19 @@ function ruleTextAt(index: number): string {
 }
 
 describe("tool consent prompt styles", () => {
-  it("展开的长入参在授权卡片内部换行，不把聊天区撑宽", () => {
-    const card = selectorIndex(".tool-consent {");
-    const row = selectorIndex(".tool-consent__row {");
-    const details = selectorIndex(".tool-consent__details {");
+  it("展开的长入参在 composer 内部换行，不把聊天区撑宽", () => {
+    const inline = selectorIndex(".composer-inline {");
+    const row = selectorIndex(".composer-inline__tool-row {");
+    const details = selectorIndex(".composer-inline__details {");
 
-    expect(card).toBeGreaterThan(-1);
-    expect(row).toBeGreaterThan(card);
+    expect(inline).toBeGreaterThan(-1);
+    expect(row).toBeGreaterThan(inline);
     expect(details).toBeGreaterThan(row);
 
-    expect(ruleTextAt(card)).toContain("max-width: 100%");
-    expect(ruleTextAt(card)).toContain("min-width: 0");
-    expect(ruleTextAt(card)).toContain("gap: 6px");
+    expect(styles).not.toContain(".tool-consent {");
+    expect(ruleTextAt(inline)).toContain("max-width: 100%");
+    expect(ruleTextAt(inline)).toContain("min-width: 0");
+    expect(ruleTextAt(inline)).toContain("gap: 10px");
     expect(ruleTextAt(row)).toContain("min-width: 0");
     expect(ruleTextAt(details)).toContain("min-width: 0");
     expect(ruleTextAt(details)).toContain("max-width: 100%");

@@ -1,7 +1,16 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
-import type { AskUserSpec } from "@lilia/contracts";
-import AskUserPrompt from "../src/components/chat/AskUserPrompt.vue";
+import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
+import type { PendingAsk } from "../src/composables/useAskUser";
+import ChatComposer from "../src/components/chat/ChatComposer.vue";
+
+const baseState: ChatComposerState = {
+  taskId: "task-1",
+  backend: "claude",
+  model: "claude-sonnet-4-6",
+  planMode: false,
+  permission: "ask",
+};
 
 const multiStepSpec: AskUserSpec = {
   title: "Lilia 想确认 2 件事",
@@ -45,15 +54,41 @@ const planApprovalSpec: AskUserSpec = {
   ],
 };
 
-describe("AskUserPrompt", () => {
+function pendingAsk(spec: AskUserSpec): PendingAsk {
+  return {
+    id: 1,
+    spec,
+    taskId: "task-1",
+    turnId: "turn-1",
+    resolve: () => {},
+  };
+}
+
+function renderComposer(spec: AskUserSpec) {
+  return render(ChatComposer, {
+    props: {
+      state: baseState,
+      attachments: [],
+      pendingAsk: pendingAsk(spec),
+    },
+  });
+}
+
+describe("ChatComposer AskUser pending prompt", () => {
   it("从问题 2 回到问题 1 后再前进，会保留问题 2 已选项", async () => {
-    const view = render(AskUserPrompt, {
-      props: {
-        spec: multiStepSpec,
-      },
-    });
+    const view = renderComposer(multiStepSpec);
 
     await fireEvent.click(view.getByRole("radio", { name: "Alpha" }));
+    expect(view.getByRole("radio", { name: "Alpha" }))
+      .toHaveAttribute("aria-checked", "true");
+    expect(view.getByRole("radio", { name: "Beta" }))
+      .toHaveAttribute("aria-checked", "false");
+    await fireEvent.mouseEnter(view.getByRole("radio", { name: "Beta" }));
+    expect(view.getByRole("radio", { name: "Alpha" }))
+      .toHaveAttribute("aria-checked", "true");
+    expect(view.getByRole("radio", { name: "Beta" }))
+      .toHaveAttribute("aria-checked", "false");
+    await fireEvent.click(view.getByRole("button", { name: /继续/ }));
     await fireEvent.click(view.getByRole("checkbox", { name: "保留选择" }));
 
     expect(view.getByRole("checkbox", { name: "保留选择" }))
@@ -66,17 +101,14 @@ describe("AskUserPrompt", () => {
       .toHaveAttribute("aria-checked", "true");
   });
 
-  it("计划确认提示使用一行紧凑样式", () => {
-    const view = render(AskUserPrompt, {
-      props: {
-        spec: planApprovalSpec,
-      },
-    });
+  it("计划确认提示作为 composer 内部一行紧凑扩展", () => {
+    const view = renderComposer(planApprovalSpec);
 
     const prompt = view.getByRole("region", { name: "确认 Claude 计划" });
-    expect(prompt).toHaveClass("ask-user--plan-approval");
+    expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");
     expect(view.queryByText(/确认后将按/)).toBeNull();
-    expect(view.getByRole("button", { name: "按计划执行" })).toBeInTheDocument();
-    expect(view.getByRole("button", { name: "先不执行" })).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "先不执行" })).toBeNull();
+    expect(view.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();
   });
 });
