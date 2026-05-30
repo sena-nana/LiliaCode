@@ -1,8 +1,4 @@
 <script setup lang="ts">
-/**
- * Transcript：消息滚动容器。贴底时跟随新事件，用户发送后由父级信号强制贴底。
- */
-
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import AgentTimeline from "./AgentTimeline.vue";
@@ -10,9 +6,7 @@ import ChatScrollMap from "./ChatScrollMap.vue";
 
 const props = defineProps<{
   timelineEvents: AgentTimelineEvent[];
-  /** 空状态居中显示的提示语。由调用方根据「绑了项目 / 收集箱对话」决定文案。 */
   emptyHeadline: string;
-  /** Turn 正在跑——传给 AgentTimeline 后用来在末尾叠一个「思考中…」指示器。 */
   isThinking?: boolean;
   projectCwd?: string | null;
   forceScrollBottomKey?: number;
@@ -26,6 +20,7 @@ let scrollbarHideTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const SCROLLBAR_HOT_ZONE = 18;
 const SCROLLBAR_HIDE_DELAY = 180;
+const PLAN_REVEAL_PADDING = 8;
 
 function clearScrollbarHideTimer() {
   if (scrollbarHideTimer === null) return;
@@ -94,6 +89,65 @@ async function scrollToBottom() {
   isPinnedToBottom.value = true;
 }
 
+async function onTimelineEventToggled(payload: { event: AgentTimelineEvent; expanded: boolean }) {
+  if (!payload.expanded || payload.event.kind !== "plan") return;
+  await nextTick();
+  revealPlanEvent(payload.event.id);
+}
+
+function revealPlanEvent(eventId: string) {
+  const el = scroller.value;
+  if (!el) return;
+  const card = findTimelinePlanCard(el, eventId);
+  if (!card) return;
+
+  const visibleArea = readPlanVisibleArea(el);
+  if (!visibleArea) return;
+  const cardRect = card.getBoundingClientRect();
+  const visibleHeight = visibleArea.bottom - visibleArea.top;
+  let delta = 0;
+  if (cardRect.height > visibleHeight || cardRect.top < visibleArea.top) {
+    delta = cardRect.top - visibleArea.top;
+  } else if (cardRect.bottom > visibleArea.bottom) {
+    delta = cardRect.bottom - visibleArea.bottom;
+  }
+  if (Math.abs(delta) < 1) return;
+
+  const top = Math.min(
+    Math.max(0, el.scrollTop + delta),
+    Math.max(0, el.scrollHeight - el.clientHeight),
+  );
+  el.scrollTo({ top, behavior: "smooth" });
+  showScrollbar();
+}
+
+function findTimelinePlanCard(scrollerEl: HTMLElement, eventId: string): HTMLElement | null {
+  for (const item of scrollerEl.querySelectorAll<HTMLElement>("[data-scroll-anchor-id]")) {
+    if (item.dataset.scrollAnchorId !== eventId) continue;
+    return item.querySelector<HTMLElement>(".timeline-card--plan") ?? item;
+  }
+  return null;
+}
+
+function readPlanVisibleArea(el: HTMLElement): { top: number; bottom: number } | null {
+  const scrollerRect = el.getBoundingClientRect();
+  const controlsRect = el.querySelector<HTMLElement>(".chat-controls-wrap")?.getBoundingClientRect();
+  let controlsOverlap = 0;
+  if (
+    controlsRect &&
+    controlsRect.top < scrollerRect.bottom &&
+    controlsRect.bottom > scrollerRect.top
+  ) {
+    controlsOverlap = Math.min(
+      scrollerRect.height,
+      Math.max(0, scrollerRect.bottom - Math.max(scrollerRect.top, controlsRect.top)),
+    );
+  }
+  const top = scrollerRect.top + PLAN_REVEAL_PADDING;
+  const bottom = scrollerRect.bottom - controlsOverlap - PLAN_REVEAL_PADDING;
+  return bottom > top ? { top, bottom } : null;
+}
+
 watch(
   () => props.timelineEvents.length,
   async () => {
@@ -146,6 +200,7 @@ onBeforeUnmount(() => {
           :events="timelineEvents"
           :is-thinking="isThinking"
           :project-cwd="projectCwd"
+          @event-toggled="onTimelineEventToggled"
         />
       </template>
       <div class="chat-controls-wrap">

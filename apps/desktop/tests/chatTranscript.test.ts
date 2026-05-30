@@ -76,12 +76,17 @@ function renderTranscriptWithControls(timelineEvents: AgentTimelineEvent[]) {
   return { controls: controls as HTMLElement, transcript, view };
 }
 
-function mockScrollMapGeometry(
-  view: { container: HTMLElement },
+function mockTranscriptViewport(
   transcript: HTMLElement,
   controls: HTMLElement,
-  anchorRects: Record<string, Partial<DOMRect>>,
+  scrollTo?: ReturnType<typeof vi.fn>,
 ) {
+  if (scrollTo) {
+    Object.defineProperty(transcript, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+  }
   mockScrollGeometry(transcript, {
     clientHeight: 240,
     scrollHeight: 1000,
@@ -93,11 +98,33 @@ function mockScrollMapGeometry(
     bottom: 240,
     height: 60,
   });
+}
+
+function mockScrollMapGeometry(
+  view: { container: HTMLElement },
+  transcript: HTMLElement,
+  controls: HTMLElement,
+  anchorRects: Record<string, Partial<DOMRect>>,
+) {
+  mockTranscriptViewport(transcript, controls);
   for (const [id, rect] of Object.entries(anchorRects)) {
     const anchor = view.container.querySelector(`[data-scroll-anchor-id="${id}"]`);
     expect(anchor).toBeInstanceOf(HTMLElement);
     mockElementRect(anchor as HTMLElement, rect);
   }
+}
+
+function mockPlanRevealGeometry(
+  view: { container: HTMLElement },
+  transcript: HTMLElement,
+  controls: HTMLElement,
+  scrollTo: ReturnType<typeof vi.fn>,
+  cardRect: Partial<DOMRect>,
+) {
+  const card = view.container.querySelector(".timeline-card--plan");
+  expect(card).toBeInstanceOf(HTMLElement);
+  mockTranscriptViewport(transcript, controls, scrollTo);
+  mockElementRect(card as HTMLElement, cardRect);
 }
 
 function tooltipText(marker: HTMLElement): string {
@@ -245,6 +272,75 @@ describe("ChatTranscript scrollbar visibility", () => {
     await flushTranscriptScroll();
 
     expect(transcript.scrollTop).toBe(1200);
+  });
+
+  it("展开计划时滚动到 sticky 输入区上方，确保卡片完整可见", async () => {
+    const scrollTo = vi.fn();
+    const { controls, transcript, view } = renderTranscriptWithControls([
+      timelineEvent({
+        id: "plan-1",
+        kind: "plan",
+        payload: { plan: "实现计划", approved: true },
+      }),
+    ]);
+    mockPlanRevealGeometry(view, transcript, controls, scrollTo, {
+      top: 120,
+      bottom: 220,
+      height: 100,
+    });
+
+    await fireEvent.click(view.container.querySelector(".timeline-plan-card__head") as HTMLElement);
+    await flushTranscriptScroll();
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 148,
+      behavior: "smooth",
+    });
+  });
+
+  it("展开计划已完整可见时不抢滚动位置", async () => {
+    const scrollTo = vi.fn();
+    const { controls, transcript, view } = renderTranscriptWithControls([
+      timelineEvent({
+        id: "plan-1",
+        kind: "plan",
+        payload: { plan: "实现计划", approved: true },
+      }),
+    ]);
+    mockPlanRevealGeometry(view, transcript, controls, scrollTo, {
+      top: 24,
+      bottom: 150,
+      height: 126,
+    });
+
+    await fireEvent.click(view.container.querySelector(".timeline-plan-card__head") as HTMLElement);
+    await flushTranscriptScroll();
+
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("计划卡片高于可见区域时展开后对齐顶部", async () => {
+    const scrollTo = vi.fn();
+    const { controls, transcript, view } = renderTranscriptWithControls([
+      timelineEvent({
+        id: "plan-1",
+        kind: "plan",
+        payload: { plan: "实现计划", approved: true },
+      }),
+    ]);
+    mockPlanRevealGeometry(view, transcript, controls, scrollTo, {
+      top: 120,
+      bottom: 360,
+      height: 240,
+    });
+
+    await fireEvent.click(view.container.querySelector(".timeline-plan-card__head") as HTMLElement);
+    await flushTranscriptScroll();
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 212,
+      behavior: "smooth",
+    });
   });
 
   it("滚动地图 thumb 精确覆盖未被输入区遮挡的可见对话区域", async () => {

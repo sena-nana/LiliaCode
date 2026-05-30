@@ -34,6 +34,10 @@ const props = defineProps<{
   projectCwd?: string | null;
 }>();
 
+const emit = defineEmits<{
+  eventToggled: [payload: { event: AgentTimelineEvent; expanded: boolean }];
+}>();
+
 const toggledIds = ref<Set<string>>(new Set());
 const expandedGroupIds = ref<Set<string>>(new Set());
 const expandedProcessGroupIds = ref<Set<string>>(new Set());
@@ -172,7 +176,9 @@ function expanded(event: AgentTimelineEvent): boolean {
 
 function toggleEvent(event: AgentTimelineEvent) {
   if (isTimelineMessage(event)) return;
+  const nextExpanded = !expanded(event);
   toggledIds.value = toggleTimelineExpandedId(toggledIds.value, event.id);
+  emit("eventToggled", { event, expanded: nextExpanded });
 }
 
 function processGroupExpanded(event: AgentTimelineEvent): boolean {

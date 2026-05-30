@@ -712,12 +712,15 @@ describe("timeline event expansion", () => {
 
     const card = view.container.querySelector(".timeline-card--plan");
     const toggle = view.getByRole("button", { name: /等待确认计划/ });
+    const badge = view.container.querySelector(".timeline-plan-card__badge");
 
     expect(card).toHaveClass("is-expanded");
+    expect(badge).toHaveClass("timeline-plan-card__badge--pending");
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(view.queryByText("## 修改计划 - 接线 runner - 补测试"))
       .not.toBeInTheDocument();
     expect(view.getByText("修改计划")).toBeInTheDocument();
+    expect(view.getByText("可能调用")).toBeInTheDocument();
     expect(view.getByText("Bash：yarn test")).toBeInTheDocument();
   });
 
@@ -741,6 +744,8 @@ describe("timeline event expansion", () => {
     });
     expect(acceptedView.container.querySelector(".timeline-card--plan"))
       .toHaveClass("is-collapsed");
+    expect(acceptedView.container.querySelector(".timeline-plan-card__badge"))
+      .toHaveClass("timeline-plan-card__badge--approved");
     expect(acceptedView.getByRole("button", { name: /已确认计划/ }))
       .toHaveAttribute("aria-expanded", "false");
     acceptedView.unmount();
@@ -764,6 +769,8 @@ describe("timeline event expansion", () => {
     });
     expect(cancelledView.container.querySelector(".timeline-card--plan"))
       .toHaveClass("is-collapsed");
+    expect(cancelledView.container.querySelector(".timeline-plan-card__badge"))
+      .toHaveClass("timeline-plan-card__badge--rejected");
     expect(cancelledView.getByRole("button", { name: /已取消计划/ }))
       .toHaveAttribute("aria-expanded", "false");
     cancelledView.unmount();
@@ -790,6 +797,8 @@ describe("timeline event expansion", () => {
 
     expect(revisionView.container.querySelector(".timeline-card--plan"))
       .toHaveClass("is-collapsed");
+    expect(revisionView.container.querySelector(".timeline-plan-card__badge"))
+      .toHaveClass("timeline-plan-card__badge--revision");
     expect(revisionToggle).toHaveAttribute("aria-expanded", "false");
     expect(revisionView.getByText("修改要求：把文档边界也写清楚")).toBeInTheDocument();
     expect(revisionView.queryByText("先改 runner")).not.toBeInTheDocument();
@@ -799,6 +808,7 @@ describe("timeline event expansion", () => {
     expect(revisionView.container.querySelector(".timeline-card--plan"))
       .toHaveClass("is-expanded");
     expect(revisionToggle).toHaveAttribute("aria-expanded", "true");
+    expect(revisionView.getByLabelText("修改要求")).toBeInTheDocument();
     expect(revisionView.getByText("先改 runner")).toBeInTheDocument();
     expect(revisionView.getByText("把文档边界也写清楚")).toBeInTheDocument();
 
