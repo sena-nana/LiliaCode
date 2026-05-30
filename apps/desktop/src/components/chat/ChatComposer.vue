@@ -97,6 +97,9 @@ const askTotal = computed(() => activeAsk.value?.spec.questions.length ?? 0);
 const askQuestion = computed<AskUserQuestion | null>(() =>
   activeAsk.value?.spec.questions[askIndex.value] ?? null,
 );
+const hasPendingPanel = computed(() =>
+  !!(activeAsk.value && askQuestion.value) || !!activeToolConsent.value,
+);
 const askDismissable = computed(() => activeAsk.value?.spec.dismissable !== false);
 const askIsLast = computed(() => askIndex.value >= askTotal.value - 1);
 const canGoPrev = computed(() => askIndex.value > 0);
@@ -116,6 +119,13 @@ const askIsPlanApproval = computed(() =>
 const askUsesInputActions = computed(() =>
   !!activeAsk.value && askQuestion.value?.mode !== "confirm",
 );
+const pendingEntryActionsKey = computed(() => {
+  if (askUsesInputActions.value) return "ask-input";
+  if (askIsPlanApproval.value) return "ask-plan";
+  if (activeAsk.value) return "ask-confirm";
+  if (activeToolConsent.value) return "tool";
+  return "none";
+});
 
 const askOptionsWithId = computed<(AskUserOption & { id: string })[]>(() => {
   const q = askQuestion.value;
@@ -302,10 +312,11 @@ function onKeydown(e: KeyboardEvent) {
 function resize() {
   const el = textarea.value;
   if (!el) return;
-  el.style.height = "0px";
+  el.style.height = "auto";
   const lineHeight = 22;
   const maxHeight = lineHeight * 8;
-  el.style.height = Math.min(el.scrollHeight, maxHeight) + "px";
+  const nextHeight = Math.min(Math.max(el.scrollHeight, lineHeight), maxHeight);
+  el.style.height = `${nextHeight}px`;
   el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
@@ -552,357 +563,378 @@ watch(
 </script>
 
 <template>
-  <div
-    class="chat-composer"
-    :class="{ 'chat-composer--pending': hasPending }"
-  >
-    <Transition name="chat-composer-inline">
-      <section
-        v-if="activeAsk && askQuestion"
-        class="composer-inline composer-inline--ask"
-        :class="{
-          'composer-inline--danger': askQuestion.danger,
-          'composer-inline--plan': askIsPlanApproval,
-        }"
-        role="region"
-        aria-live="assertive"
-        :aria-label="askTitle"
-        tabindex="-1"
-        @keydown="onInlineKeydown"
+  <div class="chat-composer">
+    <Transition name="chat-composer-pending-panel">
+      <div
+        v-if="hasPendingPanel"
+        :key="pendingKey"
+        class="chat-composer__pending-panel"
       >
-        <header class="composer-inline__header">
-          <span class="composer-inline__icon" aria-hidden="true">
-            <AlertTriangle v-if="askQuestion.danger" :size="14" />
-            <CircleHelp v-else :size="14" />
-          </span>
-          <span class="composer-inline__title">{{ askTitle }}</span>
-          <span v-if="activeAsk.spec.source" class="composer-inline__source">
-            {{ activeAsk.spec.source }}
-          </span>
-          <span v-if="askTotal > 1" class="composer-inline__progress" aria-live="polite">
-            {{ askIndex + 1 }} / {{ askTotal }}
-          </span>
-          <button
-            v-if="askDismissable"
-            type="button"
-            class="composer-inline__close"
-            aria-label="关闭"
-            @click="cancelAsk"
+        <div class="chat-composer__pending-panel-inner">
+          <section
+            v-if="activeAsk && askQuestion"
+            class="composer-inline composer-inline--ask"
+            :class="{
+              'composer-inline--danger': askQuestion.danger,
+              'composer-inline--plan': askIsPlanApproval,
+            }"
+            role="region"
+            aria-live="assertive"
+            :aria-label="askTitle"
+            tabindex="-1"
+            @keydown="onInlineKeydown"
           >
-            <X :size="14" />
-          </button>
-        </header>
-
-        <div v-if="!askIsPlanApproval" class="composer-inline__body">
-          <div class="composer-inline__question">
-            <span
-              v-if="askQuestion.header"
-              class="composer-inline__chip"
-            >{{ askQuestion.header }}</span>
-            <p class="composer-inline__qtext">{{ askQuestion.question }}</p>
-          </div>
-
-          <div
-            v-if="askQuestion.mode !== 'confirm'"
-            class="composer-inline__main"
-            :class="{ 'composer-inline__main--with-preview': askHasPreview }"
-          >
-            <ul
-              class="composer-inline__options"
-              :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
-            >
-              <li
-                v-for="opt in askOptionsWithId"
-                :key="opt.id"
-                class="composer-inline__option"
-                :class="{
-                  'is-active': activeAskOptionId === opt.id,
-                  'is-picked': askQuestion.mode === 'single'
-                    ? singlePick === opt.id
-                    : multiPicks.has(opt.id),
-                  'is-recommended': opt.recommended,
-                  'is-danger': opt.danger,
-                }"
+            <header class="composer-inline__header">
+              <span class="composer-inline__icon" aria-hidden="true">
+                <AlertTriangle v-if="askQuestion.danger" :size="14" />
+                <CircleHelp v-else :size="14" />
+              </span>
+              <span class="composer-inline__title">{{ askTitle }}</span>
+              <span v-if="activeAsk.spec.source" class="composer-inline__source">
+                {{ activeAsk.spec.source }}
+              </span>
+              <span v-if="askTotal > 1" class="composer-inline__progress" aria-live="polite">
+                {{ askIndex + 1 }} / {{ askTotal }}
+              </span>
+              <button
+                v-if="askDismissable"
+                type="button"
+                class="composer-inline__close"
+                aria-label="关闭"
+                @click="cancelAsk"
               >
-                <button
-                  type="button"
-                  class="composer-inline__option-btn"
-                  :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
-                  :aria-checked="askQuestion.mode === 'single'
-                    ? singlePick === opt.id
-                    : multiPicks.has(opt.id)"
-                  @mouseenter="highlightOption(opt.id)"
-                  @mouseleave="clearOptionHighlight(opt.id)"
-                  @focus="focusOption(opt.id)"
-                  @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
+                <X :size="14" />
+              </button>
+            </header>
+
+            <div v-if="!askIsPlanApproval" class="composer-inline__body">
+              <div class="composer-inline__question">
+                <span
+                  v-if="askQuestion.header"
+                  class="composer-inline__chip"
+                >{{ askQuestion.header }}</span>
+                <p class="composer-inline__qtext">{{ askQuestion.question }}</p>
+              </div>
+
+              <div
+                v-if="askQuestion.mode !== 'confirm'"
+                class="composer-inline__main"
+                :class="{ 'composer-inline__main--with-preview': askHasPreview }"
+              >
+                <ul
+                  class="composer-inline__options"
+                  :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
                 >
-                  <span class="composer-inline__option-indicator" aria-hidden="true">
-                    <Check
-                      v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)"
-                      :size="12"
-                    />
-                  </span>
-                  <span class="composer-inline__option-main">
-                    <span class="composer-inline__option-label">
-                      {{ opt.label }}
-                      <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
-                    </span>
-                    <span
-                      v-if="opt.description"
-                      class="composer-inline__option-desc"
-                    >{{ opt.description }}</span>
-                  </span>
-                </button>
-              </li>
-            </ul>
+                  <li
+                    v-for="opt in askOptionsWithId"
+                    :key="opt.id"
+                    class="composer-inline__option"
+                    :class="{
+                      'is-active': activeAskOptionId === opt.id,
+                      'is-picked': askQuestion.mode === 'single'
+                        ? singlePick === opt.id
+                        : multiPicks.has(opt.id),
+                      'is-recommended': opt.recommended,
+                      'is-danger': opt.danger,
+                    }"
+                  >
+                    <button
+                      type="button"
+                      class="composer-inline__option-btn"
+                      :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
+                      :aria-checked="askQuestion.mode === 'single'
+                        ? singlePick === opt.id
+                        : multiPicks.has(opt.id)"
+                      @mouseenter="highlightOption(opt.id)"
+                      @mouseleave="clearOptionHighlight(opt.id)"
+                      @focus="focusOption(opt.id)"
+                      @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
+                    >
+                      <span class="composer-inline__option-indicator" aria-hidden="true">
+                        <Check
+                          v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)"
+                          :size="12"
+                        />
+                      </span>
+                      <span class="composer-inline__option-main">
+                        <span class="composer-inline__option-label">
+                          {{ opt.label }}
+                          <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
+                        </span>
+                        <span
+                          v-if="opt.description"
+                          class="composer-inline__option-desc"
+                        >{{ opt.description }}</span>
+                      </span>
+                    </button>
+                  </li>
+                </ul>
 
-            <aside
-              v-if="askHasPreview"
-              class="composer-inline__preview"
-              aria-label="选项预览"
-            >
-              <pre v-if="askFocusedOption?.preview" class="composer-inline__preview-pre">{{ askFocusedOption.preview }}</pre>
-              <p v-else class="composer-inline__preview-empty">
-                把鼠标移到选项上 / 用方向键聚焦，这里会显示对比预览。
-              </p>
-            </aside>
-          </div>
-        </div>
-
-        <footer
-          v-if="askQuestion.mode === 'confirm' && !askIsPlanApproval"
-          class="composer-inline__actions"
-        >
-          <button
-            v-if="askQuestion.skippable !== false && askTotal > 1"
-            type="button"
-            class="ghost composer-inline__skip composer-inline__btn"
-            @click="skipAsk"
-          >
-            跳过
-          </button>
-          <span class="composer-inline__spacer" />
-          <button
-            v-if="canGoPrev"
-            type="button"
-            class="ghost composer-inline__btn"
-            @click="backAsk"
-          >
-            <ArrowLeft :size="13" aria-hidden="true" />
-            上一题
-          </button>
-
-          <button type="button" class="ghost composer-inline__btn" @click="confirmAskNo">
-            {{ askQuestion.cancelLabel ?? "不要" }}
-          </button>
-          <button
-            type="button"
-            class="composer-inline__btn"
-            :class="askQuestion.danger ? 'ghost danger' : 'primary'"
-            @click="submitAsk"
-          >
-            {{ askQuestion.confirmLabel ?? "好的" }}
-          </button>
-        </footer>
-      </section>
-
-      <section
-        v-else-if="activeToolConsent"
-        class="composer-inline composer-inline--tool"
-        :class="{ 'composer-inline--danger': toolDanger, 'is-expanded': toolExpanded }"
-        role="alert"
-        aria-live="assertive"
-      >
-        <div class="composer-inline__tool-row">
-          <span class="composer-inline__icon" aria-hidden="true">
-            <AlertTriangle v-if="toolDanger" :size="14" />
-            <component v-else :is="toolIcon" :size="14" />
-          </span>
-
-          <div class="composer-inline__tool-main">
-            <div class="composer-inline__tool-head">
-              <span class="composer-inline__tool-name">{{ activeToolConsent.toolName }}</span>
-              <span class="composer-inline__headline">{{ toolHeadline }}</span>
+                <aside
+                  v-if="askHasPreview"
+                  class="composer-inline__preview"
+                  aria-label="选项预览"
+                >
+                  <pre v-if="askFocusedOption?.preview" class="composer-inline__preview-pre">{{ askFocusedOption.preview }}</pre>
+                  <p v-else class="composer-inline__preview-empty">
+                    把鼠标移到选项上 / 用方向键聚焦，这里会显示对比预览。
+                  </p>
+                </aside>
+              </div>
             </div>
-            <p v-if="toolInlinePreview" class="composer-inline__preview-line">{{ toolInlinePreview }}</p>
-            <p v-if="toolSubtitle" class="composer-inline__subtitle">{{ toolSubtitle }}</p>
-          </div>
 
-          <button
-            v-if="toolInputJson && toolInputJson !== '{}'"
-            type="button"
-            class="composer-inline__toggle"
-            :aria-expanded="toolExpanded"
-            @click="toolExpanded = !toolExpanded"
+            <footer
+              v-if="askQuestion.mode === 'confirm' && !askIsPlanApproval"
+              class="composer-inline__actions"
+            >
+              <button
+                v-if="askQuestion.skippable !== false && askTotal > 1"
+                type="button"
+                class="ghost composer-inline__skip composer-inline__btn"
+                @click="skipAsk"
+              >
+                跳过
+              </button>
+              <span class="composer-inline__spacer" />
+              <button
+                v-if="canGoPrev"
+                type="button"
+                class="ghost composer-inline__btn"
+                @click="backAsk"
+              >
+                <ArrowLeft :size="13" aria-hidden="true" />
+                上一题
+              </button>
+
+              <button type="button" class="ghost composer-inline__btn" @click="confirmAskNo">
+                {{ askQuestion.cancelLabel ?? "不要" }}
+              </button>
+              <button
+                type="button"
+                class="composer-inline__btn"
+                :class="askQuestion.danger ? 'ghost danger' : 'primary'"
+                @click="submitAsk"
+              >
+                {{ askQuestion.confirmLabel ?? "好的" }}
+              </button>
+            </footer>
+          </section>
+
+          <section
+            v-else-if="activeToolConsent"
+            class="composer-inline composer-inline--tool"
+            :class="{ 'composer-inline--danger': toolDanger, 'is-expanded': toolExpanded }"
+            role="alert"
+            aria-live="assertive"
           >
-            <component
-              :is="toolExpanded ? ChevronDown : ChevronRight"
-              :size="12"
-              aria-hidden="true"
-            />
-            {{ toolExpanded ? "收起" : "查看入参" }}
-          </button>
+            <div class="composer-inline__tool-row">
+              <span class="composer-inline__icon" aria-hidden="true">
+                <AlertTriangle v-if="toolDanger" :size="14" />
+                <component v-else :is="toolIcon" :size="14" />
+              </span>
 
+              <div class="composer-inline__tool-main">
+                <div class="composer-inline__tool-head">
+                  <span class="composer-inline__tool-name">{{ activeToolConsent.toolName }}</span>
+                  <span class="composer-inline__headline">{{ toolHeadline }}</span>
+                </div>
+                <p v-if="toolInlinePreview" class="composer-inline__preview-line">{{ toolInlinePreview }}</p>
+                <p v-if="toolSubtitle" class="composer-inline__subtitle">{{ toolSubtitle }}</p>
+              </div>
+
+              <button
+                v-if="toolInputJson && toolInputJson !== '{}'"
+                type="button"
+                class="composer-inline__toggle"
+                :aria-expanded="toolExpanded"
+                @click="toolExpanded = !toolExpanded"
+              >
+                <component
+                  :is="toolExpanded ? ChevronDown : ChevronRight"
+                  :size="12"
+                  aria-hidden="true"
+                />
+                {{ toolExpanded ? "收起" : "查看入参" }}
+              </button>
+            </div>
+
+            <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
+          </section>
         </div>
-
-        <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
-      </section>
+      </div>
     </Transition>
 
-    <textarea
-      v-if="!hasPending"
-      ref="textarea"
-      v-model="inputValue"
-      class="chat-composer__input"
-      rows="1"
-      :placeholder="inputPlaceholder"
-      @keydown="onKeydown"
-      @input="resize"
-    />
-
     <div
-      v-if="!hasPending && attachments?.length"
-      class="chat-composer__attachments"
-      aria-label="待发送附件"
+      class="chat-composer__entry-row"
+      :class="{ 'chat-composer__entry-row--pending': hasPending }"
     >
-      <span
-        v-for="attachment in attachments"
-        :key="attachment.id"
-        class="chat-attachment-chip"
-        :title="attachment.path"
-      >
-        <Paperclip :size="13" aria-hidden="true" />
-        <span class="chat-attachment-chip__name">{{ attachment.name }}</span>
-        <button
-          type="button"
-          class="chat-attachment-chip__remove"
-          :aria-label="`移除附件 ${attachment.name}`"
-          @click="emit('remove-attachment', attachment.id)"
-        >
-          <X :size="12" aria-hidden="true" />
-        </button>
-      </span>
-    </div>
-
-    <div :class="hasPending ? 'chat-composer__pending-row' : 'chat-composer__row'">
       <textarea
-        v-if="hasPending"
         ref="textarea"
         v-model="inputValue"
-        class="chat-composer__input chat-composer__input--pending"
+        class="chat-composer__input"
+        :class="{ 'chat-composer__input--pending': hasPending }"
         rows="1"
         :placeholder="inputPlaceholder"
         @keydown="onKeydown"
         @input="resize"
       />
 
-      <div v-if="!hasPending" class="chat-composer__group">
-        <button
-          type="button"
-          class="chat-chip chat-chip--icon"
-          title="添加附件"
-          aria-label="添加附件"
-          @click="emit('pick-attachments')"
+      <Transition name="chat-composer-entry-actions" mode="out-in">
+        <div
+          v-if="hasPending"
+          :key="pendingEntryActionsKey"
+          class="chat-composer__entry-actions"
         >
-          <Paperclip :size="14" aria-hidden="true" />
-        </button>
-        <Dropdown
-          :model-value="state.permission"
-          :options="permissionOptions"
-          :icon="ShieldCheck"
-          @update:model-value="setPermission"
-        />
-        <button
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :class="{ 'is-open': state.planMode }"
-          :title="state.planMode ? '本轮先制定计划' : '直接执行'"
-          :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
-          :aria-pressed="state.planMode"
-          @click="togglePlanMode"
-        >
-          <ListChecks :size="14" aria-hidden="true" />
-        </button>
-      </div>
+          <button
+            v-if="askUsesInputActions && askQuestion?.skippable !== false && askTotal > 1"
+            type="button"
+            class="ghost composer-inline__skip composer-inline__btn"
+            @click="skipAsk"
+          >
+            跳过
+          </button>
 
-      <button
-        v-if="askUsesInputActions && askQuestion?.skippable !== false && askTotal > 1"
-        type="button"
-        class="ghost composer-inline__skip composer-inline__btn"
-        @click="skipAsk"
-      >
-        跳过
-      </button>
+          <div v-if="askUsesInputActions" class="chat-composer__pending-actions">
+            <button
+              v-if="canGoPrev"
+              type="button"
+              class="ghost composer-inline__btn"
+              @click="backAsk"
+            >
+              <ArrowLeft :size="13" aria-hidden="true" />
+              上一题
+            </button>
+            <button
+              type="button"
+              class="primary composer-inline__btn"
+              :disabled="!canAskSubmit"
+              @click="submitAsk"
+            >
+              {{ askIsLast ? "完成" : "继续" }}
+              <ArrowRight v-if="!askIsLast" :size="13" aria-hidden="true" />
+            </button>
+          </div>
 
-      <div v-if="askUsesInputActions" class="chat-composer__pending-actions">
-        <button
-          v-if="canGoPrev"
-          type="button"
-          class="ghost composer-inline__btn"
-          @click="backAsk"
-        >
-          <ArrowLeft :size="13" aria-hidden="true" />
-          上一题
-        </button>
-        <button
-          type="button"
-          class="primary composer-inline__btn"
-          :disabled="!canAskSubmit"
-          @click="submitAsk"
-        >
-          {{ askIsLast ? "完成" : "继续" }}
-          <ArrowRight v-if="!askIsLast" :size="13" aria-hidden="true" />
-        </button>
-      </div>
+          <div v-else-if="askIsPlanApproval" class="chat-composer__pending-actions">
+            <button
+              type="button"
+              class="ghost composer-inline__btn"
+              @click="confirmAskNo"
+            >
+              忽略
+            </button>
+            <button
+              type="button"
+              class="primary composer-inline__btn"
+              @click="submitAsk"
+            >
+              同意
+            </button>
+          </div>
 
-      <div v-else-if="askIsPlanApproval" class="chat-composer__pending-actions">
-        <button
-          type="button"
-          class="ghost composer-inline__btn"
-          @click="confirmAskNo"
-        >
-          忽略
-        </button>
-        <button
-          type="button"
-          class="primary composer-inline__btn"
-          @click="submitAsk"
-        >
-          同意
-        </button>
-      </div>
+          <div v-else-if="activeToolConsent" class="chat-composer__pending-actions">
+            <button
+              type="button"
+              class="ghost composer-inline__btn"
+              :disabled="toolSubmitting !== null"
+              @click="decideToolConsent('deny')"
+            >
+              {{ toolSubmitting === "deny" ? "处理中..." : "忽略" }}
+            </button>
+            <button
+              type="button"
+              class="composer-inline__btn"
+              :class="toolDanger ? 'ghost danger' : 'primary'"
+              :disabled="toolSubmitting !== null"
+              @click="decideToolConsent('allow')"
+            >
+              {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
+            </button>
+          </div>
 
-      <div v-else-if="activeToolConsent" class="chat-composer__pending-actions">
-        <button
-          type="button"
-          class="ghost composer-inline__btn"
-          :disabled="toolSubmitting !== null"
-          @click="decideToolConsent('deny')"
-        >
-          {{ toolSubmitting === "deny" ? "处理中..." : "忽略" }}
-        </button>
-        <button
-          type="button"
-          class="composer-inline__btn"
-          :class="toolDanger ? 'ghost danger' : 'primary'"
-          :disabled="toolSubmitting !== null"
-          @click="decideToolConsent('allow')"
-        >
-          {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
-        </button>
-      </div>
-
-      <button
-        v-if="!askUsesInputActions"
-        type="button"
-        class="chat-composer__send"
-        :disabled="!canSend"
-        :title="sendTitle"
-        :aria-label="sendAriaLabel"
-        @click="send"
-      >
-        <ArrowUp :size="16" aria-hidden="true" />
-      </button>
+          <button
+            v-if="!askUsesInputActions"
+            type="button"
+            class="chat-composer__send"
+            :disabled="!canSend"
+            :title="sendTitle"
+            :aria-label="sendAriaLabel"
+            @click="send"
+          >
+            <ArrowUp :size="16" aria-hidden="true" />
+          </button>
+        </div>
+      </Transition>
     </div>
+
+    <Transition name="chat-composer-stack">
+      <div
+        v-if="!hasPending && attachments?.length"
+        class="chat-composer__attachments"
+        aria-label="待发送附件"
+      >
+        <span
+          v-for="attachment in attachments"
+          :key="attachment.id"
+          class="chat-attachment-chip"
+          :title="attachment.path"
+        >
+          <Paperclip :size="13" aria-hidden="true" />
+          <span class="chat-attachment-chip__name">{{ attachment.name }}</span>
+          <button
+            type="button"
+            class="chat-attachment-chip__remove"
+            :aria-label="`移除附件 ${attachment.name}`"
+            @click="emit('remove-attachment', attachment.id)"
+          >
+            <X :size="12" aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+    </Transition>
+
+    <Transition name="chat-composer-stack">
+      <div v-if="!hasPending" class="chat-composer__row">
+        <div class="chat-composer__group">
+          <button
+            type="button"
+            class="chat-chip chat-chip--icon"
+            title="添加附件"
+            aria-label="添加附件"
+            @click="emit('pick-attachments')"
+          >
+            <Paperclip :size="14" aria-hidden="true" />
+          </button>
+          <Dropdown
+            :model-value="state.permission"
+            :options="permissionOptions"
+            :icon="ShieldCheck"
+            @update:model-value="setPermission"
+          />
+          <button
+            type="button"
+            class="chat-chip chat-chip--icon"
+            :class="{ 'is-open': state.planMode }"
+            :title="state.planMode ? '本轮先制定计划' : '直接执行'"
+            :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
+            :aria-pressed="state.planMode"
+            @click="togglePlanMode"
+          >
+            <ListChecks :size="14" aria-hidden="true" />
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="chat-composer__send"
+          :disabled="!canSend"
+          :title="sendTitle"
+          :aria-label="sendAriaLabel"
+          @click="send"
+        >
+          <ArrowUp :size="16" aria-hidden="true" />
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>

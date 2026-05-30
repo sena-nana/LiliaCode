@@ -3199,6 +3199,7 @@ button.ghost:hover {
   line-height: 22px;
   resize: none;
   overflow-y: hidden;
+  transition: height 0.16s ease;
 }
 
 .chat-composer__input::placeholder {
@@ -3251,19 +3252,42 @@ button.ghost:hover {
   opacity: 0.85;
 }
 
-.chat-composer--pending {
-  gap: 10px;
+.chat-composer__pending-panel {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.chat-composer__pending-row {
+.chat-composer__pending-panel-inner {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-composer__entry-row {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  min-width: 0;
+  transition: gap 0.18s ease;
+}
+
+.chat-composer__entry-row .chat-composer__input {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .chat-composer__input--pending {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-composer__entry-actions {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
@@ -3274,11 +3298,11 @@ button.ghost:hover {
   flex: 0 0 auto;
 }
 
-.chat-composer__pending-row .composer-inline__btn {
+.chat-composer__entry-row .composer-inline__btn {
   white-space: nowrap;
 }
 
-.chat-composer__pending-row .composer-inline__skip {
+.chat-composer__entry-row .composer-inline__skip {
   margin-right: 0;
 }
 
@@ -3753,29 +3777,100 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
-.chat-composer-inline-enter-active,
-.chat-composer-inline-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+.chat-composer-pending-panel-enter-active,
+.chat-composer-pending-panel-leave-active {
+  overflow: hidden;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.18s ease;
+  will-change: grid-template-rows, opacity;
 }
 
-.chat-composer-inline-enter-from,
-.chat-composer-inline-leave-to {
+.chat-composer-pending-panel-enter-from,
+.chat-composer-pending-panel-leave-to {
+  grid-template-rows: 0fr;
   opacity: 0;
-  transform: translateY(4px);
+}
+
+.chat-composer-pending-panel-enter-to,
+.chat-composer-pending-panel-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.chat-composer-entry-actions-enter-active,
+.chat-composer-entry-actions-leave-active {
+  overflow: hidden;
+  transition:
+    max-width 0.32s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  will-change: max-width, opacity, transform;
+}
+
+.chat-composer-entry-actions-enter-from,
+.chat-composer-entry-actions-leave-to {
+  max-width: 0;
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.chat-composer-entry-actions-enter-to,
+.chat-composer-entry-actions-leave-from {
+  max-width: 520px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.chat-composer-stack-enter-active,
+.chat-composer-stack-leave-active {
+  overflow: hidden;
+  transition:
+    max-height 0.32s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  will-change: max-height, opacity, transform;
+}
+
+.chat-composer-stack-enter-from,
+.chat-composer-stack-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+.chat-composer-stack-enter-to,
+.chat-composer-stack-leave-from {
+  max-height: 260px;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-composer-inline-enter-active,
-  .chat-composer-inline-leave-active {
+  .chat-composer__input,
+  .chat-composer-pending-panel-enter-active,
+  .chat-composer-pending-panel-leave-active,
+  .chat-composer-entry-actions-enter-active,
+  .chat-composer-entry-actions-leave-active,
+  .chat-composer-stack-enter-active,
+  .chat-composer-stack-leave-active {
     transition: none;
-  }
-  .chat-composer-inline-enter-from,
-  .chat-composer-inline-leave-to {
-    transform: none;
+    will-change: auto;
   }
 }
 
 @media (max-width: 720px) {
+  .chat-composer__entry-row {
+    flex-wrap: wrap;
+  }
+  .chat-composer__entry-row .chat-composer__input {
+    flex-basis: 100%;
+  }
+  .chat-composer__entry-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
   .composer-inline__source {
     display: none;
   }

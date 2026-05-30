@@ -97,6 +97,40 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "开启计划模式" })).toBeInTheDocument();
   });
 
+  it("pending 状态切换时复用同一个输入框节点", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    const input = view.getByRole("textbox");
+    await fireEvent.update(input, "先保留这段输入");
+
+    await view.rerender({
+      state: baseState,
+      attachments: [],
+      pendingAsk: pendingAsk(singleAskSpec),
+    });
+
+    const pendingInput = view.getByRole("textbox");
+    expect(pendingInput).toBe(input);
+    expect(pendingInput).toHaveValue("");
+
+    await fireEvent.update(pendingInput, "pending 回答");
+
+    await view.rerender({
+      state: baseState,
+      attachments: [],
+      pendingAsk: null,
+    });
+
+    const restoredInput = view.getByRole("textbox");
+    expect(restoredInput).toBe(input);
+    expect(restoredInput).toHaveValue("先保留这段输入");
+  });
+
   it("pending AskUser 中输入文本后，完成按钮会作为 other 回答返回", async () => {
     const view = render(ChatComposer, {
       props: {
