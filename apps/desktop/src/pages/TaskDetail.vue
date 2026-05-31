@@ -40,7 +40,6 @@ import {
   useToolConsentForTask,
 } from "../composables/useToolConsentBridge";
 import {
-  getAgentInteractionSettings,
   getComposerState,
   listAgentTimeline,
   listModels,
@@ -54,9 +53,14 @@ import {
   setComposerState,
   type ToolConsentDecision,
 } from "../services/chat";
+import {
+  loadAgentInteractionSettings,
+  useAgentInteractionSettings,
+} from "../composables/useAgentInteractionSettings";
+import { onDebugTimelineEvent } from "../composables/useDebugTimelineEvents";
+import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import type {
   AskUserResult,
-  AgentInteractionSettings,
   AgentTimelineEvent,
   AgentTimelinePayload,
   ChatAttachment,
@@ -83,7 +87,11 @@ const emptyHeadline = computed(() =>
     : "今天想做什么？",
 );
 
-const timelineEvents = shallowRef<AgentTimelineEvent[]>([]);
+const persistedTimelineEvents = shallowRef<AgentTimelineEvent[]>([]);
+const overlayTimelineEvents = shallowRef<AgentTimelineEvent[]>([]);
+const timelineEvents = computed(() =>
+  mergeTimelineEvents(persistedTimelineEvents.value, overlayTimelineEvents.value),
+);
 const composer = ref<ChatComposerState>({
   taskId: props.taskId,
   backend: "claude",
@@ -104,8 +112,8 @@ const runtimePendingAgentActions = usePendingAgentActionsForTask(
   pendingAskUsers,
   pendingToolConsents,
 );
-const agentInteractionSettings = ref<AgentInteractionSettings>({ nonInterruptMode: false });
-const nonInterruptMode = computed(() => agentInteractionSettings.value.nonInterruptMode);
+const agentInteractionSettings = useAgentInteractionSettings();
+const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
 const pendingAgentActions = computed(() =>
   nonInterruptMode.value ? runtimePendingAgentActions.value : [],
 );
@@ -330,21 +338,36 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
 }
 
 function upsertTimelineEvent(event: AgentTimelineEvent) {
-  const existingIndex = timelineEvents.value.findIndex((item) => item.id === event.id);
-  if (existingIndex < 0) {
-    const next: AgentTimelineEvent[] = timelineEvents.value.slice();
-    next.push(event);
-    timelineEvents.value = next;
-    return;
-  }
+  persistedTimelineEvents.value = upsertTimelineEventById(
+    persistedTimelineEvents.value,
+    event,
+  );
+}
 
-  const next: AgentTimelineEvent[] = timelineEvents.value.slice();
+function upsertOverlayTimelineEvent(event: AgentTimelineEvent) {
+  overlayTimelineEvents.value = upsertTimelineEventById(
+    overlayTimelineEvents.value,
+    event,
+  );
+}
+
+function upsertTimelineEventById(
+  events: AgentTimelineEvent[],
+  event: AgentTimelineEvent,
+): AgentTimelineEvent[] {
+  const existingIndex = events.findIndex((item) => item.id === event.id);
+  if (existingIndex < 0) {
+    return [...events, event];
+  }
+  const next = events.slice();
   next[existingIndex] = event;
-  timelineEvents.value = next;
+  return next;
 }
 
 function removeTimelineEvent(eventId: string) {
-  timelineEvents.value = timelineEvents.value.filter((item) => item.id !== eventId);
+  persistedTimelineEvents.value = persistedTimelineEvents.value.filter((item) =>
+    item.id !== eventId
+  );
 }
 
 function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimelinePayload[] {
@@ -446,21 +469,32 @@ async function loadAll() {
     getComposerState(taskId),
   ]);
   if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-  timelineEvents.value = mergeTimelineEvents(events, timelineEvents.value);
+  persistedTimelineEvents.value = mergeTimelineEvents(events, persistedTimelineEvents.value);
   composer.value = comp;
   // models 依赖 backend，单独拉。
   await reloadModelsForBackend(comp.backend);
 }
 
-async function loadAgentInteractionSettings() {
-  try {
-    agentInteractionSettings.value = await getAgentInteractionSettings();
-  } catch (err) {
-    console.error("[settings] load agent interaction settings failed", err);
+const unlisteners: UnlistenFn[] = [];
+let unsubscribeDebugTimeline: (() => void) | null = null;
+let unregisterDebugPanel: (() => void) | null = null;
+
+function syncDebugPanelRegistration() {
+  if (!hasContext.value || !agentInteractionSettings.debug.value) {
+    unregisterDebugPanel?.();
+    unregisterDebugPanel = null;
+    return;
   }
+  if (unregisterDebugPanel) return;
+  unregisterDebugPanel = registerDebugChatSidebarPanel();
 }
 
-const unlisteners: UnlistenFn[] = [];
+function resubscribeDebugTimeline() {
+  unsubscribeDebugTimeline?.();
+  unsubscribeDebugTimeline = onDebugTimelineEvent(props.taskId, upsertOverlayTimelineEvent);
+}
+
+resubscribeDebugTimeline();
 
 onMounted(async () => {
   unlisteners.push(
@@ -482,7 +516,7 @@ onMounted(async () => {
       if (e.taskId !== props.taskId) return;
       isTurnRunning.value = true;
       let cleared = false;
-      timelineEvents.value = timelineEvents.value.map((event) => {
+      persistedTimelineEvents.value = persistedTimelineEvents.value.map((event) => {
         const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
           ? event.payload as Record<string, unknown>
           : {};
@@ -509,6 +543,10 @@ onMounted(async () => {
 });
 
 onUnmounted(async () => {
+  unsubscribeDebugTimeline?.();
+  unsubscribeDebugTimeline = null;
+  unregisterDebugPanel?.();
+  unregisterDebugPanel = null;
   for (const u of unlisteners) {
     try { await u(); } catch { /* ignore */ }
   }
@@ -519,10 +557,18 @@ watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
     isTurnRunning.value = false;
-    timelineEvents.value = [];
+    persistedTimelineEvents.value = [];
+    overlayTimelineEvents.value = [];
     attachments.value = [];
-    await Promise.all([loadAll(), loadAgentInteractionSettings()]);
+    resubscribeDebugTimeline();
+    await loadAll();
   },
+);
+
+watch(
+  () => [hasContext.value, agentInteractionSettings.debug.value] as const,
+  syncDebugPanelRegistration,
+  { immediate: true },
 );
 </script>
 

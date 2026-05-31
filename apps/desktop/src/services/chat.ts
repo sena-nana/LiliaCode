@@ -130,7 +130,7 @@ export function getAgentInteractionSettings(): Promise<AgentInteractionSettings>
 }
 
 export function setAgentInteractionSettings(
-  settings: AgentInteractionSettings,
+  settings: Partial<AgentInteractionSettings>,
 ): Promise<void> {
   return invoke<void>("agent_interaction_set_settings", { settings });
 }

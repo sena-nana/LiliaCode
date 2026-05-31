@@ -136,6 +136,8 @@ struct ChatModelOption {
 struct AgentInteractionSettings {
     #[serde(default)]
     non_interrupt_mode: bool,
+    #[serde(default)]
+    debug: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

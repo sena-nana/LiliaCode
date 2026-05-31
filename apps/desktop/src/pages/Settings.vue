@@ -7,10 +7,8 @@ import {
 import { useTheme } from "../composables/useTheme";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import {
-  getAgentInteractionSettings,
   getAssistantAIConfig,
   getCCSwitchConfig,
-  setAgentInteractionSettings,
   setAssistantAIConfig,
   setCCSwitchConfig,
   setRouterMode,
@@ -29,6 +27,7 @@ import type {
   ChatBackendKind,
   ProjectSettings,
 } from "@lilia/contracts";
+import { useAgentInteractionSettings } from "../composables/useAgentInteractionSettings";
 
 const { theme, setTheme } = useTheme();
 const {
@@ -147,29 +146,40 @@ async function testAssistantAI() {
 }
 
 // ---- Agent 交互 ----
-const agentInteraction = ref<AgentInteractionSettings>({ nonInterruptMode: false });
+const agentInteractionStore = useAgentInteractionSettings();
+const agentInteraction = agentInteractionStore.settings;
 const savingAgentInteraction = ref(false);
 const agentInteractionError = ref<string | null>(null);
 
 async function loadAgentInteraction() {
   try {
-    agentInteraction.value = await getAgentInteractionSettings();
+    await agentInteractionStore.load();
   } catch (err) {
     agentInteractionError.value = `读取 Agent 交互设置失败：${String(err)}`;
   }
 }
 
 async function setNonInterruptMode(nonInterruptMode: boolean) {
-  if (agentInteraction.value.nonInterruptMode === nonInterruptMode) return;
+  await setAgentInteraction({ nonInterruptMode });
+}
+
+async function setDebugMode(debug: boolean) {
+  await setAgentInteraction({ debug });
+}
+
+async function setAgentInteraction(patch: Partial<AgentInteractionSettings>) {
+  const next = { ...agentInteraction.value, ...patch };
+  if (
+    next.nonInterruptMode === agentInteraction.value.nonInterruptMode &&
+    next.debug === agentInteraction.value.debug
+  ) {
+    return;
+  }
   savingAgentInteraction.value = true;
   agentInteractionError.value = null;
-  const previous = agentInteraction.value;
-  const next: AgentInteractionSettings = { ...previous, nonInterruptMode };
-  agentInteraction.value = next;
   try {
-    await setAgentInteractionSettings(next);
+    await agentInteractionStore.update(patch);
   } catch (err) {
-    agentInteraction.value = previous;
     agentInteractionError.value = `保存 Agent 交互设置失败：${String(err)}`;
   } finally {
     savingAgentInteraction.value = false;
@@ -463,6 +473,35 @@ onMounted(async () => {
             :class="{ 'is-active': agentInteraction.nonInterruptMode }"
             :disabled="savingAgentInteraction"
             @click="setNonInterruptMode(true)"
+          >
+            开启
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row__label">
+          <div>Debug 面板</div>
+          <div class="settings-row__hint">在对话侧栏加入临时事件注入面板。</div>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="Debug 面板">
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="!agentInteraction.debug"
+            :class="{ 'is-active': !agentInteraction.debug }"
+            :disabled="savingAgentInteraction"
+            @click="setDebugMode(false)"
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.debug"
+            :class="{ 'is-active': agentInteraction.debug }"
+            :disabled="savingAgentInteraction"
+            @click="setDebugMode(true)"
           >
             开启
           </button>

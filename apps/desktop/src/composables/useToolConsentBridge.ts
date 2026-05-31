@@ -19,6 +19,10 @@ import {
 } from "../services/chat";
 
 const pending = reactive<Record<string, ToolConsentRequest>>({});
+const localResolvers = new Map<
+  string,
+  (decision: ToolConsentDecision, message?: string) => void
+>();
 let installed = false;
 let unlisten: (() => void) | null = null;
 
@@ -34,6 +38,7 @@ export async function installToolConsentBridge(): Promise<() => void> {
   installed = true;
   unlisten = await onToolConsentRequest((req) => {
     pending[req.taskId] = req;
+    localResolvers.delete(req.requestId);
   });
   return () => {
     unlisten?.();
@@ -58,6 +63,17 @@ export function usePendingToolConsentsForTask(
   });
 }
 
+export function requestLocalToolConsent(
+  request: ToolConsentRequest,
+): Promise<{ decision: ToolConsentDecision; message?: string }> {
+  pending[request.taskId] = request;
+  return new Promise((resolve) => {
+    localResolvers.set(request.requestId, (decision, message) => {
+      resolve({ decision, message });
+    });
+  });
+}
+
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */
 export async function respondConsent(
   taskId: string,
@@ -69,6 +85,12 @@ export async function respondConsent(
   // 即便 invoke 失败，也只是 runner 没收到决策，下次会用同 id 再发一次。
   if (pending[taskId]?.requestId === requestId) {
     delete pending[taskId];
+  }
+  const localResolve = localResolvers.get(requestId);
+  if (localResolve) {
+    localResolvers.delete(requestId);
+    localResolve(decision, message);
+    return;
   }
   await respondToolConsent(taskId, requestId, decision, message);
 }

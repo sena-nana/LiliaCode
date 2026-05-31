@@ -370,6 +370,8 @@ export interface ChatModelOption {
 export interface AgentInteractionSettings {
   /** 开启后，权限请求、Agent 提问和计划确认不再占用输入框。 */
   nonInterruptMode: boolean;
+  /** 开启后，任务页侧边栏注册调试面板，允许注入预制 timeline 事件。 */
+  debug: boolean;
 }
 
 /**
