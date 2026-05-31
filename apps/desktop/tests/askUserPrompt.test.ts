@@ -54,6 +54,23 @@ const recommendedSingleSpec: AskUserSpec = {
   ],
 };
 
+const singleWithOtherSpec: AskUserSpec = {
+  title: "Lilia 想确认一下",
+  questions: [
+    {
+      id: "q-other",
+      header: "入口",
+      question: "选一个入口。",
+      mode: "single",
+      allowOther: true,
+      options: [
+        { id: "alpha", label: "Alpha" },
+        { id: "beta", label: "Beta" },
+      ],
+    },
+  ],
+};
+
 const planApprovalSpec: AskUserSpec = {
   title: "确认 Claude 计划",
   source: "Claude Plan",
@@ -150,6 +167,24 @@ describe("ChatComposer AskUser pending prompt", () => {
     expect(beta).toHaveAttribute("aria-checked", "true");
   });
 
+  it("允许 other 的单选题点击其他后才显示输入框", async () => {
+    const view = renderComposer(singleWithOtherSpec);
+
+    expect(view.queryByRole("textbox")).toBeNull();
+    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
+
+    expect(view.getByRole("radio", { name: "其他" }))
+      .toHaveAttribute("aria-checked", "true");
+    expect(view.getByRole("textbox")).toBeInTheDocument();
+  });
+
+  it("未允许 other 的单选题不显示其他选项和输入框", () => {
+    const view = renderComposer(recommendedSingleSpec);
+
+    expect(view.queryByRole("radio", { name: "其他" })).toBeNull();
+    expect(view.queryByRole("textbox")).toBeNull();
+  });
+
   it("计划确认提示作为 composer 内部一行紧凑扩展", () => {
     const view = renderComposer(planApprovalSpec);
 
@@ -157,7 +192,7 @@ describe("ChatComposer AskUser pending prompt", () => {
     expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");
     expect(view.queryByText(/确认后将按/)).toBeNull();
     expect(view.queryByRole("button", { name: "先不执行" })).toBeNull();
-    expect(view.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();
   });
 });

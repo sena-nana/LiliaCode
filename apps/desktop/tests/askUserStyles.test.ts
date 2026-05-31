@@ -22,6 +22,7 @@ describe("ask user prompt styles", () => {
     const entryActions = selectorIndex(".chat-composer__entry-actions {");
     const pendingActions = selectorIndex(".chat-composer__pending-actions {");
     const header = selectorIndex(".composer-inline__header {");
+    const body = selectorIndex(".composer-inline__body {");
     const preview = selectorIndex(".composer-inline__main--with-preview {");
     const panelTransition = selectorIndex(".chat-composer-pending-panel-enter-active,");
     const panelFrom = selectorIndex(".chat-composer-pending-panel-enter-from,");
@@ -41,7 +42,8 @@ describe("ask user prompt styles", () => {
     expect(entryActions).toBeGreaterThan(entryRow);
     expect(pendingActions).toBeGreaterThan(entryActions);
     expect(header).toBeGreaterThan(prompt);
-    expect(preview).toBeGreaterThan(header);
+    expect(body).toBeGreaterThan(header);
+    expect(preview).toBeGreaterThan(body);
     expect(panelTransition).toBeGreaterThan(preview);
     expect(panelFrom).toBeGreaterThan(panelTransition);
     expect(panelTo).toBeGreaterThan(panelFrom);
@@ -71,6 +73,8 @@ describe("ask user prompt styles", () => {
     expect(ruleTextAt(prompt)).toContain("min-width: 0");
     expect(ruleTextAt(pendingActions)).toContain("display: inline-flex");
     expect(ruleTextAt(header)).toContain("grid-template-columns");
+    expect(ruleTextAt(body)).not.toContain("max-height");
+    expect(ruleTextAt(body)).not.toContain("overflow-y");
     expect(ruleTextAt(preview)).toContain("grid-template-columns");
     expect(ruleTextAt(panelTransition)).toContain("grid-template-rows 0.28s");
     expect(ruleTextAt(panelTransition)).toContain("opacity 0.18s");
@@ -104,26 +108,49 @@ describe("ask user prompt styles", () => {
     expect(styles).not.toContain(".composer-inline--plan .composer-inline__actions");
   });
 
-  it("右侧选项详情使用稳定高度，切换选项时不改变面板高度", () => {
+  it("右侧选项详情跟随选项列表高度，不截断选项列表", () => {
     const previewGrid = selectorIndex(".composer-inline__main--with-preview {");
-    const previewSizing = selectorIndex(
-      ".composer-inline__main--with-preview .composer-inline__options,",
-    );
-    const previewOptions = selectorIndex(
-      ".composer-inline__main--with-preview .composer-inline__options {",
-    );
+    const preview = selectorIndex(".composer-inline__preview {");
     const previewPre = selectorIndex(".composer-inline__preview-pre {");
+    const timelineOptionsClamp = selectorIndex(".timeline-pending-action .composer-inline__options {");
 
     expect(previewGrid).toBeGreaterThan(-1);
-    expect(previewSizing).toBeGreaterThan(previewGrid);
-    expect(previewOptions).toBeGreaterThan(previewSizing);
-    expect(previewPre).toBeGreaterThan(previewOptions);
+    expect(preview).toBeGreaterThan(previewGrid);
+    expect(previewPre).toBeGreaterThan(preview);
+    expect(timelineOptionsClamp).toBe(-1);
 
-    expect(ruleTextAt(previewGrid)).toContain("--composer-inline-preview-height");
-    expect(ruleTextAt(previewSizing)).toContain("height: var(--composer-inline-preview-height)");
-    expect(ruleTextAt(previewSizing)).toContain("min-height: 0");
-    expect(ruleTextAt(previewOptions)).toContain("overflow-y: auto");
+    expect(ruleTextAt(previewGrid)).toContain("align-items: stretch");
+    expect(ruleTextAt(previewGrid)).not.toContain("clamp");
+    expect(ruleTextAt(preview)).toContain("min-height: 0");
+    expect(ruleTextAt(preview)).not.toContain("max-height");
     expect(ruleTextAt(previewPre)).toContain("overflow: auto");
+  });
+
+  it("时间线待处理输入框保持单行，聚焦不使用强调色描边", () => {
+    const input = selectorIndex(".timeline-pending-action__input {");
+    const focus = selectorIndex(".timeline-pending-action__input:focus {");
+
+    expect(input).toBeGreaterThan(-1);
+    expect(focus).toBeGreaterThan(input);
+    expect(ruleTextAt(input)).toContain("height: 28px");
+    expect(ruleTextAt(input)).toContain("resize: none");
+    expect(ruleTextAt(focus)).toContain("outline: none");
+    expect(ruleTextAt(focus)).toContain("border-color: var(--border-strong)");
+    expect(ruleTextAt(focus)).not.toContain("var(--accent)");
+  });
+
+  it("其他回答输入框在操作行自然填满剩余空间", () => {
+    const otherInput = selectorIndex(".composer-inline__other-input {");
+    const timelineActions = selectorIndex(
+      ".timeline-pending-action:not(.composer-inline--ask) .composer-inline__actions {",
+    );
+
+    expect(otherInput).toBeGreaterThan(-1);
+    expect(timelineActions).toBeGreaterThan(otherInput);
+    expect(ruleTextAt(otherInput)).toContain("flex: 1 1 auto");
+    expect(ruleTextAt(otherInput)).toContain("min-width: 0");
+    expect(ruleTextAt(otherInput)).toContain("width: auto");
+    expect(ruleTextAt(otherInput)).not.toContain("max-width");
   });
 
   it("推荐项只通过徽标提示，不给按钮默认描边", () => {

@@ -33,6 +33,16 @@ const askUserSpec: AskUserSpec = {
   ],
 };
 
+const askUserWithOtherSpec: AskUserSpec = {
+  ...askUserSpec,
+  questions: [
+    {
+      ...askUserSpec.questions[0],
+      allowOther: true,
+    },
+  ],
+};
+
 const multiAskUserSpec: AskUserSpec = {
   title: "Claude 想确认 2 件事",
   source: "Claude",
@@ -307,6 +317,46 @@ describe("chat AskUser prompt", () => {
     await expectAskUserResponse("t-002");
   });
 
+  it("非打断模式的允许 other 提问点击其他后才显示输入框", async () => {
+    await enableNonInterruptMode();
+    const view = await renderTaskDetail();
+
+    emitAskUserRequest("t-002", askUserWithOtherSpec);
+    emitAskUserTimelineEvent("t-002", askUserWithOtherSpec);
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".timeline-pending-action.composer-inline--ask"))
+        .not.toBeNull();
+    });
+    expect(view.queryByPlaceholderText("自定义回答")).toBeNull();
+
+    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
+    const input = view.getByPlaceholderText("自定义回答");
+    const actionRow = input.closest(".composer-inline__actions");
+    expect(actionRow).not.toBeNull();
+    expect(actionRow).toContainElement(view.getByRole("button", { name: "完成" }));
+    expect(actionRow?.querySelector(".composer-inline__spacer")).toBeNull();
+    await fireEvent.update(input, "第三种方案");
+    await fireEvent.click(view.getByRole("button", { name: "完成" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+        taskId: "t-002",
+        requestId: "ask-t-002",
+        result: {
+          cancelled: false,
+          answers: {
+            "q-1": {
+              questionId: "q-1",
+              value: "other",
+              notes: "第三种方案",
+            },
+          },
+        },
+      }, undefined);
+    });
+  });
+
   it("非打断模式的多题提问在时间线卡片中保留前后题回答", async () => {
     await enableNonInterruptMode();
     const view = await renderTaskDetail();
@@ -357,12 +407,12 @@ describe("chat AskUser prompt", () => {
     const prompt = await view.findByRole("region", { name: "确认 Claude 计划" });
     expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");
     expect(view.queryByRole("button", { name: "先不执行" })).toBeNull();
-    expect(view.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();
 
     const input = await view.findByPlaceholderText("输入修改要求，Enter 退回计划");
     await fireEvent.update(input, "请把测试计划拆细");
-    await fireEvent.click(view.getByRole("button", { name: "发送计划修改要求" }));
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
@@ -394,12 +444,12 @@ describe("chat AskUser prompt", () => {
     expect(composer?.querySelector(".composer-inline--tool")).toBeInTheDocument();
     expect(view.queryByRole("button", { name: "添加附件" })).toBeNull();
     expect(view.queryByRole("button", { name: "拒绝" })).toBeNull();
-    expect(view.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();
 
     const input = await view.findByPlaceholderText("输入拒绝理由，Enter 拒绝此次调用");
     await fireEvent.update(input, "先不要写这个文件");
-    await fireEvent.click(view.getByRole("button", { name: "发送拒绝备注" }));
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
@@ -427,8 +477,9 @@ describe("chat AskUser prompt", () => {
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("button", { name: "添加附件" })).toBeInTheDocument();
 
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     await fireEvent.update(view.getByPlaceholderText("拒绝理由"), "先不要写这个文件");
-    await fireEvent.click(view.getByRole("button", { name: "忽略" }));
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
@@ -545,8 +596,9 @@ describe("chat AskUser prompt", () => {
     await waitFor(() => {
       expect(view.container.querySelector(".timeline-pending-action--plan")).not.toBeNull();
     });
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     await fireEvent.update(view.getByPlaceholderText("修改要求"), "请把测试计划拆细");
-    await fireEvent.click(view.getByRole("button", { name: "提交修改要求" }));
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {

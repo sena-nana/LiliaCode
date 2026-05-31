@@ -38,6 +38,22 @@ const singleAskSpec: AskUserSpec = {
   ],
 };
 
+const singleAskWithOtherSpec: AskUserSpec = {
+  title: "Claude 想确认一下",
+  questions: [
+    {
+      id: "q-1",
+      question: "选哪个方案？",
+      mode: "single",
+      allowOther: true,
+      options: [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+    },
+  ],
+};
+
 const toolConsent: ToolConsentRequest = {
   taskId: "task-1",
   turnId: "turn-tool",
@@ -176,7 +192,7 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "开启计划模式" })).toBeInTheDocument();
   });
 
-  it("pending 状态切换时复用同一个输入框节点", async () => {
+  it("需要输入的 pending 状态切换时复用同一个输入框节点", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -190,7 +206,7 @@ describe("ChatComposer", () => {
     await view.rerender({
       state: baseState,
       attachments: [],
-      pendingAsk: pendingAsk(singleAskSpec),
+      toolConsent,
     });
 
     const pendingInput = view.getByRole("textbox");
@@ -203,6 +219,7 @@ describe("ChatComposer", () => {
       state: baseState,
       attachments: [],
       pendingAsk: null,
+      toolConsent: null,
     });
 
     const restoredInput = view.getByRole("textbox");
@@ -276,17 +293,22 @@ describe("ChatComposer", () => {
     expect(input.scrollTop).toBe(0);
   });
 
-  it("pending AskUser 中输入文本后，完成按钮会作为 other 回答返回", async () => {
+  it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
-        pendingAsk: pendingAsk(singleAskSpec),
+        pendingAsk: pendingAsk(singleAskWithOtherSpec),
       },
     });
 
-    expect(view.queryByRole("radio", { name: "其他..." })).toBeNull();
-    await fireEvent.update(view.getByRole("textbox"), "我想选第三种");
+    expect(view.queryByRole("textbox")).toBeNull();
+    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
+    const input = view.getByRole("textbox");
+    const entryRow = input.closest(".chat-composer__entry-row");
+    expect(entryRow).not.toBeNull();
+    expect(entryRow).toContainElement(view.getByRole("button", { name: "完成" }));
+    await fireEvent.update(input, "我想选第三种");
     await fireEvent.click(view.getByRole("button", { name: "完成" }));
 
     expect(view.emitted("resolve-ask-user")?.[0]?.[0]).toEqual({
@@ -301,7 +323,21 @@ describe("ChatComposer", () => {
     });
   });
 
-  it("pending 工具授权中发送文本会作为拒绝备注返回", async () => {
+  it("pending AskUser 不允许 other 时不显示自定义输入", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        pendingAsk: pendingAsk(singleAskSpec),
+      },
+    });
+
+    expect(view.queryByRole("radio", { name: "其他" })).toBeNull();
+    expect(view.queryByRole("textbox")).toBeNull();
+    expect(view.getByRole("button", { name: "完成" })).toBeDisabled();
+  });
+
+  it("pending 工具授权中输入文本后修改按钮会作为拒绝备注返回", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -310,8 +346,9 @@ describe("ChatComposer", () => {
       },
     });
 
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     await fireEvent.update(view.getByRole("textbox"), "先不要写这个文件");
-    await fireEvent.click(view.getByRole("button", { name: "发送拒绝备注" }));
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([
       "deny",
@@ -329,7 +366,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.queryByRole("button", { name: "拒绝" })).toBeNull();
-    expect(view.getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
 
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 

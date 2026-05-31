@@ -49,6 +49,9 @@ const {
   canGoPrev,
   askTitle,
   askOptionsWithId,
+  askHasPreview,
+  askFocusedOption,
+  askOtherSelected,
   canAskSubmit,
   activeOptionId,
   singlePick,
@@ -71,6 +74,8 @@ const toolRequest = computed(() =>
 );
 const { toolDanger, toolIcon, toolHeadline, toolInputJson, toolSubtitle } =
   useToolConsentPresentation(toolRequest);
+const hasFreeformText = computed(() => freeformText.value.trim().length > 0);
+const hasToolMessage = computed(() => toolMessage.value.trim().length > 0);
 
 function resolveAsk(result: AskUserResult) {
   if (props.action.kind === "tool_consent") return;
@@ -145,10 +150,10 @@ watch(actionKey, () => {
         <button
           type="button"
           class="ghost composer-inline__btn"
-          :disabled="toolSubmitting !== null"
+          :disabled="toolSubmitting !== null || !hasToolMessage"
           @click="decideTool('deny')"
         >
-          {{ toolSubmitting === "deny" ? "处理中..." : "忽略" }}
+          {{ toolSubmitting === "deny" ? "处理中..." : hasToolMessage ? "修改" : "忽略" }}
         </button>
         <button
           type="button"
@@ -171,17 +176,17 @@ watch(actionKey, () => {
     <textarea
       v-model="freeformText"
       class="timeline-pending-action__input"
-      rows="2"
+      rows="1"
       placeholder="修改要求"
     />
     <div class="composer-inline__actions">
       <button
         type="button"
         class="ghost composer-inline__btn"
-        :disabled="!freeformText.trim()"
+        :disabled="!hasFreeformText"
         @click="submitAskFreeform()"
       >
-        提交修改要求
+        {{ hasFreeformText ? "修改" : "忽略" }}
       </button>
       <button type="button" class="primary composer-inline__btn" @click="submitAsk">
         同意
@@ -228,59 +233,68 @@ watch(actionKey, () => {
         <p class="composer-inline__qtext">{{ askQuestion.question }}</p>
       </div>
 
-      <ul
+      <div
         v-if="askQuestion.mode !== 'confirm'"
-        class="composer-inline__options"
-        :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
+        class="composer-inline__main"
+        :class="{ 'composer-inline__main--with-preview': askHasPreview }"
       >
-        <li
-          v-for="opt in askOptionsWithId"
-          :key="opt.id"
-          class="composer-inline__option"
-          :class="{
-            'is-active': activeOptionId === opt.id,
-            'is-picked': askQuestion.mode === 'single'
-              ? singlePick === opt.id
-              : multiPicks.has(opt.id),
-            'is-recommended': opt.recommended,
-            'is-danger': opt.danger,
-          }"
+        <ul
+          class="composer-inline__options"
+          :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
         >
-          <button
-            type="button"
-            class="composer-inline__option-btn"
-            :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
-            :aria-checked="askQuestion.mode === 'single'
-              ? singlePick === opt.id
-              : multiPicks.has(opt.id)"
-            @mouseenter="highlightOption(opt.id)"
-            @mouseleave="clearOptionHighlight(opt.id)"
-            @focus="focusOption(opt.id)"
-            @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
+          <li
+            v-for="opt in askOptionsWithId"
+            :key="opt.id"
+            class="composer-inline__option"
+            :class="{
+              'is-active': activeOptionId === opt.id,
+              'is-picked': askQuestion.mode === 'single'
+                ? singlePick === opt.id
+                : multiPicks.has(opt.id),
+              'is-recommended': opt.recommended,
+              'is-danger': opt.danger,
+            }"
           >
-            <span class="composer-inline__option-indicator" aria-hidden="true">
-              <Check v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)" :size="12" />
-            </span>
-            <span class="composer-inline__option-main">
-              <span class="composer-inline__option-label">
-                {{ opt.label }}
-                <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
+            <button
+              type="button"
+              class="composer-inline__option-btn"
+              :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
+              :aria-checked="askQuestion.mode === 'single'
+                ? singlePick === opt.id
+                : multiPicks.has(opt.id)"
+              @mouseenter="highlightOption(opt.id)"
+              @mouseleave="clearOptionHighlight(opt.id)"
+              @focus="focusOption(opt.id)"
+              @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
+            >
+              <span class="composer-inline__option-indicator" aria-hidden="true">
+                <Check v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)" :size="12" />
               </span>
-              <span v-if="opt.description" class="composer-inline__option-desc">
-                {{ opt.description }}
+              <span class="composer-inline__option-main">
+                <span class="composer-inline__option-label">
+                  {{ opt.label }}
+                  <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
+                </span>
+                <span v-if="opt.description" class="composer-inline__option-desc">
+                  {{ opt.description }}
+                </span>
               </span>
-            </span>
-          </button>
-        </li>
-      </ul>
+            </button>
+          </li>
+        </ul>
 
-      <textarea
-        v-if="askQuestion.mode !== 'confirm'"
-        v-model="freeformText"
-        class="timeline-pending-action__input"
-        rows="1"
-        placeholder="自定义回答"
-      />
+        <aside
+          v-if="askHasPreview"
+          class="composer-inline__preview"
+          aria-label="选项预览"
+        >
+          <pre v-if="askFocusedOption?.preview" class="composer-inline__preview-pre">{{ askFocusedOption.preview }}</pre>
+          <p v-else class="composer-inline__preview-empty">
+            把鼠标移到选项上 / 用方向键聚焦，这里会显示对比预览。
+          </p>
+        </aside>
+      </div>
+
     </div>
 
     <footer class="composer-inline__actions">
@@ -292,7 +306,7 @@ watch(actionKey, () => {
       >
         跳过
       </button>
-      <span class="composer-inline__spacer" />
+      <span v-if="!askOtherSelected" class="composer-inline__spacer" />
       <button
         v-if="canGoPrev"
         type="button"
@@ -302,6 +316,13 @@ watch(actionKey, () => {
         <ArrowLeft :size="13" aria-hidden="true" />
         上一题
       </button>
+      <textarea
+        v-if="askQuestion.mode !== 'confirm' && askOtherSelected"
+        v-model="freeformText"
+        class="timeline-pending-action__input composer-inline__other-input"
+        rows="1"
+        placeholder="自定义回答"
+      />
       <button
         v-if="askQuestion.mode === 'confirm'"
         type="button"

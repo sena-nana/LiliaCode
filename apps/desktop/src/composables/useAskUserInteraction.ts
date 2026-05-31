@@ -9,6 +9,8 @@ import type { PendingAsk } from "./useAskUser";
 
 export const OTHER_ANSWER_VALUE = "other";
 
+type AskUserOptionWithId = AskUserOption & { id: string; isOther?: boolean };
+
 export function useAskUserInteraction(
   activeAsk: ComputedRef<PendingAsk | null>,
   freeformText: Ref<string>,
@@ -40,23 +42,50 @@ export function useAskUserInteraction(
     askTotal.value === 1 &&
     askQuestion.value?.mode === "confirm",
   );
-  const askOptionsWithId = computed<(AskUserOption & { id: string })[]>(() => {
+  const askAllowsOther = computed(() => {
+    const q = askQuestion.value;
+    return q?.mode !== "confirm" && q?.allowOther === true;
+  });
+  const askOptionsWithId = computed<AskUserOptionWithId[]>(() => {
     const q = askQuestion.value;
     if (!q || !q.options) return [];
-    return q.options.map((opt, i) => ({ ...opt, id: opt.id ?? opt.label ?? `opt-${i}` }));
+    const options = q.options.map((opt, i) => ({
+      ...opt,
+      id: opt.id ?? opt.label ?? `opt-${i}`,
+    }));
+    if (!askAllowsOther.value) return options;
+    return [
+      ...options,
+      {
+        id: OTHER_ANSWER_VALUE,
+        label: "其他",
+        isOther: true,
+      },
+    ];
   });
   const askHasPreview = computed(() => askOptionsWithId.value.some((opt) => !!opt.preview));
   const askFocusedOption = computed(() =>
     askOptionsWithId.value.find((opt) => opt.id === singleFocus.value) ?? null,
   );
+  const askOtherSelected = computed(() => {
+    const q = askQuestion.value;
+    if (!q || !askAllowsOther.value) return false;
+    if (q.mode === "single") return singlePick.value === OTHER_ANSWER_VALUE;
+    if (q.mode === "multi") return multiPicks.value.has(OTHER_ANSWER_VALUE);
+    return false;
+  });
   const canAskSubmit = computed(() => {
     const q = askQuestion.value;
     if (!q) return false;
     if (q.mode === "confirm") return true;
     const hasFreeform = freeformText.value.trim().length > 0;
-    if (q.mode === "single") return hasFreeform || !!singlePick.value;
+    if (q.mode === "single") {
+      if (singlePick.value === OTHER_ANSWER_VALUE) return askAllowsOther.value && hasFreeform;
+      return !!singlePick.value;
+    }
     const min = q.minSelections ?? 1;
-    return multiPicks.value.size + (hasFreeform ? 1 : 0) >= min;
+    const hasOther = multiPicks.value.has(OTHER_ANSWER_VALUE);
+    return multiPicks.value.size >= min && (!hasOther || hasFreeform);
   });
 
   function focusOption(id: string) {
@@ -75,13 +104,19 @@ export function useAskUserInteraction(
   }
 
   function selectSingleOption(id: string) {
+    if (id === OTHER_ANSWER_VALUE && !askAllowsOther.value) return;
     singleFocus.value = id;
     singlePick.value = id;
+    if (id !== OTHER_ANSWER_VALUE) freeformText.value = "";
   }
 
   function toggleMulti(id: string) {
+    if (id === OTHER_ANSWER_VALUE && !askAllowsOther.value) return;
     const next = new Set(multiPicks.value);
-    if (next.has(id)) next.delete(id);
+    if (next.has(id)) {
+      next.delete(id);
+      if (id === OTHER_ANSWER_VALUE) freeformText.value = "";
+    }
     else {
       const q = askQuestion.value;
       if (q?.maxSelections && next.size >= q.maxSelections) {
@@ -100,9 +135,22 @@ export function useAskUserInteraction(
     if (q.mode === "confirm") return { questionId: q.id, value: "yes" };
     if (q.mode === "single") {
       const id = singlePick.value;
+      if (id === OTHER_ANSWER_VALUE) {
+        const notes = freeformText.value.trim();
+        return askAllowsOther.value && notes
+          ? { questionId: q.id, value: OTHER_ANSWER_VALUE, notes }
+          : null;
+      }
       return id ? { questionId: q.id, value: id } : null;
     }
-    return { questionId: q.id, value: [...multiPicks.value] };
+    const picked = [...multiPicks.value];
+    if (!picked.includes(OTHER_ANSWER_VALUE)) {
+      return { questionId: q.id, value: picked };
+    }
+    const notes = freeformText.value.trim();
+    return askAllowsOther.value && notes
+      ? { questionId: q.id, value: picked, notes }
+      : null;
   }
 
   function buildFreeformAnswer(value: string): AskUserAnswer | null {
@@ -112,6 +160,7 @@ export function useAskUserInteraction(
       return { questionId: q.id, value: "revision_request", notes: value };
     }
     if (q.mode === "confirm") return { questionId: q.id, value: "no", notes: value };
+    if (!askAllowsOther.value) return null;
     if (q.mode === "single") {
       return { questionId: q.id, value: OTHER_ANSWER_VALUE, notes: value };
     }
@@ -121,15 +170,10 @@ export function useAskUserInteraction(
     return { questionId: q.id, value: [...picked], notes: value };
   }
 
-  function buildCurrentAskAnswer(): AskUserAnswer | null {
-    const text = askQuestion.value?.mode !== "confirm" ? freeformText.value.trim() : "";
-    return text ? buildFreeformAnswer(text) : buildAskAnswer();
-  }
-
   function saveNavigableAnswer() {
     const q = askQuestion.value;
     if (!q || q.mode === "confirm" || !canAskSubmit.value) return;
-    const ans = buildCurrentAskAnswer();
+    const ans = buildAskAnswer();
     if (ans) askAnswers.value[ans.questionId] = ans;
   }
 
@@ -159,7 +203,7 @@ export function useAskUserInteraction(
 
   function submitAsk() {
     if (!canAskSubmit.value) return;
-    const ans = buildCurrentAskAnswer();
+    const ans = buildAskAnswer();
     if (!ans) return;
     askAnswers.value[ans.questionId] = ans;
     resolveIfDone(advanceAsk());
@@ -218,7 +262,11 @@ export function useAskUserInteraction(
       if (q.mode === "single") {
         if (prior && typeof prior.value === "string") {
           if (prior.value === OTHER_ANSWER_VALUE) {
-            freeformText.value = prior.notes ?? "";
+            if (askAllowsOther.value) {
+              singleFocus.value = OTHER_ANSWER_VALUE;
+              singlePick.value = OTHER_ANSWER_VALUE;
+              freeformText.value = prior.notes ?? "";
+            }
           } else {
             singleFocus.value = prior.value;
             singlePick.value = prior.value;
@@ -228,9 +276,11 @@ export function useAskUserInteraction(
         if (prior && Array.isArray(prior.value)) {
           if (prior.value.includes(OTHER_ANSWER_VALUE)) {
             multiPicks.value = new Set(
-              prior.value.filter((value) => value !== OTHER_ANSWER_VALUE),
+              askAllowsOther.value
+                ? prior.value
+                : prior.value.filter((value) => value !== OTHER_ANSWER_VALUE),
             );
-            freeformText.value = prior.notes ?? "";
+            if (askAllowsOther.value) freeformText.value = prior.notes ?? "";
           } else {
             multiPicks.value = new Set(prior.value);
           }
@@ -253,9 +303,11 @@ export function useAskUserInteraction(
     canGoPrev,
     askTitle,
     askIsPlanApproval,
+    askAllowsOther,
     askOptionsWithId,
     askHasPreview,
     askFocusedOption,
+    askOtherSelected,
     canAskSubmit,
     focusOption,
     highlightOption,

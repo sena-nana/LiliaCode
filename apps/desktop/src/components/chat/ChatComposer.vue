@@ -103,6 +103,7 @@ const {
   askOptionsWithId,
   askHasPreview,
   askFocusedOption,
+  askOtherSelected,
   canAskSubmit,
   singleFocus,
   activeOptionId: activeAskOptionId,
@@ -131,6 +132,8 @@ const hasPendingPanel = computed(() =>
 const askUsesInputActions = computed(() =>
   !!activeAsk.value && askQuestion.value?.mode !== "confirm",
 );
+const pendingInputText = computed(() => pendingText.value.trim());
+const hasPendingInputText = computed(() => pendingInputText.value.length > 0);
 const pendingEntryActionsKey = computed(() => {
   if (askUsesInputActions.value) return "ask-input";
   if (askIsPlanApproval.value) return "ask-plan";
@@ -154,7 +157,7 @@ const inputPlaceholder = computed(() => {
     const q = askQuestion.value;
     if (askIsPlanApproval.value) return "输入修改要求，Enter 退回计划";
     if (q?.mode === "confirm") return "输入取消原因，Enter 返回给 Agent";
-    return "输入自定义回答，Enter 作为其他选项";
+    return "补充其他回答";
   }
   return "可向 agent 询问任何事，输入 @ 使用插件或提及文件";
 });
@@ -237,6 +240,11 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     send();
   }
+}
+
+function modifyPlanApproval() {
+  if (!hasPendingInputText.value) return;
+  submitAskFreeform();
 }
 
 function queueResize() {
@@ -326,7 +334,7 @@ function decideToolConsent(decision: ToolConsentDecision, explicitMessage?: stri
   if (!c || toolSubmitting.value) return;
   toolSubmitting.value = decision;
   const message = decision === "deny"
-    ? explicitMessage?.trim() || pendingText.value.trim() || "用户拒绝了此次工具调用"
+    ? explicitMessage?.trim() || pendingInputText.value || "用户拒绝了此次工具调用"
     : undefined;
   emit("resolve-tool-consent", decision, message);
   if (decision === "deny") pendingText.value = "";
@@ -570,6 +578,7 @@ onBeforeUnmount(() => {
       :class="{ 'chat-composer__entry-row--pending': hasPending }"
     >
       <textarea
+        v-if="!hasPending || !askUsesInputActions || askOtherSelected"
         ref="textareaMeasure"
         class="chat-composer__input chat-composer__input-measure"
         rows="1"
@@ -577,6 +586,7 @@ onBeforeUnmount(() => {
         aria-hidden="true"
       />
       <textarea
+        v-if="!hasPending || !askUsesInputActions || askOtherSelected"
         ref="textarea"
         v-model="inputValue"
         class="chat-composer__input"
@@ -625,9 +635,10 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ghost composer-inline__btn"
-              @click="confirmAskNo"
+              :disabled="!hasPendingInputText"
+              @click="modifyPlanApproval"
             >
-              忽略
+              {{ hasPendingInputText ? "修改" : "忽略" }}
             </button>
             <button
               type="button"
@@ -642,10 +653,10 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ghost composer-inline__btn"
-              :disabled="toolSubmitting !== null"
+              :disabled="toolSubmitting !== null || !hasPendingInputText"
               @click="decideToolConsent('deny')"
             >
-              {{ toolSubmitting === "deny" ? "处理中..." : "忽略" }}
+              {{ toolSubmitting === "deny" ? "处理中..." : hasPendingInputText ? "修改" : "忽略" }}
             </button>
             <button
               type="button"
@@ -659,7 +670,7 @@ onBeforeUnmount(() => {
           </div>
 
           <button
-            v-if="!askUsesInputActions"
+            v-if="!hasPending || (!askUsesInputActions && !askIsPlanApproval && !activeToolConsent)"
             type="button"
             class="chat-composer__send"
             :class="{ 'chat-composer__send--interrupt': canInterrupt }"
