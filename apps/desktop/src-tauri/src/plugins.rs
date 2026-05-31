@@ -8,11 +8,14 @@
 //!     但 Lilia 在启动 agent 子进程时按它决定本轮传给 SDK 的 skills 列表。
 //!   - Plugins (marketplace beta)：`<root>/.claude/plugins/<name>/plugin.json`，用
 //!     `disabled: true` 控制是否传给 SDK 的 plugins 列表。
+//!   - 外部 MCP：Lilia 自管 `<LILIA_HOME>/config/claude-mcp-servers.json`，
+//!     当前只支持用户级 stdio server。
 //! - **Codex**：`~/.codex/config.toml` 的 `[mcp_servers.<name>]` 节，一期做只读 + 「打开配置」。
 //!
 //! 文件解析全部手写极小子集（避免引入 yaml / toml 依赖）。解析失败按「跳过 + 记 warning」
 //! 处理，不让单个坏文件阻塞整个面板。
 
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +27,9 @@ const SKILLS_SUBDIR: &str = "skills";
 const PLUGINS_SUBDIR: &str = "plugins";
 const SKILL_FILE: &str = "SKILL.md";
 const PLUGIN_MANIFEST: &str = "plugin.json";
+const LILIA_CONFIG_SUBDIR: &str = "config";
+const CLAUDE_MCP_CONFIG_FILE: &str = "claude-mcp-servers.json";
+const BUILTIN_CLAUDE_MCP_SERVER: &str = "lilia";
 
 const SCOPE_USER: &str = "user";
 const SCOPE_PROJECT: &str = "project";
@@ -53,6 +59,18 @@ pub struct ClaudePlugin {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ClaudeMcpServer {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<BTreeMap<String, String>>,
+    pub env_keys: Vec<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexMcpServer {
     pub name: String,
     pub command: String,
@@ -66,6 +84,8 @@ pub struct PluginsOverview {
     pub claude_user_skills: Vec<ClaudeSkill>,
     pub claude_project_skills: Vec<ClaudeSkill>,
     pub claude_user_plugins: Vec<ClaudePlugin>,
+    pub claude_mcp_servers: Vec<ClaudeMcpServer>,
+    pub claude_mcp_config_path: Option<String>,
     pub codex_mcp_servers: Vec<CodexMcpServer>,
     pub codex_config_path: Option<String>,
     pub warnings: Vec<String>,
@@ -83,7 +103,19 @@ pub struct ClaudeRuntimePlugin {
 pub struct ClaudeRuntimeExtensions {
     pub skills: Vec<String>,
     pub plugins: Vec<ClaudeRuntimePlugin>,
+    pub mcp_servers: BTreeMap<String, ClaudeRuntimeMcpServer>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeRuntimeMcpServer {
+    pub r#type: String,
+    pub command: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +165,10 @@ fn ensure_dir(p: &Path) -> Result<(), String> {
         fs::create_dir_all(p).map_err(|e| format!("创建目录 {} 失败：{e}", p.display()))?;
     }
     Ok(())
+}
+
+fn lilia_config_dir() -> PathBuf {
+    crate::store::resolve_lilia_home().join(LILIA_CONFIG_SUBDIR)
 }
 
 // ---------- Claude Skill ----------
@@ -283,8 +319,7 @@ pub fn create_claude_skill(
         "---\nname: {name}\ndescription: '{}'\n---\n\n在这里写 Skill 内容。Claude 会按需读取。\n",
         desc_one_line.replace('\'', "''")
     );
-    fs::write(&skill_file, body)
-        .map_err(|e| format!("写入 SKILL.md 失败：{e}"))?;
+    fs::write(&skill_file, body).map_err(|e| format!("写入 SKILL.md 失败：{e}"))?;
     Ok(ClaudeSkill {
         scope: scope.to_string(),
         name,
@@ -306,8 +341,7 @@ pub fn delete_claude_skill(
     if !skill_dir.exists() {
         return Err(format!("未找到 skill：{name}"));
     }
-    fs::remove_dir_all(&skill_dir)
-        .map_err(|e| format!("删除 skill 目录失败：{e}"))?;
+    fs::remove_dir_all(&skill_dir).map_err(|e| format!("删除 skill 目录失败：{e}"))?;
     Ok(())
 }
 
@@ -325,8 +359,7 @@ pub fn set_claude_skill_enabled(
     let original = fs::read_to_string(&skill_file)
         .map_err(|e| format!("读取 {} 失败：{e}", skill_file.display()))?;
     let updated = rewrite_disabled_field(&original, !enabled);
-    fs::write(&skill_file, updated)
-        .map_err(|e| format!("写入 SKILL.md 失败：{e}"))?;
+    fs::write(&skill_file, updated).map_err(|e| format!("写入 SKILL.md 失败：{e}"))?;
     Ok(())
 }
 
@@ -467,8 +500,7 @@ pub fn set_claude_plugin_enabled(
         .map_err(|e| format!("读取 {} 失败：{e}", manifest_path.display()))?;
     let updated = rewrite_plugin_disabled_field(&original, !enabled)
         .map_err(|e| format!("更新 plugin.json 失败：{e}"))?;
-    fs::write(&manifest_path, updated)
-        .map_err(|e| format!("写入 plugin.json 失败：{e}"))?;
+    fs::write(&manifest_path, updated).map_err(|e| format!("写入 plugin.json 失败：{e}"))?;
     Ok(())
 }
 
@@ -483,10 +515,297 @@ fn rewrite_plugin_disabled_field(text: &str, want_disabled: bool) -> Result<Stri
     } else {
         obj.remove("disabled");
     }
-    serde_json::to_string_pretty(&value).map_err(|e| e.to_string()).map(|mut out| {
-        out.push('\n');
-        out
-    })
+    serde_json::to_string_pretty(&value)
+        .map_err(|e| e.to_string())
+        .map(|mut out| {
+            out.push('\n');
+            out
+        })
+}
+
+// ---------- Claude external MCP servers ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeMcpConfigFile {
+    #[serde(default)]
+    servers: Vec<ClaudeMcpConfigEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeMcpConfigEntry {
+    name: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeMcpServerInput {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
+}
+
+pub fn claude_mcp_config_path() -> PathBuf {
+    lilia_config_dir().join(CLAUDE_MCP_CONFIG_FILE)
+}
+
+fn sanitize_claude_mcp_name(raw: &str) -> Result<String, String> {
+    let name = sanitize_extension_name(raw, "Claude MCP server")?;
+    if name.eq_ignore_ascii_case(BUILTIN_CLAUDE_MCP_SERVER) {
+        return Err("Claude MCP server 名称不能使用内置名称：lilia".to_string());
+    }
+    Ok(name)
+}
+
+fn normalize_command(raw: &str) -> Result<String, String> {
+    let command = raw.trim();
+    if command.is_empty() {
+        return Err("command 不能为空".to_string());
+    }
+    Ok(command.to_string())
+}
+
+fn normalize_args(args: Vec<String>) -> Vec<String> {
+    args.into_iter()
+        .map(|arg| arg.trim().to_string())
+        .filter(|arg| !arg.is_empty())
+        .collect()
+}
+
+fn normalize_env(env: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    env.into_iter()
+        .filter_map(|(key, value)| {
+            let key = key.trim().to_string();
+            if key.is_empty() || value.is_empty() {
+                None
+            } else {
+                Some((key, value))
+            }
+        })
+        .collect()
+}
+
+fn sort_claude_mcp_entries(entries: &mut [ClaudeMcpConfigEntry]) {
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+}
+
+fn read_claude_mcp_config() -> Result<ClaudeMcpConfigFile, String> {
+    let path = claude_mcp_config_path();
+    read_claude_mcp_config_from_path(&path)
+}
+
+fn read_claude_mcp_config_from_path(path: &Path) -> Result<ClaudeMcpConfigFile, String> {
+    if !path.exists() {
+        return Ok(ClaudeMcpConfigFile::default());
+    }
+    let text =
+        fs::read_to_string(&path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    if text.trim().is_empty() {
+        return Ok(ClaudeMcpConfigFile::default());
+    }
+    serde_json::from_str::<ClaudeMcpConfigFile>(&text)
+        .map_err(|e| format!("{} 不是合法 Claude MCP 配置：{e}", path.display()))
+}
+
+fn write_claude_mcp_config(config: &ClaudeMcpConfigFile) -> Result<(), String> {
+    let path = claude_mcp_config_path();
+    if let Some(parent) = path.parent() {
+        ensure_dir(parent)?;
+    }
+    let mut text = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    text.push('\n');
+    fs::write(&path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
+}
+
+fn public_claude_mcp_server(entry: &ClaudeMcpConfigEntry, include_env: bool) -> ClaudeMcpServer {
+    let mut env_keys: Vec<String> = entry.env.keys().cloned().collect();
+    env_keys.sort_by_key(|key| key.to_lowercase());
+    ClaudeMcpServer {
+        name: entry.name.clone(),
+        command: entry.command.clone(),
+        args: entry.args.clone(),
+        env: if include_env && !entry.env.is_empty() {
+            Some(entry.env.clone())
+        } else {
+            None
+        },
+        env_keys,
+        enabled: !entry.disabled,
+    }
+}
+
+fn validate_claude_mcp_entries(
+    mut entries: Vec<ClaudeMcpConfigEntry>,
+) -> (Vec<ClaudeMcpConfigEntry>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut out = Vec::new();
+    for mut entry in entries.drain(..) {
+        let name = match sanitize_claude_mcp_name(&entry.name) {
+            Ok(name) => name,
+            Err(e) => {
+                warnings.push(format!("跳过 Claude MCP server：{e}"));
+                continue;
+            }
+        };
+        let lower = name.to_lowercase();
+        if let Some(existing) = seen.get(&lower) {
+            warnings.push(format!(
+                "跳过重复 Claude MCP server：{}（已存在 {}）",
+                name, existing
+            ));
+            continue;
+        }
+        let command = match normalize_command(&entry.command) {
+            Ok(command) => command,
+            Err(e) => {
+                warnings.push(format!("跳过 Claude MCP server {name}：{e}"));
+                continue;
+            }
+        };
+        entry.name = name.clone();
+        entry.command = command;
+        entry.args = normalize_args(entry.args);
+        entry.env = normalize_env(entry.env);
+        seen.insert(lower, name);
+        out.push(entry);
+    }
+    sort_claude_mcp_entries(&mut out);
+    (out, warnings)
+}
+
+pub fn list_claude_mcp_servers() -> (Vec<ClaudeMcpServer>, Vec<String>) {
+    let config = match read_claude_mcp_config() {
+        Ok(config) => config,
+        Err(e) => return (Vec::new(), vec![e]),
+    };
+    let (entries, warnings) = validate_claude_mcp_entries(config.servers);
+    let servers = entries
+        .iter()
+        .map(|entry| public_claude_mcp_server(entry, false))
+        .collect();
+    (servers, warnings)
+}
+
+pub fn create_claude_mcp_server(input: ClaudeMcpServerInput) -> Result<ClaudeMcpServer, String> {
+    let name = sanitize_claude_mcp_name(&input.name)?;
+    let command = normalize_command(&input.command)?;
+    let mut config = read_claude_mcp_config()?;
+    if config
+        .servers
+        .iter()
+        .any(|server| server.name.eq_ignore_ascii_case(&name))
+    {
+        return Err(format!("同名 Claude MCP server 已存在：{name}"));
+    }
+    let entry = ClaudeMcpConfigEntry {
+        name,
+        command,
+        args: normalize_args(input.args),
+        env: normalize_env(input.env.unwrap_or_default()),
+        disabled: false,
+    };
+    let public = public_claude_mcp_server(&entry, false);
+    config.servers.push(entry);
+    sort_claude_mcp_entries(&mut config.servers);
+    write_claude_mcp_config(&config)?;
+    Ok(public)
+}
+
+pub fn update_claude_mcp_server(
+    name: &str,
+    input: ClaudeMcpServerInput,
+) -> Result<ClaudeMcpServer, String> {
+    let current_name = sanitize_claude_mcp_name(name)?;
+    let next_name = sanitize_claude_mcp_name(&input.name)?;
+    let command = normalize_command(&input.command)?;
+    let mut config = read_claude_mcp_config()?;
+    if config.servers.iter().any(|server| {
+        server.name.eq_ignore_ascii_case(&next_name)
+            && !server.name.eq_ignore_ascii_case(&current_name)
+    }) {
+        return Err(format!("同名 Claude MCP server 已存在：{next_name}"));
+    }
+    let Some(server) = config
+        .servers
+        .iter_mut()
+        .find(|server| server.name.eq_ignore_ascii_case(&current_name))
+    else {
+        return Err(format!("未找到 Claude MCP server：{current_name}"));
+    };
+    server.name = next_name;
+    server.command = command;
+    server.args = normalize_args(input.args);
+    if let Some(env) = input.env {
+        server.env = normalize_env(env);
+    }
+    let public = public_claude_mcp_server(server, false);
+    sort_claude_mcp_entries(&mut config.servers);
+    write_claude_mcp_config(&config)?;
+    Ok(public)
+}
+
+pub fn delete_claude_mcp_server(name: &str) -> Result<(), String> {
+    let name = sanitize_claude_mcp_name(name)?;
+    let mut config = read_claude_mcp_config()?;
+    let Some(index) = config
+        .servers
+        .iter()
+        .position(|server| server.name.eq_ignore_ascii_case(&name))
+    else {
+        return Err(format!("未找到 Claude MCP server：{name}"));
+    };
+    config.servers.remove(index);
+    write_claude_mcp_config(&config)
+}
+
+pub fn set_claude_mcp_server_enabled(name: &str, enabled: bool) -> Result<(), String> {
+    let name = sanitize_claude_mcp_name(name)?;
+    let mut config = read_claude_mcp_config()?;
+    let Some(server) = config
+        .servers
+        .iter_mut()
+        .find(|server| server.name.eq_ignore_ascii_case(&name))
+    else {
+        return Err(format!("未找到 Claude MCP server：{name}"));
+    };
+    server.disabled = !enabled;
+    write_claude_mcp_config(&config)
+}
+
+pub fn runtime_claude_mcp_servers() -> (BTreeMap<String, ClaudeRuntimeMcpServer>, Vec<String>) {
+    let config = match read_claude_mcp_config() {
+        Ok(config) => config,
+        Err(e) => return (BTreeMap::new(), vec![e]),
+    };
+    let (entries, warnings) = validate_claude_mcp_entries(config.servers);
+    let mut out = BTreeMap::new();
+    for entry in entries {
+        if entry.disabled {
+            continue;
+        }
+        out.insert(
+            entry.name,
+            ClaudeRuntimeMcpServer {
+                r#type: "stdio".to_string(),
+                command: entry.command,
+                args: entry.args,
+                env: entry.env,
+            },
+        );
+    }
+    (out, warnings)
 }
 
 // ---------- Codex MCP servers ----------
@@ -573,9 +892,7 @@ fn parse_toml_string_array(raw: &str) -> Option<Vec<String>> {
         if item.is_empty() {
             continue;
         }
-        let unq = item
-            .strip_prefix('"')
-            .and_then(|s| s.strip_suffix('"'))?;
+        let unq = item.strip_prefix('"').and_then(|s| s.strip_suffix('"'))?;
         out.push(unq.to_string());
     }
     Some(out)
@@ -638,8 +955,11 @@ pub fn overview(app: &AppHandle, project_cwd: Option<&str>) -> PluginsOverview {
     warnings.extend(w2);
     let (user_plugins, w3) = list_claude_plugins(app, SCOPE_USER);
     warnings.extend(w3);
-    let (codex_mcp_servers, w4) = list_codex_mcp_servers(app);
+    let (claude_mcp_servers, w4) = list_claude_mcp_servers();
     warnings.extend(w4);
+    let claude_mcp_config_path = Some(claude_mcp_config_path().to_string_lossy().to_string());
+    let (codex_mcp_servers, w5) = list_codex_mcp_servers(app);
+    warnings.extend(w5);
     let codex_config_path = codex_config_path(app)
         .ok()
         .map(|path| path.to_string_lossy().to_string());
@@ -647,6 +967,8 @@ pub fn overview(app: &AppHandle, project_cwd: Option<&str>) -> PluginsOverview {
         claude_user_skills: user_skills,
         claude_project_skills: project_skills,
         claude_user_plugins: user_plugins,
+        claude_mcp_servers,
+        claude_mcp_config_path,
         codex_mcp_servers,
         codex_config_path,
         warnings,
@@ -680,6 +1002,8 @@ pub fn runtime_extensions(app: &AppHandle, project_cwd: Option<&str>) -> AgentRu
             path: plugin.path,
         })
         .collect();
+    let (claude_mcp_servers, mcp_warnings) = runtime_claude_mcp_servers();
+    claude_warnings.extend(mcp_warnings);
 
     let config_path = codex_config_path(app).ok();
     let (mcp_servers, codex_warnings) = list_codex_mcp_servers(app);
@@ -688,6 +1012,7 @@ pub fn runtime_extensions(app: &AppHandle, project_cwd: Option<&str>) -> AgentRu
         claude: ClaudeRuntimeExtensions {
             skills,
             plugins: runtime_plugins,
+            mcp_servers: claude_mcp_servers,
             warnings: claude_warnings,
         },
         codex: CodexRuntimeExtensions {
@@ -765,6 +1090,87 @@ mod tests {
         let disabled = rewrite_plugin_disabled_field(&enabled, true).unwrap();
         let value: serde_json::Value = serde_json::from_str(&disabled).unwrap();
         assert_eq!(value.get("disabled").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn claude_mcp_config_empty_when_missing() {
+        let missing = std::env::temp_dir().join(format!(
+            "lilia-missing-claude-mcp-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&missing);
+        let config = read_claude_mcp_config_from_path(&missing).unwrap();
+        assert!(config.servers.is_empty());
+    }
+
+    #[test]
+    fn claude_mcp_validates_and_sorts_servers() {
+        let entries = vec![
+            ClaudeMcpConfigEntry {
+                name: "weather".to_string(),
+                command: "node".to_string(),
+                args: vec!["weather.js".to_string(), "".to_string()],
+                env: BTreeMap::from([
+                    ("TOKEN".to_string(), "secret".to_string()),
+                    ("EMPTY".to_string(), "".to_string()),
+                ]),
+                disabled: false,
+            },
+            ClaudeMcpConfigEntry {
+                name: "alpha".to_string(),
+                command: "uvx".to_string(),
+                args: vec!["alpha".to_string()],
+                env: BTreeMap::new(),
+                disabled: true,
+            },
+        ];
+        let (entries, warnings) = validate_claude_mcp_entries(entries);
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert_eq!(entries[0].name, "alpha");
+        assert_eq!(entries[1].name, "weather");
+        assert_eq!(entries[1].args, vec!["weather.js"]);
+        assert_eq!(entries[1].env.len(), 1);
+    }
+
+    #[test]
+    fn claude_mcp_rejects_builtin_name() {
+        assert!(sanitize_claude_mcp_name("lilia").is_err());
+        assert!(sanitize_claude_mcp_name("LILIA").is_err());
+        assert!(sanitize_claude_mcp_name("ok_server").is_ok());
+    }
+
+    #[test]
+    fn claude_mcp_public_view_hides_env_values() {
+        let entry = ClaudeMcpConfigEntry {
+            name: "weather".to_string(),
+            command: "node".to_string(),
+            args: vec![],
+            env: BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+            disabled: false,
+        };
+        let public = public_claude_mcp_server(&entry, false);
+        assert_eq!(public.env_keys, vec!["TOKEN"]);
+        assert!(public.env.is_none());
+
+        let runtime = public_claude_mcp_server(&entry, true);
+        assert_eq!(
+            runtime.env.and_then(|env| env.get("TOKEN").cloned()),
+            Some("secret".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_mcp_validation_skips_lilia_with_warning() {
+        let entries = vec![ClaudeMcpConfigEntry {
+            name: "lilia".to_string(),
+            command: "node".to_string(),
+            args: vec![],
+            env: BTreeMap::new(),
+            disabled: false,
+        }];
+        let (entries, warnings) = validate_claude_mcp_entries(entries);
+        assert!(entries.is_empty());
+        assert!(warnings.iter().any(|warning| warning.contains("lilia")));
     }
 
     #[test]

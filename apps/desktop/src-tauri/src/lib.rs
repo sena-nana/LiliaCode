@@ -28,7 +28,10 @@ mod window_state;
 use agent_events::{AgentEventEffect, AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
 use agent_extensions::TodoMirrorExtension;
 use agent_timeline::AgentTimelineEventInput;
-use plugins::{ClaudePlugin, ClaudeSkill, CodexMcpServer, PluginsOverview};
+use plugins::{
+    ClaudeMcpServer, ClaudeMcpServerInput, ClaudePlugin, ClaudeSkill, CodexMcpServer,
+    PluginsOverview,
+};
 use store::LiliaStore;
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -1081,17 +1084,18 @@ fn try_cc_switch_for_backend(app: &AppHandle) -> Option<BackendConnectionPlan> {
 }
 
 /// direct 路由：用 store 里的 ProviderConfig；apiKey/baseUrl 都空则 unconfigured。
-fn try_direct_for_backend(
-    app: &AppHandle,
-    backend: &'static str,
-) -> BackendConnectionPlan {
+fn try_direct_for_backend(app: &AppHandle, backend: &'static str) -> BackendConnectionPlan {
     let key = match backend {
         BACKEND_CODEX => PROVIDER_KEY_CODEX,
         _ => PROVIDER_KEY_CLAUDE,
     };
     let cfg = load_provider_config(app, key).unwrap_or_default();
     let has_key = cfg.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
-    let has_url = cfg.base_url.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
+    let has_url = cfg
+        .base_url
+        .as_ref()
+        .map(|u| !u.is_empty())
+        .unwrap_or(false);
     if !has_key && !has_url {
         return BackendConnectionPlan {
             mode: ConnectionMode::Unconfigured,
@@ -1246,9 +1250,8 @@ fn spawn_agent_turn(
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(err) => {
-                let msg = format!(
-                    "无法启动 node 子进程（请确保已安装 Node 18+ 并在 PATH 中）：{err}"
-                );
+                let msg =
+                    format!("无法启动 node 子进程（请确保已安装 Node 18+ 并在 PATH 中）：{err}");
                 persist_and_emit_error_timeline_event(
                     &app_handle,
                     &task_id_for_thread,
@@ -1272,10 +1275,11 @@ fn spawn_agent_turn(
         let child_handle = Arc::new(Mutex::new(child));
         {
             let store = app_handle.state::<ChatStore>();
-            store.running_children.lock().unwrap().insert(
-                task_id_for_thread.clone(),
-                child_handle.clone(),
-            );
+            store
+                .running_children
+                .lock()
+                .unwrap()
+                .insert(task_id_for_thread.clone(), child_handle.clone());
             store.running_turns.lock().unwrap().insert(
                 task_id_for_thread.clone(),
                 RunningTurn {
@@ -1349,9 +1353,7 @@ fn spawn_agent_turn(
                 match &event {
                     AgentRuntimeEvent::ToolUse { .. } | AgentRuntimeEvent::TodoList { .. } => {}
                     AgentRuntimeEvent::Timeline { .. } => {
-                        if let Some(input) =
-                            timeline_input_from_runtime_event(&event_ctx, &event)
-                        {
+                        if let Some(input) = timeline_input_from_runtime_event(&event_ctx, &event) {
                             if let Some(text) = assistant_error_text(&input) {
                                 last_assistant_error_text = Some(text);
                             }
@@ -1581,9 +1583,13 @@ fn describe_attachment_path(path: String) -> ChatAttachment {
         })
         .unwrap_or("unknown")
         .to_string();
-    let size = metadata
-        .as_ref()
-        .and_then(|meta| if meta.is_file() { Some(meta.len()) } else { None });
+    let size = metadata.as_ref().and_then(|meta| {
+        if meta.is_file() {
+            Some(meta.len())
+        } else {
+            None
+        }
+    });
     let path_text = normalized_path.to_string_lossy().to_string();
     let name = normalized_path
         .file_name()
@@ -1747,7 +1753,9 @@ fn chat_respond_tool_consent(
         return Ok(()); // runner 已退出；忽略
     };
     let mut stdin = handle.lock().map_err(|e| e.to_string())?;
-    stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
     stdin.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1776,7 +1784,9 @@ fn chat_respond_ask_user(
         return Ok(());
     };
     let mut stdin = handle.lock().map_err(|e| e.to_string())?;
-    stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| e.to_string())?;
     stdin.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1822,10 +1832,7 @@ fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
 }
 
 #[tauri::command]
-fn chat_get_composer_state(
-    task_id: String,
-    store: State<'_, ChatStore>,
-) -> ChatComposerState {
+fn chat_get_composer_state(task_id: String, store: State<'_, ChatStore>) -> ChatComposerState {
     store
         .composers
         .lock()
@@ -1845,11 +1852,7 @@ fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatStore>
 }
 
 #[tauri::command]
-fn chat_reset_session(
-    task_id: String,
-    chat_store: State<'_, ChatStore>,
-    app: AppHandle,
-) {
+fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: AppHandle) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
     sessions.remove(&session_key(BACKEND_CLAUDE, &task_id));
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
@@ -1858,7 +1861,11 @@ fn chat_reset_session(
     chat_store.pending_turns.lock().unwrap().remove(&task_id);
     chat_store.running_turns.lock().unwrap().remove(&task_id);
     chat_store.running_children.lock().unwrap().remove(&task_id);
-    chat_store.interrupted_turns.lock().unwrap().remove(&task_id);
+    chat_store
+        .interrupted_turns
+        .lock()
+        .unwrap()
+        .remove(&task_id);
     chat_store.running_stdins.lock().unwrap().remove(&task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
         if let Err(err) = store
@@ -1878,7 +1885,11 @@ fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus 
         BACKEND_CODEX => "OPENAI_API_KEY",
         _ => "ANTHROPIC_API_KEY",
     };
-    let has_api_key = plan.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false)
+    let has_api_key = plan
+        .api_key
+        .as_ref()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false)
         || env::var(key_env).map(|v| !v.is_empty()).unwrap_or(false)
         || load_provider_config(
             app,
@@ -2101,9 +2112,7 @@ fn assistant_ai_test_connection(config: AssistantAIConfig) -> AssistantAITestRes
                         .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
                         .collect()
                 });
-            let matched = parsed
-                .as_ref()
-                .map(|list| list.iter().any(|m| m == model));
+            let matched = parsed.as_ref().map(|list| list.iter().any(|m| m == model));
             AssistantAITestResult {
                 ok: true,
                 error: None,
@@ -2370,6 +2379,52 @@ fn plugins_set_claude_plugin_enabled(
 }
 
 #[tauri::command]
+fn plugins_create_claude_mcp_server(
+    input: ClaudeMcpServerInput,
+) -> Result<ClaudeMcpServer, String> {
+    plugins::create_claude_mcp_server(input)
+}
+
+#[tauri::command]
+fn plugins_update_claude_mcp_server(
+    name: String,
+    input: ClaudeMcpServerInput,
+) -> Result<ClaudeMcpServer, String> {
+    plugins::update_claude_mcp_server(&name, input)
+}
+
+#[tauri::command]
+fn plugins_delete_claude_mcp_server(name: String) -> Result<(), String> {
+    plugins::delete_claude_mcp_server(&name)
+}
+
+#[tauri::command]
+fn plugins_set_claude_mcp_server_enabled(name: String, enabled: bool) -> Result<(), String> {
+    plugins::set_claude_mcp_server_enabled(&name, enabled)
+}
+
+/// 用系统默认编辑器打开 Lilia 自管 Claude MCP 配置。
+#[tauri::command]
+fn plugins_open_claude_mcp_config(app: AppHandle) -> Result<(), String> {
+    let path = plugins::claude_mcp_config_path();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建 Claude MCP 配置目录失败：{e}"))?;
+        }
+    }
+    if !path.exists() {
+        std::fs::write(&path, b"{\n  \"servers\": []\n}\n")
+            .map_err(|e| format!("初始化 Claude MCP 配置失败：{e}"))?;
+    }
+    let path_str = path.to_string_lossy().to_string();
+    app.opener()
+        .open_path(path_str, None::<&str>)
+        .map_err(|e| format!("打开 Claude MCP 配置失败：{e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn plugins_list_codex_mcp_servers(app: AppHandle) -> Vec<CodexMcpServer> {
     plugins::list_codex_mcp_servers(&app).0
 }
@@ -2380,13 +2435,11 @@ fn plugins_open_codex_config(app: AppHandle) -> Result<(), String> {
     let path = plugins::codex_config_path(&app)?;
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建 .codex 目录失败：{e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建 .codex 目录失败：{e}"))?;
         }
     }
     if !path.exists() {
-        std::fs::write(&path, b"")
-            .map_err(|e| format!("初始化 config.toml 失败：{e}"))?;
+        std::fs::write(&path, b"").map_err(|e| format!("初始化 config.toml 失败：{e}"))?;
     }
     let path_str = path.to_string_lossy().to_string();
     app.opener()
@@ -2428,7 +2481,10 @@ pub fn run() {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
             }
-            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed) {
+            if matches!(
+                event,
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
+            ) {
                 if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
                     window_state::persist_main_window_state(&window.app_handle(), &webview_window);
                 }
@@ -2469,6 +2525,11 @@ pub fn run() {
             plugins_set_claude_skill_enabled,
             plugins_list_claude_plugins,
             plugins_set_claude_plugin_enabled,
+            plugins_create_claude_mcp_server,
+            plugins_update_claude_mcp_server,
+            plugins_delete_claude_mcp_server,
+            plugins_set_claude_mcp_server_enabled,
+            plugins_open_claude_mcp_config,
             plugins_list_codex_mcp_servers,
             plugins_open_codex_config,
             todos::todo_list,

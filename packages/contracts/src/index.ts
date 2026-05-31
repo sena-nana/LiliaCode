@@ -466,7 +466,7 @@ export interface EnvStatusReport {
  * 插件 / 技能管理契约。两个 backend 扩展机制不对称：
  * - Claude Code：skills (markdown 文件夹) + plugins (marketplace bundle)，
  *   目录 `~/.claude/<kind>/<name>/` 或 `<cwd>/.claude/<kind>/<name>/`。
- *   Lilia 一期直接管理 skill；plugin 仅列出已安装。
+ *   Lilia 直接管理 skill 与自管 Claude MCP；plugin 列出已安装并可启停。
  * - Codex：扩展集中在 `~/.codex/config.toml` 的 `[mcp_servers.*]` 节，
  *   一期只读 + 一键打开配置文件。
  */
@@ -504,6 +504,17 @@ export interface ClaudePlugin {
   path: string;
 }
 
+export interface ClaudeMcpServer {
+  name: string;
+  command: string;
+  args: string[];
+  /** 写入 / 运行时使用；overview 列表不回显值。 */
+  env?: Record<string, string>;
+  /** overview 列表只展示 key，避免把 token/key 直接露出来。 */
+  envKeys: string[];
+  enabled: boolean;
+}
+
 export interface CodexMcpServer {
   name: string;
   command: string;
@@ -517,9 +528,17 @@ export interface ClaudeRuntimePlugin {
   path: string;
 }
 
+export interface ClaudeRuntimeMcpServer {
+  type: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface ClaudeRuntimeExtensions {
   skills: string[];
   plugins: ClaudeRuntimePlugin[];
+  mcpServers: Record<string, ClaudeRuntimeMcpServer>;
   warnings: string[];
 }
 
@@ -539,6 +558,8 @@ export interface PluginsOverview {
   claudeUserSkills: ClaudeSkill[];
   claudeProjectSkills: ClaudeSkill[];
   claudeUserPlugins: ClaudePlugin[];
+  claudeMcpServers: ClaudeMcpServer[];
+  claudeMcpConfigPath: string | null;
   codexMcpServers: CodexMcpServer[];
   codexConfigPath: string | null;
   /** 解析期发生的非致命错误，UI 用来提示「读取 .codex/config.toml 时第 N 行有误」。 */

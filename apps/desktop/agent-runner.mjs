@@ -12,7 +12,7 @@
 //         "planMode": true|false,
 //         "permission": "full|ask|readonly",
 //         "extensions": {
-//           "claude": { "skills": [], "plugins": [], "warnings": [] },
+//           "claude": { "skills": [], "plugins": [], "mcpServers": {}, "warnings": [] },
 //           "codex": { "mcpServers": [], "configPath": "...|null", "warnings": [] }
 //         }
 //       }
@@ -419,6 +419,33 @@ function stringArray(value) {
     : [];
 }
 
+function readClaudeRuntimeMcpServers(value, warnings) {
+  if (!isRecord(value)) return {};
+  const mcpServers = {};
+  for (const [name, server] of Object.entries(value)) {
+    if (name === "lilia") {
+      warnings.push("跳过外部 Claude MCP server：lilia 是 Lilia 内置 server");
+      continue;
+    }
+    if (!isRecord(server) || server.type !== "stdio" || typeof server.command !== "string" || !server.command.trim()) {
+      warnings.push(`跳过外部 Claude MCP server：${name}`);
+      continue;
+    }
+    const args = stringArray(server.args);
+    const env = Object.fromEntries(
+      Object.entries(isRecord(server.env) ? server.env : {})
+        .filter(([key, val]) => key.trim() && typeof val === "string" && val),
+    );
+    mcpServers[name] = {
+      type: "stdio",
+      command: server.command,
+      ...(args.length > 0 ? { args } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
+    };
+  }
+  return mcpServers;
+}
+
 function readClaudeRuntimeExtensions(cmd) {
   const ext = readRuntimeExtensions(cmd).claude;
   const plugins = Array.isArray(ext?.plugins)
@@ -431,7 +458,13 @@ function readClaudeRuntimeExtensions(cmd) {
       )
       .map((plugin) => ({ type: "local", path: plugin.path }))
     : [];
-  return { skills: stringArray(ext?.skills), plugins, warnings: stringArray(ext?.warnings) };
+  const warnings = stringArray(ext?.warnings);
+  return {
+    skills: stringArray(ext?.skills),
+    plugins,
+    mcpServers: readClaudeRuntimeMcpServers(ext?.mcpServers, warnings),
+    warnings,
+  };
 }
 
 function readCodexRuntimeExtensions(cmd) {
@@ -1622,6 +1655,7 @@ async function runClaude(cmd) {
     systemPrompt: buildClaudeSystemPrompt(),
     mcpServers: {
       lilia: liliaAskUserServer,
+      ...runtimeExtensions.mcpServers,
     },
     toolAliases: {
       AskUserQuestion: "mcp__lilia__ask_user_question",
