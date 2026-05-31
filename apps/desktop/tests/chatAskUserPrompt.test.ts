@@ -307,7 +307,7 @@ describe("chat AskUser prompt", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("chat_send_message", expect.objectContaining({
         taskId: "t-002",
-        content: "补充上下文",
+        content: expect.stringContaining("补充上下文"),
       }), undefined);
     });
 

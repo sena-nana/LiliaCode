@@ -40,6 +40,13 @@ import {
   useToolConsentForTask,
 } from "../composables/useToolConsentBridge";
 import {
+  createTodo,
+  listTodos,
+  updateTodo,
+  type TaskTodo,
+  type TaskTodoPriority,
+} from "../services/todos";
+import {
   getComposerState,
   listAgentTimeline,
   listModels,
@@ -59,6 +66,7 @@ import {
 } from "../composables/useAgentInteractionSettings";
 import { onDebugTimelineEvent } from "../composables/useDebugTimelineEvents";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
+import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   AskUserResult,
   AgentTimelineEvent,
@@ -218,17 +226,64 @@ function removeAttachment(attachmentId: string) {
   attachments.value = attachments.value.filter((attachment) => attachment.id !== attachmentId);
 }
 
-async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
-  if (!hasContext.value) return;
-  if (!content.trim() && outgoingAttachments.length === 0) return;
+const LILIA_GUIDE_PREFIX = "[Lilia 引导]";
+const guidePriorityOrder: TaskTodoPriority[] = ["high", "normal", "low"];
+const dispatchingGuideIds = new Set<string>();
+let autoGuideDispatching = false;
+let pendingGuideWindow: "tool" | "user" | "idle" | null = null;
 
-  // 草稿在第一条消息发出去之前先入库，即使后端报错也不撤回。
+function priorityLabel(priority: TaskTodoPriority): string {
+  if (priority === "high") return "高";
+  if (priority === "low") return "低";
+  return "中";
+}
+
+function guideTextForComposer(
+  content: string,
+  outgoingAttachments: ChatAttachment[],
+): string {
+  const text = content.trim();
+  if (outgoingAttachments.length === 0) return text;
+  const attachmentLines = outgoingAttachments.map((attachment, index) =>
+    `${index + 1}. ${attachment.name}: ${attachment.path}`
+  );
+  return [
+    text || "请参考以下本地路径继续处理。",
+    "",
+    "附加路径：",
+    ...attachmentLines,
+  ].join("\n");
+}
+
+function guideMessage(todo: TaskTodo): string {
+  return [
+    LILIA_GUIDE_PREFIX,
+    `优先级：${priorityLabel(todo.priority)}`,
+    "",
+    todo.text,
+  ].join("\n");
+}
+
+async function ensureTaskReadyForMessage(
+  content: string,
+  outgoingAttachments: ChatAttachment[],
+) {
   if (props.projectId && isDraftTask(props.taskId)) {
     await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
   } else if (!props.projectId && isDraftOrphan(props.taskId)) {
     await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
   }
+}
 
+async function sendAgentMessage(
+  content: string,
+  outgoingAttachments: ChatAttachment[] = [],
+  guideId?: string,
+) {
+  if (!hasContext.value) return;
+  if (!content.trim() && outgoingAttachments.length === 0) return;
+
+  await ensureTaskReadyForMessage(content, outgoingAttachments);
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
 
   const optimistic = createMessageTimelineEvent({
@@ -242,26 +297,97 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
   upsertTimelineEvent(optimistic);
   userSendScrollKey.value += 1;
   try {
-    const result = await sendMessage(
+    await sendMessage(
       props.taskId,
       content,
       composer.value,
       cwd,
       outgoingAttachments,
+      guideId,
     );
-    // Rust 端 chat_send_message 已经同步落库 user message timeline 事件并
-    // emit 出来，前端 onAgentTimeline listener 自然会用带正确 (turnSeq,
-    // intraTurnOrder) 的真实事件 upsert。这里只摘掉 pending-* 占位即可——
-    // 千万不要再用本地构造的版本覆盖，否则乐观对象的 turnSeq=MAX 会把
-    // 真实事件踢到时间线末尾。
-    void result;
     removeTimelineEvent(optimistic.id);
-    attachments.value = [];
   } catch (err) {
     removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
     upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`));
+    throw err;
   }
+}
+
+async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
+  if (!hasContext.value) return;
+  if (!content.trim() && outgoingAttachments.length === 0) return;
+
+  try {
+    const guideText = guideTextForComposer(content, outgoingAttachments);
+    await ensureTaskReadyForMessage(guideText, []);
+    await createTodo(props.taskId, guideText, "normal");
+    attachments.value = [];
+    if (pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0) {
+      void scheduleGuideInsertion("user");
+    } else if (!isTurnRunning.value) {
+      void scheduleGuideInsertion("idle");
+    }
+  } catch (err) {
+    upsertTimelineEvent(createErrorTimelineEvent(`创建引导失败：${String(err)}`));
+  }
+}
+
+async function selectPendingGuide(windowKind: "tool" | "user" | "idle"): Promise<TaskTodo | null> {
+  const candidates = (await listTodos(props.taskId))
+    .filter((todo) =>
+      todo.source === "lilia" &&
+      todo.guideStatus === "pending" &&
+      !dispatchingGuideIds.has(todo.id)
+    );
+  const allowed = windowKind === "tool"
+    ? new Set<TaskTodoPriority>(["high"])
+    : windowKind === "user"
+      ? new Set<TaskTodoPriority>(["normal"])
+      : new Set<TaskTodoPriority>(guidePriorityOrder);
+  return candidates
+    .filter((todo) => allowed.has(todo.priority))
+    .sort((a, b) =>
+      guidePriorityOrder.indexOf(a.priority) - guidePriorityOrder.indexOf(b.priority) ||
+      a.order - b.order ||
+      a.createdAt - b.createdAt
+    )[0] ?? null;
+}
+
+async function dispatchGuide(todo: TaskTodo) {
+  if (todo.source !== "lilia" || dispatchingGuideIds.has(todo.id)) return;
+  dispatchingGuideIds.add(todo.id);
+  try {
+    await sendAgentMessage(guideMessage(todo), [], todo.id);
+  } catch (err) {
+    await updateTodo(todo.id, { guideStatus: "pending" }).catch(() => undefined);
+    upsertTimelineEvent(createErrorTimelineEvent(`插入引导失败：${String(err)}`));
+  } finally {
+    dispatchingGuideIds.delete(todo.id);
+  }
+}
+
+async function scheduleGuideInsertion(windowKind: "tool" | "user" | "idle") {
+  if (autoGuideDispatching) {
+    pendingGuideWindow = windowKind;
+    return;
+  }
+  autoGuideDispatching = true;
+  try {
+    const guide = await selectPendingGuide(windowKind);
+    if (guide) await dispatchGuide(guide);
+  } catch (err) {
+    upsertTimelineEvent(createErrorTimelineEvent(`调度引导失败：${String(err)}`));
+  } finally {
+    autoGuideDispatching = false;
+    const nextWindow = pendingGuideWindow;
+    pendingGuideWindow = null;
+    if (nextWindow) void scheduleGuideInsertion(nextWindow);
+  }
+}
+
+function onInsertGuide(todo: TaskTodo) {
+  void dispatchGuide(todo);
 }
 
 async function onInterrupt() {
@@ -509,6 +635,9 @@ onMounted(async () => {
     await onAgentTimeline((e) => {
       if (e.taskId !== props.taskId) return;
       upsertTimelineEvent(e);
+      if (isAgentTimelineToolWindowKind(e.kind)) {
+        void scheduleGuideInsertion("tool");
+      }
     }),
   );
   unlisteners.push(
@@ -537,6 +666,7 @@ onMounted(async () => {
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
       isTurnRunning.value = false;
+      void scheduleGuideInsertion("idle");
     }),
   );
   await Promise.all([loadAll(), loadAgentInteractionSettings()]);
@@ -570,6 +700,23 @@ watch(
   syncDebugPanelRegistration,
   { immediate: true },
 );
+
+watch(
+  () => [
+    pendingAskUsers.value.length,
+    pendingToolConsents.value.length,
+    pendingPlanApproval.value?.turnId ?? "",
+  ] as const,
+  ([askCount, consentCount, planTurn], [prevAskCount, prevConsentCount, prevPlanTurn]) => {
+    if (
+      askCount > prevAskCount ||
+      consentCount > prevConsentCount ||
+      (planTurn && planTurn !== prevPlanTurn)
+    ) {
+      void scheduleGuideInsertion("user");
+    }
+  },
+);
 </script>
 
 <template>
@@ -594,7 +741,11 @@ watch(
           >
             <template #controls>
               <div class="chat-controls">
-                <TodoFloat v-if="taskId" :task-id="taskId" />
+                <TodoFloat
+                  v-if="taskId"
+                  :task-id="taskId"
+                  @insert-guide="onInsertGuide"
+                />
                 <ChatComposer
                   :state="composer"
                   :attachments="attachments"

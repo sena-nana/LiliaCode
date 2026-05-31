@@ -96,6 +96,7 @@ struct PendingChatTurn {
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
     turn_id: String,
+    guide_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -670,21 +671,28 @@ mod agent_event_sink_tests {
                 created_at: 100,
             },
             turn_id: format!("turn-{id}"),
+            guide_id: None,
         }
     }
 
     #[test]
-    fn clearing_pending_turns_removes_executable_queue() {
+    fn clearing_pending_turns_removes_executable_queue_and_returns_guide_ids() {
         let store = ChatStore::default();
         {
             let mut pending = store.pending_turns.lock().unwrap();
             pending
                 .entry("task-1".to_string())
                 .or_default()
-                .push_back(pending_turn("queued"));
+                .push_back(PendingChatTurn {
+                    guide_id: Some("guide-1".to_string()),
+                    ..pending_turn("queued")
+                });
         }
 
-        assert_eq!(clear_pending_turns(&store, "task-1"), 1);
+        assert_eq!(
+            clear_pending_turns(&store, "task-1"),
+            vec!["guide-1".to_string()]
+        );
         assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
     }
 
@@ -829,6 +837,7 @@ fn queue_pending_turn(
     attachments: Vec<ChatAttachment>,
     message: ChatMessage,
     turn_id: String,
+    guide_id: Option<String>,
 ) -> usize {
     let mut pending = store.pending_turns.lock().unwrap();
     let queue = pending.entry(task_id.to_string()).or_default();
@@ -839,18 +848,41 @@ fn queue_pending_turn(
         attachments,
         message,
         turn_id,
+        guide_id,
     });
     queue.len()
 }
 
-fn clear_pending_turns(store: &ChatStore, task_id: &str) -> usize {
+fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<String> {
     store
         .pending_turns
         .lock()
         .unwrap()
         .remove(task_id)
-        .map(|queue| queue.len())
-        .unwrap_or(0)
+        .map(|queue| queue.into_iter().filter_map(|turn| turn.guide_id).collect())
+        .unwrap_or_default()
+}
+
+fn set_guide_status_for_app(
+    app: &AppHandle,
+    guide_id: Option<&str>,
+    status: &str,
+) -> Result<(), String> {
+    let Some(guide_id) = guide_id else {
+        return Ok(());
+    };
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    todos::set_lilia_guide_status(app, &store, guide_id, status)
+}
+
+fn reset_cleared_guide_queue(app: &AppHandle, guide_ids: Vec<String>) {
+    for guide_id in guide_ids {
+        if let Err(err) = set_guide_status_for_app(app, Some(&guide_id), "pending") {
+            eprintln!("[todo-guides] reset queued guide failed: {err}");
+        }
+    }
 }
 
 fn take_next_pending_turn(
@@ -1534,6 +1566,9 @@ fn finish_agent_turn(
         take_next_pending_turn(&store, &task_id, advance_queue)
     };
     if let Some(turn) = next {
+        if let Err(err) = set_guide_status_for_app(&app_handle, turn.guide_id.as_deref(), "sent") {
+            eprintln!("[todo-guides] mark queued guide sent failed: {err}");
+        }
         persist_and_emit_message_timeline_event(
             &app_handle,
             &turn.message,
@@ -1624,6 +1659,7 @@ fn chat_send_message(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    guide_id: Option<String>,
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
@@ -1649,6 +1685,7 @@ fn chat_send_message(
         let mut running = store.running_tasks.lock().unwrap();
         if running.contains_key(&task_id) {
             drop(running);
+            set_guide_status_for_app(&app, guide_id.as_deref(), "queued")?;
             let queued_count = queue_pending_turn(
                 &store,
                 &task_id,
@@ -1658,6 +1695,7 @@ fn chat_send_message(
                 attachments,
                 user_msg.clone(),
                 turn_id.clone(),
+                guide_id.clone(),
             );
             persist_and_emit_message_timeline_event(
                 &app,
@@ -1675,6 +1713,7 @@ fn chat_send_message(
         running.insert(task_id.clone(), true);
     }
 
+    set_guide_status_for_app(&app, guide_id.as_deref(), "sent")?;
     persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, &turn_id, false);
 
     spawn_agent_turn(
@@ -1695,7 +1734,11 @@ fn chat_send_message(
 }
 
 #[tauri::command]
-fn chat_interrupt_turn(task_id: String, store: State<'_, ChatStore>) -> Result<(), String> {
+fn chat_interrupt_turn(
+    task_id: String,
+    app: AppHandle,
+    store: State<'_, ChatStore>,
+) -> Result<(), String> {
     let running_turn = {
         let turns = store.running_turns.lock().unwrap();
         turns.get(&task_id).cloned()
@@ -1704,7 +1747,7 @@ fn chat_interrupt_turn(task_id: String, store: State<'_, ChatStore>) -> Result<(
         return Ok(());
     };
 
-    clear_pending_turns(&store, &task_id);
+    reset_cleared_guide_queue(&app, clear_pending_turns(&store, &task_id));
     store
         .interrupted_turns
         .lock()
@@ -1858,7 +1901,7 @@ fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: Ap
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
     drop(sessions);
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
-    chat_store.pending_turns.lock().unwrap().remove(&task_id);
+    reset_cleared_guide_queue(&app, clear_pending_turns(&chat_store, &task_id));
     chat_store.running_turns.lock().unwrap().remove(&task_id);
     chat_store.running_children.lock().unwrap().remove(&task_id);
     chat_store

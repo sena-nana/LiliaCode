@@ -16,6 +16,7 @@ import {
   type ChatSidebarPanel,
 } from "../src/composables/useChatSidebar";
 import { setAgentInteractionSettings } from "../src/services/chat";
+import { createTodo } from "../src/services/todos";
 import { mockInvoke } from "./tauriMock";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -448,7 +449,7 @@ describe("TaskDetail chat sidebar toggle", () => {
     expect(view.getByText("点击预制事件按钮")).toBeInTheDocument();
   });
 
-  it("debug Todo工具走真实 TodoWrite 链路并刷新 TodoFloat", async () => {
+  it("debug Todo工具刷新原生 Todo，并把用户输入先进 Lilia 引导", async () => {
     await setAgentInteractionSettings({ debug: true });
     mockInvoke.mockClear();
     openChatSidebar("debug");
@@ -459,24 +460,60 @@ describe("TaskDetail chat sidebar toggle", () => {
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_apply_agent_event")).toBe(true);
-      expect(view.getByText("完成 Claude TodoWrite 调试接线")).toBeInTheDocument();
+      expect(view.getByText("确认 TodoFloat 自动刷新")).toBeInTheDocument();
     });
-    expect(view.getByText("1 / 3 done")).toBeInTheDocument();
+    expect(view.getByText("验证手动 Todo 不被 agent 覆盖")).toBeInTheDocument();
+    expect(view.queryByText("完成 Claude TodoWrite 调试接线")).toBeNull();
+    expect(view.getByText("Todo")).toBeInTheDocument();
     expect(view.getByText("模拟 Claude TodoWrite 并刷新 Lilia Todo")).toBeInTheDocument();
 
-    await fireEvent.click(view.getByRole("checkbox", { name: "切换 Todo：确认 TodoFloat 自动刷新" }));
-    await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_update")).toBe(true);
-      expect(view.getByText("2 / 3 done")).toBeInTheDocument();
-    });
-
-    await fireEvent.update(view.getByPlaceholderText("添加 Todo…"), "手动补充调试项");
-    await fireEvent.click(view.getByRole("button", { name: "添加 Todo" }));
+    await fireEvent.update(
+      view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"),
+      "手动补充调试项",
+    );
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(true);
       expect(view.getByText("手动补充调试项")).toBeInTheDocument();
-      expect(view.getByText("2 / 4 done")).toBeInTheDocument();
+      expect(view.getByText("引导")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const createIndex = mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "todo_create");
+      const sendIndex = mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message");
+      expect(createIndex).toBeGreaterThanOrEqual(0);
+      expect(sendIndex).toBeGreaterThan(createIndex);
+    });
+  });
+
+  it("Lilia 引导可以编辑优先级、正文并手动插入", async () => {
+    mockInvoke.mockClear();
+    const view = await renderTaskDetail();
+
+    await createTodo("t-002", "需要补充上下文");
+    mockInvoke.mockClear();
+
+    const guide = await view.findByRole("button", { name: "需要补充上下文" });
+    await fireEvent.click(guide);
+    const editInput = await view.findByLabelText("编辑引导");
+    await fireEvent.update(editInput, "需要补充关键上下文");
+    await fireEvent.blur(editInput);
+    await waitFor(() => {
+      expect(view.getByText("需要补充关键上下文")).toBeInTheDocument();
+    });
+    await fireEvent.click(view.getAllByTitle("设为高优先级").at(-1)!);
+
+    await waitFor(() => {
+      expect(view.getByText("需要补充关键上下文")).toBeInTheDocument();
+    });
+
+    const insert = view.getByRole("button", { name: /立即插入引导：需要补充关键上下文/ });
+    await fireEvent.click(insert);
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
+      expect(view.getByText("已插入")).toBeInTheDocument();
     });
   });
 
@@ -487,7 +524,7 @@ describe("TaskDetail chat sidebar toggle", () => {
     const view = await renderTaskDetail();
 
     const debug = debugSidebar(view.container);
-    await fireEvent.click(debug.getByRole("button", { name: "命令" }));
+    await fireEvent.click(await debug.findByRole("button", { name: "命令" }));
     await fireEvent.click(debug.getByRole("button", { name: "读文件" }));
     await fireEvent.click(debug.getByRole("button", { name: "改文件" }));
 

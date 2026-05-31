@@ -2,7 +2,7 @@ import { fireEvent, render } from "@testing-library/vue";
 import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
-import { deriveTimelineDisplay } from "@lilia/contracts";
+import { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import { normalizeClaudeTool } from "../../../packages/contracts/src/claudeTools.mjs";
 import AgentTimeline from "../src/components/chat/AgentTimeline.vue";
 import { timelineEventLabel, timelineInlinePreview } from "../src/components/chat/timelineDisplay";
@@ -79,6 +79,25 @@ async function flushPlanMeasure() {
 }
 
 describe("timeline display derivation", () => {
+  it("识别所有会触发高优先级引导的工具窗口 kind", () => {
+    for (const kind of [
+      "tool",
+      "command",
+      "mcp",
+      "search",
+      "web_search",
+      "web_fetch",
+      "file_read",
+      "file_change",
+      "todo_list",
+      "subagent",
+    ]) {
+      expect(isAgentTimelineToolWindowKind(kind)).toBe(true);
+    }
+    expect(isAgentTimelineToolWindowKind("message")).toBe(false);
+    expect(isAgentTimelineToolWindowKind("plan")).toBe(false);
+  });
+
   it("命令输出详情保留原始分行", () => {
     const display = deriveTimelineDisplay({
       kind: "command",

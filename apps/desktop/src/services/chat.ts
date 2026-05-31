@@ -83,6 +83,7 @@ export function sendMessage(
   composer: ChatComposerState,
   projectCwd: string,
   attachments: ChatAttachment[] = [],
+  guideId?: string,
 ): Promise<ChatSendResult> {
   return invoke<ChatSendResult>("chat_send_message", {
     taskId,
@@ -90,6 +91,7 @@ export function sendMessage(
     composer,
     projectCwd,
     attachments,
+    guideId: guideId ?? null,
   });
 }
 

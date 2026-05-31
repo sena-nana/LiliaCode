@@ -56,6 +56,23 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
   );
 }
 
+const AGENT_TIMELINE_TOOL_WINDOW_KINDS = new Set([
+  "tool",
+  "command",
+  "mcp",
+  "search",
+  "web_search",
+  "web_fetch",
+  "file_read",
+  "file_change",
+  "todo_list",
+  "subagent",
+]);
+
+export function isAgentTimelineToolWindowKind(kind: string): boolean {
+  return AGENT_TIMELINE_TOOL_WINDOW_KINDS.has(kind);
+}
+
 /**
  * 试着按 lilia 工具协议派生 display。命中两类输入：
  *  - 旧 DB 事件：`payload.toolName` 是 Claude 工具名（如 Bash/Read/Edit），lilia
@@ -150,18 +167,7 @@ function asString(value: unknown): string | null {
 
 /** 旧持久化数据里把工具事件落进这些 kind，需要走兼容映射。 */
 function isLegacyToolKind(kind: string): boolean {
-  return (
-    kind === "tool" ||
-    kind === "command" ||
-    kind === "file_change" ||
-    kind === "file_read" ||
-    kind === "todo_list" ||
-    kind === "subagent" ||
-    kind === "plan" ||
-    kind === "search" ||
-    kind === "web_fetch" ||
-    kind === "web_search"
-  );
+  return isAgentTimelineToolWindowKind(kind) || kind === "plan";
 }
 
 interface KindBuildInput {

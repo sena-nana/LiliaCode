@@ -48,7 +48,9 @@ interface TodoRow {
   text: string;
   done: boolean;
   order: number;
-  source: "user" | "agent";
+  source: "lilia" | "agent";
+  priority: "high" | "normal" | "low";
+  guideStatus: "pending" | "queued" | "sent" | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -61,6 +63,7 @@ interface AgentTodoInput {
   status?: unknown;
   completed?: unknown;
   done?: unknown;
+  priority?: unknown;
 }
 
 const baseProjects: ProjectRow[] = [
@@ -199,16 +202,50 @@ function readAgentTodoDone(todo: unknown): boolean {
     String(row.status ?? "").toLowerCase() === "completed";
 }
 
+function normalizeTodoPriority(value: unknown): "high" | "normal" | "low" {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (text === "high" || text === "low") return text;
+  return "normal";
+}
+
 function listMockTodos(taskId: string): TodoRow[] {
   return [...(todosByTaskId[taskId] ?? [])]
     .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
     .map(cloneTodo);
 }
 
+function setMockGuideStatus(
+  guideId: unknown,
+  guideStatus: "pending" | "queued" | "sent",
+) {
+  if (typeof guideId !== "string" || !guideId) return;
+  const now = Date.now();
+  for (const taskId of Object.keys(todosByTaskId)) {
+    let changed = false;
+    todosByTaskId[taskId] = todosByTaskId[taskId].map((todo) => {
+      if (todo.id !== guideId || todo.source !== "lilia" || todo.guideStatus === guideStatus) {
+        return todo;
+      }
+      changed = true;
+      return { ...todo, guideStatus, updatedAt: now };
+    });
+    if (changed) {
+      emitTauriEvent("todo-changed", { taskId });
+      return;
+    }
+  }
+}
+
+function resetMockQueuedGuides(turns: Array<Record<string, unknown>> = []) {
+  for (const turn of turns) {
+    setMockGuideStatus(turn.guideId, "pending");
+  }
+}
+
 function applyMockAgentTodos(taskId: string, todos: unknown[]): TodoRow[] {
   const now = Date.now();
   const existing = todosByTaskId[taskId] ?? [];
-  const userRows = existing.filter((todo) => todo.source === "user");
+  const userRows = existing.filter((todo) => todo.source === "lilia");
   const agentRows = existing.filter((todo) => todo.source === "agent");
   const userMax = userRows.reduce((max, todo) => Math.max(max, todo.order), -1);
   const nextAgentRows: TodoRow[] = [];
@@ -224,6 +261,8 @@ function applyMockAgentTodos(taskId: string, todos: unknown[]): TodoRow[] {
       done: readAgentTodoDone(todo),
       order: userMax + 1 + index,
       source: "agent",
+      priority: normalizeTodoPriority((todo as AgentTodoInput)?.priority),
+      guideStatus: null,
       createdAt: matched?.createdAt ?? now,
       updatedAt: now,
     };
@@ -379,6 +418,7 @@ export function completeMockAgentTurn(taskId: string) {
   if (next) {
     chatQueued[taskId] = rest;
     chatRunning[taskId] = true;
+    setMockGuideStatus(next.guideId, "sent");
     const queuedMessage = (timelineEvents[taskId] ?? []).find((event) => {
       const payload = event.payload as Record<string, unknown> | null;
       return event.kind === "message" && payload?.queued === true;
@@ -868,11 +908,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         text,
         done: false,
         order,
-        source: "user",
+        source: "lilia",
+        priority: normalizeTodoPriority(args.priority),
+        guideStatus: "pending",
         createdAt: now,
         updatedAt: now,
       };
       todosByTaskId[taskId] = [...(todosByTaskId[taskId] ?? []), todo];
+      emitTauriEvent("todo-changed", { taskId });
       return cloneTodo(todo);
     }
 
@@ -883,16 +926,28 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         let changed = false;
         todosByTaskId[taskId] = todosByTaskId[taskId].map((todo) => {
           if (todo.id !== id) return todo;
+          if (todo.source !== "lilia") return todo;
           changed = true;
           return {
             ...todo,
             text: typeof args.text === "string" ? args.text : todo.text,
             done: typeof args.done === "boolean" ? args.done : todo.done,
             order: typeof args.order === "number" ? args.order : todo.order,
+            priority: args.priority === "high" || args.priority === "normal" || args.priority === "low"
+              ? args.priority
+              : todo.priority,
+            guideStatus: args.guideStatus === "pending" ||
+              args.guideStatus === "queued" ||
+              args.guideStatus === "sent"
+              ? args.guideStatus
+              : todo.guideStatus,
             updatedAt: now,
           };
         });
-        if (changed) break;
+        if (changed) {
+          emitTauriEvent("todo-changed", { taskId });
+          break;
+        }
       }
       return undefined;
     }
@@ -901,8 +956,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const id = String(args.id);
       for (const taskId of Object.keys(todosByTaskId)) {
         const before = todosByTaskId[taskId].length;
-        todosByTaskId[taskId] = todosByTaskId[taskId].filter((todo) => todo.id !== id);
-        if (todosByTaskId[taskId].length !== before) break;
+        todosByTaskId[taskId] = todosByTaskId[taskId].filter((todo) =>
+          todo.id !== id || todo.source !== "lilia"
+        );
+        if (todosByTaskId[taskId].length !== before) {
+          emitTauriEvent("todo-changed", { taskId });
+          break;
+        }
       }
       return undefined;
     }
@@ -950,6 +1010,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         intraTurnOrder: 0,
       });
       if (queued) {
+        setMockGuideStatus(args.guideId, "queued");
         chatQueued[taskId] = [...(chatQueued[taskId] ?? []), args];
         return {
           message,
@@ -957,6 +1018,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           queuedCount: chatQueued[taskId].length,
         };
       }
+      setMockGuideStatus(args.guideId, "sent");
       chatRunning[taskId] = true;
       queueMicrotask(() => {
         emitTauriEvent("chat:turn-started", {
@@ -975,6 +1037,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const taskId = String(args.taskId);
       const turnId = currentChatTurnId(taskId);
       const message = "用户打断了当前 Agent 运行";
+      resetMockQueuedGuides(chatQueued[taskId]);
       chatQueued[taskId] = [];
       if (chatRunning[taskId] === true) {
         emitMockTimelineEvent(taskId, {
@@ -999,6 +1062,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           });
         });
       }
+      return undefined;
+    }
+
+    case "chat_reset_session": {
+      const taskId = String(args.taskId);
+      resetMockQueuedGuides(chatQueued[taskId]);
+      chatQueued[taskId] = [];
+      chatRunning[taskId] = false;
       return undefined;
     }
 

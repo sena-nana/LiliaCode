@@ -96,7 +96,9 @@ mod tests {
               text         TEXT NOT NULL,
               done         INTEGER NOT NULL DEFAULT 0,
               "order"      INTEGER NOT NULL,
-              source       TEXT NOT NULL CHECK (source IN ('user','agent')),
+              source       TEXT NOT NULL CHECK (source IN ('lilia','agent')),
+              priority     TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal','low')),
+              guide_status TEXT CHECK (guide_status IS NULL OR guide_status IN ('pending','queued','sent')),
               created_at   INTEGER NOT NULL,
               updated_at   INTEGER NOT NULL
             );
@@ -117,7 +119,7 @@ mod tests {
                 name: "TodoWrite".to_string(),
                 input: json!({
                     "todos": [
-                        { "content": "Draft event kernel", "status": "completed" },
+                        { "content": "Draft event kernel", "status": "completed", "priority": "high" },
                         { "content": "Wire extension host", "status": "pending" }
                     ]
                 }),
@@ -126,15 +128,21 @@ mod tests {
         .unwrap();
 
         assert!(handled);
-        let rows: Vec<(String, i64, String)> = {
+        let rows: Vec<(String, i64, String, String, Option<String>)> = {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT text, done, source
+                    r#"SELECT text, done, source, priority, guide_status
                        FROM task_todos WHERE task_id = ?1 ORDER BY "order" ASC"#,
                 )
                 .unwrap();
             stmt.query_map(params!["task-1"], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
@@ -144,8 +152,20 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("Draft event kernel".to_string(), 1, "agent".to_string()),
-                ("Wire extension host".to_string(), 0, "agent".to_string()),
+                (
+                    "Draft event kernel".to_string(),
+                    1,
+                    "agent".to_string(),
+                    "high".to_string(),
+                    None
+                ),
+                (
+                    "Wire extension host".to_string(),
+                    0,
+                    "agent".to_string(),
+                    "normal".to_string(),
+                    None
+                ),
             ]
         );
     }
@@ -160,7 +180,7 @@ mod tests {
             "task-1",
             &AgentRuntimeEvent::TodoList {
                 items: vec![
-                    json!({ "text": "Mirror provider todo", "completed": true }),
+                    json!({ "text": "Mirror provider todo", "completed": true, "priority": "low" }),
                     json!({ "content": "Keep Claude shape", "status": "pending" }),
                     json!({ "text": "Done alias", "done": true }),
                 ],
@@ -169,15 +189,15 @@ mod tests {
         .unwrap();
 
         assert!(handled);
-        let rows: Vec<(String, i64, String)> = {
+        let rows: Vec<(String, i64, String, String)> = {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT text, done, source
+                    r#"SELECT text, done, source, priority
                        FROM task_todos WHERE task_id = ?1 ORDER BY "order" ASC"#,
                 )
                 .unwrap();
             stmt.query_map(params!["task-1"], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
@@ -187,9 +207,24 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("Mirror provider todo".to_string(), 1, "agent".to_string()),
-                ("Keep Claude shape".to_string(), 0, "agent".to_string()),
-                ("Done alias".to_string(), 1, "agent".to_string()),
+                (
+                    "Mirror provider todo".to_string(),
+                    1,
+                    "agent".to_string(),
+                    "low".to_string()
+                ),
+                (
+                    "Keep Claude shape".to_string(),
+                    0,
+                    "agent".to_string(),
+                    "normal".to_string()
+                ),
+                (
+                    "Done alias".to_string(),
+                    1,
+                    "agent".to_string(),
+                    "normal".to_string()
+                ),
             ]
         );
     }

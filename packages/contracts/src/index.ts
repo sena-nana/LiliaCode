@@ -73,7 +73,9 @@ export interface TaskGraph {
  * 设计原则见 [[lilia-v1-feature-architecture]]。
  */
 
-export type TaskTodoSource = "user" | "agent";
+export type TaskTodoSource = "lilia" | "agent";
+export type TaskTodoPriority = "high" | "normal" | "low";
+export type TaskTodoGuideStatus = "pending" | "queued" | "sent";
 
 export interface TaskTodo {
   id: string;
@@ -82,8 +84,11 @@ export interface TaskTodo {
   done: boolean;
   /** 列表内排序，越小越靠前。 */
   order: number;
-  /** "agent" 表示来自 Claude SDK TodoWrite；"user" 是手动维护。 */
+  /** "agent" 表示来自原生 TodoWrite/todo_list；"lilia" 是 Lilia 引导。 */
   source: TaskTodoSource;
+  priority: TaskTodoPriority;
+  /** 仅 Lilia 引导使用；agent 原生 Todo 镜像为 null。 */
+  guideStatus: TaskTodoGuideStatus | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -345,7 +350,7 @@ export interface AgentTimelineEvent {
   intraTurnOrder: number;
 }
 
-export { deriveTimelineDisplay } from "./timelineDisplay";
+export { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "./timelineDisplay";
 export type { TimelineDisplayInput } from "./timelineDisplay";
 
 export interface ChatComposerState {

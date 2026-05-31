@@ -4216,265 +4216,227 @@ button.ghost:hover {
   }
 }
 
-/* ----- Todo float（贴附 composer 顶边的 chip / 卡片） ----- */
+/* ----- Todo / 引导紧凑列表（贴附 composer 顶边） ----- */
 .todo-float {
-  /* 展开态：与 composer 同视觉语言的卡片 */
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px -10px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  max-height: 280px;
-  overflow: hidden;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 5px 6px;
 }
 
-.todo-float.is-collapsed {
-  /* 折叠态：右对齐 chip，背景/边框/阴影全去掉 */
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  align-self: end;
-  justify-self: end;
-  width: auto;
-  max-width: max-content;
-  max-height: none;
-  overflow: visible;
+.todo-float__section {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
 }
 
-.todo-float__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-elev);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+.todo-float__section + .todo-float__section {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 4px;
 }
 
-.todo-float__chip:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.todo-float__ring {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-  /* SVG 默认 baseline align，强制居中 */
-  display: block;
-}
-
-.todo-float__ring-track {
-  fill: none;
-  stroke: var(--border);
-  stroke-width: 2;
-}
-
-.todo-float__ring-done {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-  /* 从 12 点方向开始，顺时针 */
-  transform: rotate(-90deg);
-  transform-origin: 50% 50%;
-  transition: stroke-dasharray 0.18s ease;
-}
-
-.todo-float__chip-count {
-  font-variant-numeric: tabular-nums;
-}
-
-.todo-float__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-soft);
-  flex: 0 0 auto;
-}
-
-.todo-float__title {
-  font-size: 11px;
+.todo-float__section-label {
+  align-self: start;
+  color: var(--text-faint);
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.todo-float__count {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--bg-subtle);
-  font-variant-numeric: tabular-nums;
-}
-
-.todo-float__collapse {
-  margin-left: auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.todo-float__collapse:hover {
-  background: var(--bg-hover);
-  color: var(--text);
+  line-height: 22px;
+  text-align: right;
 }
 
 .todo-float__list {
-  list-style: none;
-  margin: 0;
-  padding: 6px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
+  list-style: none;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
 }
 
 .todo-float__row {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px;
   border-radius: 6px;
-  font-size: 13px;
   color: var(--text);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  min-height: 26px;
+  min-width: 0;
+  padding: 2px 4px;
 }
 
-.todo-float__row:hover {
+.todo-float__row:hover,
+.todo-float__row:focus-within {
   background: var(--bg-hover);
 }
 
-.todo-float__row.is-done .todo-float__text {
-  text-decoration: line-through;
+.todo-float__row.is-queued,
+.todo-float__row.is-sent {
   color: var(--text-muted);
 }
 
-.todo-float__check {
-  /* 覆盖全局 input 默认 32px 高度。 */
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  flex: 0 0 auto;
-  cursor: pointer;
-}
-
 .todo-float__source {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
   align-items: center;
+  color: var(--text-faint);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 16px;
   justify-content: center;
+  width: 16px;
+}
+
+.todo-float__priority,
+.todo-float__priority-choice {
+  align-items: center;
+  border-radius: 4px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
+}
+
+.todo-float__priority {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+}
+
+.todo-float__priority--high {
+  background: var(--err-soft);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--err);
+}
+
+.todo-float__priority--low {
   color: var(--text-faint);
 }
 
-.todo-float__text {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  line-height: 1.4;
+.todo-float__priority-group {
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
 }
 
-.todo-float__del {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
+.todo-float__priority-choice {
   background: transparent;
+  border: 0;
+  border-radius: 0;
   color: var(--text-faint);
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
-  flex: 0 0 auto;
+  height: 20px;
+  min-width: 22px;
 }
 
-.todo-float__row:hover .todo-float__del,
-.todo-float__row:focus-within .todo-float__del {
-  opacity: 1;
+.todo-float__priority-choice:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
-.todo-float__del:hover {
+.todo-float__priority-choice.is-active {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.todo-float__priority-choice--high.is-active {
   background: var(--err-soft);
   color: var(--err);
 }
 
-.todo-float__add {
-  display: flex;
-  gap: 6px;
-  padding: 8px 12px 10px;
-  border-top: 1px solid var(--border-soft);
-  flex: 0 0 auto;
+.todo-float__priority-choice--low.is-active {
+  color: var(--text-muted);
 }
 
-.todo-float__input {
-  flex: 1;
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-weight: 500;
+.todo-float__text {
+  flex: 1 1 auto;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.todo-float__input:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: var(--bg);
-}
-
-.todo-float__add-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 6px;
+.todo-float__text-btn {
+  background: transparent;
   border: 0;
-  background: var(--accent);
-  color: var(--accent-text);
+  color: inherit;
+  cursor: text;
+  font: inherit;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.todo-float__edit {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--text);
+  flex: 1 1 auto;
+  font: inherit;
+  height: 24px;
+  min-width: 80px;
+  padding: 0 6px;
+}
+
+.todo-float__edit:focus {
+  outline: none;
+}
+
+.todo-float__status {
+  color: var(--text-faint);
+  flex: 0 0 auto;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.todo-float__icon-btn {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-faint);
   cursor: pointer;
   display: inline-flex;
-  align-items: center;
+  flex: 0 0 auto;
+  height: 22px;
   justify-content: center;
+  padding: 0;
+  width: 22px;
 }
 
-.todo-float__add-btn:disabled {
+.todo-float__icon-btn:hover:not(:disabled) {
   background: var(--bg-active);
-  color: var(--text-faint);
+  color: var(--text);
+}
+
+.todo-float__icon-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.7;
+  opacity: 0.42;
+}
+
+.todo-float__icon-btn--danger:hover:not(:disabled) {
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 .todo-float__error {
-  margin: 0 12px 10px;
-  font-size: 11px;
+  align-items: center;
   color: var(--err);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  margin: 2px 4px 0;
 }
 
 /* ----- 下拉 chip + popover ----- */

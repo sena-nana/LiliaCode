@@ -99,6 +99,7 @@ impl LiliaStore {
                 .get()
                 .map_err(|e| format!("lilia-store: 取连接失败：{e}"))?;
             ensure_current_schema(&mut conn)?;
+            reset_orphaned_queued_guides(&conn)?;
         }
 
         Ok(LiliaStore { pool })
@@ -111,6 +112,15 @@ impl LiliaStore {
     }
 }
 
+fn reset_orphaned_queued_guides(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "UPDATE task_todos SET guide_status = 'pending' WHERE source = 'lilia' AND guide_status = 'queued'",
+        [],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("lilia-store: 重置 queued 引导失败：{e}"))
+}
+
 const RESET_BASELINE_SCHEMA_VERSION: i64 = 3;
 
 struct SchemaMigration {
@@ -119,7 +129,11 @@ struct SchemaMigration {
     apply: fn(&Connection) -> Result<(), String>,
 }
 
-const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
+    version: 4,
+    name: "todo_guides",
+    apply: migrate_todo_guides,
+}];
 
 /// baseline=3：`agent_timeline_events` 的 `order` 列拆成
 /// `(turn_seq, intra_turn_order)`，排序按 turn 隔离。跨过这个版本会触发
@@ -133,6 +147,46 @@ fn current_schema_version() -> i64 {
         .last()
         .map(|migration| migration.version)
         .unwrap_or(RESET_BASELINE_SCHEMA_VERSION)
+}
+
+fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_todos_next (
+          id           TEXT PRIMARY KEY,
+          task_id      TEXT NOT NULL,
+          text         TEXT NOT NULL,
+          done         INTEGER NOT NULL DEFAULT 0,
+          "order"      INTEGER NOT NULL,
+          source       TEXT NOT NULL CHECK (source IN ('lilia','agent')),
+          priority     TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal','low')),
+          guide_status TEXT CHECK (guide_status IS NULL OR guide_status IN ('pending','queued','sent')),
+          created_at   INTEGER NOT NULL,
+          updated_at   INTEGER NOT NULL
+        );
+
+        INSERT INTO task_todos_next
+          (id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at)
+        SELECT
+          id,
+          task_id,
+          text,
+          done,
+          "order",
+          CASE source WHEN 'user' THEN 'lilia' ELSE source END,
+          'normal',
+          CASE source WHEN 'agent' THEN NULL ELSE 'pending' END,
+          created_at,
+          updated_at
+        FROM task_todos;
+
+        DROP TABLE task_todos;
+        ALTER TABLE task_todos_next RENAME TO task_todos;
+        CREATE INDEX idx_task_todos_task_id_order
+          ON task_todos(task_id, "order");
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 todo_guides 失败：{e}"))
 }
 
 fn ensure_schema_with_migrations(
@@ -190,7 +244,7 @@ fn reset_development_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(&format!(
         "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
     ))
-        .map_err(|e| format!("lilia-store: 写 user_version 失败：{e}"))
+    .map_err(|e| format!("lilia-store: 写 user_version 失败：{e}"))
 }
 
 fn create_current_schema(conn: &Connection) -> Result<(), String> {
@@ -298,7 +352,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, RESET_BASELINE_SCHEMA_VERSION);
+        assert_eq!(version, current_schema_version());
 
         let project_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
@@ -318,6 +372,70 @@ mod tests {
     }
 
     #[test]
+    fn todo_guides_migration_maps_user_rows_to_lilia() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_current_schema(&conn).unwrap();
+        conn.execute(
+            r#"INSERT INTO task_todos
+               (id, task_id, text, done, "order", source, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            params!["todo-1", "task-1", "旧用户 Todo", 0, 0, "user", 1, 1],
+        )
+        .unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+        ))
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        let row: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT source, priority, guide_status FROM task_todos WHERE id = 'todo-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "lilia".to_string(),
+                "normal".to_string(),
+                Some("pending".to_string()),
+            ),
+        );
+    }
+
+    #[test]
+    fn reset_orphaned_queued_guides_marks_them_pending() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_current_schema(&conn).unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+        ))
+        .unwrap();
+        ensure_current_schema(&mut conn).unwrap();
+        conn.execute(
+            r#"INSERT INTO task_todos
+               (id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, 'lilia', 'normal', 'queued', ?6, ?7)"#,
+            params!["guide-1", "task-1", "排队引导", 0, 0, 1, 1],
+        )
+        .unwrap();
+
+        reset_orphaned_queued_guides(&conn).unwrap();
+
+        let status: String = conn
+            .query_row(
+                "SELECT guide_status FROM task_todos WHERE id = 'guide-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "pending");
+    }
+
+    #[test]
     fn future_migrations_continue_after_reset_baseline() {
         let mut conn = Connection::open_in_memory().unwrap();
         ensure_current_schema(&mut conn).unwrap();
@@ -329,9 +447,9 @@ mod tests {
 
         ensure_schema_with_migrations(
             &mut conn,
-            RESET_BASELINE_SCHEMA_VERSION + 1,
+            current_schema_version() + 1,
             &[SchemaMigration {
-                version: RESET_BASELINE_SCHEMA_VERSION + 1,
+                version: current_schema_version() + 1,
                 name: "test_add_project_label",
                 apply: add_future_project_label_migration,
             }],
@@ -341,7 +459,7 @@ mod tests {
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, RESET_BASELINE_SCHEMA_VERSION + 1);
+        assert_eq!(version, current_schema_version() + 1);
 
         let project_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))

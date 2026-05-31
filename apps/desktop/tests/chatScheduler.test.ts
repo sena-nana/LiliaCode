@@ -14,6 +14,7 @@ import {
   mockInvoke,
   seedMockChatMessages,
 } from "./tauriMock";
+import { createTodo, updateTodo } from "../src/services/todos";
 
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
@@ -119,20 +120,18 @@ describe("chat scheduler", () => {
 
     await sendText(view, "参考附件总结项目");
 
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
-    expect(send?.[1]).toMatchObject({
-      content: "参考附件总结项目",
-      attachments: [
-        {
-          name: "README.md",
-          path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
-          kind: "file",
-        },
-      ],
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
     });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({ attachments: [] });
+    expect(send?.[1].content).toContain("[Lilia 引导]");
+    expect(send?.[1].content).toContain("参考附件总结项目");
+    expect(send?.[1].content).toContain("D:\\PROJECT\\workspace\\Lilia\\README.md");
   });
 
-  it("会把 Agent 运行中追加的用户消息进入调度队列", async () => {
+  it("会把 Agent 运行中追加的用户消息先放入 Lilia 引导，并在 turn 结束后插入", async () => {
     const view = await renderTaskDetail();
 
     await sendText(view, "先检查当前实现");
@@ -143,19 +142,83 @@ describe("chat scheduler", () => {
     await sendText(view, "补充：优先看调度器");
     await waitFor(() => {
       expect(view.getByText("补充：优先看调度器")).toBeInTheDocument();
-      expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
-        .toHaveClass("is-queued");
+      expect(view.getByText("补充：优先看调度器").closest(".todo-float"))
+        .not.toBeNull();
     });
 
     const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
-    expect(sends).toHaveLength(2);
-    expect(sends[1][1]).toMatchObject({ content: "补充：优先看调度器" });
+    expect(sends).toHaveLength(1);
 
     completeMockAgentTurn("t-002");
 
     await waitFor(() => {
-      expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
-        .not.toHaveClass("is-queued");
+      const nextSends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      expect(nextSends).toHaveLength(2);
+      expect(nextSends[1][1].content).toContain("补充：优先看调度器");
+    });
+  });
+
+  it("运行中手动插入的引导会保持 queued，直到 queued turn 真正启动才变 sent", async () => {
+    const view = await renderTaskDetail();
+
+    await sendText(view, "先检查当前实现");
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+
+    const guide = await createTodo("t-002", "排队后再处理");
+    const insert = await view.findByRole("button", { name: /立即插入引导：排队后再处理/ });
+    await fireEvent.click(insert);
+
+    await waitFor(() => {
+      const row = view.getByText("排队后再处理").closest(".todo-float__row");
+      expect(row).toHaveTextContent("已排队");
+      expect(row).not.toHaveTextContent("已插入");
+    });
+
+    const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+    expect(sends).toHaveLength(2);
+    expect(sends[1][1]).toMatchObject({ guideId: guide.id });
+
+    completeMockAgentTurn("t-002");
+
+    await waitFor(() => {
+      const row = view.getByText("排队后再处理").closest(".todo-float__row");
+      expect(row).toHaveTextContent("已插入");
+      expect(row).not.toHaveTextContent("已排队");
+    });
+  });
+
+  it("打断会把已排队但未启动的引导恢复为 pending，可再次手动插入", async () => {
+    const view = await renderTaskDetail();
+
+    await sendText(view, "先检查当前实现");
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+
+    await createTodo("t-002", "打断后保留");
+    await fireEvent.click(await view.findByRole("button", { name: /立即插入引导：打断后保留/ }));
+
+    await waitFor(() => {
+      expect(view.getByText("打断后保留").closest(".todo-float__row"))
+        .toHaveTextContent("已排队");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+
+    await waitFor(() => {
+      expect(view.getByText("打断后保留").closest(".todo-float__row"))
+        .not.toHaveTextContent("已排队");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /立即插入引导：打断后保留/ }));
+
+    await waitFor(() => {
+      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      expect(sends).toHaveLength(3);
     });
   });
 
@@ -169,8 +232,8 @@ describe("chat scheduler", () => {
 
     await sendText(view, "补充：优先看调度器");
     await waitFor(() => {
-      expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
-        .toHaveClass("is-queued");
+      expect(view.getByText("补充：优先看调度器").closest(".todo-float"))
+        .not.toBeNull();
     });
 
     await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
@@ -184,11 +247,46 @@ describe("chat scheduler", () => {
       expect(view.getByRole("button", { name: /Agent 已打断/ }))
         .toBeInTheDocument();
     });
-    expect(view.getByText("补充：优先看调度器").closest(".chat-bubble"))
-      .toHaveClass("is-queued");
+    const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+    expect(sends).toHaveLength(1);
+    expect(view.getByText("补充：优先看调度器").closest(".todo-float"))
+      .not.toBeNull();
   });
 
-  it("初始加载完成后仍保留刚发送的用户气泡", async () => {
+  it("工具类 timeline 窗口会触发高优先级引导，但不会触发普通优先级引导", async () => {
+    const view = await renderTaskDetail();
+
+    const high = await createTodo("t-002", "高优先级工具窗口引导");
+    await updateTodo(high.id, { priority: "high" });
+    await createTodo("t-002", "普通优先级保留");
+    mockInvoke.mockClear();
+
+    emitMockTimelineEvent("t-002", {
+      id: "tl-command-window",
+      kind: "command",
+      status: "started",
+      title: "Bash",
+      summary: "yarn test",
+      payload: {
+        backend: "claude",
+        command: "yarn test",
+      },
+      turnId: "turn-tool-window",
+    });
+
+    await waitFor(() => {
+      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      expect(sends).toHaveLength(1);
+      expect(sends[0][1].content).toContain("高优先级工具窗口引导");
+      expect(sends[0][1].content).not.toContain("普通优先级保留");
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("普通优先级保留")).toBeInTheDocument();
+    });
+  });
+
+  it("初始加载完成后仍保留刚发送的 Lilia 引导", async () => {
     const view = await renderTaskDetail();
 
     await sendText(view, "页面刚打开时发送的用户消息");
@@ -198,8 +296,8 @@ describe("chat scheduler", () => {
       expect(view.getByText("页面刚打开时发送的用户消息")).toBeInTheDocument();
     });
 
-    expect(view.getByText("页面刚打开时发送的用户消息").closest(".chat-bubble"))
-      .toHaveAttribute("data-role", "user");
+    expect(view.getByText("页面刚打开时发送的用户消息").closest(".todo-float"))
+      .not.toBeNull();
   });
 
   it("用户停在历史位置时，发送普通消息后自动滚动到底部", async () => {
