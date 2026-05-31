@@ -10,6 +10,16 @@ import type { TaskTodo } from "@lilia/contracts";
 
 export type { TaskTodo };
 
+export interface AgentTodoInput {
+  content?: string;
+  text?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  completed?: boolean;
+  done?: boolean;
+}
+
 export function listTodos(taskId: string): Promise<TaskTodo[]> {
   return invoke<TaskTodo[]>("todo_list", { taskId });
 }
@@ -38,6 +48,13 @@ export function updateTodo(id: string, patch: TodoPatch): Promise<void> {
 
 export function deleteTodo(id: string): Promise<void> {
   return invoke<void>("todo_delete", { id });
+}
+
+export function applyAgentTodoEvent(
+  taskId: string,
+  todos: AgentTodoInput[],
+): Promise<TaskTodo[]> {
+  return invoke<TaskTodo[]>("todo_apply_agent_event", { taskId, todos });
 }
 
 export interface TodoChangedEvent {

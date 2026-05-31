@@ -10,7 +10,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Runtime, State};
 use uuid::Uuid;
 
 use crate::store::LiliaStore;
@@ -305,11 +305,20 @@ pub fn apply_agent_event_impl(
 }
 
 #[tauri::command]
-pub fn todo_apply_agent_event(
+pub fn todo_apply_agent_event<R: Runtime>(
     task_id: String,
     todos: Vec<AgentTodoItem>,
+    app: AppHandle<R>,
     store: State<'_, LiliaStore>,
 ) -> Result<Vec<TaskTodo>, String> {
     let conn = store.conn()?;
-    apply_agent_event_impl(&conn, &task_id, &todos)
+    let updated = apply_agent_event_impl(&conn, &task_id, &todos)?;
+    app.emit(
+        "todo-changed",
+        serde_json::json!({
+            "taskId": task_id,
+        }),
+    )
+    .map_err(|err| format!("todo-changed emit failed: {err}"))?;
+    Ok(updated)
 }

@@ -145,10 +145,10 @@ watch(
 );
 
 onMounted(async () => {
-  await refresh();
   unlistenTodoChanged = await onTodoChanged((e) => {
     if (e.taskId === props.taskId) refresh();
   });
+  await refresh();
 });
 
 onUnmounted(async () => {
@@ -213,6 +213,7 @@ onUnmounted(async () => {
             type="checkbox"
             class="todo-float__check"
             :checked="t.done"
+            :aria-label="`切换 Todo：${t.text}`"
             @change="onToggleDone(t)"
           />
           <span
@@ -227,6 +228,7 @@ onUnmounted(async () => {
             type="button"
             class="todo-float__del"
             title="删除"
+            :aria-label="`删除 Todo：${t.text}`"
             @click="onDelete(t)"
           >
             <Trash2 :size="12" />
@@ -246,6 +248,7 @@ onUnmounted(async () => {
           class="todo-float__add-btn"
           :disabled="!newText.trim()"
           title="添加"
+          aria-label="添加 Todo"
         >
           <Plus :size="14" />
         </button>

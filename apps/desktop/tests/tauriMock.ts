@@ -42,6 +42,27 @@ interface AgentTimelineEvent {
   intraTurnOrder: number;
 }
 
+interface TodoRow {
+  id: string;
+  taskId: string;
+  text: string;
+  done: boolean;
+  order: number;
+  source: "user" | "agent";
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface AgentTodoInput {
+  content?: unknown;
+  text?: unknown;
+  title?: unknown;
+  description?: unknown;
+  status?: unknown;
+  completed?: unknown;
+  done?: unknown;
+}
+
 const baseProjects: ProjectRow[] = [
   {
     id: "lilia",
@@ -115,6 +136,8 @@ const baseTasks: TaskRow[] = [
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
 let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
+let todosByTaskId: Record<string, TodoRow[]> = {};
+let todoSeq = 0;
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 const baseClaudePlugins = [{
@@ -151,6 +174,66 @@ function cloneTask(row: TaskRow): TaskRow {
   return { ...row, dependsOn: [...row.dependsOn] };
 }
 
+function cloneTodo(row: TodoRow): TodoRow {
+  return { ...row };
+}
+
+function nextTodoId(): string {
+  todoSeq += 1;
+  return `todo-${todoSeq}`;
+}
+
+function readAgentTodoText(todo: unknown): string {
+  if (typeof todo === "string") return todo.trim();
+  if (!todo || typeof todo !== "object" || Array.isArray(todo)) return "";
+  const row = todo as AgentTodoInput;
+  const value = row.content ?? row.text ?? row.title ?? row.description;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readAgentTodoDone(todo: unknown): boolean {
+  if (!todo || typeof todo !== "object" || Array.isArray(todo)) return false;
+  const row = todo as AgentTodoInput;
+  return row.completed === true ||
+    row.done === true ||
+    String(row.status ?? "").toLowerCase() === "completed";
+}
+
+function listMockTodos(taskId: string): TodoRow[] {
+  return [...(todosByTaskId[taskId] ?? [])]
+    .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
+    .map(cloneTodo);
+}
+
+function applyMockAgentTodos(taskId: string, todos: unknown[]): TodoRow[] {
+  const now = Date.now();
+  const existing = todosByTaskId[taskId] ?? [];
+  const userRows = existing.filter((todo) => todo.source === "user");
+  const agentRows = existing.filter((todo) => todo.source === "agent");
+  const userMax = userRows.reduce((max, todo) => Math.max(max, todo.order), -1);
+  const nextAgentRows: TodoRow[] = [];
+
+  todos.forEach((todo, index) => {
+    const text = readAgentTodoText(todo);
+    if (!text) return;
+    const matched = agentRows.find((row) => row.text === text);
+    const nextRow: TodoRow = {
+      id: matched?.id ?? nextTodoId(),
+      taskId,
+      text,
+      done: readAgentTodoDone(todo),
+      order: userMax + 1 + index,
+      source: "agent",
+      createdAt: matched?.createdAt ?? now,
+      updatedAt: now,
+    };
+    nextAgentRows.push(nextRow);
+  });
+
+  todosByTaskId[taskId] = [...userRows, ...nextAgentRows];
+  return listMockTodos(taskId);
+}
+
 function refreshSessionCounts() {
   projects = projects.map((project) => ({
     ...project,
@@ -163,6 +246,8 @@ function refreshSessionCounts() {
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
+  todosByTaskId = {};
+  todoSeq = 0;
   timelineEvents = {
     "t-002": [
       {
@@ -764,8 +849,71 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       });
     }
 
-    case "todo_list":
-      return [];
+    case "todo_list": {
+      const taskId = String(args.taskId);
+      return listMockTodos(taskId);
+    }
+
+    case "todo_create": {
+      const taskId = String(args.taskId);
+      const text = String(args.text ?? "").trim();
+      const now = Date.now();
+      const order = (todosByTaskId[taskId] ?? []).reduce(
+        (max, todo) => Math.max(max, todo.order),
+        -1,
+      ) + 1;
+      const todo: TodoRow = {
+        id: nextTodoId(),
+        taskId,
+        text,
+        done: false,
+        order,
+        source: "user",
+        createdAt: now,
+        updatedAt: now,
+      };
+      todosByTaskId[taskId] = [...(todosByTaskId[taskId] ?? []), todo];
+      return cloneTodo(todo);
+    }
+
+    case "todo_update": {
+      const id = String(args.id);
+      const now = Date.now();
+      for (const taskId of Object.keys(todosByTaskId)) {
+        let changed = false;
+        todosByTaskId[taskId] = todosByTaskId[taskId].map((todo) => {
+          if (todo.id !== id) return todo;
+          changed = true;
+          return {
+            ...todo,
+            text: typeof args.text === "string" ? args.text : todo.text,
+            done: typeof args.done === "boolean" ? args.done : todo.done,
+            order: typeof args.order === "number" ? args.order : todo.order,
+            updatedAt: now,
+          };
+        });
+        if (changed) break;
+      }
+      return undefined;
+    }
+
+    case "todo_delete": {
+      const id = String(args.id);
+      for (const taskId of Object.keys(todosByTaskId)) {
+        const before = todosByTaskId[taskId].length;
+        todosByTaskId[taskId] = todosByTaskId[taskId].filter((todo) => todo.id !== id);
+        if (todosByTaskId[taskId].length !== before) break;
+      }
+      return undefined;
+    }
+
+    case "todo_apply_agent_event": {
+      const taskId = String(args.taskId);
+      const todos = Array.isArray(args.todos) ? args.todos : [];
+      const updated = applyMockAgentTodos(taskId, todos);
+      emitTauriEvent("todo-changed", { taskId });
+      return updated;
+    }
 
     case "chat_send_message": {
       const taskId = String(args.taskId);

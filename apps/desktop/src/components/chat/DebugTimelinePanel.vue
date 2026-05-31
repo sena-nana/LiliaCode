@@ -35,7 +35,8 @@ const groups = [
     id: "cards",
     label: "卡片",
     actions: [
-      { id: "todo", label: "待办", icon: ListChecks, run: debugTimeline.emitTodo },
+      { id: "todo-tool", label: "Todo工具", icon: ListChecks, run: debugTimeline.emitTodoTool },
+      { id: "todo", label: "待办卡片", icon: ListChecks, run: debugTimeline.emitTodo },
       { id: "command", label: "命令", icon: Terminal, run: debugTimeline.emitCommand },
       { id: "file-read", label: "读文件", icon: FileText, run: debugTimeline.emitFileRead },
       { id: "file-change", label: "改文件", icon: FilePen, run: debugTimeline.emitFileChange },

@@ -440,12 +440,44 @@ describe("TaskDetail chat sidebar toggle", () => {
 
     const view = await renderTaskDetail();
 
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "待办" }));
+    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "待办卡片" }));
 
     const todoButton = await view.findByRole("button", { name: /更新待办/ });
     await fireEvent.click(todoButton);
 
     expect(view.getByText("点击预制事件按钮")).toBeInTheDocument();
+  });
+
+  it("debug Todo工具走真实 TodoWrite 链路并刷新 TodoFloat", async () => {
+    await setAgentInteractionSettings({ debug: true });
+    mockInvoke.mockClear();
+    openChatSidebar("debug");
+
+    const view = await renderTaskDetail();
+
+    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "Todo工具" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_apply_agent_event")).toBe(true);
+      expect(view.getByText("完成 Claude TodoWrite 调试接线")).toBeInTheDocument();
+    });
+    expect(view.getByText("1 / 3 done")).toBeInTheDocument();
+    expect(view.getByText("模拟 Claude TodoWrite 并刷新 Lilia Todo")).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("checkbox", { name: "切换 Todo：确认 TodoFloat 自动刷新" }));
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_update")).toBe(true);
+      expect(view.getByText("2 / 3 done")).toBeInTheDocument();
+    });
+
+    await fireEvent.update(view.getByPlaceholderText("添加 Todo…"), "手动补充调试项");
+    await fireEvent.click(view.getByRole("button", { name: "添加 Todo" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(true);
+      expect(view.getByText("手动补充调试项")).toBeInTheDocument();
+      expect(view.getByText("2 / 4 done")).toBeInTheDocument();
+    });
   });
 
   it("debug 普通卡片事件覆盖命令、读文件和改文件", async () => {

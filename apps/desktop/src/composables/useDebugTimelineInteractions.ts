@@ -8,6 +8,7 @@ import { askUserForTask } from "./useAskUser";
 import { emitDebugTimelineEvent } from "./useDebugTimelineEvents";
 import { requestLocalToolConsent } from "./useToolConsentBridge";
 import type { ToolConsentRequest } from "../services/chat";
+import { applyAgentTodoEvent, type AgentTodoInput } from "../services/todos";
 
 let debugSeq = 0;
 
@@ -142,6 +143,43 @@ export function useDebugTimelineInteractions(taskId: string) {
         ],
       },
     }));
+  }
+
+  async function emitTodoTool() {
+    const ids = nextDebugIds(taskId, "todo-tool");
+    const items: AgentTodoInput[] = [
+      { content: "完成 Claude TodoWrite 调试接线", status: "completed" },
+      { content: "确认 TodoFloat 自动刷新", status: "in_progress" },
+      { content: "验证手动 Todo 不被 agent 覆盖", status: "pending" },
+    ];
+    try {
+      await applyAgentTodoEvent(taskId, items);
+      emitDebugTimelineEvent(createDebugEvent({
+        id: ids.eventId,
+        taskId,
+        turnId: ids.turnId,
+        kind: "todo_list",
+        title: "Debug TodoWrite",
+        summary: "模拟 Claude TodoWrite 并刷新 Lilia Todo",
+        status: "success",
+        now: ids.now,
+        order: ids.order,
+        payload: { items: items as unknown as AgentTimelinePayload },
+      }));
+    } catch (err) {
+      emitDebugTimelineEvent(createDebugEvent({
+        id: ids.eventId,
+        taskId,
+        turnId: ids.turnId,
+        kind: "error",
+        title: "Debug TodoWrite 失败",
+        summary: String(err),
+        status: "error",
+        now: ids.now,
+        order: ids.order,
+        payload: { message: String(err) },
+      }));
+    }
   }
 
   function emitPlan() {
@@ -460,6 +498,7 @@ export function useDebugTimelineInteractions(taskId: string) {
   return {
     emitPlan,
     emitTodo,
+    emitTodoTool,
     emitAskUser,
     emitAskUserMulti,
     emitAskUserPreview,
