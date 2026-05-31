@@ -3,20 +3,27 @@
  * 插件 / 技能管理面板。两块 backend 的扩展机制不对称，用 tab 切：
  * - Claude Skills（user / project scope）
  * - Claude Plugins（marketplace beta，仅只读列出）
+ * - Claude MCP servers（Lilia 自管用户级 stdio）
  * - Codex MCP servers（来自 ~/.codex/config.toml，只读 + 打开文件按钮）
  */
 import { computed, onMounted, ref } from "vue";
 import {
   Puzzle, Sparkles, Server, Plus, RefreshCw, Trash2, FolderOpen,
-  AlertTriangle, Check, Layers, Folder,
+  AlertTriangle, Check, Layers, Folder, Pencil,
 } from "lucide-vue-next";
 import {
   pluginsOverview,
+  createClaudeMcpServer,
   createClaudeSkill,
+  deleteClaudeMcpServer,
   deleteClaudeSkill,
+  setClaudeMcpServerEnabled,
   setClaudePluginEnabled,
   setClaudeSkillEnabled,
+  updateClaudeMcpServer,
+  openClaudeMcpConfig,
   openCodexConfig,
+  type ClaudeMcpServer,
   type ClaudePlugin,
   type ClaudeSkill,
   type CodexMcpServer,
@@ -26,10 +33,15 @@ import { listProjects } from "../services/projectsStore";
 import Dropdown from "../components/Dropdown.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 
-type Tab = "claude-skills" | "claude-plugins" | "codex-mcp";
+type Tab = "claude-skills" | "claude-plugins" | "claude-mcp" | "codex-mcp";
 
 const tab = ref<Tab>("claude-skills");
 const scope = ref<PluginScope>("user");
+
+interface EnvDraftRow {
+  key: string;
+  value: string;
+}
 
 const projects = computed(() => listProjects());
 /** 「项目级 skill」只对真的有 cwd 的项目可用，分类型项目排除。 */
@@ -49,6 +61,8 @@ function onProjectChange(cwd: string) {
 const userSkills = ref<ClaudeSkill[]>([]);
 const projectSkills = ref<ClaudeSkill[]>([]);
 const claudePlugins = ref<ClaudePlugin[]>([]);
+const claudeMcpServers = ref<ClaudeMcpServer[]>([]);
+const claudeMcpConfigPath = ref<string | null>(null);
 const codexServers = ref<CodexMcpServer[]>([]);
 const codexConfigPath = ref<string | null>(null);
 const warnings = ref<string[]>([]);
@@ -75,6 +89,8 @@ async function refresh() {
     userSkills.value = data.claudeUserSkills;
     projectSkills.value = data.claudeProjectSkills;
     claudePlugins.value = data.claudeUserPlugins;
+    claudeMcpServers.value = data.claudeMcpServers;
+    claudeMcpConfigPath.value = data.claudeMcpConfigPath;
     codexServers.value = data.codexMcpServers;
     codexConfigPath.value = data.codexConfigPath;
     warnings.value = data.warnings;
@@ -150,28 +166,142 @@ async function togglePlugin(plugin: ClaudePlugin) {
 }
 
 async function removeSkill(skill: ClaudeSkill) {
-  pendingRemove.value = skill;
+  pendingRemoveSkill.value = skill;
 }
 
-const pendingRemove = ref<ClaudeSkill | null>(null);
+const pendingRemoveSkill = ref<ClaudeSkill | null>(null);
+const pendingRemoveMcp = ref<ClaudeMcpServer | null>(null);
 const removing = ref(false);
 
 async function confirmRemove() {
-  const skill = pendingRemove.value;
-  if (!skill || removing.value) return;
+  if (removing.value) return;
   removing.value = true;
   try {
-    await deleteClaudeSkill(
-      skill.scope as PluginScope,
-      skill.scope === "project" ? projectCwd.value : null,
-      skill.name,
-    );
-    pendingRemove.value = null;
+    if (pendingRemoveSkill.value) {
+      const skill = pendingRemoveSkill.value;
+      await deleteClaudeSkill(
+        skill.scope as PluginScope,
+        skill.scope === "project" ? projectCwd.value : null,
+        skill.name,
+      );
+      pendingRemoveSkill.value = null;
+    } else if (pendingRemoveMcp.value) {
+      await deleteClaudeMcpServer(pendingRemoveMcp.value.name);
+      pendingRemoveMcp.value = null;
+    }
     await refresh();
   } catch (err) {
     errorText.value = String(err);
   } finally {
     removing.value = false;
+  }
+}
+
+// ---- Claude MCP: 新建 / 编辑 / 启停 / 删除 ----
+const showMcpEditor = ref(false);
+const editingMcp = ref<ClaudeMcpServer | null>(null);
+const mcpName = ref("");
+const mcpCommand = ref("");
+const mcpArgsText = ref("");
+const mcpEnvRows = ref<EnvDraftRow[]>([]);
+const mcpEnvDirty = ref(false);
+const mcpSaving = ref(false);
+const mcpError = ref<string | null>(null);
+
+const mcpEditorTitle = computed(() =>
+  editingMcp.value ? `编辑 Claude MCP：${editingMcp.value.name}` : "新增 Claude MCP",
+);
+
+function resetMcpEditor(server: ClaudeMcpServer | null) {
+  editingMcp.value = server;
+  mcpName.value = server?.name ?? "";
+  mcpCommand.value = server?.command ?? "";
+  mcpArgsText.value = server?.args.join("\n") ?? "";
+  mcpEnvRows.value = server?.envKeys.length
+    ? server.envKeys.map((key) => ({ key, value: "" }))
+    : [{ key: "", value: "" }];
+  mcpEnvDirty.value = false;
+  mcpError.value = null;
+}
+
+function openCreateMcp() {
+  resetMcpEditor(null);
+  showMcpEditor.value = true;
+}
+
+function openEditMcp(server: ClaudeMcpServer) {
+  resetMcpEditor(server);
+  showMcpEditor.value = true;
+}
+
+function addMcpEnvRow() {
+  mcpEnvDirty.value = true;
+  mcpEnvRows.value.push({ key: "", value: "" });
+}
+
+function removeMcpEnvRow(index: number) {
+  mcpEnvDirty.value = true;
+  mcpEnvRows.value.splice(index, 1);
+  if (mcpEnvRows.value.length === 0) {
+    mcpEnvRows.value.push({ key: "", value: "" });
+  }
+}
+
+function buildMcpEnvPayload() {
+  return Object.fromEntries(
+    mcpEnvRows.value
+      .map((row) => [row.key.trim(), row.value] as const)
+      .filter(([key, value]) => key && value),
+  );
+}
+
+async function saveMcpServer() {
+  if (mcpSaving.value) return;
+  mcpError.value = null;
+  mcpSaving.value = true;
+  try {
+    const env = buildMcpEnvPayload();
+    const input = {
+      name: mcpName.value,
+      command: mcpCommand.value,
+      args: mcpArgsText.value
+        .split(/\r?\n/)
+        .map((arg) => arg.trim())
+        .filter(Boolean),
+      ...(mcpEnvDirty.value || Object.keys(env).length > 0 ? { env } : {}),
+    };
+    if (editingMcp.value) {
+      await updateClaudeMcpServer(editingMcp.value.name, input);
+    } else {
+      await createClaudeMcpServer(input);
+    }
+    showMcpEditor.value = false;
+    await refresh();
+  } catch (err) {
+    mcpError.value = String(err);
+  } finally {
+    mcpSaving.value = false;
+  }
+}
+
+async function toggleMcp(server: ClaudeMcpServer) {
+  try {
+    await setClaudeMcpServerEnabled(server.name, !server.enabled);
+    server.enabled = !server.enabled;
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
+function removeMcp(server: ClaudeMcpServer) {
+  pendingRemoveMcp.value = server;
+}
+
+async function openClaudeMcp() {
+  try {
+    await openClaudeMcpConfig();
+  } catch (err) {
+    errorText.value = String(err);
   }
 }
 
@@ -218,6 +348,15 @@ async function openCodex() {
       >
         <Puzzle :size="14" aria-hidden="true" /> Claude Plugins
         <span class="plugins-tabs__count">{{ claudePlugins.length }}</span>
+      </button>
+      <button
+        type="button" role="tab"
+        :aria-selected="tab === 'claude-mcp'"
+        :class="{ 'is-active': tab === 'claude-mcp' }"
+        @click="tab = 'claude-mcp'"
+      >
+        <Server :size="14" aria-hidden="true" /> Claude MCP
+        <span class="plugins-tabs__count">{{ claudeMcpServers.length }}</span>
       </button>
       <button
         type="button" role="tab"
@@ -352,6 +491,60 @@ async function openCodex() {
       <p v-else class="plugins-empty">没有发现已安装的 plugin。</p>
     </div>
 
+    <!-- ===== Claude MCP ===== -->
+    <div v-else-if="tab === 'claude-mcp'" class="card">
+      <div class="plugins-toolbar">
+        <span class="plugins-toolbar__hint">
+          来自 <code>{{ claudeMcpConfigPath || "~/.lilia/config/claude-mcp-servers.json" }}</code>
+        </span>
+        <button type="button" class="ghost" @click="openClaudeMcp">
+          <FolderOpen :size="12" aria-hidden="true" /> 打开配置
+        </button>
+        <button type="button" class="primary" @click="openCreateMcp">
+          <Plus :size="14" aria-hidden="true" /> 新增 MCP
+        </button>
+      </div>
+      <ul v-if="claudeMcpServers.length" class="plugins-list">
+        <li
+          v-for="s in claudeMcpServers"
+          :key="s.name"
+          class="plugins-list__item"
+          :class="{ 'is-disabled': !s.enabled }"
+        >
+          <div class="plugins-list__head">
+            <span class="plugins-list__name">{{ s.name }}</span>
+            <span v-if="s.enabled" class="plugins-list__badge plugins-list__badge--ok">
+              <Check :size="11" aria-hidden="true" /> 已启用
+            </span>
+            <span v-else class="plugins-list__badge plugins-list__badge--mute">已停用</span>
+            <span v-if="s.envKeys.length" class="plugins-list__badge plugins-list__badge--mute">
+              env {{ s.envKeys.length }}
+            </span>
+          </div>
+          <div class="plugins-list__meta">
+            <code>{{ s.command }} {{ s.args.join(' ') }}</code>
+          </div>
+          <p v-if="s.envKeys.length" class="plugins-list__desc">
+            {{ s.envKeys.join(", ") }}
+          </p>
+          <div class="plugins-list__actions">
+            <button type="button" class="ghost" @click="toggleMcp(s)">
+              {{ s.enabled ? "停用" : "启用" }}
+            </button>
+            <button type="button" class="ghost" @click="openEditMcp(s)">
+              <Pencil :size="12" aria-hidden="true" /> 编辑
+            </button>
+            <button type="button" class="ghost danger" @click="removeMcp(s)">
+              <Trash2 :size="12" aria-hidden="true" /> 删除
+            </button>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="plugins-empty">
+        还没有外部 Claude MCP server。
+      </p>
+    </div>
+
     <!-- ===== Codex MCP ===== -->
     <div v-else class="card">
       <div class="plugins-toolbar">
@@ -430,16 +623,109 @@ async function openCodex() {
       </Transition>
     </Teleport>
 
-    <!-- ===== 删除 Skill 二次确认 ===== -->
+    <!-- ===== Claude MCP 弹层 ===== -->
+    <Teleport to="body">
+      <Transition name="search-palette">
+        <div
+          v-if="showMcpEditor"
+          class="search-palette"
+          role="dialog" aria-modal="true" aria-label="Claude MCP"
+          @click.self="showMcpEditor = false"
+        >
+          <div class="search-palette__card dialog__card">
+            <div class="dialog__header">
+              <Server :size="14" aria-hidden="true" />
+              <span>{{ mcpEditorTitle }}</span>
+            </div>
+            <div class="dialog__body">
+              <label>
+                <span>名称</span>
+                <input
+                  v-model="mcpName" type="text"
+                  class="text-input"
+                  placeholder="weather-mcp"
+                />
+              </label>
+              <label>
+                <span>Command</span>
+                <input
+                  v-model="mcpCommand" type="text"
+                  class="text-input"
+                  placeholder="node"
+                />
+              </label>
+              <label>
+                <span>Args</span>
+                <textarea
+                  v-model="mcpArgsText"
+                  class="text-input"
+                  rows="4"
+                  placeholder="每行一个参数"
+                />
+              </label>
+              <div class="plugins-env-editor">
+                <div class="plugins-env-editor__head">
+                  <span>Env</span>
+                  <button type="button" class="ghost" @click="addMcpEnvRow">
+                    <Plus :size="12" aria-hidden="true" /> 添加
+                  </button>
+                </div>
+                <div
+                  v-for="(row, index) in mcpEnvRows"
+                  :key="index"
+                  class="plugins-env-editor__row"
+                >
+                  <input
+                    v-model="row.key"
+                    type="text"
+                    class="text-input"
+                    placeholder="KEY"
+                    @input="mcpEnvDirty = true"
+                  />
+                  <input
+                    v-model="row.value"
+                    type="password"
+                    class="text-input"
+                    :placeholder="editingMcp?.envKeys.includes(row.key) ? '留空保留现有值' : 'value'"
+                    @input="mcpEnvDirty = true"
+                  />
+                  <button type="button" class="ghost" @click="removeMcpEnvRow(index)">
+                    <Trash2 :size="12" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <p v-if="mcpError" class="plugins-create__error">{{ mcpError }}</p>
+              <p class="plugins-create__hint">
+                配置保存到 <code>{{ claudeMcpConfigPath || "~/.lilia/config/claude-mcp-servers.json" }}</code>。
+              </p>
+            </div>
+            <div class="dialog__actions">
+              <button type="button" class="ghost" :disabled="mcpSaving" @click="showMcpEditor = false">
+                取消
+              </button>
+              <button type="button" class="primary" :disabled="mcpSaving" @click="saveMcpServer">
+                {{ mcpSaving ? "保存中…" : "保存" }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== 删除二次确认 ===== -->
     <ConfirmDialog
-      :open="pendingRemove !== null"
-      :title="`删除 skill「${pendingRemove?.name ?? ''}」？`"
-      message="该 skill 目录会被整体删除，不可恢复。"
+      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null"
+      :title="pendingRemoveSkill
+        ? `删除 skill「${pendingRemoveSkill?.name ?? ''}」？`
+        : `删除 Claude MCP「${pendingRemoveMcp?.name ?? ''}」？`"
+      :message="pendingRemoveSkill
+        ? '该 skill 目录会被整体删除，不可恢复。'
+        : '该 MCP server 会从 Lilia 配置中删除，不可恢复。'"
       confirm-text="删除"
       busy-text="删除中…"
       :busy="removing"
       danger
-      @cancel="pendingRemove = null"
+      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null"
       @confirm="confirmRemove"
     />
   </section>

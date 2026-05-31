@@ -125,7 +125,19 @@ const baseClaudePlugins = [{
   enabled: true,
   path: "C:\\Users\\mock\\.claude\\plugins\\demo-plugin",
 }];
+const baseClaudeMcpServers = [{
+  name: "weather",
+  command: "node",
+  args: ["weather-mcp.js"],
+  envKeys: ["WEATHER_TOKEN"],
+  enabled: true,
+}];
 let claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
+let claudeMcpServers = baseClaudeMcpServers.map((server) => ({
+  ...server,
+  args: [...server.args],
+  envKeys: [...server.envKeys],
+}));
 let agentInteractionSettings = { nonInterruptMode: false, debug: false };
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
@@ -173,6 +185,11 @@ export function resetTauriMockData() {
   chatRunning = {};
   chatQueued = {};
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
+  claudeMcpServers = baseClaudeMcpServers.map((server) => ({
+    ...server,
+    args: [...server.args],
+    envKeys: [...server.envKeys],
+  }));
   agentInteractionSettings = { nonInterruptMode: false, debug: false };
   eventHandlers = {};
   webviewDragDropHandlers = [];
@@ -612,6 +629,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         ],
         claudeProjectSkills: [],
         claudeUserPlugins: claudePlugins.map((plugin) => ({ ...plugin })),
+        claudeMcpServers: claudeMcpServers.map((server) => ({
+          ...server,
+          args: [...server.args],
+          envKeys: [...server.envKeys],
+        })),
+        claudeMcpConfigPath: "C:\\Users\\mock\\.lilia\\config\\claude-mcp-servers.json",
         codexMcpServers: [
           {
             name: "mock-mcp",
@@ -632,6 +655,65 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       );
       return undefined;
     }
+
+    case "plugins_create_claude_mcp_server": {
+      const input = args.input as {
+        name?: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+      const server = {
+        name: String(input.name ?? ""),
+        command: String(input.command ?? ""),
+        args: Array.isArray(input.args) ? input.args.map(String) : [],
+        envKeys: Object.keys(input.env ?? {}),
+        enabled: true,
+      };
+      claudeMcpServers = [...claudeMcpServers, server];
+      return { ...server, args: [...server.args], envKeys: [...server.envKeys] };
+    }
+
+    case "plugins_update_claude_mcp_server": {
+      const name = String(args.name);
+      const input = args.input as {
+        name?: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+      let updated = claudeMcpServers.find((server) => server.name === name);
+      if (!updated) return undefined;
+      updated = {
+        ...updated,
+        name: String(input.name ?? updated.name),
+        command: String(input.command ?? updated.command),
+        args: Array.isArray(input.args) ? input.args.map(String) : updated.args,
+        envKeys: input.env ? Object.keys(input.env) : updated.envKeys,
+      };
+      claudeMcpServers = claudeMcpServers.map((server) =>
+        server.name === name ? updated : server
+      );
+      return { ...updated, args: [...updated.args], envKeys: [...updated.envKeys] };
+    }
+
+    case "plugins_delete_claude_mcp_server": {
+      const name = String(args.name);
+      claudeMcpServers = claudeMcpServers.filter((server) => server.name !== name);
+      return undefined;
+    }
+
+    case "plugins_set_claude_mcp_server_enabled": {
+      const name = String(args.name);
+      const enabled = args.enabled === true;
+      claudeMcpServers = claudeMcpServers.map((server) =>
+        server.name === name ? { ...server, enabled } : server
+      );
+      return undefined;
+    }
+
+    case "plugins_open_claude_mcp_config":
+      return undefined;
 
     case "chat_set_composer_state":
       return undefined;

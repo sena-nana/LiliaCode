@@ -141,11 +141,15 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/attachments[\s\S]*?path/);
   });
 
-  it("Claude runtime extensions 映射为 SDK skills/plugins options", () => {
+  it("Claude runtime extensions 映射为 SDK skills/plugins/MCP options", () => {
     expect(runnerSource).toContain("function readClaudeRuntimeExtensions");
     expect(runnerSource).toMatch(/\.\.\.\(runtimeExtensions\.skills\.length > 0 \? \{ skills: runtimeExtensions\.skills \} : \{\}\)/);
     expect(runnerSource).toMatch(/\.\.\.\(runtimeExtensions\.plugins\.length > 0 \? \{ plugins: runtimeExtensions\.plugins \} : \{\}\)/);
     expect(runnerSource).toContain('plugin.type === "local"');
+    expect(runnerSource).toContain("mcpServers,");
+    expect(runnerSource).toContain("...runtimeExtensions.mcpServers");
+    expect(runnerSource).toContain("lilia: liliaAskUserServer");
+    expect(runnerSource).toContain("lilia 是 Lilia 内置 server");
   });
 
   it("Codex runtime extensions 只发运行时 MCP 状态，不传入 SDK 私有参数", () => {
