@@ -70,6 +70,18 @@ export function setClaudeSkillEnabled(
   });
 }
 
+export function setClaudePluginEnabled(
+  scope: PluginScope,
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  return invoke<void>("plugins_set_claude_plugin_enabled", {
+    scope,
+    name,
+    enabled,
+  });
+}
+
 export function listClaudePlugins(scope: PluginScope): Promise<ClaudePlugin[]> {
   return invoke<ClaudePlugin[]>("plugins_list_claude_plugins", { scope });
 }

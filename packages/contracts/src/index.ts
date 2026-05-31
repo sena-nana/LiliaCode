@@ -512,12 +512,35 @@ export interface CodexMcpServer {
   enabled: boolean;
 }
 
+export interface ClaudeRuntimePlugin {
+  type: "local";
+  path: string;
+}
+
+export interface ClaudeRuntimeExtensions {
+  skills: string[];
+  plugins: ClaudeRuntimePlugin[];
+  warnings: string[];
+}
+
+export interface CodexRuntimeExtensions {
+  mcpServers: CodexMcpServer[];
+  configPath: string | null;
+  warnings: string[];
+}
+
+export interface AgentRuntimeExtensions {
+  claude?: ClaudeRuntimeExtensions;
+  codex?: CodexRuntimeExtensions;
+}
+
 /** 一次拉全数据的便利接口：UI 启动时一次性 invoke，省一轮 round trip。 */
 export interface PluginsOverview {
   claudeUserSkills: ClaudeSkill[];
   claudeProjectSkills: ClaudeSkill[];
   claudeUserPlugins: ClaudePlugin[];
   codexMcpServers: CodexMcpServer[];
+  codexConfigPath: string | null;
   /** 解析期发生的非致命错误，UI 用来提示「读取 .codex/config.toml 时第 N 行有误」。 */
   warnings: string[];
 }

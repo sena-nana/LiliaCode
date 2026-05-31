@@ -14,6 +14,7 @@ import {
   pluginsOverview,
   createClaudeSkill,
   deleteClaudeSkill,
+  setClaudePluginEnabled,
   setClaudeSkillEnabled,
   openCodexConfig,
   type ClaudePlugin,
@@ -49,6 +50,7 @@ const userSkills = ref<ClaudeSkill[]>([]);
 const projectSkills = ref<ClaudeSkill[]>([]);
 const claudePlugins = ref<ClaudePlugin[]>([]);
 const codexServers = ref<CodexMcpServer[]>([]);
+const codexConfigPath = ref<string | null>(null);
 const warnings = ref<string[]>([]);
 const loading = ref(false);
 const errorText = ref<string | null>(null);
@@ -74,6 +76,7 @@ async function refresh() {
     projectSkills.value = data.claudeProjectSkills;
     claudePlugins.value = data.claudeUserPlugins;
     codexServers.value = data.codexMcpServers;
+    codexConfigPath.value = data.codexConfigPath;
     warnings.value = data.warnings;
   } catch (err) {
     errorText.value = String(err);
@@ -132,6 +135,15 @@ async function toggleSkill(skill: ClaudeSkill) {
       !skill.enabled,
     );
     skill.enabled = !skill.enabled;
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
+async function togglePlugin(plugin: ClaudePlugin) {
+  try {
+    await setClaudePluginEnabled(plugin.scope as PluginScope, plugin.name, !plugin.enabled);
+    plugin.enabled = !plugin.enabled;
   } catch (err) {
     errorText.value = String(err);
   }
@@ -311,16 +323,30 @@ async function openCodex() {
     <!-- ===== Claude Plugins ===== -->
     <div v-else-if="tab === 'claude-plugins'" class="card">
       <p class="plugins-section-hint">
-        来自 <code>~/.claude/plugins/</code> 的 marketplace 插件（beta），一期仅展示。
+        来自 <code>~/.claude/plugins/</code> 的 marketplace 插件（beta）。
       </p>
       <ul v-if="claudePlugins.length" class="plugins-list">
-        <li v-for="p in claudePlugins" :key="p.path" class="plugins-list__item">
+        <li
+          v-for="p in claudePlugins"
+          :key="p.path"
+          class="plugins-list__item"
+          :class="{ 'is-disabled': !p.enabled }"
+        >
           <div class="plugins-list__head">
             <span class="plugins-list__name">{{ p.name }}</span>
+            <span v-if="p.enabled" class="plugins-list__badge plugins-list__badge--ok">
+              <Check :size="11" aria-hidden="true" /> 已启用
+            </span>
+            <span v-else class="plugins-list__badge plugins-list__badge--mute">已停用</span>
             <span class="plugins-list__badge plugins-list__badge--mute">v{{ p.version || "—" }}</span>
           </div>
           <p class="plugins-list__desc">{{ p.description || "（无描述）" }}</p>
           <div class="plugins-list__meta"><code>{{ p.path }}</code></div>
+          <div class="plugins-list__actions">
+            <button type="button" class="ghost" @click="togglePlugin(p)">
+              {{ p.enabled ? "停用" : "启用" }}
+            </button>
+          </div>
         </li>
       </ul>
       <p v-else class="plugins-empty">没有发现已安装的 plugin。</p>
@@ -329,7 +355,9 @@ async function openCodex() {
     <!-- ===== Codex MCP ===== -->
     <div v-else class="card">
       <div class="plugins-toolbar">
-        <span class="plugins-toolbar__hint">来自 <code>~/.codex/config.toml</code> 的 mcp_servers 节</span>
+        <span class="plugins-toolbar__hint">
+          来自 <code>{{ codexConfigPath || "~/.codex/config.toml" }}</code> 的 mcp_servers 节
+        </span>
         <button type="button" class="ghost" @click="openCodex">
           <FolderOpen :size="12" aria-hidden="true" /> 打开 config.toml
         </button>

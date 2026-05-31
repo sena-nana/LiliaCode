@@ -5,8 +5,9 @@
 //! - **Claude Code**
 //!   - Skills：`<root>/.claude/skills/<name>/SKILL.md`，frontmatter 至少有 `name` 和 `description`。
 //!     Lilia 额外承认自定义字段 `disabled: true` 表示关闭——Claude 官方不读这个字段，
-//!     但 Lilia 在启动 agent 子进程时按它决定 pluginRoots。
-//!   - Plugins (marketplace beta)：`<root>/.claude/plugins/<name>/plugin.json`，一期只读列出。
+//!     但 Lilia 在启动 agent 子进程时按它决定本轮传给 SDK 的 skills 列表。
+//!   - Plugins (marketplace beta)：`<root>/.claude/plugins/<name>/plugin.json`，用
+//!     `disabled: true` 控制是否传给 SDK 的 plugins 列表。
 //! - **Codex**：`~/.codex/config.toml` 的 `[mcp_servers.<name>]` 节，一期做只读 + 「打开配置」。
 //!
 //! 文件解析全部手写极小子集（避免引入 yaml / toml 依赖）。解析失败按「跳过 + 记 warning」
@@ -66,7 +67,38 @@ pub struct PluginsOverview {
     pub claude_project_skills: Vec<ClaudeSkill>,
     pub claude_user_plugins: Vec<ClaudePlugin>,
     pub codex_mcp_servers: Vec<CodexMcpServer>,
+    pub codex_config_path: Option<String>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeRuntimePlugin {
+    pub r#type: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeRuntimeExtensions {
+    pub skills: Vec<String>,
+    pub plugins: Vec<ClaudeRuntimePlugin>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRuntimeExtensions {
+    pub mcp_servers: Vec<CodexMcpServer>,
+    pub config_path: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeExtensions {
+    pub claude: ClaudeRuntimeExtensions,
+    pub codex: CodexRuntimeExtensions,
 }
 
 // ---------- 目录定位 ----------
@@ -204,19 +236,27 @@ pub fn list_claude_skills(
 }
 
 fn sanitize_skill_name(raw: &str) -> Result<String, String> {
+    sanitize_extension_name(raw, "skill")
+}
+
+fn sanitize_plugin_name(raw: &str) -> Result<String, String> {
+    sanitize_extension_name(raw, "plugin")
+}
+
+fn sanitize_extension_name(raw: &str, label: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("skill 名称不能为空".to_string());
+        return Err(format!("{label} 名称不能为空"));
     }
     if trimmed.len() > 64 {
-        return Err("skill 名称太长（>64 字符）".to_string());
+        return Err(format!("{label} 名称太长（>64 字符）"));
     }
     // 避免穿目录或写非法字符到 frontmatter。
     if !trimmed
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        return Err("skill 名称只能包含 a-z / A-Z / 0-9 / - / _".to_string());
+        return Err(format!("{label} 名称只能包含 a-z / A-Z / 0-9 / - / _"));
     }
     Ok(trimmed.to_string())
 }
@@ -347,7 +387,6 @@ fn rewrite_disabled_field(text: &str, want_disabled: bool) -> String {
 
 #[derive(Debug, Default)]
 struct PluginManifest {
-    name: Option<String>,
     description: Option<String>,
     version: Option<String>,
     disabled: bool,
@@ -358,9 +397,6 @@ fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
     let v: serde_json::Value = serde_json::from_str(text).ok()?;
     let obj = v.as_object()?;
     let mut m = PluginManifest::default();
-    if let Some(s) = obj.get("name").and_then(|x| x.as_str()) {
-        m.name = Some(s.to_string());
-    }
     if let Some(s) = obj.get("description").and_then(|x| x.as_str()) {
         m.description = Some(s.to_string());
     }
@@ -405,7 +441,7 @@ pub fn list_claude_plugins(app: &AppHandle, scope: &str) -> (Vec<ClaudePlugin>, 
         });
         out.push(ClaudePlugin {
             scope: scope.to_string(),
-            name: m.name.unwrap_or(dir_name),
+            name: dir_name,
             description: m.description.unwrap_or_default(),
             version: m.version.unwrap_or_default(),
             enabled: !m.disabled,
@@ -413,6 +449,44 @@ pub fn list_claude_plugins(app: &AppHandle, scope: &str) -> (Vec<ClaudePlugin>, 
         });
     }
     (out, warnings)
+}
+
+pub fn set_claude_plugin_enabled(
+    app: &AppHandle,
+    scope: &str,
+    name: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    if scope != SCOPE_USER {
+        return Err("当前仅支持用户级 Claude plugin".to_string());
+    }
+    let name = sanitize_plugin_name(name)?;
+    let root = claude_root_for(app, scope, None, PLUGINS_SUBDIR)?;
+    let manifest_path = root.join(&name).join(PLUGIN_MANIFEST);
+    let original = fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("读取 {} 失败：{e}", manifest_path.display()))?;
+    let updated = rewrite_plugin_disabled_field(&original, !enabled)
+        .map_err(|e| format!("更新 plugin.json 失败：{e}"))?;
+    fs::write(&manifest_path, updated)
+        .map_err(|e| format!("写入 plugin.json 失败：{e}"))?;
+    Ok(())
+}
+
+fn rewrite_plugin_disabled_field(text: &str, want_disabled: bool) -> Result<String, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("不是合法 JSON：{e}"))?;
+    let Some(obj) = value.as_object_mut() else {
+        return Err("plugin.json 顶层必须是对象".to_string());
+    };
+    if want_disabled {
+        obj.insert("disabled".to_string(), serde_json::Value::Bool(true));
+    } else {
+        obj.remove("disabled");
+    }
+    serde_json::to_string_pretty(&value).map_err(|e| e.to_string()).map(|mut out| {
+        out.push('\n');
+        out
+    })
 }
 
 // ---------- Codex MCP servers ----------
@@ -566,12 +640,61 @@ pub fn overview(app: &AppHandle, project_cwd: Option<&str>) -> PluginsOverview {
     warnings.extend(w3);
     let (codex_mcp_servers, w4) = list_codex_mcp_servers(app);
     warnings.extend(w4);
+    let codex_config_path = codex_config_path(app)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string());
     PluginsOverview {
         claude_user_skills: user_skills,
         claude_project_skills: project_skills,
         claude_user_plugins: user_plugins,
         codex_mcp_servers,
+        codex_config_path,
         warnings,
+    }
+}
+
+pub fn runtime_extensions(app: &AppHandle, project_cwd: Option<&str>) -> AgentRuntimeExtensions {
+    let mut claude_warnings = Vec::new();
+    let (user_skills, w1) = list_claude_skills(app, SCOPE_USER, None);
+    claude_warnings.extend(w1);
+    let (project_skills, w2) = if project_cwd.is_some() {
+        list_claude_skills(app, SCOPE_PROJECT, project_cwd)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    claude_warnings.extend(w2);
+    let skills = user_skills
+        .into_iter()
+        .chain(project_skills)
+        .filter(|skill| skill.enabled)
+        .map(|skill| skill.name)
+        .collect();
+
+    let (plugins, w3) = list_claude_plugins(app, SCOPE_USER);
+    claude_warnings.extend(w3);
+    let runtime_plugins = plugins
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+        .map(|plugin| ClaudeRuntimePlugin {
+            r#type: "local".to_string(),
+            path: plugin.path,
+        })
+        .collect();
+
+    let config_path = codex_config_path(app).ok();
+    let (mcp_servers, codex_warnings) = list_codex_mcp_servers(app);
+
+    AgentRuntimeExtensions {
+        claude: ClaudeRuntimeExtensions {
+            skills,
+            plugins: runtime_plugins,
+            warnings: claude_warnings,
+        },
+        codex: CodexRuntimeExtensions {
+            mcp_servers,
+            config_path: config_path.map(|path| path.to_string_lossy().to_string()),
+            warnings: codex_warnings,
+        },
     }
 }
 
@@ -622,6 +745,29 @@ mod tests {
     }
 
     #[test]
+    fn plugin_manifest_recognizes_disabled() {
+        let text = r#"{
+  "name": "demo",
+  "description": "Demo plugin",
+  "version": "1.0.0",
+  "disabled": true
+}"#;
+        let manifest = parse_plugin_manifest(text).unwrap();
+        assert!(manifest.disabled);
+    }
+
+    #[test]
+    fn plugin_rewrite_toggles_disabled() {
+        let src = r#"{"name":"demo","disabled":true}"#;
+        let enabled = rewrite_plugin_disabled_field(src, false).unwrap();
+        assert!(!enabled.contains("disabled"));
+
+        let disabled = rewrite_plugin_disabled_field(&enabled, true).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&disabled).unwrap();
+        assert_eq!(value.get("disabled").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
     fn codex_toml_parses_simple_block() {
         let text = r#"
 # 顶层注释
@@ -656,5 +802,6 @@ args = ["linear-mcp"]
         assert!(sanitize_skill_name("../escape").is_err());
         assert!(sanitize_skill_name("ok-name_1").is_ok());
         assert!(sanitize_skill_name("").is_err());
+        assert!(sanitize_plugin_name("ok-plugin").is_ok());
     }
 }

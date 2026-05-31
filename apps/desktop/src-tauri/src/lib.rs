@@ -1213,6 +1213,7 @@ fn spawn_agent_turn(
             count
         };
 
+        let extensions = plugins::runtime_extensions(&app_handle, Some(&project_cwd));
         let stdin_payload = serde_json::json!({
             "backend": backend_for_thread,
             "cwd": project_cwd,
@@ -1222,6 +1223,7 @@ fn spawn_agent_turn(
             "resumeSessionId": resume_session_id,
             "planMode": composer_for_thread.plan_mode,
             "permission": composer_for_thread.permission,
+            "extensions": extensions,
         });
 
         let mut cmd = Command::new("node");
@@ -2358,6 +2360,16 @@ fn plugins_list_claude_plugins(app: AppHandle, scope: String) -> Vec<ClaudePlugi
 }
 
 #[tauri::command]
+fn plugins_set_claude_plugin_enabled(
+    app: AppHandle,
+    scope: String,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    plugins::set_claude_plugin_enabled(&app, &scope, &name, enabled)
+}
+
+#[tauri::command]
 fn plugins_list_codex_mcp_servers(app: AppHandle) -> Vec<CodexMcpServer> {
     plugins::list_codex_mcp_servers(&app).0
 }
@@ -2456,6 +2468,7 @@ pub fn run() {
             plugins_delete_claude_skill,
             plugins_set_claude_skill_enabled,
             plugins_list_claude_plugins,
+            plugins_set_claude_plugin_enabled,
             plugins_list_codex_mcp_servers,
             plugins_open_codex_config,
             todos::todo_list,

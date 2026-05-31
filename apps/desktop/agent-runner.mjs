@@ -10,7 +10,11 @@
 //         "model": "...",
 //         "resumeSessionId": "...|null",
 //         "planMode": true|false,
-//         "permission": "full|ask|readonly"
+//         "permission": "full|ask|readonly",
+//         "extensions": {
+//           "claude": { "skills": [], "plugins": [], "warnings": [] },
+//           "codex": { "mcpServers": [], "configPath": "...|null", "warnings": [] }
+//         }
 //       }
 //   - stdin 后续行：父进程对此前发出的 control_request 的响应，目前包括：
 //       {"type":"consent_response","id":"consent-1","decision":"allow"|"deny","message":"..."}
@@ -402,6 +406,52 @@ function requestUserConsent(payload) {
   emit({ type: "consent_request", id, ...payload });
   return new Promise((resolve) => {
     consentPending.set(id, (response) => resolve({ id, ...response }));
+  });
+}
+
+function readRuntimeExtensions(cmd) {
+  return isRecord(cmd?.extensions) ? cmd.extensions : {};
+}
+
+function stringArray(value) {
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item.trim())
+    : [];
+}
+
+function readClaudeRuntimeExtensions(cmd) {
+  const ext = readRuntimeExtensions(cmd).claude;
+  const plugins = Array.isArray(ext?.plugins)
+    ? ext.plugins
+      .filter((plugin) =>
+        isRecord(plugin) &&
+        plugin.type === "local" &&
+        typeof plugin.path === "string" &&
+        plugin.path.trim(),
+      )
+      .map((plugin) => ({ type: "local", path: plugin.path }))
+    : [];
+  return { skills: stringArray(ext?.skills), plugins, warnings: stringArray(ext?.warnings) };
+}
+
+function readCodexRuntimeExtensions(cmd) {
+  const ext = readRuntimeExtensions(cmd).codex;
+  const mcpServers = Array.isArray(ext?.mcpServers) ? ext.mcpServers : [];
+  const configPath = typeof ext?.configPath === "string" && ext.configPath.trim()
+    ? ext.configPath
+    : null;
+  return { mcpServers, configPath, warnings: stringArray(ext?.warnings) };
+}
+
+function emitRuntimeExtensionWarnings(backend, warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return;
+  emitTimeline({
+    kind: "error",
+    status: "info",
+    title: `${backend} extensions warning`,
+    summary: warnings.join("\n"),
+    payload: { backend, warnings },
+    sourceId: `${backend}:extensions:warnings`,
   });
 }
 
@@ -1528,6 +1578,7 @@ function mapClaudeSystemTimeline(msg) {
 
 async function runClaude(cmd) {
   const { cwd, prompt, model, resumeSessionId } = cmd;
+  const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
   const permission = cmd.permission === "full" || cmd.permission === "readonly"
     ? cmd.permission
     : "ask";
@@ -1578,10 +1629,13 @@ async function runClaude(cmd) {
     toolConfig: {
       askUserQuestion: { previewFormat: "markdown" },
     },
+    ...(runtimeExtensions.skills.length > 0 ? { skills: runtimeExtensions.skills } : {}),
+    ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),
     ...permOpts,
     // SDK 默认会启用 Claude Code 的全套工具（Read/Write/Bash/...）。这正是
     // 「Lilia 是 Claude Code 的图形外壳」这一定位要的——不裁剪 tools。
   };
+  emitRuntimeExtensionWarnings("claude", runtimeExtensions.warnings);
 
   const claudeQuery = query({ prompt: singleClaudePromptStream(prompt), options });
   ctx.query = claudeQuery;
@@ -2132,6 +2186,7 @@ function pickCodexAssistantText(item) {
 
 async function runCodex(cmd) {
   const { cwd, prompt, model, resumeSessionId, permission } = cmd;
+  const runtimeExtensions = readCodexRuntimeExtensions(cmd);
 
   // 动态 import：让仅用 Claude 的环境不需要装 @openai/codex-sdk 也能跑。
   let Codex;
@@ -2148,6 +2203,7 @@ async function runCodex(cmd) {
   }
 
   const permOpts = mapCodexPermission(permission);
+  emitCodexRuntimeExtensionsTimeline(runtimeExtensions);
   const codex = new Codex({
     apiKey: process.env.OPENAI_API_KEY,
     baseUrl: process.env.OPENAI_BASE_URL || undefined,
@@ -2201,6 +2257,31 @@ async function runCodex(cmd) {
     });
     emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
   }
+}
+
+function emitCodexRuntimeExtensionsTimeline(extensions) {
+  const count = extensions.mcpServers.length;
+  const serverNames = extensions.mcpServers
+    .map((server) => stringOrNull(server?.name))
+    .filter(Boolean);
+  emitTimeline({
+    kind: "mcp",
+    status: "info",
+    title: "Codex MCP config",
+    summary: count > 0
+      ? `已注册 ${count} 个 MCP server`
+      : "未发现 Codex MCP server",
+    payload: {
+      backend: "codex",
+      source: "config.toml",
+      configPath: extensions.configPath,
+      serverCount: count,
+      servers: serverNames,
+      warnings: extensions.warnings,
+    },
+    sourceId: "codex:mcp:runtime-config",
+  });
+  emitRuntimeExtensionWarnings("codex", extensions.warnings);
 }
 
 // ---------- Dry run（单测用） ----------

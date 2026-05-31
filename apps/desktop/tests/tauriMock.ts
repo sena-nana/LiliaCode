@@ -117,6 +117,15 @@ let tasks: TaskRow[] = [];
 let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+const baseClaudePlugins = [{
+  scope: "user",
+  name: "demo-plugin",
+  description: "测试用 Claude plugin",
+  version: "1.0.0",
+  enabled: true,
+  path: "C:\\Users\\mock\\.claude\\plugins\\demo-plugin",
+}];
+let claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
 let agentInteractionSettings = { nonInterruptMode: false, debug: false };
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
@@ -163,6 +172,7 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
   agentInteractionSettings = { nonInterruptMode: false, debug: false };
   eventHandlers = {};
   webviewDragDropHandlers = [];
@@ -587,6 +597,40 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         planMode: false,
         permission: "ask",
       };
+    }
+
+    case "plugins_overview":
+      return {
+        claudeUserSkills: [
+          {
+            scope: "user",
+            name: "mock-skill",
+            description: "测试用 Skill",
+            enabled: true,
+            path: "C:\\Users\\mock\\.claude\\skills\\mock-skill\\SKILL.md",
+          },
+        ],
+        claudeProjectSkills: [],
+        claudeUserPlugins: claudePlugins.map((plugin) => ({ ...plugin })),
+        codexMcpServers: [
+          {
+            name: "mock-mcp",
+            command: "node",
+            args: ["mock-mcp.js"],
+            enabled: true,
+          },
+        ],
+        codexConfigPath: "C:\\Users\\mock\\.codex\\config.toml",
+        warnings: [],
+      };
+
+    case "plugins_set_claude_plugin_enabled": {
+      const name = String(args.name);
+      const enabled = args.enabled === true;
+      claudePlugins = claudePlugins.map((plugin) =>
+        plugin.name === name ? { ...plugin, enabled } : plugin
+      );
+      return undefined;
     }
 
     case "chat_set_composer_state":

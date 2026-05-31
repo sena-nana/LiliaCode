@@ -140,4 +140,23 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/cmd\.prompt\s*=\s*buildPromptWithAttachments\(/);
     expect(runnerSource).toMatch(/attachments[\s\S]*?path/);
   });
+
+  it("Claude runtime extensions 映射为 SDK skills/plugins options", () => {
+    expect(runnerSource).toContain("function readClaudeRuntimeExtensions");
+    expect(runnerSource).toMatch(/\.\.\.\(runtimeExtensions\.skills\.length > 0 \? \{ skills: runtimeExtensions\.skills \} : \{\}\)/);
+    expect(runnerSource).toMatch(/\.\.\.\(runtimeExtensions\.plugins\.length > 0 \? \{ plugins: runtimeExtensions\.plugins \} : \{\}\)/);
+    expect(runnerSource).toContain('plugin.type === "local"');
+  });
+
+  it("Codex runtime extensions 只发运行时 MCP 状态，不传入 SDK 私有参数", () => {
+    expect(runnerSource).toContain("function readCodexRuntimeExtensions");
+    expect(runnerSource).toContain("function emitCodexRuntimeExtensionsTimeline");
+    expect(runnerSource).toContain("codex:mcp:runtime-config");
+    expect(runnerSource).toContain("configPath: extensions.configPath");
+    const startThreadBlock = runnerSource.match(
+      /codex\.startThread\(\{[\s\S]*?\n\s*\}\)/,
+    )?.[0];
+    expect(startThreadBlock).toBeTruthy();
+    expect(startThreadBlock).not.toContain("mcpServers");
+  });
 });
