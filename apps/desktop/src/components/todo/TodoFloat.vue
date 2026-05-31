@@ -164,7 +164,6 @@ onUnmounted(async () => {
 <template>
   <div v-if="hasVisibleTodos" class="todo-float" aria-label="Todo 与引导">
     <section v-if="agentTodos.length" class="todo-float__section">
-      <div class="todo-float__section-label">Todo</div>
       <ul class="todo-float__list">
         <li
           v-for="todo in agentTodos"
@@ -174,19 +173,18 @@ onUnmounted(async () => {
           <span class="todo-float__source" title="Agent 原生 Todo">
             <Bot :size="12" aria-hidden="true" />
           </span>
+          <span class="todo-float__text">{{ todo.text }}</span>
           <span
             class="todo-float__priority"
             :class="`todo-float__priority--${todo.priority}`"
           >
             {{ priorityLabel(todo.priority) }}
           </span>
-          <span class="todo-float__text">{{ todo.text }}</span>
         </li>
       </ul>
     </section>
 
     <section v-if="guides.length" class="todo-float__section">
-      <div class="todo-float__section-label">引导</div>
       <ul class="todo-float__list">
         <li
           v-for="todo in guides"
@@ -197,24 +195,6 @@ onUnmounted(async () => {
           <span class="todo-float__source" title="Lilia 引导">
             <Sparkles :size="12" aria-hidden="true" />
           </span>
-
-          <div class="todo-float__priority-group" aria-label="引导优先级">
-            <button
-              v-for="option in priorityOptions"
-              :key="option.value"
-              type="button"
-              class="todo-float__priority-choice"
-              :class="{
-                'is-active': todo.priority === option.value,
-                [`todo-float__priority-choice--${option.value}`]: true,
-              }"
-              :aria-pressed="todo.priority === option.value"
-              :title="`设为${option.label}优先级`"
-              @click="setPriority(todo, option.value)"
-            >
-              {{ option.label }}
-            </button>
-          </div>
 
           <input
             v-if="editingId === todo.id"
@@ -240,6 +220,24 @@ onUnmounted(async () => {
           <span v-if="guideStatusLabel(todo)" class="todo-float__status">
             {{ guideStatusLabel(todo) }}
           </span>
+
+          <div class="todo-float__priority-group" aria-label="引导优先级">
+            <button
+              v-for="option in priorityOptions"
+              :key="option.value"
+              type="button"
+              class="todo-float__priority-choice"
+              :class="{
+                'is-active': todo.priority === option.value,
+                [`todo-float__priority-choice--${option.value}`]: true,
+              }"
+              :aria-pressed="todo.priority === option.value"
+              :title="`设为${option.label}优先级`"
+              @click="setPriority(todo, option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
 
           <button
             type="button"

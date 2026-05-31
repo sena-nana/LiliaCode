@@ -464,7 +464,10 @@ describe("TaskDetail chat sidebar toggle", () => {
     });
     expect(view.getByText("验证手动 Todo 不被 agent 覆盖")).toBeInTheDocument();
     expect(view.queryByText("完成 Claude TodoWrite 调试接线")).toBeNull();
-    expect(view.getByText("Todo")).toBeInTheDocument();
+    const todoFloat = view.getByLabelText("Todo 与引导");
+    expect(within(todoFloat).queryByText("Todo")).toBeNull();
+    expect(within(todoFloat).queryByText("引导")).toBeNull();
+    expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(1);
     expect(view.getByText("模拟 Claude TodoWrite 并刷新 Lilia Todo")).toBeInTheDocument();
 
     await fireEvent.update(
@@ -476,7 +479,7 @@ describe("TaskDetail chat sidebar toggle", () => {
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(true);
       expect(view.getByText("手动补充调试项")).toBeInTheDocument();
-      expect(view.getByText("引导")).toBeInTheDocument();
+      expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(2);
     });
 
     await waitFor(() => {
@@ -493,6 +496,11 @@ describe("TaskDetail chat sidebar toggle", () => {
 
     await createTodo("t-002", "需要补充上下文");
     mockInvoke.mockClear();
+
+    const todoFloat = await view.findByLabelText("Todo 与引导");
+    expect(within(todoFloat).queryByText("Todo")).toBeNull();
+    expect(within(todoFloat).queryByText("引导")).toBeNull();
+    expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(1);
 
     const guide = await view.findByRole("button", { name: "需要补充上下文" });
     await fireEvent.click(guide);

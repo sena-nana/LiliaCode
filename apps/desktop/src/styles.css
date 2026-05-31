@@ -1956,7 +1956,7 @@ button.ghost:hover {
   align-self: center;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .chat-transcript-frame {
@@ -3442,6 +3442,13 @@ button.ghost:hover {
   box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
 }
 
+.todo-float + .chat-composer {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top-color: var(--border-soft);
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.45);
+}
+
 .chat-composer__input {
   /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;
@@ -4220,35 +4227,21 @@ button.ghost:hover {
 .todo-float {
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
   box-shadow: 0 4px 16px -10px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   max-height: 220px;
   overflow-y: auto;
-  padding: 5px 6px;
-}
-
-.todo-float__section {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 4px;
-  min-width: 0;
+  padding: 6px 8px;
 }
 
 .todo-float__section + .todo-float__section {
   border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
   padding-top: 4px;
-}
-
-.todo-float__section-label {
-  align-self: start;
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 22px;
-  text-align: right;
 }
 
 .todo-float__list {
