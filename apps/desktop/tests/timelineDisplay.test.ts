@@ -1,6 +1,5 @@
 import { fireEvent, render } from "@testing-library/vue";
-import { nextTick } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import { normalizeClaudeTool } from "../../../packages/contracts/src/claudeTools.mjs";
@@ -38,44 +37,6 @@ function listItems(
   return details?.flatMap((item) =>
     item.type === "list" ? item.items.map((entry) => entry.text) : []
   ) ?? [];
-}
-
-function mockElementRect(element: HTMLElement, rect: Partial<DOMRect>) {
-  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
-    x: rect.left ?? 0,
-    y: rect.top ?? 0,
-    left: rect.left ?? 0,
-    top: rect.top ?? 0,
-    right: rect.right ?? 100,
-    bottom: rect.bottom ?? 0,
-    width: rect.width ?? 100,
-    height: rect.height ?? 0,
-    toJSON: () => ({}),
-  });
-}
-
-function mockScrollGeometry(
-  element: HTMLElement,
-  values: {
-    clientHeight: number;
-    scrollHeight: number;
-    scrollTop: number;
-  },
-) {
-  Object.defineProperty(element, "clientHeight", {
-    configurable: true,
-    value: values.clientHeight,
-  });
-  Object.defineProperty(element, "scrollHeight", {
-    configurable: true,
-    value: values.scrollHeight,
-  });
-  element.scrollTop = values.scrollTop;
-}
-
-async function flushPlanMeasure() {
-  await nextTick();
-  await nextTick();
 }
 
 describe("timeline display derivation", () => {
@@ -813,8 +774,7 @@ describe("timeline event expansion", () => {
     expect(view.getByText("Bash：yarn test")).toBeInTheDocument();
   });
 
-  it("计划长正文的 markdown 标题显示为内层滚动节点并可点击跳转", async () => {
-    const scrollTo = vi.fn();
+  it("计划正文保留 markdown 标题结构但不生成内层滚动地图", () => {
     const view = render(AgentTimeline, {
       props: {
         activePlanApprovalTurnId: "turn-outline",
@@ -850,193 +810,8 @@ describe("timeline event expansion", () => {
 
     expect(body).toBeInstanceOf(HTMLElement);
     expect(headings).toHaveLength(3);
-    Object.defineProperty(body as HTMLElement, "scrollTo", {
-      configurable: true,
-      value: scrollTo,
-    });
-    mockScrollGeometry(body as HTMLElement, {
-      clientHeight: 200,
-      scrollHeight: 1000,
-      scrollTop: 20,
-    });
-    mockElementRect(body as HTMLElement, { top: 100, bottom: 300, height: 200 });
-    mockElementRect(headings[0] as HTMLElement, { top: 120, bottom: 140, height: 20 });
-    mockElementRect(headings[1] as HTMLElement, { top: 330, bottom: 350, height: 20 });
-    mockElementRect(headings[2] as HTMLElement, { top: 520, bottom: 540, height: 20 });
-
-    await fireEvent.scroll(body as HTMLElement);
-    await flushPlanMeasure();
-
-    const markers = view.container.querySelectorAll(".timeline-plan-card__heading-marker");
-    const firstMarker = view.getByRole("button", { name: "跳到计划标题：阶段一" });
-    const secondMarker = view.getByRole("button", { name: "跳到计划标题：阶段二" });
-    const thirdMarker = view.getByRole("button", { name: "跳到计划标题：阶段三" });
-
-    expect(markers).toHaveLength(3);
-    expect(firstMarker).toHaveClass("timeline-plan-card__heading-marker--level-4");
-    expect(secondMarker).toHaveClass("timeline-plan-card__heading-marker--level-5");
-    expect(thirdMarker).toHaveClass("timeline-plan-card__heading-marker--level-6");
-    expect(firstMarker).toHaveAttribute("title", "阶段一");
-    expect(firstMarker.querySelector(".timeline-plan-card__heading-marker-tooltip"))
-      .toHaveTextContent("阶段一");
-
-    await fireEvent.click(secondMarker);
-
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 242,
-      behavior: "smooth",
-    });
-  });
-
-  it("计划内层滚动条按外层规则显隐并支持拖动", async () => {
-    vi.useFakeTimers();
-    try {
-      let body: HTMLElement;
-      const scrollTo = vi.fn(({ top }: ScrollToOptions) => {
-        body.scrollTop = Number(top);
-      });
-      const view = render(AgentTimeline, {
-        props: {
-          activePlanApprovalTurnId: "turn-scrollbar",
-          events: [
-            timelineEvent({
-              id: "plan-scrollbar",
-              kind: "plan",
-              status: "requires_action",
-              title: "ExitPlanMode",
-              turnId: "turn-scrollbar",
-              payload: {
-                plan: "正文\n\n".repeat(80),
-                approved: null,
-                executionPermission: "ask",
-              },
-            }),
-          ],
-        },
-      });
-      const shell = view.container.querySelector(".timeline-plan-card__body-shell");
-      body = view.container.querySelector(".timeline-plan-card__body") as HTMLElement;
-
-      expect(shell).toBeInstanceOf(HTMLElement);
-      expect(body).toBeInstanceOf(HTMLElement);
-      Object.defineProperty(body, "scrollTo", {
-        configurable: true,
-        value: scrollTo,
-      });
-      mockScrollGeometry(body, {
-        clientHeight: 200,
-        scrollHeight: 1000,
-        scrollTop: 20,
-      });
-      mockElementRect(body, { top: 100, right: 100, bottom: 300, height: 200 });
-      await flushPlanMeasure();
-
-      await fireEvent.scroll(body);
-      await flushPlanMeasure();
-
-      const scrollMap = view.container.querySelector(".timeline-plan-card__scroll-map");
-      const track = view.container.querySelector(".timeline-plan-card__scroll-track");
-      const thumb = view.container.querySelector(".timeline-plan-card__scroll-thumb");
-
-      expect(scrollMap).toHaveClass("is-visible");
-      expect(track).toBeInstanceOf(HTMLElement);
-      expect(thumb).toBeInstanceOf(HTMLElement);
-
-      await fireEvent(body, new Event("scrollend"));
-      await vi.advanceTimersByTimeAsync(179);
-      expect(scrollMap).toHaveClass("is-visible");
-      await vi.advanceTimersByTimeAsync(1);
-      await nextTick();
-      expect(scrollMap).not.toHaveClass("is-visible");
-
-      await fireEvent.mouseMove(shell as HTMLElement, { clientX: 95 });
-      expect(scrollMap).toHaveClass("is-visible");
-      await fireEvent.mouseMove(shell as HTMLElement, { clientX: 20 });
-      await vi.advanceTimersByTimeAsync(180);
-      await nextTick();
-      expect(scrollMap).not.toHaveClass("is-visible");
-
-      mockElementRect(track as HTMLElement, { top: 0, bottom: 184, height: 184 });
-      await fireEvent.pointerDown(track as HTMLElement, { clientY: 170, pointerId: 1 });
-      expect(scrollTo).toHaveBeenLastCalledWith({
-        top: 220,
-        behavior: "auto",
-      });
-
-      await fireEvent.pointerDown(thumb as HTMLElement, { clientY: 20, pointerId: 2 });
-      await fireEvent.pointerMove(window, { clientY: 56, pointerId: 2 });
-      expect(body.scrollTop).toBeCloseTo(416, 0);
-      await fireEvent.pointerUp(window, { clientY: 56, pointerId: 2 });
-    } finally {
-      vi.clearAllTimers();
-      vi.useRealTimers();
-    }
-  });
-
-  it("不为未溢出计划或非主计划标题生成内层滚动节点", async () => {
-    const shortView = render(AgentTimeline, {
-      props: {
-        activePlanApprovalTurnId: "turn-short",
-        events: [
-          timelineEvent({
-            id: "plan-short",
-            kind: "plan",
-            status: "requires_action",
-            title: "ExitPlanMode",
-            turnId: "turn-short",
-            payload: {
-              plan: "## 简短计划\n- 一屏内可见",
-              approved: null,
-              executionPermission: "ask",
-            },
-          }),
-        ],
-      },
-    });
-    const shortBody = shortView.container.querySelector(".timeline-plan-card__body");
-    expect(shortBody).toBeInstanceOf(HTMLElement);
-    mockScrollGeometry(shortBody as HTMLElement, {
-      clientHeight: 300,
-      scrollHeight: 300,
-      scrollTop: 0,
-    });
-    await fireEvent.scroll(shortBody as HTMLElement);
-    await flushPlanMeasure();
-    expect(shortView.queryByRole("button", { name: "跳到计划标题：简短计划" }))
-      .not.toBeInTheDocument();
-    shortView.unmount();
-
-    const revisionView = render(AgentTimeline, {
-      props: {
-        events: [
-          timelineEvent({
-            id: "plan-revision-heading",
-            kind: "plan",
-            status: "cancelled",
-            title: "ExitPlanMode",
-            payload: {
-              plan: "只调整一行计划",
-              revisionRequest: "## 修改边界\n把文档边界也写清楚",
-              approved: false,
-              executionPermission: "ask",
-            },
-          }),
-        ],
-      },
-    });
-    const revisionToggle = revisionView.getByRole("button", { name: /要求修改计划/ });
-    await fireEvent.click(revisionToggle);
-    const revisionBody = revisionView.container.querySelector(".timeline-plan-card__body");
-    expect(revisionBody).toBeInstanceOf(HTMLElement);
-    mockScrollGeometry(revisionBody as HTMLElement, {
-      clientHeight: 160,
-      scrollHeight: 500,
-      scrollTop: 0,
-    });
-    await fireEvent.scroll(revisionBody as HTMLElement);
-    await flushPlanMeasure();
-    expect(revisionView.queryByRole("button", { name: "跳到计划标题：修改边界" }))
-      .not.toBeInTheDocument();
+    expect(view.container.querySelector(".timeline-plan-card__scroll-map")).toBeNull();
+    expect(view.queryByRole("button", { name: /跳到计划标题/ })).not.toBeInTheDocument();
   });
 
   it("处理后的计划默认折叠并可再次展开", async () => {

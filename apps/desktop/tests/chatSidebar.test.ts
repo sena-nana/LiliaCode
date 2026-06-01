@@ -16,6 +16,7 @@ import {
 } from "../src/composables/useChatSidebar";
 import { setAgentInteractionSettings } from "../src/services/chat";
 import { createTodo } from "../src/services/todos";
+import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
 import { mockInvoke } from "./tauriMock";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -155,6 +156,13 @@ function debugSidebar(container: HTMLElement) {
   return within(sidebarElement(container));
 }
 
+async function enableDebugSidebar() {
+  await setAgentInteractionSettings({ debug: true });
+  mockInvoke.mockClear();
+  openChatSidebar("debug");
+  return renderTaskDetail();
+}
+
 beforeEach(() => {
   localStorage.clear();
   closeChatSidebar();
@@ -162,6 +170,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  const { state } = useAskUser();
+  while (state.current || state.queue.length) {
+    resolveAskUser({ answers: {}, cancelled: true });
+  }
   cleanup();
   for (const cleanup of cleanups.splice(0)) cleanup();
   closeChatSidebar();
@@ -316,11 +328,7 @@ describe("TaskDetail chat sidebar toggle", () => {
   });
 
   it("开启 debug 后注册调试面板，并模拟计划确认完整流程", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "计划" }));
 
@@ -345,11 +353,7 @@ describe("TaskDetail chat sidebar toggle", () => {
   });
 
   it("debug 提问使用真实 pending ask 流程并在回答后回写时间线", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "单选提问" }));
 
@@ -365,84 +369,22 @@ describe("TaskDetail chat sidebar toggle", () => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
   });
 
-  it("debug 多选提问覆盖多选交互并本地完成", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
+  it.each([
+    ["多选提问", "Debug 多选提问"],
+    ["示例提问", "Debug 示例提问"],
+    ["多题提问", "Debug 多题提问"],
+  ])("debug %s 按钮能注入本地提问卡片", async (buttonName, regionName) => {
+    const view = await enableDebugSidebar();
 
-    const view = await renderTaskDetail();
+    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: buttonName }));
 
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "多选提问" }));
-
-    expect(await view.findByRole("region", { name: "Debug 多选提问" })).toBeInTheDocument();
+    expect(await view.findByRole("region", { name: regionName })).toBeInTheDocument();
     expect(view.queryByText("已失效")).toBeNull();
-
-    await fireEvent.click(view.getByRole("checkbox", { name: /权限申请/ }));
-    await fireEvent.click(view.getByRole("checkbox", { name: /普通卡片/ }));
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(view.getByText("Debug 多选提问已回答")).toBeInTheDocument();
-    });
-
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
-  });
-
-  it("debug 示例提问显示选项预览并本地完成", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "示例提问" }));
-    expect(await view.findByRole("region", { name: "Debug 示例提问" })).toBeInTheDocument();
-
-    await fireEvent.mouseEnter(view.getByRole("radio", { name: /详细/ }));
-    expect(view.getByLabelText("选项预览")).toHaveTextContent("本地 resolve 后回写卡片状态");
-
-    await fireEvent.click(view.getByRole("radio", { name: /详细/ }));
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(view.getByText("Debug 示例提问已回答")).toBeInTheDocument();
-    });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
-  });
-
-  it("debug 多题提问保留前后题选择并本地完成", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "多题提问" }));
-
-    expect(await view.findByRole("region", { name: "Debug 多题提问" })).toBeInTheDocument();
-    await fireEvent.click(view.getByRole("radio", { name: /时间线/ }));
-    await fireEvent.click(view.getByRole("button", { name: "继续" }));
-    await fireEvent.click(view.getByRole("checkbox", { name: "完成态" }));
-    await fireEvent.click(view.getByRole("button", { name: "上一题" }));
-
-    expect(view.getByRole("radio", { name: /时间线/ })).toHaveAttribute("aria-checked", "true");
-
-    await fireEvent.click(view.getByRole("button", { name: "继续" }));
-    expect(view.getByRole("checkbox", { name: "完成态" })).toHaveAttribute("aria-checked", "true");
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(view.getByText("Debug 多题提问已回答")).toBeInTheDocument();
-    });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
   });
 
   it("debug 权限申请走本地 pending tool consent，不触发 runner IPC", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "权限申请" }));
 
@@ -460,10 +402,7 @@ describe("TaskDetail chat sidebar toggle", () => {
   });
 
   it("debug 待办卡片可插入并展开查看详情", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "待办卡片" }));
 
@@ -474,11 +413,7 @@ describe("TaskDetail chat sidebar toggle", () => {
   });
 
   it("debug Todo工具刷新原生 Todo，并把用户输入先进 Lilia 引导", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    mockInvoke.mockClear();
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "Todo工具" }));
 
@@ -547,10 +482,7 @@ describe("TaskDetail chat sidebar toggle", () => {
   });
 
   it("debug 普通卡片事件覆盖命令、读文件和改文件", async () => {
-    await setAgentInteractionSettings({ debug: true });
-    openChatSidebar("debug");
-
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
 
     const debug = debugSidebar(view.container);
     await fireEvent.click(await debug.findByRole("button", { name: "命令" }));

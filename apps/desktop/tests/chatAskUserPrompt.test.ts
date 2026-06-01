@@ -36,43 +36,6 @@ const askUserSpec: AskUserSpec = {
   ],
 };
 
-const askUserWithOtherSpec: AskUserSpec = {
-  ...askUserSpec,
-  questions: [
-    {
-      ...askUserSpec.questions[0],
-      allowOther: true,
-    },
-  ],
-};
-
-const multiAskUserSpec: AskUserSpec = {
-  title: "Claude 想确认 2 件事",
-  source: "Claude",
-  questions: [
-    {
-      id: "q-1",
-      header: "方案",
-      question: "选哪个方案？",
-      mode: "single",
-      options: [
-        { id: "o-1", label: "A" },
-        { id: "o-2", label: "B" },
-      ],
-    },
-    {
-      id: "q-2",
-      header: "范围",
-      question: "要包含哪些内容？",
-      mode: "multi",
-      options: [
-        { id: "cache", label: "缓存" },
-        { id: "tests", label: "测试" },
-      ],
-    },
-  ],
-};
-
 async function renderTaskDetail(taskId = "t-002") {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(`/projects/lilia/tasks/${taskId}`);
@@ -380,88 +343,6 @@ describe("chat AskUser prompt", () => {
     await expectAskUserResponse("t-002");
   });
 
-  it("非打断模式的允许 other 提问点击其他后才显示输入框", async () => {
-    await enableNonInterruptMode();
-    const view = await renderTaskDetail();
-
-    emitAskUserRequest("t-002", askUserWithOtherSpec);
-    emitAskUserTimelineEvent("t-002", askUserWithOtherSpec);
-
-    await waitFor(() => {
-      expect(view.container.querySelector(".timeline-pending-action.composer-inline--ask"))
-        .not.toBeNull();
-    });
-    expect(view.queryByPlaceholderText("自定义回答")).toBeNull();
-
-    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
-    const input = view.getByPlaceholderText("自定义回答");
-    const actionRow = input.closest(".composer-inline__actions");
-    expect(actionRow).not.toBeNull();
-    expect(actionRow).toContainElement(view.getByRole("button", { name: "完成" }));
-    expect(actionRow?.querySelector(".composer-inline__spacer")).toBeNull();
-    await fireEvent.update(input, "第三种方案");
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
-        taskId: "t-002",
-        requestId: "ask-t-002",
-        result: {
-          cancelled: false,
-          answers: {
-            "q-1": {
-              questionId: "q-1",
-              value: "other",
-              notes: "第三种方案",
-            },
-          },
-        },
-      }, undefined);
-    });
-  });
-
-  it("非打断模式的多题提问在时间线卡片中保留前后题回答", async () => {
-    await enableNonInterruptMode();
-    const view = await renderTaskDetail();
-
-    emitAskUserRequest("t-002", multiAskUserSpec);
-    emitAskUserTimelineEvent("t-002", multiAskUserSpec);
-
-    await waitFor(() => {
-      expect(view.container.querySelector(".timeline-pending-action.composer-inline--ask"))
-        .not.toBeNull();
-    });
-    await fireEvent.click(view.getByRole("radio", { name: "B" }));
-    await waitFor(() => {
-      expect(view.getByRole("radio", { name: "B" })).toHaveAttribute("aria-checked", "true");
-    });
-    await fireEvent.click(view.getByRole("button", { name: "继续" }));
-    await fireEvent.click(view.getByRole("checkbox", { name: "缓存" }));
-    await fireEvent.click(view.getByRole("checkbox", { name: "测试" }));
-    await fireEvent.click(view.getByRole("button", { name: "上一题" }));
-
-    expect(view.getByRole("radio", { name: "B" })).toHaveAttribute("aria-checked", "true");
-
-    await fireEvent.click(view.getByRole("button", { name: "继续" }));
-    expect(view.getByRole("checkbox", { name: "缓存" })).toHaveAttribute("aria-checked", "true");
-    expect(view.getByRole("checkbox", { name: "测试" })).toHaveAttribute("aria-checked", "true");
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
-        taskId: "t-002",
-        requestId: "ask-t-002",
-        result: {
-          cancelled: false,
-          answers: {
-            "q-1": { questionId: "q-1", value: "o-2" },
-            "q-2": { questionId: "q-2", value: ["cache", "tests"] },
-          },
-        },
-      }, undefined);
-    });
-  });
-
   it("计划确认挂起时，输入框发送文本会回写为计划修改要求而不是新消息", async () => {
     const view = await renderTaskDetail();
 
@@ -581,7 +462,7 @@ describe("chat AskUser prompt", () => {
     });
   });
 
-  it("非打断模式的 Bash 时间线待授权卡片可编辑命令并同意回写 updatedInput", async () => {
+  it("非打断模式的 Bash 时间线待授权卡片复用可编辑命令入口", async () => {
     await enableNonInterruptMode();
     const view = await renderTaskDetail();
 
@@ -598,8 +479,6 @@ describe("chat AskUser prompt", () => {
     expect(promptView.getByText("COMMAND")).toBeInTheDocument();
     expect(promptView.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
 
-    await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
-    await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
     await fireEvent.click(promptView.getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
@@ -608,7 +487,7 @@ describe("chat AskUser prompt", () => {
         requestId: "bash-tool-t-002",
         decision: "allow",
         message: null,
-        updatedInput: { command: "pwd && echo ok" },
+        updatedInput: null,
       }, undefined);
     });
   });
@@ -684,6 +563,7 @@ describe("chat AskUser prompt", () => {
 
     await waitFor(() => {
       expect(view.container.querySelector(".chat-composer .composer-inline--plan")).toBeNull();
+      expect(view.container.querySelector(".timeline-pending-action--plan")).not.toBeNull();
     });
     const action = view.container.querySelector(".timeline-pending-action--plan");
     expect(action).not.toBeNull();

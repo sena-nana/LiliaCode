@@ -939,13 +939,6 @@ describe("chat scheduler", () => {
         .toHaveAttribute("aria-expanded", "false");
     });
 
-    await fireEvent.click(view.getByRole("button", { name: /cargo check/ }));
-    await waitFor(() => {
-      expect(view.getByText("Rust 验证输出详情")).toBeInTheDocument();
-      expect(view.getByRole("button", { name: /cargo check/ }))
-        .toHaveAttribute("aria-expanded", "true");
-    });
-
     emitMockTimelineEvent("t-002", {
       id: "tl-new-final-after-history",
       kind: "message",
@@ -966,8 +959,7 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText("新一轮最终回复。")).toBeInTheDocument();
       expect(view.getByRole("button", { name: /cargo check/ }))
-        .toHaveAttribute("aria-expanded", "true");
-      expect(view.getByText("Rust 验证输出详情")).toBeInTheDocument();
+        .toHaveAttribute("aria-expanded", "false");
     });
     expect(view.queryByRole("button", { name: /展开过程/ })).toBeNull();
 

@@ -1,19 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, type CSSProperties } from "vue";
+import { computed } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import BaseScrollMap from "./BaseScrollMap.vue";
 import MarkdownBlock from "./MarkdownBlock.vue";
 import TimelineCardDetails from "./TimelineCardDetails.vue";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
-import {
-  markerTopForElement,
-  type ScrollMapMetrics,
-} from "./useScrollMap";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
@@ -29,14 +24,6 @@ type PlanStatusKind =
   | "cancelled"
   | "expired"
   | "neutral";
-
-interface HeadingMarker {
-  index: number;
-  key: string;
-  label: string;
-  level: 4 | 5 | 6;
-  top: number;
-}
 
 const STATUS_LABELS: Record<PlanStatusKind, string> = {
   pending: "待确认",
@@ -62,8 +49,6 @@ const emit = defineEmits<{
   resolvePendingAction: [resolution: PendingAgentActionResolution];
 }>();
 
-const bodyEl = ref<HTMLElement | null>(null);
-const bodyShellEl = ref<HTMLElement | null>(null);
 const display = computed(() =>
   readTimelineDisplay(props.event, { projectCwd: props.projectCwd }),
 );
@@ -129,82 +114,10 @@ const expandedFallbackView = computed(() =>
         singleLineTone: "muted",
       }),
 );
-const planScrollMeasureKey = computed(() =>
-  [
-    props.expanded,
-    planText.value,
-    revisionRequest.value,
-    allowedPromptRows.value.map((row) => row.key).join("|"),
-  ].join("\n"),
-);
-
-const HEADING_SCROLL_OFFSET = 8;
 
 function onToggle() {
   if (!props.canToggle) return;
   emit("toggle", props.event);
-}
-
-function headingMarkersForMetrics(metrics: ScrollMapMetrics): HeadingMarker[] {
-  const body = bodyEl.value;
-  if (!props.expanded || !body || !metrics.scrollable || !planText.value) {
-    return [];
-  }
-
-  const headings = planHeadingElements(body);
-  if (!headings.length || metrics.trackHeight <= 0 || metrics.domainHeight <= 0) {
-    return [];
-  }
-
-  return headings.flatMap((heading, index) => {
-    const label = compactHeadingLabel(heading.textContent);
-    if (!label) return [];
-    return [{
-      index,
-      key: `${index}:${label}`,
-      label,
-      level: readHeadingLevel(heading),
-      top: markerTopForElement(body, heading, metrics),
-    }];
-  });
-}
-
-function readPlanObservedTargets(body: HTMLElement): HTMLElement[] {
-  const content = body.querySelector(".timeline-plan-card__content");
-  return content instanceof HTMLElement ? [content] : [];
-}
-
-function planHeadingElements(body: HTMLElement): HTMLElement[] {
-  return Array.from(
-    body.querySelectorAll<HTMLElement>(
-      ".timeline-plan-card__markdown--plan .markdown-block__heading",
-    ),
-  );
-}
-
-function headingMarkerStyle(marker: HeadingMarker): CSSProperties {
-  return { top: `${marker.top}px` };
-}
-
-function readHeadingLevel(heading: HTMLElement): 4 | 5 | 6 {
-  const level = Number(heading.tagName.replace(/^H/i, ""));
-  return level === 4 || level === 5 || level === 6 ? level : 6;
-}
-
-function jumpToHeading(
-  marker: HeadingMarker,
-  scrollTo: (top: number, behavior: ScrollBehavior) => void,
-) {
-  const body = bodyEl.value;
-  const heading = body ? planHeadingElements(body)[marker.index] : null;
-  if (!body || !heading) return;
-
-  const bodyRect = body.getBoundingClientRect();
-  const headingRect = heading.getBoundingClientRect();
-  scrollTo(
-    body.scrollTop + headingRect.top - bodyRect.top - HEADING_SCROLL_OFFSET,
-    "smooth",
-  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -220,9 +133,6 @@ function compactPayloadLine(value: unknown, max: number): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-function compactHeadingLabel(value: string | null): string {
-  return (value ?? "").replace(/\s+/g, " ").trim();
-}
 </script>
 
 <template>
@@ -271,12 +181,10 @@ function compactHeadingLabel(value: string | null): string {
 
     <div
       v-if="expanded"
-      ref="bodyShellEl"
       :id="detailsId"
       class="timeline-plan-card__body-shell"
     >
       <div
-        ref="bodyEl"
         class="timeline-plan-card__body"
       >
         <div v-if="hasStructuredBody" class="timeline-plan-card__content">
@@ -323,38 +231,6 @@ function compactHeadingLabel(value: string | null): string {
           :fallback-view="expandedFallbackView"
         />
       </div>
-
-      <BaseScrollMap
-        :enabled="expanded"
-        :scroller="bodyEl"
-        :hover-target="bodyShellEl"
-        :observe-targets="readPlanObservedTargets"
-        :measure-key="planScrollMeasureKey"
-        class="timeline-plan-card__scroll-map"
-        track-class="timeline-plan-card__scroll-track"
-        thumb-class="timeline-plan-card__scroll-thumb"
-        aria-label="计划正文滚动"
-      >
-        <template #default="{ metrics, scrollTo }">
-          <button
-            v-for="marker in headingMarkersForMetrics(metrics)"
-            :key="marker.key"
-            type="button"
-            class="timeline-plan-card__heading-marker"
-            :class="`timeline-plan-card__heading-marker--level-${marker.level}`"
-            :style="headingMarkerStyle(marker)"
-            :aria-label="`跳到计划标题：${marker.label}`"
-            :title="marker.label"
-            @pointerdown.stop
-            @click.stop="jumpToHeading(marker, scrollTo)"
-          >
-            <span class="timeline-plan-card__heading-marker-dot" />
-            <span class="timeline-plan-card__heading-marker-tooltip">
-              {{ marker.label }}
-            </span>
-          </button>
-        </template>
-      </BaseScrollMap>
     </div>
 
     <TimelinePendingAction
