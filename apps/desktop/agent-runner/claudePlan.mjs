@@ -1,5 +1,14 @@
 export const PLAN_APPROVAL_QUESTION_ID = "approve-plan";
 
+import {
+  compactLine,
+  isRecord,
+  parseRecordJson,
+  readArrayRecords,
+  readFirstString,
+  readFirstText,
+} from "../../../packages/contracts/src/toolUtils.mjs";
+
 const PLAN_TOOL_NAMES = new Set(["ExitPlanMode", "exit_plan_mode"]);
 const READONLY_DENIED_TOOLS = new Set([
   "Bash",
@@ -18,39 +27,6 @@ const READONLY_ALLOWED_TOOLS = new Set([
   "NotebookRead",
   "TodoWrite",
 ]);
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function compactLine(value, max = 600) {
-  if (typeof value !== "string") return "";
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
-function readFirstString(record, keys, max = 6000) {
-  if (!isRecord(record)) return "";
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) {
-      const text = value.trim();
-      return text.length > max ? `${text.slice(0, max)}...` : text;
-    }
-  }
-  return "";
-}
-
-function parseJsonLike(value) {
-  if (isRecord(value)) return value;
-  if (typeof value !== "string" || !value.trim()) return {};
-  try {
-    const parsed = JSON.parse(value);
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
 
 export function isClaudePlanTool(toolName) {
   return PLAN_TOOL_NAMES.has(String(toolName || ""));
@@ -74,9 +50,7 @@ export function normalizeClaudePermissionMode(permission) {
 }
 
 export function readPlanAllowedPrompts(input) {
-  const prompts = Array.isArray(input?.allowedPrompts) ? input.allowedPrompts : [];
-  return prompts
-    .filter(isRecord)
+  return readArrayRecords(input?.allowedPrompts)
     .map((item) => ({
       tool: compactLine(item.tool, 80) || "tool",
       prompt: compactLine(item.prompt, 400),
@@ -85,12 +59,12 @@ export function readPlanAllowedPrompts(input) {
 }
 
 export function extractPlanTextFromInput(input) {
-  return readFirstString(input, ["plan", "content", "text", "markdown"], 12000);
+  return readFirstText(input, ["plan", "content", "text", "markdown"], 12000);
 }
 
 export function extractPlanResult(output) {
-  const parsed = parseJsonLike(output);
-  const plan = readFirstString(parsed, ["plan", "content", "text", "markdown"], 12000);
+  const parsed = parseRecordJson(output) ?? {};
+  const plan = readFirstText(parsed, ["plan", "content", "text", "markdown"], 12000);
   return {
     plan,
     filePath: readFirstString(parsed, ["filePath", "file_path"], 1200) || undefined,

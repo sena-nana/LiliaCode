@@ -2,9 +2,11 @@ import { computed, markRaw, reactive, type Component } from "vue";
 
 const STORAGE_KEY = "lilia.chatSidebar.open";
 const WIDTH_STORAGE_KEY = "lilia.chatSidebar.width";
-const MIN_WIDTH = 180;
-const MAX_WIDTH = 520;
-const DEFAULT_WIDTH = 340;
+
+export const CHAT_SIDEBAR_WIDTH_STORAGE_KEY = WIDTH_STORAGE_KEY;
+export const CHAT_SIDEBAR_MIN_WIDTH = 180;
+export const CHAT_SIDEBAR_MAX_WIDTH = 520;
+export const CHAT_SIDEBAR_DEFAULT_WIDTH = 340;
 
 export interface ChatSidebarContext {
   taskId: string;
@@ -26,13 +28,8 @@ interface RegisteredChatSidebarPanel extends ChatSidebarPanel {
 
 interface ChatSidebarState {
   open: boolean;
-  width: number;
   activePanelId: string | null;
   panels: RegisteredChatSidebarPanel[];
-}
-
-function clampWidth(width: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));
 }
 
 function readStoredOpen(): boolean {
@@ -40,16 +37,6 @@ function readStoredOpen(): boolean {
     return localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
     return false;
-  }
-}
-
-function readStoredWidth(): number {
-  try {
-    const raw = localStorage.getItem(WIDTH_STORAGE_KEY);
-    const value = raw ? Number.parseFloat(raw) : NaN;
-    return Number.isFinite(value) ? clampWidth(value) : DEFAULT_WIDTH;
-  } catch {
-    return DEFAULT_WIDTH;
   }
 }
 
@@ -61,17 +48,8 @@ function persistOpen(open: boolean) {
   }
 }
 
-function persistWidth(width: number) {
-  try {
-    localStorage.setItem(WIDTH_STORAGE_KEY, String(width));
-  } catch {
-    /* ignore quota / privacy mode errors */
-  }
-}
-
 const state = reactive<ChatSidebarState>({
   open: readStoredOpen(),
-  width: readStoredWidth(),
   activePanelId: null,
   panels: [],
 });
@@ -107,7 +85,6 @@ function setOpen(open: boolean) {
 
 function syncFromStorage() {
   state.open = readStoredOpen();
-  state.width = readStoredWidth();
 }
 
 export const chatSidebarPanels = computed(() => sortedPanels());
@@ -169,33 +146,17 @@ export function setActiveChatSidebarPanel(panelId: string) {
   state.activePanelId = panelId;
 }
 
-export function setChatSidebarWidth(width: number) {
-  state.width = clampWidth(width);
-}
-
-export function persistChatSidebarWidth() {
-  persistWidth(state.width);
-}
-
-export function resetChatSidebarWidth() {
-  state.width = DEFAULT_WIDTH;
-  persistWidth(DEFAULT_WIDTH);
-}
-
 export function useChatSidebar() {
   syncFromStorage();
   return {
     state,
-    minWidth: MIN_WIDTH,
-    maxWidth: MAX_WIDTH,
+    minWidth: CHAT_SIDEBAR_MIN_WIDTH,
+    maxWidth: CHAT_SIDEBAR_MAX_WIDTH,
     panels: chatSidebarPanels,
     activePanel: activeChatSidebarPanel,
     open: openChatSidebar,
     close: closeChatSidebar,
     toggle: toggleChatSidebar,
     setActivePanel: setActiveChatSidebarPanel,
-    setWidth: setChatSidebarWidth,
-    persistWidth: persistChatSidebarWidth,
-    resetWidth: resetChatSidebarWidth,
   };
 }

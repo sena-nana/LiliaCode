@@ -9,47 +9,21 @@
 //
 // 这是 .mjs 而非 .ts 是因为 runner 由 Tauri 直接 `node agent-runner.mjs` 拉起，
 // 不经过任何构建步骤；TS 端通过同目录 claudeTools.d.mts 拿到类型。
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function readRecord(value) {
-  return isRecord(value) ? value : {};
-}
-
-function pickString(record, keys) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function pickNumber(record, keys) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
-}
-
-function shortText(value, max) {
-  if (typeof value !== "string") return "";
-  return value.length > max ? `${value.slice(0, max)}...` : value;
-}
+import {
+  compactLine,
+  isRecord,
+  pickNumber,
+  pickString,
+  readArrayRecords,
+  readFirstText,
+  readRecord,
+  shortText,
+} from "./toolUtils.mjs";
 
 const FILE_PATH_KEYS = ["file_path", "path"];
 
-function compactLine(value, max) {
-  if (typeof value !== "string") return "";
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
 function readAskUserQuestions(input) {
-  return (Array.isArray(input?.questions) ? input.questions : [])
-    .filter(isRecord);
+  return readArrayRecords(input?.questions);
 }
 
 function askUserQuestionTitle(question, index) {
@@ -76,8 +50,7 @@ function normalizeAskUserQuestionTool(input) {
 }
 
 function readPlanAllowedPrompts(input) {
-  return (Array.isArray(input?.allowedPrompts) ? input.allowedPrompts : [])
-    .filter(isRecord)
+  return readArrayRecords(input?.allowedPrompts)
     .map((item) => ({
       tool: compactLine(item.tool, 80) || "tool",
       prompt: compactLine(item.prompt, 400),
@@ -230,7 +203,7 @@ export const CLAUDE_TO_LILIA = {
     };
   },
   ExitPlanMode: (input) => {
-    const plan = pickString(input, ["plan", "content", "text", "markdown"]);
+    const plan = readFirstText(input, ["plan", "content", "text", "markdown"], 12000);
     return {
       kind: "plan",
       payload: {

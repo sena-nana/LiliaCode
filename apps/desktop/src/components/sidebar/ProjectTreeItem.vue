@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Folder,
@@ -50,15 +50,12 @@ interface TreeDropMarker {
   valid: boolean;
 }
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   project: Project;
   isExpanded: boolean;
   dragSource?: TreeDragMarker | null;
   dropTarget?: TreeDropMarker | null;
-  treeActivityToken?: number;
-}>(), {
-  treeActivityToken: 0,
-});
+}>();
 
 const emit = defineEmits<{
   toggle: [projectId: string];
@@ -72,7 +69,6 @@ const route = useRoute();
 const router = useRouter();
 
 const PROJECT_CONVERSATION_COLLAPSE_LIMIT = 4;
-const PROJECT_CONVERSATION_IDLE_MS = 30_000;
 
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
@@ -80,7 +76,6 @@ const editingInput = ref<HTMLInputElement | null>(null);
 
 const confirmingId = ref<string | null>(null);
 const overflowExpanded = ref(false);
-let overflowCollapseTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const projectConversations = computed(() =>
   listProjectConversations(props.project.id)
@@ -122,34 +117,13 @@ const showConversationOverflow = computed(() =>
   visibleProjectConversations.value.length < projectConversations.value.length
 );
 
-function clearOverflowCollapseTimer() {
-  if (overflowCollapseTimer === null) return;
-  window.clearTimeout(overflowCollapseTimer);
-  overflowCollapseTimer = null;
-}
-
 function collapseConversationOverflow() {
   overflowExpanded.value = false;
-  clearOverflowCollapseTimer();
-}
-
-function scheduleOverflowCollapse() {
-  clearOverflowCollapseTimer();
-  if (!overflowExpanded.value || !props.isExpanded) return;
-  overflowCollapseTimer = window.setTimeout(() => {
-    collapseConversationOverflow();
-  }, PROJECT_CONVERSATION_IDLE_MS);
 }
 
 function revealConversationOverflow() {
   overflowExpanded.value = true;
-  scheduleOverflowCollapse();
 }
-
-watch(
-  () => props.treeActivityToken,
-  scheduleOverflowCollapse,
-);
 
 watch(
   () => props.isExpanded,
@@ -168,11 +142,6 @@ watch(
     }
   },
 );
-
-onBeforeUnmount(() => {
-  clearOverflowCollapseTimer();
-});
-
 async function onArchiveClick(e: MouseEvent, taskId: string) {
   e.preventDefault();
   e.stopPropagation();

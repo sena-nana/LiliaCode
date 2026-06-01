@@ -1,6 +1,6 @@
 import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
 import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
@@ -107,10 +107,6 @@ async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: num
   });
 }
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 describe("SecondaryPanel project tree expansion", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
@@ -201,27 +197,23 @@ describe("SecondaryPanel project tree expansion", () => {
   });
 });
 
-describe("SecondaryPanel project conversation overflow activity", () => {
+describe("SecondaryPanel project conversation overflow", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
   });
 
-  it("项目树交互会刷新已展开剩余对话的自动折叠计时，侧栏非树操作不会", async () => {
+  it("展开剩余对话后不再因为侧栏活动自动折叠", async () => {
     seedSecondaryPanelOverflowConversations();
     const view = await renderSecondaryPanel();
-    vi.useFakeTimers();
 
     await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
     expect(view.getByText("溢出对话 5")).toBeInTheDocument();
 
-    await vi.advanceTimersByTimeAsync(20_000);
     await fireEvent.pointerMove(getProjectRow(view, "Lilia"), {
       pointerId: 1,
       clientY: 24,
     });
-
-    await vi.advanceTimersByTimeAsync(20_000);
     expect(view.getByText("溢出对话 5")).toBeInTheDocument();
 
     const panel = view.container.querySelector(".secondary-panel");
@@ -234,9 +226,8 @@ describe("SecondaryPanel project conversation overflow activity", () => {
       clientY: 400,
     });
 
-    await vi.advanceTimersByTimeAsync(10_000);
     await nextTick();
-    expect(view.queryByText("溢出对话 5")).not.toBeInTheDocument();
+    expect(view.getByText("溢出对话 5")).toBeInTheDocument();
   });
 });
 

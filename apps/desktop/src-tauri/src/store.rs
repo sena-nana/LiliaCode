@@ -6,8 +6,8 @@
  *   解析后立刻确保 `config/ db/ cache/` 三个子目录存在，避免后续每处都自己 mkdir。
  * - **连接池**：r2d2 + r2d2_sqlite。SQLite 单 writer，但读路径走多 reader 仍然受益。
  *   WAL 模式 + busy_timeout 让并发读写不互踩。
- * - **schema baseline**：本次重置会把旧开发库清空并建成新基线；
- *   之后的 schema 变更继续在该基线后追加迁移。
+ * - **schema baseline**：新库 / 重置库直接创建当前 schema；
+ *   旧库按 user_version 继续跑对应迁移。
  */
 
 use std::env;
@@ -259,7 +259,8 @@ fn reset_development_schema(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("lilia-store: 清空旧开发库失败：{e}"))?;
     create_current_schema(conn)?;
     conn.execute_batch(&format!(
-        "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+        "PRAGMA user_version = {};",
+        current_schema_version()
     ))
     .map_err(|e| format!("lilia-store: 写 user_version 失败：{e}"))
 }
@@ -273,7 +274,10 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           text         TEXT NOT NULL,
           done         INTEGER NOT NULL DEFAULT 0,
           "order"      INTEGER NOT NULL,
-          source       TEXT NOT NULL CHECK (source IN ('user','agent')),
+          source       TEXT NOT NULL CHECK (source IN ('lilia','agent')),
+          priority     TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal','low')),
+          guide_status TEXT CHECK (guide_status IS NULL OR guide_status IN ('pending','queued','sent')),
+          attachments_json TEXT NOT NULL DEFAULT '[]',
           created_at   INTEGER NOT NULL,
           updated_at   INTEGER NOT NULL
         );
@@ -346,6 +350,83 @@ mod tests {
     use super::*;
     use rusqlite::params;
 
+    fn create_reset_baseline_schema(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE task_todos (
+              id           TEXT PRIMARY KEY,
+              task_id      TEXT NOT NULL,
+              text         TEXT NOT NULL,
+              done         INTEGER NOT NULL DEFAULT 0,
+              "order"      INTEGER NOT NULL,
+              source       TEXT NOT NULL CHECK (source IN ('user','agent')),
+              created_at   INTEGER NOT NULL,
+              updated_at   INTEGER NOT NULL
+            );
+            CREATE INDEX idx_task_todos_task_id_order
+              ON task_todos(task_id, "order");
+
+            CREATE TABLE projects (
+              id         TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              cwd        TEXT,
+              created_at INTEGER NOT NULL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              pinned     INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0,
+              FOREIGN KEY (project_id) REFERENCES projects(id)
+            );
+
+            CREATE INDEX idx_tasks_project_id
+              ON tasks(project_id);
+            CREATE INDEX idx_tasks_archived
+              ON tasks(archived);
+
+            CREATE TABLE task_dependencies (
+              task_id       TEXT NOT NULL,
+              depends_on_id TEXT NOT NULL,
+              PRIMARY KEY (task_id, depends_on_id),
+              FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
+              FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE agent_timeline_events (
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
+            );
+
+            CREATE INDEX idx_agent_timeline_events_task_id_turn
+              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+            "#,
+        )
+        .unwrap();
+    }
+
     #[test]
     fn old_development_database_is_rebuilt_from_current_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -381,6 +462,14 @@ mod tests {
             params!["new-project", "新项目", 2, 0, 0],
         )
         .unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_todos
+               (id, task_id, text, done, "order", source, priority, guide_status, attachments_json, created_at, updated_at)
+               VALUES (?1, ?2, ?3, 0, 0, 'lilia', 'normal', 'pending', '[]', ?4, ?5)"#,
+            params!["fresh-todo", "task-1", "当前 Todo", 2, 2],
+        )
+        .unwrap();
     }
 
     fn add_future_project_label_migration(conn: &Connection) -> Result<(), String> {
@@ -391,7 +480,7 @@ mod tests {
     #[test]
     fn todo_guides_migration_maps_user_rows_to_lilia() {
         let mut conn = Connection::open_in_memory().unwrap();
-        create_current_schema(&conn).unwrap();
+        create_reset_baseline_schema(&conn);
         conn.execute(
             r#"INSERT INTO task_todos
                (id, task_id, text, done, "order", source, created_at, updated_at)
@@ -426,7 +515,7 @@ mod tests {
     #[test]
     fn todo_attachments_migration_defaults_existing_rows() {
         let mut conn = Connection::open_in_memory().unwrap();
-        create_current_schema(&conn).unwrap();
+        create_reset_baseline_schema(&conn);
         conn.execute(
             r#"INSERT INTO task_todos
                (id, task_id, text, done, "order", source, created_at, updated_at)
@@ -456,7 +545,8 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         create_current_schema(&conn).unwrap();
         conn.execute_batch(&format!(
-            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+            "PRAGMA user_version = {};",
+            current_schema_version()
         ))
         .unwrap();
         ensure_current_schema(&mut conn).unwrap();

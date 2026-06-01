@@ -42,9 +42,27 @@ export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
             component: ProjectShell,
             props: true,
             children: [
-              { path: "", component: SessionsView, props: true },
-              { path: "roadmap", component: RoadmapView, props: true },
-              { path: "memory", component: MemoryView, props: true },
+              {
+                path: "",
+                name: "project-sessions",
+                component: SessionsView,
+                props: true,
+                meta: { projectTab: "sessions" },
+              },
+              {
+                path: "roadmap",
+                name: "project-roadmap",
+                component: RoadmapView,
+                props: true,
+                meta: { projectTab: "roadmap" },
+              },
+              {
+                path: "memory",
+                name: "project-memory",
+                component: MemoryView,
+                props: true,
+                meta: { projectTab: "memory" },
+              },
             ],
           },
           // 任务详情是 ProjectShell 的兄弟路由，进入聊天时 ViewTabs 不渲染。

@@ -15,10 +15,8 @@ const route = useRoute();
 const project = computed(() => getProject(props.projectId));
 
 const activeTab = computed<"sessions" | "roadmap" | "memory">(() => {
-  const tail = route.path.split("/").pop() ?? "";
-  if (tail === "roadmap") return "roadmap";
-  if (tail === "memory") return "memory";
-  return "sessions";
+  const tab = route.meta.projectTab;
+  return tab === "roadmap" || tab === "memory" ? tab : "sessions";
 });
 </script>
 

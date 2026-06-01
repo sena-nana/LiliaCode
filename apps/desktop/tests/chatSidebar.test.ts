@@ -12,7 +12,6 @@ import {
   closeChatSidebar,
   openChatSidebar,
   registerChatSidebarPanel,
-  setChatSidebarWidth,
   type ChatSidebarPanel,
 } from "../src/composables/useChatSidebar";
 import { setAgentInteractionSettings } from "../src/services/chat";
@@ -159,7 +158,7 @@ function debugSidebar(container: HTMLElement) {
 beforeEach(() => {
   localStorage.clear();
   closeChatSidebar();
-  setChatSidebarWidth(340);
+  localStorage.setItem(WIDTH_STORAGE_KEY, "340");
 });
 
 afterEach(() => {

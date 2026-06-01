@@ -90,25 +90,6 @@ function tryDeriveToolDisplay(
   summary: string,
   status: AgentTimelineEventStatus,
 ): AgentTimelineDisplay | null {
-  const toolName = readFirstString(payload, ["toolName", "tool", "name"], 200);
-  if (toolName && isLegacyToolKind(kind)) {
-    const normalized = normalizeClaudeTool(toolName, payload.input, payload);
-    // 仅当 normalizer 命中专用规则（kind 不是兜底的 "tool"）时才走这条路径，
-    // 否则按下面的"事件自身 kind"分支处理（保留事件生产方声明的 kind）。
-    if (normalized.kind !== "tool" || kind === "tool") {
-      const mergedPayload = mergeToolPayload(normalized.payload, payload);
-      const display = deriveLiliaToolDisplay({
-        kind: normalized.kind,
-        subkind: normalized.subkind,
-        payload: mergedPayload,
-        title,
-        status,
-      });
-      const finished = finishToolDisplay(display, payload, title, summary);
-      if (finished) return finished;
-    }
-  }
-
   if (getLiliaToolRule(kind, asString(payload.subkind))) {
     const display = deriveLiliaToolDisplay({
       kind,
@@ -120,20 +101,56 @@ function tryDeriveToolDisplay(
     return finishToolDisplay(display, payload, title, summary);
   }
 
-  return null;
+  return tryDeriveLegacyClaudeToolDisplay(kind, payload, title, summary, status);
 }
 
-/**
- * 合并 Claude normalizer 的输出和原始 payload —— 原始 payload 的非空值优先
- * （这是新协议事件 / tool result 事件的情况，顶层就有 command/path），
- * normalizer 的字段做兜底（旧 DB 事件的 payload.input 里才有真值）。
- */
-function mergeToolPayload(
+function tryDeriveLegacyClaudeToolDisplay(
+  kind: string,
+  payload: Record<string, unknown>,
+  title: string,
+  summary: string,
+  status: AgentTimelineEventStatus,
+): AgentTimelineDisplay | null {
+  if (!isLegacyToolKind(kind)) return null;
+  const toolName = readFirstString(payload, ["toolName", "tool", "name"], 200);
+  if (!toolName) return null;
+
+  const normalized = normalizeClaudeTool(toolName, payload.input, payload);
+  if (normalized.kind === "tool" && kind !== "tool") return null;
+
+  const display = deriveLiliaToolDisplay({
+    kind: normalized.kind,
+    subkind: normalized.subkind,
+    payload: legacyToolPayload(normalized.payload, payload),
+    title,
+    status,
+  });
+  return finishToolDisplay(display, payload, title, summary);
+}
+
+function legacyToolPayload(
   normalized: Record<string, unknown>,
   original: Record<string, unknown>,
 ): Record<string, unknown> {
+  const allowedOriginalFields = [
+    "approved",
+    "cancelled",
+    "decision",
+    "duration",
+    "error",
+    "exit",
+    "exitCode",
+    "message",
+    "output",
+    "result",
+    "stderr",
+    "stdout",
+    "structuredContent",
+  ];
   const merged: Record<string, unknown> = { ...normalized };
-  for (const [key, value] of Object.entries(original)) {
+  for (const key of allowedOriginalFields) {
+    if (!(key in original)) continue;
+    const value = original[key];
     if (key === "approved" && value === null) {
       merged[key] = value;
       continue;
@@ -141,7 +158,6 @@ function mergeToolPayload(
     if (value === undefined || value === null || value === "") continue;
     merged[key] = value;
   }
-  if (original.output !== undefined) merged.output = original.output;
   return merged;
 }
 

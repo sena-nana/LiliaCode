@@ -26,7 +26,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 const selectedIdx = ref(0);
 
 const results = computed<SearchResult[]>(() =>
-  searchSessions(query.value, "hybrid").slice(0, 12),
+  searchSessions(query.value).slice(0, 12),
 );
 
 watch(results, () => {

@@ -20,70 +20,26 @@
 //
 // 这是 .mjs 而非 .ts：runner 由 Tauri 直接 `node agent-runner.mjs` 拉起，
 // 不经过任何构建步骤；TS 端通过同目录 liliaTools.d.mts 拿到类型。
+import {
+  compactLine,
+  isRecord,
+  parseRecordJson,
+  pick,
+  readFirstString,
+  readFirstText,
+  readRecord,
+  shortText,
+  stringOrNull,
+} from "./toolUtils.mjs";
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export function readRecord(value) {
-  return isRecord(value) ? value : {};
-}
-
-export function pick(record, keys) {
-  for (const key of keys) {
-    const value = record[key];
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
-  return undefined;
-}
-
-function stringOrNull(value) {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return null;
-}
-
-function shortText(value, max) {
-  const text = stringOrNull(value);
-  if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
-function stringifyInline(value) {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    return value.map((item) => stringifyInline(item)).filter(Boolean).join(" ").trim();
-  }
-  if (isRecord(value)) {
-    return readFirstString(value, [
-      "text", "title", "summary", "content", "message",
-      "name", "path", "filePath", "query", "command",
-    ], 600);
-  }
-  return "";
-}
-
-export function compactLine(value, max) {
-  const text = stringifyInline(value).replace(/\s+/g, " ").trim();
-  return text ? shortText(text, max) : "";
-}
-
-export function readFirstString(payload, keys, max) {
-  for (const key of keys) {
-    const text = compactLine(payload[key], max);
-    if (text) return text;
-  }
-  return "";
-}
-
-export function readFirstText(payload, keys, max) {
-  for (const key of keys) {
-    const text = shortText(stringOrNull(payload[key])?.trim() ?? "", max);
-    if (text) return text;
-  }
-  return "";
-}
+export {
+  compactLine,
+  isRecord,
+  pick,
+  readFirstString,
+  readFirstText,
+  readRecord,
+};
 
 export function displayField(label, value) {
   const text = compactLine(value, 1200);
@@ -187,17 +143,6 @@ function askUserPreviewFromQuestions(questions) {
   if (!questions.length) return "用户提问";
   const title = askUserQuestionTitle(questions[0], 0);
   return questions.length > 1 ? `${title} 等 ${questions.length} 个问题` : title;
-}
-
-function parseRecordJson(value) {
-  if (isRecord(value)) return value;
-  if (typeof value !== "string" || !value.trim()) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function readAskUserResult(payload) {

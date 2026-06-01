@@ -1,11 +1,8 @@
 /**
  * 会话搜索：按标题搜，覆盖项目下任务 + 收集箱对话。
  *
- * 三种模式：
- * - text   纯子串匹配（大小写不敏感），顺便算出命中区间给 UI 高亮。
- * - vector 字符 bigram TF-IDF + 余弦相似度。中英混排都能给有意义的相似度排序，
- *          零依赖。后续接 Anthropic/OpenAI embedding 时只需替换 `vectorize` 内部。
- * - hybrid 同时跑 text + vector，按 route 合并；归一化方式见 `searchHybrid`。
+ * 搜索策略：标题子串命中优先，同时用字符 bigram TF-IDF + 余弦相似度补充相近结果；
+ * 按 route 合并去重后排序。
  *
  * 当前只搜标题——消息体存在内存 HashMap 重启就丢，等持久化落盘后再扩到 content。
  */
@@ -16,12 +13,7 @@ import {
   listProjectConversations,
 } from "./tasksStore";
 
-export type SearchMode = "text" | "vector" | "hybrid";
-
 export type SearchKind = "project-task" | "orphan";
-
-/** 标识结果在 hybrid 模式下来自哪一路：纯文本子串、向量相似度，或同时被两边命中。 */
-export type SearchSource = "text" | "vector" | "both";
 
 export interface SearchResult {
   kind: SearchKind;
@@ -37,8 +29,6 @@ export interface SearchResult {
   score: number;
   /** title 上需要高亮的 [start, end) 区间。纯向量命中时为空。 */
   highlights: Array<[number, number]>;
-  /** 命中来源；text/vector 模式恒等于自身，hybrid 模式按实际命中路决定。 */
-  source: SearchSource;
 }
 
 interface Doc {
@@ -111,7 +101,7 @@ function searchText(query: string, corpus: Doc[]): SearchResult[] {
     // 越多命中 / 越靠前得分越高；常数 10 让命中数主导。
     const score =
       ranges.length * 10 + (1 - earliest / Math.max(d.title.length, 1));
-    out.push({ ...d, score, highlights: ranges, source: "text" });
+    out.push({ ...d, score, highlights: ranges });
   }
   return out.sort((a, b) => b.score - a.score);
 }
@@ -190,15 +180,15 @@ function searchVector(query: string, corpus: Doc[]): SearchResult[] {
     const dVec = tfidfVec(bigrams(d.title), idf);
     const score = cosine(qVec, dVec);
     if (score <= 0) continue;
-    out.push({ ...d, score, highlights: [], source: "vector" });
+    out.push({ ...d, score, highlights: [] });
   }
   return out.sort((a, b) => b.score - a.score);
 }
 
-// ---------------- hybrid mode ----------------
+// ---------------- merge ----------------
 
 /** 合并两路结果：text 分数除以最高 text 分归一到 [0,1]；权重 0.6/0.4 略偏向文本。 */
-function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
+function searchMerged(query: string, corpus: Doc[]): SearchResult[] {
   const q = query.trim();
   if (!q) return [];
   const textHits = searchText(q, corpus);
@@ -216,7 +206,6 @@ function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
     merged.set(r.route, {
       ...r,
       score: norm(r.score) * TEXT_WEIGHT,
-      source: "text",
     });
   }
 
@@ -226,13 +215,11 @@ function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
       merged.set(r.route, {
         ...prev,
         score: prev.score + r.score * VECTOR_WEIGHT,
-        source: "both",
       });
     } else {
       merged.set(r.route, {
         ...r,
         score: r.score * VECTOR_WEIGHT,
-        source: "vector",
       });
     }
   }
@@ -242,9 +229,6 @@ function searchHybrid(query: string, corpus: Doc[]): SearchResult[] {
 
 // ---------------- public ----------------
 
-export function searchSessions(query: string, mode: SearchMode): SearchResult[] {
-  const corpus = buildCorpus();
-  if (mode === "vector") return searchVector(query, corpus);
-  if (mode === "hybrid") return searchHybrid(query, corpus);
-  return searchText(query, corpus);
+export function searchSessions(query: string): SearchResult[] {
+  return searchMerged(query, buildCorpus());
 }

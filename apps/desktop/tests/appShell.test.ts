@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 const COLLAPSED_STORAGE_KEY = "lilia.sidebarCollapsed";
+const WIDTH_STORAGE_KEY = "lilia.sidebarWidth";
 
 async function renderAppShell() {
   const router = createRouter({
@@ -86,5 +87,42 @@ describe("AppShell left sidebar collapse", () => {
     expect(view.getByRole("button", { name: "展开左侧栏" }))
       .toHaveAttribute("aria-pressed", "true");
     expect(leftResizer(view.container)).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("左侧栏宽度可拖拽调整、写回存储并双击恢复默认", async () => {
+    localStorage.setItem(WIDTH_STORAGE_KEY, "260");
+    const view = await renderAppShell();
+    const shell = shellElement(view.container);
+    const resizer = leftResizer(view.container);
+
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("260px");
+    expect(resizer).toHaveAttribute("aria-valuemin", "180");
+    expect(resizer).toHaveAttribute("aria-valuemax", "480");
+    expect(resizer).toHaveAttribute("aria-valuenow", "260");
+
+    await fireEvent.pointerDown(resizer, {
+      button: 0,
+      clientX: 200,
+      pointerId: 1,
+    });
+    await fireEvent.pointerMove(window, {
+      clientX: 300,
+      pointerId: 1,
+    });
+
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("360px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "360");
+
+    await fireEvent.pointerUp(window, {
+      clientX: 300,
+      pointerId: 1,
+    });
+
+    expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("360");
+
+    await fireEvent.dblClick(resizer);
+
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("220px");
+    expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("220");
   });
 });

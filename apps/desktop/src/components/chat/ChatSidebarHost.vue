@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed } from "vue";
 import {
+  CHAT_SIDEBAR_DEFAULT_WIDTH,
+  CHAT_SIDEBAR_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
+  CHAT_SIDEBAR_WIDTH_STORAGE_KEY,
   useChatSidebar,
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
+import { useResizablePane } from "../../composables/useResizablePane";
 
 const props = defineProps<ChatSidebarContext>();
 
@@ -11,10 +16,14 @@ const sidebar = useChatSidebar();
 const panels = sidebar.panels;
 const activePanel = sidebar.activePanel;
 const sidebarState = sidebar.state;
-const isResizing = ref(false);
-
-let startX = 0;
-let startWidth = 0;
+const sidebarWidth = useResizablePane({
+  storageKey: CHAT_SIDEBAR_WIDTH_STORAGE_KEY,
+  minWidth: CHAT_SIDEBAR_MIN_WIDTH,
+  maxWidth: CHAT_SIDEBAR_MAX_WIDTH,
+  defaultWidth: CHAT_SIDEBAR_DEFAULT_WIDTH,
+  edge: "left",
+  disabled: computed(() => !sidebarState.open),
+});
 
 const sidebarContext = computed<ChatSidebarContext>(() => ({
   taskId: props.taskId,
@@ -22,40 +31,13 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
   projectCwd: props.projectCwd,
 }));
 
-function onPointerMove(event: PointerEvent) {
-  sidebar.setWidth(startWidth + (startX - event.clientX));
-}
-
-function onPointerUp(event: PointerEvent) {
-  isResizing.value = false;
-  window.removeEventListener("pointermove", onPointerMove);
-  window.removeEventListener("pointerup", onPointerUp);
-  (event.target as Element | null)?.releasePointerCapture?.(event.pointerId);
-  sidebar.persistWidth();
-}
-
-function startResize(event: PointerEvent) {
-  if (!sidebarState.open || event.button !== 0) return;
-  event.preventDefault();
-  isResizing.value = true;
-  startX = event.clientX;
-  startWidth = sidebarState.width;
-  (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
-  window.addEventListener("pointermove", onPointerMove);
-  window.addEventListener("pointerup", onPointerUp);
-}
-
-onBeforeUnmount(() => {
-  window.removeEventListener("pointermove", onPointerMove);
-  window.removeEventListener("pointerup", onPointerUp);
-});
 </script>
 
 <template>
   <aside
     class="chat-sidebar"
-    :class="{ 'is-open': sidebarState.open, 'is-resizing': isResizing }"
-    :style="{ '--chat-sidebar-width': sidebarState.width + 'px' }"
+    :class="{ 'is-open': sidebarState.open, 'is-resizing': sidebarWidth.isResizing.value }"
+    :style="{ '--chat-sidebar-width': sidebarWidth.width.value + 'px' }"
     aria-label="对话侧栏"
     :aria-hidden="sidebarState.open ? undefined : 'true'"
     :inert="sidebarState.open ? undefined : true"
@@ -65,12 +47,12 @@ onBeforeUnmount(() => {
       role="separator"
       aria-orientation="vertical"
       :aria-disabled="sidebarState.open ? undefined : 'true'"
-      :aria-valuenow="sidebarState.width"
-      :aria-valuemin="sidebar.minWidth"
-      :aria-valuemax="sidebar.maxWidth"
+      :aria-valuenow="sidebarWidth.width.value"
+      :aria-valuemin="sidebarWidth.minWidth"
+      :aria-valuemax="sidebarWidth.maxWidth"
       title="拖动调整对话侧栏宽度（双击恢复默认）"
-      @pointerdown="startResize"
-      @dblclick="sidebar.resetWidth"
+      @pointerdown="sidebarWidth.startResize"
+      @dblclick="sidebarWidth.resetWidth"
     />
     <div class="chat-sidebar__inner">
       <header

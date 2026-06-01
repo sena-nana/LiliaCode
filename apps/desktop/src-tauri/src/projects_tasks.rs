@@ -7,6 +7,8 @@
  * - 草稿（draft）留在前端内存，不落库；`promote` 后才 INSERT。
  */
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -59,7 +61,7 @@ fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
 
 fn build_task(
     row: &rusqlite::Row<'_>,
-    deps: &std::collections::HashMap<String, Vec<String>>,
+    deps: &HashMap<String, Vec<String>>,
 ) -> rusqlite::Result<TaskRow> {
     let id: String = row.get(0)?;
     let depends_on = deps.get(&id).cloned().unwrap_or_default();
@@ -78,23 +80,125 @@ fn build_task(
     })
 }
 
-fn load_all_deps(
+fn collect_deps<I>(rows: I) -> Result<HashMap<String, Vec<String>>, String>
+where
+    I: IntoIterator<Item = rusqlite::Result<(String, String)>>,
+{
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for r in rows {
+        let (tid, did) = r.map_err(|e| format!("load_scoped_deps: row 失败：{e}"))?;
+        map.entry(tid).or_default().push(did);
+    }
+    Ok(map)
+}
+
+fn load_project_deps(
     conn: &Connection,
-) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    project_id: Option<&str>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    if let Some(project_id) = project_id {
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT d.task_id, d.depends_on_id
+                   FROM task_dependencies d
+                   INNER JOIN tasks t ON t.id = d.task_id
+                   WHERE t.project_id = ?1 AND t.archived = 0"#,
+            )
+            .map_err(|e| format!("load_scoped_deps: prepare 失败：{e}"))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("load_scoped_deps: query 失败：{e}"))?;
+        return collect_deps(rows);
+    }
+
     let mut stmt = conn
-        .prepare("SELECT task_id, depends_on_id FROM task_dependencies")
-        .map_err(|e| format!("load_all_deps: prepare 失败：{e}"))?;
+        .prepare(
+            r#"SELECT d.task_id, d.depends_on_id
+               FROM task_dependencies d
+               INNER JOIN tasks t ON t.id = d.task_id
+               WHERE t.project_id IS NULL AND t.archived = 0"#,
+        )
+        .map_err(|e| format!("load_scoped_deps: prepare 失败：{e}"))?;
     let rows = stmt
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
-        .map_err(|e| format!("load_all_deps: query 失败：{e}"))?;
-    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for r in rows {
-        let (tid, did) = r.map_err(|e| format!("load_all_deps: row 失败：{e}"))?;
-        map.entry(tid).or_default().push(did);
+        .map_err(|e| format!("load_scoped_deps: query 失败：{e}"))?;
+    collect_deps(rows)
+}
+
+fn load_task_deps(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut stmt = conn
+        .prepare("SELECT task_id, depends_on_id FROM task_dependencies WHERE task_id = ?1")
+        .map_err(|e| format!("load_scoped_deps: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("load_scoped_deps: query 失败：{e}"))?;
+    collect_deps(rows)
+}
+
+fn next_task_sort_order(
+    conn: &Connection,
+    project_id: Option<&str>,
+    context: &str,
+) -> Result<i64, String> {
+    let max_order: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM tasks WHERE (project_id = ?1 OR (project_id IS NULL AND ?1 IS NULL)) AND archived = 0",
+            params![project_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("{context}: max sort_order 失败：{e}"))?;
+    Ok(max_order + 1)
+}
+
+struct NewTask<'a> {
+    id: &'a str,
+    project_id: Option<&'a str>,
+    session_id: &'a str,
+    title: &'a str,
+    status: &'a str,
+    created_at: i64,
+    parent_id: Option<&'a str>,
+    sort_order: i64,
+    depends_on: &'a [String],
+}
+
+fn insert_task_with_deps(
+    conn: &Connection,
+    task: NewTask<'_>,
+    context: &str,
+) -> Result<(), String> {
+    conn.execute(
+        r#"INSERT INTO tasks (id, project_id, session_id, title, status, created_at, parent_id, sort_order)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+        params![
+            task.id,
+            task.project_id,
+            task.session_id,
+            task.title,
+            task.status,
+            task.created_at,
+            task.parent_id,
+            task.sort_order
+        ],
+    )
+    .map_err(|e| format!("{context}: insert 失败：{e}"))?;
+    for dep in task.depends_on {
+        conn.execute(
+            "INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
+            params![task.id, dep],
+        )
+        .map_err(|e| format!("{context}: insert dep 失败：{e}"))?;
     }
-    Ok(map)
+    Ok(())
 }
 
 // ========== Project 命令 ==========
@@ -245,7 +349,7 @@ pub fn task_list(
     store: State<'_, LiliaStore>,
 ) -> Result<Vec<TaskRow>, String> {
     let conn = store.conn()?;
-    let deps = load_all_deps(&conn)?;
+    let deps = load_project_deps(&conn, project_id.as_deref())?;
     let mut out = Vec::new();
     match &project_id {
         Some(pid) => {
@@ -287,7 +391,7 @@ pub fn task_list(
 #[tauri::command]
 pub fn task_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<TaskRow>, String> {
     let conn = store.conn()?;
-    let deps_map = load_all_deps(&conn)?;
+    let deps_map = load_task_deps(&conn, &id)?;
     let result = conn
         .query_row(
             r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
@@ -312,27 +416,22 @@ pub fn task_create(
     let conn = store.conn()?;
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
-    let max_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM tasks WHERE (project_id = ?1 OR (project_id IS NULL AND ?1 IS NULL)) AND archived = 0",
-            params![project_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("task_create: max sort_order 失败：{e}"))?;
-    let sort_order = max_order + 1;
-    conn.execute(
-        r#"INSERT INTO tasks (id, project_id, session_id, title, status, created_at, parent_id, sort_order)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
-        params![id, project_id, id, title, status, now, parent_id, sort_order],
-    )
-    .map_err(|e| format!("task_create: insert 失败：{e}"))?;
-    for dep in &depends_on {
-        conn.execute(
-            "INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
-            params![id, dep],
-        )
-        .map_err(|e| format!("task_create: insert dep 失败：{e}"))?;
-    }
+    let sort_order = next_task_sort_order(&conn, project_id.as_deref(), "task_create")?;
+    insert_task_with_deps(
+        &conn,
+        NewTask {
+            id: &id,
+            project_id: project_id.as_deref(),
+            session_id: &id,
+            title: &title,
+            status: &status,
+            created_at: now,
+            parent_id: parent_id.as_deref(),
+            sort_order,
+            depends_on: &depends_on,
+        },
+        "task_create",
+    )?;
     Ok(TaskRow {
         id: id.clone(),
         project_id,
@@ -388,27 +487,22 @@ pub fn task_promote(
 ) -> Result<TaskRow, String> {
     let conn = store.conn()?;
     let now = now_millis();
-    let max_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM tasks WHERE (project_id = ?1 OR (project_id IS NULL AND ?1 IS NULL)) AND archived = 0",
-            params![project_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("task_promote: max sort_order 失败：{e}"))?;
-    let sort_order = max_order + 1;
-    conn.execute(
-        r#"INSERT INTO tasks (id, project_id, session_id, title, status, created_at, parent_id, sort_order)
-           VALUES (?1, ?2, ?3, ?4, 'running', ?5, NULL, ?6)"#,
-        params![id, project_id, id, title, now, sort_order],
-    )
-    .map_err(|e| format!("task_promote: insert 失败：{e}"))?;
-    for dep in &depends_on {
-        conn.execute(
-            "INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
-            params![id, dep],
-        )
-        .map_err(|e| format!("task_promote: insert dep 失败：{e}"))?;
-    }
+    let sort_order = next_task_sort_order(&conn, project_id.as_deref(), "task_promote")?;
+    insert_task_with_deps(
+        &conn,
+        NewTask {
+            id: &id,
+            project_id: project_id.as_deref(),
+            session_id: &id,
+            title: &title,
+            status: "running",
+            created_at: now,
+            parent_id: None,
+            sort_order,
+            depends_on: &depends_on,
+        },
+        "task_promote",
+    )?;
     Ok(TaskRow {
         id: id.clone(),
         project_id,
@@ -526,18 +620,11 @@ pub fn task_reparent(
 ) -> Result<(), String> {
     let conn = store.conn()?;
 
-    // 计算目标列表的新 sort_order（追加到末尾）
-    let max_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM tasks WHERE (project_id = ?1 OR (project_id IS NULL AND ?1 IS NULL)) AND archived = 0",
-            params![new_project_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("task_reparent: max sort_order 失败：{e}"))?;
+    let sort_order = next_task_sort_order(&conn, new_project_id.as_deref(), "task_reparent")?;
 
     conn.execute(
         "UPDATE tasks SET project_id = ?1, sort_order = ?2 WHERE id = ?3",
-        params![new_project_id, max_order + 1, task_id],
+        params![new_project_id, sort_order, task_id],
     )
     .map_err(|e| format!("task_reparent: update 失败：{e}"))?;
 

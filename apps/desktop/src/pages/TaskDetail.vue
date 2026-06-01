@@ -602,7 +602,9 @@ const guideDispatch = useGuideDispatch({
   taskId: () => props.taskId,
   ensureReady: ensureTaskReadyForMessage,
   sendAgentMessage,
-  ensureDispatchReady: ensureComposerLoaded,
+  ensureDispatchReady: async () => {
+    await ensureComposerLoaded();
+  },
   hasPendingAgentAction: () => pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
   isTurnRunning: () => isTurnRunning.value,
   clearAttachments: () => {
