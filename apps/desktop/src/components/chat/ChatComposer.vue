@@ -47,6 +47,7 @@ import EditableCommandBlock from "./EditableCommandBlock.vue";
 const props = defineProps<{
   state: ChatComposerState;
   attachments?: ChatAttachment[];
+  appendAttachmentsToEndKey?: number;
   projectCwd?: string | null;
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
@@ -157,6 +158,7 @@ const contextUserInteracted = ref(false);
 let contextSearchSeq = 0;
 let resizeFrameId: number | null = null;
 let overflowTimerId: number | null = null;
+let observedAppendToEndKey = props.appendAttachmentsToEndKey ?? 0;
 
 const toolExpanded = ref(false);
 const toolSubmitting = ref<ToolConsentDecision | null>(null);
@@ -1207,9 +1209,15 @@ watch(richEditor, () => {
 });
 
 watch(
-  () => (props.attachments ?? []).map((attachment) => `${attachment.id}:${attachment.path}`).join("\n"),
+  () => [
+    (props.attachments ?? []).map((attachment) => `${attachment.id}:${attachment.path}`).join("\n"),
+    props.appendAttachmentsToEndKey ?? 0,
+  ] as const,
   () => {
     if (hasPending.value) return;
+    const nextAppendToEndKey = props.appendAttachmentsToEndKey ?? 0;
+    const shouldAppendToEnd = nextAppendToEndKey !== observedAppendToEndKey;
+    observedAppendToEndKey = nextAppendToEndKey;
     const incoming = props.attachments ?? [];
     const incomingPaths = new Set(incoming.map((attachment) => attachment.path));
     const filtered = composerParts.value.filter((part) =>
@@ -1221,7 +1229,7 @@ watch(
       renderRichEditorFromParts();
     }
 
-    let offset = externalAttachmentInsertionOffset();
+    let offset = shouldAppendToEnd ? composerPartsLength() : externalAttachmentInsertionOffset();
     for (const attachment of incoming) {
       if (composerHasAttachmentPath(attachment.path)) continue;
       if (insertAttachmentReference(attachment, offset)) {

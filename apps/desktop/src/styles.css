@@ -1747,6 +1747,37 @@ button.ghost:hover {
   flex: 1 1 auto;
 }
 
+.chat-file-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.chat-file-drop-overlay__icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.chat-file-drop-overlay__text {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .chat-sidebar {
   position: relative;
   flex: 0 0 0;

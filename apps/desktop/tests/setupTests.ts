@@ -20,6 +20,11 @@ vi.mock("@tauri-apps/api/webview", async () => {
   return { getCurrentWebview: mockGetCurrentWebview };
 });
 
+vi.mock("@tauri-apps/api/window", async () => {
+  const { mockGetCurrentWindow } = await import("./tauriMock");
+  return { getCurrentWindow: mockGetCurrentWindow };
+});
+
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
   configurable: true,
   value: {

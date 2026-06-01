@@ -170,6 +170,7 @@ let agentInteractionSettings = { nonInterruptMode: false, debug: false };
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
 let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
+let windowScaleFactor = 1;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -321,10 +322,12 @@ export function resetTauriMockData() {
   agentInteractionSettings = { nonInterruptMode: false, debug: false };
   eventHandlers = {};
   webviewDragDropHandlers = [];
+  windowScaleFactor = 1;
   refreshSessionCounts();
   mockInvoke.mockClear();
   mockListen.mockClear();
   mockGetCurrentWebview.mockClear();
+  mockGetCurrentWindow.mockClear();
 }
 
 export function emitTauriEvent(event: string, payload: unknown) {
@@ -421,6 +424,19 @@ export const mockGetCurrentWebview = vi.fn(() => ({
     };
   }),
 }));
+
+export const mockGetCurrentWindow = vi.fn(() => ({
+  isMaximized: vi.fn(async () => false),
+  onResized: vi.fn(async () => vi.fn()),
+  minimize: vi.fn(async () => undefined),
+  toggleMaximize: vi.fn(async () => undefined),
+  close: vi.fn(async () => undefined),
+  scaleFactor: vi.fn(async () => windowScaleFactor),
+}));
+
+export function setMockWindowScaleFactor(scaleFactor: number) {
+  windowScaleFactor = scaleFactor;
+}
 
 export function completeMockAgentTurn(taskId: string) {
   emitTauriEvent("chat:done", {

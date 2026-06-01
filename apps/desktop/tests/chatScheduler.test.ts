@@ -1,6 +1,6 @@
 import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
@@ -14,8 +14,14 @@ import {
   mockInvoke,
   seedMockChatMessages,
   setMockComposerStateHandler,
+  setMockWindowScaleFactor,
 } from "./tauriMock";
 import { createTodo, updateTodo } from "../src/services/todos";
+import {
+  installToolConsentBridge,
+  respondConsent,
+  useToolConsentForTask,
+} from "../src/composables/useToolConsentBridge";
 
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
@@ -86,6 +92,39 @@ function setChatDropBounds(view: ReturnType<typeof render>) {
   });
 }
 
+function setChatSidebarBounds(view: ReturnType<typeof render>) {
+  const sidebar = view.container.querySelector(".chat-sidebar") as HTMLElement | null;
+  if (!sidebar) throw new Error("未找到对话侧栏");
+  sidebar.getBoundingClientRect = () => ({
+    x: 600,
+    y: 0,
+    left: 600,
+    top: 0,
+    right: 800,
+    bottom: 800,
+    width: 200,
+    height: 800,
+    toJSON: () => ({}),
+  });
+}
+
+function emitToolConsentRequest(taskId: string) {
+  emitTauriEvent("chat:tool-consent-request", {
+    taskId,
+    turnId: "turn-tool",
+    backend: "claude",
+    requestId: `tool-${taskId}`,
+    toolName: "Write",
+    input: { file_path: "src/main.ts" },
+    title: null,
+    displayName: null,
+    description: null,
+    blockedPath: null,
+    decisionReason: null,
+    toolUseId: null,
+  });
+}
+
 function chatTranscriptElement(view: ReturnType<typeof render>): HTMLElement {
   const transcript = view.container.querySelector(".chat-transcript");
   if (!(transcript instanceof HTMLElement)) {
@@ -121,8 +160,19 @@ async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {
 }
 
 describe("chat scheduler", () => {
+  let unlistenToolConsent: (() => void) | null = null;
+
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
+  });
+
+  afterEach(async () => {
+    const pendingConsent = useToolConsentForTask("t-002").value;
+    if (pendingConsent) {
+      await respondConsent("t-002", pendingConsent.requestId, "deny", "测试清理");
+    }
+    unlistenToolConsent?.();
+    unlistenToolConsent = null;
   });
 
   it("只处理落在当前聊天区域内的文件 drop，并随消息发送", async () => {
@@ -165,6 +215,173 @@ describe("chat scheduler", () => {
     expect(send?.[1].content).toContain("[Lilia 引导]");
     expect(send?.[1].content).toContain("参考附件总结项目");
     expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
+  });
+
+  it("文件拖入主聊天区时显示遮罩，离开或 drop 后隐藏", async () => {
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "enter",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 120, y: 160 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("拖入文件以追加到输入框")).toBeInTheDocument();
+    });
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 900, y: 900 },
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText("拖入文件以追加到输入框")).toBeNull();
+    });
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 120, y: 160 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("拖入文件以追加到输入框")).toBeInTheDocument();
+    });
+
+    emitWebviewDragDropEvent({ type: "leave" });
+
+    await waitFor(() => {
+      expect(view.queryByText("拖入文件以追加到输入框")).toBeNull();
+    });
+  });
+
+  it("不会在右侧对话侧栏显示拖入遮罩或添加附件", async () => {
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+    setChatSidebarBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 650, y: 160 },
+    });
+
+    expect(view.queryByText("拖入文件以追加到输入框")).toBeNull();
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 650, y: 160 },
+    });
+
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_describe_attachments"),
+    ).toBe(false);
+    expect(view.queryByText("README.md")).not.toBeInTheDocument();
+  });
+
+  it("高 DPI 下会把 physical 拖拽坐标转换为 logical 坐标后命中主聊天区", async () => {
+    setMockWindowScaleFactor(2);
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 240, y: 320 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("拖入文件以追加到输入框")).toBeInTheDocument();
+    });
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 240, y: 320 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("README.md")).toBeInTheDocument();
+    });
+  });
+
+  it("高 DPI 下右侧对话侧栏仍不会接收拖入文件", async () => {
+    setMockWindowScaleFactor(2);
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+    setChatSidebarBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 1300, y: 320 },
+    });
+
+    await waitFor(() => {
+      expect(view.queryByText("拖入文件以追加到输入框")).toBeNull();
+    });
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 1300, y: 320 },
+    });
+
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_describe_attachments"),
+    ).toBe(false);
+    expect(view.queryByText("README.md")).not.toBeInTheDocument();
+  });
+
+  it("pending 工具授权状态下暂不接收拖入文件", async () => {
+    unlistenToolConsent = await installToolConsentBridge();
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitToolConsentRequest("t-002");
+    await view.findByRole("alert");
+    mockInvoke.mockClear();
+
+    emitWebviewDragDropEvent({
+      type: "over",
+      position: { x: 120, y: 160 },
+    });
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 120, y: 160 },
+    });
+
+    expect(view.queryByText("拖入文件以追加到输入框")).toBeNull();
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_describe_attachments"),
+    ).toBe(false);
+    expect(view.queryByText("README.md")).not.toBeInTheDocument();
+  });
+
+  it("拖入附件总是追加到输入框末尾并跳过重复路径", async () => {
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+    const input = await setComposerText(view, "开头  结尾");
+    placeEditableCaret(input, "开头 ".length);
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: [
+        "D:\\PROJECT\\workspace\\Lilia\\README.md",
+        "D:\\PROJECT\\workspace\\Lilia\\README.md",
+        "D:\\PROJECT\\workspace\\Lilia\\big-dir",
+      ],
+      position: { x: 120, y: 160 },
+    });
+
+    await waitFor(() => {
+      expect(view.getByText("README.md")).toBeInTheDocument();
+      expect(view.getByText("big-dir")).toBeInTheDocument();
+    });
+
+    const composerText = view.getByRole("textbox").textContent ?? "";
+    expect(composerText.indexOf("结尾")).toBeLessThan(composerText.indexOf("README.md"));
+    expect(view.getAllByText("README.md")).toHaveLength(1);
   });
 
   it("@ 搜索选中的文件作为路径上下文进入 Lilia 引导", async () => {

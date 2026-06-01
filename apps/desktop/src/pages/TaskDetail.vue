@@ -13,6 +13,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
   isDraftOrphan,
@@ -107,6 +108,8 @@ const composerForView = computed<ChatComposerState>(() => composer.value ?? {
 const models = ref<ChatModelOption[]>([]);
 const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
+const droppedAttachmentAppendKey = ref(0);
+const fileDropActive = ref(false);
 const attachments = ref<ChatAttachment[]>([]);
 const userSendScrollKey = ref(0);
 const pendingAskUser = useAskUserForTask(() => props.taskId);
@@ -136,6 +139,7 @@ const pendingPlanApproval = computed(() => {
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
 let optimisticMessageSeq = 0;
+const appWindow = getCurrentWindow();
 
 async function ensureOrphanCwd(): Promise<string> {
   if (orphanCwd.value) return orphanCwd.value;
@@ -173,6 +177,30 @@ function isPointInsideElement(
     point.y <= rect.bottom;
 }
 
+function canAcceptFileDropAt(point: { x: number; y: number } | null): boolean {
+  if (!hasContext.value) return false;
+  if (!nonInterruptMode.value && (pendingAskUser.value || pendingToolConsent.value)) return false;
+  if (!isPointInsideElement(point, chatPageRef.value)) return false;
+  const sidebar = chatPageRef.value?.querySelector(".chat-sidebar");
+  return !(sidebar instanceof HTMLElement && isPointInsideElement(point, sidebar));
+}
+
+async function normalizeDropPoint(
+  point: { x: number; y: number } | null,
+): Promise<{ x: number; y: number } | null> {
+  if (!point) return null;
+  try {
+    const scaleFactor = await appWindow.scaleFactor();
+    if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) return point;
+    return {
+      x: point.x / scaleFactor,
+      y: point.y / scaleFactor,
+    };
+  } catch {
+    return point;
+  }
+}
+
 function readDropPayload(payload: unknown): {
   type: string;
   paths: string[];
@@ -195,7 +223,7 @@ function readDropPayload(payload: unknown): {
   };
 }
 
-async function addAttachmentsFromPaths(paths: string[]) {
+async function addAttachmentsFromPaths(paths: string[], appendToEnd = false) {
   const uniquePaths = paths.filter((path, index) =>
     paths.indexOf(path) === index &&
     !attachments.value.some((attachment) => attachment.path === path)
@@ -204,9 +232,13 @@ async function addAttachmentsFromPaths(paths: string[]) {
   try {
     const described = await describeAttachments(uniquePaths);
     const existing = new Set(attachments.value.map((attachment) => attachment.path));
+    const nextAttachments = described.filter((attachment) => !existing.has(attachment.path));
+    if (appendToEnd && nextAttachments.length > 0) {
+      droppedAttachmentAppendKey.value += 1;
+    }
     attachments.value = [
       ...attachments.value,
-      ...described.filter((attachment) => !existing.has(attachment.path)),
+      ...nextAttachments,
     ];
   } catch (err) {
     console.error("[chat] describeAttachments failed", err);
@@ -641,9 +673,18 @@ onMounted(async () => {
   unlisteners.push(
     await getCurrentWebview().onDragDropEvent(async (event) => {
       const drop = readDropPayload(event.payload);
-      if (!drop || drop.type !== "drop" || drop.paths.length === 0) return;
-      if (!isPointInsideElement(drop.position, chatPageRef.value)) return;
-      await addAttachmentsFromPaths(drop.paths);
+      if (!drop) return;
+      if (drop.type === "leave") {
+        fileDropActive.value = false;
+        return;
+      }
+      const point = await normalizeDropPoint(drop.position);
+      const canAccept = canAcceptFileDropAt(point);
+      fileDropActive.value = (drop.type === "enter" || drop.type === "over") && canAccept;
+      if (drop.type !== "drop") return;
+      fileDropActive.value = false;
+      if (!canAccept || drop.paths.length === 0) return;
+      await addAttachmentsFromPaths(drop.paths, true);
     }),
   );
   unlisteners.push(
@@ -706,6 +747,7 @@ watch(
     overlayTimelineEvents.value = [];
     composer.value = null;
     attachments.value = [];
+    fileDropActive.value = false;
     resubscribeDebugTimeline();
     if (!props.projectId) await ensureOrphanCwd();
     await loadAll();
@@ -745,6 +787,15 @@ watch(
     <div class="chat">
       <div class="chat-layout">
         <div class="chat-layout__main">
+          <div
+            v-if="fileDropActive"
+            class="chat-file-drop-overlay"
+            aria-live="polite"
+            role="status"
+          >
+            <span class="chat-file-drop-overlay__icon" aria-hidden="true">+</span>
+            <span class="chat-file-drop-overlay__text">拖入文件以追加到输入框</span>
+          </div>
           <ChatTranscript
             :timeline-events="timelineEvents"
             :empty-headline="emptyHeadline"
@@ -766,6 +817,7 @@ watch(
                 <ChatComposer
                   :state="composerForView"
                   :attachments="attachments"
+                  :append-attachments-to-end-key="droppedAttachmentAppendKey"
                   :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
                   :pending-ask="nonInterruptMode ? null : pendingAskUser"
