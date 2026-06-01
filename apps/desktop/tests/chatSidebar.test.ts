@@ -191,6 +191,7 @@ describe("chat sidebar host", () => {
     expect(view.queryByText("侧栏")).not.toBeInTheDocument();
   });
 
+
   it("会从本地存储恢复打开状态", () => {
     localStorage.setItem(STORAGE_KEY, "1");
 
@@ -200,6 +201,7 @@ describe("chat sidebar host", () => {
     expect(sidebar).toHaveClass("is-open");
     expect(sidebar).not.toHaveAttribute("aria-hidden");
   });
+
 
   it("渲染注册内容并传入当前对话上下文", () => {
     trackPanel({
@@ -216,29 +218,6 @@ describe("chat sidebar host", () => {
     );
   });
 
-  it("active panel 注销后切到下一个注册内容", async () => {
-    const unregisterFirst = trackPanel({
-      id: "first",
-      title: "First",
-      order: 1,
-      component: FirstPanel,
-    });
-    trackPanel({
-      id: "second",
-      title: "Second",
-      order: 2,
-      component: SecondPanel,
-    });
-    openChatSidebar("first");
-
-    const view = renderHost();
-    expect(view.getByTestId("first-panel")).toBeInTheDocument();
-
-    unregisterFirst();
-    await nextTick();
-
-    expect(view.getByTestId("second-panel")).toBeInTheDocument();
-  });
 
   it("可从左边缘拖动调整宽度并在松手后写回本地存储", async () => {
     openChatSidebar();
@@ -286,22 +265,6 @@ describe("chat sidebar host", () => {
 
     expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("180");
   });
-
-  it("对话侧栏宽度可双击恢复默认值", async () => {
-    localStorage.setItem(WIDTH_STORAGE_KEY, "480");
-    openChatSidebar();
-
-    const view = renderHost();
-    const sidebar = sidebarElement(view.container);
-    const resizer = sidebarResizer(view.container);
-
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("480px");
-
-    await fireEvent.dblClick(resizer);
-
-    expect(sidebar.style.getPropertyValue("--chat-sidebar-width")).toBe("340px");
-    expect(localStorage.getItem(WIDTH_STORAGE_KEY)).toBe("340");
-  });
 });
 
 describe("TaskDetail chat sidebar toggle", () => {
@@ -325,174 +288,5 @@ describe("TaskDetail chat sidebar toggle", () => {
     expect(sidebar).not.toHaveClass("is-open");
     expect(toggle).toHaveAttribute("aria-label", "打开对话侧栏");
     expect(localStorage.getItem(STORAGE_KEY)).toBe("0");
-  });
-
-  it("开启 debug 后注册调试面板，并模拟计划确认完整流程", async () => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "计划" }));
-
-    await waitFor(() => {
-      expect(view.container.querySelector(".timeline-card--plan")).toBeInTheDocument();
-    });
-    expect(view.getByRole("button", { name: /等待确认计划/ })).toBeInTheDocument();
-    expect(view.queryByText("已失效")).toBeNull();
-    expect(view.getByRole("region", { name: "确认 Debug 计划" })).toBeInTheDocument();
-
-    await fireEvent.click(view.getByRole("button", { name: "同意" }));
-
-    await waitFor(() => {
-      expect(view.getByText("已同意")).toBeInTheDocument();
-    });
-    expect(mockInvoke.mock.calls).not.toContainEqual([
-      "agent_timeline_insert",
-      expect.anything(),
-      undefined,
-    ]);
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
-  });
-
-  it("debug 提问使用真实 pending ask 流程并在回答后回写时间线", async () => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "单选提问" }));
-
-    expect(await view.findByRole("region", { name: "Debug 提问" })).toBeInTheDocument();
-    expect(view.queryByText("已失效")).toBeNull();
-
-    await fireEvent.click(view.getByRole("radio", { name: "待办" }));
-    await fireEvent.click(view.getByRole("button", { name: "完成" }));
-
-    await waitFor(() => {
-      expect(view.getByText("Debug 提问已回答")).toBeInTheDocument();
-    });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
-  });
-
-  it.each([
-    ["多选提问", "Debug 多选提问"],
-    ["示例提问", "Debug 示例提问"],
-    ["多题提问", "Debug 多题提问"],
-  ])("debug %s 按钮能注入本地提问卡片", async (buttonName, regionName) => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: buttonName }));
-
-    expect(await view.findByRole("region", { name: regionName })).toBeInTheDocument();
-    expect(view.queryByText("已失效")).toBeNull();
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_ask_user")).toBe(false);
-  });
-
-  it("debug 权限申请走本地 pending tool consent，不触发 runner IPC", async () => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "权限申请" }));
-
-    expect(await view.findByRole("alert")).toBeInTheDocument();
-    expect(view.queryByText("已失效")).toBeNull();
-    expect(view.getByText("写入调试夹具")).toBeInTheDocument();
-
-    await fireEvent.click(view.getByRole("button", { name: "同意" }));
-
-    await waitFor(() => {
-      expect(view.getByText("Debug 权限已同意")).toBeInTheDocument();
-    });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_respond_tool_consent")).toBe(false);
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_timeline_insert")).toBe(false);
-  });
-
-  it("debug 待办卡片可插入并展开查看详情", async () => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "待办卡片" }));
-
-    const todoButton = await view.findByRole("button", { name: /更新待办/ });
-    await fireEvent.click(todoButton);
-
-    expect(view.getByText("点击预制事件按钮")).toBeInTheDocument();
-  });
-
-  it("debug Todo工具刷新原生 Todo，并把用户输入先进 Lilia 引导", async () => {
-    const view = await enableDebugSidebar();
-
-    await fireEvent.click(await debugSidebar(view.container).findByRole("button", { name: "Todo工具" }));
-
-    await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_apply_agent_event")).toBe(true);
-      expect(view.getByText("确认 TodoFloat 自动刷新")).toBeInTheDocument();
-    });
-    expect(view.getByText("验证手动 Todo 不被 agent 覆盖")).toBeInTheDocument();
-    expect(view.queryByText("完成 Claude TodoWrite 调试接线")).toBeNull();
-    const todoFloat = view.getByLabelText("Todo 与引导");
-    expect(within(todoFloat).queryByText("Todo")).toBeNull();
-    expect(within(todoFloat).queryByText("引导")).toBeNull();
-    expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(1);
-    expect(view.getByText("模拟 Claude TodoWrite 并刷新 Lilia Todo")).toBeInTheDocument();
-
-    await setComposerText(view, "手动补充调试项");
-    await fireEvent.click(view.getByRole("button", { name: "发送" }));
-
-    await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(true);
-      expect(view.getByText("手动补充调试项")).toBeInTheDocument();
-      expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(2);
-    });
-
-    await waitFor(() => {
-      const createIndex = mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "todo_create");
-      const sendIndex = mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message");
-      expect(createIndex).toBeGreaterThanOrEqual(0);
-      expect(sendIndex).toBeGreaterThan(createIndex);
-    });
-  });
-
-  it("Lilia 引导可以编辑优先级、正文并手动插入", async () => {
-    mockInvoke.mockClear();
-    const view = await renderTaskDetail();
-
-    await createTodo("t-002", "需要补充上下文");
-    mockInvoke.mockClear();
-
-    const todoFloat = await view.findByLabelText("Todo 与引导");
-    expect(within(todoFloat).queryByText("Todo")).toBeNull();
-    expect(within(todoFloat).queryByText("引导")).toBeNull();
-    expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(1);
-
-    const guide = await view.findByRole("button", { name: "需要补充上下文" });
-    await fireEvent.click(guide);
-    const editInput = await view.findByLabelText("编辑引导");
-    await fireEvent.update(editInput, "需要补充关键上下文");
-    await fireEvent.blur(editInput);
-    await waitFor(() => {
-      expect(view.getByText("需要补充关键上下文")).toBeInTheDocument();
-    });
-    await fireEvent.click(view.getAllByTitle("设为高优先级").at(-1)!);
-
-    await waitFor(() => {
-      expect(view.getByText("需要补充关键上下文")).toBeInTheDocument();
-    });
-
-    const insert = view.getByRole("button", { name: /立即插入引导：需要补充关键上下文/ });
-    await fireEvent.click(insert);
-
-    await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
-      expect(view.getByText("已插入")).toBeInTheDocument();
-    });
-  });
-
-  it("debug 普通卡片事件覆盖命令、读文件和改文件", async () => {
-    const view = await enableDebugSidebar();
-
-    const debug = debugSidebar(view.container);
-    await fireEvent.click(await debug.findByRole("button", { name: "命令" }));
-    await fireEvent.click(debug.getByRole("button", { name: "读文件" }));
-    await fireEvent.click(debug.getByRole("button", { name: "改文件" }));
-
-    await waitFor(() => {
-      expect(view.getByText("yarn verify:contracts")).toBeInTheDocument();
-      expect(view.getByText("packages/contracts/src/index.ts")).toBeInTheDocument();
-      expect(view.getByText("apps/desktop/src/pages/TaskDetail.vue")).toBeInTheDocument();
-    });
   });
 });

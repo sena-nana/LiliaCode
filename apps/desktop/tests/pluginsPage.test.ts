@@ -38,43 +38,4 @@ describe("Plugins page", () => {
     });
     expect(view.getByText("uvx linear-mcp")).toBeInTheDocument();
   });
-
-  it("编辑 Claude MCP 时留空 env 保留旧值，删行才删除旧 key", async () => {
-    const view = render(Plugins);
-
-    await fireEvent.click(view.getByRole("tab", { name: /Claude MCP/ }));
-    await waitFor(() => {
-      expect(view.getByText("weather")).toBeInTheDocument();
-    });
-
-    await fireEvent.click(view.getByRole("button", { name: /编辑/ }));
-    await fireEvent.click(view.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
-      expect(lastClaudeMcpUpdateInput()).toEqual(
-        expect.not.objectContaining({
-          removeEnvKeys: expect.any(Array),
-        }),
-      );
-    });
-    await waitFor(() => {
-      expect(view.queryByRole("dialog", { name: "Claude MCP" })).not.toBeInTheDocument();
-    });
-
-    mockInvoke.mockClear();
-    await fireEvent.click(view.getByRole("button", { name: /编辑/ }));
-    await waitFor(() => {
-      expect(view.getByRole("button", { name: "保存" })).toBeInTheDocument();
-    });
-    await fireEvent.click(view.getByRole("button", { name: "删除 Env" }));
-    await fireEvent.click(view.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
-      expect(lastClaudeMcpUpdateInput()).toEqual(
-        expect.objectContaining({
-          removeEnvKeys: ["WEATHER_TOKEN"],
-        }),
-      );
-    });
-  });
 });

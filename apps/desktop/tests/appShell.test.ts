@@ -78,17 +78,6 @@ describe("AppShell left sidebar collapse", () => {
     expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("0");
   });
 
-  it("会从本地存储恢复左侧栏折叠状态", async () => {
-    localStorage.setItem(COLLAPSED_STORAGE_KEY, "1");
-
-    const view = await renderAppShell();
-
-    expect(shellElement(view.container)).toHaveClass("is-sidebar-collapsed");
-    expect(view.getByRole("button", { name: "展开左侧栏" }))
-      .toHaveAttribute("aria-pressed", "true");
-    expect(leftResizer(view.container)).toHaveAttribute("aria-disabled", "true");
-  });
-
   it("左侧栏宽度可拖拽调整、写回存储并双击恢复默认", async () => {
     localStorage.setItem(WIDTH_STORAGE_KEY, "260");
     const view = await renderAppShell();

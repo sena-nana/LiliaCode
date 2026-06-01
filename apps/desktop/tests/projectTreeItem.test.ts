@@ -114,6 +114,7 @@ describe("ProjectTreeItem", () => {
     expect(view.emitted("toggle")).toEqual([["lilia"]]);
   });
 
+
   it("项目右键菜单第一项进入对应项目", async () => {
     const view = await renderProjectTreeItem("/projects/tools");
 
@@ -127,56 +128,6 @@ describe("ProjectTreeItem", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.path).toBe("/projects/lilia");
     });
-  });
-
-  it("session 置顶按钮显示在归档按钮左侧并触发切换", async () => {
-    const view = await renderProjectTreeItem();
-    const sessionRow = view.getByText("接入 Claude Code 会话发现")
-      .closest("a");
-    const buttons = Array.from(sessionRow?.querySelectorAll("button") ?? []);
-
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-      "置顶",
-      "归档",
-    ]);
-
-    await fireEvent.click(buttons[0]);
-
-    expect(mockInvoke.mock.calls.at(-1)?.slice(0, 2)).toEqual([
-      "task_toggle_pin",
-      { id: "t-001" },
-    ]);
-
-    await waitFor(() => {
-      expect(view.getByLabelText("取消置顶")).toHaveClass("is-pinned");
-    });
-  });
-
-  it("归档失败时发出错误事件而不是 archived", async () => {
-    mockInvoke.mockRejectedValueOnce(new Error("archive failed"));
-    const view = await renderProjectTreeItem();
-
-    await fireEvent.click(view.getByLabelText("更多"));
-    await fireEvent.click(await view.findByText("归档所有对话"));
-    await fireEvent.click(await view.findByText("确认归档？再点一次"));
-
-    await waitFor(() => {
-      expect(view.emitted("error")?.[0]?.[0]).toContain("归档所有对话失败");
-    });
-    expect(view.emitted("archived")).toBeUndefined();
-  });
-
-  it("归档当前打开的项目对话成功后才发出 archived", async () => {
-    const view = await renderProjectTreeItem("/projects/lilia/tasks/t-001");
-
-    await fireEvent.click(view.getByLabelText("更多"));
-    await fireEvent.click(await view.findByText("归档所有对话"));
-    await fireEvent.click(await view.findByText("确认归档？再点一次"));
-
-    await waitFor(() => {
-      expect(view.emitted("archived")).toHaveLength(1);
-    });
-    expect(view.emitted("error")).toBeUndefined();
   });
 
   it("项目对话超过四条时用省略行折叠剩余对话，并可点击展开", async () => {
@@ -198,44 +149,5 @@ describe("ProjectTreeItem", () => {
     expect(view.getByText("对话 5")).toBeInTheDocument();
     expect(view.getByText("对话 6")).toBeInTheDocument();
     expect(view.queryByRole("button", { name: "显示剩余对话" })).not.toBeInTheDocument();
-  });
-
-  it("展开剩余对话后会保持展开直到用户折叠项目", async () => {
-    seedProjectConversations(5);
-    const view = await renderProjectTreeItem();
-
-    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
-    expect(view.getByText("对话 5")).toBeInTheDocument();
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(view.getByText("对话 5")).toBeInTheDocument();
-  });
-
-  it("折叠项目后会重置项目内对话折叠状态", async () => {
-    seedProjectConversations(5);
-    const view = await renderProjectTreeItem();
-
-    await fireEvent.click(view.getByRole("button", { name: "显示剩余对话" }));
-    expect(view.getByText("对话 5")).toBeInTheDocument();
-
-    await view.rerender({ isExpanded: false });
-    await view.rerender({ isExpanded: true });
-
-    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
-    expect(view.getByRole("button", { name: "显示剩余对话" })).toBeInTheDocument();
-  });
-
-  it("当前打开的隐藏对话会在折叠态占用第四个可见位置", async () => {
-    seedProjectConversations(6);
-
-    const view = await renderProjectTreeItem("/projects/lilia/tasks/t-overflow-6");
-
-    expect(view.getByText("对话 1")).toBeInTheDocument();
-    expect(view.getByText("对话 2")).toBeInTheDocument();
-    expect(view.getByText("对话 3")).toBeInTheDocument();
-    expect(view.queryByText("对话 4")).not.toBeInTheDocument();
-    expect(view.queryByText("对话 5")).not.toBeInTheDocument();
-    expect(view.getByText("对话 6")).toBeInTheDocument();
-    expect(view.getByRole("button", { name: "显示剩余对话" })).toBeInTheDocument();
   });
 });

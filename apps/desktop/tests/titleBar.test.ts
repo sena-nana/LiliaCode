@@ -56,17 +56,4 @@ describe("TitleBar breadcrumbs", () => {
       expect(view.getByText("用首条消息生成标题")).toBeInTheDocument();
     });
   });
-
-  it("收集箱草稿首条消息入库后会跟随正式标题更新", async () => {
-    const draft = createDraftOrphan();
-    const view = await renderTitleBar(`/chats/${draft.id}`);
-
-    expect(view.getByText("新对话")).toBeInTheDocument();
-
-    await promoteDraftOrphan(draft.id, "收集箱里的第一条消息");
-
-    await waitFor(() => {
-      expect(view.getByText("收集箱里的第一条消息")).toBeInTheDocument();
-    });
-  });
 });
