@@ -55,6 +55,14 @@ describe("agent timeline styles", () => {
     expect(chatTranscript).toContain('class="chat-controls-wrap"');
   });
 
+  it("拖入文件遮罩保持原有布局，只通过加深遮罩提高可读性", () => {
+    const overlay = selectorIndex(".chat-file-drop-overlay {");
+
+    expect(overlay).toBeGreaterThan(-1);
+    expect(taskDetail).not.toContain("chat-file-drop-overlay__panel");
+    expect(ruleTextAt(overlay)).toContain("background: color-mix(in srgb, var(--bg) 84%, transparent)");
+  });
+
   it("输入区粘底时遮住底部安全区，时间线不会露到输入框下方", () => {
     const transcript = selectorIndex(".chat-transcript {");
     const controlsWrap = selectorIndex(".chat-controls-wrap {");

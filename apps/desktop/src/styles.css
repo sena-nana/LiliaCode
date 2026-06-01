@@ -1757,7 +1757,7 @@ button.ghost:hover {
   gap: 10px;
   padding: 24px;
   pointer-events: none;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
 }
 
 .chat-file-drop-overlay__icon {
