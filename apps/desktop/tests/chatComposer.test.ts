@@ -1,6 +1,6 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, within } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
+import type { AskUserSpec, ChatAttachment, ChatComposerState } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -76,6 +76,36 @@ const bashToolConsent: ToolConsentRequest = {
   input: { command: "pwd" },
 };
 
+const projectCwd = "D:\\PROJECT\\workspace\\Lilia";
+
+const previewImageAttachment: ChatAttachment = {
+  id: "att-img",
+  name: "context-preview.png",
+  path: "D:\\PROJECT\\workspace\\Lilia\\screenshots\\context-preview.png",
+  kind: "file",
+  size: 42,
+  exists: true,
+  mime: "image/png",
+  directory: null,
+};
+
+const largeDirectoryAttachment: ChatAttachment = {
+  id: "att-big",
+  name: "big-dir",
+  path: "D:\\PROJECT\\workspace\\Lilia\\big-dir",
+  kind: "directory",
+  size: null,
+  exists: true,
+  mime: null,
+  directory: {
+    fileCount: 250,
+    directoryCount: 18,
+    totalSize: 24 * 1024 * 1024,
+    truncated: true,
+    unreadableCount: 0,
+  },
+};
+
 function renderRunningComposer() {
   return render(ChatComposer, {
     props: {
@@ -95,6 +125,42 @@ function setMeasuredScrollHeight(scrollHeight: number) {
 
 async function flushComposerResize() {
   await vi.advanceTimersByTimeAsync(16);
+}
+
+async function flushContextSearch() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function placeEditableCaret(element: HTMLElement, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const textNode = element.firstChild;
+  if (textNode?.nodeType === Node.TEXT_NODE) {
+    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
+  } else {
+    range.selectNodeContents(element);
+    range.collapse(false);
+  }
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+async function setComposerText(view: ReturnType<typeof render>, text: string) {
+  const input = view.getByRole("textbox") as HTMLElement;
+  if (input instanceof HTMLTextAreaElement) {
+    await fireEvent.update(input, text);
+    return input;
+  }
+  input.textContent = text;
+  placeEditableCaret(input, text.length);
+  await fireEvent.input(input);
+  return input;
+}
+
+function composerText(input: HTMLElement): string {
+  return input instanceof HTMLTextAreaElement ? input.value : input.textContent ?? "";
 }
 
 beforeEach(() => {
@@ -137,11 +203,393 @@ describe("ChatComposer", () => {
   it("Agent 运行但有输入时仍发送到调度队列", async () => {
     const view = renderRunningComposer();
 
-    await fireEvent.update(view.getByRole("textbox"), "补充上下文");
+    await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
     expect(view.emitted("send")?.[0]).toEqual(["补充上下文", []]);
     expect(view.emitted("interrupt")).toBeUndefined();
+  });
+
+  it("@ 输入打开文件上下文搜索，Esc 关闭", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@read");
+    await flushContextSearch();
+
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+    expect(view.getAllByText("README.md").length).toBeGreaterThan(0);
+
+    await fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
+  });
+
+  it("@ 搜索面板不渲染额外搜索头", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@read");
+    await flushContextSearch();
+
+    const panel = view.getByRole("listbox", { name: "文件上下文搜索" });
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).queryByText("@read")).toBeNull();
+  });
+
+  it("@ 搜索结果将路径内联显示在 name 后且相同路径不重复", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@read");
+    await flushContextSearch();
+    expect(view.getAllByText("README.md")).toHaveLength(1);
+
+    await setComposerText(view, "@composer");
+    await flushContextSearch();
+
+    const main = view.getByText("ChatComposer.vue").closest(".chat-composer__context-main");
+    expect(main).not.toBeNull();
+    expect(within(main as HTMLElement).getByText("apps/desktop/src/components/chat/ChatComposer.vue"))
+      .toBeInTheDocument();
+    expect(main?.querySelector(".chat-composer__context-name")?.nextElementSibling)
+      .toHaveClass("chat-composer__context-path");
+  });
+
+  it("@ 搜索选中结果后转为上下文附件并清理 mention", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "参考 @read");
+    await flushContextSearch();
+    expect(view.getAllByText("README.md").length).toBeGreaterThan(0);
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "README.md",
+      path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+      kind: "file",
+    });
+    expect(view.emitted("send")).toBeUndefined();
+    expect(composerText(input)).toContain("参考");
+    expect(composerText(input)).toContain("README.md");
+    expect(composerText(input)).not.toContain("D:\\PROJECT\\workspace\\Lilia\\README.md");
+    expect(composerText(input)).not.toContain("@read");
+  });
+
+  it("@ 可在输入内容中任意位置紧贴文本触发", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "参考@read");
+    await flushContextSearch();
+    expect(view.getAllByText("README.md").length).toBeGreaterThan(0);
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "README.md",
+      path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+    });
+    expect(composerText(input)).toContain("参考");
+    expect(composerText(input)).toContain("README.md");
+    expect(composerText(input)).not.toContain("@read");
+  });
+
+  it("@ 搜索目录时 Enter 选中文件夹生成附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@big");
+    await flushContextSearch();
+    expect(view.getByText("big-dir")).toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "big-dir",
+      kind: "directory",
+    });
+    expect(composerText(input)).toContain("big-dir");
+    expect(composerText(input)).not.toContain("@big");
+  });
+
+  it("@ 搜索目录时 Tab 进入目录且不生成附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@big");
+    await flushContextSearch();
+    await fireEvent.keyDown(input, { key: "Tab", code: "Tab" });
+    await flushContextSearch();
+
+    expect(view.emitted("add-context-attachment")).toBeUndefined();
+    expect(composerText(input)).toBe("@big-dir/");
+    expect(view.getByText("inside.md")).toBeInTheDocument();
+  });
+
+  it("@ 搜索目录内按 Esc 回退到上一级，根目录再按 Esc 关闭", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@big");
+    await flushContextSearch();
+    await fireEvent.keyDown(input, { key: "Tab", code: "Tab" });
+    await flushContextSearch();
+    expect(composerText(input)).toBe("@big-dir/");
+
+    await fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
+    await flushContextSearch();
+    expect(composerText(input)).toBe("@");
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
+    expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
+  });
+
+  it("单独 @ 按 Enter 作为普通文本发送，不默认选中文件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@");
+    await flushContextSearch();
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")).toBeUndefined();
+    expect(view.emitted("send")?.[0]).toEqual(["@", []]);
+  });
+
+  it("@ 搜索文件时 Tab 不选中附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@read");
+    await flushContextSearch();
+    await fireEvent.keyDown(input, { key: "Tab", code: "Tab" });
+
+    expect(view.emitted("add-context-attachment")).toBeUndefined();
+    expect(composerText(input)).toBe("@read");
+  });
+
+  it("@ 无匹配后继续输入会退出搜索，删回单独 @ 后重新打开", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+
+    await setComposerText(view, "@zzzz");
+    await flushContextSearch();
+    expect(view.getByText("没有匹配的文件或目录")).toBeInTheDocument();
+
+    await setComposerText(view, "@zzzzz");
+    await flushContextSearch();
+    expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
+
+    await setComposerText(view, "@");
+    await flushContextSearch();
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+    expect(view.getByText("README.md")).toBeInTheDocument();
+  });
+
+  it("@ 搜索默认隐藏点文件，输入点后显示", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@env");
+    await flushContextSearch();
+    expect(view.queryByText(".env")).toBeNull();
+
+    await setComposerText(view, "@.");
+    await flushContextSearch();
+    expect(view.getByText(".env")).toBeInTheDocument();
+  });
+
+  it("@ 搜索默认隐藏 gitignore 忽略项，明确路径后显示", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@dist");
+    await flushContextSearch();
+    expect(view.queryByText("dist")).toBeNull();
+
+    await setComposerText(view, "@dist/");
+    await flushContextSearch();
+    expect(view.getByText("app.js")).toBeInTheDocument();
+  });
+
+  it("@ 绝对路径不存在时提示且不创建附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@D:\\PROJECT\\workspace\\Lilia\\missing.md");
+    await flushContextSearch();
+
+    expect(view.getByText(/路径不存在/)).toBeInTheDocument();
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")).toBeUndefined();
+    expect(view.emitted("send")).toBeUndefined();
+  });
+
+  it("@ 绝对路径允许空格并可转为附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "@D:\\PROJECT\\workspace\\My Project\\context.png");
+    await flushContextSearch();
+    expect(view.getByText("context.png")).toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "context.png",
+      path: "D:\\PROJECT\\workspace\\My Project\\context.png",
+      kind: "file",
+      mime: "image/png",
+    });
+    expect(composerText(input)).toContain("context.png");
+    expect(composerText(input)).not.toContain("@D:\\PROJECT");
+  });
+
+  it("pending 输入态不启用 @ 文件上下文搜索", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+        toolConsent,
+      },
+    });
+
+    await fireEvent.update(view.getByRole("textbox"), "@read");
+    await flushContextSearch();
+
+    expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
+  });
+
+  it("行内引用卡显示目录体量提示，图片额外显示预览", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [previewImageAttachment, largeDirectoryAttachment],
+      },
+    });
+    await flushContextSearch();
+
+    const thumb = view.container.querySelector(".chat-attachment-chip__thumb");
+    expect(thumb).not.toBeNull();
+    expect(thumb as Element).toHaveAttribute(
+      "src",
+      "asset://D:/PROJECT/workspace/Lilia/screenshots/context-preview.png",
+    );
+    expect(view.getByText("目录较大")).toBeInTheDocument();
+    expect(view.getAllByText("context-preview.png").length).toBeGreaterThan(0);
+  });
+
+  it("移除行内引用卡会同步移除附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [previewImageAttachment],
+      },
+    });
+    await flushContextSearch();
+
+    await fireEvent.click(view.getByRole("button", {
+      name: "移除文件引用 context-preview.png",
+    }));
+
+    expect(view.emitted("remove-attachment")?.[0]).toEqual(["att-img"]);
   });
 
   it("Agent 运行且空输入时 textarea Enter 不触发打断", async () => {
@@ -199,7 +647,7 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "开启计划模式" })).toBeInTheDocument();
   });
 
-  it("需要输入的 pending 状态切换时复用同一个输入框节点", async () => {
+  it("需要输入的 pending 状态切换时不污染普通输入内容", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -207,8 +655,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    const input = view.getByRole("textbox");
-    await fireEvent.update(input, "先保留这段输入");
+    const input = await setComposerText(view, "先保留这段输入");
 
     await view.rerender({
       state: baseState,
@@ -217,7 +664,7 @@ describe("ChatComposer", () => {
     });
 
     const pendingInput = view.getByRole("textbox");
-    expect(pendingInput).toBe(input);
+    expect(pendingInput).not.toBe(input);
     expect(pendingInput).toHaveValue("");
 
     await fireEvent.update(pendingInput, "pending 回答");
@@ -230,15 +677,16 @@ describe("ChatComposer", () => {
     });
 
     const restoredInput = view.getByRole("textbox");
-    expect(restoredInput).toBe(input);
-    expect(restoredInput).toHaveValue("先保留这段输入");
+    expect(restoredInput).not.toBe(pendingInput);
+    expect(composerText(restoredInput as HTMLElement)).toContain("先保留这段输入");
   });
 
-  it("输入超过一行时向上扩展，最多三行后滚动", async () => {
+  it("pending textarea 输入超过一行时向上扩展，最多三行后滚动", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
+        toolConsent,
       },
     });
     const input = view.getByRole("textbox") as HTMLTextAreaElement;
@@ -275,29 +723,41 @@ describe("ChatComposer", () => {
     expect(input.scrollTop).toBe(0);
   });
 
-  it("发送后输入框通过高度动画缩回一行", async () => {
+  it("发送后 rich 输入内容清空", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
       },
     });
-    const input = view.getByRole("textbox") as HTMLTextAreaElement;
 
-    setMeasuredScrollHeight(74);
-    await fireEvent.update(input, "第一行\n第二行\n第三行");
-    await flushComposerResize();
-    expect(input.style.height).toBe("74px");
-
-    setMeasuredScrollHeight(30);
+    const input = await setComposerText(view, "第一行\n第二行\n第三行");
     await fireEvent.click(view.getByRole("button", { name: "发送" }));
-    await flushComposerResize();
 
     expect(view.emitted("send")?.[0]).toEqual(["第一行\n第二行\n第三行", []]);
-    expect(input).toHaveValue("");
-    expect(input.style.height).toBe("30px");
-    expect(input.style.overflowY).toBe("hidden");
-    expect(input.scrollTop).toBe(0);
+    expect(composerText(input)).toBe("");
+  });
+
+  it("普通 rich 输入支持 Shift+Enter 插入换行且不发送", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    const input = await setComposerText(view, "第一行");
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter", shiftKey: true });
+
+    expect(view.emitted("send")).toBeUndefined();
+    expect(composerText(input)).toBe("第一行\n");
+
+    input.textContent = `${composerText(input)}第二行`;
+    placeEditableCaret(input, "第一行\n第二行".length);
+    await fireEvent.input(input);
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    expect(view.emitted("send")?.[0]).toEqual(["第一行\n第二行", []]);
   });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {

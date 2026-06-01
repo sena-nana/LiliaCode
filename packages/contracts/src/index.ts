@@ -89,6 +89,7 @@ export interface TaskTodo {
   priority: TaskTodoPriority;
   /** 仅 Lilia 引导使用；agent 原生 Todo 镜像为 null。 */
   guideStatus: TaskTodoGuideStatus | null;
+  attachments?: ChatAttachment[];
   createdAt: number;
   updatedAt: number;
 }
@@ -156,12 +157,29 @@ export type ChatRole = "user" | "assistant" | "system";
 
 export type ChatAttachmentKind = "file" | "directory" | "unknown";
 
+export interface ChatAttachmentDirectoryMeta {
+  fileCount: number;
+  directoryCount: number;
+  totalSize: number;
+  truncated: boolean;
+  unreadableCount: number;
+}
+
 export interface ChatAttachment {
   id: string;
   name: string;
   path: string;
   kind: ChatAttachmentKind;
   size: number | null;
+  exists?: boolean;
+  mime?: string | null;
+  directory?: ChatAttachmentDirectoryMeta | null;
+}
+
+export interface ChatContextSearchResult {
+  attachment: ChatAttachment;
+  relativePath: string;
+  matchedBy: "name" | "path";
 }
 
 export interface ChatMessage {

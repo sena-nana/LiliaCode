@@ -93,6 +93,32 @@ async function renderTaskDetail(taskId = "t-002") {
   return view;
 }
 
+function placeEditableCaret(element: HTMLElement, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const textNode = element.firstChild;
+  if (textNode?.nodeType === Node.TEXT_NODE) {
+    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
+  } else {
+    range.selectNodeContents(element);
+    range.collapse(false);
+  }
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+async function setComposerText(view: ReturnType<typeof render>, text: string) {
+  const input = view.getByRole("textbox") as HTMLElement;
+  if (input instanceof HTMLTextAreaElement) {
+    await fireEvent.update(input, text);
+    return input;
+  }
+  input.textContent = text;
+  placeEditableCaret(input, text.length);
+  await fireEvent.input(input);
+  return input;
+}
+
 async function enableNonInterruptMode() {
   await setAgentInteractionSettings({ nonInterruptMode: true });
   mockInvoke.mockClear();
@@ -335,10 +361,7 @@ describe("chat AskUser prompt", () => {
     expect(view.getByRole("button", { name: "添加附件" })).toBeInTheDocument();
 
     emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
-    await fireEvent.update(
-      view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"),
-      "补充上下文",
-    );
+    await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
     await waitFor(() => {
@@ -663,7 +686,7 @@ describe("chat AskUser prompt", () => {
     expect(action).not.toBeNull();
     expect(action).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "确认 Claude 计划" })).toBe(action);
-    expect(view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"))
+    expect(view.container.querySelector(".chat-composer__rich-input"))
       .toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("button", { name: "同意" }));

@@ -150,6 +150,8 @@ async function ensureOrphanCwd(): Promise<string> {
   return orphanCwd.value;
 }
 
+const contextSearchCwd = computed(() => project.value?.cwd ?? orphanCwd.value ?? null);
+
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
@@ -214,6 +216,12 @@ async function addAttachmentsFromPaths(paths: string[]) {
   }
 }
 
+function addContextAttachment(attachment: ChatAttachment) {
+  if (attachment.exists === false) return;
+  if (attachments.value.some((item) => item.path === attachment.path)) return;
+  attachments.value = [...attachments.value, attachment];
+}
+
 async function onPickAttachments() {
   try {
     const paths = await pickAttachmentFiles();
@@ -244,16 +252,18 @@ function guideTextForComposer(
   outgoingAttachments: ChatAttachment[],
 ): string {
   const text = content.trim();
-  if (outgoingAttachments.length === 0) return text;
-  const attachmentLines = outgoingAttachments.map((attachment, index) =>
-    `${index + 1}. ${attachment.name}: ${attachment.path}`
-  );
-  return [
-    text || "请参考以下本地路径继续处理。",
-    "",
-    "附加路径：",
-    ...attachmentLines,
-  ].join("\n");
+  if (text) return text;
+  if (outgoingAttachments.length === 0) return "";
+  return outgoingAttachments.map(attachmentReferenceText).join("\n");
+}
+
+function attachmentReferenceText(attachment: ChatAttachment): string {
+  const kind = attachment.mime?.startsWith("image/")
+    ? "图片引用"
+    : attachment.kind === "directory"
+      ? "目录引用"
+      : "文件引用";
+  return `[${kind}: ${attachment.name} | ${attachment.path}]`;
 }
 
 function guideMessage(todo: TaskTodo): string {
@@ -321,8 +331,8 @@ async function onSend(content: string, outgoingAttachments: ChatAttachment[] = [
 
   try {
     const guideText = guideTextForComposer(content, outgoingAttachments);
-    await ensureTaskReadyForMessage(guideText, []);
-    await createTodo(props.taskId, guideText, "normal");
+    await ensureTaskReadyForMessage(guideText, outgoingAttachments);
+    await createTodo(props.taskId, guideText, "normal", outgoingAttachments);
     attachments.value = [];
     if (pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0) {
       void scheduleGuideInsertion("user");
@@ -359,7 +369,7 @@ async function dispatchGuide(todo: TaskTodo) {
   if (todo.source !== "lilia" || dispatchingGuideIds.has(todo.id)) return;
   dispatchingGuideIds.add(todo.id);
   try {
-    await sendAgentMessage(guideMessage(todo), [], todo.id);
+    await sendAgentMessage(guideMessage(todo), todo.attachments ?? [], todo.id);
   } catch (err) {
     await updateTodo(todo.id, { guideStatus: "pending" }).catch(() => undefined);
     upsertTimelineEvent(createErrorTimelineEvent(`插入引导失败：${String(err)}`));
@@ -506,6 +516,17 @@ function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimel
     path: attachment.path,
     kind: attachment.kind,
     size: attachment.size,
+    exists: attachment.exists ?? null,
+    mime: attachment.mime ?? null,
+    directory: attachment.directory
+      ? {
+        fileCount: attachment.directory.fileCount,
+        directoryCount: attachment.directory.directoryCount,
+        totalSize: attachment.directory.totalSize,
+        truncated: attachment.directory.truncated,
+        unreadableCount: attachment.directory.unreadableCount,
+      }
+      : null,
   }));
 }
 
@@ -626,6 +647,7 @@ function resubscribeDebugTimeline() {
 resubscribeDebugTimeline();
 
 onMounted(async () => {
+  if (!props.projectId) await ensureOrphanCwd();
   unlisteners.push(
     await getCurrentWebview().onDragDropEvent(async (event) => {
       const drop = readDropPayload(event.payload);
@@ -694,6 +716,7 @@ watch(
     overlayTimelineEvents.value = [];
     attachments.value = [];
     resubscribeDebugTimeline();
+    if (!props.projectId) await ensureOrphanCwd();
     await loadAll();
   },
 );
@@ -752,6 +775,7 @@ watch(
                 <ChatComposer
                   :state="composer"
                   :attachments="attachments"
+                  :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
                   :pending-ask="nonInterruptMode ? null : pendingAskUser"
                   :tool-consent="nonInterruptMode ? null : pendingToolConsent"
@@ -760,6 +784,7 @@ watch(
                   @update:state="onComposerUpdate"
                   @remove-attachment="removeAttachment"
                   @pick-attachments="onPickAttachments"
+                  @add-context-attachment="addContextAttachment"
                   @resolve-ask-user="onResolveAskUser"
                   @resolve-tool-consent="onResolveToolConsent"
                 />

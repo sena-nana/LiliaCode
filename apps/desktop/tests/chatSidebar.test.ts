@@ -119,6 +119,31 @@ async function renderTaskDetail() {
   });
 }
 
+function placeEditableCaret(element: HTMLElement, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const textNode = element.firstChild;
+  if (textNode?.nodeType === Node.TEXT_NODE) {
+    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
+  } else {
+    range.selectNodeContents(element);
+    range.collapse(false);
+  }
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+async function setComposerText(view: ReturnType<typeof render>, text: string) {
+  const input = view.getByRole("textbox") as HTMLElement;
+  if (input instanceof HTMLTextAreaElement) {
+    await fireEvent.update(input, text);
+    return;
+  }
+  input.textContent = text;
+  placeEditableCaret(input, text.length);
+  await fireEvent.input(input);
+}
+
 function titlebarSidebarButton(container: HTMLElement): HTMLButtonElement {
   const button = container.querySelector(".titlebar__chat-sidebar-btn");
   if (!(button instanceof HTMLButtonElement)) {
@@ -470,10 +495,7 @@ describe("TaskDetail chat sidebar toggle", () => {
     expect(todoFloat.querySelectorAll(".todo-float__section")).toHaveLength(1);
     expect(view.getByText("模拟 Claude TodoWrite 并刷新 Lilia Todo")).toBeInTheDocument();
 
-    await fireEvent.update(
-      view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件"),
-      "手动补充调试项",
-    );
+    await setComposerText(view, "手动补充调试项");
     await fireEvent.click(view.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {

@@ -25,6 +25,7 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
   value: {
     invoke: mockInvoke,
     transformCallback: vi.fn(() => 1),
+    convertFileSrc: vi.fn((path: string) => `asset://${path.replace(/\\/g, "/")}`),
   },
 });
 

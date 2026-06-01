@@ -139,6 +139,18 @@ describe("ask user prompt styles", () => {
     expect(ruleTextAt(focus)).not.toContain("var(--accent)");
   });
 
+  it("富文本输入框空态 placeholder 不参与光标排版", () => {
+    const input = selectorIndex(".chat-composer__rich-input {");
+    const placeholder = selectorIndex(".chat-composer__rich-input.is-empty::before {");
+
+    expect(input).toBeGreaterThan(-1);
+    expect(placeholder).toBeGreaterThan(input);
+    expect(ruleTextAt(input)).toContain("position: relative");
+    expect(ruleTextAt(placeholder)).toContain("position: absolute");
+    expect(ruleTextAt(placeholder)).toContain("inset: 4px 6px auto");
+    expect(ruleTextAt(placeholder)).toContain("pointer-events: none");
+  });
+
   it("其他回答输入框在操作行自然填满剩余空间", () => {
     const otherInput = selectorIndex(".composer-inline__other-input {");
     const timelineActions = selectorIndex(

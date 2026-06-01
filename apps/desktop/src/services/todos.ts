@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  ChatAttachment,
   TaskTodo,
   TaskTodoGuideStatus,
   TaskTodoPriority,
@@ -34,8 +35,9 @@ export function createTodo(
   taskId: string,
   text: string,
   priority: TaskTodoPriority = "normal",
+  attachments: ChatAttachment[] = [],
 ): Promise<TaskTodo> {
-  return invoke<TaskTodo>("todo_create", { taskId, text, priority });
+  return invoke<TaskTodo>("todo_create", { taskId, text, priority, attachments });
 }
 
 export interface TodoPatch {

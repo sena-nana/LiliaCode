@@ -51,6 +51,7 @@ interface TodoRow {
   source: "lilia" | "agent";
   priority: "high" | "normal" | "low";
   guideStatus: "pending" | "queued" | "sent" | null;
+  attachments: unknown[];
   createdAt: number;
   updatedAt: number;
 }
@@ -178,7 +179,7 @@ function cloneTask(row: TaskRow): TaskRow {
 }
 
 function cloneTodo(row: TodoRow): TodoRow {
-  return { ...row };
+  return { ...row, attachments: [...row.attachments] };
 }
 
 function nextTodoId(): string {
@@ -263,6 +264,7 @@ function applyMockAgentTodos(taskId: string, todos: unknown[]): TodoRow[] {
       source: "agent",
       priority: normalizeTodoPriority((todo as AgentTodoInput)?.priority),
       guideStatus: null,
+      attachments: [],
       createdAt: matched?.createdAt ?? now,
       updatedAt: now,
     };
@@ -879,14 +881,108 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
       return paths.map((path, index) => {
         const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+        const lower = path.toLowerCase();
+        const exists = !lower.includes("missing") && !lower.includes("not-found");
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path);
+        const isFile = path.includes(".") || isImage;
+        const isBigDir = lower.includes("big-dir") || lower.includes("大型目录");
         return {
           id: `att-${index + 1}`,
           name,
           path,
-          kind: path.includes(".") ? "file" : "directory",
-          size: path.includes(".") ? 42 : null,
+          kind: exists ? (isFile ? "file" : "directory") : "unknown",
+          size: exists && isFile ? 42 : null,
+          exists,
+          mime: exists && isImage ? "image/png" : null,
+          directory: exists && !isFile
+            ? {
+              fileCount: isBigDir ? 250 : 12,
+              directoryCount: isBigDir ? 18 : 2,
+              totalSize: isBigDir ? 24 * 1024 * 1024 : 4096,
+              truncated: isBigDir,
+              unreadableCount: 0,
+            }
+            : null,
         };
       });
+    }
+
+    case "chat_search_context_attachments": {
+      const projectCwd = String(args.projectCwd ?? "D:\\PROJECT\\workspace\\Lilia");
+      const query = String(args.query ?? "").toLowerCase().replace(/\\/g, "/");
+      const limit = typeof args.limit === "number" ? args.limit : 12;
+      const pathMode = query.includes("/");
+      const allowHidden = query.includes(".");
+      const ignoredRoots = ["dist"];
+      const fixtures = [
+        { relativePath: "README.md", kind: "file" },
+        { relativePath: "apps", kind: "directory" },
+        { relativePath: "apps/desktop", kind: "directory" },
+        { relativePath: "apps/desktop/src/components/chat/ChatComposer.vue", kind: "file" },
+        { relativePath: "apps/desktop/src-tauri/src/lib.rs", kind: "file" },
+        { relativePath: "docs/design/memory.md", kind: "file" },
+        { relativePath: "screenshots/context-preview.png", kind: "file" },
+        { relativePath: "big-dir", kind: "directory" },
+        { relativePath: "big-dir/inside.md", kind: "file" },
+        { relativePath: ".env", kind: "file" },
+        { relativePath: ".github", kind: "directory" },
+        { relativePath: ".github/workflows", kind: "directory" },
+        { relativePath: "dist", kind: "directory" },
+        { relativePath: "dist/app.js", kind: "file" },
+      ];
+      const directParent = (() => {
+        if (!pathMode) return null;
+        const normalized = query.startsWith("./") ? query.slice(2) : query;
+        if (!normalized) return "";
+        if (normalized.endsWith("/")) return normalized.replace(/\/+$/, "");
+        return normalized.slice(0, normalized.lastIndexOf("/"));
+      })();
+      return fixtures
+        .filter(({ relativePath }) => {
+          const normalized = relativePath.toLowerCase();
+          const parts = normalized.split("/");
+          const name = parts.at(-1) ?? normalized;
+          if (!allowHidden && parts.some((part) => part.startsWith("."))) return false;
+          if (!pathMode && ignoredRoots.some((root) => normalized === root || normalized.startsWith(`${root}/`))) {
+            return false;
+          }
+          if (directParent !== null) {
+            const parent = parts.slice(0, -1).join("/");
+            if (parent !== directParent) return false;
+          }
+          if (!query) return true;
+          return normalized.includes(query) || name.includes(query);
+        })
+        .slice(0, limit)
+        .map(({ relativePath, kind }, index) => {
+          const path = `${projectCwd}\\${relativePath.replace(/\//g, "\\")}`;
+          const name = relativePath.split("/").at(-1) ?? relativePath;
+          const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(relativePath);
+          const isFile = kind === "file";
+          const isBigDir = relativePath === "big-dir";
+          return {
+            attachment: {
+              id: `ctx-${index + 1}`,
+              name,
+              path,
+              kind,
+              size: isFile ? 42 : null,
+              exists: true,
+              mime: isImage ? "image/png" : null,
+              directory: !isFile
+                ? {
+                  fileCount: isBigDir ? 250 : 12,
+                  directoryCount: isBigDir ? 18 : 2,
+                  totalSize: isBigDir ? 24 * 1024 * 1024 : 4096,
+                  truncated: isBigDir,
+                  unreadableCount: 0,
+                }
+                : null,
+            },
+            relativePath,
+            matchedBy: (name.toLowerCase().includes(query) ? "name" : "path"),
+          };
+        });
     }
 
     case "todo_list": {
@@ -911,6 +1007,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         source: "lilia",
         priority: normalizeTodoPriority(args.priority),
         guideStatus: "pending",
+        attachments: Array.isArray(args.attachments) ? args.attachments : [],
         createdAt: now,
         updatedAt: now,
       };

@@ -15,6 +15,7 @@ import type {
   CCSwitchStatus,
   ChatBackendKind,
   ChatAttachment,
+  ChatContextSearchResult,
   ChatComposerState,
   AgentTimelineEvent,
   AgentAskUserRequestEvent,
@@ -35,6 +36,7 @@ export type {
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
+  ChatContextSearchResult,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -85,6 +87,18 @@ export function interruptTurn(taskId: string): Promise<void> {
 
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
   return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
+}
+
+export function searchContextAttachments(
+  projectCwd: string,
+  query: string,
+  limit = 12,
+): Promise<ChatContextSearchResult[]> {
+  return invoke<ChatContextSearchResult[]>("chat_search_context_attachments", {
+    projectCwd,
+    query,
+    limit,
+  });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {

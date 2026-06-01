@@ -32,9 +32,40 @@ async function renderTaskDetail() {
   });
 }
 
+function placeEditableCaret(element: HTMLElement, offset: number) {
+  const selection = window.getSelection();
+  const range = document.createRange();
+  const textNode = element.firstChild;
+  if (textNode?.nodeType === Node.TEXT_NODE) {
+    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
+  } else {
+    range.selectNodeContents(element);
+    range.collapse(false);
+  }
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+async function setComposerText(view: ReturnType<typeof render>, text: string) {
+  const input = view.getByRole("textbox") as HTMLElement;
+  if (input instanceof HTMLTextAreaElement) {
+    await fireEvent.update(input, text);
+    return input;
+  }
+  const hasInlineReference = input.querySelector(".chat-file-reference") !== null;
+  if (hasInlineReference) {
+    input.append(document.createTextNode(` ${text}`));
+    placeEditableCaret(input, input.textContent?.length ?? text.length);
+  } else {
+    input.textContent = text;
+    placeEditableCaret(input, text.length);
+  }
+  await fireEvent.input(input);
+  return input;
+}
+
 async function sendText(view: ReturnType<typeof render>, text: string) {
-  const input = await view.findByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件");
-  await fireEvent.update(input, text);
+  await setComposerText(view, text);
   await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
 }
 
@@ -125,10 +156,44 @@ describe("chat scheduler", () => {
         .toBe(true);
     });
     const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
-    expect(send?.[1]).toMatchObject({ attachments: [] });
+    expect(send?.[1]).toMatchObject({
+      attachments: [expect.objectContaining({
+        path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+      })],
+    });
     expect(send?.[1].content).toContain("[Lilia 引导]");
     expect(send?.[1].content).toContain("参考附件总结项目");
-    expect(send?.[1].content).toContain("D:\\PROJECT\\workspace\\Lilia\\README.md");
+    expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
+  });
+
+  it("@ 搜索选中的文件作为路径上下文进入 Lilia 引导", async () => {
+    const view = await renderTaskDetail();
+    const input = await setComposerText(view, "总结这个文件 @read");
+
+    await waitFor(() => {
+      expect(view.getAllByText("README.md").length).toBeGreaterThan(0);
+    });
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => {
+      expect(view.getByRole("textbox")).toHaveTextContent("README.md");
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      attachments: [expect.objectContaining({
+        path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+      })],
+    });
+    expect(send?.[1].content).toContain("[Lilia 引导]");
+    expect(send?.[1].content).toContain("总结这个文件");
+    expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
   });
 
   it("会把 Agent 运行中追加的用户消息先放入 Lilia 引导，并在 turn 结束后插入", async () => {

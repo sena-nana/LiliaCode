@@ -129,11 +129,18 @@ struct SchemaMigration {
     apply: fn(&Connection) -> Result<(), String>,
 }
 
-const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
-    version: 4,
-    name: "todo_guides",
-    apply: migrate_todo_guides,
-}];
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        version: 4,
+        name: "todo_guides",
+        apply: migrate_todo_guides,
+    },
+    SchemaMigration {
+        version: 5,
+        name: "todo_attachments",
+        apply: migrate_todo_attachments,
+    },
+];
 
 /// baseline=3：`agent_timeline_events` 的 `order` 列拆成
 /// `(turn_seq, intra_turn_order)`，排序按 turn 隔离。跨过这个版本会触发
@@ -187,6 +194,16 @@ fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 todo_guides 失败：{e}"))
+}
+
+fn migrate_todo_attachments(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_todos
+          ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 todo_attachments 失败：{e}"))
 }
 
 fn ensure_schema_with_migrations(
@@ -404,6 +421,34 @@ mod tests {
                 Some("pending".to_string()),
             ),
         );
+    }
+
+    #[test]
+    fn todo_attachments_migration_defaults_existing_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_current_schema(&conn).unwrap();
+        conn.execute(
+            r#"INSERT INTO task_todos
+               (id, task_id, text, done, "order", source, created_at, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            params!["todo-attachments", "task-1", "旧 Todo", 0, 0, "user", 1, 1],
+        )
+        .unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+        ))
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        let attachments_json: String = conn
+            .query_row(
+                "SELECT attachments_json FROM task_todos WHERE id = 'todo-attachments'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attachments_json, "[]");
     }
 
     #[test]
