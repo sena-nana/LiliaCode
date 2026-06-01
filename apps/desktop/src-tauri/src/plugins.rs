@@ -554,6 +554,8 @@ pub struct ClaudeMcpServerInput {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub remove_env_keys: Vec<String>,
 }
 
 pub fn claude_mcp_config_path() -> PathBuf {
@@ -594,6 +596,19 @@ fn normalize_env(env: BTreeMap<String, String>) -> BTreeMap<String, String> {
             }
         })
         .collect()
+}
+
+fn apply_claude_mcp_env_update(
+    current: &mut BTreeMap<String, String>,
+    env: Option<BTreeMap<String, String>>,
+    remove_env_keys: Vec<String>,
+) {
+    for key in remove_env_keys {
+        current.remove(key.trim());
+    }
+    if let Some(env) = env {
+        current.extend(normalize_env(env));
+    }
 }
 
 fn sort_claude_mcp_entries(entries: &mut [ClaudeMcpConfigEntry]) {
@@ -747,9 +762,7 @@ pub fn update_claude_mcp_server(
     server.name = next_name;
     server.command = command;
     server.args = normalize_args(input.args);
-    if let Some(env) = input.env {
-        server.env = normalize_env(env);
-    }
+    apply_claude_mcp_env_update(&mut server.env, input.env, input.remove_env_keys);
     let public = public_claude_mcp_server(server, false);
     sort_claude_mcp_entries(&mut config.servers);
     write_claude_mcp_config(&config)?;
@@ -789,6 +802,12 @@ pub fn runtime_claude_mcp_servers() -> (BTreeMap<String, ClaudeRuntimeMcpServer>
         Ok(config) => config,
         Err(e) => return (BTreeMap::new(), vec![e]),
     };
+    runtime_claude_mcp_servers_from_config(config)
+}
+
+fn runtime_claude_mcp_servers_from_config(
+    config: ClaudeMcpConfigFile,
+) -> (BTreeMap<String, ClaudeRuntimeMcpServer>, Vec<String>) {
     let (entries, warnings) = validate_claude_mcp_entries(config.servers);
     let mut out = BTreeMap::new();
     for entry in entries {
@@ -1157,6 +1176,63 @@ mod tests {
             runtime.env.and_then(|env| env.get("TOKEN").cloned()),
             Some("secret".to_string())
         );
+    }
+
+    #[test]
+    fn claude_mcp_env_patch_preserves_removes_and_overwrites_keys() {
+        let mut env = BTreeMap::from([
+            ("KEEP".to_string(), "old".to_string()),
+            ("REMOVE".to_string(), "gone".to_string()),
+            ("TOKEN".to_string(), "old-token".to_string()),
+        ]);
+
+        apply_claude_mcp_env_update(
+            &mut env,
+            Some(BTreeMap::from([
+                ("TOKEN".to_string(), "new-token".to_string()),
+                ("EMPTY".to_string(), "".to_string()),
+                (" ADD ".to_string(), "fresh".to_string()),
+            ])),
+            vec!["REMOVE".to_string(), " ".to_string()],
+        );
+
+        assert_eq!(env.get("KEEP").map(String::as_str), Some("old"));
+        assert_eq!(env.get("TOKEN").map(String::as_str), Some("new-token"));
+        assert_eq!(env.get("ADD").map(String::as_str), Some("fresh"));
+        assert!(!env.contains_key("REMOVE"));
+        assert!(!env.contains_key("EMPTY"));
+    }
+
+    #[test]
+    fn claude_mcp_runtime_returns_only_enabled_servers_with_env() {
+        let config = ClaudeMcpConfigFile {
+            servers: vec![
+                ClaudeMcpConfigEntry {
+                    name: "enabled".to_string(),
+                    command: "node".to_string(),
+                    args: vec!["server.js".to_string()],
+                    env: BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+                    disabled: false,
+                },
+                ClaudeMcpConfigEntry {
+                    name: "disabled".to_string(),
+                    command: "node".to_string(),
+                    args: vec!["disabled.js".to_string()],
+                    env: BTreeMap::new(),
+                    disabled: true,
+                },
+            ],
+        };
+
+        let (servers, warnings) = runtime_claude_mcp_servers_from_config(config);
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert!(servers.contains_key("enabled"));
+        assert!(!servers.contains_key("disabled"));
+        let enabled = servers.get("enabled").unwrap();
+        assert_eq!(enabled.r#type, "stdio");
+        assert_eq!(enabled.command, "node");
+        assert_eq!(enabled.args, vec!["server.js"]);
+        assert_eq!(enabled.env.get("TOKEN").map(String::as_str), Some("secret"));
     }
 
     #[test]

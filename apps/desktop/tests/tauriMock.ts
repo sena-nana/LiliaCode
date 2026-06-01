@@ -806,15 +806,25 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         command?: string;
         args?: string[];
         env?: Record<string, string>;
+        removeEnvKeys?: string[];
       };
       let updated = claudeMcpServers.find((server) => server.name === name);
       if (!updated) return undefined;
+      const removed = new Set(
+        Array.isArray(input.removeEnvKeys) ? input.removeEnvKeys.map(String) : [],
+      );
+      const envKeys = input.env
+        ? [
+            ...updated.envKeys.filter((key) => !removed.has(key) && !(key in input.env!)),
+            ...Object.keys(input.env),
+          ]
+        : updated.envKeys.filter((key) => !removed.has(key));
       updated = {
         ...updated,
         name: String(input.name ?? updated.name),
         command: String(input.command ?? updated.command),
         args: Array.isArray(input.args) ? input.args.map(String) : updated.args,
-        envKeys: input.env ? Object.keys(input.env) : updated.envKeys,
+        envKeys,
       };
       claudeMcpServers = claudeMcpServers.map((server) =>
         server.name === name ? updated : server

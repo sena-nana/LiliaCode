@@ -520,6 +520,15 @@ export interface ClaudeMcpServer {
   enabled: boolean;
 }
 
+export interface ClaudeMcpServerInput {
+  name: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  /** Update-only: keys removed from the existing server env. */
+  removeEnvKeys?: string[];
+}
+
 export interface CodexMcpServer {
   name: string;
   command: string;
