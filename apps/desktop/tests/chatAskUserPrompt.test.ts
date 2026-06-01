@@ -10,10 +10,13 @@ import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
 import { setAgentInteractionSettings } from "../src/services/chat";
+import { createTodo } from "../src/services/todos";
 import {
   emitTauriEvent,
   emitMockTimelineEvent,
   mockInvoke,
+  replaceMockTimelineEvents,
+  setMockChatRunning,
 } from "./tauriMock";
 
 const askUserSpec: AskUserSpec = {
@@ -90,7 +93,7 @@ async function renderTaskDetail(taskId = "t-002") {
     )).toBe(true);
   });
   await Promise.resolve();
-  return view;
+  return Object.assign(view, { router });
 }
 
 async function enableNonInterruptMode() {
@@ -641,5 +644,106 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "完成" }));
 
     await expectAskUserResponse("t-002");
+  });
+
+  it("快速连续发送的本地 pending 消息不会互相覆盖", async () => {
+    const view = await renderTaskDetail();
+    setMockChatRunning("t-002", true);
+    emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
+
+    await createTodo("t-002", "第一条补充");
+    await createTodo("t-002", "第二条补充");
+    await fireEvent.click(await view.findByRole("button", { name: /立即插入引导：第一条补充/ }));
+    await fireEvent.click(await view.findByRole("button", { name: /立即插入引导：第二条补充/ }));
+
+    await waitFor(() => {
+      expect(view.getByText("第一条补充")).toBeInTheDocument();
+      expect(view.getByText("第二条补充")).toBeInTheDocument();
+      expect(view.container.querySelectorAll(".chat-bubble.is-queued")).toHaveLength(2);
+    });
+  });
+
+  it("后端真实消息到达后不残留同内容 queued 乐观消息", async () => {
+    const view = await renderTaskDetail();
+    setMockChatRunning("t-002", true);
+    emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
+
+    const sentContent = [
+      "[Lilia 引导]",
+      "优先级：中",
+      "",
+      "需要后端确认的消息",
+    ].join("\n");
+    const input = view.getByPlaceholderText("可向 agent 询问任何事，输入 @ 使用插件或提及文件");
+    await fireEvent.update(input, "需要后端确认的消息");
+    await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
+
+    await waitFor(() => {
+      expect(view.getByText("需要后端确认的消息")).toBeInTheDocument();
+    });
+
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "u-confirmed",
+        kind: "message",
+        status: "success",
+        title: "用户输入",
+        summary: sentContent,
+        payload: {
+          role: "user",
+          content: sentContent,
+          attachments: [],
+          queued: false,
+        },
+        createdAt: 11_000,
+        updatedAt: 11_000,
+      },
+    ]);
+    await view.router.push("/projects/lilia/tasks/t-001");
+    await view.rerender({ projectId: "lilia", taskId: "t-001" });
+    await view.router.push("/projects/lilia/tasks/t-002");
+    await view.rerender({ projectId: "lilia", taskId: "t-002" });
+
+    await waitFor(() => {
+      expect(view.container.querySelectorAll(".chat-bubble__content"))
+        .toHaveLength(1);
+    });
+    expect(view.container.querySelector(".chat-bubble.is-queued")).toBeNull();
+    expect(view.getByText("需要后端确认的消息")).toBeInTheDocument();
+  });
+
+  it("重新加载历史时间线时不保留后端已删除的旧本地事件", async () => {
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "stale-command",
+        kind: "command",
+        status: "success",
+        title: "stale command",
+        summary: "旧事件",
+        payload: { command: "stale command" },
+      },
+    ]);
+    const view = await renderTaskDetail();
+    await view.findByText("旧事件");
+
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "fresh-command",
+        kind: "command",
+        status: "success",
+        title: "fresh command",
+        summary: "新事件",
+        payload: { command: "fresh command" },
+      },
+    ]);
+    await view.router.push("/projects/lilia/tasks/t-001");
+    await view.rerender({ projectId: "lilia", taskId: "t-001" });
+    await view.router.push("/projects/lilia/tasks/t-002");
+    await view.rerender({ projectId: "lilia", taskId: "t-002" });
+
+    await waitFor(() => {
+      expect(view.getByText("新事件")).toBeInTheDocument();
+    });
+    expect(view.queryByText("旧事件")).toBeNull();
   });
 });

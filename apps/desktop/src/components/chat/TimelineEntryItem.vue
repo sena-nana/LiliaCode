@@ -2,17 +2,19 @@
 import { computed } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
-import {
-  pendingActionForTimelineEvent,
-  timelineEventRequiresAgentAction,
-  type PendingAgentAction,
-  type PendingAgentActionResolution,
+import type {
+  PendingAgentAction,
+  PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import TimelinePlanCard from "./TimelinePlanCard.vue";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
+import {
+  hasTimelinePendingActionState,
+  timelinePendingActionState,
+} from "./timelinePendingActions";
 import {
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
@@ -54,8 +56,7 @@ function isTimelineMessage(event: AgentTimelineEvent): boolean {
 
 function canToggle(event: AgentTimelineEvent): boolean {
   return timelineCanExpand(event, displayContext.value) ||
-    !!pendingAction(event) ||
-    expiredPendingAction(event);
+    hasTimelinePendingActionState(pendingState(event));
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
@@ -103,13 +104,19 @@ function kindClass(prefix: string, kind: string): string {
 }
 
 function pendingAction(event: AgentTimelineEvent): PendingAgentAction | null {
-  return pendingActionForTimelineEvent(event, pendingActions.value);
+  return pendingState(event).action;
 }
 
 function expiredPendingAction(event: AgentTimelineEvent): boolean {
-  if (props.showExpiredPendingActions !== true) return false;
-  if (pendingAction(event)) return false;
-  return timelineEventRequiresAgentAction(event);
+  return pendingState(event).expired;
+}
+
+function pendingState(event: AgentTimelineEvent) {
+  return timelinePendingActionState(
+    event,
+    pendingActions.value,
+    props.showExpiredPendingActions,
+  );
 }
 
 function groupScrollAnchorIds(entry: TimelineGroupEntry): string {

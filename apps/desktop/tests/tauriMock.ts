@@ -331,6 +331,10 @@ export function emitTauriEvent(event: string, payload: unknown) {
   }
 }
 
+export function setMockChatRunning(taskId: string, running: boolean) {
+  chatRunning[taskId] = running;
+}
+
 export function emitWebviewDragDropEvent(payload: unknown) {
   for (const handler of webviewDragDropHandlers) {
     handler({ payload });
@@ -489,6 +493,27 @@ export function emitMockTimelineEvent(
   ];
   emitTauriEvent("agent:timeline", event);
   return event;
+}
+
+export function replaceMockTimelineEvents(
+  taskId: string,
+  events: Partial<AgentTimelineEvent>[],
+) {
+  timelineEvents[taskId] = events.map((patch, index) => ({
+    id: patch.id ?? `tl-${taskId}-${index}`,
+    taskId,
+    turnId: patch.turnId ?? "turn-live",
+    backend: patch.backend ?? "claude",
+    kind: patch.kind ?? "command",
+    status: patch.status ?? "success",
+    title: patch.title ?? "历史事件",
+    summary: patch.summary ?? "",
+    payload: patch.payload ?? {},
+    createdAt: patch.createdAt ?? 10_000 + index,
+    updatedAt: patch.updatedAt ?? patch.createdAt ?? 10_000 + index,
+    turnSeq: patch.turnSeq ?? index,
+    intraTurnOrder: patch.intraTurnOrder ?? 0,
+  }));
 }
 
 /**

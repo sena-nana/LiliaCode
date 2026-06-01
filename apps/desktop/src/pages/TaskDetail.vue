@@ -134,6 +134,7 @@ const pendingPlanApproval = computed(() => {
 
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
+let optimisticMessageSeq = 0;
 
 async function ensureOrphanCwd(): Promise<string> {
   if (orphanCwd.value) return orphanCwd.value;
@@ -246,7 +247,7 @@ async function sendAgentMessage(
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
 
   const optimistic = createMessageTimelineEvent({
-    id: `pending-${Date.now()}`,
+    id: nextOptimisticMessageId(),
     taskId: props.taskId,
     content,
     attachments: outgoingAttachments,
@@ -389,6 +390,11 @@ function removeTimelineEvent(eventId: string) {
   );
 }
 
+function nextOptimisticMessageId(): string {
+  optimisticMessageSeq += 1;
+  return `pending-${Date.now()}-${optimisticMessageSeq}`;
+}
+
 function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimelinePayload[] {
   return attachments.map((attachment) => ({
     id: attachment.id,
@@ -447,6 +453,57 @@ function mergeTimelineEvents(
     a.createdAt - b.createdAt ||
     a.id.localeCompare(b.id)
   );
+}
+
+function mergeLoadedTimelineEvents(
+  loaded: AgentTimelineEvent[],
+  current: AgentTimelineEvent[],
+): AgentTimelineEvent[] {
+  const loadedKeys = new Set(
+    loaded
+      .filter(isUserMessageEvent)
+      .map(userMessageIdentityKey),
+  );
+  const optimisticEvents = current.filter((event) =>
+    isQueuedUserMessageEvent(event) && !loadedKeys.has(userMessageIdentityKey(event))
+  );
+  return mergeTimelineEvents(loaded, optimisticEvents);
+}
+
+function isUserMessageEvent(event: AgentTimelineEvent): boolean {
+  if (event.kind !== "message") return false;
+  const payload = readTimelineEventPayloadRecord(event);
+  return payload.role === "user" || payload.role === "system";
+}
+
+function isQueuedUserMessageEvent(event: AgentTimelineEvent): boolean {
+  return isUserMessageEvent(event) &&
+    readTimelineEventPayloadRecord(event).queued === true;
+}
+
+function userMessageIdentityKey(event: AgentTimelineEvent): string {
+  const payload = readTimelineEventPayloadRecord(event);
+  const content = typeof payload.content === "string" ? payload.content : event.summary ?? "";
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments
+      .map((attachment) => {
+        const row = readPayloadRecord(attachment);
+        return typeof row.path === "string" ? row.path : "";
+      })
+      .filter(Boolean)
+      .join("\u001f")
+    : "";
+  return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}`;
+}
+
+function readTimelineEventPayloadRecord(event: AgentTimelineEvent): Record<string, unknown> {
+  return readPayloadRecord(event.payload);
+}
+
+function readPayloadRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function createErrorTimelineEvent(message: string): AgentTimelineEvent {
@@ -509,7 +566,10 @@ async function loadAll() {
   try {
     const [events, comp] = await Promise.all([loadTimelineEvents(taskId), nextComposerLoad]);
     if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-    persistedTimelineEvents.value = mergeTimelineEvents(events, persistedTimelineEvents.value);
+    persistedTimelineEvents.value = mergeLoadedTimelineEvents(
+      events,
+      persistedTimelineEvents.value,
+    );
     if (!comp) return;
   } finally {
     if (composerLoad === nextComposerLoad) composerLoad = null;

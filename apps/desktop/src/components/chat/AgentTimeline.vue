@@ -10,10 +10,6 @@ import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import {
-  pendingActionForTimelineEvent,
-  timelineEventRequiresAgentAction,
-} from "../../composables/usePendingAgentActions";
 import ChatBubble from "./ChatBubble.vue";
 import TimelineEntryItem from "./TimelineEntryItem.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
@@ -35,6 +31,10 @@ import {
   toggleTimelineExpandedId,
   type TimelineDisplayContext,
 } from "./timelineDisplay";
+import {
+  hasTimelinePendingActionState,
+  timelinePendingActionState,
+} from "./timelinePendingActions";
 
 type StreamableMessage = ChatMessage & { streaming?: boolean; queued?: boolean };
 
@@ -159,6 +159,14 @@ const eventPreviewCache = computed(() => {
   return cache;
 });
 
+const userMessageCache = computed(() => {
+  const cache = new Map<string, StreamableMessage>();
+  for (const event of visibleEvents.value) {
+    if (isTimelineUserMessage(event)) cache.set(event.id, messageFromEvent(event));
+  }
+  return cache;
+});
+
 const showThinkingIndicator = computed(() => {
   if (!props.isThinking) return false;
   return !visibleEvents.value.some((event) =>
@@ -215,8 +223,7 @@ watch(
 );
 
 function expanded(event: AgentTimelineEvent): boolean {
-  if (pendingActionForTimelineEvent(event, pendingActions.value)) return true;
-  if (expiredPendingAction(event)) return true;
+  if (hasTimelinePendingActionState(pendingState(event))) return true;
   return isTimelineExpanded(event, toggledIds.value, displayContext.value);
 }
 
@@ -342,7 +349,7 @@ function previewText(event: AgentTimelineEvent): string {
 
 function groupExpanded(entry: TimelineGroupEntry): boolean {
   if (entry.events.some((event) =>
-    pendingActionForTimelineEvent(event, pendingActions.value) || expiredPendingAction(event)
+    hasTimelinePendingActionState(pendingState(event))
   )) {
     return true;
   }
@@ -370,10 +377,16 @@ function isTimelineUserMessage(event: AgentTimelineEvent): boolean {
 
 const pendingActions = computed(() => props.pendingActions ?? []);
 
-function expiredPendingAction(event: AgentTimelineEvent): boolean {
-  if (props.showExpiredPendingActions !== true) return false;
-  if (pendingActionForTimelineEvent(event, pendingActions.value)) return false;
-  return timelineEventRequiresAgentAction(event);
+function pendingState(event: AgentTimelineEvent) {
+  return timelinePendingActionState(
+    event,
+    pendingActions.value,
+    props.showExpiredPendingActions,
+  );
+}
+
+function userMessage(event: AgentTimelineEvent): StreamableMessage {
+  return userMessageCache.value.get(event.id) ?? messageFromEvent(event);
 }
 
 function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
@@ -423,11 +436,11 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           class="agent-timeline__message-row"
           :data-scroll-anchor-id="entry.event.id"
           :class="[
-            `agent-timeline__message-row--${messageFromEvent(entry.event).role}`,
-            { 'is-queued': messageFromEvent(entry.event).queued },
+            `agent-timeline__message-row--${userMessage(entry.event).role}`,
+            { 'is-queued': userMessage(entry.event).queued },
           ]"
         >
-          <ChatBubble :message="messageFromEvent(entry.event)" />
+          <ChatBubble :message="userMessage(entry.event)" />
         </li>
 
         <TimelineEntryItem

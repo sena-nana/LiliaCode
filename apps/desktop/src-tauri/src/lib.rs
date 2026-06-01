@@ -787,6 +787,71 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn finish_running_turn_handles_clears_handles_and_consumes_matching_marks() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-stop".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+        store.interrupted_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-stop".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+
+        let finished = finish_running_turn_handles(&store, "task-1", "turn-stop", BACKEND_CLAUDE);
+
+        assert!(finished.interrupted);
+        assert!(!finished.reset);
+        assert!(store.running_turns.lock().unwrap().get("task-1").is_none());
+        assert!(store.interrupted_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn reset_finish_does_not_advance_pending_queue() {
+        let store = ChatStore::default();
+        store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .insert("task-1".to_string(), true);
+        store.reset_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-reset".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(pending_turn("queued"));
+
+        let finished = finish_running_turn_handles(&store, "task-1", "turn-reset", BACKEND_CLAUDE);
+        assert!(finished.reset);
+        assert!(take_next_pending_turn(&store, "task-1", !finished.reset).is_none());
+
+        assert_eq!(
+            store
+                .pending_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|queue| queue.len()),
+            Some(1)
+        );
+        assert!(store.running_tasks.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
     fn prepare_running_turn_stop_without_running_turn_leaves_queue_intact() {
         let store = ChatStore::default();
         store
@@ -1009,10 +1074,15 @@ struct PreparedTurnStop {
     guide_ids: Vec<String>,
 }
 
-fn clear_running_handles(store: &ChatStore, task_id: &str) {
+struct FinishedRunningTurn {
+    interrupted: bool,
+    reset: bool,
+}
+
+fn clear_running_handles(store: &ChatStore, task_id: &str) -> Option<RunningTurn> {
     store.running_stdins.lock().unwrap().remove(task_id);
     store.running_children.lock().unwrap().remove(task_id);
-    store.running_turns.lock().unwrap().remove(task_id);
+    store.running_turns.lock().unwrap().remove(task_id)
 }
 
 fn prepare_running_turn_stop(
@@ -1080,6 +1150,17 @@ fn take_turn_stop_marks(
         .remove(task_id)
         .is_some_and(|turn| turn.turn_id == turn_id && turn.backend == backend);
     (interrupted, reset)
+}
+
+fn finish_running_turn_handles(
+    store: &ChatStore,
+    task_id: &str,
+    turn_id: &str,
+    backend: &str,
+) -> FinishedRunningTurn {
+    clear_running_handles(store, task_id);
+    let (interrupted, reset) = take_turn_stop_marks(store, task_id, turn_id, backend);
+    FinishedRunningTurn { interrupted, reset }
 }
 
 fn stop_running_turn(
@@ -1687,10 +1768,9 @@ fn spawn_agent_turn(
         // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
         // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
         drop(stdin_handle);
-        let (interrupted, reset) = {
+        let finished = {
             let store = app_handle.state::<ChatStore>();
-            clear_running_handles(&store, &task_id_for_thread);
-            take_turn_stop_marks(
+            finish_running_turn_handles(
                 &store,
                 &task_id_for_thread,
                 &turn_id_for_thread,
@@ -1699,7 +1779,7 @@ fn spawn_agent_turn(
         };
 
         // 流结束前确保 pending 的最后一帧落地；reset 后则丢弃旧 turn 缓冲，避免回写已清空的 timeline。
-        if reset {
+        if finished.reset {
             timeline_throttle.pending.clear();
         } else {
             timeline_throttle.flush_all(&app_handle);
@@ -1718,7 +1798,7 @@ fn spawn_agent_turn(
             })
             .unwrap_or_default();
 
-        if interrupted && !reset {
+        if finished.interrupted && !finished.reset {
             persist_and_emit_interrupted_timeline_event(
                 &app_handle,
                 &task_id_for_thread,
@@ -1728,7 +1808,9 @@ fn spawn_agent_turn(
         }
 
         let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
-        if !reset && should_emit_runner_exit_error(interrupted, nonzero, &stderr_text) {
+        if !finished.reset
+            && should_emit_runner_exit_error(finished.interrupted, nonzero, &stderr_text)
+        {
             persist_and_emit_error_timeline_event(
                 &app_handle,
                 &task_id_for_thread,
@@ -1743,7 +1825,7 @@ fn spawn_agent_turn(
             task_id_for_thread,
             backend_for_thread,
             last_session_id,
-            !interrupted && !reset,
+            !finished.interrupted && !finished.reset,
         );
     });
 }
