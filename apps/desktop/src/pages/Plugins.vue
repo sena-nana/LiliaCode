@@ -41,6 +41,7 @@ const scope = ref<PluginScope>("user");
 interface EnvDraftRow {
   key: string;
   value: string;
+  originalKey: string | null;
 }
 
 const projects = computed(() => listProjects());
@@ -204,7 +205,6 @@ const mcpName = ref("");
 const mcpCommand = ref("");
 const mcpArgsText = ref("");
 const mcpEnvRows = ref<EnvDraftRow[]>([]);
-const mcpEnvDirty = ref(false);
 const mcpSaving = ref(false);
 const mcpError = ref<string | null>(null);
 
@@ -218,9 +218,8 @@ function resetMcpEditor(server: ClaudeMcpServer | null) {
   mcpCommand.value = server?.command ?? "";
   mcpArgsText.value = server?.args.join("\n") ?? "";
   mcpEnvRows.value = server?.envKeys.length
-    ? server.envKeys.map((key) => ({ key, value: "" }))
-    : [{ key: "", value: "" }];
-  mcpEnvDirty.value = false;
+    ? server.envKeys.map((key) => ({ key, value: "", originalKey: key }))
+    : [{ key: "", value: "", originalKey: null }];
   mcpError.value = null;
 }
 
@@ -235,24 +234,31 @@ function openEditMcp(server: ClaudeMcpServer) {
 }
 
 function addMcpEnvRow() {
-  mcpEnvDirty.value = true;
-  mcpEnvRows.value.push({ key: "", value: "" });
+  mcpEnvRows.value.push({ key: "", value: "", originalKey: null });
 }
 
 function removeMcpEnvRow(index: number) {
-  mcpEnvDirty.value = true;
   mcpEnvRows.value.splice(index, 1);
   if (mcpEnvRows.value.length === 0) {
-    mcpEnvRows.value.push({ key: "", value: "" });
+    mcpEnvRows.value.push({ key: "", value: "", originalKey: null });
   }
 }
 
-function buildMcpEnvPayload() {
-  return Object.fromEntries(
+function buildMcpEnvPatch() {
+  const env = Object.fromEntries(
     mcpEnvRows.value
       .map((row) => [row.key.trim(), row.value] as const)
       .filter(([key, value]) => key && value),
   );
+  const preservedOriginalKeys = new Set(
+    mcpEnvRows.value.flatMap((row) =>
+      row.originalKey && row.key.trim() === row.originalKey ? [row.originalKey] : [],
+    ),
+  );
+  const removeEnvKeys = editingMcp.value
+    ? editingMcp.value.envKeys.filter((key) => !preservedOriginalKeys.has(key))
+    : [];
+  return { env, removeEnvKeys };
 }
 
 async function saveMcpServer() {
@@ -260,7 +266,7 @@ async function saveMcpServer() {
   mcpError.value = null;
   mcpSaving.value = true;
   try {
-    const env = buildMcpEnvPayload();
+    const { env, removeEnvKeys } = buildMcpEnvPatch();
     const input = {
       name: mcpName.value,
       command: mcpCommand.value,
@@ -268,7 +274,8 @@ async function saveMcpServer() {
         .split(/\r?\n/)
         .map((arg) => arg.trim())
         .filter(Boolean),
-      ...(mcpEnvDirty.value || Object.keys(env).length > 0 ? { env } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
+      ...(removeEnvKeys.length > 0 ? { removeEnvKeys } : {}),
     };
     if (editingMcp.value) {
       await updateClaudeMcpServer(editingMcp.value.name, input);
@@ -680,16 +687,19 @@ async function openCodex() {
                     type="text"
                     class="text-input"
                     placeholder="KEY"
-                    @input="mcpEnvDirty = true"
                   />
                   <input
                     v-model="row.value"
                     type="password"
                     class="text-input"
                     :placeholder="editingMcp?.envKeys.includes(row.key) ? '留空保留现有值' : 'value'"
-                    @input="mcpEnvDirty = true"
                   />
-                  <button type="button" class="ghost" @click="removeMcpEnvRow(index)">
+                  <button
+                    type="button"
+                    class="ghost"
+                    aria-label="删除 Env"
+                    @click="removeMcpEnvRow(index)"
+                  >
                     <Trash2 :size="12" aria-hidden="true" />
                   </button>
                 </div>

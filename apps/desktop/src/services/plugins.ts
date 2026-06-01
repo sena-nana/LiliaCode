@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ClaudeMcpServer,
+  ClaudeMcpServerInput,
   ClaudePlugin,
   ClaudeSkill,
   CodexMcpServer,
@@ -15,19 +16,13 @@ import type {
 
 export type {
   ClaudeMcpServer,
+  ClaudeMcpServerInput,
   ClaudePlugin,
   ClaudeSkill,
   CodexMcpServer,
   PluginScope,
   PluginsOverview,
 };
-
-export interface ClaudeMcpServerInput {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-}
 
 export function pluginsOverview(projectCwd?: string | null): Promise<PluginsOverview> {
   return invoke<PluginsOverview>("plugins_overview", {
