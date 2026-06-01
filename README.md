@@ -83,8 +83,8 @@ Milestone（季度 / 月）       ← Lilia 让你能讲清楚工程走到了哪
 
 ### 工程化兜底：双 Backend + 本地优先
 
-- **双 Backend + 灵活路由**：同时支持 [`@anthropic-ai/claude-agent-sdk`](apps/desktop/package.json) 与 `@openai/codex-sdk`；每个 Backend 独立选择 CC-Switch 本地代理（`127.0.0.1:15721` 自动探测）或直连官方 API；composer 行可切 Backend / Model / Permission / Branch。
-- **本地优先 · 自建对话存储**：所有结构化数据落在 `~/.lilia/`（支持 `LILIA_HOME` 与 `.redirect` 重定向）；SQLite + r2d2 + WAL + 迁移框架；对话主存 SQLite、JSONL 作 Claude Code 兼容镜像。实现见 [apps/desktop/src-tauri/src/store.rs](apps/desktop/src-tauri/src/store.rs)。
+- **双 Backend + 灵活路由**：同时支持 [`@anthropic-ai/claude-agent-sdk`](apps/desktop/package.json) 与 `@openai/codex-sdk`；每个 Backend 独立选择 CC-Switch 本地代理（`127.0.0.1:15721` 自动探测）或直连官方 API；composer 行可切 Backend / Model / Permission。
+- **本地优先 · 自建对话存储**：所有结构化数据落在 `~/.lilia/`（支持 `LILIA_HOME` 与 `.redirect` 重定向）；SQLite + r2d2 + WAL + 迁移框架；对话过程以时间线事件持久化。实现见 [apps/desktop/src-tauri/src/store.rs](apps/desktop/src-tauri/src/store.rs)。
 
 ---
 

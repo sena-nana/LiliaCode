@@ -213,12 +213,34 @@ export function onToolConsentRequest(
   );
 }
 
+function stringField(row: Record<string, unknown>, camel: string, snake: string): string {
+  const value = row[camel] ?? row[snake];
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeAskUserRequest(value: AgentAskUserRequest): AgentAskUserRequest | null {
+  const row = value as unknown as Record<string, unknown>;
+  const spec = row.spec;
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  const taskId = stringField(row, "taskId", "task_id");
+  const requestId = stringField(row, "requestId", "request_id");
+  if (!taskId || !requestId) return null;
+  return {
+    taskId,
+    turnId: stringField(row, "turnId", "turn_id"),
+    backend: stringField(row, "backend", "backend") as AgentAskUserRequest["backend"],
+    requestId,
+    spec: spec as AgentAskUserRequest["spec"],
+  };
+}
+
 export function onAskUserRequest(
   handler: (e: AgentAskUserRequest) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentAskUserRequest>("chat:ask-user-request", (event) =>
-    handler(event.payload),
-  );
+  return listen<AgentAskUserRequest>("chat:ask-user-request", (event) => {
+    const req = normalizeAskUserRequest(event.payload);
+    if (req) handler(req);
+  });
 }
 
 /** 把用户对一次 canUseTool 的决策写回 runner，让被卡住的工具继续 / 终止。 */

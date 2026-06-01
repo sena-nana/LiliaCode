@@ -13,6 +13,7 @@ import {
   emitWebviewDragDropEvent,
   mockInvoke,
   seedMockChatMessages,
+  setMockComposerStateHandler,
 } from "./tauriMock";
 import { createTodo, updateTodo } from "../src/services/todos";
 
@@ -129,6 +130,58 @@ describe("chat scheduler", () => {
     expect(send?.[1].content).toContain("[Lilia 引导]");
     expect(send?.[1].content).toContain("参考附件总结项目");
     expect(send?.[1].content).toContain("D:\\PROJECT\\workspace\\Lilia\\README.md");
+  });
+
+  it("composer 尚未加载完成时发送会等待后端状态再发给 agent", async () => {
+    let resolveComposer!: (value: unknown) => void;
+    setMockComposerStateHandler((taskId) =>
+      new Promise((resolve) => {
+        resolveComposer = resolve;
+      }).then(() => ({
+        taskId,
+        backend: "claude",
+        model: "claude-sonnet-4-6",
+        planMode: false,
+        permission: "ask",
+      }))
+    );
+
+    const view = await renderTaskDetail();
+    await sendText(view, "加载期间发送");
+
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+
+    resolveComposer(null);
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1].content).toContain("加载期间发送");
+  });
+
+  it("composer 加载失败时不会发送或清空附件", async () => {
+    setMockComposerStateHandler(() => Promise.reject(new Error("composer failed")));
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 120, y: 160 },
+    });
+    await waitFor(() => {
+      expect(view.getByText("README.md")).toBeInTheDocument();
+    });
+
+    await sendText(view, "失败时保留附件");
+
+    await waitFor(() => {
+      expect(view.getByText(/创建引导失败/)).toBeInTheDocument();
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(view.getByText("README.md")).toBeInTheDocument();
   });
 
   it("会把 Agent 运行中追加的用户消息先放入 Lilia 引导，并在 turn 结束后插入", async () => {

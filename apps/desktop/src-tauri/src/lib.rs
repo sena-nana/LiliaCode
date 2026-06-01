@@ -697,6 +697,124 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn prepare_running_turn_stop_for_interrupt_marks_interrupted_and_clears_queue() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-running".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-queued".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let prepared = prepare_running_turn_stop(&store, "task-1", true, false).unwrap();
+
+        assert_eq!(prepared.guide_ids, vec!["guide-queued".to_string()]);
+        assert!(prepared.child_handle.is_none());
+        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
+        assert_eq!(
+            store
+                .interrupted_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-running")
+        );
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn prepare_running_turn_stop_for_reset_marks_reset_without_interrupted_event() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-reset".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+
+        let prepared = prepare_running_turn_stop(&store, "task-1", false, true).unwrap();
+
+        assert!(prepared.guide_ids.is_empty());
+        assert!(store.interrupted_turns.lock().unwrap().get("task-1").is_none());
+        assert_eq!(
+            store
+                .reset_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-reset")
+        );
+    }
+
+    #[test]
+    fn reset_marker_is_read_without_consuming_until_turn_finish() {
+        let store = ChatStore::default();
+        store.reset_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-reset".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        );
+
+        assert!(is_turn_marked_reset(
+            &store,
+            "task-1",
+            "turn-reset",
+            BACKEND_CLAUDE
+        ));
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_some());
+
+        let (interrupted, reset) =
+            take_turn_stop_marks(&store, "task-1", "turn-reset", BACKEND_CLAUDE);
+        assert!(!interrupted);
+        assert!(reset);
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn prepare_running_turn_stop_without_running_turn_leaves_queue_intact() {
+        let store = ChatStore::default();
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-still-queued".to_string()),
+                ..pending_turn("queued")
+            });
+
+        assert!(prepare_running_turn_stop(&store, "task-1", true, true).is_none());
+        assert_eq!(
+            store
+                .pending_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|queue| queue.len()),
+            Some(1)
+        );
+        assert!(store.interrupted_turns.lock().unwrap().get("task-1").is_none());
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
     fn interrupted_exit_does_not_emit_runner_error() {
         assert!(!should_emit_runner_exit_error(
             true,
@@ -788,6 +906,7 @@ struct ChatStore {
     running_turns: Mutex<HashMap<String, RunningTurn>>,
     running_children: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
     interrupted_turns: Mutex<HashMap<String, RunningTurn>>,
+    reset_turns: Mutex<HashMap<String, RunningTurn>>,
     /// 仍在运行的 runner 子进程 stdin。key = task_id，turn 结束时移除（Drop 即关 stdin）。
     /// 让 chat_respond_tool_consent 命令能把决策写回给 runner。
     running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
@@ -883,6 +1002,104 @@ fn reset_cleared_guide_queue(app: &AppHandle, guide_ids: Vec<String>) {
             eprintln!("[todo-guides] reset queued guide failed: {err}");
         }
     }
+}
+
+struct PreparedTurnStop {
+    child_handle: Option<Arc<Mutex<Child>>>,
+    guide_ids: Vec<String>,
+}
+
+fn clear_running_handles(store: &ChatStore, task_id: &str) {
+    store.running_stdins.lock().unwrap().remove(task_id);
+    store.running_children.lock().unwrap().remove(task_id);
+    store.running_turns.lock().unwrap().remove(task_id);
+}
+
+fn prepare_running_turn_stop(
+    store: &ChatStore,
+    task_id: &str,
+    mark_interrupted: bool,
+    mark_reset: bool,
+) -> Option<PreparedTurnStop> {
+    let running_turn = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(task_id).cloned()
+    }?;
+
+    let guide_ids = clear_pending_turns(store, task_id);
+    if mark_interrupted {
+        store
+            .interrupted_turns
+            .lock()
+            .unwrap()
+            .insert(task_id.to_string(), running_turn.clone());
+    }
+    if mark_reset {
+        store
+            .reset_turns
+            .lock()
+            .unwrap()
+            .insert(task_id.to_string(), running_turn);
+    }
+
+    let child_handle = {
+        let children = store.running_children.lock().unwrap();
+        children.get(task_id).cloned()
+    };
+    Some(PreparedTurnStop {
+        child_handle,
+        guide_ids,
+    })
+}
+
+fn is_turn_marked_reset(store: &ChatStore, task_id: &str, turn_id: &str, backend: &str) -> bool {
+    store
+        .reset_turns
+        .lock()
+        .unwrap()
+        .get(task_id)
+        .is_some_and(|turn| turn.turn_id == turn_id && turn.backend == backend)
+}
+
+fn take_turn_stop_marks(
+    store: &ChatStore,
+    task_id: &str,
+    turn_id: &str,
+    backend: &str,
+) -> (bool, bool) {
+    let interrupted = store
+        .interrupted_turns
+        .lock()
+        .unwrap()
+        .remove(task_id)
+        .is_some_and(|turn| turn.turn_id == turn_id && turn.backend == backend);
+    let reset = store
+        .reset_turns
+        .lock()
+        .unwrap()
+        .remove(task_id)
+        .is_some_and(|turn| turn.turn_id == turn_id && turn.backend == backend);
+    (interrupted, reset)
+}
+
+fn stop_running_turn(
+    app: &AppHandle,
+    store: &ChatStore,
+    task_id: &str,
+    mark_interrupted: bool,
+    mark_reset: bool,
+) -> Result<bool, String> {
+    let Some(prepared) = prepare_running_turn_stop(store, task_id, mark_interrupted, mark_reset)
+    else {
+        return Ok(false);
+    };
+    reset_cleared_guide_queue(app, prepared.guide_ids);
+    if let Some(child_handle) = prepared.child_handle {
+        let mut child = child_handle.lock().map_err(|err| err.to_string())?;
+        terminate_agent_child(&mut child)?;
+    }
+    clear_running_handles(store, task_id);
+    Ok(true)
 }
 
 fn take_next_pending_turn(
@@ -1370,10 +1587,19 @@ fn spawn_agent_turn(
         if let Some(stdout) = child_stdout {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
+                let store = app_handle.state::<ChatStore>();
                 let line = match line {
                     Ok(l) if !l.trim().is_empty() => l,
                     _ => continue,
                 };
+                if is_turn_marked_reset(
+                    &store,
+                    &task_id_for_thread,
+                    &turn_id_for_thread,
+                    &backend_for_thread,
+                ) {
+                    break;
+                }
                 let value: JsonValue = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(_) => continue, // 忽略偶发非 JSON 输出（SDK 内部 log 等）
@@ -1458,39 +1684,26 @@ fn spawn_agent_turn(
             }
         }
 
-        // 流结束前确保 pending 的最后一帧落地——否则 turn 末尾的尾段文本会卡在节流窗口里。
-        timeline_throttle.flush_all(&app_handle);
-
         // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
         // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
         drop(stdin_handle);
-        let interrupted = {
+        let (interrupted, reset) = {
             let store = app_handle.state::<ChatStore>();
-            store
-                .running_stdins
-                .lock()
-                .unwrap()
-                .remove(&task_id_for_thread);
-            store
-                .running_children
-                .lock()
-                .unwrap()
-                .remove(&task_id_for_thread);
-            store
-                .running_turns
-                .lock()
-                .unwrap()
-                .remove(&task_id_for_thread);
-            let was_interrupted = store
-                .interrupted_turns
-                .lock()
-                .unwrap()
-                .remove(&task_id_for_thread)
-                .is_some_and(|turn| {
-                    turn.turn_id == turn_id_for_thread && turn.backend == backend_for_thread
-                });
-            was_interrupted
+            clear_running_handles(&store, &task_id_for_thread);
+            take_turn_stop_marks(
+                &store,
+                &task_id_for_thread,
+                &turn_id_for_thread,
+                &backend_for_thread,
+            )
         };
+
+        // 流结束前确保 pending 的最后一帧落地；reset 后则丢弃旧 turn 缓冲，避免回写已清空的 timeline。
+        if reset {
+            timeline_throttle.pending.clear();
+        } else {
+            timeline_throttle.flush_all(&app_handle);
+        }
 
         // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
         let exit_status = child_handle
@@ -1505,7 +1718,7 @@ fn spawn_agent_turn(
             })
             .unwrap_or_default();
 
-        if interrupted {
+        if interrupted && !reset {
             persist_and_emit_interrupted_timeline_event(
                 &app_handle,
                 &task_id_for_thread,
@@ -1515,7 +1728,7 @@ fn spawn_agent_turn(
         }
 
         let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
-        if should_emit_runner_exit_error(interrupted, nonzero, &stderr_text) {
+        if !reset && should_emit_runner_exit_error(interrupted, nonzero, &stderr_text) {
             persist_and_emit_error_timeline_event(
                 &app_handle,
                 &task_id_for_thread,
@@ -1530,7 +1743,7 @@ fn spawn_agent_turn(
             task_id_for_thread,
             backend_for_thread,
             last_session_id,
-            !interrupted,
+            !interrupted && !reset,
         );
     });
 }
@@ -1739,31 +1952,7 @@ fn chat_interrupt_turn(
     app: AppHandle,
     store: State<'_, ChatStore>,
 ) -> Result<(), String> {
-    let running_turn = {
-        let turns = store.running_turns.lock().unwrap();
-        turns.get(&task_id).cloned()
-    };
-    let Some(running_turn) = running_turn else {
-        return Ok(());
-    };
-
-    reset_cleared_guide_queue(&app, clear_pending_turns(&store, &task_id));
-    store
-        .interrupted_turns
-        .lock()
-        .unwrap()
-        .insert(task_id.clone(), running_turn);
-
-    let child_handle = {
-        let children = store.running_children.lock().unwrap();
-        children.get(&task_id).cloned()
-    };
-    let Some(child_handle) = child_handle else {
-        return Ok(());
-    };
-
-    let mut child = child_handle.lock().map_err(|err| err.to_string())?;
-    terminate_agent_child(&mut child)
+    stop_running_turn(&app, &store, &task_id, true, false).map(|_| ())
 }
 
 /// 把用户对一次工具调用的决策（allow / deny）写回 runner 的 stdin。
@@ -1901,15 +2090,23 @@ fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: Ap
     sessions.remove(&session_key(BACKEND_CODEX, &task_id));
     drop(sessions);
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
+    let stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {
+        Ok(stopped) => stopped,
+        Err(err) => {
+            eprintln!("[chat] reset running turn failed: {err}");
+            false
+        }
+    };
     reset_cleared_guide_queue(&app, clear_pending_turns(&chat_store, &task_id));
-    chat_store.running_turns.lock().unwrap().remove(&task_id);
-    chat_store.running_children.lock().unwrap().remove(&task_id);
     chat_store
         .interrupted_turns
         .lock()
         .unwrap()
         .remove(&task_id);
-    chat_store.running_stdins.lock().unwrap().remove(&task_id);
+    if !stopped_running {
+        chat_store.reset_turns.lock().unwrap().remove(&task_id);
+    }
+    clear_running_handles(&chat_store, &task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
         if let Err(err) = store
             .conn()
@@ -1918,6 +2115,16 @@ fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: Ap
             eprintln!("[agent-timeline] clear on reset failed: {err}");
         }
     }
+}
+
+fn save_provider_store_value<T: Serialize>(app: &AppHandle, key: &str, value: &T) -> Result<(), String> {
+    let store = app
+        .store(PROVIDER_STORE_FILE)
+        .map_err(|e| format!("打开配置存储失败：{e}"))?;
+    let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
+    store.set(key, value);
+    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
+    Ok(())
 }
 
 fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {
@@ -2048,13 +2255,7 @@ fn provider_set_config(app: AppHandle, config: ProviderConfig) -> Result<(), Str
         BACKEND_CLAUDE => PROVIDER_KEY_CLAUDE,
         other => return Err(format!("未知 backend: {other}")),
     };
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    let value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
-    store.set(key, value);
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, key, &config)
 }
 
 #[tauri::command]
@@ -2064,13 +2265,7 @@ fn cc_switch_get_config(app: AppHandle) -> CCSwitchConfig {
 
 #[tauri::command]
 fn cc_switch_set_config(app: AppHandle, config: CCSwitchConfig) -> Result<(), String> {
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    let value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
-    store.set(CC_SWITCH_KEY, value);
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, CC_SWITCH_KEY, &config)
 }
 
 #[tauri::command]
@@ -2080,13 +2275,7 @@ fn assistant_ai_get_config(app: AppHandle) -> AssistantAIConfig {
 
 #[tauri::command]
 fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Result<(), String> {
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    let value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
-    store.set(ASSISTANT_AI_KEY, value);
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, ASSISTANT_AI_KEY, &config)
 }
 
 #[tauri::command]
@@ -2099,13 +2288,7 @@ fn agent_interaction_set_settings(
     app: AppHandle,
     settings: AgentInteractionSettings,
 ) -> Result<(), String> {
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    let value = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
-    store.set(AGENT_INTERACTION_KEY, value);
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, AGENT_INTERACTION_KEY, &settings)
 }
 
 /// 连通性 ping：GET {baseUrl}/models，3 秒超时。
@@ -2193,12 +2376,7 @@ fn router_set_mode(app: AppHandle, backend: String, mode: String) -> Result<(), 
         BACKEND_CLAUDE => ROUTER_KEY_CLAUDE,
         other => return Err(format!("未知 backend: {other}")),
     };
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    store.set(key, JsonValue::String(mode));
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, key, &JsonValue::String(mode))
 }
 
 // ---------- Project / Git ----------
@@ -2225,13 +2403,7 @@ fn project_get_settings(app: AppHandle) -> ProjectSettings {
 
 #[tauri::command]
 fn project_set_settings(app: AppHandle, settings: ProjectSettings) -> Result<(), String> {
-    let store = app
-        .store(PROVIDER_STORE_FILE)
-        .map_err(|e| format!("打开配置存储失败：{e}"))?;
-    let value = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
-    store.set(PROJECT_CLONE_PARENT_KEY, value);
-    store.save().map_err(|e| format!("保存配置失败：{e}"))?;
-    Ok(())
+    save_provider_store_value(&app, PROJECT_CLONE_PARENT_KEY, &settings)
 }
 
 /// 从 git URL 推断仓库目录名。`https://github.com/foo/bar.git` → `bar`。

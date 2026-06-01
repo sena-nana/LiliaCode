@@ -143,6 +143,7 @@ let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 const baseClaudePlugins = [{
   scope: "user",
   name: "demo-plugin",
@@ -308,6 +309,7 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
   claudeMcpServers = baseClaudeMcpServers.map((server) => ({
     ...server,
@@ -333,6 +335,12 @@ export function emitWebviewDragDropEvent(payload: unknown) {
   for (const handler of webviewDragDropHandlers) {
     handler({ payload });
   }
+}
+
+export function setMockComposerStateHandler(
+  handler: ((taskId: string) => unknown | Promise<unknown>) | null,
+) {
+  composerStateHandler = handler;
 }
 
 export function setMockProjectPinned(projectId: string, pinned: boolean) {
@@ -732,6 +740,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "chat_get_composer_state": {
       const taskId = String(args.taskId);
+      if (composerStateHandler) return composerStateHandler(taskId);
       return {
         taskId,
         backend: "claude",

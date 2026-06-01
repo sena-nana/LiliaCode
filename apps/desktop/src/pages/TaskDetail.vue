@@ -39,13 +39,8 @@ import {
   usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../composables/useToolConsentBridge";
-import {
-  createTodo,
-  listTodos,
-  updateTodo,
-  type TaskTodo,
-  type TaskTodoPriority,
-} from "../services/todos";
+import { useGuideDispatch } from "../composables/useGuideDispatch";
+import type { TaskTodo } from "../services/todos";
 import {
   getComposerState,
   listAgentTimeline,
@@ -100,10 +95,11 @@ const overlayTimelineEvents = shallowRef<AgentTimelineEvent[]>([]);
 const timelineEvents = computed(() =>
   mergeTimelineEvents(persistedTimelineEvents.value, overlayTimelineEvents.value),
 );
-const composer = ref<ChatComposerState>({
+const composer = ref<ChatComposerState | null>(null);
+const composerForView = computed<ChatComposerState>(() => composer.value ?? {
   taskId: props.taskId,
   backend: "claude",
-  model: "claude-sonnet-4-6",
+  model: "",
   planMode: false,
   permission: "ask",
 });
@@ -226,44 +222,6 @@ function removeAttachment(attachmentId: string) {
   attachments.value = attachments.value.filter((attachment) => attachment.id !== attachmentId);
 }
 
-const LILIA_GUIDE_PREFIX = "[Lilia 引导]";
-const guidePriorityOrder: TaskTodoPriority[] = ["high", "normal", "low"];
-const dispatchingGuideIds = new Set<string>();
-let autoGuideDispatching = false;
-let pendingGuideWindow: "tool" | "user" | "idle" | null = null;
-
-function priorityLabel(priority: TaskTodoPriority): string {
-  if (priority === "high") return "高";
-  if (priority === "low") return "低";
-  return "中";
-}
-
-function guideTextForComposer(
-  content: string,
-  outgoingAttachments: ChatAttachment[],
-): string {
-  const text = content.trim();
-  if (outgoingAttachments.length === 0) return text;
-  const attachmentLines = outgoingAttachments.map((attachment, index) =>
-    `${index + 1}. ${attachment.name}: ${attachment.path}`
-  );
-  return [
-    text || "请参考以下本地路径继续处理。",
-    "",
-    "附加路径：",
-    ...attachmentLines,
-  ].join("\n");
-}
-
-function guideMessage(todo: TaskTodo): string {
-  return [
-    LILIA_GUIDE_PREFIX,
-    `优先级：${priorityLabel(todo.priority)}`,
-    "",
-    todo.text,
-  ].join("\n");
-}
-
 async function ensureTaskReadyForMessage(
   content: string,
   outgoingAttachments: ChatAttachment[],
@@ -283,6 +241,7 @@ async function sendAgentMessage(
   if (!hasContext.value) return;
   if (!content.trim() && outgoingAttachments.length === 0) return;
 
+  const currentComposer = await ensureComposerLoaded();
   await ensureTaskReadyForMessage(content, outgoingAttachments);
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
 
@@ -300,7 +259,7 @@ async function sendAgentMessage(
     await sendMessage(
       props.taskId,
       content,
-      composer.value,
+      currentComposer,
       cwd,
       outgoingAttachments,
       guideId,
@@ -316,78 +275,11 @@ async function sendAgentMessage(
 
 async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
   if (!hasContext.value) return;
-  if (!content.trim() && outgoingAttachments.length === 0) return;
-
-  try {
-    const guideText = guideTextForComposer(content, outgoingAttachments);
-    await ensureTaskReadyForMessage(guideText, []);
-    await createTodo(props.taskId, guideText, "normal");
-    attachments.value = [];
-    if (pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0) {
-      void scheduleGuideInsertion("user");
-    } else if (!isTurnRunning.value) {
-      void scheduleGuideInsertion("idle");
-    }
-  } catch (err) {
-    upsertTimelineEvent(createErrorTimelineEvent(`创建引导失败：${String(err)}`));
-  }
-}
-
-async function selectPendingGuide(windowKind: "tool" | "user" | "idle"): Promise<TaskTodo | null> {
-  const candidates = (await listTodos(props.taskId))
-    .filter((todo) =>
-      todo.source === "lilia" &&
-      todo.guideStatus === "pending" &&
-      !dispatchingGuideIds.has(todo.id)
-    );
-  const allowed = windowKind === "tool"
-    ? new Set<TaskTodoPriority>(["high"])
-    : windowKind === "user"
-      ? new Set<TaskTodoPriority>(["normal"])
-      : new Set<TaskTodoPriority>(guidePriorityOrder);
-  return candidates
-    .filter((todo) => allowed.has(todo.priority))
-    .sort((a, b) =>
-      guidePriorityOrder.indexOf(a.priority) - guidePriorityOrder.indexOf(b.priority) ||
-      a.order - b.order ||
-      a.createdAt - b.createdAt
-    )[0] ?? null;
-}
-
-async function dispatchGuide(todo: TaskTodo) {
-  if (todo.source !== "lilia" || dispatchingGuideIds.has(todo.id)) return;
-  dispatchingGuideIds.add(todo.id);
-  try {
-    await sendAgentMessage(guideMessage(todo), [], todo.id);
-  } catch (err) {
-    await updateTodo(todo.id, { guideStatus: "pending" }).catch(() => undefined);
-    upsertTimelineEvent(createErrorTimelineEvent(`插入引导失败：${String(err)}`));
-  } finally {
-    dispatchingGuideIds.delete(todo.id);
-  }
-}
-
-async function scheduleGuideInsertion(windowKind: "tool" | "user" | "idle") {
-  if (autoGuideDispatching) {
-    pendingGuideWindow = windowKind;
-    return;
-  }
-  autoGuideDispatching = true;
-  try {
-    const guide = await selectPendingGuide(windowKind);
-    if (guide) await dispatchGuide(guide);
-  } catch (err) {
-    upsertTimelineEvent(createErrorTimelineEvent(`调度引导失败：${String(err)}`));
-  } finally {
-    autoGuideDispatching = false;
-    const nextWindow = pendingGuideWindow;
-    pendingGuideWindow = null;
-    if (nextWindow) void scheduleGuideInsertion(nextWindow);
-  }
+  await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
 }
 
 function onInsertGuide(todo: TaskTodo) {
-  void dispatchGuide(todo);
+  void guideDispatch.dispatchGuide(todo);
 }
 
 async function onInterrupt() {
@@ -440,13 +332,13 @@ async function onResolvePendingAgentAction(resolution: PendingAgentActionResolut
 }
 
 async function onComposerUpdate(next: ChatComposerState) {
-  const backendChanged = next.backend !== composer.value.backend;
+  const backendChanged = next.backend !== composer.value?.backend;
   composer.value = next;
   if (backendChanged) {
     // 切 backend → 重拉模型清单，并把 model 修正到新清单首项。
     await reloadModelsForBackend(next.backend);
   }
-  try { await setComposerState(composer.value); }
+  try { await setComposerState(next); }
   catch (err) { console.error("[chat] setComposerState failed", err); }
 }
 
@@ -455,8 +347,9 @@ async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
     const mdls = await listModels(backend);
     models.value = mdls;
     // 当前 model 不在新清单 → 回退首项；空清单则保留原值让后端报错。
-    if (mdls.length && !mdls.some((m) => m.id === composer.value.model)) {
-      composer.value = { ...composer.value, model: mdls[0].id };
+    const currentComposer = composer.value;
+    if (currentComposer && mdls.length && !mdls.some((m) => m.id === currentComposer.model)) {
+      composer.value = { ...currentComposer, model: mdls[0].id };
     }
   } catch (err) {
     console.error("[chat] listModels failed", err);
@@ -518,7 +411,7 @@ function createMessageTimelineEvent(input: {
     id: input.id,
     taskId: input.taskId,
     turnId: null,
-    backend: composer.value.backend,
+    backend: composerForView.value.backend,
     kind: "message",
     status: input.queued ? "pending" : "success",
     title: "用户输入",
@@ -562,7 +455,7 @@ function createErrorTimelineEvent(message: string): AgentTimelineEvent {
     id: `error-${now}`,
     taskId: props.taskId,
     turnId: null,
-    backend: composer.value.backend,
+    backend: composerForView.value.backend,
     kind: "error",
     status: "error",
     title: "错误",
@@ -585,21 +478,58 @@ async function loadTimelineEvents(taskId: string): Promise<AgentTimelineEvent[]>
 }
 
 let loadSeq = 0;
+let composerLoad: Promise<ChatComposerState | null> | null = null;
+
+async function loadComposerForCurrentTask(taskId: string, seq: number): Promise<ChatComposerState | null> {
+  const comp = await getComposerState(taskId);
+  if (seq !== loadSeq || taskId !== props.taskId) return null;
+  composer.value = comp;
+  await reloadModelsForBackend(comp.backend);
+  return comp;
+}
+
+async function ensureComposerLoaded(): Promise<ChatComposerState> {
+  if (composer.value) return composer.value;
+  const pending = composerLoad ?? loadComposerForCurrentTask(props.taskId, loadSeq);
+  const loaded = await pending;
+  if (!loaded) throw new Error("Composer 尚未就绪");
+  return loaded;
+}
 
 async function loadAll() {
   const seq = ++loadSeq;
   const taskId = props.taskId;
   const projectId = props.projectId;
-  const [events, comp] = await Promise.all([
-    loadTimelineEvents(taskId),
-    getComposerState(taskId),
-  ]);
-  if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-  persistedTimelineEvents.value = mergeTimelineEvents(events, persistedTimelineEvents.value);
-  composer.value = comp;
-  // models 依赖 backend，单独拉。
-  await reloadModelsForBackend(comp.backend);
+  composer.value = null;
+  const nextComposerLoad = loadComposerForCurrentTask(taskId, seq).catch((err) => {
+    console.error("[chat] getComposerState failed", err);
+    return null;
+  });
+  composerLoad = nextComposerLoad;
+  try {
+    const [events, comp] = await Promise.all([loadTimelineEvents(taskId), nextComposerLoad]);
+    if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+    persistedTimelineEvents.value = mergeTimelineEvents(events, persistedTimelineEvents.value);
+    if (!comp) return;
+  } finally {
+    if (composerLoad === nextComposerLoad) composerLoad = null;
+  }
 }
+
+const guideDispatch = useGuideDispatch({
+  taskId: () => props.taskId,
+  ensureReady: ensureTaskReadyForMessage,
+  sendAgentMessage,
+  ensureDispatchReady: ensureComposerLoaded,
+  hasPendingAgentAction: () => pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
+  isTurnRunning: () => isTurnRunning.value,
+  clearAttachments: () => {
+    attachments.value = [];
+  },
+  reportError: (message) => {
+    upsertTimelineEvent(createErrorTimelineEvent(message));
+  },
+});
 
 const unlisteners: UnlistenFn[] = [];
 let unsubscribeDebugTimeline: (() => void) | null = null;
@@ -636,7 +566,7 @@ onMounted(async () => {
       if (e.taskId !== props.taskId) return;
       upsertTimelineEvent(e);
       if (isAgentTimelineToolWindowKind(e.kind)) {
-        void scheduleGuideInsertion("tool");
+        void guideDispatch.scheduleGuideInsertion("tool");
       }
     }),
   );
@@ -666,7 +596,7 @@ onMounted(async () => {
     await onDone((e) => {
       if (e.taskId !== props.taskId) return;
       isTurnRunning.value = false;
-      void scheduleGuideInsertion("idle");
+      void guideDispatch.scheduleGuideInsertion("idle");
     }),
   );
   await Promise.all([loadAll(), loadAgentInteractionSettings()]);
@@ -689,6 +619,7 @@ watch(
     isTurnRunning.value = false;
     persistedTimelineEvents.value = [];
     overlayTimelineEvents.value = [];
+    composer.value = null;
     attachments.value = [];
     resubscribeDebugTimeline();
     await loadAll();
@@ -713,7 +644,7 @@ watch(
       consentCount > prevConsentCount ||
       (planTurn && planTurn !== prevPlanTurn)
     ) {
-      void scheduleGuideInsertion("user");
+      void guideDispatch.scheduleGuideInsertion("user");
     }
   },
 );
@@ -747,7 +678,7 @@ watch(
                   @insert-guide="onInsertGuide"
                 />
                 <ChatComposer
-                  :state="composer"
+                  :state="composerForView"
                   :attachments="attachments"
                   :sending="isTurnRunning"
                   :pending-ask="nonInterruptMode ? null : pendingAskUser"
