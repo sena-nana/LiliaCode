@@ -63,6 +63,7 @@ describe("ask user prompt styles", () => {
     expect(styles).not.toContain(".chat-composer-inline-enter-active");
     expect(ruleTextAt(input)).toContain("max-height: 74px");
     expect(ruleTextAt(input)).toContain("transition: height 0.16s");
+    expect(ruleTextAt(input)).toContain("caret-color: var(--text-muted)");
     expect(ruleTextAt(panelInner)).toContain("overflow: hidden");
     expect(ruleTextAt(panel)).toContain("display: grid");
     expect(ruleTextAt(panel)).toContain("grid-template-rows: 1fr");
@@ -134,6 +135,7 @@ describe("ask user prompt styles", () => {
     expect(focus).toBeGreaterThan(input);
     expect(ruleTextAt(input)).toContain("height: 28px");
     expect(ruleTextAt(input)).toContain("resize: none");
+    expect(ruleTextAt(input)).toContain("caret-color: var(--text-muted)");
     expect(ruleTextAt(focus)).toContain("outline: none");
     expect(ruleTextAt(focus)).toContain("border-color: var(--border-strong)");
     expect(ruleTextAt(focus)).not.toContain("var(--accent)");
@@ -146,6 +148,7 @@ describe("ask user prompt styles", () => {
     expect(input).toBeGreaterThan(-1);
     expect(placeholder).toBeGreaterThan(input);
     expect(ruleTextAt(input)).toContain("position: relative");
+    expect(ruleTextAt(input)).toContain("caret-color: var(--text-muted)");
     expect(ruleTextAt(placeholder)).toContain("position: absolute");
     expect(ruleTextAt(placeholder)).toContain("inset: 4px 6px auto");
     expect(ruleTextAt(placeholder)).toContain("pointer-events: none");

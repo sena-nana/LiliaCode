@@ -3462,6 +3462,7 @@ button.ghost:hover {
   font: inherit;
   font-weight: 500;
   line-height: 22px;
+  caret-color: var(--text-muted);
   resize: none;
   overflow-y: hidden;
   transition: height 0.16s ease;
@@ -3497,6 +3498,7 @@ button.ghost:hover {
   font: inherit;
   font-weight: 500;
   line-height: 22px;
+  caret-color: var(--text-muted);
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4305,6 +4307,7 @@ button.ghost:hover {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
+  caret-color: var(--text-muted);
   resize: vertical;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4362,6 +4365,7 @@ button.ghost:hover {
   font: inherit;
   font-size: 12px;
   line-height: 18px;
+  caret-color: var(--text-muted);
   resize: none;
   overflow: hidden;
   transition: background-color 0.12s ease, border-color 0.12s ease;

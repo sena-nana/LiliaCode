@@ -53,6 +53,7 @@ describe("tool consent prompt styles", () => {
     expect(ruleTextAt(input)).toContain("resize: vertical");
     expect(ruleTextAt(input)).toContain("white-space: pre-wrap");
     expect(ruleTextAt(input)).toContain("overflow-wrap: anywhere");
+    expect(ruleTextAt(input)).toContain("caret-color: var(--text-muted)");
     expect(ruleTextAt(hint)).toContain("color: var(--text-muted)");
   });
 });
