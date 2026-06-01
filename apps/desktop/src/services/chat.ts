@@ -15,6 +15,7 @@ import type {
   CCSwitchStatus,
   ChatBackendKind,
   ChatAttachment,
+  ChatContextSearchResult,
   ChatComposerState,
   AgentTimelineEvent,
   AgentAskUserRequestEvent,
@@ -25,6 +26,9 @@ import type {
   EnvStatusReport,
   ProviderConfig,
   RouterMode,
+  ToolConsentDecision,
+  ToolConsentRequest,
+  ToolConsentUpdatedInput,
 } from "@lilia/contracts";
 
 export type {
@@ -32,6 +36,7 @@ export type {
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
+  ChatContextSearchResult,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -39,32 +44,13 @@ export type {
   EnvStatusReport,
   ProviderConfig,
   RouterMode,
+  ToolConsentDecision,
+  ToolConsentRequest,
+  ToolConsentUpdatedInput,
 };
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
-
-/**
- * runner 通过 canUseTool 把工具调用授权请求转过来，等用户决策。
- * 字段对齐 Claude SDK 的 CanUseTool 入参：title / description / displayName
- * 由 SDK bridge 在能拿到时填好；input 是原始工具入参 JSON。
- */
-export interface ToolConsentRequest {
-  taskId: string;
-  turnId: string;
-  backend: ChatBackendKind;
-  requestId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  title: string | null;
-  displayName: string | null;
-  description: string | null;
-  blockedPath: string | null;
-  decisionReason: string | null;
-  toolUseId: string | null;
-}
-
-export type ToolConsentDecision = "allow" | "deny";
 
 export type AgentAskUserRequest = AgentAskUserRequestEvent;
 
@@ -101,6 +87,18 @@ export function interruptTurn(taskId: string): Promise<void> {
 
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
   return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
+}
+
+export function searchContextAttachments(
+  projectCwd: string,
+  query: string,
+  limit = 12,
+): Promise<ChatContextSearchResult[]> {
+  return invoke<ChatContextSearchResult[]>("chat_search_context_attachments", {
+    projectCwd,
+    query,
+    limit,
+  });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {
@@ -249,12 +247,14 @@ export function respondToolConsent(
   requestId: string,
   decision: ToolConsentDecision,
   message?: string,
+  updatedInput?: ToolConsentUpdatedInput,
 ): Promise<void> {
   return invoke<void>("chat_respond_tool_consent", {
     taskId,
     requestId,
     decision,
     message: message ?? null,
+    updatedInput: updatedInput ?? null,
   });
 }
 

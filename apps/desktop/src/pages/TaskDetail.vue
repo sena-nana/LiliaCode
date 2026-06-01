@@ -54,6 +54,7 @@ import {
   sendMessage,
   setComposerState,
   type ToolConsentDecision,
+  type ToolConsentUpdatedInput,
 } from "../services/chat";
 import {
   loadAgentInteractionSettings,
@@ -146,6 +147,8 @@ async function ensureOrphanCwd(): Promise<string> {
   return orphanCwd.value;
 }
 
+const contextSearchCwd = computed(() => project.value?.cwd ?? orphanCwd.value ?? null);
+
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= 30) return normalized;
@@ -208,6 +211,12 @@ async function addAttachmentsFromPaths(paths: string[]) {
   } catch (err) {
     console.error("[chat] describeAttachments failed", err);
   }
+}
+
+function addContextAttachment(attachment: ChatAttachment) {
+  if (attachment.exists === false) return;
+  if (attachments.value.some((item) => item.path === attachment.path)) return;
+  attachments.value = [...attachments.value, attachment];
 }
 
 async function onPickAttachments() {
@@ -301,11 +310,12 @@ function onResolveAskUser(result: AskUserResult) {
 async function onResolveToolConsent(
   decision: ToolConsentDecision,
   message?: string,
+  updatedInput?: ToolConsentUpdatedInput,
 ) {
   const request = pendingToolConsent.value;
   if (!request) return;
   try {
-    await respondConsent(request.taskId, request.requestId, decision, message);
+    await respondConsent(request.taskId, request.requestId, decision, message, updatedInput);
   } catch (err) {
     console.error("[tool-consent] respond failed", err);
   }
@@ -323,6 +333,7 @@ async function onResolvePendingAgentAction(resolution: PendingAgentActionResolut
         request.requestId,
         resolution.decision,
         resolution.message,
+        resolution.updatedInput,
       );
     } catch (err) {
       console.error("[tool-consent] respond failed", err);
@@ -402,6 +413,17 @@ function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimel
     path: attachment.path,
     kind: attachment.kind,
     size: attachment.size,
+    exists: attachment.exists ?? null,
+    mime: attachment.mime ?? null,
+    directory: attachment.directory
+      ? {
+        fileCount: attachment.directory.fileCount,
+        directoryCount: attachment.directory.directoryCount,
+        totalSize: attachment.directory.totalSize,
+        truncated: attachment.directory.truncated,
+        unreadableCount: attachment.directory.unreadableCount,
+      }
+      : null,
   }));
 }
 
@@ -613,6 +635,7 @@ function resubscribeDebugTimeline() {
 resubscribeDebugTimeline();
 
 onMounted(async () => {
+  if (!props.projectId) await ensureOrphanCwd();
   unlisteners.push(
     await getCurrentWebview().onDragDropEvent(async (event) => {
       const drop = readDropPayload(event.payload);
@@ -682,6 +705,7 @@ watch(
     composer.value = null;
     attachments.value = [];
     resubscribeDebugTimeline();
+    if (!props.projectId) await ensureOrphanCwd();
     await loadAll();
   },
 );
@@ -740,6 +764,7 @@ watch(
                 <ChatComposer
                   :state="composerForView"
                   :attachments="attachments"
+                  :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
                   :pending-ask="nonInterruptMode ? null : pendingAskUser"
                   :tool-consent="nonInterruptMode ? null : pendingToolConsent"
@@ -748,6 +773,7 @@ watch(
                   @update:state="onComposerUpdate"
                   @remove-attachment="removeAttachment"
                   @pick-attachments="onPickAttachments"
+                  @add-context-attachment="addContextAttachment"
                   @resolve-ask-user="onResolveAskUser"
                   @resolve-tool-consent="onResolveToolConsent"
                 />

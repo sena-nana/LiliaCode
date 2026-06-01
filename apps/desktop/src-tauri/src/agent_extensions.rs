@@ -99,6 +99,7 @@ mod tests {
               source       TEXT NOT NULL CHECK (source IN ('lilia','agent')),
               priority     TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal','low')),
               guide_status TEXT CHECK (guide_status IS NULL OR guide_status IN ('pending','queued','sent')),
+              attachments_json TEXT NOT NULL DEFAULT '[]',
               created_at   INTEGER NOT NULL,
               updated_at   INTEGER NOT NULL
             );

@@ -34,16 +34,18 @@ function guideTextForComposer(
   outgoingAttachments: ChatAttachment[],
 ): string {
   const text = content.trim();
-  if (outgoingAttachments.length === 0) return text;
-  const attachmentLines = outgoingAttachments.map((attachment, index) =>
-    `${index + 1}. ${attachment.name}: ${attachment.path}`
-  );
-  return [
-    text || "请参考以下本地路径继续处理。",
-    "",
-    "附加路径：",
-    ...attachmentLines,
-  ].join("\n");
+  if (text) return text;
+  if (outgoingAttachments.length === 0) return "";
+  return outgoingAttachments.map(attachmentReferenceText).join("\n");
+}
+
+function attachmentReferenceText(attachment: ChatAttachment): string {
+  const kind = attachment.mime?.startsWith("image/")
+    ? "图片引用"
+    : attachment.kind === "directory"
+      ? "目录引用"
+      : "文件引用";
+  return `[${kind}: ${attachment.name} | ${attachment.path}]`;
 }
 
 function guideMessage(todo: TaskTodo): string {
@@ -87,7 +89,7 @@ export function useGuideDispatch(options: GuideDispatchOptions) {
     if (todo.source !== "lilia" || dispatchingGuideIds.has(todo.id)) return;
     dispatchingGuideIds.add(todo.id);
     try {
-      await options.sendAgentMessage(guideMessage(todo), [], todo.id);
+      await options.sendAgentMessage(guideMessage(todo), todo.attachments ?? [], todo.id);
     } catch (err) {
       await updateTodo(todo.id, { guideStatus: "pending" }).catch(() => undefined);
       options.reportError(`插入引导失败：${String(err)}`);
@@ -123,8 +125,8 @@ export function useGuideDispatch(options: GuideDispatchOptions) {
     try {
       await options.ensureDispatchReady();
       const guideText = guideTextForComposer(content, outgoingAttachments);
-      await options.ensureReady(guideText, []);
-      await createTodo(options.taskId(), guideText, "normal");
+      await options.ensureReady(guideText, outgoingAttachments);
+      await createTodo(options.taskId(), guideText, "normal", outgoingAttachments);
       options.clearAttachments();
       if (options.hasPendingAgentAction()) {
         void scheduleGuideInsertion("user");

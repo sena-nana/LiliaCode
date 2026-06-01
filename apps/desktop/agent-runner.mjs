@@ -17,7 +17,7 @@
 //         }
 //       }
 //   - stdin 后续行：父进程对此前发出的 control_request 的响应，目前包括：
-//       {"type":"consent_response","id":"consent-1","decision":"allow"|"deny","message":"..."}
+//       {"type":"consent_response","id":"consent-1","decision":"allow"|"deny","message":"...","updatedInput":{...}}
 //       {"type":"ask_user_response","id":"ask-1","result":{...AskUserResult}}
 //     父进程不会再关闭 stdin —— SDK 调 query 结束、runner 主动 exit 收尾。
 //   - stdout 还是一行一条 NDJSON：
@@ -508,6 +508,93 @@ function consentTimelineSourceId(id, payload) {
   return stringOrNull(payload?.toolUseID) || id;
 }
 
+function readAllowedCommandEdit(toolName, originalInput, updatedInput) {
+  if (toolName !== "Bash" || !isRecord(originalInput) || !isRecord(updatedInput)) return null;
+  const originalCommand = typeof originalInput.command === "string" ? originalInput.command : "";
+  const modifiedCommand = typeof updatedInput.command === "string" ? updatedInput.command : "";
+  if (!modifiedCommand.trim() || modifiedCommand === originalCommand) return null;
+  return {
+    input: { ...originalInput, command: modifiedCommand },
+    originalCommand,
+    modifiedCommand,
+  };
+}
+
+function commandEditFields(edit) {
+  if (!edit) return {};
+  return {
+    commandEdited: true,
+    originalCommand: edit.originalCommand,
+    modifiedCommand: edit.modifiedCommand,
+  };
+}
+
+function withCommandEditPayload(payload, finalInput, edit) {
+  if (!edit) return payload;
+  return {
+    ...payload,
+    input: finalInput,
+    ...commandEditFields(edit),
+  };
+}
+
+function commandFence(command) {
+  let fence = "```";
+  while (command.includes(fence)) fence += "`";
+  return fence;
+}
+
+function commandEditAdditionalContext(edit) {
+  const command = edit?.modifiedCommand || "";
+  const fence = commandFence(command);
+  return [
+    "用户修改了命令。",
+    "修改后的命令是：",
+    `${fence}shell`,
+    command,
+    fence,
+  ].join("\n");
+}
+
+function rememberCommandEdit(ctx, toolName, toolUseId, edit) {
+  const id = stringOrNull(toolUseId);
+  if (!id || !edit) return;
+  ctx?.commandEdits?.set(id, edit);
+  const normalized = normalizeClaudeTool(toolName, edit.input);
+  rememberClaudeTool(ctx, id, {
+    name: toolName,
+    kind: normalized.kind,
+    subkind: normalized.subkind,
+    payload: { ...normalized.payload, ...commandEditFields(edit) },
+  });
+}
+
+function createCommandEditHook(ctx) {
+  return async function commandEditHook(input, toolUseId) {
+    const id = stringOrNull(input?.tool_use_id) || stringOrNull(toolUseId);
+    const edit = id ? ctx?.commandEdits?.get(id) : null;
+    if (!id || !edit) return { continue: true };
+    ctx.commandEdits.delete(id);
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: input?.hook_event_name === "PostToolUseFailure"
+          ? "PostToolUseFailure"
+          : "PostToolUse",
+        additionalContext: commandEditAdditionalContext(edit),
+      },
+    };
+  };
+}
+
+function createClaudeHooks(ctx) {
+  const commandEditHook = createCommandEditHook(ctx);
+  return {
+    PostToolUse: [{ matcher: "Bash", hooks: [commandEditHook] }],
+    PostToolUseFailure: [{ matcher: "Bash", hooks: [commandEditHook] }],
+  };
+}
+
 function emitToolConsentTimeline(id, payload, status, decisionMessage = "") {
   const toolName = stringOrNull(payload?.toolName) || "tool";
   const input = isRecord(payload?.input) ? payload.input : {};
@@ -533,6 +620,11 @@ function emitToolConsentTimeline(id, payload, status, decisionMessage = "") {
     blockedPath: stringOrNull(payload?.blockedPath),
     decisionReason: stringOrNull(payload?.decisionReason),
   };
+  if (payload?.commandEdited === true) {
+    eventPayload.commandEdited = true;
+    eventPayload.originalCommand = stringOrNull(payload?.originalCommand);
+    eventPayload.modifiedCommand = stringOrNull(payload?.modifiedCommand);
+  }
   if (normalized.subkind) eventPayload.subkind = normalized.subkind;
   if (decisionMessage) eventPayload.decisionMessage = decisionMessage;
   emitTimeline({
@@ -594,6 +686,7 @@ function handleControlLine(line) {
     resolve({
       decision: msg.decision === "allow" ? "allow" : "deny",
       message: stringOrNull(msg.message) || "",
+      updatedInput: isRecord(msg.updatedInput) ? msg.updatedInput : null,
     });
     return;
   }
@@ -636,13 +729,17 @@ function createClaudeCanUseTool(ctx) {
       blockedPath: stringOrNull(opts?.blockedPath),
       decisionReason: stringOrNull(opts?.decisionReason),
     };
-    const { id, decision, message } = await requestUserConsent(consentPayload);
+    const { id, decision, message, updatedInput } = await requestUserConsent(consentPayload);
     if (decision === "allow") {
-      emitToolConsentTimeline(id, consentPayload, "success", "用户已同意此次工具调用");
+      const commandEdit = readAllowedCommandEdit(toolName, safeInput, updatedInput);
+      const finalInput = commandEdit?.input ?? safeInput;
+      rememberCommandEdit(ctx, toolName, opts?.toolUseID, commandEdit);
+      const finalConsentPayload = withCommandEditPayload(consentPayload, finalInput, commandEdit);
+      emitToolConsentTimeline(id, finalConsentPayload, "success", "用户已同意此次工具调用");
       // Claude Code 二进制端 Zod 校验要求 allow 必须带 updatedInput——SDK 的 d.ts
       // 把它标成 optional 但底层 schema 实际 required。不填会被当作工具调用失败，
       // Agent 收到 is_error 结果会无限重试 canUseTool。原样回填即可。
-      return { behavior: "allow", updatedInput: safeInput };
+      return { behavior: "allow", updatedInput: finalInput };
     }
     emitToolConsentTimeline(id, consentPayload, "cancelled", message || "用户拒绝了此次工具调用");
     return { behavior: "deny", message: message || "用户拒绝了此次工具调用" };
@@ -1168,15 +1265,18 @@ function emitClaudeToolTimeline(block, msg, ctx) {
     });
     return;
   }
-  const normalized = normalizeClaudeTool(name, input, {
+  const commandEdit = sourceId ? ctx?.commandEdits?.get(sourceId) : null;
+  const finalInput = commandEdit?.input ?? input;
+  const normalized = normalizeClaudeTool(name, finalInput, {
     subagent_type: msg?.subagent_type,
     task_description: msg?.task_description,
   });
+  const normalizedPayload = { ...normalized.payload, ...commandEditFields(commandEdit) };
   const denied = sourceId ? ctx?.deniedTools?.get(sourceId) : null;
   const payload = {
     backend: "claude",
     toolName: name,
-    ...normalized.payload,
+    ...normalizedPayload,
     ...(denied ? {
       permissionDenied: true,
       reason: denied.reason,
@@ -1190,7 +1290,7 @@ function emitClaudeToolTimeline(block, msg, ctx) {
       name,
       kind: normalized.kind,
       subkind: normalized.subkind,
-      payload: normalized.payload,
+      payload: normalizedPayload,
     });
   }
   emitTimeline({
@@ -1639,6 +1739,8 @@ async function runClaude(cmd) {
     resultSeen: false,
     /** sourceId → { name, kind, payload }，给未收到 tool_result 的工具做收尾用。 */
     activeTools: new Map(),
+    /** toolUseID → 用户编辑过的 Bash command，供 PostToolUse hook 追加给模型。 */
+    commandEdits: new Map(),
   };
   const options = {
     cwd: cwd || process.cwd(),
@@ -1648,6 +1750,7 @@ async function runClaude(cmd) {
     // canUseTool 同时承载询问、计划确认和 Lilia 只读门禁；是否触发由 Claude
     // 当前 permissionMode 决定。
     canUseTool: createClaudeCanUseTool(ctx),
+    hooks: createClaudeHooks(ctx),
     // SDK 1.0 默认不注入任何 system prompt——既丢了 Claude Code 内置的工具说明，
     // 也让模型不知道当前平台/shell，于是在 Windows 上偶尔会发 PowerShell 命令进
     // Bash 工具。启用 claude_code 预设拿回基础上下文，Windows 上 append 一段

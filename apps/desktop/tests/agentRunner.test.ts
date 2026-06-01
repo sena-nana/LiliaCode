@@ -24,6 +24,25 @@ describe("agent-runner Claude stream", () => {
     );
   });
 
+  it("Claude Bash 授权允许用户编辑命令并把修改说明注入工具结果上下文", () => {
+    expect(runnerSource).toContain("updatedInput: isRecord(msg.updatedInput) ? msg.updatedInput : null");
+    expect(runnerSource).toContain("function readAllowedCommandEdit(toolName, originalInput, updatedInput)");
+    expect(runnerSource).toContain('if (toolName !== "Bash"');
+    expect(runnerSource).toContain("function commandEditFields(edit)");
+    expect(runnerSource).toContain("rememberCommandEdit(ctx, toolName, opts?.toolUseID, commandEdit)");
+    expect(runnerSource).toContain("const finalInput = commandEdit?.input ?? input");
+    expect(runnerSource).toContain('commandEdited: true');
+    expect(runnerSource).toContain("additionalContext: commandEditAdditionalContext(edit)");
+    expect(runnerSource).toContain("用户修改了命令。");
+    expect(runnerSource).toContain("修改后的命令是：");
+    expect(runnerSource).toContain("PostToolUse: [{ matcher: \"Bash\", hooks: [commandEditHook] }]");
+    expect(runnerSource).toContain("PostToolUseFailure: [{ matcher: \"Bash\", hooks: [commandEditHook] }]");
+    expect(runnerSource).toContain("hooks: createClaudeHooks(ctx)");
+    expect(runnerSource).toMatch(
+      /return \{ behavior: "allow", updatedInput: finalInput \};/,
+    );
+  });
+
   it("Claude plan mode 先进入计划，确认后恢复原执行权限", () => {
     expect(runnerSource).toContain("normalizeClaudePermissionMode");
     expect(runnerSource).toContain("mapClaudeInitialPermission(permission, planMode)");

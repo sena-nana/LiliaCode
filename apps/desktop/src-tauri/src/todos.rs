@@ -36,6 +36,7 @@ pub struct TaskTodo {
     pub source: String,
     pub priority: String,
     pub guide_status: Option<String>,
+    pub attachments: Vec<JsonValue>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -86,6 +87,15 @@ fn normalize_guide_status(value: Option<&str>) -> Option<String> {
     }
 }
 
+fn parse_attachments_json(value: String) -> Vec<JsonValue> {
+    serde_json::from_str::<Vec<JsonValue>>(&value).unwrap_or_default()
+}
+
+fn attachments_json(attachments: Option<Vec<JsonValue>>) -> Result<String, String> {
+    serde_json::to_string(&attachments.unwrap_or_default())
+        .map_err(|e| format!("todo attachments: serialize 失败：{e}"))
+}
+
 pub(crate) fn parse_agent_todo_items(values: &[JsonValue]) -> Vec<AgentTodoItem> {
     values
         .iter()
@@ -123,15 +133,16 @@ fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskTodo> {
         source: row.get(5)?,
         priority: row.get(6)?,
         guide_status: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        attachments: parse_attachments_json(row.get(8)?),
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
 fn select_by_task(conn: &Connection, task_id: &str) -> Result<Vec<TaskTodo>, String> {
     let mut stmt = conn
         .prepare(
-            r#"SELECT id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at
+            r#"SELECT id, task_id, text, done, "order", source, priority, guide_status, attachments_json, created_at, updated_at
                FROM task_todos WHERE task_id = ?1 ORDER BY "order" ASC, created_at ASC"#,
         )
         .map_err(|e| format!("todo_list: prepare 失败：{e}"))?;
@@ -210,6 +221,7 @@ pub fn todo_create<R: Runtime>(
     task_id: String,
     text: String,
     priority: Option<String>,
+    attachments: Option<Vec<JsonValue>>,
     app: AppHandle<R>,
     store: State<'_, LiliaStore>,
 ) -> Result<TaskTodo, String> {
@@ -221,6 +233,8 @@ pub fn todo_create<R: Runtime>(
     let id = Uuid::new_v4().to_string();
     let order = next_order(&conn, &task_id)?;
     let now = now_millis();
+    let attachment_values = attachments.unwrap_or_default();
+    let attachment_json = attachments_json(Some(attachment_values.clone()))?;
     let todo = TaskTodo {
         id: id.clone(),
         task_id: task_id.clone(),
@@ -230,13 +244,14 @@ pub fn todo_create<R: Runtime>(
         source: "lilia".to_string(),
         priority: normalize_priority(priority.as_deref()),
         guide_status: Some(GUIDE_STATUS_PENDING.to_string()),
+        attachments: attachment_values,
         created_at: now,
         updated_at: now,
     };
     conn.execute(
         r#"INSERT INTO task_todos
-           (id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"#,
+           (id, task_id, text, done, "order", source, priority, guide_status, attachments_json, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
         params![
             todo.id,
             todo.task_id,
@@ -246,6 +261,7 @@ pub fn todo_create<R: Runtime>(
             todo.source,
             todo.priority,
             todo.guide_status,
+            attachment_json,
             todo.created_at,
             todo.updated_at,
         ],
@@ -433,8 +449,8 @@ pub fn apply_agent_event_impl(
             let id = Uuid::new_v4().to_string();
             conn.execute(
                 r#"INSERT INTO task_todos
-                   (id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at)
-                   VALUES (?1, ?2, ?3, ?4, ?5, 'agent', ?6, NULL, ?7, ?8)"#,
+                   (id, task_id, text, done, "order", source, priority, guide_status, attachments_json, created_at, updated_at)
+                   VALUES (?1, ?2, ?3, ?4, ?5, 'agent', ?6, NULL, '[]', ?7, ?8)"#,
                 params![id, task_id, text, if done { 1 } else { 0 }, order, priority, now, now],
             )
             .map_err(|e| format!("apply_agent_event: insert 失败：{e}"))?;

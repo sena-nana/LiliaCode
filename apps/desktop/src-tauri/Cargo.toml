@@ -26,6 +26,7 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
+ignore = "0.4"
 # 辅助模型连通性测试（GET {baseUrl}/models）的极简同步 HTTP 客户端。
 # rustls-tls：避免依赖 OpenSSL；blocking：用在 Tauri command 同步上下文里，无需引入 tokio。
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

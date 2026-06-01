@@ -4,8 +4,12 @@ import type {
   AgentTimelineEvent,
   AgentTimelineEventKind,
   ChatAttachment,
+  ChatContextSearchResult,
   ChatMessage,
+  TaskTodo,
   TimelineDisplayInput,
+  ToolConsentRequest,
+  ToolConsentResponsePayload,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -56,8 +60,35 @@ export type ChatAttachmentSchemaTypeTest = Assert<
       path: "D:/PROJECT/workspace/Lilia/README.md";
       kind: "file";
       size: 42;
+      exists: true;
+      mime: null;
+      directory: null;
     },
     ChatAttachment
+  >
+>;
+
+export type ChatContextSearchResultSchemaTypeTest = Assert<
+  Extends<
+    {
+      attachment: {
+        id: "att-1";
+        name: "src";
+        path: "D:/PROJECT/workspace/Lilia/src";
+        kind: "directory";
+        size: null;
+        directory: {
+          fileCount: 12;
+          directoryCount: 3;
+          totalSize: 2048;
+          truncated: false;
+          unreadableCount: 0;
+        };
+      };
+      relativePath: "src";
+      matchedBy: "name";
+    },
+    ChatContextSearchResult
   >
 >;
 
@@ -72,6 +103,58 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
       createdAt: 1;
     },
     ChatMessage
+  >
+>;
+
+export type TaskTodoAllowsGuideAttachmentsTypeTest = Assert<
+  Extends<
+    {
+      id: "todo-1";
+      taskId: "task-1";
+      text: "see file";
+      done: false;
+      order: 0;
+      source: "lilia";
+      priority: "normal";
+      guideStatus: "pending";
+      attachments: ChatAttachment[];
+      createdAt: 1;
+      updatedAt: 1;
+    },
+    TaskTodo
+  >
+>;
+
+export type ToolConsentRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "claude";
+      requestId: "tool-1";
+      toolName: "Bash";
+      input: { command: "pwd" };
+      title: null;
+      displayName: null;
+      description: null;
+      blockedPath: null;
+      decisionReason: null;
+      toolUseId: null;
+    },
+    ToolConsentRequest
+  >
+>;
+
+export type ToolConsentResponseUpdatedInputTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      requestId: "tool-1";
+      decision: "allow";
+      message: null;
+      updatedInput: { command: "pwd && echo ok" };
+    },
+    ToolConsentResponsePayload
   >
 >;
 
