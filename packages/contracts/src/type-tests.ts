@@ -6,6 +6,8 @@ import type {
   ChatAttachment,
   ChatMessage,
   TimelineDisplayInput,
+  ToolConsentRequest,
+  ToolConsentResponsePayload,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -72,6 +74,39 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
       createdAt: 1;
     },
     ChatMessage
+  >
+>;
+
+export type ToolConsentRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "claude";
+      requestId: "tool-1";
+      toolName: "Bash";
+      input: { command: "pwd" };
+      title: null;
+      displayName: null;
+      description: null;
+      blockedPath: null;
+      decisionReason: null;
+      toolUseId: null;
+    },
+    ToolConsentRequest
+  >
+>;
+
+export type ToolConsentResponseUpdatedInputTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      requestId: "tool-1";
+      decision: "allow";
+      message: null;
+      updatedInput: { command: "pwd && echo ok" };
+    },
+    ToolConsentResponsePayload
   >
 >;
 

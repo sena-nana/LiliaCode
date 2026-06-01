@@ -69,6 +69,13 @@ const toolConsent: ToolConsentRequest = {
   toolUseId: null,
 };
 
+const bashToolConsent: ToolConsentRequest = {
+  ...toolConsent,
+  requestId: "bash-tool-1",
+  toolName: "Bash",
+  input: { command: "pwd" },
+};
+
 function renderRunningComposer() {
   return render(ChatComposer, {
     props: {
@@ -371,5 +378,65 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     expect(view.emitted("resolve-tool-consent")?.[0]).toEqual(["allow", undefined]);
+  });
+
+  it("pending Bash 授权显示完整命令框，点击可编辑且取消会重置草稿", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        toolConsent: bashToolConsent,
+      },
+    });
+
+    expect(view.getByText("COMMAND")).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
+
+    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
+    expect(view.getByRole("textbox", { name: "编辑命令" })).toHaveValue("pwd");
+    expect(view.getByText("正在编辑命令。")).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "取消" })).toBeEnabled();
+
+    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
+    await fireEvent.click(view.getByRole("button", { name: "取消" }));
+
+    expect(view.queryByRole("textbox", { name: "编辑命令" })).toBeNull();
+    expect(view.queryByText("正在编辑命令。")).toBeNull();
+    expect(view.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
+  });
+
+  it("pending Bash 授权同意时返回用户修改后的 updatedInput", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        toolConsent: bashToolConsent,
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
+    await fireEvent.click(view.getByRole("button", { name: "同意" }));
+
+    expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([
+      "allow",
+      undefined,
+      { command: "pwd && echo ok" },
+    ]);
+  });
+
+  it("pending Bash 授权编辑为空命令时不能同意", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        toolConsent: bashToolConsent,
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "   ");
+
+    expect(view.getByRole("button", { name: "同意" })).toBeDisabled();
   });
 });

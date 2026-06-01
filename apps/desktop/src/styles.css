@@ -4047,6 +4047,55 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
+.editable-command {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.editable-command__preview {
+  width: 100%;
+  text-align: left;
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editable-command__preview:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.editable-command__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  max-height: 176px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editable-command__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.editable-command__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .timeline-pending-action {
   width: 100%;
   max-width: 100%;

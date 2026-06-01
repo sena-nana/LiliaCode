@@ -369,6 +369,36 @@ export interface ChatModelOption {
   backend: ChatBackendKind;
 }
 
+export type ToolConsentDecision = "allow" | "deny";
+export type ToolConsentUpdatedInput = Record<string, unknown>;
+
+/**
+ * runner 通过 canUseTool 把工具调用授权请求转给 UI，UI 再把用户决策写回 runner。
+ * updatedInput 只出现在响应侧，用于少数可编辑授权项（当前是 Bash command）。
+ */
+export interface ToolConsentRequest {
+  taskId: string;
+  turnId: string;
+  backend: ChatBackendKind;
+  requestId: string;
+  toolName: string;
+  input: ToolConsentUpdatedInput;
+  title: string | null;
+  displayName: string | null;
+  description: string | null;
+  blockedPath: string | null;
+  decisionReason: string | null;
+  toolUseId: string | null;
+}
+
+export interface ToolConsentResponsePayload {
+  taskId: string;
+  requestId: string;
+  decision: ToolConsentDecision;
+  message: string | null;
+  updatedInput?: ToolConsentUpdatedInput;
+}
+
 /**
  * Agent 交互偏好。全局生效，不跟随单个 task 的 composer state。
  */

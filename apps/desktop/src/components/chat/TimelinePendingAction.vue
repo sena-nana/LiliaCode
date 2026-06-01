@@ -12,12 +12,14 @@ import {
 } from "lucide-vue-next";
 import type { AskUserResult } from "@lilia/contracts";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
+import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type { ToolConsentDecision } from "../../services/chat";
+import EditableCommandBlock from "./EditableCommandBlock.vue";
 
 const props = defineProps<{
   action: PendingAgentAction;
@@ -74,6 +76,15 @@ const toolRequest = computed(() =>
 );
 const { toolDanger, toolIcon, toolHeadline, toolInputJson, toolSubtitle } =
   useToolConsentPresentation(toolRequest);
+const {
+  commandDraft: toolCommandDraft,
+  isEditingCommand: isEditingToolCommand,
+  hasEditableCommand,
+  commandIsEmpty: toolCommandIsEmpty,
+  updatedCommandInput,
+  beginCommandEdit,
+  cancelCommandEdit,
+} = useEditableToolCommand(toolRequest);
 const hasFreeformText = computed(() => freeformText.value.trim().length > 0);
 const hasToolMessage = computed(() => toolMessage.value.trim().length > 0);
 
@@ -89,7 +100,9 @@ function resolveAsk(result: AskUserResult) {
 
 function decideTool(decision: ToolConsentDecision) {
   if (props.action.kind !== "tool_consent" || toolSubmitting.value) return;
+  if (decision === "allow" && toolCommandIsEmpty.value) return;
   toolSubmitting.value = decision;
+  const updatedInput = decision === "allow" ? updatedCommandInput.value : undefined;
   emit("resolve", {
     kind: "tool_consent",
     requestId: props.action.requestId,
@@ -97,6 +110,7 @@ function decideTool(decision: ToolConsentDecision) {
     message: decision === "deny"
       ? toolMessage.value.trim() || "用户拒绝了此次工具调用"
       : undefined,
+    ...(updatedInput ? { updatedInput } : {}),
   });
 }
 
@@ -111,7 +125,11 @@ watch(actionKey, () => {
   <section
     v-if="props.action.kind === 'tool_consent' && toolRequest"
     class="timeline-pending-action composer-inline composer-inline--tool"
-    :class="{ 'composer-inline--danger': toolDanger, 'is-expanded': toolExpanded }"
+    :class="{
+      'composer-inline--danger': toolDanger,
+      'is-expanded': toolExpanded,
+      'is-editing-command': isEditingToolCommand,
+    }"
     role="alert"
     aria-live="assertive"
   >
@@ -138,6 +156,12 @@ watch(actionKey, () => {
         {{ toolExpanded ? "收起" : "查看入参" }}
       </button>
     </div>
+    <EditableCommandBlock
+      v-if="hasEditableCommand"
+      v-model="toolCommandDraft"
+      :editing="isEditingToolCommand"
+      @begin-edit="beginCommandEdit"
+    />
     <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
     <div class="timeline-pending-action__row">
       <textarea
@@ -150,19 +174,19 @@ watch(actionKey, () => {
         <button
           type="button"
           class="ghost composer-inline__btn"
-          :disabled="toolSubmitting !== null || !hasToolMessage"
-          @click="decideTool('deny')"
+          :disabled="toolSubmitting !== null || (!isEditingToolCommand && !hasToolMessage)"
+          @click="isEditingToolCommand ? cancelCommandEdit() : decideTool('deny')"
         >
-          {{ toolSubmitting === "deny" ? "处理中..." : hasToolMessage ? "修改" : "忽略" }}
+          {{ toolSubmitting === "deny" ? "处理中..." : isEditingToolCommand ? "取消" : hasToolMessage ? "修改" : "忽略" }}
         </button>
         <button
           type="button"
           class="primary composer-inline__btn"
-        :disabled="toolSubmitting !== null"
-        @click="decideTool('allow')"
-      >
+          :disabled="toolSubmitting !== null || toolCommandIsEmpty"
+          @click="decideTool('allow')"
+        >
           {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
-      </button>
+        </button>
       </div>
     </div>
   </section>

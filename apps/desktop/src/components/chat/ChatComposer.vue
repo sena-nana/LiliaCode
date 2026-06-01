@@ -27,13 +27,16 @@ import type {
   PermissionMode,
 } from "@lilia/contracts";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
+import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
+  ToolConsentUpdatedInput,
 } from "../../services/chat";
 import Dropdown from "../Dropdown.vue";
+import EditableCommandBlock from "./EditableCommandBlock.vue";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -50,7 +53,11 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
   "resolve-ask-user": [result: AskUserResult];
-  "resolve-tool-consent": [decision: ToolConsentDecision, message?: string];
+  "resolve-tool-consent": [
+    decision: ToolConsentDecision,
+    message?: string,
+    updatedInput?: ToolConsentUpdatedInput,
+  ];
   interrupt: [];
 }>();
 
@@ -150,6 +157,15 @@ const {
   toolInputJson,
   toolSubtitle,
 } = useToolConsentPresentation(activeToolConsent);
+const {
+  commandDraft: toolCommandDraft,
+  isEditingCommand: isEditingToolCommand,
+  hasEditableCommand,
+  commandIsEmpty: toolCommandIsEmpty,
+  updatedCommandInput,
+  beginCommandEdit,
+  cancelCommandEdit,
+} = useEditableToolCommand(activeToolConsent);
 
 const inputPlaceholder = computed(() => {
   if (activeToolConsent.value) return "输入拒绝理由，Enter 拒绝此次调用";
@@ -332,11 +348,17 @@ function onInlineKeydown(e: KeyboardEvent) {
 function decideToolConsent(decision: ToolConsentDecision, explicitMessage?: string) {
   const c = activeToolConsent.value;
   if (!c || toolSubmitting.value) return;
+  if (decision === "allow" && toolCommandIsEmpty.value) return;
   toolSubmitting.value = decision;
   const message = decision === "deny"
     ? explicitMessage?.trim() || pendingInputText.value || "用户拒绝了此次工具调用"
     : undefined;
-  emit("resolve-tool-consent", decision, message);
+  const updatedInput = decision === "allow" ? updatedCommandInput.value : undefined;
+  if (updatedInput) {
+    emit("resolve-tool-consent", decision, message, updatedInput);
+  } else {
+    emit("resolve-tool-consent", decision, message);
+  }
   if (decision === "deny") pendingText.value = "";
 }
 
@@ -532,7 +554,11 @@ onBeforeUnmount(() => {
           <section
             v-else-if="activeToolConsent"
             class="composer-inline composer-inline--tool"
-            :class="{ 'composer-inline--danger': toolDanger, 'is-expanded': toolExpanded }"
+            :class="{
+              'composer-inline--danger': toolDanger,
+              'is-expanded': toolExpanded,
+              'is-editing-command': isEditingToolCommand,
+            }"
             role="alert"
             aria-live="assertive"
           >
@@ -547,7 +573,12 @@ onBeforeUnmount(() => {
                   <span class="composer-inline__tool-name">{{ activeToolConsent.toolName }}</span>
                   <span class="composer-inline__headline">{{ toolHeadline }}</span>
                 </div>
-                <p v-if="toolInlinePreview" class="composer-inline__preview-line">{{ toolInlinePreview }}</p>
+                <p
+                  v-if="toolInlinePreview && !hasEditableCommand"
+                  class="composer-inline__preview-line"
+                >
+                  {{ toolInlinePreview }}
+                </p>
                 <p v-if="toolSubtitle" class="composer-inline__subtitle">{{ toolSubtitle }}</p>
               </div>
 
@@ -566,6 +597,13 @@ onBeforeUnmount(() => {
                 {{ toolExpanded ? "收起" : "查看入参" }}
               </button>
             </div>
+
+            <EditableCommandBlock
+              v-if="hasEditableCommand"
+              v-model="toolCommandDraft"
+              :editing="isEditingToolCommand"
+              @begin-edit="beginCommandEdit"
+            />
 
             <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
           </section>
@@ -653,16 +691,16 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="ghost composer-inline__btn"
-              :disabled="toolSubmitting !== null || !hasPendingInputText"
-              @click="decideToolConsent('deny')"
+              :disabled="toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
+              @click="isEditingToolCommand ? cancelCommandEdit() : decideToolConsent('deny')"
             >
-              {{ toolSubmitting === "deny" ? "处理中..." : hasPendingInputText ? "修改" : "忽略" }}
+              {{ toolSubmitting === "deny" ? "处理中..." : isEditingToolCommand ? "取消" : hasPendingInputText ? "修改" : "忽略" }}
             </button>
             <button
               type="button"
               class="composer-inline__btn"
               :class="toolDanger ? 'ghost danger' : 'primary'"
-              :disabled="toolSubmitting !== null"
+              :disabled="toolSubmitting !== null || toolCommandIsEmpty"
               @click="decideToolConsent('allow')"
             >
               {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}

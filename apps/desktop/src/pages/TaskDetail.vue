@@ -59,6 +59,7 @@ import {
   sendMessage,
   setComposerState,
   type ToolConsentDecision,
+  type ToolConsentUpdatedInput,
 } from "../services/chat";
 import {
   loadAgentInteractionSettings,
@@ -408,11 +409,12 @@ function onResolveAskUser(result: AskUserResult) {
 async function onResolveToolConsent(
   decision: ToolConsentDecision,
   message?: string,
+  updatedInput?: ToolConsentUpdatedInput,
 ) {
   const request = pendingToolConsent.value;
   if (!request) return;
   try {
-    await respondConsent(request.taskId, request.requestId, decision, message);
+    await respondConsent(request.taskId, request.requestId, decision, message, updatedInput);
   } catch (err) {
     console.error("[tool-consent] respond failed", err);
   }
@@ -430,6 +432,7 @@ async function onResolvePendingAgentAction(resolution: PendingAgentActionResolut
         request.requestId,
         resolution.decision,
         resolution.message,
+        resolution.updatedInput,
       );
     } catch (err) {
       console.error("[tool-consent] respond failed", err);

@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AskUserSpec } from "@lilia/contracts";
@@ -217,6 +217,43 @@ function emitToolConsentTimelineEvent(taskId: string) {
       toolName: "Write",
       input: { file_path: "src/main.ts" },
       path: "src/main.ts",
+      permissionRequest: true,
+    },
+  });
+}
+
+function emitBashToolConsentRequest(taskId: string) {
+  emitTauriEvent("chat:tool-consent-request", {
+    taskId,
+    turnId: "turn-bash",
+    backend: "claude",
+    requestId: `bash-tool-${taskId}`,
+    toolName: "Bash",
+    input: { command: "pwd" },
+    title: null,
+    displayName: null,
+    description: null,
+    blockedPath: null,
+    decisionReason: null,
+    toolUseId: "bash-tool-use",
+  });
+}
+
+function emitBashToolConsentTimelineEvent(taskId: string) {
+  emitMockTimelineEvent(taskId, {
+    id: `bash-tool-card-${taskId}`,
+    kind: "command",
+    status: "requires_action",
+    title: "Bash",
+    summary: "pwd",
+    turnId: "turn-bash",
+    payload: {
+      backend: "claude",
+      interaction: "tool_consent",
+      requestId: `bash-tool-${taskId}`,
+      toolName: "Bash",
+      input: { command: "pwd" },
+      command: "pwd",
       permissionRequest: true,
     },
   });
@@ -457,6 +494,7 @@ describe("chat AskUser prompt", () => {
         requestId: "tool-t-002",
         decision: "deny",
         message: "先不要写这个文件",
+        updatedInput: null,
       }, undefined);
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
@@ -487,6 +525,64 @@ describe("chat AskUser prompt", () => {
         requestId: "tool-t-002",
         decision: "deny",
         message: "先不要写这个文件",
+        updatedInput: null,
+      }, undefined);
+    });
+  });
+
+  it("Bash 工具授权在 composer 中可编辑命令并同意回写 updatedInput", async () => {
+    const view = await renderTaskDetail();
+
+    emitBashToolConsentRequest("t-002");
+
+    const prompt = await view.findByRole("alert");
+    const promptView = within(prompt);
+    expect(promptView.getByText("COMMAND")).toBeInTheDocument();
+    expect(promptView.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
+
+    await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
+    await fireEvent.click(view.getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
+        taskId: "t-002",
+        requestId: "bash-tool-t-002",
+        decision: "allow",
+        message: null,
+        updatedInput: { command: "pwd && echo ok" },
+      }, undefined);
+    });
+  });
+
+  it("非打断模式的 Bash 时间线待授权卡片可编辑命令并同意回写 updatedInput", async () => {
+    await enableNonInterruptMode();
+    const view = await renderTaskDetail();
+
+    emitBashToolConsentRequest("t-002");
+    emitBashToolConsentTimelineEvent("t-002");
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer .composer-inline--tool")).toBeNull();
+    });
+    const prompt = view.container.querySelector(".timeline-pending-action.composer-inline--tool");
+    expect(prompt).not.toBeNull();
+    const promptView = within(prompt as HTMLElement);
+
+    expect(promptView.getByText("COMMAND")).toBeInTheDocument();
+    expect(promptView.getByRole("button", { name: "编辑完整命令" })).toHaveTextContent("pwd");
+
+    await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
+    await fireEvent.click(promptView.getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
+        taskId: "t-002",
+        requestId: "bash-tool-t-002",
+        decision: "allow",
+        message: null,
+        updatedInput: { command: "pwd && echo ok" },
       }, undefined);
     });
   });

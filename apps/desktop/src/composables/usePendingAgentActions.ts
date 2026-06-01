@@ -4,6 +4,7 @@ import type { PendingAsk } from "./useAskUser";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
+  ToolConsentUpdatedInput,
 } from "../services/chat";
 
 export type PendingAgentActionKind = "tool_consent" | "ask_user" | "plan_approval";
@@ -30,6 +31,7 @@ export type PendingAgentActionResolution =
       requestId: string;
       decision: ToolConsentDecision;
       message?: string;
+      updatedInput?: ToolConsentUpdatedInput;
     }
   | {
       kind: "ask_user" | "plan_approval";

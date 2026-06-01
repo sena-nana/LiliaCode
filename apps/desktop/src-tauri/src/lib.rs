@@ -1776,15 +1776,21 @@ fn chat_respond_tool_consent(
     request_id: String,
     decision: String,
     message: Option<String>,
+    updated_input: Option<JsonValue>,
     store: State<'_, ChatStore>,
 ) -> Result<(), String> {
     let decision_norm = if decision == "allow" { "allow" } else { "deny" };
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "type": "consent_response",
         "id": request_id,
         "decision": decision_norm,
         "message": message.unwrap_or_default(),
     });
+    if let Some(value) = updated_input {
+        if !value.is_null() {
+            payload["updatedInput"] = value;
+        }
+    }
     let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     line.push('\n');
 
