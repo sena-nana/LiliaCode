@@ -2427,6 +2427,7 @@ function emitCodexRuntimeExtensionsTimeline(extensions) {
       : "未发现 Codex MCP server",
     payload: {
       backend: "codex",
+      subkind: "config",
       source: "config.toml",
       configPath: extensions.configPath,
       serverCount: count,

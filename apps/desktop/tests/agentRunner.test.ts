@@ -61,4 +61,10 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toContain('emit: (text) => emitAssistantMessageTimeline(text, "running", "codex")');
     expect(runnerSource).toContain('emitAssistantMessageTimeline(finalText, "success", "codex")');
   });
+
+  it("Codex MCP 配置发现事件带 config 子分类，真实 MCP 调用仍由 mcp_tool_call 映射", () => {
+    expect(runnerSource).toMatch(/case "mcp_tool_call":\s*return \{ kind: "mcp" \};/);
+    expect(runnerSource).toContain('title: "Codex MCP config"');
+    expect(runnerSource).toMatch(/payload:\s*\{[\s\S]*?subkind:\s*"config"[\s\S]*?source:\s*"config\.toml"/);
+  });
 });

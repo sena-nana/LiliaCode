@@ -213,6 +213,23 @@ function buildByKind({ kind, status, title, summary, payload }: KindBuildInput):
           .filter((d): d is AgentTimelineDisplayDetail => d !== null),
       };
     case "mcp": {
+      if (isCodexMcpConfigEvent(payload)) {
+        const count = typeof payload.serverCount === "number" && Number.isFinite(payload.serverCount)
+          ? payload.serverCount
+          : Array.isArray(payload.servers)
+            ? payload.servers.length
+            : null;
+        return {
+          icon: "plug",
+          label: "Codex MCP 配置",
+          preview: summary || (count && count > 0
+            ? `已发现 ${count} 个 MCP server`
+            : "未发现 Codex MCP server"),
+          details: [fieldsDetail([
+            displayField("config", pick(payload, ["configPath"])),
+          ])].filter((d): d is AgentTimelineDisplayDetail => d !== null),
+        };
+      }
       const target = [
         readFirstString(payload, ["server", "serverName", "mcpServer"], 200),
         readFirstString(payload, ["tool", "toolName", "name"], 200),
@@ -313,6 +330,10 @@ function buildByKind({ kind, status, title, summary, payload }: KindBuildInput):
       };
     }
   }
+}
+
+function isCodexMcpConfigEvent(payload: Record<string, unknown>): boolean {
+  return payload.subkind === "config" || payload.source === "config.toml";
 }
 
 interface DisplayContext {

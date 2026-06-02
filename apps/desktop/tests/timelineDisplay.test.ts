@@ -242,6 +242,42 @@ describe("timeline display derivation", () => {
     expect(codeContent(outputDisplay.details, "OUTPUT")).toBe("found docs");
   });
 
+  it("Codex MCP 配置发现不显示为 MCP 调用", () => {
+    const display = deriveTimelineDisplay({
+      kind: "mcp",
+      status: "info",
+      title: "Codex MCP config",
+      summary: "已注册 2 个 MCP server",
+      payload: {
+        backend: "codex",
+        subkind: "config",
+        source: "config.toml",
+        configPath: "C:\\Users\\Administrator\\.codex\\config.toml",
+        serverCount: 2,
+        servers: ["node_repl", "browser"],
+      },
+    });
+    const event = {
+      kind: "mcp",
+      status: "info" as const,
+      title: "Codex MCP config",
+      summary: "已注册 2 个 MCP server",
+      payload: {
+        backend: "codex",
+        subkind: "config",
+        source: "config.toml",
+        servers: ["node_repl", "browser"],
+      },
+    };
+
+    expect(display.label).toBe("Codex MCP 配置");
+    expect(display.action).toBeUndefined();
+    expect(timelineEventLabel(event)).toBe("Codex MCP 配置");
+    expect(timelineInlinePreview(event)).toBe("已注册 2 个 MCP server");
+    expect(display.group).toBeUndefined();
+    expect(listItems(display.details)).toEqual([]);
+  });
+
   it("兜底工具只展示输入输出，不重复工具名字段", () => {
     const display = deriveTimelineDisplay({
       kind: "tool",

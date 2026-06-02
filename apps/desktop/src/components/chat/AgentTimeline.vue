@@ -419,6 +419,7 @@ function processEventsSummary(
 
 function processEventCategoryLabel(event: AgentTimelineEvent): string {
   const declared = timelineDeclaredGroupUnit(event);
+  if (!declared) return "";
   const key = declared?.key ?? event.kind;
   return PROCESS_CATEGORY_LABELS[key] ?? PROCESS_CATEGORY_LABELS[event.kind] ?? "";
 }
