@@ -1,5 +1,7 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import { normalizeClaudeTool } from "../../../packages/contracts/src/claudeTools.mjs";
@@ -57,6 +59,10 @@ function timelineEvent(
     turnSeq: patch.turnSeq ?? 1,
     intraTurnOrder: patch.intraTurnOrder ?? 1,
   };
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
 }
 
 describe("timeline display derivation", () => {
@@ -272,6 +278,99 @@ describe("timeline display derivation", () => {
 });
 
 describe("timeline event expansion", () => {
+  it.each(["info", "requires_action"] as const)(
+    "MCP %s 状态图标不生成背景状态 class",
+    (status) => {
+      const view = render(AgentTimeline, {
+        props: {
+          events: [
+            timelineEvent({
+              id: `mcp-${status}-1`,
+              kind: "mcp",
+              status,
+              title: "docs / search",
+              summary: "docs / search",
+              payload: {
+                server: "docs",
+                tool: "search",
+              },
+            }),
+          ],
+        },
+      });
+
+      const nodes = [...view.container.querySelectorAll(".agent-timeline__node")];
+      expect(nodes).toHaveLength(1);
+      const node = nodes[0];
+      expect([...node.classList]).toEqual(["agent-timeline__node"]);
+    },
+  );
+
+  it("时间线 icon 节点样式不包含背景声明", () => {
+    const css = readFileSync(resolve(__dirname, "../src/styles.css"), "utf8");
+    const nodeRuleBodies = [...css.matchAll(/\.agent-timeline__node[^{]*\{([^}]*)\}/g)]
+      .map((match) => match[1]);
+
+    expect(nodeRuleBodies.length).toBeGreaterThan(0);
+    for (const body of nodeRuleBodies) {
+      expect(body).not.toMatch(/\bbackground(?:-color)?\s*:/);
+    }
+  });
+
+  it("折叠的过程事件不参与 rail 避让计算", async () => {
+    const view = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "tool-1",
+            kind: "mcp",
+            status: "success",
+            title: "docs / search",
+            summary: "docs / search",
+            payload: {
+              server: "docs",
+              tool: "search",
+            },
+            turnId: "turn-1",
+            turnSeq: 1,
+            intraTurnOrder: 1,
+          }),
+          timelineEvent({
+            id: "reply-1",
+            kind: "message",
+            status: "success",
+            title: "Assistant",
+            summary: "done",
+            payload: {
+              role: "assistant",
+              content: "功能测试全部通过。\n\n还有什么需要继续测试的吗？",
+            },
+            turnId: "turn-1",
+            turnSeq: 1,
+            intraTurnOrder: 2,
+          }),
+          timelineEvent({
+            id: "turn-end-1",
+            kind: "turn",
+            status: "success",
+            title: "turn done",
+            summary: "",
+            payload: {},
+            turnId: "turn-1",
+            turnSeq: 1,
+            intraTurnOrder: 3,
+          }),
+        ],
+      },
+    });
+
+    await nextFrame();
+    await nextFrame();
+
+    const railLine = view.container.querySelector<HTMLElement>(".agent-timeline__rail-line");
+    expect(railLine?.style.maskImage).toBe("");
+    expect(railLine?.style.webkitMaskImage).toBe("");
+  });
 
   it("有详情事件仍可展开", async () => {
     const view = render(AgentTimeline, {

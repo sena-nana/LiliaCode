@@ -2342,6 +2342,7 @@ button.ghost:hover {
   --agent-timeline-color: var(--text-muted);
   --agent-timeline-rail-offset: 28px;
 
+  position: relative;
   width: min(100%, calc(760px + var(--agent-timeline-rail-offset)));
   margin: 0 auto;
   padding-right: var(--agent-timeline-rail-offset);
@@ -2362,19 +2363,24 @@ button.ghost:hover {
   position: relative;
 }
 
-/* 贯穿整个列表的左侧轨道线。节点容器用 --bg 自身把线"咬"开,
- * 不需要 mask；用户消息行也用 --bg 盖住,让 rail 在对话中"让位"。 */
-.agent-timeline__list::before {
-  content: "";
+.agent-timeline__rail-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 28px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.agent-timeline__rail-line {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 14px;
-  margin-left: -0.5px;
+  transform: translateX(-0.5px);
   width: 1px;
   background: var(--border-soft);
-  z-index: 0;
-  pointer-events: none;
 }
 
 .agent-timeline__list > li {
@@ -2454,7 +2460,7 @@ button.ghost:hover {
   gap: 7px;
 }
 
-/* 节点容器:22px 圆,bg = --bg 自然把背后的 rail 线打断 */
+/* 节点容器只承载 lucide 图标，不承载背景色。 */
 .agent-timeline__node {
   position: relative;
   z-index: 1;
@@ -2462,29 +2468,21 @@ button.ghost:hover {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--bg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text-faint);
-  transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+  transition: color 0.18s ease, opacity 0.18s ease;
 }
 
-.agent-timeline__node--pending {
-  border: 1px dashed var(--border-strong);
-}
-
-.agent-timeline__node--running {
+.agent-timeline__item:is(.is-status-running, .is-status-started, .is-status-in-progress) .agent-timeline__node,
+.agent-timeline__group-item:is(.is-status-running, .is-status-started, .is-status-in-progress) .agent-timeline__node {
   color: var(--accent);
 }
 
-.agent-timeline__node--failed {
+.agent-timeline__item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__node,
+.agent-timeline__group-item:is(.is-status-failed, .is-status-error, .is-status-cancelled) .agent-timeline__node {
   color: var(--err);
-}
-
-.agent-timeline__node--warn {
-  background: var(--warn-soft);
-  color: var(--warn);
 }
 
 .agent-timeline__head {
@@ -2755,7 +2753,6 @@ button.ghost:hover {
 
 .agent-timeline__item--plan .agent-timeline__node,
 .agent-timeline__group-item--plan .agent-timeline__node {
-  background: transparent;
   color: var(--text-muted);
 }
 
