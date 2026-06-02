@@ -287,7 +287,7 @@ describe("ChatComposer", () => {
     expect(view.emitted("send")).toBeUndefined();
   });
 
-  it("@ 普通无结果继续输入会自动收起，删回裸 @ 后重新打开", async () => {
+  it("@ 普通无结果继续输入会自动收起搜索面板", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -302,15 +302,31 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "@zzzzz");
     await waitFor(() => {
-      expect(view.queryByText("没有匹配的文件或目录")).toBeNull();
+      expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
     });
-
-    await setComposerText(view, "@");
-    await flushContextSearch();
-    expect(view.getByText("README.md")).toBeInTheDocument();
   });
 
-  it("@ 路径型无结果继续输入时仍保留搜索提示", async () => {
+  it("@ 无结果自动收起后删回裸 @ 会重新打开搜索面板", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+
+    await setComposerText(view, "@zzzz");
+    await flushContextSearch();
+    await setComposerText(view, "@zzzzz");
+    await waitFor(() => {
+      expect(view.queryByRole("listbox", { name: "文件上下文搜索" })).toBeNull();
+    });
+    await setComposerText(view, "@");
+    await flushContextSearch();
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+  });
+
+  it("@ 路径型无结果继续输入时不会自动收起搜索面板", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -325,7 +341,7 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "@dist/not-there-more");
     await flushContextSearch();
-    expect(view.getByText("没有匹配的文件或目录")).toBeInTheDocument();
+    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
   });
 
   it("文本粘贴会转成纯文本并去除富文本样式", async () => {
