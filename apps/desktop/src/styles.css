@@ -3547,7 +3547,7 @@ button.ghost:hover {
   background: var(--bg-subtle);
   color: var(--text);
   line-height: 1.25;
-  vertical-align: text-bottom;
+  vertical-align: middle;
   white-space: nowrap;
 }
 

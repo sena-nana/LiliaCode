@@ -163,7 +163,6 @@ const contextSuppressedKey = ref<string | null>(null);
 const contextNoMatchSuppression = ref<{
   start: number;
   query: string;
-  active: boolean;
 } | null>(null);
 const contextUserInteracted = ref(false);
 let contextSearchSeq = 0;
@@ -355,38 +354,14 @@ function readMentionRange(text: string, cursor: number): MentionRange | null {
 
 function isContextAutoSuppressed(range: MentionRange): boolean {
   const suppression = contextNoMatchSuppression.value;
-  return suppression?.active === true &&
-    suppression.start === range.start &&
-    range.query.trim().length > 0;
+  if (!suppression || suppression.start !== range.start) return false;
+  if (range.query.trim().length === 0 || isContextPathQueryLike(range.query)) return false;
+  return range.query.length > suppression.query.length &&
+    range.query.startsWith(suppression.query);
 }
 
 function isContextPathQueryLike(value: string): boolean {
   return value.includes("/") || value.includes("\\");
-}
-
-function updateContextAutoSuppression(range: MentionRange | null) {
-  if (!range) {
-    contextNoMatchSuppression.value = null;
-    return;
-  }
-  const query = range.query.trim();
-  if (query.length === 0) {
-    contextNoMatchSuppression.value = null;
-    return;
-  }
-  if (isContextPathQueryLike(range.query)) {
-    contextNoMatchSuppression.value = null;
-    return;
-  }
-  const suppression = contextNoMatchSuppression.value;
-  if (!suppression || suppression.start !== range.start) {
-    contextNoMatchSuppression.value = null;
-    return;
-  }
-  if (range.query.length > suppression.query.length &&
-    range.query.startsWith(suppression.query)) {
-    contextNoMatchSuppression.value = { ...suppression, active: true };
-  }
 }
 
 function updateInputSelection() {
@@ -1028,8 +1003,9 @@ async function refreshContextSearch(range: MentionRange | null) {
     contextNoMatchSuppression.value = results.length === 0 &&
       !missingPath &&
       !searchError &&
-      query.length > 0
-      ? { start: range.start, query: range.query, active: false }
+      query.length > 0 &&
+      !isContextPathQueryLike(range.query)
+      ? { start: range.start, query: range.query }
       : null;
   } catch (err) {
     if (seq !== contextSearchSeq) return;
@@ -1364,7 +1340,6 @@ watch(
     props.projectCwd ?? "",
   ] as const,
   () => {
-    updateContextAutoSuppression(mentionRange.value);
     void refreshContextSearch(mentionRange.value);
   },
   { immediate: true },
