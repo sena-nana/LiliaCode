@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type { ChatImageViewerSource } from "./imageViewer";
 
@@ -11,13 +11,16 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const MIN_SCALE = 1;
-const MAX_SCALE = 6;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
 const WHEEL_SCALE_STEP = 0.0016;
+const MIN_VISIBLE_COVERAGE_RATIO = 0.75;
 
+const stageRef = ref<HTMLElement | null>(null);
+const stageSize = ref({ width: 0, height: 0 });
 const naturalWidth = ref<number | null>(null);
 const naturalHeight = ref<number | null>(null);
-const scale = ref(1);
+const zoom = ref(1);
 const offset = ref({ x: 0, y: 0 });
 const drag = ref<{
   pointerId: number;
@@ -26,10 +29,33 @@ const drag = ref<{
   originX: number;
   originY: number;
 } | null>(null);
+let resizeObserver: ResizeObserver | null = null;
 
-const canDrag = computed(() => scale.value > MIN_SCALE);
+const fitScale = computed(() => {
+  const width = naturalWidth.value;
+  const height = naturalHeight.value;
+  const stageWidth = stageSize.value.width;
+  const stageHeight = stageSize.value.height;
+  if (!width || !height || !stageWidth || !stageHeight) return 1;
+  return Math.min(1, stageWidth / width, stageHeight / height);
+});
+const fittedWidth = computed(() =>
+  naturalWidth.value ? naturalWidth.value * fitScale.value : null
+);
+const fittedHeight = computed(() =>
+  naturalHeight.value ? naturalHeight.value * fitScale.value : null
+);
+const renderedWidth = computed(() =>
+  fittedWidth.value ? fittedWidth.value * zoom.value : null
+);
+const renderedHeight = computed(() =>
+  fittedHeight.value ? fittedHeight.value * zoom.value : null
+);
+const canDrag = computed(() => zoom.value > MIN_ZOOM);
 const imageStyle = computed<CSSProperties>(() => ({
-  transform: `translate3d(${offset.value.x}px, ${offset.value.y}px, 0) scale(${scale.value})`,
+  width: fittedWidth.value ? `${fittedWidth.value}px` : undefined,
+  height: fittedHeight.value ? `${fittedHeight.value}px` : undefined,
+  transform: `translate3d(${offset.value.x}px, ${offset.value.y}px, 0) scale(${zoom.value})`,
   cursor: drag.value ? "grabbing" : canDrag.value ? "grab" : "default",
 }));
 const metadataText = computed(() => {
@@ -48,15 +74,72 @@ watch(
   () => {
     naturalWidth.value = null;
     naturalHeight.value = null;
-    scale.value = MIN_SCALE;
+    zoom.value = MIN_ZOOM;
     offset.value = { x: 0, y: 0 };
     drag.value = null;
+    updateStageSize();
   },
   { immediate: true },
 );
 
+watch(
+  () => [
+    fittedWidth.value,
+    fittedHeight.value,
+    stageSize.value.width,
+    stageSize.value.height,
+  ],
+  normalizeOffset,
+);
+
+onMounted(() => {
+  updateStageSize();
+  if (typeof ResizeObserver === "function" && stageRef.value) {
+    resizeObserver = new ResizeObserver(updateStageSize);
+    resizeObserver.observe(stageRef.value);
+  }
+  window.addEventListener("resize", updateStageSize);
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  window.removeEventListener("resize", updateStageSize);
+});
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampAxisOffset(value: number, renderedSize: number | null, viewportSize: number): number {
+  if (!renderedSize || !viewportSize) return 0;
+  const requiredCoverage = viewportSize * MIN_VISIBLE_COVERAGE_RATIO;
+  if (renderedSize < requiredCoverage) return 0;
+  const max = (viewportSize + renderedSize) / 2 - requiredCoverage;
+  return clamp(value, -max, max);
+}
+
+function clampOffset(value: { x: number; y: number }) {
+  if (!canDrag.value) return { x: 0, y: 0 };
+  return {
+    x: clampAxisOffset(value.x, renderedWidth.value, stageSize.value.width),
+    y: clampAxisOffset(value.y, renderedHeight.value, stageSize.value.height),
+  };
+}
+
+function normalizeOffset() {
+  offset.value = clampOffset(offset.value);
+}
+
+function updateStageSize() {
+  const stage = stageRef.value;
+  if (!stage) {
+    stageSize.value = { width: 0, height: 0 };
+    return;
+  }
+  const rect = stage.getBoundingClientRect();
+  const width = rect.width || stage.clientWidth;
+  const height = rect.height || stage.clientHeight;
+  stageSize.value = { width, height };
 }
 
 function onImageLoad(event: Event) {
@@ -64,18 +147,20 @@ function onImageLoad(event: Event) {
   if (!(image instanceof HTMLImageElement)) return;
   naturalWidth.value = image.naturalWidth || null;
   naturalHeight.value = image.naturalHeight || null;
+  updateStageSize();
+  void nextTick(updateStageSize);
 }
 
 function onWheel(event: WheelEvent) {
   event.preventDefault();
-  const nextScale = clamp(
-    scale.value * (1 - event.deltaY * WHEEL_SCALE_STEP),
-    MIN_SCALE,
-    MAX_SCALE,
+  const nextZoom = clamp(
+    zoom.value * (1 - event.deltaY * WHEEL_SCALE_STEP),
+    MIN_ZOOM,
+    MAX_ZOOM,
   );
-  if (Math.abs(nextScale - scale.value) < 0.001) return;
-  scale.value = nextScale;
-  if (nextScale === MIN_SCALE) offset.value = { x: 0, y: 0 };
+  if (Math.abs(nextZoom - zoom.value) < 0.001) return;
+  zoom.value = nextZoom;
+  normalizeOffset();
 }
 
 function onImagePointerDown(event: PointerEvent) {
@@ -95,10 +180,10 @@ function onImagePointerDown(event: PointerEvent) {
 function onImagePointerMove(event: PointerEvent) {
   const state = drag.value;
   if (!state || event.pointerId !== state.pointerId) return;
-  offset.value = {
+  offset.value = clampOffset({
     x: state.originX + event.clientX - state.startX,
     y: state.originY + event.clientY - state.startY,
-  };
+  });
 }
 
 function clearDrag(event?: PointerEvent) {
@@ -148,7 +233,7 @@ function formatFileSize(size: number | null | undefined): string {
     @wheel="onWheel"
   >
     <figure class="image-viewer__figure">
-      <div class="image-viewer__stage">
+      <div ref="stageRef" class="image-viewer__stage">
         <img
           class="image-viewer__image"
           :src="image.src"
