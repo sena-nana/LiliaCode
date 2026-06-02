@@ -144,6 +144,8 @@ let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let clipboardFilePaths: string[] = [];
+let clipboardImageSeq = 0;
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 const baseClaudePlugins = [{
   scope: "user",
@@ -312,6 +314,8 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  clipboardFilePaths = [];
+  clipboardImageSeq = 0;
   composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
   claudeMcpServers = baseClaudeMcpServers.map((server) => ({
@@ -595,6 +599,10 @@ export function seedMockChatMessages(taskId: string, messages: unknown[]) {
     ...messageEvents,
     ...(timelineEvents[taskId] ?? []).filter((event) => event.kind !== "message"),
   ];
+}
+
+export function setMockClipboardFilePaths(paths: string[]) {
+  clipboardFilePaths = [...paths];
 }
 
 export const mockListen = vi.fn(async (
@@ -965,6 +973,35 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             : null,
         };
       });
+    }
+
+    case "chat_read_clipboard_file_paths":
+      return [...clipboardFilePaths];
+
+    case "chat_save_clipboard_image": {
+      clipboardImageSeq += 1;
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const mime = typeof input.mime === "string" && input.mime.startsWith("image/")
+        ? input.mime
+        : "image/png";
+      const ext = mime === "image/jpeg"
+        ? "jpg"
+        : mime === "image/webp"
+          ? "webp"
+          : "png";
+      const path = `C:\\Users\\mock\\.lilia\\cache\\clipboard-images\\clipboard-${clipboardImageSeq}.${ext}`;
+      return {
+        id: `clip-${clipboardImageSeq}`,
+        name: `图片 ${clipboardImageSeq}.${ext}`,
+        path,
+        kind: "file",
+        size: 42,
+        exists: true,
+        mime,
+        directory: null,
+      };
     }
 
     case "chat_search_context_attachments": {

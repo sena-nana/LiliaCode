@@ -3463,6 +3463,15 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
+.chat-file-reference:hover,
+.chat-file-reference:focus-visible,
+.chat-attachment-chip--image-preview:hover,
+.chat-attachment-chip--image-preview:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 .chat-file-reference--warning {
   border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
 }
@@ -4719,6 +4728,15 @@ button.ghost:hover {
   background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
 }
 
+.chat-attachment-chip--image-preview {
+  width: 30px;
+  height: 30px;
+  max-width: 30px;
+  padding: 2px;
+  border-radius: 6px;
+  gap: 0;
+}
+
 .chat-attachment-chip__thumb {
   width: 20px;
   height: 20px;
@@ -4727,6 +4745,13 @@ button.ghost:hover {
   object-fit: cover;
   background: var(--bg-elev);
   flex: 0 0 auto;
+}
+
+.chat-attachment-chip--image-preview .chat-attachment-chip__thumb {
+  width: 24px;
+  height: 24px;
+  margin-left: 0;
+  border-radius: 5px;
 }
 
 .chat-attachment-chip__name {

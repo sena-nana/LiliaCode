@@ -5,10 +5,12 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose, Engine as _};
 use ignore::WalkBuilder;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,7 @@ const ROUTER_DIRECT: &str = "direct";
 
 const BACKEND_CLAUDE: &str = "claude";
 const BACKEND_CODEX: &str = "codex";
+static CLIPBOARD_IMAGE_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
 
 // ---------- 契约（与 packages/contracts 同形） ----------
 
@@ -114,6 +117,14 @@ struct ChatContextSearchResult {
     attachment: ChatAttachment,
     relative_path: String,
     matched_by: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipboardImageInput {
+    mime: Option<String>,
+    bytes_base64: String,
+    name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1944,6 +1955,95 @@ fn image_mime_for_path(path: &Path) -> Option<String> {
     Some(mime.to_string())
 }
 
+fn clipboard_image_extension(mime: Option<&str>, name: Option<&str>) -> &'static str {
+    let normalized = mime.unwrap_or("").trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "image/avif" => "avif",
+        "image/bmp" => "bmp",
+        "image/gif" => "gif",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/svg+xml" => "svg",
+        "image/webp" => "webp",
+        _ => name
+            .and_then(|value| Path::new(value).extension())
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .and_then(|ext| match ext.as_str() {
+                "avif" => Some("avif"),
+                "bmp" => Some("bmp"),
+                "gif" => Some("gif"),
+                "jpg" | "jpeg" => Some("jpg"),
+                "png" => Some("png"),
+                "svg" => Some("svg"),
+                "webp" => Some("webp"),
+                _ => None,
+            })
+            .unwrap_or("png"),
+    }
+}
+
+fn normalize_clipboard_image_mime(mime: Option<&str>, ext: &str) -> String {
+    let normalized = mime.unwrap_or("").trim().to_ascii_lowercase();
+    if normalized.starts_with("image/") {
+        return normalized;
+    }
+    match ext {
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        _ => "image/png",
+    }
+    .to_string()
+}
+
+fn clipboard_images_cache_dir(home: &Path) -> PathBuf {
+    home.join("cache").join("clipboard-images")
+}
+
+fn clipboard_image_path(home: &Path, mime: Option<&str>, name: Option<&str>, now: u64) -> PathBuf {
+    let ext = clipboard_image_extension(mime, name);
+    clipboard_images_cache_dir(home).join(format!(
+        "clipboard-{now}-{}.{}",
+        Uuid::new_v4(),
+        ext
+    ))
+}
+
+fn clipboard_image_display_name(ext: &str, seq: u64) -> String {
+    format!("图片 {seq}.{ext}")
+}
+
+fn save_clipboard_image_to_cache(
+    home: &Path,
+    input: ClipboardImageInput,
+    now: u64,
+    display_seq: u64,
+) -> Result<ChatAttachment, String> {
+    let path = clipboard_image_path(home, input.mime.as_deref(), input.name.as_deref(), now);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "无法解析剪贴板图片缓存目录".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("创建剪贴板图片缓存目录失败：{e}"))?;
+    let bytes = general_purpose::STANDARD
+        .decode(input.bytes_base64.trim())
+        .map_err(|e| format!("解析剪贴板图片失败：{e}"))?;
+    fs::write(&path, bytes).map_err(|e| format!("保存剪贴板图片失败：{e}"))?;
+    let mut attachment = describe_attachment_path(path.to_string_lossy().to_string());
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    attachment.name = clipboard_image_display_name(&ext, display_seq);
+    attachment.mime = Some(normalize_clipboard_image_mime(input.mime.as_deref(), &ext));
+    Ok(attachment)
+}
+
 fn scan_directory_meta(path: &Path) -> ChatAttachmentDirectoryMeta {
     let mut meta = ChatAttachmentDirectoryMeta {
         file_count: 0,
@@ -2270,6 +2370,41 @@ fn chat_describe_attachments(paths: Vec<String>) -> Result<Vec<ChatAttachment>, 
         .collect())
 }
 
+#[cfg(windows)]
+fn read_windows_clipboard_file_paths() -> Result<Vec<String>, String> {
+    use clipboard_win::{formats::FileList, Clipboard, Getter};
+
+    let _clipboard = Clipboard::new_attempts(10)
+        .map_err(|e| format!("打开剪贴板失败：{e}"))?;
+    let mut paths = Vec::<String>::new();
+    match FileList.read_clipboard(&mut paths) {
+        Ok(_) => Ok(paths),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+#[cfg(not(windows))]
+fn read_windows_clipboard_file_paths() -> Result<Vec<String>, String> {
+    Ok(Vec::new())
+}
+
+#[tauri::command]
+fn chat_read_clipboard_file_paths() -> Result<Vec<String>, String> {
+    read_windows_clipboard_file_paths().map(|paths| {
+        paths
+            .into_iter()
+            .filter(|path| !path.trim().is_empty())
+            .collect()
+    })
+}
+
+#[tauri::command]
+fn chat_save_clipboard_image(input: ClipboardImageInput) -> Result<ChatAttachment, String> {
+    let home = store::resolve_lilia_home();
+    let display_seq = CLIPBOARD_IMAGE_DISPLAY_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+    save_clipboard_image_to_cache(&home, input, now_millis(), display_seq)
+}
+
 #[tauri::command]
 fn chat_search_context_attachments(
     project_cwd: String,
@@ -2315,6 +2450,54 @@ mod context_search_tests {
             .iter()
             .map(|result| result.relative_path.clone())
             .collect()
+    }
+
+    #[test]
+    fn clipboard_image_extension_uses_mime_then_safe_name_extension() {
+        assert_eq!(
+            clipboard_image_extension(Some("image/jpeg"), Some("ignored.png")),
+            "jpg"
+        );
+        assert_eq!(
+            clipboard_image_extension(None, Some("screen.webp")),
+            "webp"
+        );
+        assert_eq!(
+            clipboard_image_extension(Some("text/plain"), Some("note.txt")),
+            "png"
+        );
+    }
+
+    #[test]
+    fn clipboard_image_display_name_uses_short_sequence_name() {
+        assert_eq!(clipboard_image_display_name("png", 1), "图片 1.png");
+        assert_eq!(clipboard_image_display_name("webp", 12), "图片 12.webp");
+    }
+
+    #[test]
+    fn clipboard_image_is_saved_under_cache_and_described_as_image_file() {
+        let home = temp_context_root("clipboard-image");
+        let input = ClipboardImageInput {
+            mime: Some("image/png".to_string()),
+            bytes_base64: general_purpose::STANDARD.encode([1_u8, 2, 3, 4]),
+            name: None,
+        };
+
+        let attachment = save_clipboard_image_to_cache(&home, input, 12345, 1).unwrap();
+
+        assert_eq!(attachment.name, "图片 1.png");
+        assert_eq!(attachment.kind, "file");
+        assert_eq!(attachment.exists, true);
+        assert_eq!(attachment.mime.as_deref(), Some("image/png"));
+        let path = PathBuf::from(&attachment.path);
+        assert!(path.exists());
+        assert_eq!(
+            path.parent().unwrap(),
+            clipboard_images_cache_dir(&home).as_path()
+        );
+        assert_eq!(fs::read(&path).unwrap(), vec![1_u8, 2, 3, 4]);
+
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]
@@ -3251,6 +3434,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             chat_describe_attachments,
+            chat_read_clipboard_file_paths,
+            chat_save_clipboard_image,
             chat_search_context_attachments,
             chat_send_message,
             chat_interrupt_turn,
