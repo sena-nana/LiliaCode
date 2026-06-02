@@ -13,6 +13,7 @@ import {
   emitWebviewDragDropEvent,
   mockInvoke,
   seedMockChatMessages,
+  setMockActiveBackend,
   setMockComposerStateHandler,
 } from "./tauriMock";
 import { createTodo, updateTodo } from "../src/services/todos";
@@ -156,6 +157,24 @@ describe("chat scheduler", () => {
     expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
   });
 
+  it("全局 provider 为 Codex 时发送会覆盖旧 composer backend", async () => {
+    setMockActiveBackend("codex");
+    const view = await renderTaskDetail();
+
+    await sendText(view, "检查 Codex 通路");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      composer: expect.objectContaining({
+        backend: "codex",
+        model: "gpt-5-codex",
+      }),
+    });
+  });
 
   it("composer 尚未加载完成时发送会等待后端状态再发给 agent", async () => {
     let resolveComposer!: (value: unknown) => void;

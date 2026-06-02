@@ -51,6 +51,7 @@ const CC_SWITCH_DEFAULT_URL: &str = "http://127.0.0.1:15721";
 const CC_SWITCH_PLACEHOLDER_KEY: &str = "sk-cc-switch-proxy";
 
 const PROVIDER_STORE_FILE: &str = "provider-config.json";
+const PROVIDER_ACTIVE_BACKEND_KEY: &str = "provider.activeBackend";
 const PROVIDER_KEY_CLAUDE: &str = "provider.claude";
 const PROVIDER_KEY_CODEX: &str = "provider.codex";
 const CC_SWITCH_KEY: &str = "cc-switch.config";
@@ -697,6 +698,49 @@ mod agent_event_sink_tests {
         assert_ne!(first, "u-0");
     }
 
+    #[test]
+    fn active_backend_normalizes_unknown_values_to_claude() {
+        assert_eq!(normalize_backend(BACKEND_CLAUDE), BACKEND_CLAUDE);
+        assert_eq!(normalize_backend(BACKEND_CODEX), BACKEND_CODEX);
+        assert_eq!(normalize_backend(""), BACKEND_CLAUDE);
+        assert_eq!(normalize_backend("unknown"), BACKEND_CLAUDE);
+    }
+
+    #[test]
+    fn composer_uses_active_backend_and_matching_default_model() {
+        let composer = ChatComposerState {
+            task_id: "stale-task".to_string(),
+            backend: BACKEND_CLAUDE.to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            plan_mode: true,
+            permission: "readonly".to_string(),
+        };
+
+        let normalized = normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX);
+
+        assert_eq!(normalized.task_id, "task-1");
+        assert_eq!(normalized.backend, BACKEND_CODEX);
+        assert_eq!(normalized.model, "gpt-5-codex");
+        assert!(normalized.plan_mode);
+        assert_eq!(normalized.permission, "readonly");
+    }
+
+    #[test]
+    fn composer_keeps_model_when_it_belongs_to_active_backend() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CLAUDE.to_string(),
+            model: "o3".to_string(),
+            plan_mode: false,
+            permission: "ask".to_string(),
+        };
+
+        let normalized = normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX);
+
+        assert_eq!(normalized.backend, BACKEND_CODEX);
+        assert_eq!(normalized.model, "o3");
+    }
+
     fn pending_turn(id: &str) -> PendingChatTurn {
         PendingChatTurn {
             content: format!("content {id}"),
@@ -1043,11 +1087,88 @@ fn new_chat_message_id() -> String {
     format!("u-{}", Uuid::new_v4())
 }
 
+fn normalize_backend(value: &str) -> &'static str {
+    match value {
+        BACKEND_CODEX => BACKEND_CODEX,
+        _ => BACKEND_CLAUDE,
+    }
+}
+
+fn default_model_for_backend(backend: &str) -> &'static str {
+    match normalize_backend(backend) {
+        BACKEND_CODEX => "gpt-5-codex",
+        _ => "claude-sonnet-4-6",
+    }
+}
+
+fn model_options_for_backend(backend: &str) -> Vec<ChatModelOption> {
+    match normalize_backend(backend) {
+        BACKEND_CODEX => vec![
+            ChatModelOption {
+                id: "gpt-5-codex".to_string(),
+                label: "GPT-5 Codex".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+            },
+            ChatModelOption {
+                id: "o3".to_string(),
+                label: "o3".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+            },
+            ChatModelOption {
+                id: "o3-mini".to_string(),
+                label: "o3-mini".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+            },
+        ],
+        _ => vec![
+            ChatModelOption {
+                id: "claude-opus-4-7".to_string(),
+                label: "Opus 4.7".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+            ChatModelOption {
+                id: "claude-sonnet-4-6".to_string(),
+                label: "Sonnet 4.6".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+            ChatModelOption {
+                id: "claude-haiku-4-5".to_string(),
+                label: "Haiku 4.5".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+            },
+        ],
+    }
+}
+
+fn normalize_model_for_backend(model: &str, backend: &str) -> String {
+    let backend = normalize_backend(backend);
+    if model_options_for_backend(backend)
+        .iter()
+        .any(|option| option.id == model)
+    {
+        model.to_string()
+    } else {
+        default_model_for_backend(backend).to_string()
+    }
+}
+
+fn normalize_composer_for_backend(
+    mut composer: ChatComposerState,
+    task_id: &str,
+    backend: &str,
+) -> ChatComposerState {
+    let backend = normalize_backend(backend);
+    composer.task_id = task_id.to_string();
+    composer.backend = backend.to_string();
+    composer.model = normalize_model_for_backend(&composer.model, backend);
+    composer
+}
+
 fn default_composer(task_id: &str) -> ChatComposerState {
     ChatComposerState {
         task_id: task_id.to_string(),
         backend: BACKEND_CLAUDE.to_string(),
-        model: "claude-sonnet-4-6".to_string(),
+        model: default_model_for_backend(BACKEND_CLAUDE).to_string(),
         plan_mode: false,
         permission: "ask".to_string(),
     }
@@ -1393,6 +1514,15 @@ fn load_provider_config(app: &AppHandle, key: &str) -> Option<ProviderConfig> {
     let store = app.store(PROVIDER_STORE_FILE).ok()?;
     let value = store.get(key)?;
     serde_json::from_value::<ProviderConfig>(value).ok()
+}
+
+fn load_active_backend(app: &AppHandle) -> String {
+    let read = || -> Option<String> {
+        let store = app.store(PROVIDER_STORE_FILE).ok()?;
+        let value = store.get(PROVIDER_ACTIVE_BACKEND_KEY)?;
+        value.as_str().map(|s| normalize_backend(s).to_string())
+    };
+    read().unwrap_or_else(|| BACKEND_CLAUDE.to_string())
 }
 
 /// 读 CC-Switch 配置；读不到回 Default。
@@ -2595,6 +2725,8 @@ fn chat_send_message(
     guide_id: Option<String>,
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
+    let active_backend = load_active_backend(&app);
+    let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {
         id: new_chat_message_id(),
@@ -2607,7 +2739,6 @@ fn chat_send_message(
     // turn_id 在 user 消息入库前就分配，并与 agent turn 共享 —— 让两者落到同一个
     // turn_seq，user 消息天然占据 turn 内 intra_turn_order=0 的位置。
     let turn_id = format!("turn-{}", now_millis());
-    // 同步 composer 偏好——发送时选的下拉值就是用户最新偏好。
     store
         .composers
         .lock()
@@ -2751,42 +2882,7 @@ fn chat_respond_ask_user(
 
 #[tauri::command]
 fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
-    match backend.as_str() {
-        BACKEND_CODEX => vec![
-            ChatModelOption {
-                id: "gpt-5-codex".to_string(),
-                label: "GPT-5 Codex".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            },
-            ChatModelOption {
-                id: "o3".to_string(),
-                label: "o3".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            },
-            ChatModelOption {
-                id: "o3-mini".to_string(),
-                label: "o3-mini".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            },
-        ],
-        _ => vec![
-            ChatModelOption {
-                id: "claude-opus-4-7".to_string(),
-                label: "Opus 4.7".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-            ChatModelOption {
-                id: "claude-sonnet-4-6".to_string(),
-                label: "Sonnet 4.6".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-            ChatModelOption {
-                id: "claude-haiku-4-5".to_string(),
-                label: "Haiku 4.5".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-        ],
-    }
+    model_options_for_backend(&backend)
 }
 
 #[tauri::command]
@@ -2843,7 +2939,11 @@ fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: Ap
     }
 }
 
-fn save_provider_store_value<T: Serialize>(app: &AppHandle, key: &str, value: &T) -> Result<(), String> {
+fn save_provider_store_value<T: Serialize>(
+    app: &AppHandle,
+    key: &str,
+    value: &T,
+) -> Result<(), String> {
     let store = app
         .store(PROVIDER_STORE_FILE)
         .map_err(|e| format!("打开配置存储失败：{e}"))?;
@@ -2982,6 +3082,21 @@ fn provider_set_config(app: AppHandle, config: ProviderConfig) -> Result<(), Str
         other => return Err(format!("未知 backend: {other}")),
     };
     save_provider_store_value(&app, key, &config)
+}
+
+#[tauri::command]
+fn provider_get_active_backend(app: AppHandle) -> String {
+    load_active_backend(&app)
+}
+
+#[tauri::command]
+fn provider_set_active_backend(app: AppHandle, backend: String) -> Result<(), String> {
+    match backend.as_str() {
+        BACKEND_CLAUDE | BACKEND_CODEX => {
+            save_provider_store_value(&app, PROVIDER_ACTIVE_BACKEND_KEY, &backend)
+        }
+        other => Err(format!("未知 backend: {other}")),
+    }
 }
 
 #[tauri::command]
@@ -3448,6 +3563,8 @@ pub fn run() {
             chat_check_env,
             provider_get_config,
             provider_set_config,
+            provider_get_active_backend,
+            provider_set_active_backend,
             cc_switch_get_config,
             cc_switch_set_config,
             assistant_ai_get_config,

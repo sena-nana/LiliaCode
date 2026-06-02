@@ -48,39 +48,36 @@ const router = useRouter();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
-const { statusFor } = useConnectionStatus();
+const { activeBackend, statusFor, nodeAvailable, codexCliAvailable } = useConnectionStatus();
 
 // ── Connection status badge ──
 
-const primaryStatus = computed(() => {
-  const claude = statusFor("claude");
-  const codex = statusFor("codex");
-  if (claude && claude.connectionMode !== "unconfigured") {
-    return { backend: "claude" as const, status: claude };
-  }
-  if (codex && codex.connectionMode !== "unconfigured") {
-    return { backend: "codex" as const, status: codex };
-  }
-  return claude || codex
-    ? { backend: "claude" as const, status: claude ?? codex! }
-    : null;
-});
+const activeStatus = computed(() => statusFor(activeBackend.value));
 
 const backendLabel = computed(() =>
-  primaryStatus.value?.backend === "codex" ? "Codex" : "Claude",
+  activeBackend.value === "codex" ? "Codex" : "Claude",
 );
 
+const runtimeIssue = computed(() => {
+  if (!nodeAvailable.value) return "未找到 node（v18+）。点击进入设置。";
+  if (activeBackend.value === "codex" && !codexCliAvailable.value) {
+    return "未找到 codex CLI。点击进入设置。";
+  }
+  return null;
+});
+
 const isUnconfigured = computed(
-  () => primaryStatus.value?.status.connectionMode === "unconfigured" ||
-    primaryStatus.value === null,
+  () => !!runtimeIssue.value ||
+    activeStatus.value?.connectionMode === "unconfigured" ||
+    activeStatus.value === null,
 );
 
 const connectionTooltip = computed(() => {
-  const ps = primaryStatus.value;
-  if (!ps) return "正在检测 agent 连接…";
-  const s = ps.status;
+  if (runtimeIssue.value) return runtimeIssue.value;
+  const s = activeStatus.value;
+  if (!s) return "正在检测 agent 连接…";
   if (s.connectionMode === "unconfigured") {
-    return "CC-Switch 代理不可达。点击进入设置。";
+    return `${backendLabel.value} 未连接。CC-Switch 代理不可达。点击进入设置。`;
   }
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
@@ -858,7 +855,7 @@ onBeforeUnmount(() => {
           <AlertTriangle :size="12" aria-hidden="true" />
           <span class="sb-conn__label">未连接</span>
         </template>
-        <template v-else-if="primaryStatus">
+        <template v-else-if="activeStatus">
           <Sparkles :size="12" aria-hidden="true" />
           <span class="sb-conn__label">{{ backendLabel }}</span>
         </template>

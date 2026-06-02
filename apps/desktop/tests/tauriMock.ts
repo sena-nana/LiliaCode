@@ -146,6 +146,7 @@ let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
+let activeBackend: "claude" | "codex" = "claude";
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 const baseClaudePlugins = [{
   scope: "user",
@@ -288,6 +289,37 @@ function refreshSessionCounts() {
   }));
 }
 
+function defaultModelForBackend(backend: "claude" | "codex") {
+  return backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-6";
+}
+
+function normalizeBackend(value: unknown): "claude" | "codex" {
+  return value === "codex" ? "codex" : "claude";
+}
+
+function modelBelongsToBackend(model: string, backend: "claude" | "codex") {
+  if (backend === "codex") {
+    return ["gpt-5-codex", "o3", "o3-mini"].includes(model);
+  }
+  return model.startsWith("claude-");
+}
+
+function normalizeComposer(input: unknown, taskId: string) {
+  const row = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const backend = activeBackend;
+  const model = typeof row.model === "string" && modelBelongsToBackend(row.model, backend)
+    ? row.model
+    : defaultModelForBackend(backend);
+  return {
+    ...row,
+    taskId,
+    backend,
+    model,
+  };
+}
+
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
@@ -316,6 +348,7 @@ export function resetTauriMockData() {
   chatQueued = {};
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
+  activeBackend = "claude";
   composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
   claudeMcpServers = baseClaudeMcpServers.map((server) => ({
@@ -605,6 +638,10 @@ export function setMockClipboardFilePaths(paths: string[]) {
   clipboardFilePaths = [...paths];
 }
 
+export function setMockActiveBackend(backend: "claude" | "codex") {
+  activeBackend = backend;
+}
+
 export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
@@ -776,6 +813,27 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           },
         },
       };
+
+    case "provider_get_active_backend":
+      return activeBackend;
+
+    case "provider_set_active_backend":
+      activeBackend = normalizeBackend(args.backend);
+      return undefined;
+
+    case "provider_get_config": {
+      const backend = normalizeBackend(args.backend);
+      return { backend, baseUrl: null, apiKey: null };
+    }
+
+    case "provider_set_config":
+      return undefined;
+
+    case "cc_switch_get_config":
+      return { baseUrl: "http://127.0.0.1:15721" };
+
+    case "cc_switch_set_config":
+      return undefined;
 
     case "agent_timeline_list": {
       const taskId = String(args.taskId);
@@ -1172,6 +1230,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_send_message": {
       const taskId = String(args.taskId);
       const content = String(args.content);
+      const composer = normalizeComposer(args.composer, taskId);
+      args.composer = composer;
       const attachments = Array.isArray(args.attachments) ? args.attachments : [];
       const queued = chatRunning[taskId] === true;
       const message = {
@@ -1189,6 +1249,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         id: message.id,
         turnId,
         kind: "message",
+        backend: composer.backend,
         status: queued ? "pending" : "success",
         title: "用户输入",
         summary: content,
@@ -1236,12 +1297,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       if (chatRunning[taskId] === true) {
         emitMockTimelineEvent(taskId, {
           id: `tl-interrupted-${turnId}`,
+          backend: activeBackend,
           kind: "error",
           status: "error",
           title: "Agent 已打断",
           summary: message,
           payload: {
-            backend: "claude",
+            backend: activeBackend,
             interrupted: true,
             message,
           },

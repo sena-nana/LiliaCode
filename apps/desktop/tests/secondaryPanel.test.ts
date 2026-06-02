@@ -8,7 +8,7 @@ import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady, TASKS } from "../src/data/tasks";
-import { mockInvoke, setMockProjectPinned } from "./tauriMock";
+import { mockInvoke, setMockActiveBackend, setMockProjectPinned } from "./tauriMock";
 
 function seedTreeExpansionState(state: unknown) {
   localStorage.setItem("lilia.projectTree.expansion", JSON.stringify(state));
@@ -113,6 +113,15 @@ describe("SecondaryPanel project tree expansion", () => {
     localStorage.clear();
   });
 
+  it("左下角连接徽章显示全局 active provider", async () => {
+    setMockActiveBackend("codex");
+    const view = await renderSecondaryPanel();
+
+    await waitFor(() => {
+      const label = view.container.querySelector(".sb-conn__label");
+      expect(label).toHaveTextContent("Codex");
+    });
+  });
 
   it("会恢复上次关闭时的项目展开状态和收集箱状态", async () => {
     seedTreeExpansionState({

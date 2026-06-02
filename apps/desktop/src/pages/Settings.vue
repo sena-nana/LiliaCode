@@ -31,16 +31,23 @@ import { useAgentInteractionSettings } from "../composables/useAgentInteractionS
 
 const { theme, setTheme } = useTheme();
 const {
-  statusFor, probing, refresh, nodeAvailable, codexCliAvailable, ccSwitch,
+  activeBackend,
+  setActiveBackend,
+  statusFor,
+  probing,
+  refresh,
+  nodeAvailable,
+  codexCliAvailable,
+  ccSwitch,
 } = useConnectionStatus();
 
-// UI-only：决定卡片里 banner 展示哪个 backend 的状态；实际对话用哪个仍由各 task 的 composer 决定。
-const selectedBackend = ref<ChatBackendKind>("claude");
 const backendOptions: { value: ChatBackendKind; label: string }[] = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
 ];
+const switchingBackend = ref<ChatBackendKind | null>(null);
 
+const selectedBackend = computed(() => activeBackend.value);
 const selectedStatus = computed(() => statusFor(selectedBackend.value));
 const isClaude = computed(() => selectedBackend.value === "claude");
 
@@ -91,6 +98,19 @@ async function saveCCSwitch() {
 }
 
 async function probe() { await refresh(); }
+
+async function selectBackend(backend: ChatBackendKind) {
+  if (switchingBackend.value) return;
+  switchingBackend.value = backend;
+  try {
+    await setActiveBackend(backend);
+    await refresh();
+  } catch (err) {
+    console.error("[settings] setActiveBackend failed", err);
+  } finally {
+    switchingBackend.value = null;
+  }
+}
 
 // ---- 辅助模型（Assistant AI）----
 // 独立 OpenAI 兼容配置：不参与 Agent，仅供 Memory 助手等周边模块消费。
@@ -296,7 +316,7 @@ onMounted(async () => {
       <div class="settings-row">
         <div class="settings-row__label">
           <div>使用</div>
-          <div class="settings-row__hint">切换查看的 backend 状态。</div>
+          <div class="settings-row__hint">切换全局 Agent provider。</div>
         </div>
         <div class="segmented" role="radiogroup" aria-label="Backend">
           <button
@@ -306,7 +326,8 @@ onMounted(async () => {
             role="radio"
             :aria-checked="selectedBackend === opt.value"
             :class="{ 'is-active': selectedBackend === opt.value }"
-            @click="selectedBackend = opt.value"
+            :disabled="switchingBackend !== null"
+            @click="selectBackend(opt.value)"
           >
             {{ opt.label }}
           </button>

@@ -40,4 +40,10 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/cmd\.prompt\s*=\s*buildPromptWithAttachments\(/);
     expect(runnerSource).toMatch(/attachments[\s\S]*?path/);
   });
+
+  it("backend 为 codex 时只进入 Codex runner 分支", () => {
+    expect(runnerSource).toContain('const backend = cmd.backend === "codex" ? "codex" : "claude"');
+    expect(runnerSource).toMatch(/if\s*\(backend === "codex"\)\s*\{\s*await runCodex\(cmd\);/);
+    expect(runnerSource).toMatch(/}\s*else\s*\{\s*await runClaude\(cmd\);/);
+  });
 });

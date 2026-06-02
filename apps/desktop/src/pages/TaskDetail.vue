@@ -47,7 +47,6 @@ import type { TaskTodo } from "../services/todos";
 import {
   getComposerState,
   listAgentTimeline,
-  listModels,
   onAgentTimeline,
   onDone,
   onTurnStarted,
@@ -63,6 +62,7 @@ import {
   loadAgentInteractionSettings,
   useAgentInteractionSettings,
 } from "../composables/useAgentInteractionSettings";
+import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { onDebugTimelineEvent } from "../composables/useDebugTimelineEvents";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
@@ -72,7 +72,6 @@ import type {
   AgentTimelinePayload,
   ChatAttachment,
   ChatComposerState,
-  ChatModelOption,
 } from "@lilia/contracts";
 
 const props = defineProps<{ projectId?: string; taskId: string }>();
@@ -100,14 +99,6 @@ const timelineEvents = computed(() =>
   mergeTimelineEvents(persistedTimelineEvents.value, overlayTimelineEvents.value),
 );
 const composer = ref<ChatComposerState | null>(null);
-const composerForView = computed<ChatComposerState>(() => composer.value ?? {
-  taskId: props.taskId,
-  backend: "claude",
-  model: "",
-  planMode: false,
-  permission: "ask",
-});
-const models = ref<ChatModelOption[]>([]);
 const isTurnRunning = ref(false);
 const chatPageRef = ref<HTMLElement | null>(null);
 const droppedAttachmentAppendKey = ref(0);
@@ -125,6 +116,16 @@ const runtimePendingAgentActions = usePendingAgentActionsForTask(
 );
 const agentInteractionSettings = useAgentInteractionSettings();
 const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
+const { activeBackend } = useConnectionStatus();
+const composerForView = computed<ChatComposerState>(() =>
+  withActiveBackend(composer.value ?? {
+    taskId: props.taskId,
+    backend: activeBackend.value,
+    model: "",
+    planMode: false,
+    permission: "ask",
+  }),
+);
 const pendingAgentActions = computed(() =>
   nonInterruptMode.value ? runtimePendingAgentActions.value : [],
 );
@@ -155,6 +156,14 @@ async function ensureOrphanCwd(): Promise<string> {
 }
 
 const contextSearchCwd = computed(() => project.value?.cwd ?? orphanCwd.value ?? null);
+
+function withActiveBackend(state: ChatComposerState): ChatComposerState {
+  return {
+    ...state,
+    taskId: props.taskId,
+    backend: activeBackend.value,
+  };
+}
 
 function summarizeTitle(text: string): string {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -286,7 +295,8 @@ async function sendAgentMessage(
   if (!hasContext.value) return;
   if (!content.trim() && outgoingAttachments.length === 0) return;
 
-  const currentComposer = await ensureComposerLoaded();
+  await ensureComposerLoaded();
+  const currentComposer = composerForView.value;
   await ensureTaskReadyForMessage(content, outgoingAttachments);
   const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
 
@@ -379,28 +389,10 @@ async function onResolvePendingAgentAction(resolution: PendingAgentActionResolut
 }
 
 async function onComposerUpdate(next: ChatComposerState) {
-  const backendChanged = next.backend !== composer.value?.backend;
-  composer.value = next;
-  if (backendChanged) {
-    // 切 backend → 重拉模型清单，并把 model 修正到新清单首项。
-    await reloadModelsForBackend(next.backend);
-  }
-  try { await setComposerState(next); }
+  const normalized = withActiveBackend(next);
+  composer.value = normalized;
+  try { await setComposerState(normalized); }
   catch (err) { console.error("[chat] setComposerState failed", err); }
-}
-
-async function reloadModelsForBackend(backend: ChatComposerState["backend"]) {
-  try {
-    const mdls = await listModels(backend);
-    models.value = mdls;
-    // 当前 model 不在新清单 → 回退首项；空清单则保留原值让后端报错。
-    const currentComposer = composer.value;
-    if (currentComposer && mdls.length && !mdls.some((m) => m.id === currentComposer.model)) {
-      composer.value = { ...currentComposer, model: mdls[0].id };
-    }
-  } catch (err) {
-    console.error("[chat] listModels failed", err);
-  }
 }
 
 function upsertTimelineEvent(event: AgentTimelineEvent) {
@@ -597,9 +589,8 @@ let composerLoad: Promise<ChatComposerState | null> | null = null;
 async function loadComposerForCurrentTask(taskId: string, seq: number): Promise<ChatComposerState | null> {
   const comp = await getComposerState(taskId);
   if (seq !== loadSeq || taskId !== props.taskId) return null;
-  composer.value = comp;
-  await reloadModelsForBackend(comp.backend);
-  return comp;
+  composer.value = withActiveBackend(comp);
+  return composer.value;
 }
 
 async function ensureComposerLoaded(): Promise<ChatComposerState> {

@@ -20,7 +20,6 @@ import type {
   AgentTimelineEvent,
   AgentAskUserRequestEvent,
   AskUserResult,
-  ChatModelOption,
   ChatSendResult,
   ConnectionMode,
   EnvStatusReport,
@@ -125,10 +124,6 @@ export async function pickAttachmentFiles(): Promise<string[]> {
   return Array.isArray(picked) ? picked : [picked];
 }
 
-export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {
-  return invoke<ChatModelOption[]>("chat_list_models", { backend });
-}
-
 export function getComposerState(taskId: string): Promise<ChatComposerState> {
   return invoke<ChatComposerState>("chat_get_composer_state", { taskId });
 }
@@ -163,6 +158,14 @@ export function getProviderConfig(backend: ChatBackendKind): Promise<ProviderCon
 
 export function setProviderConfig(config: ProviderConfig): Promise<void> {
   return invoke<void>("provider_set_config", { config });
+}
+
+export function getActiveBackend(): Promise<ChatBackendKind> {
+  return invoke<ChatBackendKind>("provider_get_active_backend");
+}
+
+export function setActiveBackend(backend: ChatBackendKind): Promise<void> {
+  return invoke<void>("provider_set_active_backend", { backend });
 }
 
 export function getCCSwitchConfig(): Promise<CCSwitchConfig> {
