@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -67,6 +67,7 @@ const ROUTER_DIRECT: &str = "direct";
 
 const BACKEND_CLAUDE: &str = "claude";
 const BACKEND_CODEX: &str = "codex";
+const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 128, 0);
 static CLIPBOARD_IMAGE_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
 
 // ---------- 契约（与 packages/contracts 同形） ----------
@@ -257,10 +258,21 @@ struct CCSwitchStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CodexAppServerStatus {
+    version: Option<String>,
+    available: bool,
+    supports_required_protocol: bool,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EnvStatusReport {
     node_available: bool,
-    /// codex CLI 是否能在 PATH 找到（@openai/codex-sdk 是 wrapper）。
+    /// codex CLI 是否能在 PATH 找到。
     codex_cli_available: bool,
+    /// Codex app-server / dynamic tool / AskUser 所需能力检查。
+    codex_app_server: CodexAppServerStatus,
     cc_switch: CCSwitchStatus,
     /// 每个 backend 当前生效的路由模式（"cc-switch" | "direct"）。
     router_modes: HashMap<String, String>,
@@ -704,6 +716,49 @@ mod agent_event_sink_tests {
         assert_eq!(normalize_backend(BACKEND_CODEX), BACKEND_CODEX);
         assert_eq!(normalize_backend(""), BACKEND_CLAUDE);
         assert_eq!(normalize_backend("unknown"), BACKEND_CLAUDE);
+    }
+
+    #[test]
+    fn codex_cli_version_parser_reads_codex_cli_output() {
+        assert_eq!(
+            parse_codex_cli_version("codex-cli 0.128.0"),
+            Some((0, 128, 0))
+        );
+        assert_eq!(
+            parse_codex_cli_version("codex-cli 0.130.0-alpha.5"),
+            Some((0, 130, 0))
+        );
+        assert_eq!(
+            parse_codex_cli_version("codex-cli 0.136.0-alpha.2"),
+            Some((0, 136, 0))
+        );
+    }
+
+    #[test]
+    fn codex_cli_probe_skips_failed_windowsapps_candidate() {
+        let candidates = vec![
+            "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\codex.exe".to_string(),
+            "C:\\Users\\me\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe".to_string(),
+        ];
+        let status = build_codex_app_server_probe_status_with(&candidates, |program, args| {
+            if program.contains("WindowsApps") {
+                return Err("Access is denied.".to_string());
+            }
+            match args {
+                ["--version"] => Ok("codex-cli 0.130.0-alpha.5".to_string()),
+                ["app-server", "--help"] => {
+                    Ok("Usage: codex app-server [OPTIONS] [COMMAND]".to_string())
+                }
+                _ => Err("unexpected args".to_string()),
+            }
+        });
+
+        assert_eq!(
+            status.path.as_deref(),
+            Some("C:\\Users\\me\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe")
+        );
+        assert!(status.public.supports_required_protocol);
+        assert_eq!(status.public.version.as_deref(), Some("codex-cli 0.130.0-alpha.5"));
     }
 
     #[test]
@@ -1746,6 +1801,12 @@ fn spawn_agent_turn(
         }
         if let Some(key) = &connection.api_key {
             cmd.env(key_key, key);
+        }
+        if backend_for_thread == BACKEND_CODEX {
+            let codex_app_server = build_codex_app_server_probe_status();
+            if let Some(path) = codex_app_server.path {
+                cmd.env("LILIA_CODEX_CLI_PATH", path);
+            }
         }
 
         let mut child = match cmd.spawn() {
@@ -3027,10 +3088,279 @@ fn cli_available(name: &str) -> bool {
     false
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexCliProbe {
+    program: String,
+    version_output: String,
+    app_server_help: String,
+}
+
+#[derive(Debug, Clone)]
+struct CodexAppServerProbeStatus {
+    public: CodexAppServerStatus,
+    path: Option<String>,
+}
+
+fn codex_candidate_filenames() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &["codex.cmd", "codex.exe", "codex.bat", "codex"]
+    } else {
+        &["codex"]
+    }
+}
+
+fn windows_native_codex_paths() -> Vec<String> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let Some(local_app_data) = env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let bin = PathBuf::from(local_app_data).join("OpenAI").join("Codex").join("bin");
+    let mut paths = Vec::new();
+    let root_codex = bin.join("codex.exe");
+    if root_codex.exists() {
+        paths.push(root_codex.to_string_lossy().to_string());
+    }
+    if let Ok(entries) = fs::read_dir(&bin) {
+        for entry in entries.flatten() {
+            let path = entry.path().join("codex.exe");
+            if path.exists() {
+                paths.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    paths
+}
+
+fn normalize_candidate_key(path: &str) -> String {
+    if cfg!(windows) {
+        path.to_ascii_lowercase()
+    } else {
+        path.to_string()
+    }
+}
+
+fn push_unique_candidate(candidates: &mut Vec<String>, seen: &mut HashSet<String>, path: String) {
+    if path.trim().is_empty() {
+        return;
+    }
+    let key = normalize_candidate_key(path.trim());
+    if seen.insert(key) {
+        candidates.push(path.trim().to_string());
+    }
+}
+
+fn where_codex_candidates() -> Vec<String> {
+    let output = Command::new(if cfg!(windows) { "where.exe" } else { "which" })
+        .arg("codex")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn path_codex_candidates() -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(path_var) = env::var_os("PATH") {
+        for dir in env::split_paths(&path_var) {
+            for filename in codex_candidate_filenames() {
+                let candidate = dir.join(filename);
+                if candidate.exists() {
+                    paths.push(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn codex_cli_candidate_paths() -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    let path_candidates = path_codex_candidates();
+    let where_candidates = where_codex_candidates();
+    for path in &path_candidates {
+        let is_windows_apps = cfg!(windows) && path.to_ascii_lowercase().contains("\\windowsapps\\");
+        if !is_windows_apps {
+            push_unique_candidate(&mut candidates, &mut seen, path.clone());
+        }
+    }
+    for path in windows_native_codex_paths() {
+        push_unique_candidate(&mut candidates, &mut seen, path);
+    }
+    for path in &where_candidates {
+        let is_windows_apps = cfg!(windows) && path.to_ascii_lowercase().contains("\\windowsapps\\");
+        if !is_windows_apps {
+            push_unique_candidate(&mut candidates, &mut seen, path.clone());
+        }
+    }
+    for candidate in codex_candidate_filenames() {
+        push_unique_candidate(&mut candidates, &mut seen, (*candidate).to_string());
+    }
+    for path in path_candidates.into_iter().chain(where_candidates) {
+        let is_windows_apps = cfg!(windows) && path.to_ascii_lowercase().contains("\\windowsapps\\");
+        if is_windows_apps {
+            push_unique_candidate(&mut candidates, &mut seen, path);
+        }
+    }
+    candidates
+}
+
+fn command_output_result(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !err.is_empty() { err } else { out };
+        return Err(if detail.is_empty() {
+            format!("command exited with {}", output.status)
+        } else {
+            detail
+        });
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !text.is_empty() {
+        return Ok(text);
+    }
+    let text = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if text.is_empty() {
+        Err("command produced no output".to_string())
+    } else {
+        Ok(text)
+    }
+}
+
+fn resolve_codex_cli_probe_with<F>(candidates: &[String], mut command_output: F) -> Option<CodexCliProbe>
+where
+    F: FnMut(&str, &[&str]) -> Result<String, String>,
+{
+    for candidate in candidates {
+        let version = match command_output(candidate, &["--version"]) {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+        let parsed_version = parse_codex_cli_version(&version);
+        let help = match command_output(candidate, &["app-server", "--help"]) {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+        let app_server_available = help.contains("codex app-server") || help.contains("Usage:");
+        let version_supported = parsed_version
+            .map(|version| codex_version_at_least(version, MIN_CODEX_APP_SERVER_VERSION))
+            .unwrap_or(false);
+        if app_server_available && version_supported {
+            return Some(CodexCliProbe {
+                program: candidate.clone(),
+                version_output: version,
+                app_server_help: help,
+            });
+        }
+    }
+    None
+}
+
+fn parse_codex_cli_version(output: &str) -> Option<(u32, u32, u32)> {
+    let version = output
+        .split_whitespace()
+        .find(|part| part.chars().next().is_some_and(|ch| ch.is_ascii_digit()))?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;
+    let patch_text = parts.next().unwrap_or("0");
+    let patch_digits: String = patch_text
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    let patch = patch_digits.parse::<u32>().ok()?;
+    Some((major, minor, patch))
+}
+
+fn codex_version_at_least(version: (u32, u32, u32), minimum: (u32, u32, u32)) -> bool {
+    version >= minimum
+}
+
+fn build_codex_app_server_probe_status_with<F>(
+    candidates: &[String],
+    mut command_output: F,
+) -> CodexAppServerProbeStatus
+where
+    F: FnMut(&str, &[&str]) -> Result<String, String>,
+{
+    let codex_cli = resolve_codex_cli_probe_with(candidates, &mut command_output);
+    let mut issues = Vec::new();
+    let Some(codex_cli) = codex_cli else {
+        if candidates.is_empty() {
+            issues.push("未找到 codex CLI。请先安装 Codex CLI 后重新检测。".to_string());
+        } else {
+            issues.push("Codex app-server 环境不满足。".to_string());
+        }
+        return CodexAppServerProbeStatus {
+            public: CodexAppServerStatus {
+                version: None,
+                available: false,
+                supports_required_protocol: false,
+                issues,
+            },
+            path: None,
+        };
+    };
+
+    let parsed_version = parse_codex_cli_version(&codex_cli.version_output);
+    if parsed_version.is_none() {
+        issues.push("无法读取 codex CLI 版本。".to_string());
+    }
+
+    let available = codex_cli.app_server_help.contains("codex app-server")
+        || codex_cli.app_server_help.contains("Usage:");
+    if !available {
+        issues.push("当前 codex CLI 不支持 app-server 子命令。".to_string());
+    }
+
+    let version_supported = parsed_version
+        .map(|version| codex_version_at_least(version, MIN_CODEX_APP_SERVER_VERSION))
+        .unwrap_or(false);
+    if !version_supported {
+        issues.push("当前 codex CLI 版本过低，需要 0.128.0 或更新版本以支持 Lilia 的流式事件、工具审批和 AskUser。".to_string());
+    }
+
+    let path = Some(codex_cli.program);
+    CodexAppServerProbeStatus {
+        public: CodexAppServerStatus {
+            version: Some(codex_cli.version_output),
+            available,
+            supports_required_protocol: available && version_supported,
+            issues,
+        },
+        path,
+    }
+}
+
+fn build_codex_app_server_probe_status() -> CodexAppServerProbeStatus {
+    build_codex_app_server_probe_status_with(&codex_cli_candidate_paths(), command_output_result)
+}
+
 #[tauri::command]
 fn chat_check_env(app: AppHandle) -> EnvStatusReport {
     let node_available = cli_available("node");
-    let codex_cli_available = cli_available("codex");
+    let codex_app_server = build_codex_app_server_probe_status();
+    let codex_cli_available = codex_app_server.path.is_some();
 
     let mut backends = HashMap::new();
     backends.insert(
@@ -3055,6 +3385,7 @@ fn chat_check_env(app: AppHandle) -> EnvStatusReport {
     EnvStatusReport {
         node_available,
         codex_cli_available,
+        codex_app_server: codex_app_server.public,
         cc_switch: build_cc_switch_status(&app),
         router_modes,
         backends,

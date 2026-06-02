@@ -5,10 +5,16 @@ import { defineComponent, nextTick } from "vue";
 import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
+import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady, TASKS } from "../src/data/tasks";
-import { mockInvoke, setMockActiveBackend, setMockProjectPinned } from "./tauriMock";
+import {
+  mockInvoke,
+  setMockActiveBackend,
+  setMockCodexAppServerStatus,
+  setMockProjectPinned,
+} from "./tauriMock";
 
 function seedTreeExpansionState(state: unknown) {
   localStorage.setItem("lilia.projectTree.expansion", JSON.stringify(state));
@@ -120,6 +126,23 @@ describe("SecondaryPanel project tree expansion", () => {
     await waitFor(() => {
       const label = view.container.querySelector(".sb-conn__label");
       expect(label).toHaveTextContent("Codex");
+    });
+  });
+
+  it("Codex app-server 环境不满足时左下角 provider 卡片标红", async () => {
+    setMockActiveBackend("codex");
+    setMockCodexAppServerStatus({
+      supportsRequiredProtocol: false,
+      issues: ["Codex app-server 环境不满足。"],
+    });
+    await useConnectionStatus().refresh();
+    const view = await renderSecondaryPanel();
+
+    await waitFor(() => {
+      const card = view.container.querySelector(".sb-conn");
+      expect(card).toHaveClass("sb-conn--error");
+      expect(card).toHaveTextContent("异常");
+      expect(card).toHaveAttribute("title", expect.stringContaining("Codex app-server 环境不满足"));
     });
   });
 

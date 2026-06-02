@@ -208,7 +208,7 @@ export type PermissionMode = "full" | "ask" | "readonly";
 /**
  * 当前支持的对话后端：
  * - claude：@anthropic-ai/claude-agent-sdk
- * - codex：@openai/codex-sdk（内部 spawn 本地 codex CLI）
+ * - codex：本地 codex CLI app-server
  */
 export type ChatBackendKind = "claude" | "codex";
 
@@ -505,10 +505,23 @@ export interface CCSwitchStatus {
   baseUrl: string | null;
 }
 
+export interface CodexAppServerStatus {
+  /** codex CLI 的版本输出；未找到或无法读取时为 null。 */
+  version: string | null;
+  /** `codex app-server` 子命令是否可用。 */
+  available: boolean;
+  /** 当前版本是否满足 Lilia app-server 协议能力要求。 */
+  supportsRequiredProtocol: boolean;
+  /** 环境不满足时给 UI 展示的具体原因。 */
+  issues: string[];
+}
+
 export interface EnvStatusReport {
   nodeAvailable: boolean;
-  /** codex CLI 是否能在 PATH 找到（@openai/codex-sdk 是 wrapper）。 */
+  /** codex CLI 是否能在 PATH 找到。 */
   codexCliAvailable: boolean;
+  /** Codex app-server / dynamic tool / AskUser 所需能力检查。 */
+  codexAppServer: CodexAppServerStatus;
   ccSwitch: CCSwitchStatus;
   /** 每个 backend 当前生效的路由模式。 */
   routerModes: Record<ChatBackendKind, RouterMode>;

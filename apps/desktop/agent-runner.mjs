@@ -41,6 +41,7 @@
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 import { createInterface } from "node:readline";
+import { spawn, spawnSync } from "node:child_process";
 import { z } from "zod/v4";
 import {
   createClaudeStreamState,
@@ -243,7 +244,7 @@ function claudeTextFragmentSourceId(sessionId, blockKey) {
  *
  * 终态调 `finishImmediate` 一次性提交剩余，上层紧接 emit success，保证
  * 最终态不被 pacer 延迟。`syncTo` 给只发完整 snapshot 不发增量 delta 的
- * 上游补差量用（如 Codex 的 assistant_message item）。
+ * 上游补差量用。
  */
 function createTextPacer({ intervalMs = 33, flushDivisor = 6, emit }) {
   let buffer = "";
@@ -508,11 +509,18 @@ function requestAskUser(spec, options = {}) {
   const id = `ask-${askUserSeq++}`;
   const emitTimelineEvent =
     options.emitTimelineEvent !== false && spec?.intent !== "plan_approval";
-  if (emitTimelineEvent) emitAskUserTimeline(id, spec, "requires_action");
+  const backend = options.backend === "codex" ? "codex" : "claude";
+  if (emitTimelineEvent) emitAskUserTimeline(id, spec, "requires_action", null, backend);
   return new Promise((resolve) => {
     askUserPending.set(id, (result) => {
       if (emitTimelineEvent) {
-        emitAskUserTimeline(id, spec, result?.cancelled === true ? "cancelled" : "success", result);
+        emitAskUserTimeline(
+          id,
+          spec,
+          result?.cancelled === true ? "cancelled" : "success",
+          result,
+          backend,
+        );
       }
       resolve(result);
     });
@@ -614,7 +622,10 @@ function createClaudeHooks(ctx) {
 function emitToolConsentTimeline(id, payload, status, decisionMessage = "") {
   const toolName = stringOrNull(payload?.toolName) || "tool";
   const input = isRecord(payload?.input) ? payload.input : {};
-  const normalized = normalizeClaudeTool(toolName, input);
+  const backend = payload?.backend === "codex" ? "codex" : "claude";
+  const normalized = backend === "claude"
+    ? normalizeClaudeTool(toolName, input)
+    : normalizeCodexConsentTool(toolName, input);
   const summary = decisionMessage ||
     oneLineSummary(payload?.description) ||
     normalized.summary ||
@@ -622,7 +633,7 @@ function emitToolConsentTimeline(id, payload, status, decisionMessage = "") {
     oneLineSummary(payload?.displayName) ||
     toolName;
   const eventPayload = {
-    backend: "claude",
+    backend,
     interaction: "tool_consent",
     requestId: id,
     toolName,
@@ -661,7 +672,7 @@ function askUserTimelineSummary(spec) {
   return `${question} 等 ${questions.length} 个问题`;
 }
 
-function emitAskUserTimeline(id, spec, status, result = null) {
+function emitAskUserTimeline(id, spec, status, result = null, backend = "claude") {
   const questions = Array.isArray(spec?.questions) ? spec.questions : [];
   emitTimeline({
     kind: "ask_user",
@@ -669,7 +680,7 @@ function emitAskUserTimeline(id, spec, status, result = null) {
     title: stringOrNull(spec?.title) || "AskUserQuestion",
     summary: askUserTimelineSummary(spec),
     payload: {
-      backend: "claude",
+      backend,
       interaction: "ask_user",
       requestId: id,
       title: stringOrNull(spec?.title),
@@ -1222,6 +1233,44 @@ const askUserQuestionInputSchema = {
     .max(4),
 };
 
+const askUserQuestionJsonSchema = {
+  type: "object",
+  properties: {
+    questions: {
+      type: "array",
+      minItems: 1,
+      maxItems: 4,
+      items: {
+        type: "object",
+        properties: {
+          question: { type: "string" },
+          header: { type: "string" },
+          options: {
+            type: "array",
+            minItems: 2,
+            maxItems: 4,
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                description: { type: "string" },
+                preview: { type: "string" },
+              },
+              required: ["label"],
+              additionalProperties: false,
+            },
+          },
+          multiSelect: { type: "boolean", default: false },
+        },
+        required: ["question", "header", "options"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["questions"],
+  additionalProperties: false,
+};
+
 const liliaAskUserServer = createSdkMcpServer({
   name: "lilia",
   version: "0.1.0",
@@ -1236,6 +1285,99 @@ const liliaAskUserServer = createSdkMcpServer({
   ],
   alwaysLoad: true,
 });
+
+const codexAskUserDynamicTool = {
+  name: "AskUserQuestion",
+  description: "Ask the human user one or more multiple-choice questions through Lilia.",
+  inputSchema: askUserQuestionJsonSchema,
+};
+
+function askUserSpecToCodexOutput(input, spec, result) {
+  return askUserResultToClaudeOutput(input, spec, result);
+}
+
+function codexAskUserInputToSpec(input) {
+  return {
+    title: "Codex 想确认一下",
+    source: "Codex",
+    dismissable: true,
+    questions: normalizeClaudeAskUserQuestions(input),
+  };
+}
+
+async function handleCodexAskUserQuestion(input) {
+  const spec = codexAskUserInputToSpec(input);
+  if (spec.questions.length === 0) {
+    return {
+      questions: Array.isArray(input?.questions) ? input.questions : [],
+      answers: {},
+      annotations: {},
+      cancelled: true,
+      error: "No valid questions were provided.",
+    };
+  }
+  const result = await requestAskUser(spec, { backend: "codex" });
+  return askUserSpecToCodexOutput(input, spec, result);
+}
+
+function codexRequestUserInputQuestionsToSpec(params) {
+  const rawQuestions = Array.isArray(params?.questions) ? params.questions.slice(0, 4) : [];
+  const questions = rawQuestions
+    .map((question, questionIndex) => {
+      if (!isRecord(question)) return null;
+      const options = Array.isArray(question.options) ? question.options.slice(0, 10) : [];
+      const normalizedOptions = options
+        .map((option, optionIndex) => {
+          if (!isRecord(option)) return null;
+          const label = stringOrNull(option.label) || `Option ${optionIndex + 1}`;
+          const normalized = {
+            id: label,
+            label,
+          };
+          const description = stringOrNull(option.description);
+          if (description) normalized.description = description;
+          if (optionIndex === 0) normalized.recommended = true;
+          return normalized;
+        })
+        .filter(Boolean);
+      const allowOther = question.isOther === true;
+      const hasOptions = normalizedOptions.length >= 2;
+      if (!hasOptions && !allowOther) return null;
+      return {
+        id: stringOrNull(question.id) || `q-${questionIndex + 1}`,
+        header: shortText(question.header, 12) || `问题 ${questionIndex + 1}`,
+        question: shortText(question.question, 1200) || "请补充信息。",
+        mode: hasOptions ? "single" : "single",
+        options: hasOptions ? normalizedOptions : [{ id: "other", label: "其他" }, { id: "skip", label: "跳过" }],
+        allowOther,
+        skippable: false,
+      };
+    })
+    .filter(Boolean);
+  return {
+    title: "Codex 想确认一下",
+    source: "Codex",
+    dismissable: true,
+    questions,
+  };
+}
+
+function askUserResultToCodexRequestUserInputResponse(result, spec) {
+  const answers = {};
+  for (const question of spec.questions) {
+    const answer = result.answers?.[question.id];
+    if (!answer || answer.skipped) continue;
+    if (Array.isArray(answer.value)) {
+      answers[question.id] = {
+        answers: answer.value.map((value) => value === "other" ? answer.notes || "Other" : String(value)),
+      };
+      continue;
+    }
+    const value = answer.value === "other" ? answer.notes || "Other" : String(answer.value);
+    if (value) answers[question.id] = { answers: [value] };
+  }
+  return { answers };
+}
 
 /**
  * Claude 工具调用 → lilia 协议事件：通过 `@lilia/contracts/claudeTools.mjs` 的
@@ -2020,8 +2162,7 @@ function emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSe
 // ---------- Codex ----------
 
 function mapCodexPermission(p) {
-  // Lilia 三档 → Codex SDK 的 sandboxMode（0.47 起：字段从 sandbox 改名为
-  // sandboxMode，approvalMode 已从 ThreadOptions 移除，交由 codex CLI 自身策略）。
+  // Lilia 三档 → Codex app-server 的 sandboxPolicy。
   switch (p) {
     case "full":
       return { sandboxMode: "danger-full-access" };
@@ -2034,14 +2175,13 @@ function mapCodexPermission(p) {
 }
 
 function getCodexItemType(item) {
-  return stringOrNull(item?.type || item?.item_type) || "";
+  return stringOrNull(item?.type) || "";
 }
 
 function getCodexStatus(eventType, item) {
   const status = stringOrNull(item?.status);
   if (status) return normalizeTimelineStatus(status);
   if (eventType === "item.started") return "started";
-  if (eventType === "item.updated") return "running";
   if (eventType === "item.completed") return "success";
   if (eventType === "turn.started") return "started";
   if (eventType === "turn.completed") return "success";
@@ -2053,18 +2193,16 @@ function codexTimelineKindForItem(item) {
   switch (getCodexItemType(item)) {
     case "reasoning":
       return { kind: "reasoning" };
-    case "command_execution":
+    case "commandExecution":
       return { kind: "command" };
-    case "file_change":
+    case "fileChange":
       return { kind: "file_change" };
-    case "mcp_tool_call":
+    case "mcpToolCall":
       return { kind: "mcp" };
-    case "web_search":
+    case "webSearch":
       return { kind: "search", subkind: "web" };
-    case "todo_list":
+    case "plan":
       return { kind: "todo_list" };
-    case "error":
-      return { kind: "error" };
     default:
       return null;
   }
@@ -2076,7 +2214,7 @@ function summarizeCodexTodoList(items) {
     .map((todo) => {
       if (!isRecord(todo)) return shortText(todo, 120);
       const prefix = todo.completed ? "[x]" : "[ ]";
-      return `${prefix} ${shortText(todo.text, 160) || ""}`.trim();
+      return `${prefix} ${shortText(todo.text || todo.step, 160) || ""}`.trim();
     })
     .filter(Boolean)
     .join("\n");
@@ -2118,7 +2256,7 @@ function codexTimelineTitle(kind, item, eventType) {
 function codexTimelineSummary(kind, item) {
   switch (kind) {
     case "reasoning":
-      return shortText(item.text, 1200) || "";
+      return shortText(item.text || item.summary?.join?.("\n"), 1200) || "";
     case "command":
       // 折叠预览要保持稳定地显示指令本身——派生器从 payload.command 算出 object，
       // 这里把 command 当作 summary 兜底，避免 item.aggregated_output 在命令结束后
@@ -2149,13 +2287,13 @@ function codexTimelinePayload(kind, subkind, item, eventType) {
   if (subkind) base.subkind = subkind;
   switch (kind) {
     case "reasoning":
-      return { ...base, text: item.text };
+      return { ...base, text: item.text, summary: item.summary, content: item.content };
     case "command":
       return {
         ...base,
         command: item.command,
-        output: item.aggregated_output,
-        exit: item.exit_code,
+        output: item.aggregatedOutput,
+        exit: item.exitCode,
       };
     case "file_change":
       return { ...base, changes: item.changes };
@@ -2172,7 +2310,96 @@ function codexTimelinePayload(kind, subkind, item, eventType) {
   }
 }
 
-function emitCodexItemTimeline(eventType, item) {
+function normalizeCodexConsentTool(toolName, input) {
+  const name = String(toolName || "tool");
+  if (
+    name === "item/commandExecution/requestApproval" ||
+    name === "commandExecution"
+  ) {
+    const command = stringifyCodexCommand(
+      input?.parsedCmd ||
+        input?.command ||
+        input?.cmd ||
+        input?.commandActions,
+    ) || name;
+    return {
+      kind: "command",
+      payload: { command },
+      summary: shortText(command, 200),
+    };
+  }
+  if (
+    name === "item/fileChange/requestApproval" ||
+    name === "fileChange"
+  ) {
+    return {
+      kind: "file_change",
+      payload: {
+        changes: Array.isArray(input?.fileChanges) ? input.fileChanges : undefined,
+        grantRoot: stringOrNull(input?.grantRoot),
+      },
+      summary: shortText(stringOrNull(input?.grantRoot) || "Patch approval", 200),
+    };
+  }
+  return {
+    kind: "tool",
+    payload: {},
+    summary: shortText(name, 200),
+  };
+}
+
+function maybeEmitCodexPlanApproval(eventType, item, ctx) {
+  if (!ctx?.planMode || ctx.planApprovalHandled) return false;
+  if (getCodexItemType(item) !== "plan") return false;
+  const items = Array.isArray(item?.items) ? item.items : [];
+  if (items.length === 0 || items.every((todo) => todo?.completed === true)) return false;
+  ctx.planApprovalHandled = true;
+  ctx.pendingPlanPayload = {
+    source: "Codex plan",
+    plan: summarizeCodexTodoList(items),
+    approved: null,
+    executionPermission: ctx.executionPermission,
+    items,
+  };
+  emitTimeline({
+    kind: "plan",
+    status: "requires_action",
+    title: "Codex plan",
+    summary: oneLineSummary(ctx.pendingPlanPayload.plan),
+    payload: {
+      backend: "codex",
+      ...ctx.pendingPlanPayload,
+    },
+    sourceId: item?.id || "codex:plan",
+  });
+  return true;
+}
+
+function emitCodexPlanResolution(ctx, result) {
+  const pending = ctx?.pendingPlanPayload;
+  if (!pending) return;
+  const revisionRequest = readPlanRevisionRequest(result);
+  const approved = revisionRequest ? false : isPlanApprovalAccepted(result);
+  emitTimeline({
+    kind: "plan",
+    status: approved ? "success" : "cancelled",
+    title: "Codex plan",
+    summary: oneLineSummary(revisionRequest || pending.plan),
+    payload: {
+      backend: "codex",
+      ...pending,
+      approved,
+      ...(revisionRequest ? { revisionRequest } : {}),
+    },
+    sourceId: "codex:plan",
+  });
+}
+
+function emitCodexItemTimeline(eventType, item, ctx = null) {
+  if (maybeEmitCodexPlanApproval(eventType, item, ctx)) {
+    emit({ type: "todo_list", items: item.items });
+    return;
+  }
   const route = codexTimelineKindForItem(item);
   if (!route) return;
   const { kind, subkind = null } = route;
@@ -2212,16 +2439,26 @@ function emitCodexTurnTimeline(eventType, ev, ctx) {
 }
 
 /**
- * 把 @openai/codex-sdk 的 ThreadEvent 翻译为 Lilia 的 NDJSON 协议。
- * SDK 的事件 schema 可能在 minor 版本间漂移，所有 picker 都做防御性 fallback。
+ * 把 Codex app-server 事件翻译为 Lilia 的 NDJSON 协议。
+ * app-server 事件 schema 仍在变化，所有 picker 都做防御性兼容。
  */
 function mapCodexEventToNdjson(ev, ctx) {
   if (!ev || typeof ev !== "object") return;
 
-  const tid = ev.thread_id || ev.threadId;
+  const tid = ev.threadId;
   if (tid && typeof tid === "string") ctx.lastThreadId = tid;
 
   const type = ev.type || "";
+
+  if (type === "agentMessage.delta") {
+    const delta = stringOrNull(ev.delta) || "";
+    if (delta) {
+      ctx.assistantDeltaText += delta;
+      ctx.assistantSnapshotText += delta;
+      ctx.pacer.push(delta);
+    }
+    return;
+  }
 
   if (type === "thread.started") return;
 
@@ -2230,64 +2467,22 @@ function mapCodexEventToNdjson(ev, ctx) {
     return;
   }
 
-  // 文本增量：0.47 的 item.updated 给的是累积后的 ThreadItem.text（不是 delta），
-  // 用 itemTextSeen 按 item.id 跟踪已发长度提取增量。若上游 SDK 改回发 delta
-  // （total < seen），按 raw 直发兜底。
-  if (type === "item.updated") {
-    const item = ev.item || ev;
-    const kind = item?.type || item?.item_type;
-    emitCodexItemTimeline(type, item);
-    if (
-      (kind === "agent_message" || kind === "assistant_message") &&
-      typeof item?.text === "string" &&
-      item?.id
-    ) {
-      const seen = ctx.itemTextSeen.get(item.id) || 0;
-      const total = item.text.length;
-      if (total > seen) {
-        const delta = item.text.slice(seen);
-        ctx.assistantDeltaText += delta;
-        ctx.assistantSnapshotText = item.text;
-        ctx.pacer.push(delta);
-        ctx.itemTextSeen.set(item.id, total);
-      } else if (total < seen) {
-        ctx.assistantDeltaText += item.text;
-        ctx.assistantSnapshotText = item.text;
-        ctx.pacer.syncTo(ctx.assistantSnapshotText);
-      }
-      return;
-    }
-    // 老 SDK / 未识别 item 类型走 picker 兜底。
-    const text = pickCodexDeltaText(ev);
-    if (text) {
-      ctx.assistantDeltaText += text;
-      ctx.pacer.push(text);
-    }
-    return;
-  }
-
-  // 完成的 item：agent_message 触发最终回复 timeline，其它当 tool_use。
+  // 完成的 item：agentMessage 触发最终回复 timeline，其它当 tool_use。
   if (type === "item.completed" || type === "item.started") {
     const item = ev.item || ev;
-    const kind = item?.item_type || item?.type;
-    emitCodexItemTimeline(type, item);
-    if (
-      kind === "agent_message" ||
-      kind === "assistant_message" ||
-      kind === "message"
-    ) {
+    const kind = item?.type;
+    emitCodexItemTimeline(type, item, ctx);
+    if (kind === "agentMessage") {
       const text = pickCodexAssistantText(item);
       if (text && type === "item.completed") {
         ctx.assistantSnapshotText = text;
-        ctx.pacer.finishImmediate();
-        emitAssistantMessageTimeline(text, "success", "codex");
-        if (item?.id) ctx.itemTextSeen.delete(item.id);
+        emitCodexAssistantSuccess(ctx, text);
       }
       return;
     }
     if (type === "item.started") {
       const name = String(kind || "tool");
-      const { item_type: _ignore, type: _ignore2, ...rest } = item || {};
+      const { type: _ignore, ...rest } = item || {};
       emit({ type: "tool_use", name, input: rest });
     }
     return;
@@ -2295,7 +2490,7 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   if (type === "turn.completed") {
     ctx.turnCompletedSeen = true;
-    ctx.pacer.finishImmediate();
+    emitCodexAssistantSuccess(ctx);
     emitCodexTurnTimeline(type, ev, ctx);
     emit({
       type: "done",
@@ -2307,21 +2502,11 @@ function mapCodexEventToNdjson(ev, ctx) {
 
   if (type === "turn.failed" || type === "error") {
     const msg = ev.error?.message || ev.message || "codex turn failed";
+    ctx.turnCompletedSeen = true;
     ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
     emit({ type: "error", message: msg });
   }
-}
-
-function pickCodexDeltaText(ev) {
-  if (typeof ev.delta === "string") return ev.delta;
-  if (typeof ev.text === "string") return ev.text;
-  const item = ev.item;
-  if (item && typeof item === "object") {
-    if (typeof item.delta === "string") return item.delta;
-    if (typeof item.text === "string") return item.text;
-  }
-  return null;
 }
 
 function pickCodexAssistantText(item) {
@@ -2337,80 +2522,419 @@ function pickCodexAssistantText(item) {
   return "";
 }
 
-async function runCodex(cmd) {
-  const { cwd, prompt, model, resumeSessionId, permission } = cmd;
-  const runtimeExtensions = readCodexRuntimeExtensions(cmd);
-
-  // 动态 import：让仅用 Claude 的环境不需要装 @openai/codex-sdk 也能跑。
-  let Codex;
-  try {
-    ({ Codex } = await import("@openai/codex-sdk"));
-  } catch (err) {
-    emit({
-      type: "error",
-      message:
-        "未安装 @openai/codex-sdk，请在仓库根目录 `yarn install`，并确保已全局安装 codex CLI。",
-    });
-    process.exit(1);
-    return;
+function codexAppServerBinary() {
+  const injected = stringOrNull(process.env.LILIA_CODEX_CLI_PATH)?.trim();
+  const candidates = [
+    ...(injected ? [injected] : []),
+    ...(process.platform === "win32" ? ["codex.cmd", "codex.exe", "codex.bat", "codex"] : ["codex"]),
+  ];
+  for (const candidate of candidates) {
+    const result = spawnCodexCandidateSync(candidate, ["--version"], { stdio: "ignore" });
+    if (!result.error && result.status === 0) return candidate;
   }
+  return candidates[0];
+}
 
-  emitCodexRuntimeExtensionsTimeline(runtimeExtensions);
-  const codex = new Codex({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseUrl: process.env.OPENAI_BASE_URL || undefined,
+function isWindowsCommandScript(binary) {
+  return process.platform === "win32" && /\.(cmd|bat)$/i.test(binary);
+}
+
+function windowsCommandLineToken(value) {
+  const text = String(value);
+  if (!/[\s"&|<>^]/.test(text)) return text;
+  return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+function windowsCommandLine(binary, args) {
+  return [binary, ...args].map(windowsCommandLineToken).join(" ");
+}
+
+function spawnCodexCandidateSync(binary, args, options = {}) {
+  if (!isWindowsCommandScript(binary)) return spawnSync(binary, args, options);
+  return spawnSync(process.env.ComSpec || "cmd.exe", [
+    "/d",
+    "/s",
+    "/c",
+    windowsCommandLine(binary, args),
+  ], options);
+}
+
+function spawnCodexAppServer(binary, options) {
+  if (!isWindowsCommandScript(binary)) return spawn(binary, ["app-server"], options);
+  return spawn(process.env.ComSpec || "cmd.exe", [
+    "/d",
+    "/s",
+    "/c",
+    windowsCommandLine(binary, ["app-server"]),
+  ], options);
+}
+
+function mapCodexSandboxMode(permission) {
+  return mapCodexPermission(permission).sandboxMode;
+}
+
+function mapCodexApprovalPolicy(permission) {
+  if (permission === "full") return "never";
+  if (permission === "readonly") return "never";
+  return "on-request";
+}
+
+function stringifyCodexCommand(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (isRecord(part)) {
+          return stringOrNull(part.text) ||
+            stringOrNull(part.value) ||
+            stringOrNull(part.arg) ||
+            stringOrNull(part.command) ||
+            "";
+        }
+        return stringOrNull(part) || "";
+      })
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (typeof value === "string") return value;
+  if (isRecord(value)) {
+    return stringifyCodexCommand(value.parsedCmd || value.command || value.cmd || value.args);
+  }
+  return "";
+}
+
+function createCodexAppServer() {
+  const binary = codexAppServerBinary();
+  const child = spawnCodexAppServer(binary, {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...(process.env.OPENAI_BASE_URL ? { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } : {}),
+      ...(process.env.OPENAI_API_KEY ? { CODEX_API_KEY: process.env.OPENAI_API_KEY } : {}),
+    },
   });
-  const threadOptions = {
-    workingDirectory: cwd || process.cwd(),
+  const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const pending = new Map();
+  const notifications = [];
+  let seq = 1;
+  let stderr = "";
+  let closed = false;
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+  child.once("error", (err) => {
+    closed = true;
+    for (const { reject } of pending.values()) {
+      reject(err);
+    }
+    pending.clear();
+  });
+  child.once("exit", () => {
+    closed = true;
+    for (const { reject } of pending.values()) {
+      reject(new Error(`Codex app-server exited: ${stderr.trim()}`));
+    }
+    pending.clear();
+  });
+  rl.on("line", (line) => {
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(msg, "id")) {
+      const entry = pending.get(msg.id);
+      if (!entry) {
+        notifications.push(msg);
+        return;
+      }
+      pending.delete(msg.id);
+      if (msg.error) entry.reject(new Error(msg.error.message || "Codex app-server request failed"));
+      else entry.resolve(msg.result ?? null);
+      return;
+    }
+    notifications.push(msg);
+  });
+  function request(method, params = {}) {
+    if (closed || !child.stdin) {
+      return Promise.reject(new Error("Codex app-server is not running"));
+    }
+    const id = seq++;
+    const payload = { method, id, params };
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
+    });
+  }
+  function notify(method, params = {}) {
+    if (!closed && child.stdin) child.stdin.write(`${JSON.stringify({ method, params })}\n`);
+  }
+  function respond(id, result) {
+    if (!closed && child.stdin) child.stdin.write(`${JSON.stringify({ id, result })}\n`);
+  }
+  function drainNotifications() {
+    return notifications.splice(0, notifications.length);
+  }
+  function close() {
+    rl.close();
+    try {
+      child.kill();
+    } catch {
+      // noop
+    }
+  }
+  return { binary, child, request, notify, respond, drainNotifications, close };
+}
+
+async function initializeCodexAppServer(server) {
+  await server.request("initialize", {
+    clientInfo: {
+      name: "lilia",
+      title: "LiliaCode",
+      version: "0.1.0",
+    },
+    capabilities: { experimentalApi: true },
+  });
+  server.notify("initialized", {});
+}
+
+async function startCodexAppServerThread(server, cmd) {
+  const { cwd, model, resumeSessionId, permission, planMode } = cmd;
+  const common = {
     model: model || undefined,
-    ...mapCodexPermission(permission),
-    skipGitRepoCheck: true,
+    cwd: cwd || process.cwd(),
+    sandbox: mapCodexSandboxMode(permission),
+    approvalPolicy: mapCodexApprovalPolicy(permission),
+    includePlanTool: planMode === true,
   };
+  if (resumeSessionId) {
+    const resumed = await server.request("thread/resume", { threadId: resumeSessionId, ...common });
+    return resumed?.thread?.id || resumed?.threadId || resumeSessionId;
+  }
+  const started = await server.request("thread/start", {
+    ...common,
+    dynamicTools: [codexAskUserDynamicTool],
+  });
+  return started?.thread?.id || started?.threadId || null;
+}
 
-  const thread = resumeSessionId
-    ? codex.resumeThread(resumeSessionId, threadOptions)
-    : codex.startThread(threadOptions);
+async function startCodexAppServerTurn(server, threadId, prompt, cmd) {
+  return server.request("turn/start", {
+    threadId,
+    input: [{ type: "text", text: prompt }],
+    cwd: cmd.cwd || process.cwd(),
+    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
+  });
+}
 
-  const ctx = {
-    lastThreadId: thread?.id ?? resumeSessionId ?? null,
-    itemTextSeen: new Map(),
+function normalizeCodexAppServerEvent(msg) {
+  if (!isRecord(msg)) return null;
+  const method = stringOrNull(msg.method);
+  const params = isRecord(msg.params) ? msg.params : {};
+  if (method === "turn/started") return { type: "turn.started", ...params };
+  if (method === "turn/completed") {
+    const turn = isRecord(params.turn) ? params.turn : null;
+    const status = stringOrNull(turn?.status);
+    if (status === "failed" || status === "interrupted") {
+      return { type: "turn.failed", ...params, error: turn?.error || params.error };
+    }
+    return { type: "turn.completed", ...params };
+  }
+  if (method === "turn/failed") return { type: "turn.failed", ...params };
+  if (method === "turn/plan/updated") {
+    return {
+      type: "item.started",
+      item: {
+        id: stringOrNull(params.turnId) || "codex:plan",
+        type: "plan",
+        items: normalizeCodexPlanSteps(params.plan),
+      },
+    };
+  }
+  if (method === "item/started") return { type: "item.started", item: params.item || params };
+  if (method === "item/completed") return { type: "item.completed", item: params.item || params };
+  if (method === "item/agentMessage/delta") {
+    return {
+      type: "agentMessage.delta",
+      id: stringOrNull(params.itemId) || "codex:agent-message",
+      delta: stringOrNull(params.delta) || "",
+    };
+  }
+  return null;
+}
+
+function normalizeCodexPlanSteps(plan) {
+  return Array.isArray(plan)
+    ? plan
+      .map((step) => {
+        if (!isRecord(step)) return null;
+        const text = stringOrNull(step.step) || stringOrNull(step.text);
+        if (!text) return null;
+        return {
+          text,
+          completed: step.status === "completed",
+          status: stringOrNull(step.status),
+        };
+      })
+      .filter(Boolean)
+    : [];
+}
+
+async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
+  if (!isRecord(msg)) return false;
+  const method = stringOrNull(msg.method);
+  if (method === "item/tool/call") {
+    const params = isRecord(msg.params) ? msg.params : {};
+    const toolName = stringOrNull(params.tool);
+    if (!isLiliaAskUserTool(toolName)) return false;
+    const input = isRecord(params.arguments) ? params.arguments : {};
+    const output = await handleCodexAskUserQuestion(input);
+    server.respond(msg.id, {
+      success: output.cancelled !== true,
+      contentItems: [{ type: "inputText", text: JSON.stringify(output) }],
+    });
+    return true;
+  }
+  if (method === "item/tool/requestUserInput") {
+    const params = isRecord(msg.params) ? msg.params : {};
+    const spec = codexRequestUserInputQuestionsToSpec(params);
+    if (spec.questions.length === 0) {
+      server.respond(msg.id, { answers: {} });
+      return true;
+    }
+    const result = await requestAskUser(spec, { backend: "codex" });
+    server.respond(msg.id, askUserResultToCodexRequestUserInputResponse(result, spec));
+    return true;
+  }
+  const params = isRecord(msg.params) ? msg.params : {};
+  const isCommandApproval =
+    method === "item/commandExecution/requestApproval";
+  const isFileChangeApproval =
+    method === "item/fileChange/requestApproval";
+  if (!isCommandApproval && !isFileChangeApproval) return false;
+  const requestId =
+    stringOrNull(params.approvalId) ||
+    stringOrNull(params.callId) ||
+    stringOrNull(params.itemId) ||
+    stringOrNull(msg.id) ||
+    `codex-${method}`;
+  const toolName = method;
+  const input = { ...params };
+  const command = stringifyCodexCommand(
+    params.command ||
+      params.parsedCmd ||
+      params.cmd ||
+      params.commandActions,
+  );
+  const patchSummary = oneLineSummary(params.grantRoot || params.reason || "Patch approval");
+  const payload = {
+    backend: "codex",
+    toolName,
+    input,
+    toolUseID: requestId,
+    title: isCommandApproval ? "Codex command approval" : "Codex patch approval",
+    displayName: toolName,
+    description: isCommandApproval ? command : patchSummary,
+  };
+  const { id, decision, message } = await requestUserConsent(payload);
+  const accepted = decision === "allow";
+  server.respond(msg.id, { decision: accepted ? "accept" : "decline" });
+  emitToolConsentTimeline(id, payload, accepted ? "success" : "cancelled", accepted
+    ? "用户已同意此次 Codex 操作"
+    : message || "用户拒绝了此次 Codex 操作");
+  return true;
+}
+
+async function runCodexAppServer(cmd, runtimeExtensions) {
+  const server = createCodexAppServer();
+  emitCodexRuntimeExtensionsTimeline(runtimeExtensions);
+  try {
+    await initializeCodexAppServer(server);
+    const threadId = await startCodexAppServerThread(server, cmd);
+    if (!threadId) throw new Error("Codex app-server did not return a thread id");
+    const ctx = createCodexRunContext(cmd, threadId);
+    await startCodexAppServerTurn(server, threadId, cmd.prompt, cmd);
+    const startedAt = Date.now();
+    while (!ctx.turnCompletedSeen) {
+      const messages = server.drainNotifications();
+      for (const msg of messages) {
+        if (await maybeHandleCodexServerRequest(server, msg, ctx)) continue;
+        const ev = normalizeCodexAppServerEvent(msg);
+        if (ev) mapCodexEventToNdjson(ev, ctx);
+        await maybeHandleCodexPlanApproval(ctx);
+      }
+      if (Date.now() - startedAt > 1000 * 60 * 60) {
+        throw new Error("Codex app-server turn timed out");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    finalizeCodexRunContext(ctx);
+  } finally {
+    server.close();
+  }
+}
+
+function createCodexRunContext(cmd, sessionId = null) {
+  return {
+    lastThreadId: sessionId,
     assistantDeltaText: "",
     assistantSnapshotText: "",
     turnCompletedSeen: false,
+    planMode: cmd.planMode === true,
+    planApprovalHandled: false,
+    planApprovalResolved: false,
+    pendingPlanPayload: null,
+    executionPermission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
+    assistantSuccessEmitted: false,
     pacer: createTextPacer({
       emit: (text) => emitAssistantMessageTimeline(text, "running", "codex"),
     }),
   };
+}
 
-  // 0.47 起 thread.run() 返回完整 Turn（非流式），要拿事件流必须用 runStreamed。
-  const turn = await thread.runStreamed(prompt);
+function emitCodexAssistantSuccess(ctx, finalText = null) {
+  if (!ctx || ctx.assistantSuccessEmitted) return;
+  const text =
+    fullTextOrNull(finalText) ||
+    fullTextOrNull(ctx.assistantSnapshotText) ||
+    fullTextOrNull(ctx.assistantDeltaText);
+  ctx.pacer.finishImmediate();
+  if (!text) return;
+  ctx.assistantSuccessEmitted = true;
+  emitAssistantMessageTimeline(text, "success", "codex");
+}
 
-  for await (const ev of turn.events) {
-    mapCodexEventToNdjson(ev, ctx);
-  }
+async function maybeHandleCodexPlanApproval(ctx) {
+  if (!ctx?.pendingPlanPayload || ctx.planApprovalResolved) return;
+  ctx.planApprovalResolved = true;
+  const result = await requestAskUser(buildPlanApprovalSpec(), { emitTimelineEvent: false });
+  emitCodexPlanResolution(ctx, result);
+}
 
-  if (ctx.lastThreadId && !ctx.turnCompletedSeen) {
-    // 兜底 done：与 Claude 分支语义一致——某些版本可能不发 turn.completed。
-    const finalText =
-      fullTextOrNull(ctx.assistantSnapshotText) ||
-      fullTextOrNull(ctx.assistantDeltaText);
-    ctx.pacer.finishImmediate();
-    if (finalText) {
-      emitAssistantMessageTimeline(finalText, "success", "codex");
-    }
-    emitTimeline({
-      kind: "turn",
-      status: "success",
-      title: "Codex turn completed",
-      summary: "",
-      payload: {
-        backend: "codex",
-        eventType: "turn.completed",
-        sessionId: ctx.lastThreadId,
-      },
-    });
-    emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
-  }
+function finalizeCodexRunContext(ctx) {
+  if (!ctx.lastThreadId || ctx.turnCompletedSeen) return;
+  const finalText =
+    fullTextOrNull(ctx.assistantSnapshotText) ||
+    fullTextOrNull(ctx.assistantDeltaText);
+  emitCodexAssistantSuccess(ctx, finalText);
+  emitTimeline({
+    kind: "turn",
+    status: "success",
+    title: "Codex turn completed",
+    summary: "",
+    payload: {
+      backend: "codex",
+      eventType: "turn.completed",
+      sessionId: ctx.lastThreadId,
+    },
+  });
+  emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
+}
+
+async function runCodex(cmd) {
+  const runtimeExtensions = readCodexRuntimeExtensions(cmd);
+  await runCodexAppServer(cmd, runtimeExtensions);
 }
 
 function emitCodexRuntimeExtensionsTimeline(extensions) {

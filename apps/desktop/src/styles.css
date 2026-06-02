@@ -994,6 +994,16 @@ pre code {
   filter: brightness(1.1);
 }
 
+.sb-conn--error {
+  background: var(--err-soft);
+  color: var(--err);
+  opacity: 0.9;
+}
+
+.sb-conn--error:hover {
+  filter: brightness(1.1);
+}
+
 .sb-conn__label {
   min-width: 0;
   overflow: hidden;

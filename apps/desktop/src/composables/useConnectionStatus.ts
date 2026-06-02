@@ -33,8 +33,9 @@ async function probeOnce() {
   return inflight;
 }
 
-async function loadActiveBackend(): Promise<ChatBackendKind> {
+async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
   if (backendInflight) return backendInflight;
+  if (activeBackendLoaded && !force) return activeBackend.value;
   backendInflight = getActiveBackend()
     .then((backend) => {
       activeBackend.value = backend === "codex" ? "codex" : "claude";
@@ -51,6 +52,10 @@ async function loadActiveBackend(): Promise<ChatBackendKind> {
       backendInflight = null;
     });
   return backendInflight;
+}
+
+async function refreshAll() {
+  await Promise.all([probeOnce(), loadActiveBackend(true)]);
 }
 
 async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKind> {
@@ -77,6 +82,7 @@ export function useConnectionStatus() {
 
   const nodeAvailable = computed(() => report.value?.nodeAvailable ?? false);
   const codexCliAvailable = computed(() => report.value?.codexCliAvailable ?? false);
+  const codexAppServer = computed(() => report.value?.codexAppServer ?? null);
   const ccSwitch = computed(() => report.value?.ccSwitch ?? null);
 
   function statusFor(backend: ChatBackendKind): BackendEnvStatus | null {
@@ -90,10 +96,11 @@ export function useConnectionStatus() {
     report,
     activeBackend,
     probing,
-    refresh: probeOnce,
+    refresh: refreshAll,
     setActiveBackend,
     nodeAvailable,
     codexCliAvailable,
+    codexAppServer,
     ccSwitch,
     statusFor,
     routerFor,

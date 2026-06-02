@@ -38,6 +38,7 @@ const {
   refresh,
   nodeAvailable,
   codexCliAvailable,
+  codexAppServer,
   ccSwitch,
 } = useConnectionStatus();
 
@@ -55,6 +56,10 @@ const selectedRuntimeIssue = computed<string | null>(() => {
   if (probing.value) return null;
   if (!nodeAvailable.value) return "未找到 node（v18+），SDK 需要本机 Node 运行时。";
   if (!isClaude.value && !codexCliAvailable.value) return "未找到 codex CLI。请先 npm i -g @openai/codex 再重新检测。";
+  if (!isClaude.value && codexAppServer.value && !codexAppServer.value.supportsRequiredProtocol) {
+    return codexAppServer.value.issues.join(" ") ||
+      "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
+  }
   return null;
 });
 

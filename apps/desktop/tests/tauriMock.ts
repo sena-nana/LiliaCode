@@ -148,6 +148,12 @@ let nextChatSendError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let activeBackend: "claude" | "codex" = "claude";
+let codexAppServerStatus = {
+  version: "codex-cli 0.128.0",
+  available: true,
+  supportsRequiredProtocol: true,
+  issues: [] as string[],
+};
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 const baseClaudePlugins = [{
   scope: "user",
@@ -351,6 +357,12 @@ export function resetTauriMockData() {
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
   activeBackend = "claude";
+  codexAppServerStatus = {
+    version: "codex-cli 0.128.0",
+    available: true,
+    supportsRequiredProtocol: true,
+    issues: [],
+  };
   composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
   claudeMcpServers = baseClaudeMcpServers.map((server) => ({
@@ -648,6 +660,14 @@ export function setMockActiveBackend(backend: "claude" | "codex") {
   activeBackend = backend;
 }
 
+export function setMockCodexAppServerStatus(status: Partial<typeof codexAppServerStatus>) {
+  codexAppServerStatus = {
+    ...codexAppServerStatus,
+    ...status,
+    issues: status.issues ? [...status.issues] : codexAppServerStatus.issues,
+  };
+}
+
 export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
@@ -796,6 +816,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return {
         nodeAvailable: true,
         codexCliAvailable: true,
+        codexAppServer: {
+          ...codexAppServerStatus,
+          issues: [...codexAppServerStatus.issues],
+        },
         ccSwitch: {
           reachable: true,
           baseUrl: "http://127.0.0.1:15721",
