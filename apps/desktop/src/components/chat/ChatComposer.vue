@@ -40,7 +40,12 @@ import type {
   ToolConsentRequest,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
-import { describeAttachments, searchContextAttachments } from "../../services/chat";
+import {
+  describeAttachments,
+  readClipboardFilePaths,
+  saveClipboardImage,
+  searchContextAttachments,
+} from "../../services/chat";
 import Dropdown from "../Dropdown.vue";
 import EditableCommandBlock from "./EditableCommandBlock.vue";
 
@@ -613,23 +618,34 @@ function nodeComposerLength(node: Node): number {
 }
 
 function captureRichSelectionOffset(): number {
-  const editor = richEditor.value;
   const selection = window.getSelection();
-  if (!editor || !selection || selection.rangeCount === 0) {
-    return inputSelection.value;
-  }
-  const focusNode = selection.focusNode;
-  if (!focusNode || !editor.contains(focusNode)) {
-    return inputSelection.value;
-  }
+  if (!selection || selection.rangeCount === 0) return inputSelection.value;
+  return richSelectionPointOffset(selection.focusNode, selection.focusOffset) ?? inputSelection.value;
+}
+
+function richSelectionPointOffset(node: Node | null, offset: number): number | null {
+  const editor = richEditor.value;
+  if (!editor || !node || !editor.contains(node)) return null;
   const range = document.createRange();
   range.selectNodeContents(editor);
   try {
-    range.setEnd(focusNode, selection.focusOffset);
+    range.setEnd(node, offset);
   } catch {
-    return inputSelection.value;
+    return null;
   }
   return nodeComposerLength(range.cloneContents());
+}
+
+function captureRichSelectionRange(): { start: number; end: number } | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const anchor = richSelectionPointOffset(selection.anchorNode, selection.anchorOffset);
+  const focus = richSelectionPointOffset(selection.focusNode, selection.focusOffset);
+  if (anchor === null || focus === null) return null;
+  return {
+    start: Math.min(anchor, focus),
+    end: Math.max(anchor, focus),
+  };
 }
 
 function childIndex(node: Node): number {
@@ -763,6 +779,107 @@ function insertAttachmentReference(attachment: ChatAttachment, offset = inputSel
   renderRichEditorFromParts();
   focusRichEditorAt(inputSelection.value);
   return true;
+}
+
+function pastedImageFiles(event: ClipboardEvent): File[] {
+  const items = Array.from(event.clipboardData?.items ?? []);
+  return items
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+}
+
+function pasteHasFileItems(event: ClipboardEvent): boolean {
+  const data = event.clipboardData;
+  if (!data) return false;
+  return Array.from(data.items).some((item) => item.kind === "file") || data.files.length > 0;
+}
+
+function htmlToPlainText(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template.content.textContent ?? "";
+}
+
+function pastedPlainText(event: ClipboardEvent): string {
+  const data = event.clipboardData;
+  if (!data) return "";
+  return data.getData("text/plain") || htmlToPlainText(data.getData("text/html"));
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
+async function savePastedImages(files: File[]): Promise<ChatAttachment[]> {
+  return Promise.all(files.map(async (file) => {
+    const bytesBase64 = await fileToBase64(file);
+    return saveClipboardImage({
+      mime: file.type || null,
+      bytesBase64,
+      name: file.name || null,
+    });
+  }));
+}
+
+async function attachmentsFromPastedFilePaths(paths: string[]): Promise<ChatAttachment[]> {
+  const uniquePaths = paths.filter((path, index) =>
+    path.trim().length > 0 &&
+    paths.indexOf(path) === index &&
+    !composerHasAttachmentPath(path)
+  );
+  if (uniquePaths.length === 0) return [];
+  return describeAttachments(uniquePaths);
+}
+
+async function insertPastedAttachments(attachments: ChatAttachment[], offset: number) {
+  let nextOffset = offset;
+  for (const attachment of attachments) {
+    if (insertAttachmentReference(attachment, nextOffset)) {
+      emit("add-context-attachment", attachment);
+      nextOffset = inputSelection.value;
+    }
+  }
+}
+
+async function handleRichPaste(imageFiles: File[], offset: number) {
+  try {
+    const paths = await readClipboardFilePaths();
+    const pathAttachments = await attachmentsFromPastedFilePaths(paths);
+    const imageAttachments = pathAttachments.length > 0 ? [] : await savePastedImages(imageFiles);
+    await insertPastedAttachments([...pathAttachments, ...imageAttachments], offset);
+  } catch (err) {
+    console.error("[chat] paste context failed", err);
+  }
+}
+
+function onRichPaste(event: ClipboardEvent) {
+  if (hasPending.value) return;
+  const hasFiles = pasteHasFileItems(event);
+  const plainText = pastedPlainText(event);
+  if (!hasFiles && !plainText) return;
+  event.preventDefault();
+  const range = captureRichSelectionRange();
+  let offset = range?.start ?? captureRichSelectionOffset();
+  const end = range?.end ?? offset;
+  inputSelection.value = offset;
+  contextSuppressedKey.value = null;
+  clearContextSearch();
+  if (!hasFiles) {
+    replaceComposerRange(offset, end, [textPart(plainText)]);
+    return;
+  }
+  if (end > offset) {
+    offset = replaceComposerRange(offset, end, []);
+  }
+  const imageFiles = pastedImageFiles(event);
+  void handleRichPaste(imageFiles, offset);
 }
 
 function richEditorHasFocus(): boolean {
@@ -1543,6 +1660,7 @@ onBeforeUnmount(() => {
         @keyup="onRichSelectionEvent"
         @mouseup="onRichSelectionEvent"
         @keydown="onRichKeydown"
+        @paste="onRichPaste"
       ></div>
 
       <Transition name="chat-composer-entry-actions" mode="out-in">
@@ -1707,7 +1825,7 @@ onBeforeUnmount(() => {
         <span
           v-for="attachment in previewAttachments"
           :key="attachment.id"
-          class="chat-attachment-chip"
+          class="chat-attachment-chip chat-attachment-chip--image-preview"
           :title="attachment.path"
         >
           <img
@@ -1715,15 +1833,6 @@ onBeforeUnmount(() => {
             :src="attachmentImageSrc(attachment) ?? undefined"
             alt=""
           />
-          <span class="chat-attachment-chip__name">{{ attachment.name }}</span>
-          <button
-            type="button"
-            class="chat-attachment-chip__remove"
-            :aria-label="`移除图片引用 ${attachment.name}`"
-            @click="emit('remove-attachment', attachment.id)"
-          >
-            <X :size="12" aria-hidden="true" />
-          </button>
         </span>
       </div>
     </Transition>

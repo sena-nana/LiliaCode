@@ -125,7 +125,7 @@ function attachmentIcon(attachment: ChatAttachment) {
       <span
         v-for="attachment in previewAttachments"
         :key="attachment.id"
-        class="chat-attachment-chip chat-attachment-chip--bubble"
+        class="chat-attachment-chip chat-attachment-chip--bubble chat-attachment-chip--image-preview"
         :title="attachment.path"
       >
         <img
@@ -133,7 +133,6 @@ function attachmentIcon(attachment: ChatAttachment) {
           :src="attachmentImageSrc(attachment) ?? undefined"
           alt=""
         />
-        <span class="chat-attachment-chip__name">{{ attachment.name }}</span>
       </span>
       <span
         v-for="attachment in legacyAttachments"

@@ -101,6 +101,18 @@ export function searchContextAttachments(
   });
 }
 
+export function readClipboardFilePaths(): Promise<string[]> {
+  return invoke<string[]>("chat_read_clipboard_file_paths");
+}
+
+export function saveClipboardImage(input: {
+  mime: string | null;
+  bytesBase64: string;
+  name?: string | null;
+}): Promise<ChatAttachment> {
+  return invoke<ChatAttachment>("chat_save_clipboard_image", { input });
+}
+
 export async function pickAttachmentFiles(): Promise<string[]> {
   const picked = await invoke<string | string[] | null>("plugin:dialog|open", {
     options: {

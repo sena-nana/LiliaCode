@@ -1,9 +1,10 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
+import { mockInvoke, setMockClipboardFilePaths } from "./tauriMock";
 
 const baseState: ChatComposerState = {
   taskId: "task-1",
@@ -82,6 +83,14 @@ async function flushContextSearch() {
   await Promise.resolve();
 }
 
+async function flushPasteTasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function placeEditableCaret(element: HTMLElement, offset: number) {
   const selection = window.getSelection();
   const range = document.createRange();
@@ -110,6 +119,53 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
 
 function composerText(input: HTMLElement): string {
   return input instanceof HTMLTextAreaElement ? input.value : input.textContent ?? "";
+}
+
+function createTextPasteEvent(text: string, html = ""): ClipboardEvent {
+  const event = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: {
+      files: [],
+      items: [],
+      getData: (type: string) => {
+        if (type === "text/plain") return text;
+        if (type === "text/html") return html;
+        return "";
+      },
+    },
+  });
+  return event;
+}
+
+function createFilePasteEvent(files: File[]): ClipboardEvent {
+  const event = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, "clipboardData", {
+    configurable: true,
+    value: {
+      files,
+      items: files.map((file) => ({
+        kind: "file",
+        type: file.type,
+        getAsFile: () => file,
+      })),
+      getData: (type: string) => type === "text/plain" ? "" : "",
+    },
+  });
+  return event;
+}
+
+function createPasteFile(input: {
+  name: string;
+  type?: string;
+  bytes?: number[];
+}): File {
+  const bytes = new Uint8Array(input.bytes ?? []);
+  return {
+    name: input.name,
+    type: input.type ?? "",
+    arrayBuffer: async () => bytes.buffer.slice(0),
+  } as File;
 }
 
 beforeEach(() => {
@@ -229,6 +285,152 @@ describe("ChatComposer", () => {
 
     expect(view.emitted("add-context-attachment")).toBeUndefined();
     expect(view.emitted("send")).toBeUndefined();
+  });
+
+  it("文本粘贴会转成纯文本并去除富文本样式", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "前  后");
+    placeEditableCaret(input, 1);
+    const event = createTextPasteEvent(
+      "粗体文本",
+      '<span style="color: red"><strong>粗体文本</strong></span>',
+    );
+
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(composerText(input)).toBe("前粗体文本  后");
+    expect(input.querySelector("span, strong")).toBeNull();
+    expect(mockInvoke).not.toHaveBeenCalledWith("chat_read_clipboard_file_paths", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_image", expect.anything());
+  });
+
+  it("粘贴文件和文件夹时按当前光标插入上下文引用", async () => {
+    setMockClipboardFilePaths([
+      "D:\\PROJECT\\workspace\\Lilia\\README.md",
+      "D:\\PROJECT\\workspace\\Lilia\\big-dir",
+    ]);
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "参考  继续");
+    placeEditableCaret(input, 3);
+    const event = createFilePasteEvent([createPasteFile({ name: "README.md" })]);
+
+    input.dispatchEvent(event);
+    await waitFor(() => {
+      expect(view.emitted("add-context-attachment")?.length).toBe(2);
+    });
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(view.emitted("add-context-attachment")?.map(([attachment]) => attachment)).toEqual([
+      expect.objectContaining({
+        name: "README.md",
+        path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+        kind: "file",
+      }),
+      expect.objectContaining({
+        name: "big-dir",
+        path: "D:\\PROJECT\\workspace\\Lilia\\big-dir",
+        kind: "directory",
+      }),
+    ]);
+    expect(composerText(input)).toContain("参考");
+    expect(composerText(input)).toContain("README.md");
+    expect(composerText(input)).toContain("big-dir");
+    expect(composerText(input)).toContain("继续");
+  });
+
+  it("粘贴剪贴板图片时保存为临时图片上下文", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "看图 ");
+    const event = createFilePasteEvent([createPasteFile({
+      name: "screenshot.png",
+      type: "image/png",
+      bytes: [105, 109, 97, 103, 101],
+    })]);
+
+    input.dispatchEvent(event);
+    await flushPasteTasks();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith("chat_save_clipboard_image", {
+      input: expect.objectContaining({
+        mime: "image/png",
+        bytesBase64: expect.any(String),
+      }),
+    }, undefined);
+    await waitFor(() => {
+      expect(view.emitted("add-context-attachment")?.length).toBe(1);
+    });
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "图片 1.png",
+      path: "C:\\Users\\mock\\.lilia\\cache\\clipboard-images\\clipboard-1.png",
+      kind: "file",
+      mime: "image/png",
+    });
+    expect(composerText(input)).toContain("图片 1.png");
+  });
+
+  it("下方图片预览只显示缩略图", () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [
+          {
+            id: "image-1",
+            name: "图片 1.png",
+            path: "D:\\PROJECT\\workspace\\Lilia\\shot.png",
+            kind: "file",
+            size: 42,
+            exists: true,
+            mime: "image/png",
+            directory: null,
+          },
+        ],
+      },
+    });
+
+    const preview = view.getByLabelText("图片预览");
+    expect(preview.querySelector(".chat-attachment-chip--image-preview")).not.toBeNull();
+    expect(preview.querySelector(".chat-attachment-chip__thumb")).not.toBeNull();
+    expect(preview.querySelector(".chat-attachment-chip__name")).toBeNull();
+    expect(preview.querySelector(".chat-attachment-chip__remove")).toBeNull();
+  });
+
+  it("重复粘贴同一路径不会重复插入", async () => {
+    setMockClipboardFilePaths(["D:\\PROJECT\\workspace\\Lilia\\README.md"]);
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    input.dispatchEvent(createFilePasteEvent([createPasteFile({ name: "README.md" })]));
+    await waitFor(() => {
+      expect(view.emitted("add-context-attachment")?.length).toBe(1);
+    });
+    input.dispatchEvent(createFilePasteEvent([createPasteFile({ name: "README.md" })]));
+    await Promise.resolve();
+
+    const attachments = view.emitted("add-context-attachment") ?? [];
+    expect(attachments).toHaveLength(1);
+    expect(composerText(input).match(/README\.md/g)).toHaveLength(1);
   });
 
 
