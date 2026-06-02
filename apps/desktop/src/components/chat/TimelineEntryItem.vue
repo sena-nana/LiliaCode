@@ -152,7 +152,6 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
     >
       <div class="agent-timeline__rail">
         <TimelineNodeIcon
-          :status="entry.aggregatedStatus"
           :icon="nodeIcon(entry.representative)"
         />
       </div>
@@ -286,7 +285,6 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
       <div class="agent-timeline__rail">
         <TimelineNodeIcon
           v-if="shouldShowNodeIcon(entry)"
-          :status="entry.event.status"
           :icon="nodeIcon(entry.event)"
         />
       </div>
