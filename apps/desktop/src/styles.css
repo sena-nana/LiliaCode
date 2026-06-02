@@ -2606,6 +2606,27 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
+.agent-timeline__retry {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.agent-timeline__retry:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--accent);
+  filter: none;
+}
+
 .agent-timeline__process-toggle {
   flex: 0 1 auto;
   display: inline-flex;

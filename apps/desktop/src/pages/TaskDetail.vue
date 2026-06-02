@@ -76,6 +76,11 @@ import type {
 
 const props = defineProps<{ projectId?: string; taskId: string }>();
 
+interface TimelineRetryContext {
+  content: string;
+  attachments: ChatAttachment[];
+}
+
 const project = computed(() =>
   props.projectId ? getProject(props.projectId) : undefined,
 );
@@ -143,6 +148,7 @@ const pendingPlanApproval = computed(() => {
 /** orphan 模式下的 fallback cwd——延迟解析。 */
 const orphanCwd = ref<string | null>(null);
 let optimisticMessageSeq = 0;
+let localErrorSeq = 0;
 const appWindow = getCurrentWindow();
 
 async function ensureOrphanCwd(): Promise<string> {
@@ -323,7 +329,10 @@ async function sendAgentMessage(
   } catch (err) {
     removeTimelineEvent(optimistic.id);
     isTurnRunning.value = false;
-    upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`));
+    upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`, {
+      content,
+      attachments: outgoingAttachments,
+    }));
     throw err;
   }
 }
@@ -545,6 +554,58 @@ function userMessageIdentityKey(event: AgentTimelineEvent): string {
   return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}`;
 }
 
+function canRetryTimelineEvent(event: AgentTimelineEvent): boolean {
+  return retryContextForTimelineEvent(event) !== null;
+}
+
+async function onRetryTimelineEvent(event: AgentTimelineEvent) {
+  const retryContext = retryContextForTimelineEvent(event);
+  if (!retryContext) return;
+  try {
+    await sendAgentMessage(retryContext.content, retryContext.attachments);
+  } catch (err) {
+    console.error("[chat] retry failed", err);
+  }
+}
+
+function retryContextForTimelineEvent(event: AgentTimelineEvent): TimelineRetryContext | null {
+  if (event.kind !== "error") return null;
+  const payload = readTimelineEventPayloadRecord(event);
+  const embedded = readRetryContext(payload.retryContext);
+  if (embedded) return embedded;
+  if (!event.turnId) return null;
+  const source = timelineEvents.value.find((candidate) => {
+    if (candidate.kind !== "message" || candidate.turnId !== event.turnId) return false;
+    return readTimelineEventPayloadRecord(candidate).role === "user";
+  });
+  if (!source) return null;
+  const sourcePayload = readTimelineEventPayloadRecord(source);
+  return readRetryContext({
+    content: typeof sourcePayload.content === "string" ? sourcePayload.content : source.summary ?? "",
+    attachments: sourcePayload.attachments,
+  });
+}
+
+function readRetryContext(value: unknown): TimelineRetryContext | null {
+  const payload = readPayloadRecord(value);
+  const content = typeof payload.content === "string" ? payload.content : "";
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.filter(isChatAttachment)
+    : [];
+  if (!content.trim() && attachments.length === 0) return null;
+  return { content, attachments };
+}
+
+function isChatAttachment(value: unknown): value is ChatAttachment {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === "string" &&
+    typeof row.name === "string" &&
+    typeof row.path === "string" &&
+    (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
+    (typeof row.size === "number" || row.size === null);
+}
+
 function readTimelineEventPayloadRecord(event: AgentTimelineEvent): Record<string, unknown> {
   return readPayloadRecord(event.payload);
 }
@@ -555,10 +616,20 @@ function readPayloadRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function createErrorTimelineEvent(message: string): AgentTimelineEvent {
+function createErrorTimelineEvent(
+  message: string,
+  retryContext?: TimelineRetryContext,
+): AgentTimelineEvent {
   const now = Date.now();
+  const payload: Record<string, AgentTimelinePayload> = { message };
+  if (retryContext) {
+    payload.retryContext = {
+      content: retryContext.content,
+      attachments: attachmentsToTimelinePayload(retryContext.attachments),
+    };
+  }
   return {
-    id: `error-${now}`,
+    id: `error-${now}-${++localErrorSeq}`,
     taskId: props.taskId,
     turnId: null,
     backend: composerForView.value.backend,
@@ -566,7 +637,7 @@ function createErrorTimelineEvent(message: string): AgentTimelineEvent {
     status: "error",
     title: "错误",
     summary: message,
-    payload: { message },
+    payload,
     createdAt: now,
     updatedAt: now,
     turnSeq: Number.MAX_SAFE_INTEGER,
@@ -800,7 +871,9 @@ watch(
             :force-scroll-bottom-key="userSendScrollKey"
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="nonInterruptMode"
+            :can-retry-event="canRetryTimelineEvent"
             @resolve-pending-agent-action="onResolvePendingAgentAction"
+            @retry-event="onRetryTimelineEvent"
             @open-image="viewingImage = $event"
           >
             <template #controls>

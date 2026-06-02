@@ -46,11 +46,13 @@ const props = defineProps<{
   activePlanApprovalTurnId?: string | null;
   pendingActions?: PendingAgentAction[];
   showExpiredPendingActions?: boolean;
+  canRetryEvent?: (event: AgentTimelineEvent) => boolean;
 }>();
 
 const emit = defineEmits<{
   eventToggled: [payload: { event: AgentTimelineEvent; expanded: boolean }];
   resolvePendingAction: [resolution: PendingAgentActionResolution];
+  "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
 }>();
 
@@ -461,10 +463,12 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           :project-cwd="projectCwd"
           :pending-actions="pendingActions"
           :show-expired-pending-actions="showExpiredPendingActions"
+          :can-retry-event="canRetryEvent"
           @toggle-event="toggleEvent"
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"
           @resolve-pending-action="emit('resolvePendingAction', $event)"
+          @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
         />
       </template>

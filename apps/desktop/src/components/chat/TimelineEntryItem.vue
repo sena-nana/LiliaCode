@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronDown, ChevronRight } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, RotateCcw } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
 import type {
   PendingAgentAction,
@@ -39,6 +39,7 @@ const props = defineProps<{
   projectCwd?: string | null;
   pendingActions?: PendingAgentAction[];
   showExpiredPendingActions?: boolean;
+  canRetryEvent?: (event: AgentTimelineEvent) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -46,6 +47,7 @@ const emit = defineEmits<{
   toggleGroup: [entry: TimelineGroupEntry];
   toggleProcessGroup: [event: AgentTimelineEvent];
   resolvePendingAction: [resolution: PendingAgentActionResolution];
+  "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
 }>();
 
@@ -59,6 +61,10 @@ function isTimelineMessage(event: AgentTimelineEvent): boolean {
 function canToggle(event: AgentTimelineEvent): boolean {
   return timelineCanExpand(event, displayContext.value) ||
     hasTimelinePendingActionState(pendingState(event));
+}
+
+function canRetry(event: AgentTimelineEvent): boolean {
+  return props.canRetryEvent?.(event) === true;
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
@@ -223,6 +229,17 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 >
                   {{ previewText(event) }}
                 </p>
+
+                <button
+                  v-if="canRetry(event)"
+                  type="button"
+                  class="agent-timeline__retry"
+                  title="重新发送上下文"
+                  aria-label="重试"
+                  @click.stop="emit('retry-event', event)"
+                >
+                  <RotateCcw :size="12" aria-hidden="true" />
+                </button>
               </header>
 
               <div
@@ -321,6 +338,17 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             </p>
 
             <button
+              v-if="canRetry(entry.event)"
+              type="button"
+              class="agent-timeline__retry"
+              title="重新发送上下文"
+              aria-label="重试"
+              @click.stop="emit('retry-event', entry.event)"
+            >
+              <RotateCcw :size="12" aria-hidden="true" />
+            </button>
+
+            <button
               v-if="hasProcessEvents(entry)"
               type="button"
               class="agent-timeline__process-toggle"
@@ -356,10 +384,12 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 :project-cwd="projectCwd"
                 :pending-actions="pendingActions"
                 :show-expired-pending-actions="showExpiredPendingActions"
+                :can-retry-event="canRetryEvent"
                 @toggle-event="emit('toggleEvent', $event)"
                 @toggle-group="emit('toggleGroup', $event)"
                 @toggle-process-group="emit('toggleProcessGroup', $event)"
                 @resolve-pending-action="emit('resolvePendingAction', $event)"
+                @retry-event="emit('retry-event', $event)"
                 @open-image="emit('open-image', $event)"
               />
             </ol>

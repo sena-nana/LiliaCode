@@ -1,6 +1,7 @@
 import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import type { ChatAttachment } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
@@ -11,7 +12,9 @@ import {
   emitMockTurnCompleted,
   emitTauriEvent,
   emitWebviewDragDropEvent,
+  failNextMockChatSend,
   mockInvoke,
+  replaceMockTimelineEvents,
   seedMockChatMessages,
   setMockActiveBackend,
   setMockComposerStateHandler,
@@ -484,5 +487,143 @@ describe("chat scheduler", () => {
     });
     expect(view.getByText("agent 报错：连接失败").closest(".chat-bubble")).toBeNull();
     expect(view.queryByText("旧错误通道不应生成气泡")).toBeNull();
+  });
+
+  it("可从同 turn 用户消息重试错误事件并复用附件", async () => {
+    const retryAttachment: ChatAttachment = {
+      id: "att-retry",
+      name: "README.md",
+      path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+      kind: "file",
+      size: 42,
+      exists: true,
+      mime: "text/markdown",
+    };
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "u-retry",
+        kind: "message",
+        turnId: "turn-retry",
+        summary: "请读取 README",
+        payload: {
+          role: "user",
+          content: "请读取 README",
+          attachments: [retryAttachment],
+          queued: false,
+        },
+        intraTurnOrder: 0,
+      },
+      {
+        id: "err-retry",
+        kind: "error",
+        turnId: "turn-retry",
+        status: "error",
+        title: "错误",
+        summary: "agent 报错：连接失败",
+        payload: { message: "agent 报错：连接失败" },
+        intraTurnOrder: 1,
+      },
+    ]);
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("agent 报错：连接失败")).toBeInTheDocument();
+    });
+
+    mockInvoke.mockClear();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await fireEvent.click(view.getByRole("button", { name: "重试" }));
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      content: "请读取 README",
+      attachments: [expect.objectContaining({
+        path: retryAttachment.path,
+      })],
+    });
+  });
+
+  it("没有可定位上下文的错误事件不显示重试", async () => {
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "err-no-context",
+        kind: "error",
+        turnId: null,
+        status: "error",
+        title: "错误",
+        summary: "agent 报错：无法定位上下文",
+        payload: { message: "agent 报错：无法定位上下文" },
+      },
+    ]);
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("agent 报错：无法定位上下文")).toBeInTheDocument();
+    });
+    expect(view.queryByRole("button", { name: "重试" })).toBeNull();
+  });
+
+  it("本地发送失败错误携带上下文并可重试", async () => {
+    replaceMockTimelineEvents("t-002", [
+      {
+        id: "err-local-retry-source",
+        kind: "error",
+        turnId: null,
+        status: "error",
+        title: "错误",
+        summary: "可重试错误",
+        payload: {
+          message: "可重试错误",
+          retryContext: {
+            content: "本地发送失败后重试",
+            attachments: [],
+          },
+        },
+      },
+    ]);
+    failNextMockChatSend("mock send failed");
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText("可重试错误")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "重试" }));
+
+    const errorGroup = await waitFor(() =>
+      view.getByRole("button", { name: "错误 2 个错误" })
+    );
+    await fireEvent.click(errorGroup);
+    await waitFor(() => {
+      expect(errorGroup).toHaveAttribute("aria-expanded", "true");
+    });
+    await waitFor(() => {
+      expect(view.getByText(/发送失败：Error: mock send failed/)).toBeInTheDocument();
+    });
+
+    mockInvoke.mockClear();
+    const retryButtons = view.getAllByRole("button", { name: "重试" });
+    const retryButton = retryButtons[retryButtons.length - 1];
+    if (!retryButton) {
+      throw new Error("未找到本地错误重试按钮");
+    }
+    await fireEvent.click(retryButton);
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({ content: "本地发送失败后重试" });
   });
 });

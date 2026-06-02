@@ -144,6 +144,7 @@ let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let nextChatSendError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let activeBackend: "claude" | "codex" = "claude";
@@ -346,6 +347,7 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  nextChatSendError = null;
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
   activeBackend = "claude";
@@ -375,6 +377,10 @@ export function emitTauriEvent(event: string, payload: unknown) {
 
 export function setMockChatRunning(taskId: string, running: boolean) {
   chatRunning[taskId] = running;
+}
+
+export function failNextMockChatSend(message: string) {
+  nextChatSendError = message;
 }
 
 export function emitWebviewDragDropEvent(payload: unknown) {
@@ -1228,6 +1234,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     }
 
     case "chat_send_message": {
+      if (nextChatSendError) {
+        const message = nextChatSendError;
+        nextChatSendError = null;
+        throw new Error(message);
+      }
       const taskId = String(args.taskId);
       const content = String(args.content);
       const composer = normalizeComposer(args.composer, taskId);
