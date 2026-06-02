@@ -385,7 +385,7 @@ describe("ChatComposer", () => {
     expect(composerText(input)).toContain("图片 1.png");
   });
 
-  it("下方图片预览只显示缩略图", () => {
+  it("下方图片预览只显示缩略图", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -409,6 +409,16 @@ describe("ChatComposer", () => {
     expect(preview.querySelector(".chat-attachment-chip__thumb")).not.toBeNull();
     expect(preview.querySelector(".chat-attachment-chip__name")).toBeNull();
     expect(preview.querySelector(".chat-attachment-chip__remove")).toBeNull();
+
+    await fireEvent.click(view.getByRole("button", { name: "查看图片 图片 1.png" }));
+
+    expect(view.emitted("open-image")?.[0]?.[0]).toMatchObject({
+      src: "asset://D:/PROJECT/workspace/Lilia/shot.png",
+      name: "图片 1.png",
+      path: "D:\\PROJECT\\workspace\\Lilia\\shot.png",
+      mime: "image/png",
+      size: 42,
+    });
   });
 
   it("重复粘贴同一路径不会重复插入", async () => {

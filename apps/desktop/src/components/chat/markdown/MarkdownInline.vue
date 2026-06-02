@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ChatImageViewerSource } from "../imageViewer";
 import type { InlineToken } from "./markdownParser";
 
 withDefaults(defineProps<{
@@ -8,8 +9,21 @@ withDefaults(defineProps<{
   renderImages: true,
 });
 
+const emit = defineEmits<{
+  "open-image": [image: ChatImageViewerSource];
+}>();
+
 function linkTarget(href: string | null): string | undefined {
   return href && /^https?:/i.test(href) ? "_blank" : undefined;
+}
+
+function openMarkdownImage(token: InlineToken) {
+  if (token.type !== "image" || !token.href) return;
+  emit("open-image", {
+    src: token.href,
+    name: token.text || null,
+    path: token.href,
+  });
 }
 </script>
 
@@ -25,13 +39,20 @@ function linkTarget(href: string | null): string | undefined {
     <em v-else-if="token.type === 'em'">{{ token.text }}</em>
     <del v-else-if="token.type === 'delete'">{{ token.text }}</del>
     <br v-else-if="token.type === 'break'">
-    <img
+    <button
       v-else-if="token.type === 'image' && token.href && renderImages"
-      class="markdown-block__image"
-      :src="token.href"
-      :alt="token.text"
-      loading="lazy"
+      type="button"
+      class="markdown-block__image-button"
+      :aria-label="token.text ? `查看图片 ${token.text}` : '查看图片'"
+      @click="openMarkdownImage(token)"
     >
+      <img
+        class="markdown-block__image"
+        :src="token.href"
+        :alt="token.text"
+        loading="lazy"
+      >
+    </button>
     <a
       v-else-if="token.type === 'link' && token.href"
       :href="token.href"

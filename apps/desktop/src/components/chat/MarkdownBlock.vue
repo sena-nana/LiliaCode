@@ -12,6 +12,7 @@ import {
   type MarkdownBlockNode,
   type TableAlignment,
 } from "./markdown/markdownParser";
+import type { ChatImageViewerSource } from "./imageViewer";
 import type { MarkdownBlockTone } from "./timelineDisplay";
 
 const props = withDefaults(defineProps<{
@@ -27,6 +28,10 @@ const normalizedContent = computed(() => normalizeMarkdownSource(props.content))
 const inlineTokens = computed(() => parseInlineMarkdown(toSingleLineText(normalizedContent.value)));
 const blocks = computed(() => parseMarkdownBlocks(normalizedContent.value));
 const hasContent = computed(() => normalizedContent.value.length > 0);
+
+const emit = defineEmits<{
+  "open-image": [image: ChatImageViewerSource];
+}>();
 
 function headingTag(block: MarkdownBlockNode): "h4" | "h5" | "h6" {
   return `h${block.level}` as "h4" | "h5" | "h6";
@@ -47,7 +52,11 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
     ]"
   >
     <span v-if="singleLine" class="markdown-block__line">
-      <MarkdownInline :tokens="inlineTokens" :render-images="false" />
+      <MarkdownInline
+        :tokens="inlineTokens"
+        :render-images="false"
+        @open-image="emit('open-image', $event)"
+      />
     </span>
 
     <template v-else>
@@ -57,7 +66,7 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
           v-if="block.type === 'heading'"
           class="markdown-block__heading"
         >
-          <MarkdownInline :tokens="block.inlines" />
+          <MarkdownInline :tokens="block.inlines" @open-image="emit('open-image', $event)" />
         </component>
 
         <pre
@@ -93,7 +102,7 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
                   :key="`head:${cellIndex}`"
                   :style="tableAlignmentStyle(block.alignments[cellIndex] ?? null)"
                 >
-                  <MarkdownInline :tokens="cell" />
+                  <MarkdownInline :tokens="cell" @open-image="emit('open-image', $event)" />
                 </th>
               </tr>
             </thead>
@@ -104,7 +113,7 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
                   :key="`cell:${rowIndex}:${cellIndex}`"
                   :style="tableAlignmentStyle(block.alignments[cellIndex] ?? null)"
                 >
-                  <MarkdownInline :tokens="cell" />
+                  <MarkdownInline :tokens="cell" @open-image="emit('open-image', $event)" />
                 </td>
               </tr>
             </tbody>
@@ -114,14 +123,15 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
         <MarkdownList
           v-else-if="block.type === 'list' && block.list"
           :list="block.list"
+          @open-image="emit('open-image', $event)"
         />
 
         <blockquote v-else-if="block.type === 'quote'" class="markdown-block__quote">
-          <MarkdownInline :tokens="block.inlines" />
+          <MarkdownInline :tokens="block.inlines" @open-image="emit('open-image', $event)" />
         </blockquote>
 
         <p v-else class="markdown-block__paragraph">
-          <MarkdownInline :tokens="block.inlines" />
+          <MarkdownInline :tokens="block.inlines" @open-image="emit('open-image', $event)" />
         </p>
       </template>
     </template>

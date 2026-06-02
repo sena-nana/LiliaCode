@@ -5,7 +5,6 @@
  */
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -48,6 +47,12 @@ import {
 } from "../../services/chat";
 import Dropdown from "../Dropdown.vue";
 import EditableCommandBlock from "./EditableCommandBlock.vue";
+import {
+  attachmentImageSrc,
+  imageViewerSourceFromAttachment,
+  isImageAttachment,
+  type ChatImageViewerSource,
+} from "./imageViewer";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -72,6 +77,7 @@ const emit = defineEmits<{
     message?: string,
     updatedInput?: ToolConsentUpdatedInput,
   ];
+  "open-image": [image: ChatImageViewerSource];
   interrupt: [];
 }>();
 
@@ -907,17 +913,9 @@ function resetComposerInput() {
   contextNoMatchSuppression.value = null;
 }
 
-function isImageAttachment(attachment: ChatAttachment): boolean {
-  return attachment.exists !== false && !!attachment.mime?.startsWith("image/");
-}
-
-function attachmentImageSrc(attachment: ChatAttachment): string | null {
-  if (!isImageAttachment(attachment)) return null;
-  try {
-    return convertFileSrc(attachment.path);
-  } catch {
-    return null;
-  }
+function openAttachmentImage(attachment: ChatAttachment) {
+  const source = imageViewerSourceFromAttachment(attachment);
+  if (source) emit("open-image", source);
 }
 
 function contextAttachmentIcon(attachment: ChatAttachment) {
@@ -1822,18 +1820,21 @@ onBeforeUnmount(() => {
         class="chat-composer__attachments"
         aria-label="图片预览"
       >
-        <span
+        <button
           v-for="attachment in previewAttachments"
           :key="attachment.id"
+          type="button"
           class="chat-attachment-chip chat-attachment-chip--image-preview"
           :title="attachment.path"
+          :aria-label="`查看图片 ${attachment.name}`"
+          @click="openAttachmentImage(attachment)"
         >
           <img
             class="chat-attachment-chip__thumb"
             :src="attachmentImageSrc(attachment) ?? undefined"
             alt=""
           />
-        </span>
+        </button>
       </div>
     </Transition>
 

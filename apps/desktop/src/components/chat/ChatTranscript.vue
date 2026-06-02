@@ -7,6 +7,7 @@ import type {
 } from "../../composables/usePendingAgentActions";
 import AgentTimeline from "./AgentTimeline.vue";
 import ChatScrollMap from "./ChatScrollMap.vue";
+import type { ChatImageViewerSource } from "./imageViewer";
 
 const props = defineProps<{
   timelineEvents: AgentTimelineEvent[];
@@ -21,6 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   resolvePendingAgentAction: [resolution: PendingAgentActionResolution];
+  "open-image": [image: ChatImageViewerSource];
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -162,6 +164,7 @@ const isEmpty = computed(() =>
           :show-expired-pending-actions="showExpiredPendingActions"
           @event-toggled="onTimelineEventToggled"
           @resolve-pending-action="emit('resolvePendingAgentAction', $event)"
+          @open-image="emit('open-image', $event)"
         />
       </template>
       <div class="chat-controls-wrap">

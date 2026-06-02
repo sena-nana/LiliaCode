@@ -1775,6 +1775,69 @@ button.ghost:hover {
   font-weight: 500;
 }
 
+.image-viewer.chat-file-drop-overlay {
+  z-index: 8;
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--bg) 82%, rgba(0, 0, 0, 0.84));
+}
+
+.chat-page > .image-viewer.chat-file-drop-overlay {
+  inset: -20px -24px;
+}
+
+.image-viewer__figure {
+  width: min(100%, 1080px);
+  height: min(100%, 760px);
+  margin: 0;
+  padding: 28px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  place-items: center;
+}
+
+.image-viewer__stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.image-viewer__image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 5px;
+  user-select: none;
+  transform-origin: center;
+  transition: transform 0.08s ease;
+}
+
+.image-viewer__meta {
+  max-width: 100%;
+  min-height: 20px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.image-viewer__name {
+  color: var(--text);
+  max-width: min(520px, 80vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-sidebar {
   position: relative;
   flex: 0 0 0;
@@ -3173,10 +3236,31 @@ button.ghost:hover {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 6px 0;
   border: 1px solid var(--border-soft);
   border-radius: 5px;
   background: var(--bg);
+}
+
+.markdown-block__image-button {
+  height: auto;
+  max-width: 100%;
+  margin: 6px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  display: block;
+  cursor: zoom-in;
+}
+
+.markdown-block__image-button:hover {
+  filter: none;
+}
+
+.markdown-block__image-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .markdown-block__quote {
@@ -4735,6 +4819,23 @@ button.ghost:hover {
   padding: 2px;
   border-radius: 6px;
   gap: 0;
+  cursor: zoom-in;
+  justify-content: center;
+  font-weight: 500;
+}
+
+button.chat-attachment-chip--image-preview {
+  border-color: var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+button.chat-attachment-chip--image-preview:hover {
+  filter: none;
+}
+
+button.chat-attachment-chip--bubble {
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
 }
 
 .chat-attachment-chip__thumb {

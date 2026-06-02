@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownBlock from "../src/components/chat/MarkdownBlock.vue";
 
@@ -118,6 +118,30 @@ describe("MarkdownBlock", () => {
     });
     expect(singleLineView.getByRole("link", { name: "https://example.com" }))
       .toHaveAttribute("href", "https://example.com");
+  });
+
+  it("Markdown 图片点击会请求打开图片查看器", async () => {
+    const view = render(MarkdownBlock, {
+      props: {
+        content: "![截图](https://example.com/shot.png)",
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "查看图片 截图" }));
+
+    expect(view.emitted("open-image")?.[0]?.[0]).toEqual({
+      src: "https://example.com/shot.png",
+      name: "截图",
+      path: "https://example.com/shot.png",
+    });
+
+    const singleLineView = render(MarkdownBlock, {
+      props: {
+        content: "![截图](https://example.com/shot.png)",
+        singleLine: true,
+      },
+    });
+    expect(singleLineView.container.querySelector(".markdown-block__image-button")).toBeNull();
   });
 
 

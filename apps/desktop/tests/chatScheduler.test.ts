@@ -294,6 +294,44 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("图片查看器遮罩挂在主内容页层级，覆盖 shell 主区留白", async () => {
+    seedMockChatMessages("t-002", [
+      {
+        id: "u-image",
+        taskId: "t-002",
+        role: "user",
+        content: "看图",
+        attachments: [
+          {
+            id: "image-1",
+            name: "shot.png",
+            path: "D:\\PROJECT\\workspace\\Lilia\\shot.png",
+            kind: "file",
+            size: 42,
+            exists: true,
+            mime: "image/png",
+            directory: null,
+          },
+        ],
+        createdAt: 2000,
+      },
+    ]);
+
+    const view = await renderTaskDetail();
+    const imageButton = await waitFor(() =>
+      view.getByRole("button", { name: "查看图片 shot.png" })
+    );
+    await fireEvent.click(imageButton);
+
+    const viewer = view.getByRole("dialog", { name: "图片查看器" });
+    const page = view.container.querySelector(".chat-page");
+    const main = view.container.querySelector(".chat-layout__main");
+
+    expect(viewer.parentElement).toBe(page);
+    expect(viewer.parentElement).not.toBe(main);
+    expect(viewer).toHaveClass("chat-file-drop-overlay");
+  });
+
 
   it("turn 完成后，最终回复之前的多个工具/计划事件折叠到 final 卡下，点开按钮才显出", async () => {
     seedMockChatMessages("t-002", [

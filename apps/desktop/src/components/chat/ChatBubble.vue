@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { FileText, Folder, Image, Paperclip } from "lucide-vue-next";
 import type { ChatAttachment, ChatMessage } from "@lilia/contracts";
+import {
+  attachmentImageSrc,
+  imageViewerSourceFromAttachment,
+  isImageAttachment,
+  type ChatImageViewerSource,
+} from "./imageViewer";
 
 const props = defineProps<{ message: ChatMessage & { streaming?: boolean; queued?: boolean } }>();
+const emit = defineEmits<{
+  "open-image": [image: ChatImageViewerSource];
+}>();
 
 type MessageSegment =
   | { type: "text"; text: string }
@@ -62,17 +70,9 @@ function fallbackAttachment(label: string, name: string, path: string): ChatAtta
   };
 }
 
-function isImageAttachment(attachment: ChatAttachment): boolean {
-  return attachment.exists !== false && !!attachment.mime?.startsWith("image/");
-}
-
-function attachmentImageSrc(attachment: ChatAttachment): string | null {
-  if (!isImageAttachment(attachment)) return null;
-  try {
-    return convertFileSrc(attachment.path);
-  } catch {
-    return null;
-  }
+function openAttachmentImage(attachment: ChatAttachment) {
+  const source = imageViewerSourceFromAttachment(attachment);
+  if (source) emit("open-image", source);
 }
 
 function attachmentIcon(attachment: ChatAttachment) {
@@ -122,18 +122,21 @@ function attachmentIcon(attachment: ChatAttachment) {
       class="chat-bubble__attachments"
       aria-label="消息附件"
     >
-      <span
+      <button
         v-for="attachment in previewAttachments"
         :key="attachment.id"
+        type="button"
         class="chat-attachment-chip chat-attachment-chip--bubble chat-attachment-chip--image-preview"
         :title="attachment.path"
+        :aria-label="`查看图片 ${attachment.name}`"
+        @click="openAttachmentImage(attachment)"
       >
         <img
           class="chat-attachment-chip__thumb"
           :src="attachmentImageSrc(attachment) ?? undefined"
           alt=""
         />
-      </span>
+      </button>
       <span
         v-for="attachment in legacyAttachments"
         :key="attachment.id"

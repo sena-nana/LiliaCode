@@ -10,6 +10,7 @@ import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import TimelinePlanCard from "./TimelinePlanCard.vue";
+import type { ChatImageViewerSource } from "./imageViewer";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
 import {
   hasTimelinePendingActionState,
@@ -45,6 +46,7 @@ const emit = defineEmits<{
   toggleGroup: [entry: TimelineGroupEntry];
   toggleProcessGroup: [event: AgentTimelineEvent];
   resolvePendingAction: [resolution: PendingAgentActionResolution];
+  "open-image": [image: ChatImageViewerSource];
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
@@ -358,6 +360,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 @toggle-group="emit('toggleGroup', $event)"
                 @toggle-process-group="emit('toggleProcessGroup', $event)"
                 @resolve-pending-action="emit('resolvePendingAction', $event)"
+                @open-image="emit('open-image', $event)"
               />
             </ol>
           </div>
@@ -371,6 +374,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               v-if="isTimelineFinalReply(entry.event)"
               :event="entry.event"
               :streaming="isTimelineFinalReplyStreaming(entry.event)"
+              @open-image="emit('open-image', $event)"
             />
             <TimelineDeclaredEvent
               v-else

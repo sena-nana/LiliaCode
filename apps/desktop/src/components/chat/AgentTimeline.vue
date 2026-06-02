@@ -13,6 +13,7 @@ import type {
 import ChatBubble from "./ChatBubble.vue";
 import TimelineEntryItem from "./TimelineEntryItem.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
+import type { ChatImageViewerSource } from "./imageViewer";
 import {
   mergeAdjacentTimelineGroups,
   processGroupEntries,
@@ -50,6 +51,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   eventToggled: [payload: { event: AgentTimelineEvent; expanded: boolean }];
   resolvePendingAction: [resolution: PendingAgentActionResolution];
+  "open-image": [image: ChatImageViewerSource];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -440,7 +442,10 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
             { 'is-queued': userMessage(entry.event).queued },
           ]"
         >
-          <ChatBubble :message="userMessage(entry.event)" />
+          <ChatBubble
+            :message="userMessage(entry.event)"
+            @open-image="emit('open-image', $event)"
+          />
         </li>
 
         <TimelineEntryItem
@@ -460,6 +465,7 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"
           @resolve-pending-action="emit('resolvePendingAction', $event)"
+          @open-image="emit('open-image', $event)"
         />
       </template>
       <li

@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import MarkdownInline from "./MarkdownInline.vue";
 import type { MarkdownListNode } from "./markdownParser";
+import type { ChatImageViewerSource } from "../imageViewer";
 
 defineProps<{
   list: MarkdownListNode;
+}>();
+
+const emit = defineEmits<{
+  "open-image": [image: ChatImageViewerSource];
 }>();
 
 function listStart(list: MarkdownListNode): number | undefined {
@@ -33,13 +38,14 @@ function listStart(list: MarkdownListNode): number | undefined {
           :aria-label="item.taskChecked ? '已完成' : '未完成'"
         >
         <span class="markdown-block__list-item-text">
-          <MarkdownInline :tokens="item.inlines" />
+          <MarkdownInline :tokens="item.inlines" @open-image="emit('open-image', $event)" />
         </span>
       </div>
       <MarkdownList
         v-for="(child, childIndex) in item.children"
         :key="childIndex"
         :list="child"
+        @open-image="emit('open-image', $event)"
       />
     </li>
   </component>

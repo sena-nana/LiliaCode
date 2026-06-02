@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import MarkdownBlock from "./MarkdownBlock.vue";
+import type { ChatImageViewerSource } from "./imageViewer";
 import { timelineFinalText } from "./timelineDisplay";
 
 const props = withDefaults(defineProps<{
@@ -13,6 +14,10 @@ const props = withDefaults(defineProps<{
 
 const content = computed(() => timelineFinalText(props.event));
 const hasContent = computed(() => content.value.trim().length > 0);
+
+const emit = defineEmits<{
+  "open-image": [image: ChatImageViewerSource];
+}>();
 </script>
 
 <template>
@@ -24,6 +29,7 @@ const hasContent = computed(() => content.value.trim().length > 0);
       v-if="hasContent"
       :content="content"
       class="timeline-markdown"
+      @open-image="emit('open-image', $event)"
     />
     <p v-else-if="streaming" class="timeline-muted-line">
       正在生成回复…

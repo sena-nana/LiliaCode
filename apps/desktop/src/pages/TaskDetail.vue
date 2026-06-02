@@ -25,6 +25,8 @@ import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
 import ChatSidebarHost from "../components/chat/ChatSidebarHost.vue";
+import ImageViewer from "../components/chat/ImageViewer.vue";
+import type { ChatImageViewerSource } from "../components/chat/imageViewer";
 import TodoFloat from "../components/todo/TodoFloat.vue";
 import {
   resolveAskUserById,
@@ -111,6 +113,7 @@ const chatPageRef = ref<HTMLElement | null>(null);
 const droppedAttachmentAppendKey = ref(0);
 const fileDropActive = ref(false);
 const attachments = ref<ChatAttachment[]>([]);
+const viewingImage = ref<ChatImageViewerSource | null>(null);
 const userSendScrollKey = ref(0);
 const pendingAskUser = useAskUserForTask(() => props.taskId);
 const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
@@ -748,6 +751,7 @@ watch(
     composer.value = null;
     attachments.value = [];
     fileDropActive.value = false;
+    viewingImage.value = null;
     resubscribeDebugTimeline();
     if (!props.projectId) await ensureOrphanCwd();
     await loadAll();
@@ -806,6 +810,7 @@ watch(
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="nonInterruptMode"
             @resolve-pending-agent-action="onResolvePendingAgentAction"
+            @open-image="viewingImage = $event"
           >
             <template #controls>
               <div class="chat-controls">
@@ -830,6 +835,7 @@ watch(
                   @add-context-attachment="addContextAttachment"
                   @resolve-ask-user="onResolveAskUser"
                   @resolve-tool-consent="onResolveToolConsent"
+                  @open-image="viewingImage = $event"
                 />
               </div>
             </template>
@@ -842,6 +848,11 @@ watch(
         />
       </div>
     </div>
+    <ImageViewer
+      v-if="viewingImage"
+      :image="viewingImage"
+      @close="viewingImage = null"
+    />
   </section>
 
   <section v-else>
