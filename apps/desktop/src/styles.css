@@ -553,7 +553,7 @@ pre code {
   filter: none;
 }
 
-/* 通用：区域 header / 行内 hover 出现的小图标按钮 */
+/* 通用：区域 header / 行内小图标按钮 */
 .sb-icon-btn {
   width: 22px;
   height: 22px;
@@ -852,7 +852,6 @@ pre code {
   cursor: text;
 }
 
-/* 项目行 / 子行 / 孤儿行右侧 hover 才显示的工具 */
 .sb-tree__hover-tools {
   display: inline-flex;
   gap: 1px;
@@ -932,13 +931,11 @@ pre code {
   justify-content: center;
   color: var(--text-muted);
   text-decoration: none;
-  /* opacity 用 0.35s 慢淡入避免「闪一下」，hover/颜色保持 0.12s 维持手感。 */
-  opacity: 0;
+  opacity: 0.44;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease;
   flex-shrink: 0;
 }
 
-.secondary-panel.is-footer-hot .sb-footer__btn,
 .sb-footer:hover .sb-footer__btn,
 .sb-footer:focus-within .sb-footer__btn,
 .sb-footer__btn.is-active {
@@ -969,11 +966,10 @@ pre code {
   letter-spacing: 0.2px;
   text-decoration: none;
   min-width: 0;
-  opacity: 0;
+  opacity: 0.62;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
 }
 
-.secondary-panel.is-footer-hot .sb-conn,
 .sb-footer:hover .sb-conn,
 .sb-footer:focus-within .sb-conn {
   opacity: 1;
@@ -991,6 +987,7 @@ pre code {
 .sb-conn--warn {
   background: var(--warn-soft);
   color: var(--warn);
+  opacity: 0.82;
 }
 
 .sb-conn--warn:hover {

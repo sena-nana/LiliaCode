@@ -216,18 +216,6 @@ function toggleOrphans() {
 
 // --- 孤儿 session 归档确认 ---
 const confirmingOrphanId = ref<string | null>(null);
-const footerHot = ref(false);
-
-function onPanelPointerMove(event: PointerEvent) {
-  const panel = event.currentTarget;
-  if (!(panel instanceof HTMLElement)) return;
-  const rect = panel.getBoundingClientRect();
-  footerHot.value = event.clientY >= rect.top + rect.height * 0.75;
-}
-
-function onPanelPointerLeave() {
-  footerHot.value = false;
-}
 
 function onOrphanArchiveClick(e: MouseEvent, orphanId: string) {
   e.preventDefault();
@@ -726,10 +714,8 @@ onBeforeUnmount(() => {
 <template>
   <aside
     class="secondary-panel"
-    :class="{ 'is-tree-dragging': treeDrag?.active, 'is-footer-hot': footerHot }"
+    :class="{ 'is-tree-dragging': treeDrag?.active }"
     @pointerdown="onTreePointerDown"
-    @pointermove="onPanelPointerMove"
-    @pointerleave="onPanelPointerLeave"
     @click.capture="onTreeClickCapture"
   >
     <div class="sb-section sb-section--actions">
