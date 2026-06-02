@@ -277,6 +277,7 @@ const composerSearchText = computed(() =>
     .join(""),
 );
 const composerSerializedText = computed(() => serializeComposerParts(composerParts.value));
+const composerIsEmpty = computed(() => composerSerializedText.value.length === 0);
 const previewAttachments = computed(() => (props.attachments ?? []).filter(isImageAttachment));
 
 const canSend = computed(() => {
@@ -704,11 +705,18 @@ function collectComposerPartsFromNode(node: Node, parts: ComposerPart[]) {
 function readComposerPartsFromEditor(): ComposerPart[] {
   const editor = richEditor.value;
   if (!editor) return composerParts.value;
+  if (isBrowserEmptyRichEditor(editor)) {
+    return [textPart("")];
+  }
   const parts: ComposerPart[] = [];
   for (const child of Array.from(editor.childNodes)) {
     collectComposerPartsFromNode(child, parts);
   }
   return normalizeComposerParts(parts);
+}
+
+function isBrowserEmptyRichEditor(editor: HTMLElement): boolean {
+  return editor.childNodes.length === 1 && editor.firstChild instanceof HTMLBRElement;
 }
 
 function syncRemovedInlineAttachments(nextParts: ComposerPart[]) {
@@ -1622,7 +1630,7 @@ onBeforeUnmount(() => {
         v-else-if="!hasPending"
         ref="richEditor"
         class="chat-composer__rich-input"
-        :class="{ 'is-empty': composerSerializedText.trim().length === 0 }"
+        :class="{ 'is-empty': composerIsEmpty }"
         role="textbox"
         aria-multiline="true"
         contenteditable="true"

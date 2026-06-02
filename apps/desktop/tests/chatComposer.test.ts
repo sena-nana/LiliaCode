@@ -217,6 +217,42 @@ describe("ChatComposer", () => {
   });
 
 
+  it("主输入框只有空格时隐藏 placeholder 且不能发送", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    const input = await setComposerText(view, "   ");
+
+    expect(input).not.toHaveClass("is-empty");
+    expect(view.getByRole("button", { name: "发送" })).toBeDisabled();
+
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    expect(view.emitted("send")).toBeUndefined();
+  });
+
+
+  it("主输入框清空后只有浏览器填充 br 时显示 placeholder", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    const input = await setComposerText(view, "写点东西");
+    input.replaceChildren(document.createElement("br"));
+    placeEditableCaret(input, 0);
+    await fireEvent.input(input);
+
+    expect(input).toHaveClass("is-empty");
+  });
+
+
   it("@ 搜索选中结果后转为上下文附件并清理 mention", async () => {
     const view = render(ChatComposer, {
       props: {
