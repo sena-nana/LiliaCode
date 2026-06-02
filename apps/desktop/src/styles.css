@@ -4603,8 +4603,7 @@ button.ghost:hover {
   background: var(--bg-hover);
 }
 
-.todo-float__row.is-queued,
-.todo-float__row.is-sent {
+.todo-float__row.is-queued {
   color: var(--text-muted);
 }
 
@@ -4618,10 +4617,12 @@ button.ghost:hover {
   width: 16px;
 }
 
-.todo-float__priority,
-.todo-float__priority-choice {
+.todo-float__priority {
   align-items: center;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 4px;
+  color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 10px;
@@ -4630,12 +4631,6 @@ button.ghost:hover {
   justify-content: center;
   min-width: 18px;
   padding: 0 5px;
-}
-
-.todo-float__priority {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-soft);
-  color: var(--text-muted);
 }
 
 .todo-float__priority--high {
@@ -4648,40 +4643,9 @@ button.ghost:hover {
   color: var(--text-faint);
 }
 
-.todo-float__priority-group {
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
-  display: inline-flex;
-  flex: 0 0 auto;
-  overflow: hidden;
-}
-
-.todo-float__priority-choice {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  color: var(--text-faint);
-  cursor: pointer;
-  height: 20px;
-  min-width: 22px;
-}
-
-.todo-float__priority-choice:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.todo-float__priority-choice.is-active {
-  background: var(--bg-active);
-  color: var(--text);
-}
-
-.todo-float__priority-choice--high.is-active {
-  background: var(--err-soft);
-  color: var(--err);
-}
-
-.todo-float__priority-choice--low.is-active {
+.todo-float__row.is-queued .todo-float__priority {
+  background: var(--bg-subtle);
+  border-color: var(--border-soft);
   color: var(--text-muted);
 }
 
@@ -4692,37 +4656,11 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
-.todo-float__text-btn {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: text;
-  font: inherit;
-  padding: 2px 0;
-  text-align: left;
-}
-
-.todo-float__edit {
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  color: var(--text);
-  flex: 1 1 auto;
-  font: inherit;
-  height: 24px;
-  min-width: 80px;
-  padding: 0 6px;
-}
-
-.todo-float__edit:focus {
-  outline: none;
-}
-
-.todo-float__status {
-  color: var(--text-faint);
+.todo-float__actions {
+  align-items: center;
+  display: inline-flex;
   flex: 0 0 auto;
-  font-size: 10px;
-  white-space: nowrap;
+  gap: 2px;
 }
 
 .todo-float__icon-btn {

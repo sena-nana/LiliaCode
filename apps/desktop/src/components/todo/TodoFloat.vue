@@ -3,7 +3,7 @@
  * Composer 顶部紧凑 Todo / 引导列表。
  *
  * - Todo：agent 原生 TodoWrite/todo_list 的只读镜像，只展示未完成项。
- * - 引导：Lilia 自己维护的待插入用户消息，用户可编辑、删除、调整优先级。
+ * - 引导：Lilia 自己维护的待插入用户消息，用户可立即发送或删除。
  */
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -18,7 +18,6 @@ import {
   deleteTodo,
   listTodos,
   onTodoChanged,
-  updateTodo,
   type TaskTodoPriority,
 } from "../../services/todos";
 import type { TaskTodo } from "@lilia/contracts";
@@ -32,24 +31,16 @@ const emit = defineEmits<{
 
 const todos = ref<TaskTodo[]>([]);
 const error = ref<string | null>(null);
-const editingId = ref<string | null>(null);
-const editText = ref("");
 const savingId = ref<string | null>(null);
 
 let unlistenTodoChanged: UnlistenFn | null = null;
-
-const priorityOptions: Array<{ value: TaskTodoPriority; label: string }> = [
-  { value: "high", label: "高" },
-  { value: "normal", label: "中" },
-  { value: "low", label: "低" },
-];
 
 const agentTodos = computed(() =>
   todos.value.filter((todo) => todo.source === "agent" && !todo.done),
 );
 
 const guides = computed(() =>
-  todos.value.filter((todo) => todo.source === "lilia"),
+  todos.value.filter((todo) => todo.source === "lilia" && todo.guideStatus !== "sent"),
 );
 
 const hasVisibleTodos = computed(() =>
@@ -57,13 +48,9 @@ const hasVisibleTodos = computed(() =>
 );
 
 function priorityLabel(priority: TaskTodoPriority): string {
-  return priorityOptions.find((option) => option.value === priority)?.label ?? "中";
-}
-
-function guideStatusLabel(todo: TaskTodo): string | null {
-  if (todo.guideStatus === "queued") return "已排队";
-  if (todo.guideStatus === "sent") return "已插入";
-  return null;
+  if (priority === "high") return "高";
+  if (priority === "low") return "低";
+  return "中";
 }
 
 async function refresh() {
@@ -73,51 +60,6 @@ async function refresh() {
     error.value = null;
   } catch (e) {
     error.value = String(e);
-  }
-}
-
-function beginEdit(todo: TaskTodo) {
-  if (todo.source !== "lilia" || savingId.value) return;
-  editingId.value = todo.id;
-  editText.value = todo.text;
-}
-
-function cancelEdit() {
-  editingId.value = null;
-  editText.value = "";
-}
-
-async function saveEdit(todo: TaskTodo) {
-  if (todo.source !== "lilia" || editingId.value !== todo.id) return;
-  const text = editText.value.trim();
-  if (!text) {
-    cancelEdit();
-    return;
-  }
-  if (text === todo.text) {
-    cancelEdit();
-    return;
-  }
-  savingId.value = todo.id;
-  try {
-    await updateTodo(todo.id, { text });
-    cancelEdit();
-  } catch (e) {
-    error.value = String(e);
-  } finally {
-    savingId.value = null;
-  }
-}
-
-async function setPriority(todo: TaskTodo, priority: TaskTodoPriority) {
-  if (todo.source !== "lilia" || todo.priority === priority || savingId.value) return;
-  savingId.value = todo.id;
-  try {
-    await updateTodo(todo.id, { priority });
-  } catch (e) {
-    error.value = String(e);
-  } finally {
-    savingId.value = null;
   }
 }
 
@@ -141,7 +83,6 @@ function onInsertGuide(todo: TaskTodo) {
 watch(
   () => props.taskId,
   () => {
-    cancelEdit();
     refresh();
   },
 );
@@ -195,70 +136,37 @@ onUnmounted(async () => {
           <span class="todo-float__source" title="Lilia 引导">
             <Sparkles :size="12" aria-hidden="true" />
           </span>
-
-          <input
-            v-if="editingId === todo.id"
-            v-model="editText"
-            class="todo-float__edit"
-            type="text"
-            aria-label="编辑引导"
-            autofocus
-            @keydown.enter.prevent="saveEdit(todo)"
-            @keydown.esc.prevent="cancelEdit"
-            @blur="saveEdit(todo)"
-          />
-          <button
-            v-else
-            type="button"
-            class="todo-float__text todo-float__text-btn"
-            :title="todo.text"
-            @click="beginEdit(todo)"
-          >
+          <span class="todo-float__text" :title="todo.text">
             {{ todo.text }}
-          </button>
-
-          <span v-if="guideStatusLabel(todo)" class="todo-float__status">
-            {{ guideStatusLabel(todo) }}
           </span>
-
-          <div class="todo-float__priority-group" aria-label="引导优先级">
+          <span
+            class="todo-float__priority"
+            :class="`todo-float__priority--${todo.priority}`"
+          >
+            {{ priorityLabel(todo.priority) }}
+          </span>
+          <div class="todo-float__actions">
             <button
-              v-for="option in priorityOptions"
-              :key="option.value"
               type="button"
-              class="todo-float__priority-choice"
-              :class="{
-                'is-active': todo.priority === option.value,
-                [`todo-float__priority-choice--${option.value}`]: true,
-              }"
-              :aria-pressed="todo.priority === option.value"
-              :title="`设为${option.label}优先级`"
-              @click="setPriority(todo, option.value)"
+              class="todo-float__icon-btn"
+              :disabled="todo.guideStatus !== 'pending'"
+              title="立即插入"
+              :aria-label="`立即插入引导：${todo.text}`"
+              @click="onInsertGuide(todo)"
             >
-              {{ option.label }}
+              <Send :size="12" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="todo-float__icon-btn todo-float__icon-btn--danger"
+              :disabled="todo.guideStatus === 'queued'"
+              title="删除引导"
+              :aria-label="`删除引导：${todo.text}`"
+              @click="onDelete(todo)"
+            >
+              <Trash2 :size="12" aria-hidden="true" />
             </button>
           </div>
-
-          <button
-            type="button"
-            class="todo-float__icon-btn"
-            :disabled="todo.guideStatus !== 'pending'"
-            title="立即插入"
-            :aria-label="`立即插入引导：${todo.text}`"
-            @click="onInsertGuide(todo)"
-          >
-            <Send :size="12" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            class="todo-float__icon-btn todo-float__icon-btn--danger"
-            :disabled="todo.guideStatus === 'queued'"
-            title="删除引导"
-            :aria-label="`删除引导：${todo.text}`"
-            @click="onDelete(todo)"
-          >
-            <Trash2 :size="12" aria-hidden="true" />
-          </button>
         </li>
       </ul>
     </section>

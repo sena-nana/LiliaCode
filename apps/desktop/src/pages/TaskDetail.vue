@@ -301,22 +301,24 @@ async function sendAgentMessage(
   if (!hasContext.value) return;
   if (!content.trim() && outgoingAttachments.length === 0) return;
 
-  await ensureComposerLoaded();
-  const currentComposer = composerForView.value;
-  await ensureTaskReadyForMessage(content, outgoingAttachments);
-  const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
-
-  const optimistic = createMessageTimelineEvent({
-    id: nextOptimisticMessageId(),
-    taskId: props.taskId,
-    content,
-    attachments: outgoingAttachments,
-    createdAt: Date.now(),
-    queued: true,
-  });
-  upsertTimelineEvent(optimistic);
-  userSendScrollKey.value += 1;
+  let optimisticId: string | null = null;
   try {
+    await ensureComposerLoaded();
+    const currentComposer = composerForView.value;
+    await ensureTaskReadyForMessage(content, outgoingAttachments);
+    const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
+
+    const optimistic = createMessageTimelineEvent({
+      id: nextOptimisticMessageId(),
+      taskId: props.taskId,
+      content,
+      attachments: outgoingAttachments,
+      createdAt: Date.now(),
+      queued: true,
+    });
+    optimisticId = optimistic.id;
+    upsertTimelineEvent(optimistic);
+    userSendScrollKey.value += 1;
     await sendMessage(
       props.taskId,
       content,
@@ -327,7 +329,7 @@ async function sendAgentMessage(
     );
     removeTimelineEvent(optimistic.id);
   } catch (err) {
-    removeTimelineEvent(optimistic.id);
+    if (optimisticId) removeTimelineEvent(optimisticId);
     isTurnRunning.value = false;
     upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`, {
       content,
@@ -339,7 +341,17 @@ async function sendAgentMessage(
 
 async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
   if (!hasContext.value) return;
-  await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
+  if (isTurnRunning.value || pendingAgentActions.value.length > 0) {
+    await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
+    return;
+  }
+
+  try {
+    await sendAgentMessage(content, outgoingAttachments);
+    attachments.value = [];
+  } catch {
+    // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+  }
 }
 
 function onInsertGuide(todo: TaskTodo) {

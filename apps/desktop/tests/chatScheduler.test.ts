@@ -155,9 +155,10 @@ describe("chat scheduler", () => {
         path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
       })],
     });
-    expect(send?.[1].content).toContain("[Lilia 引导]");
+    expect(send?.[1].content).not.toContain("[Lilia 引导]");
     expect(send?.[1].content).toContain("参考附件总结项目");
     expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(false);
   });
 
   it("全局 provider 为 Codex 时发送会覆盖旧 composer backend", async () => {
@@ -226,7 +227,7 @@ describe("chat scheduler", () => {
     await sendText(view, "失败时保留附件");
 
     await waitFor(() => {
-      expect(view.getByText(/创建引导失败/)).toBeInTheDocument();
+      expect(view.getByText(/发送失败：Error: composer failed/)).toBeInTheDocument();
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
     expect(view.getByText("README.md")).toBeInTheDocument();
@@ -239,6 +240,9 @@ describe("chat scheduler", () => {
     await sendText(view, "先检查当前实现");
     await waitFor(() => {
       expect(view.getByText("先检查当前实现")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
     });
 
     await sendText(view, "补充：优先看调度器");
@@ -256,7 +260,13 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       const nextSends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
       expect(nextSends).toHaveLength(2);
+      expect(nextSends[1][1].content).toContain("[Lilia 引导]");
       expect(nextSends[1][1].content).toContain("补充：优先看调度器");
+    });
+    await waitFor(() => {
+      const guideRows = Array.from(view.container.querySelectorAll(".todo-float__row--guide"));
+      expect(guideRows.some((row) => row.textContent?.includes("补充：优先看调度器")))
+        .toBe(false);
     });
   });
 
