@@ -192,6 +192,22 @@ function emitTimeline(input) {
   emit({ type: "timeline", event });
 }
 
+function emitAssistantMessageTimeline(text, status, backend = "assistant") {
+  const content = typeof text === "string" ? text : "";
+  emitTimeline({
+    kind: "message",
+    status,
+    title: "Assistant",
+    summary: content,
+    payload: {
+      role: "assistant",
+      content,
+      backend,
+    },
+    sourceId: `${backend}:text:message`,
+  });
+}
+
 /**
  * 把 assistant 流式回复按 **block 级** 拆成多条 inline message timeline 事件，
  * 每个 text block 用独立 sourceId（`{sessionId}:text:{blockKey}`）。
@@ -2339,20 +2355,21 @@ async function runCodex(cmd) {
     return;
   }
 
-  const permOpts = mapCodexPermission(permission);
   emitCodexRuntimeExtensionsTimeline(runtimeExtensions);
   const codex = new Codex({
     apiKey: process.env.OPENAI_API_KEY,
     baseUrl: process.env.OPENAI_BASE_URL || undefined,
   });
+  const threadOptions = {
+    workingDirectory: cwd || process.cwd(),
+    model: model || undefined,
+    ...mapCodexPermission(permission),
+    skipGitRepoCheck: true,
+  };
 
   const thread = resumeSessionId
-    ? codex.resumeThread(resumeSessionId)
-    : codex.startThread({
-        workingDirectory: cwd || process.cwd(),
-        model: model || undefined,
-        ...permOpts,
-      });
+    ? codex.resumeThread(resumeSessionId, threadOptions)
+    : codex.startThread(threadOptions);
 
   const ctx = {
     lastThreadId: thread?.id ?? resumeSessionId ?? null,

@@ -46,4 +46,19 @@ describe("agent-runner Claude stream", () => {
     expect(runnerSource).toMatch(/if\s*\(backend === "codex"\)\s*\{\s*await runCodex\(cmd\);/);
     expect(runnerSource).toMatch(/}\s*else\s*\{\s*await runClaude\(cmd\);/);
   });
+
+  it("Codex 新会话和续聊都会跳过 Git 仓库检查", () => {
+    expect(runnerSource).toContain("const threadOptions = {");
+    expect(runnerSource).toContain("skipGitRepoCheck: true");
+    expect(runnerSource).toContain("codex.resumeThread(resumeSessionId, threadOptions)");
+    expect(runnerSource).toContain("codex.startThread(threadOptions)");
+  });
+
+  it("Codex 使用通用 assistant message timeline helper", () => {
+    expect(runnerSource).toContain("function emitAssistantMessageTimeline");
+    expect(runnerSource).toMatch(/function emitAssistantMessageTimeline\(text, status, backend = "assistant"\)/);
+    expect(runnerSource).toMatch(/sourceId:\s*`\$\{backend\}:text:message`/);
+    expect(runnerSource).toContain('emit: (text) => emitAssistantMessageTimeline(text, "running", "codex")');
+    expect(runnerSource).toContain('emitAssistantMessageTimeline(finalText, "success", "codex")');
+  });
 });
