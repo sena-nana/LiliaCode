@@ -1,6 +1,6 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
+import type { AskUserSpec, ChatAttachment, ChatComposerState } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -383,6 +383,16 @@ describe("ChatComposer", () => {
       mime: "image/png",
     });
     expect(composerText(input)).toContain("图片 1.png");
+
+    const pastedAttachment = view.emitted("add-context-attachment")?.[0]?.[0] as ChatAttachment;
+    await view.rerender({
+      state: baseState,
+      attachments: [pastedAttachment],
+    });
+    expect(view.getByLabelText("图片预览").querySelector("img")).toHaveAttribute(
+      "src",
+      "asset://C:/Users/mock/.lilia/cache/clipboard-images/clipboard-1.png",
+    );
   });
 
   it("下方图片预览只显示缩略图", async () => {
