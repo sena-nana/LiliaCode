@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lilia",
+  "productName": "LiliaCode",
   "version": "0.1.0",
   "identifier": "com.lilia.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lilia",
+        "title": "LiliaCode",
         "width": 960,
         "height": 600,
         "minWidth": 960,
