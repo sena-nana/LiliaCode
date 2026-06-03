@@ -17,10 +17,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
-  isDraftOrphan,
-  isDraftTask,
+  allTasksReady,
   promoteDraftOrphan,
   promoteDraftTask,
+  resolveConversationRouteState,
 } from "../services/tasksStore";
 import { getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
@@ -98,9 +98,13 @@ const isPopup = computed(() => props.variant === "popup");
 const orphan = computed(() =>
   props.projectId ? undefined : getOrphanConversation(props.taskId),
 );
+const taskStoresReady = ref(false);
 
 /** 路由是否已找到承载对话的项目或孤儿；都没有 → 显示未找到。 */
 const hasContext = computed(() => !!project.value || !!orphan.value);
+const isContextLoading = computed(() =>
+  !taskStoresReady.value && (!!props.projectId || !!props.taskId),
+);
 
 /** 空状态标题：绑了项目就用项目名补全。 */
 const emptyHeadline = computed(() =>
@@ -194,21 +198,8 @@ function titleForMessage(content: string, outgoingAttachments: ChatAttachment[])
   return outgoingAttachments[0]?.name ?? "附件";
 }
 
-function isProjectDraftRouteId(taskId: string): boolean {
-  return taskId.startsWith("t-draft-");
-}
-
-function isOrphanDraftRouteId(taskId: string): boolean {
-  return taskId.startsWith("o-draft-");
-}
-
 function popupNewDraftRoute(projectId: string | undefined): string {
   return projectId ? `/popup/projects/${projectId}/new` : "/popup/chats/new";
-}
-
-function isLiveDraftRoute(projectId: string | undefined, taskId: string): boolean {
-  if (projectId) return isProjectDraftRouteId(taskId) && isDraftTask(taskId);
-  return isOrphanDraftRouteId(taskId) && isDraftOrphan(taskId);
 }
 
 function isPointInsideElement(
@@ -314,11 +305,12 @@ async function ensureTaskReadyForMessage(
   content: string,
   outgoingAttachments: ChatAttachment[],
 ) {
-  if (props.projectId && isProjectDraftRouteId(props.taskId)) {
-    if (!isDraftTask(props.taskId)) throw new Error("草稿已失效，请重新创建对话");
+  const routeState = resolveConversationRouteState(props.projectId, props.taskId);
+  if (props.projectId && routeState.isDraftRoute) {
+    if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
     await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
-  } else if (!props.projectId && isOrphanDraftRouteId(props.taskId)) {
-    if (!isDraftOrphan(props.taskId)) throw new Error("草稿已失效，请重新创建对话");
+  } else if (!props.projectId && routeState.isDraftRoute) {
+    if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
     await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
   }
 }
@@ -758,6 +750,10 @@ const unlisteners: UnlistenFn[] = [];
 let unsubscribeDebugTimeline: (() => void) | null = null;
 let unregisterDebugPanel: (() => void) | null = null;
 
+void allTasksReady.finally(() => {
+  taskStoresReady.value = true;
+});
+
 function syncDebugPanelRegistration() {
   if (!hasContext.value || !agentInteractionSettings.debug.value) {
     unregisterDebugPanel?.();
@@ -871,13 +867,11 @@ watch(
 );
 
 watch(
-  () => [props.variant, props.projectId, props.taskId] as const,
-  ([variant, projectId, taskId]) => {
+  () => [props.variant, props.projectId, props.taskId, taskStoresReady.value] as const,
+  ([variant, projectId, taskId, storesReady]) => {
     if (variant !== "popup") return;
-    const draftRoute = projectId
-      ? isProjectDraftRouteId(taskId)
-      : isOrphanDraftRouteId(taskId);
-    if (draftRoute && !isLiveDraftRoute(projectId, taskId)) {
+    const routeState = resolveConversationRouteState(projectId, taskId);
+    if (storesReady && routeState.isLostDraft) {
       void router.replace(popupNewDraftRoute(projectId));
     }
   },
@@ -983,6 +977,10 @@ watch(
       :image="viewingImage"
       @close="viewingImage = null"
     />
+  </section>
+
+  <section v-else-if="isContextLoading">
+    <div class="empty-state">正在加载对话…</div>
   </section>
 
   <section v-else>

@@ -3173,6 +3173,14 @@ fn focus_window(window: &WebviewWindow) {
 
 fn build_popup_window(app: &AppHandle, label: String, route: String) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window(&label) {
+        existing
+            .emit(
+                "lilia:popup:navigate",
+                MainNavigateEvent {
+                    route: normalize_popup_route(&route),
+                },
+            )
+            .map_err(|e| format!("通知弹出窗口导航失败：{e}"))?;
         focus_window(&existing);
         return Ok(());
     }

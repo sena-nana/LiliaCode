@@ -10,10 +10,12 @@ import { installToolConsentBridge } from "./composables/useToolConsentBridge";
 let unlistenConsent: (() => void) | null = null;
 let unlistenAskUser: (() => void) | null = null;
 let unlistenMainNavigate: (() => void) | null = null;
+let unlistenPopupNavigate: (() => void) | null = null;
 
 const router = useRouter();
 const appWindow = getCurrentWindow();
 const isMainWindow = appWindow.label === "main";
+const isPopupWindow = appWindow.label.startsWith("popup-");
 
 onMounted(async () => {
   const [consent, askUser] = await Promise.all([
@@ -31,15 +33,26 @@ onMounted(async () => {
       }
     });
   }
+
+  if (isPopupWindow) {
+    unlistenPopupNavigate = await listen<{ route: string }>("lilia:popup:navigate", (event) => {
+      const route = event.payload.route;
+      if (typeof route === "string" && route.startsWith("/popup/")) {
+        void router.replace(route);
+      }
+    });
+  }
 });
 
 onBeforeUnmount(() => {
   unlistenConsent?.();
   unlistenAskUser?.();
   unlistenMainNavigate?.();
+  unlistenPopupNavigate?.();
   unlistenConsent = null;
   unlistenAskUser = null;
   unlistenMainNavigate = null;
+  unlistenPopupNavigate = null;
 });
 </script>
 

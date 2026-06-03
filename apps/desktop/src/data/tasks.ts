@@ -143,6 +143,36 @@ export function isDraftTask(id: string): boolean {
   return DRAFT_TASKS.has(id);
 }
 
+export function resolveConversationRouteState(
+  projectId: string | null | undefined,
+  taskId: string | null | undefined,
+) {
+  if (!taskId) {
+    return {
+      isDraftRoute: false,
+      isLiveDraft: false,
+      isLostDraft: false,
+    };
+  }
+
+  const projectScoped = !!projectId;
+  const isDraftRoute = projectScoped
+    ? taskId.startsWith("t-draft-")
+    : taskId.startsWith("o-draft-");
+  const isLiveDraft = projectScoped
+    ? isDraftRoute && isDraftTask(taskId)
+    : isDraftRoute && isDraftOrphan(taskId);
+  const exists = projectScoped
+    ? !!getTask(projectId, taskId)
+    : !!getOrphanConversation(taskId);
+
+  return {
+    isDraftRoute,
+    isLiveDraft,
+    isLostDraft: isDraftRoute && !isLiveDraft && !exists,
+  };
+}
+
 /** 点项目行「+」时调用：产出一条绑定到该项目的草稿任务，首条消息发出前不落库。 */
 export function createDraftTask(projectId: string): Task {
   const id = `t-draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;

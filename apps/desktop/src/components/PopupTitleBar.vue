@@ -12,6 +12,7 @@ import { getProject } from "../services/projectsStore";
 import {
   getOrphanConversation,
   getTask,
+  resolveConversationRouteState,
 } from "../services/tasksStore";
 import { focusMainWindow } from "../services/popupWindows";
 
@@ -27,8 +28,8 @@ function paramAsString(value: string | string[] | undefined): string | undefined
 const projectId = computed(() => paramAsString(route.params.projectId));
 const taskId = computed(() => paramAsString(route.params.taskId));
 
-const isDraftTaskId = computed(() =>
-  taskId.value?.startsWith("t-draft-") || taskId.value?.startsWith("o-draft-"),
+const routeState = computed(() =>
+  resolveConversationRouteState(projectId.value, taskId.value),
 );
 
 interface Crumb {
@@ -42,7 +43,7 @@ const crumbs = computed<Crumb[]>(() => {
 
   if (pid) {
     const project = getProject(pid);
-    if (!tid || isDraftTaskId.value) {
+    if (!tid || routeState.value.isLiveDraft || routeState.value.isLostDraft) {
       return [
         { text: project?.name ?? "未知项目", muted: true },
         { text: "新对话" },
@@ -59,7 +60,11 @@ const crumbs = computed<Crumb[]>(() => {
     const orphan = getOrphanConversation(tid);
     return [
       { text: "收集箱", muted: true },
-      { text: isDraftTaskId.value ? "新对话" : orphan?.title ?? "新对话" },
+      {
+        text: routeState.value.isLiveDraft || routeState.value.isLostDraft
+          ? "新对话"
+          : orphan?.title ?? "新对话",
+      },
     ];
   }
 
@@ -73,9 +78,13 @@ function popupNewRoute(): string {
 function mainRouteForPopup(): string {
   const pid = projectId.value;
   const tid = taskId.value;
-  if (pid && tid && !isDraftTaskId.value) return `/projects/${pid}/tasks/${tid}`;
+  if (pid && tid && !routeState.value.isLiveDraft && !routeState.value.isLostDraft) {
+    return `/projects/${pid}/tasks/${tid}`;
+  }
   if (pid) return `/projects/${pid}`;
-  if (tid && !isDraftTaskId.value) return `/chats/${tid}`;
+  if (tid && !routeState.value.isLiveDraft && !routeState.value.isLostDraft) {
+    return `/chats/${tid}`;
+  }
   return "/";
 }
 

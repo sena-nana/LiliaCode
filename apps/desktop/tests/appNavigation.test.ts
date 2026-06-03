@@ -52,6 +52,37 @@ describe("App main navigation events", () => {
     });
   });
 
+  it("主窗口不会订阅弹窗导航事件", async () => {
+    const view = await renderApp("main");
+
+    expect(mockListenerCount("lilia:popup:navigate")).toBe(0);
+
+    emitTauriEvent("lilia:popup:navigate", {
+      route: "/popup/projects/lilia/tasks/t-001",
+    });
+
+    await Promise.resolve();
+    expect(view.router.currentRoute.value.fullPath).toBe("/");
+  });
+
+  it("弹窗收到弹窗导航事件时会切换目标对话", async () => {
+    const view = await renderApp("popup-task-t-001", "/popup/chats/o-001");
+
+    await waitFor(() => {
+      expect(mockListenerCount("lilia:popup:navigate")).toBe(1);
+    });
+
+    emitTauriEvent("lilia:popup:navigate", {
+      route: "/popup/projects/lilia/tasks/t-001",
+    });
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe(
+        "/popup/projects/lilia/tasks/t-001",
+      );
+    });
+  });
+
   it("弹窗不会订阅主窗口导航事件", async () => {
     const view = await renderApp(
       "popup-task-t-001",
@@ -59,6 +90,7 @@ describe("App main navigation events", () => {
     );
 
     expect(mockListenerCount("lilia:main:navigate")).toBe(0);
+    expect(mockListenerCount("lilia:popup:navigate")).toBe(1);
     expect(view.router.currentRoute.value.fullPath).toBe(
       "/popup/projects/lilia/tasks/t-001",
     );
