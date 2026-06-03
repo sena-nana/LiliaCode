@@ -3931,15 +3931,7 @@ button.ghost:hover {
   align-items: flex-end;
   gap: 8px;
   min-width: 0;
-  padding: 7px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
   transition: gap 0.18s ease;
-}
-
-.chat-composer__entry-row--pending {
-  background: var(--bg-subtle);
 }
 
 .chat-composer__entry-row .chat-composer__input,
