@@ -3159,8 +3159,10 @@ fn normalize_popup_route(route: &str) -> String {
     }
 }
 
-fn popup_webview_entry_path(route: &str) -> String {
-    format!("index.html#{}", normalize_popup_route(route))
+fn popup_route_bootstrap_script(route: &str) -> String {
+    let route = serde_json::to_string(&normalize_popup_route(route))
+        .unwrap_or_else(|_| "\"/popup/chats/new\"".to_string());
+    format!("window.location.hash = \"#\" + {route};")
 }
 
 fn focus_window(window: &WebviewWindow) {
@@ -3177,8 +3179,9 @@ fn build_popup_window(app: &AppHandle, label: String, route: String) -> Result<(
     let window = WebviewWindowBuilder::new(
         app,
         label,
-        WebviewUrl::App(popup_webview_entry_path(&route).into()),
+        WebviewUrl::App("index.html".into()),
     )
+        .initialization_script(popup_route_bootstrap_script(&route))
         .title("LiliaCode")
         .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
         .min_inner_size(POPUP_MIN_WIDTH, POPUP_MIN_HEIGHT)
@@ -3214,7 +3217,13 @@ fn open_new_chat_window(
 
 fn open_popup_for_shortcut(app: &AppHandle) -> Result<(), String> {
     let project_id = load_popup_last_project_id(app).filter(|id| project_exists(app, id));
-    open_new_chat_window(app, project_id, true)
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = open_new_chat_window(&app, project_id, true) {
+            eprintln!("{err}");
+        }
+    });
+    Ok(())
 }
 
 fn register_popup_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
@@ -3280,27 +3289,33 @@ fn popup_remember_last_project(app: AppHandle, project_id: String) -> Result<(),
 }
 
 #[tauri::command]
-fn popup_open_new_chat(app: AppHandle, project_id: Option<String>) -> Result<(), String> {
-    open_new_chat_window(&app, project_id, false)
+async fn popup_open_new_chat(app: AppHandle, project_id: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || open_new_chat_window(&app, project_id, false))
+        .await
+        .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
 
 #[tauri::command]
-fn popup_open_task(
+async fn popup_open_task(
     app: AppHandle,
     project_id: Option<String>,
     task_id: String,
 ) -> Result<(), String> {
-    let task_id = task_id.trim();
-    if task_id.is_empty() {
-        return Err("缺少对话 ID".to_string());
-    }
-    let route = if let Some(project_id) = normalize_optional_string(project_id) {
-        save_popup_last_project_id(&app, &project_id)?;
-        format!("popup/projects/{project_id}/tasks/{task_id}")
-    } else {
-        format!("popup/chats/{task_id}")
-    };
-    build_popup_window(&app, popup_task_label(task_id), route)
+    tauri::async_runtime::spawn_blocking(move || {
+        let task_id = task_id.trim();
+        if task_id.is_empty() {
+            return Err("缺少对话 ID".to_string());
+        }
+        let route = if let Some(project_id) = normalize_optional_string(project_id) {
+            save_popup_last_project_id(&app, &project_id)?;
+            format!("popup/projects/{project_id}/tasks/{task_id}")
+        } else {
+            format!("popup/chats/{task_id}")
+        };
+        build_popup_window(&app, popup_task_label(task_id), route)
+    })
+    .await
+    .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
 
 #[tauri::command]
@@ -4304,18 +4319,10 @@ mod popup_window_tests {
     use super::*;
 
     #[test]
-    fn popup_webview_entry_path_loads_index_with_hash_route() {
-        assert_eq!(
-            popup_webview_entry_path("/popup/projects/lilia/new"),
-            "index.html#/popup/projects/lilia/new"
-        );
-    }
+    fn popup_route_bootstrap_script_sets_hash_route() {
+        let script = popup_route_bootstrap_script("popup/chats/new");
 
-    #[test]
-    fn popup_webview_entry_path_normalizes_leading_slash() {
-        assert_eq!(
-            popup_webview_entry_path("popup/chats/new"),
-            "index.html#/popup/chats/new"
-        );
+        assert!(script.contains("\"/popup/chats/new\""));
+        assert!(script.contains("window.location.hash"));
     }
 }

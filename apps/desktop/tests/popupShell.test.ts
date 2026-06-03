@@ -6,7 +6,10 @@ import {
   createLiliaRouter,
   shouldUsePopupHashHistory,
 } from "../src/router";
-import { mockInvoke } from "./tauriMock";
+import {
+  mockCurrentWindow,
+  mockInvoke,
+} from "./tauriMock";
 
 async function renderPopup(initialRoute = "/popup/projects/lilia/tasks/t-001") {
   const router = createLiliaRouter(createMemoryHistory());
@@ -27,6 +30,19 @@ async function renderPopup(initialRoute = "/popup/projects/lilia/tasks/t-001") {
   };
 }
 
+async function expectReturnToMainRoute(initialRoute: string, mainRoute: string) {
+  const view = await renderPopup(initialRoute);
+
+  await fireEvent.click(view.getByRole("button", { name: "回到主窗口" }));
+
+  await waitFor(() => {
+    expect(mockInvoke).toHaveBeenCalledWith("popup_focus_main", {
+      route: mainRoute,
+    }, undefined);
+    expect(mockCurrentWindow.close).toHaveBeenCalledTimes(1);
+  });
+}
+
 describe("Popup shell", () => {
   it("弹窗 index hash 入口使用 hash history", () => {
     expect(shouldUsePopupHashHistory("#/popup/chats/new")).toBe(true);
@@ -45,16 +61,13 @@ describe("Popup shell", () => {
     expect(view.getByRole("button", { name: "回到主窗口" })).toBeInTheDocument();
   });
 
-  it("回到主窗口按钮会同步当前对话路由", async () => {
-    const view = await renderPopup();
-
-    await fireEvent.click(view.getByRole("button", { name: "回到主窗口" }));
-
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("popup_focus_main", {
-        route: "/projects/lilia/tasks/t-001",
-      }, undefined);
-    });
+  it.each([
+    ["/popup/projects/lilia/tasks/t-001", "/projects/lilia/tasks/t-001"],
+    ["/popup/chats/o-001", "/chats/o-001"],
+    ["/popup/projects/lilia/tasks/t-draft-temp", "/projects/lilia"],
+    ["/popup/chats/o-draft-temp", "/"],
+  ])("回到主窗口会把 %s 映射到 %s", async (popupRoute, mainRoute) => {
+    await expectReturnToMainRoute(popupRoute, mainRoute);
   });
 
   it("刷新到已丢失的弹窗草稿时会重新创建窗口内草稿", async () => {

@@ -386,6 +386,13 @@ export function resetTauriMockData() {
   eventHandlers = {};
   webviewDragDropHandlers = [];
   windowScaleFactor = 1;
+  mockCurrentWindow.label = "main";
+  mockCurrentWindow.isMaximized.mockClear();
+  mockCurrentWindow.onResized.mockClear();
+  mockCurrentWindow.minimize.mockClear();
+  mockCurrentWindow.toggleMaximize.mockClear();
+  mockCurrentWindow.close.mockClear();
+  mockCurrentWindow.scaleFactor.mockClear();
   refreshSessionCounts();
   mockInvoke.mockClear();
   mockListen.mockClear();
@@ -397,6 +404,10 @@ export function emitTauriEvent(event: string, payload: unknown) {
   for (const handler of eventHandlers[event] ?? []) {
     handler({ payload });
   }
+}
+
+export function mockListenerCount(event: string): number {
+  return eventHandlers[event]?.length ?? 0;
 }
 
 export function setMockChatRunning(taskId: string, running: boolean) {
@@ -492,14 +503,21 @@ export const mockGetCurrentWebview = vi.fn(() => ({
   }),
 }));
 
-export const mockGetCurrentWindow = vi.fn(() => ({
+export const mockCurrentWindow = {
+  label: "main",
   isMaximized: vi.fn(async () => false),
   onResized: vi.fn(async () => vi.fn()),
   minimize: vi.fn(async () => undefined),
   toggleMaximize: vi.fn(async () => undefined),
   close: vi.fn(async () => undefined),
   scaleFactor: vi.fn(async () => windowScaleFactor),
-}));
+};
+
+export const mockGetCurrentWindow = vi.fn(() => mockCurrentWindow);
+
+export function setMockCurrentWindowLabel(label: string) {
+  mockCurrentWindow.label = label;
+}
 
 export function setMockWindowScaleFactor(scaleFactor: number) {
   windowScaleFactor = scaleFactor;

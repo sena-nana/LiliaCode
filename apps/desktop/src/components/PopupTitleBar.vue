@@ -89,6 +89,7 @@ async function onNewChat() {
 
 async function onFocusMain() {
   await focusMainWindow(mainRouteForPopup());
+  await appWindow.close();
 }
 </script>
 
