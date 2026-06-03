@@ -112,6 +112,10 @@ export function saveClipboardImage(input: {
   return invoke<ChatAttachment>("chat_save_clipboard_image", { input });
 }
 
+export function saveClipboardText(input: { text: string }): Promise<ChatAttachment> {
+  return invoke<ChatAttachment>("chat_save_clipboard_text", { input });
+}
+
 export async function pickAttachmentFiles(): Promise<string[]> {
   const picked = await invoke<string | string[] | null>("plugin:dialog|open", {
     options: {

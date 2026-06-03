@@ -78,6 +78,7 @@ const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
 ];
 const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 128, 0);
 static CLIPBOARD_IMAGE_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
+static CLIPBOARD_TEXT_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
 static POPUP_WINDOW_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const POPUP_WINDOW_SETTINGS_KEY: &str = "popup-window.config";
@@ -146,6 +147,12 @@ struct ClipboardImageInput {
     mime: Option<String>,
     bytes_base64: String,
     name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipboardTextInput {
+    text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2253,6 +2260,18 @@ fn clipboard_image_display_name(ext: &str, seq: u64) -> String {
     format!("图片 {seq}.{ext}")
 }
 
+fn clipboard_texts_cache_dir(home: &Path) -> PathBuf {
+    home.join("cache").join("clipboard-texts")
+}
+
+fn clipboard_text_path(home: &Path, now: u64) -> PathBuf {
+    clipboard_texts_cache_dir(home).join(format!("clipboard-{now}-{}.txt", Uuid::new_v4()))
+}
+
+fn clipboard_text_display_name(seq: u64) -> String {
+    format!("粘贴文本 {seq}.txt")
+}
+
 fn save_clipboard_image_to_cache(
     home: &Path,
     input: ClipboardImageInput,
@@ -2277,6 +2296,24 @@ fn save_clipboard_image_to_cache(
         .to_ascii_lowercase();
     attachment.name = clipboard_image_display_name(&ext, display_seq);
     attachment.mime = Some(normalize_clipboard_image_mime(input.mime.as_deref(), &ext));
+    Ok(attachment)
+}
+
+fn save_clipboard_text_to_cache(
+    home: &Path,
+    input: ClipboardTextInput,
+    now: u64,
+    display_seq: u64,
+) -> Result<ChatAttachment, String> {
+    let path = clipboard_text_path(home, now);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "无法解析剪贴板文本缓存目录".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| format!("创建剪贴板文本缓存目录失败：{e}"))?;
+    fs::write(&path, input.text.as_bytes()).map_err(|e| format!("保存剪贴板文本失败：{e}"))?;
+    let mut attachment = describe_attachment_path(path.to_string_lossy().to_string());
+    attachment.name = clipboard_text_display_name(display_seq);
+    attachment.mime = None;
     Ok(attachment)
 }
 
@@ -2642,6 +2679,13 @@ fn chat_save_clipboard_image(input: ClipboardImageInput) -> Result<ChatAttachmen
 }
 
 #[tauri::command]
+fn chat_save_clipboard_text(input: ClipboardTextInput) -> Result<ChatAttachment, String> {
+    let home = store::resolve_lilia_home();
+    let display_seq = CLIPBOARD_TEXT_DISPLAY_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+    save_clipboard_text_to_cache(&home, input, now_millis(), display_seq)
+}
+
+#[tauri::command]
 fn chat_search_context_attachments(
     project_cwd: String,
     query: String,
@@ -2711,6 +2755,12 @@ mod context_search_tests {
     }
 
     #[test]
+    fn clipboard_text_display_name_uses_short_sequence_name() {
+        assert_eq!(clipboard_text_display_name(1), "粘贴文本 1.txt");
+        assert_eq!(clipboard_text_display_name(12), "粘贴文本 12.txt");
+    }
+
+    #[test]
     fn clipboard_image_is_saved_under_cache_and_described_as_image_file() {
         let home = temp_context_root("clipboard-image");
         let input = ClipboardImageInput {
@@ -2732,6 +2782,34 @@ mod context_search_tests {
             clipboard_images_cache_dir(&home).as_path()
         );
         assert_eq!(fs::read(&path).unwrap(), vec![1_u8, 2, 3, 4]);
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn clipboard_text_is_saved_under_cache_and_described_as_file() {
+        let home = temp_context_root("clipboard-text");
+        let input = ClipboardTextInput {
+            text: "很长的粘贴文本\nwith ascii".to_string(),
+        };
+
+        let attachment = save_clipboard_text_to_cache(&home, input, 12345, 1).unwrap();
+
+        assert_eq!(attachment.name, "粘贴文本 1.txt");
+        assert_eq!(attachment.kind, "file");
+        assert_eq!(attachment.exists, true);
+        assert_eq!(attachment.mime, None);
+        assert_eq!(attachment.size, Some("很长的粘贴文本\nwith ascii".len() as u64));
+        let path = PathBuf::from(&attachment.path);
+        assert!(path.exists());
+        assert_eq!(
+            path.parent().unwrap(),
+            clipboard_texts_cache_dir(&home).as_path()
+        );
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "很长的粘贴文本\nwith ascii"
+        );
 
         let _ = fs::remove_dir_all(home);
     }
@@ -4244,6 +4322,7 @@ pub fn run() {
             chat_describe_attachments,
             chat_read_clipboard_file_paths,
             chat_save_clipboard_image,
+            chat_save_clipboard_text,
             chat_search_context_attachments,
             chat_send_message,
             chat_interrupt_turn,

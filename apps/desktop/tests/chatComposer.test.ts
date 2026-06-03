@@ -401,6 +401,61 @@ describe("ChatComposer", () => {
     expect(input.querySelector("span, strong")).toBeNull();
     expect(mockInvoke).not.toHaveBeenCalledWith("chat_read_clipboard_file_paths", expect.anything());
     expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_image", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_text", expect.anything());
+  });
+
+  it("未达到阈值的长文本粘贴仍直接插入输入框", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "前  后");
+    placeEditableCaret(input, 1);
+    const text = "a".repeat(1999);
+    const event = createTextPasteEvent(text);
+
+    input.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(composerText(input)).toBe(`前${text}  后`);
+    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_text", expect.anything());
+    expect(view.emitted("add-context-attachment")).toBeUndefined();
+  });
+
+  it("达到阈值的长文本粘贴会保存为临时文本上下文", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "参考  继续");
+    placeEditableCaret(input, 3);
+    const text = "b".repeat(2000);
+    const event = createTextPasteEvent(text);
+
+    input.dispatchEvent(event);
+    await flushPasteTasks();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith("chat_save_clipboard_text", {
+      input: { text },
+    }, undefined);
+    await waitFor(() => {
+      expect(view.emitted("add-context-attachment")?.length).toBe(1);
+    });
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "粘贴文本 1.txt",
+      path: "C:\\Users\\mock\\.lilia\\cache\\clipboard-texts\\clipboard-1.txt",
+      kind: "file",
+      mime: null,
+    });
+    expect(composerText(input)).toContain("参考");
+    expect(composerText(input)).toContain("粘贴文本 1.txt");
+    expect(composerText(input)).toContain("继续");
+    expect(composerText(input)).not.toContain(text);
   });
 
   it("粘贴文件和文件夹时按当前光标插入上下文引用", async () => {

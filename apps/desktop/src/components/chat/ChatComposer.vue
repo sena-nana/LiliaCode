@@ -43,6 +43,7 @@ import {
   describeAttachments,
   readClipboardFilePaths,
   saveClipboardImage,
+  saveClipboardText,
   searchContextAttachments,
 } from "../../services/chat";
 import Dropdown from "../Dropdown.vue";
@@ -89,6 +90,7 @@ const COMPOSER_INPUT_MAX_HEIGHT =
   COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_INPUT_MAX_ROWS + COMPOSER_INPUT_VERTICAL_PADDING;
 const COMPOSER_INPUT_TRANSITION_MS = 160;
 const CONTEXT_SEARCH_LIMIT = 12;
+const LONG_PASTE_TEXT_THRESHOLD = 2000;
 const LARGE_DIRECTORY_FILE_COUNT = 200;
 const LARGE_DIRECTORY_TOTAL_SIZE = 20 * 1024 * 1024;
 
@@ -848,6 +850,15 @@ async function handleRichPaste(imageFiles: File[], offset: number) {
   }
 }
 
+async function handleLongTextPaste(text: string, offset: number) {
+  try {
+    const attachment = await saveClipboardText({ text });
+    await insertPastedAttachments([attachment], offset);
+  } catch (err) {
+    console.error("[chat] paste context failed", err);
+  }
+}
+
 function onRichPaste(event: ClipboardEvent) {
   if (hasPending.value) return;
   const hasFiles = pasteHasFileItems(event);
@@ -861,7 +872,14 @@ function onRichPaste(event: ClipboardEvent) {
   contextSuppressedKey.value = null;
   clearContextSearch();
   if (!hasFiles) {
-    replaceComposerRange(offset, end, [textPart(plainText)]);
+    if (plainText.length < LONG_PASTE_TEXT_THRESHOLD) {
+      replaceComposerRange(offset, end, [textPart(plainText)]);
+      return;
+    }
+    if (end > offset) {
+      offset = replaceComposerRange(offset, end, []);
+    }
+    void handleLongTextPaste(plainText, offset);
     return;
   }
   if (end > offset) {

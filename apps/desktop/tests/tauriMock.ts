@@ -154,6 +154,7 @@ let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let nextChatSendError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
+let clipboardTextSeq = 0;
 let activeBackend: "claude" | "codex" = "claude";
 let codexAppServerStatus = {
   version: "codex-cli 0.128.0",
@@ -367,6 +368,7 @@ export function resetTauriMockData() {
   nextChatSendError = null;
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
+  clipboardTextSeq = 0;
   activeBackend = "claude";
   codexAppServerStatus = {
     version: "codex-cli 0.128.0",
@@ -1216,6 +1218,25 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         size: 42,
         exists: true,
         mime,
+        directory: null,
+      };
+    }
+
+    case "chat_save_clipboard_text": {
+      clipboardTextSeq += 1;
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const text = typeof input.text === "string" ? input.text : "";
+      const path = `C:\\Users\\mock\\.lilia\\cache\\clipboard-texts\\clipboard-${clipboardTextSeq}.txt`;
+      return {
+        id: `clip-text-${clipboardTextSeq}`,
+        name: `粘贴文本 ${clipboardTextSeq}.txt`,
+        path,
+        kind: "file",
+        size: new TextEncoder().encode(text).length,
+        exists: true,
+        mime: null,
         directory: null,
       };
     }
