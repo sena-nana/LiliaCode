@@ -6,22 +6,14 @@
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
   FileText,
   Folder,
   Image,
-  ListChecks,
   Paperclip,
-  ShieldCheck,
   Square,
-  X,
 } from "lucide-vue-next";
 import type {
   AskUserResult,
@@ -46,10 +38,11 @@ import {
   saveClipboardText,
   searchContextAttachments,
 } from "../../services/chat";
-import Dropdown from "../Dropdown.vue";
-import EditableCommandBlock from "./EditableCommandBlock.vue";
+import ComposerContextPanel from "./ComposerContextPanel.vue";
+import ComposerPendingPanel from "./ComposerPendingPanel.vue";
+import ComposerRichInput from "./ComposerRichInput.vue";
+import ComposerToolbar from "./ComposerToolbar.vue";
 import {
-  attachmentImageSrc,
   imageViewerSourceFromAttachment,
   isImageAttachment,
   type ChatImageViewerSource,
@@ -383,6 +376,10 @@ function onInputEvent() {
 
 function onSelectionEvent() {
   updateInputSelection();
+}
+
+function setRichEditor(element: HTMLDivElement | null) {
+  richEditor.value = element;
 }
 
 function isAbsolutePathLike(value: string): boolean {
@@ -1106,6 +1103,11 @@ function moveContextActive(delta: number) {
   contextUserInteracted.value = true;
 }
 
+function activateContextResult(index: number) {
+  contextActiveIndex.value = index;
+  contextUserInteracted.value = true;
+}
+
 function handleContextKeydown(e: KeyboardEvent): boolean {
   if (!contextPanelOpen.value) return false;
   if (e.key === "ArrowDown") {
@@ -1404,219 +1406,49 @@ onBeforeUnmount(() => {
 <template>
   <div class="chat-composer">
     <Transition name="chat-composer-pending-panel">
-      <div
+      <ComposerPendingPanel
         v-if="hasPendingPanel"
         :key="pendingKey"
-        class="chat-composer__pending-panel"
-      >
-        <div class="chat-composer__pending-panel-inner">
-          <section
-            v-if="activeAsk && askQuestion"
-            class="composer-inline composer-inline--ask"
-            :class="{
-              'composer-inline--danger': askQuestion.danger,
-              'composer-inline--plan': askIsPlanApproval,
-            }"
-            role="region"
-            aria-live="assertive"
-            :aria-label="askTitle"
-            tabindex="-1"
-            @keydown="onInlineKeydown"
-          >
-            <header class="composer-inline__header">
-              <span class="composer-inline__icon" aria-hidden="true">
-                <AlertTriangle v-if="askQuestion.danger" :size="14" />
-                <CircleHelp v-else :size="14" />
-              </span>
-              <span class="composer-inline__title">{{ askTitle }}</span>
-              <span v-if="activeAsk.spec.source" class="composer-inline__source">
-                {{ activeAsk.spec.source }}
-              </span>
-              <span v-if="askTotal > 1" class="composer-inline__progress" aria-live="polite">
-                {{ askIndex + 1 }} / {{ askTotal }}
-              </span>
-              <button
-                v-if="askDismissable"
-                type="button"
-                class="composer-inline__close"
-                aria-label="关闭"
-                @click="cancelAsk"
-              >
-                <X :size="14" />
-              </button>
-            </header>
-
-            <div v-if="!askIsPlanApproval" class="composer-inline__body">
-              <div class="composer-inline__question">
-                <span
-                  v-if="askQuestion.header"
-                  class="composer-inline__chip"
-                >{{ askQuestion.header }}</span>
-                <p class="composer-inline__qtext">{{ askQuestion.question }}</p>
-              </div>
-
-              <div
-                v-if="askQuestion.mode !== 'confirm'"
-                class="composer-inline__main"
-                :class="{ 'composer-inline__main--with-preview': askHasPreview }"
-              >
-                <ul
-                  class="composer-inline__options"
-                  :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
-                >
-                  <li
-                    v-for="opt in askOptionsWithId"
-                    :key="opt.id"
-                    class="composer-inline__option"
-                    :class="{
-                      'is-active': activeAskOptionId === opt.id,
-                      'is-picked': askQuestion.mode === 'single'
-                        ? singlePick === opt.id
-                        : multiPicks.has(opt.id),
-                      'is-recommended': opt.recommended,
-                      'is-danger': opt.danger,
-                    }"
-                  >
-                    <button
-                      type="button"
-                      class="composer-inline__option-btn"
-                      :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
-                      :aria-checked="askQuestion.mode === 'single'
-                        ? singlePick === opt.id
-                        : multiPicks.has(opt.id)"
-                      @mouseenter="highlightOption(opt.id)"
-                      @mouseleave="clearOptionHighlight(opt.id)"
-                      @focus="focusOption(opt.id)"
-                      @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
-                    >
-                      <span class="composer-inline__option-indicator" aria-hidden="true">
-                        <Check
-                          v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)"
-                          :size="12"
-                        />
-                      </span>
-                      <span class="composer-inline__option-main">
-                        <span class="composer-inline__option-label">
-                          {{ opt.label }}
-                          <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
-                        </span>
-                        <span
-                          v-if="opt.description"
-                          class="composer-inline__option-desc"
-                        >{{ opt.description }}</span>
-                      </span>
-                    </button>
-                  </li>
-                </ul>
-
-                <aside
-                  v-if="askHasPreview"
-                  class="composer-inline__preview"
-                  aria-label="选项预览"
-                >
-                  <pre v-if="askFocusedOption?.preview" class="composer-inline__preview-pre">{{ askFocusedOption.preview }}</pre>
-                  <p v-else class="composer-inline__preview-empty">
-                    把鼠标移到选项上 / 用方向键聚焦，这里会显示对比预览。
-                  </p>
-                </aside>
-              </div>
-            </div>
-
-            <footer
-              v-if="askQuestion.mode === 'confirm' && !askIsPlanApproval"
-              class="composer-inline__actions"
-            >
-              <button
-                v-if="askQuestion.skippable !== false && askTotal > 1"
-                type="button"
-                class="ghost composer-inline__skip composer-inline__btn"
-                @click="skipAsk"
-              >
-                跳过
-              </button>
-              <span class="composer-inline__spacer" />
-              <button
-                v-if="canGoPrev"
-                type="button"
-                class="ghost composer-inline__btn"
-                @click="backAsk"
-              >
-                <ArrowLeft :size="13" aria-hidden="true" />
-                上一题
-              </button>
-
-              <button type="button" class="ghost composer-inline__btn" @click="confirmAskNo">
-                {{ askQuestion.cancelLabel ?? "不要" }}
-              </button>
-              <button
-                type="button"
-                class="composer-inline__btn"
-                :class="askQuestion.danger ? 'ghost danger' : 'primary'"
-                @click="submitAsk"
-              >
-                {{ askQuestion.confirmLabel ?? "好的" }}
-              </button>
-            </footer>
-          </section>
-
-          <section
-            v-else-if="activeToolConsent"
-            class="composer-inline composer-inline--tool"
-            :class="{
-              'composer-inline--danger': toolDanger,
-              'is-expanded': toolExpanded,
-              'is-editing-command': isEditingToolCommand,
-            }"
-            role="alert"
-            aria-live="assertive"
-          >
-            <div class="composer-inline__tool-row">
-              <span class="composer-inline__icon" aria-hidden="true">
-                <AlertTriangle v-if="toolDanger" :size="14" />
-                <component v-else :is="toolIcon" :size="14" />
-              </span>
-
-              <div class="composer-inline__tool-main">
-                <div class="composer-inline__tool-head">
-                  <span class="composer-inline__tool-name">{{ activeToolConsent.toolName }}</span>
-                  <span class="composer-inline__headline">{{ toolHeadline }}</span>
-                </div>
-                <p
-                  v-if="toolInlinePreview && !hasEditableCommand"
-                  class="composer-inline__preview-line"
-                >
-                  {{ toolInlinePreview }}
-                </p>
-                <p v-if="toolSubtitle" class="composer-inline__subtitle">{{ toolSubtitle }}</p>
-              </div>
-
-              <button
-                v-if="toolInputJson && toolInputJson !== '{}'"
-                type="button"
-                class="composer-inline__toggle"
-                :aria-expanded="toolExpanded"
-                @click="toolExpanded = !toolExpanded"
-              >
-                <component
-                  :is="toolExpanded ? ChevronDown : ChevronRight"
-                  :size="12"
-                  aria-hidden="true"
-                />
-                {{ toolExpanded ? "收起" : "查看入参" }}
-              </button>
-            </div>
-
-            <EditableCommandBlock
-              v-if="hasEditableCommand"
-              v-model="toolCommandDraft"
-              :editing="isEditingToolCommand"
-              @begin-edit="beginCommandEdit"
-            />
-
-            <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
-          </section>
-        </div>
-      </div>
+        :active-ask="activeAsk"
+        :ask-question="askQuestion"
+        :ask-title="askTitle"
+        :ask-index="askIndex"
+        :ask-total="askTotal"
+        :ask-dismissable="askDismissable"
+        :ask-is-plan-approval="askIsPlanApproval"
+        :ask-options-with-id="askOptionsWithId"
+        :ask-has-preview="askHasPreview"
+        :ask-focused-option="askFocusedOption"
+        :active-ask-option-id="activeAskOptionId"
+        :single-pick="singlePick"
+        :multi-picks="multiPicks"
+        :can-go-prev="canGoPrev"
+        :active-tool-consent="activeToolConsent"
+        :tool-danger="toolDanger"
+        :tool-icon="toolIcon"
+        :tool-headline="toolHeadline"
+        :tool-inline-preview="toolInlinePreview"
+        :tool-input-json="toolInputJson"
+        :tool-subtitle="toolSubtitle"
+        :tool-expanded="toolExpanded"
+        :is-editing-tool-command="isEditingToolCommand"
+        :has-editable-command="hasEditableCommand"
+        :tool-command-draft="toolCommandDraft"
+        @keydown="onInlineKeydown"
+        @cancel-ask="cancelAsk"
+        @highlight-option="highlightOption"
+        @clear-option-highlight="clearOptionHighlight"
+        @focus-option="focusOption"
+        @select-single-option="selectSingleOption"
+        @toggle-multi="toggleMulti"
+        @skip-ask="skipAsk"
+        @back-ask="backAsk"
+        @confirm-ask-no="confirmAskNo"
+        @submit-ask="submitAsk"
+        @update-tool-expanded="toolExpanded = $event"
+        @update-tool-command-draft="toolCommandDraft = $event"
+        @begin-command-edit="beginCommandEdit"
+      />
     </Transition>
 
     <div
@@ -1644,23 +1476,16 @@ onBeforeUnmount(() => {
         @keyup="onSelectionEvent"
         @select="onSelectionEvent"
       />
-      <div
+      <ComposerRichInput
         v-else-if="!hasPending"
-        ref="richEditor"
-        class="chat-composer__rich-input"
-        :class="{ 'is-empty': composerIsEmpty }"
-        role="textbox"
-        aria-multiline="true"
-        contenteditable="true"
-        spellcheck="false"
-        :data-placeholder="inputPlaceholder"
+        :placeholder="inputPlaceholder"
+        :is-empty="composerIsEmpty"
+        @editor="setRichEditor"
         @input="onRichInput"
-        @click="onRichSelectionEvent"
-        @keyup="onRichSelectionEvent"
-        @mouseup="onRichSelectionEvent"
+        @selection="onRichSelectionEvent"
         @keydown="onRichKeydown"
         @paste="onRichPaste"
-      ></div>
+      />
 
       <Transition name="chat-composer-entry-actions" mode="out-in">
         <div
@@ -1753,135 +1578,39 @@ onBeforeUnmount(() => {
     </div>
 
     <Transition name="chat-composer-stack">
-      <div
+      <ComposerContextPanel
         v-if="contextPanelOpen"
-        class="chat-composer__context-panel"
-        role="listbox"
-        aria-label="文件上下文搜索"
-      >
-        <p v-if="contextSearchLoading && !contextResults.length" class="chat-composer__context-note">
-          正在搜索文件…
-        </p>
-        <p v-else-if="contextSearchError && !contextResults.length" class="chat-composer__context-note is-error">
-          {{ contextSearchError }}
-        </p>
-        <div v-else-if="contextResults.length" class="chat-composer__context-list">
-          <button
-            v-for="(result, index) in contextResults"
-            :key="result.attachment.path"
-            type="button"
-            class="chat-composer__context-item"
-            :class="{
-              'is-active': index === contextActiveIndex,
-              'is-large-directory': isLargeDirectory(result.attachment),
-            }"
-            role="option"
-            :aria-selected="index === contextActiveIndex"
-            @mousedown.prevent
-            @mouseenter="contextActiveIndex = index; contextUserInteracted = true"
-            @click="selectContextResult(result)"
-          >
-            <span class="chat-composer__context-icon" aria-hidden="true">
-              <img
-                v-if="attachmentImageSrc(result.attachment)"
-                class="chat-composer__context-thumb"
-                :src="attachmentImageSrc(result.attachment) ?? undefined"
-                alt=""
-              />
-              <component
-                v-else
-                :is="contextAttachmentIcon(result.attachment)"
-                :size="14"
-              />
-            </span>
-            <span class="chat-composer__context-main">
-              <span class="chat-composer__context-name">{{ result.attachment.name }}</span>
-              <span
-                v-if="contextInlinePath(result)"
-                class="chat-composer__context-path"
-              >{{ contextInlinePath(result) }}</span>
-            </span>
-            <span class="chat-composer__context-meta">
-              {{ attachmentMetaLabel(result.attachment) }}
-            </span>
-          </button>
-        </div>
-        <p v-else-if="contextShowMissingPath" class="chat-composer__context-note is-error">
-          路径不存在：{{ contextMissingPath }}
-        </p>
-        <p v-else class="chat-composer__context-note">
-          没有匹配的文件或目录
-        </p>
-      </div>
+        :results="contextResults"
+        :active-index="contextActiveIndex"
+        :loading="contextSearchLoading"
+        :error="contextSearchError"
+        :missing-path="contextMissingPath"
+        :show-missing-path="contextShowMissingPath"
+        :is-large-directory="isLargeDirectory"
+        :attachment-meta-label="attachmentMetaLabel"
+        :context-inline-path="contextInlinePath"
+        :context-attachment-icon="contextAttachmentIcon"
+        @activate="activateContextResult"
+        @select="selectContextResult"
+      />
     </Transition>
 
     <Transition name="chat-composer-stack">
-      <div
-        v-if="!hasPending && previewAttachments.length"
-        class="chat-composer__attachments"
-        aria-label="图片预览"
-      >
-        <button
-          v-for="attachment in previewAttachments"
-          :key="attachment.id"
-          type="button"
-          class="chat-attachment-chip chat-attachment-chip--image-preview"
-          :title="attachment.path"
-          :aria-label="`查看图片 ${attachment.name}`"
-          @click="openAttachmentImage(attachment)"
-        >
-          <img
-            class="chat-attachment-chip__thumb"
-            :src="attachmentImageSrc(attachment) ?? undefined"
-            alt=""
-          />
-        </button>
-      </div>
-    </Transition>
-
-    <Transition name="chat-composer-stack">
-      <div v-if="!hasPending" class="chat-composer__row">
-        <div class="chat-composer__group">
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            title="添加附件"
-            aria-label="添加附件"
-            @click="emit('pick-attachments')"
-          >
-            <Paperclip :size="14" aria-hidden="true" />
-          </button>
-          <Dropdown
-            :model-value="state.permission"
-            :options="permissionOptions"
-            :icon="ShieldCheck"
-            @update:model-value="setPermission"
-          />
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': state.planMode }"
-            :title="state.planMode ? '本轮先制定计划' : '直接执行'"
-            :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
-            :aria-pressed="state.planMode"
-            @click="togglePlanMode"
-          >
-            <ListChecks :size="14" aria-hidden="true" />
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="chat-composer__send"
-          :class="{ 'chat-composer__send--interrupt': canInterrupt }"
-          :disabled="!canSubmitEntry"
-          :title="sendTitle"
-          :aria-label="sendAriaLabel"
-          @click="submitEntry"
-        >
-          <component :is="canInterrupt ? Square : ArrowUp" :size="16" aria-hidden="true" />
-        </button>
-      </div>
+      <ComposerToolbar
+        v-if="!hasPending"
+        :state="state"
+        :permission-options="permissionOptions"
+        :preview-attachments="previewAttachments"
+        :can-interrupt="canInterrupt"
+        :can-submit-entry="canSubmitEntry"
+        :send-title="sendTitle"
+        :send-aria-label="sendAriaLabel"
+        @pick-attachments="emit('pick-attachments')"
+        @set-permission="setPermission"
+        @toggle-plan-mode="togglePlanMode"
+        @submit-entry="submitEntry"
+        @open-image="openAttachmentImage"
+      />
     </Transition>
   </div>
 </template>

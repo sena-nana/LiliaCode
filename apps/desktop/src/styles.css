@@ -3572,10 +3572,10 @@ button.ghost:hover {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 12px 12px 10px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.45);
 }
 
@@ -3869,6 +3869,7 @@ button.ghost:hover {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .chat-composer__group {
@@ -3913,6 +3914,10 @@ button.ghost:hover {
   grid-template-rows: 1fr;
   min-width: 0;
   overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg-subtle);
 }
 
 .chat-composer__pending-panel-inner {
@@ -3926,7 +3931,15 @@ button.ghost:hover {
   align-items: flex-end;
   gap: 8px;
   min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
   transition: gap 0.18s ease;
+}
+
+.chat-composer__entry-row--pending {
+  background: var(--bg-subtle);
 }
 
 .chat-composer__entry-row .chat-composer__input,
@@ -3956,6 +3969,17 @@ button.ghost:hover {
 
 .chat-composer__entry-row .composer-inline__skip {
   margin-right: 0;
+}
+
+.chat-composer__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chat-composer__toolbar .chat-composer__attachments {
+  padding: 0 1px;
 }
 
 .composer-inline {
