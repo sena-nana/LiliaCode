@@ -1,11 +1,14 @@
 import {
   createRouter,
+  createWebHashHistory,
   createWebHistory,
   type RouterHistory,
 } from "vue-router";
 import { defineComponent, h } from "vue";
 import AppShell from "./layouts/AppShell.vue";
+import PopupShell from "./layouts/PopupShell.vue";
 import TaskDetail from "./pages/TaskDetail.vue";
+import PopupDraftBoot from "./pages/PopupDraftBoot.vue";
 import Settings from "./pages/Settings.vue";
 import Plugins from "./pages/Plugins.vue";
 import ProjectsOverview from "./pages/project/ProjectsOverview.vue";
@@ -26,10 +29,56 @@ const Home = defineComponent({
   },
 });
 
-export function createLiliaRouter(history: RouterHistory = createWebHistory()) {
+export function shouldUsePopupHashHistory(hash: string): boolean {
+  return hash.startsWith("#/popup");
+}
+
+function createDefaultHistory(): RouterHistory {
+  if (
+    typeof window !== "undefined" &&
+    shouldUsePopupHashHistory(window.location.hash)
+  ) {
+    return createWebHashHistory();
+  }
+  return createWebHistory();
+}
+
+export function createLiliaRouter(history: RouterHistory = createDefaultHistory()) {
   return createRouter({
     history,
     routes: [
+      {
+        path: "/popup",
+        component: PopupShell,
+        children: [
+          {
+            path: "projects/:projectId/new",
+            component: PopupDraftBoot,
+            props: true,
+          },
+          {
+            path: "projects/:projectId/tasks/:taskId",
+            component: TaskDetail,
+            props: (route) => ({
+              projectId: route.params.projectId,
+              taskId: route.params.taskId,
+              variant: "popup",
+            }),
+          },
+          {
+            path: "chats/new",
+            component: PopupDraftBoot,
+          },
+          {
+            path: "chats/:taskId",
+            component: TaskDetail,
+            props: (route) => ({
+              taskId: route.params.taskId,
+              variant: "popup",
+            }),
+          },
+        ],
+      },
       {
         path: "/",
         component: AppShell,

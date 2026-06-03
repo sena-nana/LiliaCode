@@ -15,7 +15,11 @@ use ignore::WalkBuilder;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tauri::{utils::config::Color, AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri::{
+    utils::config::Color, AppHandle, Emitter, Manager, State, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
@@ -74,6 +78,16 @@ const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
 ];
 const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 128, 0);
 static CLIPBOARD_IMAGE_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
+static POPUP_WINDOW_SEQ: AtomicU64 = AtomicU64::new(0);
+
+const POPUP_WINDOW_SETTINGS_KEY: &str = "popup-window.config";
+const POPUP_LAST_PROJECT_KEY: &str = "popup-window.lastProjectId";
+const POPUP_WINDOW_PREFIX: &str = "popup-";
+const POPUP_EXISTING_TASK_PREFIX: &str = "popup-task-";
+const POPUP_WIDTH: f64 = 430.0;
+const POPUP_HEIGHT: f64 = 760.0;
+const POPUP_MIN_WIDTH: f64 = 360.0;
+const POPUP_MIN_HEIGHT: f64 = 520.0;
 
 // ---------- 契约（与 packages/contracts 同形） ----------
 
@@ -205,6 +219,18 @@ struct ProviderConfig {
 #[serde(rename_all = "camelCase")]
 struct ProjectSettings {
     clone_parent_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PopupWindowSettings {
+    shortcut: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MainNavigateEvent {
+    route: String,
 }
 
 /// CC-Switch 代理层配置。Claude 与 Codex 共用同一个 baseUrl。
@@ -3034,6 +3060,261 @@ fn save_provider_store_value<T: Serialize>(
     Ok(())
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn normalize_popup_window_settings(settings: PopupWindowSettings) -> PopupWindowSettings {
+    PopupWindowSettings {
+        shortcut: normalize_optional_string(settings.shortcut),
+    }
+}
+
+fn load_popup_window_settings(app: &AppHandle) -> PopupWindowSettings {
+    let read = || -> Option<PopupWindowSettings> {
+        let store = app.store(PROVIDER_STORE_FILE).ok()?;
+        let value = store.get(POPUP_WINDOW_SETTINGS_KEY)?;
+        serde_json::from_value::<PopupWindowSettings>(value).ok()
+    };
+    normalize_popup_window_settings(read().unwrap_or_default())
+}
+
+fn save_popup_window_settings(
+    app: &AppHandle,
+    settings: &PopupWindowSettings,
+) -> Result<(), String> {
+    save_provider_store_value(app, POPUP_WINDOW_SETTINGS_KEY, settings)
+}
+
+fn load_popup_last_project_id(app: &AppHandle) -> Option<String> {
+    let store = app.store(PROVIDER_STORE_FILE).ok()?;
+    let value = store.get(POPUP_LAST_PROJECT_KEY)?;
+    normalize_optional_string(serde_json::from_value::<String>(value).ok())
+}
+
+fn save_popup_last_project_id(app: &AppHandle, project_id: &str) -> Result<(), String> {
+    save_provider_store_value(app, POPUP_LAST_PROJECT_KEY, &project_id)
+}
+
+fn project_exists(app: &AppHandle, project_id: &str) -> bool {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return false;
+    };
+    let Ok(conn) = store.conn() else {
+        return false;
+    };
+    conn.query_row(
+        "SELECT 1 FROM projects WHERE id = ?1 LIMIT 1",
+        rusqlite::params![project_id],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn sanitize_window_label_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+fn unique_popup_label(kind: &str) -> String {
+    let seq = POPUP_WINDOW_SEQ.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    format!("{POPUP_WINDOW_PREFIX}{kind}-{now}-{seq}")
+}
+
+fn popup_task_label(task_id: &str) -> String {
+    format!(
+        "{POPUP_EXISTING_TASK_PREFIX}{}",
+        sanitize_window_label_segment(task_id)
+    )
+}
+
+fn normalize_popup_route(route: &str) -> String {
+    let route = route.trim();
+    if route.starts_with('/') {
+        route.to_string()
+    } else {
+        format!("/{route}")
+    }
+}
+
+fn popup_webview_entry_path(route: &str) -> String {
+    format!("index.html#{}", normalize_popup_route(route))
+}
+
+fn focus_window(window: &WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
+fn build_popup_window(app: &AppHandle, label: String, route: String) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(&label) {
+        focus_window(&existing);
+        return Ok(());
+    }
+    let window = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::App(popup_webview_entry_path(&route).into()),
+    )
+        .title("LiliaCode")
+        .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
+        .min_inner_size(POPUP_MIN_WIDTH, POPUP_MIN_HEIGHT)
+        .center()
+        .decorations(false)
+        .resizable(true)
+        .background_color(BG)
+        .build()
+        .map_err(|e| format!("创建弹出窗口失败：{e}"))?;
+    focus_window(&window);
+    Ok(())
+}
+
+fn open_new_chat_window(
+    app: &AppHandle,
+    project_id: Option<String>,
+    allow_orphan_fallback: bool,
+) -> Result<(), String> {
+    let route = if let Some(project_id) = normalize_optional_string(project_id) {
+        if project_exists(app, &project_id) {
+            save_popup_last_project_id(app, &project_id)?;
+            format!("popup/projects/{project_id}/new")
+        } else if allow_orphan_fallback {
+            "popup/chats/new".to_string()
+        } else {
+            return Err("项目不存在，无法在弹出窗口中创建对话".to_string());
+        }
+    } else {
+        "popup/chats/new".to_string()
+    };
+    build_popup_window(app, unique_popup_label("new"), route)
+}
+
+fn open_popup_for_shortcut(app: &AppHandle) -> Result<(), String> {
+    let project_id = load_popup_last_project_id(app).filter(|id| project_exists(app, id));
+    open_new_chat_window(app, project_id, true)
+}
+
+fn register_popup_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+    app.global_shortcut()
+        .register(shortcut)
+        .map_err(|e| format!("注册弹出窗口快捷键失败：{e}"))
+}
+
+fn unregister_popup_shortcut(app: &AppHandle, shortcut: &str) {
+    if let Err(err) = app.global_shortcut().unregister(shortcut) {
+        eprintln!("[popup-window] unregister shortcut failed: {err}");
+    }
+}
+
+fn register_initial_popup_shortcut(app: &AppHandle) {
+    let settings = load_popup_window_settings(app);
+    if let Some(shortcut) = settings.shortcut.as_deref() {
+        if let Err(err) = register_popup_shortcut(app, shortcut) {
+            eprintln!("[popup-window] register shortcut failed: {err}");
+        }
+    }
+}
+
+#[tauri::command]
+fn popup_get_window_settings(app: AppHandle) -> PopupWindowSettings {
+    load_popup_window_settings(&app)
+}
+
+#[tauri::command]
+fn popup_set_window_settings(
+    app: AppHandle,
+    settings: PopupWindowSettings,
+) -> Result<(), String> {
+    let previous = load_popup_window_settings(&app);
+    let next = normalize_popup_window_settings(settings);
+    if previous.shortcut == next.shortcut {
+        return save_popup_window_settings(&app, &next);
+    }
+
+    if let Some(shortcut) = previous.shortcut.as_deref() {
+        unregister_popup_shortcut(&app, shortcut);
+    }
+
+    if let Some(shortcut) = next.shortcut.as_deref() {
+        if let Err(err) = register_popup_shortcut(&app, shortcut) {
+            if let Some(previous_shortcut) = previous.shortcut.as_deref() {
+                let _ = register_popup_shortcut(&app, previous_shortcut);
+            }
+            return Err(err);
+        }
+    }
+
+    save_popup_window_settings(&app, &next)
+}
+
+#[tauri::command]
+fn popup_remember_last_project(app: AppHandle, project_id: String) -> Result<(), String> {
+    let project_id = project_id.trim();
+    if project_id.is_empty() || !project_exists(&app, project_id) {
+        return Ok(());
+    }
+    save_popup_last_project_id(&app, project_id)
+}
+
+#[tauri::command]
+fn popup_open_new_chat(app: AppHandle, project_id: Option<String>) -> Result<(), String> {
+    open_new_chat_window(&app, project_id, false)
+}
+
+#[tauri::command]
+fn popup_open_task(
+    app: AppHandle,
+    project_id: Option<String>,
+    task_id: String,
+) -> Result<(), String> {
+    let task_id = task_id.trim();
+    if task_id.is_empty() {
+        return Err("缺少对话 ID".to_string());
+    }
+    let route = if let Some(project_id) = normalize_optional_string(project_id) {
+        save_popup_last_project_id(&app, &project_id)?;
+        format!("popup/projects/{project_id}/tasks/{task_id}")
+    } else {
+        format!("popup/chats/{task_id}")
+    };
+    build_popup_window(&app, popup_task_label(task_id), route)
+}
+
+#[tauri::command]
+fn popup_focus_main(app: AppHandle, route: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        return Err("主窗口不存在".to_string());
+    };
+    window
+        .emit("lilia:main:navigate", MainNavigateEvent { route })
+        .map_err(|e| format!("通知主窗口导航失败：{e}"))?;
+    focus_window(&window);
+    Ok(())
+}
+
 fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {
     let plan = resolve_connection_for(app, backend);
 
@@ -3887,6 +4168,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        if let Err(err) = open_popup_for_shortcut(app) {
+                            eprintln!("[popup-window] shortcut failed: {err}");
+                        }
+                    }
+                })
+                .build(),
+        )
         .manage(ChatStore::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
@@ -3908,6 +4200,7 @@ pub fn run() {
                     eprintln!("[lilia-store] init failed at {}: {err}", home.display());
                 }
             }
+            register_initial_popup_shortcut(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -3949,6 +4242,12 @@ pub fn run() {
             assistant_ai_test_connection,
             agent_interaction_get_settings,
             agent_interaction_set_settings,
+            popup_get_window_settings,
+            popup_set_window_settings,
+            popup_remember_last_project,
+            popup_open_new_chat,
+            popup_open_task,
+            popup_focus_main,
             router_get_mode,
             router_set_mode,
             project_get_settings,
@@ -3998,4 +4297,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod popup_window_tests {
+    use super::*;
+
+    #[test]
+    fn popup_webview_entry_path_loads_index_with_hash_route() {
+        assert_eq!(
+            popup_webview_entry_path("/popup/projects/lilia/new"),
+            "index.html#/popup/projects/lilia/new"
+        );
+    }
+
+    #[test]
+    fn popup_webview_entry_path_normalizes_leading_slash() {
+        assert_eq!(
+            popup_webview_entry_path("popup/chats/new"),
+            "index.html#/popup/chats/new"
+        );
+    }
 }

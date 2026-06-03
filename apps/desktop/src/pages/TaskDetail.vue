@@ -10,6 +10,7 @@
  */
 
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import { useRouter } from "vue-router";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -58,6 +59,7 @@ import {
   type ToolConsentDecision,
   type ToolConsentUpdatedInput,
 } from "../services/chat";
+import { rememberPopupLastProject } from "../services/popupWindows";
 import {
   loadAgentInteractionSettings,
   useAgentInteractionSettings,
@@ -74,7 +76,15 @@ import type {
   ChatComposerState,
 } from "@lilia/contracts";
 
-const props = defineProps<{ projectId?: string; taskId: string }>();
+const props = withDefaults(defineProps<{
+  projectId?: string;
+  taskId: string;
+  variant?: "main" | "popup";
+}>(), {
+  variant: "main",
+});
+
+const router = useRouter();
 
 interface TimelineRetryContext {
   content: string;
@@ -84,6 +94,7 @@ interface TimelineRetryContext {
 const project = computed(() =>
   props.projectId ? getProject(props.projectId) : undefined,
 );
+const isPopup = computed(() => props.variant === "popup");
 const orphan = computed(() =>
   props.projectId ? undefined : getOrphanConversation(props.taskId),
 );
@@ -181,6 +192,23 @@ function titleForMessage(content: string, outgoingAttachments: ChatAttachment[])
   const normalized = content.replace(/\s+/g, " ").trim();
   if (normalized) return summarizeTitle(normalized);
   return outgoingAttachments[0]?.name ?? "附件";
+}
+
+function isProjectDraftRouteId(taskId: string): boolean {
+  return taskId.startsWith("t-draft-");
+}
+
+function isOrphanDraftRouteId(taskId: string): boolean {
+  return taskId.startsWith("o-draft-");
+}
+
+function popupNewDraftRoute(projectId: string | undefined): string {
+  return projectId ? `/popup/projects/${projectId}/new` : "/popup/chats/new";
+}
+
+function isLiveDraftRoute(projectId: string | undefined, taskId: string): boolean {
+  if (projectId) return isProjectDraftRouteId(taskId) && isDraftTask(taskId);
+  return isOrphanDraftRouteId(taskId) && isDraftOrphan(taskId);
 }
 
 function isPointInsideElement(
@@ -286,9 +314,11 @@ async function ensureTaskReadyForMessage(
   content: string,
   outgoingAttachments: ChatAttachment[],
 ) {
-  if (props.projectId && isDraftTask(props.taskId)) {
+  if (props.projectId && isProjectDraftRouteId(props.taskId)) {
+    if (!isDraftTask(props.taskId)) throw new Error("草稿已失效，请重新创建对话");
     await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
-  } else if (!props.projectId && isDraftOrphan(props.taskId)) {
+  } else if (!props.projectId && isOrphanDraftRouteId(props.taskId)) {
+    if (!isDraftOrphan(props.taskId)) throw new Error("草稿已失效，请重新创建对话");
     await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
   }
 }
@@ -833,6 +863,28 @@ watch(
 );
 
 watch(
+  () => props.projectId,
+  (projectId) => {
+    if (projectId) void rememberPopupLastProject(projectId);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.variant, props.projectId, props.taskId] as const,
+  ([variant, projectId, taskId]) => {
+    if (variant !== "popup") return;
+    const draftRoute = projectId
+      ? isProjectDraftRouteId(taskId)
+      : isOrphanDraftRouteId(taskId);
+    if (draftRoute && !isLiveDraftRoute(projectId, taskId)) {
+      void router.replace(popupNewDraftRoute(projectId));
+    }
+  },
+  { immediate: true },
+);
+
+watch(
   () => [hasContext.value, agentInteractionSettings.debug.value] as const,
   syncDebugPanelRegistration,
   { immediate: true },
@@ -861,6 +913,7 @@ watch(
     v-if="hasContext"
     ref="chatPageRef"
     class="chat-page"
+    :class="{ 'chat-page--popup': isPopup }"
   >
     <div class="chat">
       <div class="chat-layout">
@@ -918,6 +971,7 @@ watch(
           </ChatTranscript>
         </div>
         <ChatSidebarHost
+          v-if="!isPopup"
           :task-id="taskId"
           :project-id="projectId"
           :project-cwd="project?.cwd ?? null"

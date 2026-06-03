@@ -130,6 +130,48 @@ describe("ProjectTreeItem", () => {
     });
   });
 
+  it("项目菜单可在弹出窗口中创建对话", async () => {
+    const view = await renderProjectTreeItem("/projects/tools");
+
+    await fireEvent.click(view.getByLabelText("更多"));
+    await fireEvent.click(await view.findByRole("menuitem", {
+      name: "在弹出窗口中创建对话",
+    }));
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+      projectId: "lilia",
+    }, undefined);
+  });
+
+  it("中键点击项目行会在弹出窗口中创建对话", async () => {
+    const view = await renderProjectTreeItem("/projects/tools");
+    const projectRow = view.getByText("Lilia").closest(".sb-tree__row--project");
+
+    await fireEvent(
+      projectRow!,
+      new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+      projectId: "lilia",
+    }, undefined);
+  });
+
+  it("中键点击项目对话会在弹出窗口中打开", async () => {
+    const view = await renderProjectTreeItem();
+    const row = view.getByText("接入 Claude Code 会话发现").closest(".sb-tree__row");
+
+    await fireEvent(
+      row!,
+      new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+      projectId: "lilia",
+      taskId: "t-001",
+    }, undefined);
+  });
+
   it("项目对话超过四条时用省略行折叠剩余对话，并可点击展开", async () => {
     seedProjectConversations(6);
 

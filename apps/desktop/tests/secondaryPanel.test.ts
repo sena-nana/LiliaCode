@@ -263,6 +263,21 @@ describe("SecondaryPanel project chat navigation", () => {
       );
     });
   });
+
+  it("中键点击收集箱对话会在弹出窗口中打开", async () => {
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "随手问问 Claude：tsconfig paths");
+
+    await fireEvent(
+      row,
+      new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+      projectId: null,
+      taskId: "o-001",
+    }, undefined);
+  });
 });
 
 describe("SecondaryPanel project tree drag", () => {

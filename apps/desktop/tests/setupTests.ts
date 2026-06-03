@@ -36,10 +36,12 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
 
 beforeEach(async () => {
   resetTauriMockData();
-  const [{ PROJECTS }, { ORPHAN_LIST, TASKS }] = await Promise.all([
+  const [{ PROJECTS }, tasksModule] = await Promise.all([
     import("../src/data/projects"),
     import("../src/data/tasks"),
   ]);
+  const { ORPHAN_LIST, TASKS, installTasksChangedListener } = tasksModule;
+  installTasksChangedListener();
   PROJECTS.value = mockProjectsForStore();
   TASKS.value = mockTasksByProjectForStore();
   ORPHAN_LIST.value = mockOrphansForStore();

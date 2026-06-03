@@ -183,6 +183,9 @@ let claudeMcpServers = baseClaudeMcpServers.map((server) => ({
   envKeys: [...server.envKeys],
 }));
 let agentInteractionSettings = { nonInterruptMode: false, debug: false };
+let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
+let nextPopupSettingsError: string | null = null;
+let popupLastProjectId: string | null = null;
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
 let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
@@ -377,6 +380,9 @@ export function resetTauriMockData() {
     envKeys: [...server.envKeys],
   }));
   agentInteractionSettings = { nonInterruptMode: false, debug: false };
+  popupWindowSettings = { shortcut: null };
+  nextPopupSettingsError = null;
+  popupLastProjectId = null;
   eventHandlers = {};
   webviewDragDropHandlers = [];
   windowScaleFactor = 1;
@@ -674,6 +680,10 @@ export function setMockCodexAppServerStatus(status: Partial<typeof codexAppServe
   };
 }
 
+export function failNextPopupSettingsSave(message: string) {
+  nextPopupSettingsError = message;
+}
+
 export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
@@ -733,6 +743,49 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
+    case "popup_get_window_settings":
+      return { ...popupWindowSettings };
+
+    case "popup_set_window_settings": {
+      if (nextPopupSettingsError) {
+        const message = nextPopupSettingsError;
+        nextPopupSettingsError = null;
+        throw new Error(message);
+      }
+      const input = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
+        ? args.settings as Record<string, unknown>
+        : {};
+      const shortcut = typeof input.shortcut === "string" && input.shortcut.trim()
+        ? input.shortcut.trim()
+        : null;
+      popupWindowSettings = { shortcut };
+      return undefined;
+    }
+
+    case "popup_remember_last_project": {
+      const projectId = String(args.projectId ?? "");
+      if (projects.some((project) => project.id === projectId)) {
+        popupLastProjectId = projectId;
+      }
+      return undefined;
+    }
+
+    case "popup_open_new_chat": {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (projectId) popupLastProjectId = projectId;
+      return undefined;
+    }
+
+    case "popup_open_task": {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (projectId) popupLastProjectId = projectId;
+      return undefined;
+    }
+
+    case "popup_focus_main":
+      emitTauriEvent("lilia:main:navigate", { route: String(args.route ?? "/") });
+      return undefined;
+
     case "task_list": {
       const projectId = args.projectId as string | null | undefined;
       return tasks
@@ -752,6 +805,30 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         return { ...task, pinned };
       });
       return pinned;
+    }
+
+    case "task_create": {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      const title = String(args.title ?? "新对话");
+      const status = String(args.status ?? "draft");
+      const dependsOn = Array.isArray(args.dependsOn) ? args.dependsOn.map(String) : [];
+      const id = `mock-task-${tasks.length + 1}`;
+      const row: TaskRow = {
+        id,
+        projectId,
+        sessionId: id,
+        title,
+        status,
+        createdAt: Date.now(),
+        parentId: typeof args.parentId === "string" ? args.parentId : null,
+        dependsOn,
+        sortOrder: tasks.filter((task) => task.projectId === projectId).length,
+        pinned: false,
+      };
+      tasks = [row, ...tasks];
+      refreshSessionCounts();
+      emitTauriEvent("tasks:changed", { projectId });
+      return cloneTask(row);
     }
 
     case "task_promote": {
@@ -774,6 +851,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
       tasks = [row, ...tasks.filter((task) => task.id !== id)];
       refreshSessionCounts();
+      emitTauriEvent("tasks:changed", { projectId });
       return cloneTask(row);
     }
 

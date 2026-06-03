@@ -5,12 +5,14 @@ import {
   Folder,
   FolderOpen,
   LayoutGrid,
+  ExternalLink,
   MoreHorizontal,
   Plus,
   Pencil,
   Archive,
   Trash2,
   Code2,
+  MessageSquarePlus,
   Pin,
 } from "lucide-vue-next";
 import type { Project, Task } from "@lilia/contracts";
@@ -31,6 +33,7 @@ import {
   toggleTaskPin,
 } from "../../services/tasksStore";
 import { openInFileManager, openInVSCode } from "../../services/projects";
+import { openPopupNewChat, openPopupTask } from "../../services/popupWindows";
 
 type TreeDragKind = "project" | "task";
 type TreeDropPosition = "before" | "after" | "inside";
@@ -259,6 +262,36 @@ async function deleteProject() {
   }
 }
 
+async function openProjectChatInPopup() {
+  try {
+    await openPopupNewChat(props.project.id);
+  } catch (err) {
+    emit("error", `创建弹出窗口对话失败：${String(err)}`);
+  }
+}
+
+async function openTaskInPopup(taskId: string) {
+  try {
+    await openPopupTask(taskId, props.project.id);
+  } catch (err) {
+    emit("error", `打开弹出窗口对话失败：${String(err)}`);
+  }
+}
+
+function onProjectAuxClick(e: MouseEvent) {
+  if (e.button !== 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void openProjectChatInPopup();
+}
+
+function onTaskAuxClick(e: MouseEvent, taskId: string) {
+  if (e.button !== 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void openTaskInPopup(taskId);
+}
+
 function isActiveTask(taskId: string) {
   return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
 }
@@ -310,6 +343,12 @@ function buildMenu(): ContextMenuItem[] {
       onSelect: () => router.push(`/projects/${props.project.id}`),
     },
     {
+      id: "open-popup-new-chat",
+      label: "在弹出窗口中创建对话",
+      icon: MessageSquarePlus,
+      onSelect: () => openProjectChatInPopup(),
+    },
+    {
       id: "pin",
       label: props.project.pinned ? "取消置顶" : "置顶项目",
       icon: Pin,
@@ -353,6 +392,17 @@ function buildMenu(): ContextMenuItem[] {
   ];
 }
 
+function buildTaskMenu(task: Task): ContextMenuItem[] {
+  return [
+    {
+      id: "open-popup-task",
+      label: "在弹出窗口中打开",
+      icon: ExternalLink,
+      onSelect: () => openTaskInPopup(task.id),
+    },
+  ];
+}
+
 function onMoreClick(e: MouseEvent) {
   e.stopPropagation();
   const btn = e.currentTarget as HTMLElement | null;
@@ -381,6 +431,7 @@ function onMoreClick(e: MouseEvent) {
       :aria-expanded="isExpanded"
       v-context-menu="() => buildMenu()"
       @click="emit('toggle', project.id)"
+      @auxclick="onProjectAuxClick"
     >
       <span
         class="sb-tree__project-icon"
@@ -432,7 +483,9 @@ function onMoreClick(e: MouseEvent) {
           :data-task-id="c.id"
           :data-project-id="project.id"
           :data-pinned="c.pinned ? 'true' : 'false'"
+          v-context-menu="() => buildTaskMenu(c)"
           @dragstart.prevent
+          @auxclick="onTaskAuxClick($event, c.id)"
           @mouseleave="onRowLeave">
           <span class="sb-tree__name">{{ c.title }}</span>
           <div class="sb-tree__hover-tools" @click.stop>

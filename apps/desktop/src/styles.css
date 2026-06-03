@@ -261,6 +261,24 @@ pre code {
   inset: 0 -4px;
 }
 
+/* ---------------- Popup shell ---------------- */
+
+.popup-shell {
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.popup-shell__main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
 /* 拖拽期间禁止主区文字选中和指针事件，避免选中文字 / 触发悬浮态 */
 .shell.is-resizing {
   cursor: col-resize;
@@ -1191,6 +1209,49 @@ pre code {
   color: var(--err);
 }
 
+.popup-titlebar {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 72px;
+  align-items: stretch;
+  height: 36px;
+  background: var(--bg-elev);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.popup-titlebar__controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  -webkit-app-region: no-drag;
+}
+
+.popup-titlebar__controls--left {
+  justify-content: flex-start;
+}
+
+.popup-titlebar__controls--right {
+  justify-content: flex-end;
+}
+
+.popup-titlebar__crumbs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.popup-titlebar__crumbs .titlebar__crumb {
+  max-width: min(180px, 36vw);
+}
+
 /* ---- 标题栏面包屑过渡 ---- *
  * 路由切换让面包屑文字变化——给前缀段和叶子段各套一层 <Transition mode="out-in">
  * 做 opacity 渐隐渐显，防止新旧文字短暂重叠在同一 flex 槽里。 */
@@ -1720,6 +1781,10 @@ button.ghost:hover {
   position: relative;
 }
 
+.chat-page--popup {
+  height: calc(100vh - 36px);
+}
+
 .chat {
   display: grid;
   gap: 12px;
@@ -1794,6 +1859,10 @@ button.ghost:hover {
 
 .chat-page > .image-viewer.chat-file-drop-overlay {
   inset: -20px -24px;
+}
+
+.chat-page--popup > .image-viewer.chat-file-drop-overlay {
+  inset: 0;
 }
 
 .image-viewer__figure {

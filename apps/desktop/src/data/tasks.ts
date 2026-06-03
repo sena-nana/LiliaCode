@@ -6,6 +6,7 @@
  * - 导出保持与旧版相同的函数签名，内部维护 reactive ref 缓存。
  */
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ref } from "vue";
 import type { Task } from "@lilia/contracts";
 import {
@@ -34,6 +35,11 @@ interface TaskRow {
   dependsOn: string[];
   sortOrder: number;
   pinned: boolean;
+}
+
+interface TasksChangedPayload {
+  projectId?: string | null;
+  project_id?: string | null;
 }
 
 // ---------- Reactive 缓存 ----------
@@ -91,6 +97,30 @@ async function refreshAllProjectTasks(): Promise<void> {
   const projs = listProjects();
   await Promise.all(projs.map((p) => refreshTasks(p.id)));
 }
+
+function readChangedProjectId(payload: TasksChangedPayload): string | null {
+  const value = payload.projectId ?? payload.project_id ?? null;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+async function refreshChangedTasks(payload: TasksChangedPayload) {
+  const projectId = readChangedProjectId(payload);
+  if (projectId) {
+    await refreshTasks(projectId);
+  } else {
+    await refreshOrphans();
+  }
+}
+
+export function installTasksChangedListener() {
+  void listen<TasksChangedPayload>("tasks:changed", (event) => {
+    void refreshChangedTasks(event.payload);
+  }).catch((err) => {
+    console.error("[tasks] listen tasks:changed failed", err);
+  });
+}
+
+installTasksChangedListener();
 
 // ---------- Task CRUD ----------
 

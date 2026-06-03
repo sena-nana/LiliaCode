@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::store::LiliaStore;
@@ -43,6 +43,18 @@ pub struct TaskRow {
     pub depends_on: Vec<String>,
     pub sort_order: i64,
     pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TasksChangedEvent {
+    project_id: Option<String>,
+}
+
+fn emit_tasks_changed(app: &AppHandle, project_id: Option<String>) {
+    if let Err(err) = app.emit("tasks:changed", TasksChangedEvent { project_id }) {
+        eprintln!("[tasks] emit tasks:changed failed: {err}");
+    }
 }
 
 // ========== 内部辅助 ==========
@@ -412,6 +424,7 @@ pub fn task_create(
     parent_id: Option<String>,
     depends_on: Vec<String>,
     store: State<'_, LiliaStore>,
+    app: AppHandle,
 ) -> Result<TaskRow, String> {
     let conn = store.conn()?;
     let id = Uuid::new_v4().to_string();
@@ -432,9 +445,9 @@ pub fn task_create(
         },
         "task_create",
     )?;
-    Ok(TaskRow {
+    let row = TaskRow {
         id: id.clone(),
-        project_id,
+        project_id: project_id.clone(),
         session_id: id,
         title,
         status,
@@ -443,7 +456,9 @@ pub fn task_create(
         depends_on,
         sort_order,
         pinned: false,
-    })
+    };
+    emit_tasks_changed(&app, project_id);
+    Ok(row)
 }
 
 #[tauri::command]
@@ -484,6 +499,7 @@ pub fn task_promote(
     title: String,
     depends_on: Vec<String>,
     store: State<'_, LiliaStore>,
+    app: AppHandle,
 ) -> Result<TaskRow, String> {
     let conn = store.conn()?;
     let now = now_millis();
@@ -503,9 +519,9 @@ pub fn task_promote(
         },
         "task_promote",
     )?;
-    Ok(TaskRow {
+    let row = TaskRow {
         id: id.clone(),
-        project_id,
+        project_id: project_id.clone(),
         session_id: id,
         title,
         status: "running".to_string(),
@@ -514,7 +530,9 @@ pub fn task_promote(
         depends_on,
         sort_order,
         pinned: false,
-    })
+    };
+    emit_tasks_changed(&app, project_id);
+    Ok(row)
 }
 
 /// 归档项目下所有对话：软删除（archived = 1）。返回影响行数。

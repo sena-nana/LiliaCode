@@ -452,6 +452,13 @@ export interface ProjectSettings {
 }
 
 /**
+ * 弹出窗口偏好。shortcut 使用 Tauri accelerator 字符串；null 表示不注册全局快捷键。
+ */
+export interface PopupWindowSettings {
+  shortcut: string | null;
+}
+
+/**
  * CC-Switch 代理层配置：所有走 cc-switch 路由的 backend 共用一个代理 URL。
  * 默认 http://127.0.0.1:15721。
  */

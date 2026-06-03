@@ -17,6 +17,7 @@ import {
   Archive,
   Pin,
   LayoutGrid,
+  ExternalLink,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import {
@@ -37,6 +38,8 @@ import {
 } from "../services/tasksStore";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { pickFolder } from "../services/projects";
+import { openPopupTask } from "../services/popupWindows";
+import type { ContextMenuItem } from "../composables/useContextMenu";
 
 import SidebarSearch from "../components/sidebar/SidebarSearch.vue";
 import ProjectTreeItem from "../components/sidebar/ProjectTreeItem.vue";
@@ -249,6 +252,32 @@ async function onOrphanPinClick(e: MouseEvent, orphanId: string) {
 
 function onOrphanRowLeave() {
   confirmingOrphanId.value = null;
+}
+
+async function openOrphanInPopup(taskId: string) {
+  try {
+    await openPopupTask(taskId, null);
+  } catch (err) {
+    projectError.value = `打开弹出窗口对话失败：${String(err)}`;
+  }
+}
+
+function onOrphanAuxClick(e: MouseEvent, taskId: string) {
+  if (e.button !== 1) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void openOrphanInPopup(taskId);
+}
+
+function buildOrphanMenu(taskId: string): ContextMenuItem[] {
+  return [
+    {
+      id: "open-popup-task",
+      label: "在弹出窗口中打开",
+      icon: ExternalLink,
+      onSelect: () => openOrphanInPopup(taskId),
+    },
+  ];
 }
 
 // ── Navigation helpers ──
@@ -827,7 +856,9 @@ onBeforeUnmount(() => {
               :data-task-id="o.id"
               data-project-id=""
               :data-pinned="o.pinned ? 'true' : 'false'"
+              v-context-menu="() => buildOrphanMenu(o.id)"
               @dragstart.prevent
+              @auxclick="onOrphanAuxClick($event, o.id)"
               @mouseleave="onOrphanRowLeave">
               <span class="sb-tree__name">{{ o.title }}</span>
               <div class="sb-tree__hover-tools" @click.stop>
