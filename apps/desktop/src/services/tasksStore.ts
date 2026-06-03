@@ -8,6 +8,7 @@
 export {
   listTasks,
   getTask,
+  ensureTaskLoaded,
   listProjectConversations,
   archiveProjectConversations,
   archiveTask,

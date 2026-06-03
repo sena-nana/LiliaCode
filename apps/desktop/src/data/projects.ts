@@ -30,17 +30,39 @@ export function registerProjectRemovalHandler(
 
 async function refresh(): Promise<void> {
   const rows = await invoke<ProjectRow[]>("project_list");
-  PROJECTS.value = rows.map((r) => ({
+  PROJECTS.value = rows.map(projectRowToProject);
+}
+
+function projectRowToProject(r: ProjectRow): Project {
+  return {
     id: r.id,
     name: r.name,
     cwd: r.cwd,
     sessionCount: r.sessionCount,
     pinned: r.pinned,
-  }));
+  };
+}
+
+function upsertProject(project: Project): Project {
+  const index = PROJECTS.value.findIndex((p) => p.id === project.id);
+  if (index === -1) {
+    PROJECTS.value = [...PROJECTS.value, project];
+    return project;
+  }
+  const next = [...PROJECTS.value];
+  next[index] = project;
+  PROJECTS.value = next;
+  return project;
+}
+
+function shouldDeferInitialRefresh(): boolean {
+  return typeof window !== "undefined" && window.location.hash.startsWith("#/popup");
 }
 
 // 模块加载时立刻拉一次；调用方可 await 确保数据就绪。
-export const projectsReady: Promise<void> = refresh();
+export const projectsReady: Promise<void> = shouldDeferInitialRefresh()
+  ? Promise.resolve()
+  : refresh();
 
 export function listProjects(): Project[] {
   return PROJECTS.value;
@@ -48,6 +70,14 @@ export function listProjects(): Project[] {
 
 export function getProject(id: string): Project | undefined {
   return PROJECTS.value.find((p) => p.id === id);
+}
+
+export async function ensureProjectLoaded(id: string): Promise<Project | null> {
+  const existing = getProject(id);
+  if (existing) return existing;
+  const row = await invoke<ProjectRow | null>("project_get", { id });
+  if (!row) return null;
+  return upsertProject(projectRowToProject(row));
 }
 
 /**
@@ -63,15 +93,7 @@ export async function createProject(input: {
     name: trimmedName || "未命名项目",
     cwd: input.cwd && input.cwd.trim() ? input.cwd.trim() : null,
   });
-  const project: Project = {
-    id: row.id,
-    name: row.name,
-    cwd: row.cwd,
-    sessionCount: row.sessionCount,
-    pinned: row.pinned,
-  };
-  PROJECTS.value = [...PROJECTS.value, project];
-  return project;
+  return upsertProject(projectRowToProject(row));
 }
 
 /** 更新项目名称；trim 后为空时不改动。返回是否真正更新。 */

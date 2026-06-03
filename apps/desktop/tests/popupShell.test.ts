@@ -1,7 +1,8 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { nextTick } from "vue";
 import { createMemoryHistory } from "vue-router";
 import { defineComponent } from "vue";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createLiliaRouter,
   shouldUsePopupHashHistory,
@@ -9,6 +10,8 @@ import {
 import {
   mockCurrentWindow,
   mockInvoke,
+  setMockAgentTimelineDelay,
+  setMockTaskArchived,
 } from "./tauriMock";
 import { TASKS } from "../src/data/tasks";
 
@@ -82,6 +85,38 @@ describe("Popup shell", () => {
     expect(view.getByRole("button", { name: "回到主窗口" })).toBeInTheDocument();
   });
 
+  it("弹窗打开已有对话时可用单条查询补齐当前上下文", async () => {
+    TASKS.value = {};
+
+    const view = await renderPopup("/popup/projects/lilia/tasks/t-001");
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("task_get", { id: "t-001" }, undefined);
+      expect(view.getByText("要在 Lilia 中构建什么？")).toBeInTheDocument();
+    });
+  });
+
+  it("弹窗已有对话等待首批内容时不显示新对话空状态", async () => {
+    vi.useFakeTimers();
+    try {
+      setMockAgentTimelineDelay(700);
+
+      const view = await renderPopup("/popup/projects/lilia/tasks/t-002");
+
+      expect(view.container.querySelector(".chat-page--pending")).toBeInTheDocument();
+      expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(700);
+      await nextTick();
+      await nextTick();
+      expect(view.container.querySelector(".chat-page--pending")).not.toBeInTheDocument();
+      expect(view.container.querySelector(".chat-composer")).toBeInTheDocument();
+      expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["/popup/projects/lilia/tasks/t-001", "/projects/lilia/tasks/t-001"],
     ["/popup/chats/o-001", "/chats/o-001"],
@@ -135,6 +170,20 @@ describe("Popup shell", () => {
       expect(view.router.currentRoute.value.fullPath).toMatch(
         /^\/popup\/projects\/lilia\/tasks\/t-draft-/,
       );
+    });
+  });
+
+  it("归档对话不会被单条加载为可打开对话", async () => {
+    setMockTaskArchived("t-001", true);
+    TASKS.value = {
+      ...TASKS.value,
+      lilia: (TASKS.value.lilia ?? []).filter((task) => task.id !== "t-001"),
+    };
+
+    const view = await renderPopup("/popup/projects/lilia/tasks/t-001");
+
+    await waitFor(() => {
+      expect(view.getByText(/未找到任务/)).toBeInTheDocument();
     });
   });
 });

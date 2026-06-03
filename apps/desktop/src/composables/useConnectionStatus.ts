@@ -72,8 +72,14 @@ async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKi
   }
 }
 
-export function useConnectionStatus() {
-  if (report.value === null && !inflight) {
+interface UseConnectionStatusOptions {
+  probe?: boolean;
+}
+
+export function useConnectionStatus(options: UseConnectionStatusOptions = {}) {
+  const shouldProbe = options.probe !== false;
+
+  if (shouldProbe && report.value === null && !inflight) {
     void probeOnce();
   }
   if (!activeBackendLoaded && !backendInflight) {

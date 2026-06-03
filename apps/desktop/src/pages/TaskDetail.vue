@@ -18,11 +18,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
   allTasksReady,
+  ensureTaskLoaded,
+  getTask,
   promoteDraftOrphan,
   promoteDraftTask,
   resolveConversationRouteState,
 } from "../services/tasksStore";
-import { getProject } from "../services/projectsStore";
+import { ensureProjectLoaded, getProject } from "../services/projectsStore";
 import ChatTranscript from "../components/chat/ChatTranscript.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
 import ChatSidebarHost from "../components/chat/ChatSidebarHost.vue";
@@ -95,15 +97,50 @@ const project = computed(() =>
   props.projectId ? getProject(props.projectId) : undefined,
 );
 const isPopup = computed(() => props.variant === "popup");
+const projectTask = computed(() =>
+  props.projectId ? getTask(props.projectId, props.taskId) : undefined,
+);
 const orphan = computed(() =>
   props.projectId ? undefined : getOrphanConversation(props.taskId),
 );
 const taskStoresReady = ref(false);
+const popupContextHydrating = ref(props.variant === "popup");
+const popupContextHydrated = ref(false);
+const popupContentReady = ref(props.variant !== "popup");
+const contextLoadingVisible = ref(false);
+const conversationRouteState = computed(() =>
+  resolveConversationRouteState(props.projectId, props.taskId),
+);
 
 /** 路由是否已找到承载对话的项目或孤儿；都没有 → 显示未找到。 */
-const hasContext = computed(() => !!project.value || !!orphan.value);
+const hasContext = computed(() => {
+  if (!isPopup.value) return !!project.value || !!orphan.value;
+  return props.projectId
+    ? !!project.value && !!projectTask.value
+    : !!orphan.value;
+});
 const isContextLoading = computed(() =>
-  !taskStoresReady.value && (!!props.projectId || !!props.taskId),
+  isPopup.value
+    ? popupContextHydrating.value || (!popupContextHydrated.value && !hasContext.value)
+    : !taskStoresReady.value && (!!props.projectId || !!props.taskId),
+);
+const isPopupContentLoading = computed(() =>
+  isPopup.value &&
+  hasContext.value &&
+  !conversationRouteState.value.isLiveDraft &&
+  !popupContentReady.value,
+);
+const isPopupPending = computed(() =>
+  isPopup.value && (isContextLoading.value || isPopupContentLoading.value),
+);
+const isBlockingLoading = computed(() =>
+  isPopup.value ? isPopupPending.value : isContextLoading.value,
+);
+const shouldRenderChat = computed(() =>
+  hasContext.value && (!isPopup.value || !isPopupContentLoading.value),
+);
+const shouldShowContextLoading = computed(() =>
+  isPopup.value ? isPopupPending.value && contextLoadingVisible.value : isContextLoading.value,
 );
 
 /** 空状态标题：绑了项目就用项目名补全。 */
@@ -136,7 +173,7 @@ const runtimePendingAgentActions = usePendingAgentActionsForTask(
 );
 const agentInteractionSettings = useAgentInteractionSettings();
 const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
-const { activeBackend } = useConnectionStatus();
+const { activeBackend } = useConnectionStatus({ probe: !isPopup.value });
 const composerForView = computed<ChatComposerState>(() =>
   withActiveBackend(composer.value ?? {
     taskId: props.taskId,
@@ -710,6 +747,9 @@ async function loadAll() {
   const seq = ++loadSeq;
   const taskId = props.taskId;
   const projectId = props.projectId;
+  if (isPopup.value && !conversationRouteState.value.isLiveDraft) {
+    popupContentReady.value = false;
+  }
   composer.value = null;
   const nextComposerLoad = loadComposerForCurrentTask(taskId, seq).catch((err) => {
     console.error("[chat] getComposerState failed", err);
@@ -726,6 +766,9 @@ async function loadAll() {
     if (!comp) return;
   } finally {
     if (composerLoad === nextComposerLoad) composerLoad = null;
+    if (seq === loadSeq && taskId === props.taskId && projectId === props.projectId) {
+      if (isPopup.value) popupContentReady.value = true;
+    }
   }
 }
 
@@ -749,6 +792,46 @@ const guideDispatch = useGuideDispatch({
 const unlisteners: UnlistenFn[] = [];
 let unsubscribeDebugTimeline: (() => void) | null = null;
 let unregisterDebugPanel: (() => void) | null = null;
+let popupContextSeq = 0;
+let contextLoadingTimer: ReturnType<typeof setTimeout> | null = null;
+const POPUP_CONTEXT_LOADING_NOTICE_MS = 600;
+
+function clearContextLoadingTimer() {
+  if (contextLoadingTimer === null) return;
+  clearTimeout(contextLoadingTimer);
+  contextLoadingTimer = null;
+}
+
+async function hydratePopupContext() {
+  if (!isPopup.value) {
+    popupContextHydrating.value = false;
+    popupContextHydrated.value = true;
+    return;
+  }
+
+  const seq = ++popupContextSeq;
+  const projectId = props.projectId;
+  const taskId = props.taskId;
+  popupContextHydrating.value = true;
+  popupContextHydrated.value = false;
+  try {
+    if (projectId) {
+      await Promise.all([
+        ensureProjectLoaded(projectId),
+        ensureTaskLoaded(taskId, projectId),
+      ]);
+    } else {
+      await ensureTaskLoaded(taskId, null);
+    }
+  } catch (err) {
+    console.error("[popup] hydrate context failed", err);
+  } finally {
+    if (seq === popupContextSeq && taskId === props.taskId && projectId === props.projectId) {
+      popupContextHydrating.value = false;
+      popupContextHydrated.value = true;
+    }
+  }
+}
 
 void allTasksReady.finally(() => {
   taskStoresReady.value = true;
@@ -828,10 +911,15 @@ onMounted(async () => {
       void guideDispatch.scheduleGuideInsertion("idle");
     }),
   );
-  await Promise.all([loadAll(), loadAgentInteractionSettings()]);
+  if (isPopup.value) {
+    await loadAgentInteractionSettings();
+  } else {
+    await Promise.all([loadAll(), loadAgentInteractionSettings()]);
+  }
 });
 
 onUnmounted(async () => {
+  clearContextLoadingTimer();
   unsubscribeDebugTimeline?.();
   unsubscribeDebugTimeline = null;
   unregisterDebugPanel?.();
@@ -843,8 +931,44 @@ onUnmounted(async () => {
 });
 
 watch(
+  () => [props.variant, props.projectId, props.taskId] as const,
+  () => {
+    void hydratePopupContext();
+  },
+  { immediate: true },
+);
+
+watch(
+  isBlockingLoading,
+  (loading) => {
+    clearContextLoadingTimer();
+    if (!isPopup.value) {
+      contextLoadingVisible.value = loading;
+      return;
+    }
+    contextLoadingVisible.value = false;
+    if (!loading) return;
+    contextLoadingTimer = setTimeout(() => {
+      contextLoadingVisible.value = isBlockingLoading.value;
+      contextLoadingTimer = null;
+    }, POPUP_CONTEXT_LOADING_NOTICE_MS);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.variant, props.projectId, props.taskId, hasContext.value] as const,
+  ([variant, _projectId, _taskId, ready]) => {
+    if (variant !== "popup" || !ready) return;
+    void loadAll();
+  },
+  { immediate: true },
+);
+
+watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
+    popupContentReady.value = !isPopup.value || conversationRouteState.value.isLiveDraft;
     isTurnRunning.value = false;
     persistedTimelineEvents.value = [];
     overlayTimelineEvents.value = [];
@@ -854,7 +978,7 @@ watch(
     viewingImage.value = null;
     resubscribeDebugTimeline();
     if (!props.projectId) await ensureOrphanCwd();
-    await loadAll();
+    if (!isPopup.value) await loadAll();
   },
 );
 
@@ -867,11 +991,10 @@ watch(
 );
 
 watch(
-  () => [props.variant, props.projectId, props.taskId, taskStoresReady.value] as const,
-  ([variant, projectId, taskId, storesReady]) => {
+  () => [props.variant, props.projectId, props.taskId, popupContextHydrated.value] as const,
+  ([variant, projectId, taskId, contextHydrated]) => {
     if (variant !== "popup") return;
-    const routeState = resolveConversationRouteState(projectId, taskId);
-    if (storesReady && routeState.isLostDraft) {
+    if (contextHydrated && conversationRouteState.value.isLostDraft) {
       void router.replace(popupNewDraftRoute(projectId));
     }
   },
@@ -904,7 +1027,7 @@ watch(
 
 <template>
   <section
-    v-if="hasContext"
+    v-if="shouldRenderChat"
     ref="chatPageRef"
     class="chat-page"
     :class="{ 'chat-page--popup': isPopup }"
@@ -977,6 +1100,26 @@ watch(
       :image="viewingImage"
       @close="viewingImage = null"
     />
+  </section>
+
+  <section
+    v-else-if="isPopupPending"
+    class="chat-page chat-page--popup chat-page--pending"
+    aria-busy="true"
+  >
+    <div class="chat">
+      <div class="chat-layout">
+        <div class="chat-layout__main">
+          <div
+            v-if="shouldShowContextLoading"
+            class="popup-context-loading"
+            role="status"
+          >
+            正在加载对话…
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section v-else-if="isContextLoading">

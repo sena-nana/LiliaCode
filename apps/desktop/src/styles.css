@@ -1785,6 +1785,10 @@ button.ghost:hover {
   height: calc(100vh - 36px);
 }
 
+.chat-page--pending {
+  background: var(--bg);
+}
+
 .chat {
   display: grid;
   gap: 12px;
@@ -1817,6 +1821,17 @@ button.ghost:hover {
 
 .chat-layout__main > :where(.chat-transcript-frame) {
   flex: 1 1 auto;
+}
+
+.popup-context-loading {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .chat-file-drop-overlay {
