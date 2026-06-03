@@ -5,10 +5,16 @@ import { fileURLToPath, URL } from "node:url";
 
 // @ts-expect-error process 是 Node.js 全局对象
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process 是 Node.js 全局对象
+const startupTrace = process.env.LILIA_STARTUP_TRACE === "1";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [vue()],
+
+  define: {
+    __LILIA_STARTUP_TRACE__: startupTrace,
+  },
 
   resolve: {
     alias: {

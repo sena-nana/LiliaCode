@@ -17,7 +17,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getOrphanConversation,
-  allTasksReady,
+  ensureProjectTasksLoaded,
   ensureTaskLoaded,
   getTask,
   promoteDraftOrphan,
@@ -103,7 +103,6 @@ const projectTask = computed(() =>
 const orphan = computed(() =>
   props.projectId ? undefined : getOrphanConversation(props.taskId),
 );
-const taskStoresReady = ref(false);
 const popupContextHydrating = ref(props.variant === "popup");
 const popupContextHydrated = ref(false);
 const popupContentReady = ref(props.variant !== "popup");
@@ -122,7 +121,7 @@ const hasContext = computed(() => {
 const isContextLoading = computed(() =>
   isPopup.value
     ? popupContextHydrating.value || (!popupContextHydrated.value && !hasContext.value)
-    : !taskStoresReady.value && (!!props.projectId || !!props.taskId),
+    : !hasContext.value && (!!props.projectId || !!props.taskId),
 );
 const isPopupContentLoading = computed(() =>
   isPopup.value &&
@@ -833,9 +832,22 @@ async function hydratePopupContext() {
   }
 }
 
-void allTasksReady.finally(() => {
-  taskStoresReady.value = true;
-});
+async function hydrateMainContext() {
+  if (isPopup.value) return;
+  try {
+    if (props.projectId) {
+      await Promise.all([
+        ensureProjectLoaded(props.projectId),
+        ensureProjectTasksLoaded(props.projectId),
+        ensureTaskLoaded(props.taskId, props.projectId),
+      ]);
+    } else {
+      await ensureTaskLoaded(props.taskId, null);
+    }
+  } catch (err) {
+    console.error("[chat] hydrate context failed", err);
+  }
+}
 
 function syncDebugPanelRegistration() {
   if (!hasContext.value || !agentInteractionSettings.debug.value) {
@@ -914,7 +926,7 @@ onMounted(async () => {
   if (isPopup.value) {
     await loadAgentInteractionSettings();
   } else {
-    await Promise.all([loadAll(), loadAgentInteractionSettings()]);
+    await Promise.all([hydrateMainContext(), loadAll(), loadAgentInteractionSettings()]);
   }
 });
 
@@ -978,7 +990,10 @@ watch(
     viewingImage.value = null;
     resubscribeDebugTimeline();
     if (!props.projectId) await ensureOrphanCwd();
-    if (!isPopup.value) await loadAll();
+    if (!isPopup.value) {
+      await hydrateMainContext();
+      await loadAll();
+    }
   },
 );
 
@@ -992,7 +1007,7 @@ watch(
 
 watch(
   () => [props.variant, props.projectId, props.taskId, popupContextHydrated.value] as const,
-  ([variant, projectId, taskId, contextHydrated]) => {
+  ([variant, projectId, _taskId, contextHydrated]) => {
     if (variant !== "popup") return;
     if (contextHydrated && conversationRouteState.value.isLostDraft) {
       void router.replace(popupNewDraftRoute(projectId));

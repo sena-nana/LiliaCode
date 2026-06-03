@@ -11,6 +11,7 @@ import {
   type EnvStatusReport,
 } from "../services/chat";
 import type { BackendEnvStatus, ChatBackendKind, RouterMode } from "@lilia/contracts";
+import { markStartup } from "../services/startupTrace";
 
 const report = ref<EnvStatusReport | null>(null);
 const activeBackend = ref<ChatBackendKind>("claude");
@@ -19,11 +20,15 @@ let inflight: Promise<void> | null = null;
 let backendInflight: Promise<ChatBackendKind> | null = null;
 let activeBackendLoaded = false;
 
-async function probeOnce() {
+async function probeOnce(forceRefresh = false) {
   if (inflight) return inflight;
   probing.value = true;
   inflight = (async () => {
-    try { report.value = await checkEnv(); }
+    try {
+      markStartup("env check start");
+      report.value = await checkEnv({ forceRefresh });
+      markStartup("env checked");
+    }
     catch (err) { console.error("[connection] checkEnv failed", err); }
     finally {
       probing.value = false;
@@ -40,6 +45,7 @@ async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
     .then((backend) => {
       activeBackend.value = backend === "codex" ? "codex" : "claude";
       activeBackendLoaded = true;
+      markStartup("active backend loaded");
       return activeBackend.value;
     })
     .catch((err) => {
@@ -54,8 +60,8 @@ async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
   return backendInflight;
 }
 
-async function refreshAll() {
-  await Promise.all([probeOnce(), loadActiveBackend(true)]);
+async function refreshAll(forceRefresh = true) {
+  await Promise.all([probeOnce(forceRefresh), loadActiveBackend(true)]);
 }
 
 async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKind> {
@@ -74,15 +80,17 @@ async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKi
 
 interface UseConnectionStatusOptions {
   probe?: boolean;
+  loadBackend?: boolean;
 }
 
 export function useConnectionStatus(options: UseConnectionStatusOptions = {}) {
   const shouldProbe = options.probe !== false;
+  const shouldLoadBackend = options.loadBackend !== false;
 
   if (shouldProbe && report.value === null && !inflight) {
     void probeOnce();
   }
-  if (!activeBackendLoaded && !backendInflight) {
+  if (shouldLoadBackend && !activeBackendLoaded && !backendInflight) {
     void loadActiveBackend();
   }
 

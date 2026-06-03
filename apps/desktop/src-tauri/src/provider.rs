@@ -4,6 +4,7 @@ use std::fs;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
 const AGENT_INTERACTION_KEY: &str = "agent-interaction.config";
 const ROUTER_CC_SWITCH: &str = "cc-switch";
 const ROUTER_DIRECT: &str = "direct";
+static CODEX_APP_SERVER_PROBE_CACHE: OnceLock<Mutex<Option<CodexAppServerProbeStatus>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -659,6 +662,24 @@ pub(crate) fn build_codex_app_server_probe_status() -> CodexAppServerProbeStatus
     build_codex_app_server_probe_status_with(&codex_cli_candidate_paths(), command_output_result)
 }
 
+pub(crate) fn build_codex_app_server_probe_status_cached(
+    force_refresh: bool,
+) -> CodexAppServerProbeStatus {
+    let cache = CODEX_APP_SERVER_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    if !force_refresh {
+        if let Ok(guard) = cache.lock() {
+            if let Some(status) = guard.clone() {
+                return status;
+            }
+        }
+    }
+    let status = build_codex_app_server_probe_status();
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some(status.clone());
+    }
+    status
+}
+
 pub(crate) fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<String> {
     if status.supports_required_protocol {
         return None;
@@ -686,9 +707,10 @@ pub(crate) fn validate_backend_ready_for_send(active_backend: &str) -> Result<()
 }
 
 #[tauri::command]
-pub fn chat_check_env(app: AppHandle) -> EnvStatusReport {
+pub fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusReport {
     let node_available = cli_available("node");
-    let codex_app_server = build_codex_app_server_probe_status();
+    let codex_app_server =
+        build_codex_app_server_probe_status_cached(force_refresh.unwrap_or(false));
     let codex_cli_available = codex_app_server.path.is_some();
 
     let mut backends = HashMap::new();

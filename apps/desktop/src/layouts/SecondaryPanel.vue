@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Settings,
@@ -23,6 +32,7 @@ import type { Project } from "@lilia/contracts";
 import {
   createProject,
   deriveProjectName,
+  ensureProjectsLoaded,
   listProjects,
   reorderProjects,
 } from "../services/projectsStore";
@@ -30,6 +40,8 @@ import {
   archiveTask,
   createDraftOrphan,
   createDraftTask,
+  ensureOrphansLoaded,
+  ensureProjectTasksLoaded,
   listOrphanConversations,
   listProjectConversations,
   reorderTasks,
@@ -40,20 +52,24 @@ import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { pickFolder } from "../services/projects";
 import { openPopupTask } from "../services/popupWindows";
 import type { ContextMenuItem } from "../composables/useContextMenu";
+import { markStartup } from "../services/startupTrace";
 
 import SidebarSearch from "../components/sidebar/SidebarSearch.vue";
 import ProjectTreeItem from "../components/sidebar/ProjectTreeItem.vue";
-import CloneRepoDialog from "../components/sidebar/CloneRepoDialog.vue";
-import CategoryDialog from "../components/sidebar/CategoryDialog.vue";
+const CloneRepoDialog = defineAsyncComponent(
+  () => import("../components/sidebar/CloneRepoDialog.vue"),
+);
+const CategoryDialog = defineAsyncComponent(
+  () => import("../components/sidebar/CategoryDialog.vue"),
+);
 
 const route = useRoute();
 const router = useRouter();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
-const { activeBackend, statusFor, nodeAvailable, codexCliAvailable, codexAppServer } = useConnectionStatus();
-
-// ── Connection status badge ──
+const { activeBackend, statusFor, nodeAvailable, codexCliAvailable, codexAppServer, refresh } =
+  useConnectionStatus({ probe: false, loadBackend: false });
 
 const activeStatus = computed(() => statusFor(activeBackend.value));
 
@@ -97,8 +113,6 @@ const connectionTooltip = computed(() => {
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
 
-// ── Project tree expansion ──
-
 const TREE_EXPANSION_KEY = "lilia.projectTree.expansion";
 
 interface ProjectTreeExpansionSnapshot {
@@ -133,8 +147,10 @@ const savedTreeExpansion = loadProjectTreeExpansion();
 const expanded = reactive<Record<string, boolean>>({});
 const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
 const searchActive = ref(false);
+const firstScreenUsableMarked = ref(false);
 
 function isProjectExpanded(projectId: string): boolean {
+  if (String(route.params.projectId ?? "") === projectId) return true;
   return expanded[projectId] !== false;
 }
 
@@ -156,6 +172,12 @@ function persistProjectTreeExpansion() {
   }
 }
 
+function loadProjectTasks(projectId: string) {
+  void ensureProjectTasksLoaded(projectId).catch((err) => {
+    projectError.value = `加载项目对话失败：${String(err)}`;
+  });
+}
+
 function syncProjectExpansion(nextProjects: Project[]): boolean {
   let changed = false;
   const liveIds = new Set(nextProjects.map((project) => project.id));
@@ -167,11 +189,19 @@ function syncProjectExpansion(nextProjects: Project[]): boolean {
   }
   for (const project of nextProjects) {
     if (!Object.prototype.hasOwnProperty.call(expanded, project.id)) {
-      expanded[project.id] = savedTreeExpansion.projects?.[project.id] ?? true;
+      expanded[project.id] = savedTreeExpansion.projects?.[project.id] ?? false;
       changed = true;
     }
   }
   return changed;
+}
+
+function loadExpandedProjectTasks() {
+  for (const project of projects.value) {
+    if (isProjectExpanded(project.id)) {
+      loadProjectTasks(project.id);
+    }
+  }
 }
 
 watch(
@@ -180,6 +210,45 @@ watch(
     if (syncProjectExpansion(nextProjects)) {
       persistProjectTreeExpansion();
     }
+    if (firstScreenUsableMarked.value) {
+      loadExpandedProjectTasks();
+    }
+  },
+  { immediate: true },
+);
+
+function afterNextPaint(): Promise<void> {
+  if (typeof requestAnimationFrame !== "function") {
+    return new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+async function markFirstScreenUsable() {
+  markStartup("first screen usable wait start");
+  await Promise.all([ensureProjectsLoaded(), ensureOrphansLoaded()]);
+  markStartup("sidebar data usable");
+  await nextTick();
+  await afterNextPaint();
+  markStartup("first screen usable");
+  firstScreenUsableMarked.value = true;
+  window.setTimeout(loadExpandedProjectTasks, 0);
+}
+
+watch(
+  () => route.params.projectId,
+  (projectId) => {
+    if (
+      firstScreenUsableMarked.value &&
+      typeof projectId === "string" &&
+      projectId.length > 0
+    ) {
+      loadProjectTasks(projectId);
+    }
   },
   { immediate: true },
 );
@@ -187,6 +256,9 @@ watch(
 function toggle(projectId: string) {
   expanded[projectId] = !isProjectExpanded(projectId);
   persistProjectTreeExpansion();
+  if (isProjectExpanded(projectId)) {
+    loadProjectTasks(projectId);
+  }
 }
 
 const allExpanded = computed(
@@ -219,14 +291,22 @@ onBeforeUnmount(() => {
   persistProjectTreeExpansion();
 });
 
-// ── Orphan inbox ──
+onMounted(() => {
+  markStartup("SecondaryPanel mounted");
+  void markFirstScreenUsable().catch((err) => {
+    projectError.value = `加载首屏数据失败：${String(err)}`;
+  });
+  markStartup("connection check scheduled");
+  window.setTimeout(() => {
+    void refresh(false);
+  }, 0);
+});
 
 function toggleOrphans() {
   orphansExpanded.value = !orphansExpanded.value;
   persistProjectTreeExpansion();
 }
 
-// --- 孤儿 session 归档确认 ---
 const confirmingOrphanId = ref<string | null>(null);
 
 function onOrphanArchiveClick(e: MouseEvent, orphanId: string) {
@@ -280,8 +360,6 @@ function buildOrphanMenu(taskId: string): ContextMenuItem[] {
   ];
 }
 
-// ── Navigation helpers ──
-
 function isActiveOrphan(taskId: string) {
   return route.path === `/chats/${taskId}`;
 }
@@ -327,8 +405,6 @@ const orphanDropZoneClass = computed(() => {
   };
 });
 
-// ── New chat ──
-
 function newChat() {
   const draft = createDraftOrphan();
   router.push(`/chats/${draft.id}`);
@@ -352,8 +428,6 @@ function onSearchSelect(result: { route: string }) {
 function openProjectsOverview() {
   router.push("/projects");
 }
-
-// ── Add project menu ──
 
 const addMenuOpen = ref(false);
 const menuPos = ref<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -400,8 +474,6 @@ watch(addMenuOpen, async (v) => {
   }
 });
 
-// ── Local folder picker ──
-
 async function pickLocalFolder() {
   closeAddMenu();
   projectError.value = null;
@@ -418,37 +490,27 @@ async function pickLocalFolder() {
   }
 }
 
-// ── Clone dialog ──
-
 const cloneOpen = ref(false);
-const cloneDialogRef = ref<InstanceType<typeof CloneRepoDialog> | null>(null);
 
 function openClone() {
   closeAddMenu();
   cloneOpen.value = true;
-  nextTick(() => cloneDialogRef.value?.init());
 }
 
 function onCloneCreated(p: Project) {
   openProjectChat(p.id);
 }
 
-// ── Category dialog ──
-
 const categoryOpen = ref(false);
-const categoryDialogRef = ref<InstanceType<typeof CategoryDialog> | null>(null);
 
 function openCategory() {
   closeAddMenu();
   categoryOpen.value = true;
-  nextTick(() => categoryDialogRef.value?.init());
 }
 
 function onCategoryCreated(p: Project) {
   openProjectChat(p.id);
 }
-
-// ── Project tree item handlers ──
 
 function onProjectArchived(projectId: string) {
   openProjectChat(projectId);
@@ -459,8 +521,6 @@ function onProjectDeleted(projectId: string) {
   delete expanded[projectId];
   persistProjectTreeExpansion();
 }
-
-// ── Project tree pointer drag ──
 
 type TreeDragKind = "project" | "task";
 type TreeDropPosition = "before" | "after" | "inside";
@@ -908,7 +968,6 @@ onBeforeUnmount(() => {
       </RouterLink>
     </div>
 
-    <!-- Add project context menu -->
     <Teleport to="body">
       <div v-if="addMenuOpen" class="sb-menu" role="menu"
         :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }">
@@ -927,19 +986,15 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
 
-    <!-- Clone dialog -->
     <CloneRepoDialog
-      ref="cloneDialogRef"
-      :open="cloneOpen"
+      v-if="cloneOpen"
       @close="cloneOpen = false"
       @cloned="onCloneCreated"
       @error="(msg: string) => projectError = msg"
     />
 
-    <!-- Category dialog -->
     <CategoryDialog
-      ref="categoryDialogRef"
-      :open="categoryOpen"
+      v-if="categoryOpen"
       @close="categoryOpen = false"
       @created="onCategoryCreated"
     />

@@ -8,6 +8,7 @@
  */
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -217,6 +218,7 @@ fn insert_task_with_deps(
 
 #[tauri::command]
 pub fn project_list(store: State<'_, LiliaStore>) -> Result<Vec<ProjectRow>, String> {
+    let started = Instant::now();
     let conn = store.conn()?;
     let mut stmt = conn
         .prepare(
@@ -238,6 +240,11 @@ pub fn project_list(store: State<'_, LiliaStore>) -> Result<Vec<ProjectRow>, Str
     for r in rows {
         out.push(r.map_err(|e| format!("project_list: row 失败：{e}"))?);
     }
+    crate::startup_trace::mark(&format!(
+        "command project_list {} rows {}ms",
+        out.len(),
+        started.elapsed().as_millis()
+    ));
     Ok(out)
 }
 
@@ -360,6 +367,7 @@ pub fn task_list(
     project_id: Option<String>,
     store: State<'_, LiliaStore>,
 ) -> Result<Vec<TaskRow>, String> {
+    let started = Instant::now();
     let conn = store.conn()?;
     let deps = load_project_deps(&conn, project_id.as_deref())?;
     let mut out = Vec::new();
@@ -397,6 +405,12 @@ pub fn task_list(
             }
         }
     }
+    let scope = project_id.as_deref().unwrap_or("orphans");
+    crate::startup_trace::mark(&format!(
+        "command task_list {scope} {} rows {}ms",
+        out.len(),
+        started.elapsed().as_millis()
+    ));
     Ok(out)
 }
 

@@ -140,6 +140,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "todo_attachments",
         apply: migrate_todo_attachments,
     },
+    SchemaMigration {
+        version: 6,
+        name: "task_startup_indexes",
+        apply: migrate_task_startup_indexes,
+    },
 ];
 
 /// baseline=3：`agent_timeline_events` 的 `order` 列拆成
@@ -204,6 +209,16 @@ fn migrate_todo_attachments(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 todo_attachments 失败：{e}"))
+}
+
+fn migrate_task_startup_indexes(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_tasks_project_archived_order
+          ON tasks(project_id, archived, pinned DESC, sort_order ASC);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_startup_indexes 失败：{e}"))
 }
 
 fn ensure_schema_with_migrations(
@@ -313,6 +328,8 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           ON tasks(project_id);
         CREATE INDEX idx_tasks_archived
           ON tasks(archived);
+        CREATE INDEX idx_tasks_project_archived_order
+          ON tasks(project_id, archived, pinned DESC, sort_order ASC);
 
         CREATE TABLE task_dependencies (
           task_id       TEXT NOT NULL,
@@ -395,6 +412,8 @@ mod tests {
               ON tasks(project_id);
             CREATE INDEX idx_tasks_archived
               ON tasks(archived);
+            CREATE INDEX idx_tasks_project_archived_order
+              ON tasks(project_id, archived, pinned DESC, sort_order ASC);
 
             CREATE TABLE task_dependencies (
               task_id       TEXT NOT NULL,
@@ -430,7 +449,7 @@ mod tests {
     #[test]
     fn old_development_database_is_rebuilt_from_current_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
+        conn.execute_batch(&format!(
             r#"
             CREATE TABLE projects (
               id         TEXT PRIMARY KEY,
@@ -440,9 +459,10 @@ mod tests {
             );
             INSERT INTO projects (id, name, cwd, created_at)
               VALUES ('old-project', '旧项目', NULL, 1);
-            PRAGMA user_version = 6;
+            PRAGMA user_version = {};
             "#,
-        )
+            current_schema_version() + 1
+        ))
         .unwrap();
 
         ensure_current_schema(&mut conn).unwrap();
@@ -538,6 +558,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(attachments_json, "[]");
+    }
+
+    #[test]
+    fn task_startup_indexes_migration_creates_composite_index() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_reset_baseline_schema(&conn);
+        conn.execute_batch("PRAGMA user_version = 5;").unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_project_archived_order'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 1);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { Github, FolderOpen } from "lucide-vue-next";
 import { homeDir } from "@tauri-apps/api/path";
 import type { Project } from "@lilia/contracts";
@@ -13,7 +13,6 @@ import {
   pickFolder,
 } from "../../services/projects";
 
-const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{
   close: [];
   cloned: [project: Project];
@@ -101,13 +100,15 @@ async function confirmClone() {
   }
 }
 
-defineExpose({ init });
+onMounted(() => {
+  void init();
+});
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="search-palette">
-      <div v-if="open" class="search-palette" role="dialog" aria-modal="true" aria-label="从 GitHub clone"
+      <div class="search-palette" role="dialog" aria-modal="true" aria-label="从 GitHub clone"
         @click.self="emit('close')">
         <div class="search-palette__card dialog__card">
           <div class="dialog__header">

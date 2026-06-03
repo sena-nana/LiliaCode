@@ -11,6 +11,7 @@ mod project_shell;
 mod projects_tasks;
 mod provider;
 mod settings_store;
+mod startup_trace;
 mod store;
 mod todos;
 mod util;
@@ -38,40 +39,54 @@ fn ping() -> &'static str {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        if let Err(err) = popup_windows::open_popup_for_shortcut(app) {
-                            eprintln!("[popup-window] shortcut failed: {err}");
-                        }
+    startup_trace::init();
+    let builder = tauri::Builder::default();
+    startup_trace::mark("builder created");
+    let builder = builder.plugin(tauri_plugin_opener::init());
+    startup_trace::mark("opener plugin registered");
+    let builder = builder.plugin(tauri_plugin_store::Builder::default().build());
+    startup_trace::mark("store plugin registered");
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+    startup_trace::mark("dialog plugin registered");
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Err(err) = popup_windows::open_popup_for_shortcut(app) {
+                        eprintln!("[popup-window] shortcut failed: {err}");
                     }
-                })
-                .build(),
-        )
+                }
+            })
+            .build(),
+    );
+    startup_trace::mark("global shortcut plugin registered");
+    builder
         .manage(chat::state::ChatStore::default())
         .setup(|app| {
+            startup_trace::mark("setup start");
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = window.set_background_color(Some(BG));
+                startup_trace::mark("window background set");
                 if let Some(state) = window_state::load_main_window_state(app.handle()) {
                     window_state::restore_main_window_state(&window, state);
+                    startup_trace::mark("window state restored");
                 }
                 let _ = window.show();
+                startup_trace::mark("window show");
             }
             let home = store::resolve_lilia_home();
+            startup_trace::mark("lilia home resolved");
             match store::LiliaStore::new(&home) {
                 Ok(s) => {
                     app.manage(s);
+                    startup_trace::mark("store init");
                 }
                 Err(err) => {
                     eprintln!("[lilia-store] init failed at {}: {err}", home.display());
                 }
             }
             popup_windows::register_initial_popup_shortcut(app.handle());
+            startup_trace::mark("initial popup shortcut registered");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -89,6 +104,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            startup_trace::startup_trace_frontend_mark,
             chat::attachments::chat_describe_attachments,
             chat::attachments::chat_read_clipboard_file_paths,
             chat::attachments::chat_save_clipboard_image,

@@ -10,10 +10,11 @@ import { listen } from "@tauri-apps/api/event";
 import { ref } from "vue";
 import type { Task } from "@lilia/contracts";
 import {
+  ensureProjectsLoaded,
   listProjects,
-  projectsReady,
   registerProjectRemovalHandler,
 } from "./projects";
+import { markStartup } from "../services/startupTrace";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {
@@ -42,16 +43,15 @@ interface TasksChangedPayload {
   project_id?: string | null;
 }
 
-// ---------- Reactive 缓存 ----------
-
 export const TASKS = ref<Record<string, Task[]>>({});
 export const ORPHAN_LIST = ref<OrphanConversation[]>([]);
+export const PROJECT_TASKS_LOADED = ref<Record<string, boolean>>({});
+export const ORPHANS_LOADED = ref(false);
 
-// 内存草稿（不落库）
 const DRAFT_TASKS = new Map<string, Task>();
 const DRAFT_ORPHANS = new Map<string, OrphanConversation>();
-
-// ---------- 数据加载 ----------
+const projectTaskLoads = new Map<string, Promise<void>>();
+let orphanLoad: Promise<void> | null = null;
 
 async function refreshTasks(projectId: string): Promise<void> {
   const rows = await invoke<TaskRow[]>("task_list", { projectId });
@@ -59,11 +59,18 @@ async function refreshTasks(projectId: string): Promise<void> {
     ...TASKS.value,
     [projectId]: rows.map(rowToTask),
   };
+  PROJECT_TASKS_LOADED.value = {
+    ...PROJECT_TASKS_LOADED.value,
+    [projectId]: true,
+  };
+  markStartup(`tasks loaded ${projectId}`);
 }
 
 async function refreshOrphans(): Promise<void> {
   const rows = await invoke<TaskRow[]>("task_list", { projectId: null });
   ORPHAN_LIST.value = rows.map(rowToOrphan);
+  ORPHANS_LOADED.value = true;
+  markStartup("tasks loaded orphans");
 }
 
 function rowToTask(r: TaskRow): Task {
@@ -129,24 +136,42 @@ function upsertTaskRow(row: TaskRow): Task | OrphanConversation {
   return orphan;
 }
 
-async function refreshInitialTasks(): Promise<void> {
-  await refreshOrphans();
-  await refreshAllProjectTasks();
+export function isProjectTasksLoaded(projectId: string): boolean {
+  return PROJECT_TASKS_LOADED.value[projectId] === true ||
+    Object.prototype.hasOwnProperty.call(TASKS.value, projectId);
 }
 
-function shouldDeferInitialRefresh(): boolean {
-  return typeof window !== "undefined" && window.location.hash.startsWith("#/popup");
+export function areOrphansLoaded(): boolean {
+  return ORPHANS_LOADED.value || ORPHAN_LIST.value.length > 0;
 }
 
-// 模块加载时先等 projects 初始化，再拉所有项目的 tasks 和 orphans。
-export const allTasksReady: Promise<void> = shouldDeferInitialRefresh()
-  ? Promise.resolve()
-  : projectsReady.then(refreshInitialTasks);
+export function ensureOrphansLoaded(force = false): Promise<void> {
+  if (!force && ORPHANS_LOADED.value) return Promise.resolve();
+  if (!force && orphanLoad) return orphanLoad;
+  orphanLoad = refreshOrphans().finally(() => {
+    orphanLoad = null;
+  });
+  return orphanLoad;
+}
 
-// 首次加载时把所有项目的 tasks 一并拉下来。
-async function refreshAllProjectTasks(): Promise<void> {
+export function ensureProjectTasksLoaded(projectId: string, force = false): Promise<void> {
+  if (!projectId) return Promise.resolve();
+  if (!force && isProjectTasksLoaded(projectId)) return Promise.resolve();
+  const pending = projectTaskLoads.get(projectId);
+  if (!force && pending) return pending;
+  const load = refreshTasks(projectId).finally(() => {
+    if (projectTaskLoads.get(projectId) === load) {
+      projectTaskLoads.delete(projectId);
+    }
+  });
+  projectTaskLoads.set(projectId, load);
+  return load;
+}
+
+export async function ensureAllProjectTasksLoaded(): Promise<void> {
+  await ensureProjectsLoaded();
   const projs = listProjects();
-  await Promise.all(projs.map((p) => refreshTasks(p.id)));
+  await Promise.all(projs.map((p) => ensureProjectTasksLoaded(p.id)));
 }
 
 function readChangedProjectId(payload: TasksChangedPayload): string | null {
@@ -157,9 +182,13 @@ function readChangedProjectId(payload: TasksChangedPayload): string | null {
 async function refreshChangedTasks(payload: TasksChangedPayload) {
   const projectId = readChangedProjectId(payload);
   if (projectId) {
-    await refreshTasks(projectId);
+    if (isProjectTasksLoaded(projectId)) {
+      await ensureProjectTasksLoaded(projectId, true);
+    }
   } else {
-    await refreshOrphans();
+    if (areOrphansLoaded()) {
+      await ensureOrphansLoaded(true);
+    }
   }
 }
 
@@ -172,8 +201,6 @@ export function installTasksChangedListener() {
 }
 
 installTasksChangedListener();
-
-// ---------- Task CRUD ----------
 
 export function listTasks(projectId: string): Task[] {
   return TASKS.value[projectId] ?? [];
@@ -203,7 +230,6 @@ export async function ensureTaskLoaded(
   return upsertTaskRow(row);
 }
 
-/** 供侧栏直接绑定用。 */
 export function listProjectConversations(projectId: string): Task[] {
   return listTasks(projectId);
 }
@@ -242,7 +268,6 @@ export function resolveConversationRouteState(
   };
 }
 
-/** 点项目行「+」时调用：产出一条绑定到该项目的草稿任务，首条消息发出前不落库。 */
 export function createDraftTask(projectId: string): Task {
   const id = `t-draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const draft: Task = {
@@ -260,9 +285,6 @@ export function createDraftTask(projectId: string): Task {
   return draft;
 }
 
-/**
- * 草稿发出第一条消息后调用：落库 → 从 DRAFT_TASKS 移到 TASKS 缓存。
- */
 export async function promoteDraftTask(id: string, title: string): Promise<void> {
   const draft = DRAFT_TASKS.get(id);
   if (!draft) return;
@@ -283,7 +305,6 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
   }
 }
 
-/** 归档单条对话：软删除（archived = 1），并从缓存移除。 */
 export async function archiveTask(taskId: string): Promise<boolean> {
   const ok = await invoke<boolean>("task_archive", { id: taskId });
   if (!ok) return false;
@@ -300,10 +321,6 @@ export async function archiveTask(taskId: string): Promise<boolean> {
   return true;
 }
 
-/**
- * 「归档所有对话」：软删除该项目下所有 Task + 清空草稿。
- * 返回清掉的数量（含草稿），方便调用方做提示。
- */
 export async function archiveProjectConversations(projectId: string): Promise<number> {
   const dbCount = await invoke<number>("task_archive_project", { projectId });
   const next = { ...TASKS.value };
@@ -319,7 +336,6 @@ export async function archiveProjectConversations(projectId: string): Promise<nu
   return dbCount + draftCleared;
 }
 
-/** 切换单条 session 置顶状态，并刷新其所在缓存列表。 */
 export async function toggleTaskPin(taskId: string): Promise<boolean> {
   const pinned = await invoke<boolean>("task_toggle_pin", { id: taskId });
   for (const [pid, list] of Object.entries(TASKS.value)) {
@@ -334,28 +350,24 @@ export async function toggleTaskPin(taskId: string): Promise<boolean> {
   return pinned;
 }
 
-/** 供 projects.removeProject 调用：清理该项目关联的草稿任务（DB 侧由 project_remove 处理）。 */
 export function removeProjectTasks(projectId: string): void {
   const next = { ...TASKS.value };
   delete next[projectId];
   TASKS.value = next;
+  const loaded = { ...PROJECT_TASKS_LOADED.value };
+  delete loaded[projectId];
+  PROJECT_TASKS_LOADED.value = loaded;
   for (const [draftId, draft] of DRAFT_TASKS) {
     if (draft.projectId === projectId) DRAFT_TASKS.delete(draftId);
   }
 }
 
-/**
- * 项目被移除时 DB 会把该项目下的 task project_id 置 NULL。
- * 前端缓存需要同步清掉原项目列表并重新拉取收集箱。
- */
 export async function detachProjectTasksToOrphans(projectId: string): Promise<void> {
   removeProjectTasks(projectId);
   await refreshOrphans();
 }
 
 registerProjectRemovalHandler(detachProjectTasksToOrphans);
-
-// ---------- Orphan Conversation CRUD ----------
 
 export function listOrphanConversations(): OrphanConversation[] {
   return ORPHAN_LIST.value;
@@ -370,7 +382,6 @@ export function isDraftOrphan(id: string): boolean {
   return DRAFT_ORPHANS.has(id);
 }
 
-/** 点「新对话」时调用：产出一条只活在内存里的草稿。 */
 export function createDraftOrphan(): OrphanConversation {
   const id = `o-draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const draft: OrphanConversation = {
@@ -384,9 +395,6 @@ export function createDraftOrphan(): OrphanConversation {
   return draft;
 }
 
-/**
- * 草稿发出第一条消息后调用：落库 → 从 DRAFT_ORPHANS 移到 ORPHAN_LIST 缓存。
- */
 export async function promoteDraftOrphan(id: string, title: string): Promise<void> {
   const draft = DRAFT_ORPHANS.get(id);
   if (!draft) return;
@@ -411,15 +419,11 @@ export async function promoteDraftOrphan(id: string, title: string): Promise<voi
   }
 }
 
-// ---------- 拖拽排序 / 跨项目移动 ----------
-
-/** 项目内 session 列表拖拽排序后调用。`orderedIds` 按显示顺序传入。 */
 export async function reorderTasks(
   projectId: string | null,
   orderedIds: string[],
 ): Promise<void> {
   await invoke("task_reorder", { projectId, orderedIds });
-  // 本地缓存按新顺序重排
   if (projectId) {
     const list = TASKS.value[projectId] ?? [];
     const byId = new Map(list.map((t) => [t.id, t]));
@@ -435,17 +439,12 @@ export async function reorderTasks(
   }
 }
 
-/**
- * 跨项目移动 session。从 `sourceProjectId` 移到 `targetProjectId`。
- * `sourceProjectId` 或 `targetProjectId` 为 null 表示孤儿收集箱。
- */
 export async function reparentTask(
   taskId: string,
   sourceProjectId: string | null,
   targetProjectId: string | null,
 ): Promise<void> {
   await invoke("task_reparent", { taskId, newProjectId: targetProjectId });
-  // 从源列表移除
   if (sourceProjectId) {
     const list = TASKS.value[sourceProjectId] ?? [];
     TASKS.value = {
@@ -455,7 +454,6 @@ export async function reparentTask(
   } else {
     ORPHAN_LIST.value = ORPHAN_LIST.value.filter((o) => o.id !== taskId);
   }
-  // 刷新目标列表
   if (targetProjectId) {
     await refreshTasks(targetProjectId);
   } else {

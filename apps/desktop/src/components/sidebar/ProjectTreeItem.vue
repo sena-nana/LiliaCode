@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { RouterLink, useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   Folder,
   FolderOpen,
@@ -29,6 +29,7 @@ import {
 } from "../../services/projectsStore";
 import {
   archiveTask,
+  isProjectTasksLoaded,
   listProjectConversations,
   toggleTaskPin,
 } from "../../services/tasksStore";
@@ -83,6 +84,7 @@ const overflowExpanded = ref(false);
 const projectConversations = computed(() =>
   listProjectConversations(props.project.id)
 );
+const projectTasksLoaded = computed(() => isProjectTasksLoaded(props.project.id));
 
 const activeTaskId = computed(() => {
   const taskId = route.params.taskId;
@@ -296,6 +298,10 @@ function isActiveTask(taskId: string) {
   return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
 }
 
+function openTask(taskId: string) {
+  void router.push(`/projects/${props.project.id}/tasks/${taskId}`);
+}
+
 function isActiveProject() {
   return String(route.params.projectId ?? "") === props.project.id &&
     !route.params.taskId;
@@ -472,8 +478,8 @@ function onMoreClick(e: MouseEvent) {
 
     <div class="sb-collapse" :class="{ 'is-open': isExpanded }" :aria-hidden="!isExpanded">
       <div class="sb-collapse__inner">
-        <RouterLink v-for="c in visibleProjectConversations" :key="c.id"
-          :to="`/projects/${project.id}/tasks/${c.id}`" class="sb-tree__row sb-tree__row--child"
+        <div v-for="c in visibleProjectConversations" :key="c.id"
+          class="sb-tree__row sb-tree__row--child"
           :class="[
             { 'is-active': isActiveTask(c.id) },
             treeRowStateClass('task', project.id, c.id),
@@ -484,6 +490,7 @@ function onMoreClick(e: MouseEvent) {
           :data-project-id="project.id"
           :data-pinned="c.pinned ? 'true' : 'false'"
           v-context-menu="() => buildTaskMenu(c)"
+          @click="openTask(c.id)"
           @dragstart.prevent
           @auxclick="onTaskAuxClick($event, c.id)"
           @mouseleave="onRowLeave">
@@ -503,7 +510,7 @@ function onMoreClick(e: MouseEvent) {
               <Archive v-else :size="13" aria-hidden="true" />
             </button>
           </div>
-        </RouterLink>
+        </div>
         <button
           v-if="showConversationOverflow"
           type="button"
@@ -514,7 +521,10 @@ function onMoreClick(e: MouseEvent) {
         >
           ...
         </button>
-        <p v-if="projectConversations.length === 0" class="sb-tree__empty">
+        <p v-if="!projectTasksLoaded" class="sb-tree__empty">
+          加载中…
+        </p>
+        <p v-else-if="projectConversations.length === 0" class="sb-tree__empty">
           还没有对话
         </p>
       </div>

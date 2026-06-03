@@ -9,6 +9,7 @@ export {
   listProjects,
   getProject,
   ensureProjectLoaded,
+  ensureProjectsLoaded,
   createProject,
   renameProject,
   removeProject,

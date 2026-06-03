@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 import type { Project } from "@lilia/contracts";
+import { markStartup } from "../services/startupTrace";
 
 interface ProjectRow {
   id: string;
@@ -18,6 +19,8 @@ interface ProjectRow {
 }
 
 export const PROJECTS = ref<Project[]>([]);
+const projectsLoaded = ref(false);
+let projectLoad: Promise<void> | null = null;
 let onProjectRemoved:
   | ((projectId: string) => void | Promise<void>)
   | null = null;
@@ -31,6 +34,8 @@ export function registerProjectRemovalHandler(
 async function refresh(): Promise<void> {
   const rows = await invoke<ProjectRow[]>("project_list");
   PROJECTS.value = rows.map(projectRowToProject);
+  projectsLoaded.value = true;
+  markStartup("projects loaded");
 }
 
 function projectRowToProject(r: ProjectRow): Project {
@@ -59,10 +64,15 @@ function shouldDeferInitialRefresh(): boolean {
   return typeof window !== "undefined" && window.location.hash.startsWith("#/popup");
 }
 
-// 模块加载时立刻拉一次；调用方可 await 确保数据就绪。
-export const projectsReady: Promise<void> = shouldDeferInitialRefresh()
-  ? Promise.resolve()
-  : refresh();
+export function ensureProjectsLoaded(force = false): Promise<void> {
+  if (shouldDeferInitialRefresh()) return Promise.resolve();
+  if (!force && projectsLoaded.value) return Promise.resolve();
+  if (!force && projectLoad) return projectLoad;
+  projectLoad = refresh().finally(() => {
+    projectLoad = null;
+  });
+  return projectLoad;
+}
 
 export function listProjects(): Project[] {
   return PROJECTS.value;

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { nextTick, onMounted, ref } from "vue";
 import { FolderPlus } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import { createProject } from "../../services/projectsStore";
 
-defineProps<{ open: boolean }>();
 const emit = defineEmits<{
   close: [];
   created: [project: Project];
@@ -27,13 +26,15 @@ async function confirm() {
   emit("close");
 }
 
-defineExpose({ init });
+onMounted(() => {
+  void init();
+});
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="search-palette">
-      <div v-if="open" class="search-palette" role="dialog" aria-modal="true" aria-label="创建空分类"
+      <div class="search-palette" role="dialog" aria-modal="true" aria-label="创建空分类"
         @click.self="emit('close')">
         <div class="search-palette__card dialog__card">
           <div class="dialog__header">

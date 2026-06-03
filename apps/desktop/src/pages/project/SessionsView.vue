@@ -1,18 +1,34 @@
 <script setup lang="ts">
 /** 项目下默认 tab：列出该项目的所有非草稿 Task，点击进入 TaskDetail。 */
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { RouterLink } from "vue-router";
-import { listProjectConversations } from "../../services/tasksStore";
+import {
+  ensureProjectTasksLoaded,
+  isProjectTasksLoaded,
+  listProjectConversations,
+} from "../../services/tasksStore";
 import type { Task } from "@lilia/contracts";
 
 const props = defineProps<{ projectId: string }>();
 
 const tasks = computed<Task[]>(() => listProjectConversations(props.projectId));
+const loaded = computed(() => isProjectTasksLoaded(props.projectId));
+
+watch(
+  () => props.projectId,
+  (projectId) => {
+    void ensureProjectTasksLoaded(projectId);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <div class="sessions-view">
-    <ul v-if="tasks.length" class="sessions-view__list">
+    <div v-if="!loaded" class="sessions-view__empty">
+      正在加载对话…
+    </div>
+    <ul v-else-if="tasks.length" class="sessions-view__list">
       <li v-for="t in tasks" :key="t.id" class="sessions-view__row">
         <RouterLink
           :to="`/projects/${projectId}/tasks/${t.id}`"

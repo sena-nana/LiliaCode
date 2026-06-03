@@ -874,6 +874,7 @@ pre code {
   display: inline-flex;
   gap: 1px;
   opacity: 0;
+  visibility: visible;
   transition: opacity 0.12s ease;
   margin-left: auto;
 }
@@ -882,8 +883,10 @@ pre code {
 .sb-tree__row--project:focus-within .sb-tree__hover-tools,
 .sb-tree__row--child:hover .sb-tree__hover-tools,
 .sb-tree__row--child:focus-within .sb-tree__hover-tools,
+.sb-tree__row--child.is-active .sb-tree__hover-tools,
 .sb-tree__row--orphan:hover .sb-tree__hover-tools,
-.sb-tree__row--orphan:focus-within .sb-tree__hover-tools {
+.sb-tree__row--orphan:focus-within .sb-tree__hover-tools,
+.sb-tree__row--orphan.is-active .sb-tree__hover-tools {
   opacity: 1;
 }
 

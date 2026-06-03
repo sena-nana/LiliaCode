@@ -152,8 +152,10 @@ export function resetSession(taskId: string): Promise<void> {
 }
 
 /** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式。 */
-export function checkEnv(): Promise<EnvStatusReport> {
-  return invoke<EnvStatusReport>("chat_check_env");
+export function checkEnv(options: { forceRefresh?: boolean } = {}): Promise<EnvStatusReport> {
+  return invoke<EnvStatusReport>("chat_check_env", {
+    forceRefresh: options.forceRefresh ?? false,
+  });
 }
 
 export function getProviderConfig(backend: ChatBackendKind): Promise<ProviderConfig> {
