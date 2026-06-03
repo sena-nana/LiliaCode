@@ -12,6 +12,9 @@ export default defineConfig(async () => ({
 
   resolve: {
     alias: {
+      "@lilia/contracts/claudeTools.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/claudeTools.mjs", import.meta.url),
+      ),
       "@lilia/contracts": fileURLToPath(
         new URL("../../packages/contracts/src/index.ts", import.meta.url),
       ),
