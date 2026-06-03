@@ -311,6 +311,19 @@ describe("timeline display derivation", () => {
     expect(display.object).toBe("apps/desktop/src/App.vue");
     expect(display.preview).toBe("apps/desktop/src/App.vue");
   });
+
+  it("错误事件标题固定为发生错误", () => {
+    const display = deriveTimelineDisplay({
+      kind: "error",
+      status: "error",
+      title: "Runner error",
+      summary: "provider failed",
+      payload: {},
+    });
+
+    expect(display.label).toBe("发生错误");
+    expect(display.preview).toBe("provider failed");
+  });
 });
 
 describe("timeline event expansion", () => {
@@ -432,5 +445,49 @@ describe("timeline event expansion", () => {
 
     expect(view.container.querySelector(".agent-timeline__content")).toBeInTheDocument();
     expect(view.getByText("COMMAND")).toBeInTheDocument();
+  });
+
+  it("运行失败错误按 Agent 回复渲染，不显示错误概要卡", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "error-1",
+            kind: "error",
+            status: "error",
+            title: "Runner error",
+            summary: "provider failed",
+            payload: {},
+          }),
+        ],
+      },
+    });
+
+    expect(view.container.querySelector(".timeline-card--final-reply")).toBeInTheDocument();
+    expect(view.getByText("发生错误")).toBeInTheDocument();
+    expect(view.getByText("provider failed")).toBeInTheDocument();
+    expect(view.queryByText("Runner error")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".agent-timeline__preview")).not.toBeInTheDocument();
+  });
+
+  it("中断错误仍按过程状态渲染", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        events: [
+          timelineEvent({
+            id: "interrupt-1",
+            kind: "error",
+            status: "error",
+            title: "Interrupted",
+            summary: "用户已中断",
+            payload: { interrupted: true },
+          }),
+        ],
+      },
+    });
+
+    expect(view.container.querySelector(".timeline-card--final-reply")).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: "发生错误" })).toBeInTheDocument();
+    expect(view.container.querySelector(".agent-timeline__preview")).toHaveTextContent("用户已中断");
   });
 });

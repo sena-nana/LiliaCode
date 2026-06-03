@@ -1,6 +1,7 @@
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
 import {
   aggregateTimelineStatus,
+  isTimelineFinalReply,
   timelineDeclaredGroupUnit,
   timelineGroupKey,
 } from "./timelineDisplay";
@@ -64,7 +65,7 @@ export function mergeAdjacentTimelineGroups(entries: TimelineEventEntry[]): Time
 
   for (const entry of entries) {
     const event = entry.event;
-    const key = event.kind === "message" ? null : timelineGroupKey(event);
+    const key = isTimelineFinalReply(event) ? null : timelineGroupKey(event);
 
     if (!key) {
       flush();

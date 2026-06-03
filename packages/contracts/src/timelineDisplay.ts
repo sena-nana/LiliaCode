@@ -270,7 +270,7 @@ function buildByKind({ kind, status, title, summary, payload }: KindBuildInput):
         readFirstString(payload, ["message", "error", "reason", "details", "stderr"], 1200);
       return {
         icon: "alert-triangle",
-        label: title || "错误",
+        label: "发生错误",
         preview: message,
         details: [
           lineDetail(message, "muted"),
