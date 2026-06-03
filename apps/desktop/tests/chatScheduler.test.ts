@@ -493,6 +493,7 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
+      expect(view.getByText("发生错误")).toBeInTheDocument();
       expect(view.getByText("agent 报错：连接失败")).toBeInTheDocument();
     });
     expect(view.getByText("agent 报错：连接失败").closest(".chat-bubble")).toBeNull();
@@ -610,16 +611,10 @@ describe("chat scheduler", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "重试" }));
 
-    const errorGroup = await waitFor(() =>
-      view.getByRole("button", { name: "错误 2 个错误" })
-    );
-    await fireEvent.click(errorGroup);
-    await waitFor(() => {
-      expect(errorGroup).toHaveAttribute("aria-expanded", "true");
-    });
     await waitFor(() => {
       expect(view.getByText(/发送失败：Error: mock send failed/)).toBeInTheDocument();
     });
+    expect(view.container.querySelectorAll(".timeline-card--final-reply")).toHaveLength(2);
 
     mockInvoke.mockClear();
     const retryButtons = view.getAllByRole("button", { name: "重试" });

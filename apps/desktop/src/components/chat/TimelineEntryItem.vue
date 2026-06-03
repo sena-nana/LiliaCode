@@ -17,6 +17,7 @@ import {
   timelinePendingActionState,
 } from "./timelinePendingActions";
 import {
+  isTimelineErrorReply,
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
   readTimelineDisplay,
@@ -73,6 +74,13 @@ function isCompact(event: AgentTimelineEvent): boolean {
 
 function hasProcessEvents(entry: TimelineEventEntry): boolean {
   return Boolean(entry.processEvents?.length);
+}
+
+function shouldShowHeader(entry: TimelineEventEntry): boolean {
+  return !isTimelineFinalReply(entry.event) ||
+    isTimelineErrorReply(entry.event) ||
+    hasProcessEvents(entry) ||
+    canRetry(entry.event);
 }
 
 function shouldShowNodeIcon(entry: TimelineEventEntry): boolean {
@@ -303,9 +311,15 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
 
         <template v-else>
           <header
-            v-if="!isTimelineFinalReply(entry.event) || hasProcessEvents(entry)"
+            v-if="shouldShowHeader(entry)"
             class="agent-timeline__head"
           >
+            <span
+              v-if="isTimelineErrorReply(entry.event)"
+              class="agent-timeline__title"
+            >
+              <span>{{ labelText(entry.event) }}</span>
+            </span>
             <button
               v-if="!isTimelineFinalReply(entry.event)"
               type="button"

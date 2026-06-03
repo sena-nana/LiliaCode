@@ -72,7 +72,10 @@ function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
     : {};
 }
 
-export function timelineFinalText(event: Pick<AgentTimelineEvent, "kind" | "payload">): string {
+export function timelineFinalText(
+  event: Pick<AgentTimelineEvent, "kind" | "status" | "title" | "summary" | "payload">,
+): string {
+  if (isTimelineErrorReply(event)) return timelineErrorReplyText(event);
   if (event.kind !== "message") return "";
   const payload = readTimelinePayloadRecord(event);
   if (payload.role !== "assistant") return "";
@@ -80,13 +83,22 @@ export function timelineFinalText(event: Pick<AgentTimelineEvent, "kind" | "payl
   return typeof content === "string" ? content : "";
 }
 
-/** 「最终回复」= assistant message。流式中（status=running）也算，避免 token
- * 增量到达时组件树展开/折叠状态抖动。 */
+/** 「最终回复」= assistant message 或顶层运行失败错误。流式中（status=running）
+ * 也算，避免 token 增量到达时组件树展开/折叠状态抖动。 */
 export function isTimelineFinalReply(
-  event: Pick<AgentTimelineEvent, "kind" | "payload">,
+  event: Pick<AgentTimelineEvent, "kind" | "status" | "payload">,
 ): boolean {
+  if (isTimelineErrorReply(event)) return true;
   if (event.kind !== "message") return false;
   return readTimelinePayloadRecord(event).role === "assistant";
+}
+
+export function isTimelineErrorReply(
+  event: Pick<AgentTimelineEvent, "kind" | "status" | "payload">,
+): boolean {
+  if (event.kind !== "error") return false;
+  if (isTimelineInterruptEvent(event)) return false;
+  return event.status === "error" || event.status === "failed";
 }
 
 export function isTimelineInterruptEvent(
@@ -107,7 +119,22 @@ export function isHiddenTimelineEvent(
 export function isTimelineFinalReplyStreaming(
   event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
 ): boolean {
-  return isTimelineFinalReply(event) && RUNNING_STATUSES.has(event.status);
+  return !isTimelineErrorReply(event) &&
+    isTimelineFinalReply(event) &&
+    RUNNING_STATUSES.has(event.status);
+}
+
+function timelineErrorReplyText(
+  event: Pick<AgentTimelineEvent, "title" | "summary" | "payload">,
+): string {
+  const summary = event.summary?.trim() ?? "";
+  if (summary) return summary;
+  const payload = readTimelinePayloadRecord(event);
+  for (const key of ["message", "error", "reason", "details", "stderr"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return event.title.trim();
 }
 
 function timelineDefaultExpanded(
