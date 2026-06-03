@@ -51,8 +51,8 @@ describe("agent-runner Claude stream", () => {
   it("Codex 优先通过 app-server stdio 建立可交互通道", () => {
     expect(runnerSource).toContain("createCodexAppServer");
     expect(runnerSource).toContain("process.env.LILIA_CODEX_CLI_PATH");
-    expect(runnerSource).toContain('["codex.cmd", "codex.exe", "codex.bat", "codex"]');
-    expect(runnerSource).toContain('spawnCodexCandidateSync(candidate, ["--version"], { stdio: "ignore" })');
+    expect(runnerSource).toContain('spawnCodexCandidateSync(injected, ["--version"], { stdio: "ignore" })');
+    expect(runnerSource).not.toContain('["codex.cmd", "codex.exe", "codex.bat", "codex"]');
     expect(runnerSource).toContain("function spawnCodexAppServer");
     expect(runnerSource).toContain('windowsCommandLine(binary, ["app-server"])');
     expect(runnerSource).toContain("spawnCodexAppServer(binary, {");

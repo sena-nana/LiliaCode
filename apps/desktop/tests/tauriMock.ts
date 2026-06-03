@@ -1,5 +1,11 @@
 import { vi } from "vitest";
 
+const CODEX_MODEL_OPTIONS = [
+  { id: "gpt-5.5", label: "GPT-5.5" },
+  { id: "gpt-5.4", label: "GPT-5.4" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+] as const;
+
 interface ProjectRow {
   id: string;
   name: string;
@@ -297,7 +303,7 @@ function refreshSessionCounts() {
 }
 
 function defaultModelForBackend(backend: "claude" | "codex") {
-  return backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-6";
+  return backend === "codex" ? CODEX_MODEL_OPTIONS[0].id : "claude-sonnet-4-6";
 }
 
 function normalizeBackend(value: unknown): "claude" | "codex" {
@@ -306,7 +312,7 @@ function normalizeBackend(value: unknown): "claude" | "codex" {
 
 function modelBelongsToBackend(model: string, backend: "claude" | "codex") {
   if (backend === "codex") {
-    return ["gpt-5-codex", "o3", "o3-mini"].includes(model);
+    return CODEX_MODEL_OPTIONS.some((option) => option.id === model);
   }
   return model.startsWith("claude-");
 }
@@ -1018,10 +1024,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "chat_list_models": {
       const backend = String(args.backend || "claude");
+      if (backend === "codex") {
+        return CODEX_MODEL_OPTIONS.map((option) => ({ ...option, backend }));
+      }
       return [
         {
-          id: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-6",
-          label: backend === "codex" ? "GPT-5 Codex" : "Sonnet 4.6",
+          id: "claude-sonnet-4-6",
+          label: "Sonnet 4.6",
           backend,
         },
       ];

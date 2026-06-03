@@ -374,7 +374,7 @@ export type { TimelineDisplayInput } from "./timelineDisplay";
 export interface ChatComposerState {
   taskId: string;
   backend: ChatBackendKind;
-  /** 模型 id 的语义由 backend 决定（claude-* / gpt-5-codex 等）。 */
+  /** 模型 id 的语义由 backend 决定（claude-* / gpt-5.5 等）。 */
   model: string;
   /** 是否让本轮先进入 agent 原生计划模式；确认后仍按 permission 执行。 */
   planMode: boolean;

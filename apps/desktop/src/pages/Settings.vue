@@ -57,8 +57,9 @@ const selectedRuntimeIssue = computed<string | null>(() => {
   if (!nodeAvailable.value) return "未找到 node（v18+），SDK 需要本机 Node 运行时。";
   if (!isClaude.value && !codexCliAvailable.value) return "未找到 codex CLI。请先 npm i -g @openai/codex 再重新检测。";
   if (!isClaude.value && codexAppServer.value && !codexAppServer.value.supportsRequiredProtocol) {
-    return codexAppServer.value.issues.join(" ") ||
+    const issue = codexAppServer.value.issues.join(" ") ||
       "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
+    return `${issue} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。`;
   }
   return null;
 });
@@ -68,7 +69,12 @@ const selectedOk = computed(() => selectedStatus.value?.connectionMode === "cc-s
 const selectedHint = computed(() => {
   const s = selectedStatus.value;
   if (!s) return "正在检测…";
-  if (s.connectionMode === "cc-switch") return `经 ${s.effectiveUrl ?? "—"} 转发到 CC-Switch 选中的上游 provider。`;
+  if (s.connectionMode === "cc-switch") {
+    if (!isClaude.value) {
+      return `CC-Switch 本地端口可达（${s.effectiveUrl ?? "—"}）。实际 Codex 请求会走 /responses，请确认当前上游 provider 支持 OpenAI Responses API 与当前 Codex 模型。`;
+    }
+    return `CC-Switch 本地端口可达（${s.effectiveUrl ?? "—"}），实际请求会转发到当前选中的上游 provider。`;
+  }
   return `代理 ${ccSwitch.value?.baseUrl ?? "—"} 不可达。请检查 CC-Switch 是否在运行，或修改下方 URL。`;
 });
 
@@ -380,7 +386,7 @@ onMounted(async () => {
       >
         <component :is="selectedOk ? Plug : AlertTriangle" :size="16" aria-hidden="true" />
         <div>
-          <div class="conn-banner__title">{{ selectedOk ? "已连接" : "未连接" }}</div>
+          <div class="conn-banner__title">{{ selectedOk ? "代理可达" : "未连接" }}</div>
           <div class="conn-banner__hint">{{ selectedHint }}</div>
         </div>
       </div>

@@ -38,6 +38,7 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(view.getByText("Codex 运行环境不满足")).toBeInTheDocument();
       expect(view.getByText(/当前 codex CLI 版本过低/)).toBeInTheDocument();
+      expect(view.getByText(/OpenAI Responses API/)).toBeInTheDocument();
     });
   });
 });

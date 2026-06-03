@@ -2524,15 +2524,18 @@ function pickCodexAssistantText(item) {
 
 function codexAppServerBinary() {
   const injected = stringOrNull(process.env.LILIA_CODEX_CLI_PATH)?.trim();
-  const candidates = [
-    ...(injected ? [injected] : []),
-    ...(process.platform === "win32" ? ["codex.cmd", "codex.exe", "codex.bat", "codex"] : ["codex"]),
-  ];
-  for (const candidate of candidates) {
-    const result = spawnCodexCandidateSync(candidate, ["--version"], { stdio: "ignore" });
-    if (!result.error && result.status === 0) return candidate;
+  if (!injected) {
+    throw new Error(
+      "Codex app-server 环境不满足：Lilia 未找到满足协议要求的 codex CLI。请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。",
+    );
   }
-  return candidates[0];
+  const result = spawnCodexCandidateSync(injected, ["--version"], { stdio: "ignore" });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      "Codex app-server 环境不满足：无法启动 Lilia 检测到的 codex CLI。请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。",
+    );
+  }
+  return injected;
 }
 
 function isWindowsCommandScript(binary) {

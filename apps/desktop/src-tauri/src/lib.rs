@@ -67,6 +67,11 @@ const ROUTER_DIRECT: &str = "direct";
 
 const BACKEND_CLAUDE: &str = "claude";
 const BACKEND_CODEX: &str = "codex";
+const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
+    ("gpt-5.5", "GPT-5.5"),
+    ("gpt-5.4", "GPT-5.4"),
+    ("gpt-5.4-mini", "GPT-5.4 Mini"),
+];
 const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 128, 0);
 static CLIPBOARD_IMAGE_DISPLAY_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -762,6 +767,29 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn codex_send_block_reason_mentions_cli_and_responses_support() {
+        let reason = codex_send_block_reason(&CodexAppServerStatus {
+            version: Some("codex-cli 0.125.0".to_string()),
+            available: true,
+            supports_required_protocol: false,
+            issues: vec!["当前 codex CLI 版本过低，需要 0.128.0 或更新版本。".to_string()],
+        })
+        .unwrap();
+
+        assert!(reason.contains("当前 codex CLI 版本过低"));
+        assert!(reason.contains("0.128.0"));
+        assert!(reason.contains("OpenAI Responses API"));
+
+        assert!(codex_send_block_reason(&CodexAppServerStatus {
+            version: Some("codex-cli 0.128.0".to_string()),
+            available: true,
+            supports_required_protocol: true,
+            issues: Vec::new(),
+        })
+        .is_none());
+    }
+
+    #[test]
     fn composer_uses_active_backend_and_matching_default_model() {
         let composer = ChatComposerState {
             task_id: "stale-task".to_string(),
@@ -775,7 +803,7 @@ mod agent_event_sink_tests {
 
         assert_eq!(normalized.task_id, "task-1");
         assert_eq!(normalized.backend, BACKEND_CODEX);
-        assert_eq!(normalized.model, "gpt-5-codex");
+        assert_eq!(normalized.model, "gpt-5.5");
         assert!(normalized.plan_mode);
         assert_eq!(normalized.permission, "readonly");
     }
@@ -785,7 +813,7 @@ mod agent_event_sink_tests {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CLAUDE.to_string(),
-            model: "o3".to_string(),
+            model: "gpt-5.4-mini".to_string(),
             plan_mode: false,
             permission: "ask".to_string(),
         };
@@ -793,7 +821,7 @@ mod agent_event_sink_tests {
         let normalized = normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX);
 
         assert_eq!(normalized.backend, BACKEND_CODEX);
-        assert_eq!(normalized.model, "o3");
+        assert_eq!(normalized.model, "gpt-5.4-mini");
     }
 
     fn pending_turn(id: &str) -> PendingChatTurn {
@@ -1151,30 +1179,21 @@ fn normalize_backend(value: &str) -> &'static str {
 
 fn default_model_for_backend(backend: &str) -> &'static str {
     match normalize_backend(backend) {
-        BACKEND_CODEX => "gpt-5-codex",
+        BACKEND_CODEX => CODEX_MODEL_OPTIONS[0].0,
         _ => "claude-sonnet-4-6",
     }
 }
 
 fn model_options_for_backend(backend: &str) -> Vec<ChatModelOption> {
     match normalize_backend(backend) {
-        BACKEND_CODEX => vec![
-            ChatModelOption {
-                id: "gpt-5-codex".to_string(),
-                label: "GPT-5 Codex".to_string(),
+        BACKEND_CODEX => CODEX_MODEL_OPTIONS
+            .iter()
+            .map(|(id, label)| ChatModelOption {
+                id: (*id).to_string(),
+                label: (*label).to_string(),
                 backend: BACKEND_CODEX.to_string(),
-            },
-            ChatModelOption {
-                id: "o3".to_string(),
-                label: "o3".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            },
-            ChatModelOption {
-                id: "o3-mini".to_string(),
-                label: "o3-mini".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            },
-        ],
+            })
+            .collect(),
         _ => vec![
             ChatModelOption {
                 id: "claude-opus-4-7".to_string(),
@@ -2787,6 +2806,7 @@ fn chat_send_message(
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
     let active_backend = load_active_backend(&app);
+    validate_backend_ready_for_send(&active_backend)?;
     let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {
@@ -3354,6 +3374,32 @@ where
 
 fn build_codex_app_server_probe_status() -> CodexAppServerProbeStatus {
     build_codex_app_server_probe_status_with(&codex_cli_candidate_paths(), command_output_result)
+}
+
+fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<String> {
+    if status.supports_required_protocol {
+        return None;
+    }
+
+    let detail = if status.issues.is_empty() {
+        "Codex app-server 环境不满足。".to_string()
+    } else {
+        status.issues.join(" ")
+    };
+    Some(format!(
+        "{detail} 请升级 Codex CLI 到 0.128.0 或更新版本；并确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。"
+    ))
+}
+
+fn validate_backend_ready_for_send(active_backend: &str) -> Result<(), String> {
+    if active_backend != BACKEND_CODEX {
+        return Ok(());
+    }
+    let status = build_codex_app_server_probe_status();
+    if let Some(reason) = codex_send_block_reason(&status.public) {
+        return Err(reason);
+    }
+    Ok(())
 }
 
 #[tauri::command]

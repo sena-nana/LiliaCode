@@ -175,7 +175,7 @@ describe("chat scheduler", () => {
     expect(send?.[1]).toMatchObject({
       composer: expect.objectContaining({
         backend: "codex",
-        model: "gpt-5-codex",
+        model: "gpt-5.5",
       }),
     });
   });
