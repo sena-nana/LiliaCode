@@ -11,7 +11,6 @@ import {
   type EnvStatusReport,
 } from "../services/chat";
 import type { BackendEnvStatus, ChatBackendKind, RouterMode } from "@lilia/contracts";
-import { markStartup } from "../services/startupTrace";
 
 const report = ref<EnvStatusReport | null>(null);
 const activeBackend = ref<ChatBackendKind>("claude");
@@ -25,9 +24,7 @@ async function probeOnce(forceRefresh = false) {
   probing.value = true;
   inflight = (async () => {
     try {
-      markStartup("env check start");
       report.value = await checkEnv({ forceRefresh });
-      markStartup("env checked");
     }
     catch (err) { console.error("[connection] checkEnv failed", err); }
     finally {
@@ -45,7 +42,6 @@ async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
     .then((backend) => {
       activeBackend.value = backend === "codex" ? "codex" : "claude";
       activeBackendLoaded = true;
-      markStartup("active backend loaded");
       return activeBackend.value;
     })
     .catch((err) => {

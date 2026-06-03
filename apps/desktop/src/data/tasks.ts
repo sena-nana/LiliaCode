@@ -14,7 +14,6 @@ import {
   listProjects,
   registerProjectRemovalHandler,
 } from "./projects";
-import { markStartup } from "../services/startupTrace";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {
@@ -63,14 +62,12 @@ async function refreshTasks(projectId: string): Promise<void> {
     ...PROJECT_TASKS_LOADED.value,
     [projectId]: true,
   };
-  markStartup(`tasks loaded ${projectId}`);
 }
 
 async function refreshOrphans(): Promise<void> {
   const rows = await invoke<TaskRow[]>("task_list", { projectId: null });
   ORPHAN_LIST.value = rows.map(rowToOrphan);
   ORPHANS_LOADED.value = true;
-  markStartup("tasks loaded orphans");
 }
 
 function rowToTask(r: TaskRow): Task {

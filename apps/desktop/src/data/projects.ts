@@ -7,7 +7,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
 import type { Project } from "@lilia/contracts";
-import { markStartup } from "../services/startupTrace";
 
 interface ProjectRow {
   id: string;
@@ -35,7 +34,6 @@ async function refresh(): Promise<void> {
   const rows = await invoke<ProjectRow[]>("project_list");
   PROJECTS.value = rows.map(projectRowToProject);
   projectsLoaded.value = true;
-  markStartup("projects loaded");
 }
 
 function projectRowToProject(r: ProjectRow): Project {
