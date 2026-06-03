@@ -407,7 +407,7 @@ pub fn task_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<TaskR
     let result = conn
         .query_row(
             r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
-               FROM tasks WHERE id = ?1"#,
+               FROM tasks WHERE id = ?1 AND archived = 0"#,
             params![id],
             |row| build_task(row, &deps_map),
         )

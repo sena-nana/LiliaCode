@@ -63,13 +63,7 @@ async function refreshTasks(projectId: string): Promise<void> {
 
 async function refreshOrphans(): Promise<void> {
   const rows = await invoke<TaskRow[]>("task_list", { projectId: null });
-  ORPHAN_LIST.value = rows.map((r) => ({
-    id: r.id,
-    sessionId: r.sessionId,
-    title: r.title,
-    createdAt: r.createdAt,
-    pinned: r.pinned,
-  }));
+  ORPHAN_LIST.value = rows.map(rowToOrphan);
 }
 
 function rowToTask(r: TaskRow): Task {
@@ -86,11 +80,68 @@ function rowToTask(r: TaskRow): Task {
   };
 }
 
-// 模块加载时先等 projects 初始化，再拉所有项目的 tasks 和 orphans。
-export const allTasksReady: Promise<void> = projectsReady.then(async () => {
+function rowToOrphan(r: TaskRow): OrphanConversation {
+  return {
+    id: r.id,
+    sessionId: r.sessionId,
+    title: r.title,
+    createdAt: r.createdAt,
+    pinned: r.pinned,
+  };
+}
+
+function upsertTaskRow(row: TaskRow): Task | OrphanConversation {
+  if (row.projectId) {
+    const task = rowToTask(row);
+    const existing = TASKS.value[row.projectId] ?? [];
+    const index = existing.findIndex((t) => t.id === task.id);
+    const nextProjectTasks = [...existing];
+    if (index === -1) {
+      nextProjectTasks.unshift(task);
+    } else {
+      nextProjectTasks[index] = task;
+    }
+    TASKS.value = {
+      ...TASKS.value,
+      [row.projectId]: nextProjectTasks,
+    };
+    ORPHAN_LIST.value = ORPHAN_LIST.value.filter((o) => o.id !== task.id);
+    return task;
+  }
+
+  const orphan = rowToOrphan(row);
+  const index = ORPHAN_LIST.value.findIndex((o) => o.id === orphan.id);
+  const nextOrphans = [...ORPHAN_LIST.value];
+  if (index === -1) {
+    nextOrphans.unshift(orphan);
+  } else {
+    nextOrphans[index] = orphan;
+  }
+  ORPHAN_LIST.value = nextOrphans;
+  for (const [projectId, list] of Object.entries(TASKS.value)) {
+    if (list.some((t) => t.id === orphan.id)) {
+      TASKS.value = {
+        ...TASKS.value,
+        [projectId]: list.filter((t) => t.id !== orphan.id),
+      };
+    }
+  }
+  return orphan;
+}
+
+async function refreshInitialTasks(): Promise<void> {
   await refreshOrphans();
   await refreshAllProjectTasks();
-});
+}
+
+function shouldDeferInitialRefresh(): boolean {
+  return typeof window !== "undefined" && window.location.hash.startsWith("#/popup");
+}
+
+// 模块加载时先等 projects 初始化，再拉所有项目的 tasks 和 orphans。
+export const allTasksReady: Promise<void> = shouldDeferInitialRefresh()
+  ? Promise.resolve()
+  : projectsReady.then(refreshInitialTasks);
 
 // 首次加载时把所有项目的 tasks 一并拉下来。
 async function refreshAllProjectTasks(): Promise<void> {
@@ -132,6 +183,24 @@ export function getTask(projectId: string, taskId: string): Task | undefined {
   const persisted = (TASKS.value[projectId] ?? []).find((t) => t.id === taskId);
   const draft = DRAFT_TASKS.get(taskId);
   return draft?.projectId === projectId ? draft : persisted;
+}
+
+export async function ensureTaskLoaded(
+  taskId: string,
+  expectedProjectId?: string | null,
+): Promise<Task | OrphanConversation | null> {
+  if (expectedProjectId) {
+    const existing = getTask(expectedProjectId, taskId);
+    if (existing) return existing;
+  } else if (expectedProjectId === null) {
+    const existing = getOrphanConversation(taskId);
+    if (existing) return existing;
+  }
+
+  const row = await invoke<TaskRow | null>("task_get", { id: taskId });
+  if (!row) return null;
+  if (expectedProjectId !== undefined && row.projectId !== expectedProjectId) return null;
+  return upsertTaskRow(row);
 }
 
 /** 供侧栏直接绑定用。 */

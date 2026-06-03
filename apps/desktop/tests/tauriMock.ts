@@ -26,6 +26,7 @@ interface TaskRow {
   dependsOn: string[];
   sortOrder: number;
   pinned: boolean;
+  archived?: boolean;
 }
 
 /**
@@ -190,6 +191,7 @@ let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> 
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
 let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
 let windowScaleFactor = 1;
+let agentTimelineDelayMs = 0;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -300,7 +302,7 @@ function refreshSessionCounts() {
   projects = projects.map((project) => ({
     ...project,
     sessionCount: tasks.filter((task) =>
-      task.projectId === project.id && task.status !== "cancelled"
+      !task.archived && task.projectId === project.id && task.status !== "cancelled"
     ).length,
   }));
 }
@@ -386,6 +388,7 @@ export function resetTauriMockData() {
   eventHandlers = {};
   webviewDragDropHandlers = [];
   windowScaleFactor = 1;
+  agentTimelineDelayMs = 0;
   mockCurrentWindow.label = "main";
   mockCurrentWindow.isMaximized.mockClear();
   mockCurrentWindow.onResized.mockClear();
@@ -437,6 +440,17 @@ export function setMockProjectPinned(projectId: string, pinned: boolean) {
   projectPinUpdater?.(projectId, pinned);
 }
 
+export function setMockTaskArchived(taskId: string, archived: boolean) {
+  tasks = tasks.map((task) =>
+    task.id === taskId ? { ...task, archived } : task
+  );
+  refreshSessionCounts();
+}
+
+export function setMockAgentTimelineDelay(delayMs: number) {
+  agentTimelineDelayMs = delayMs;
+}
+
 export function bindMockProjectPinUpdater(
   updater: ((projectId: string, pinned: boolean) => void) | null,
 ) {
@@ -458,7 +472,7 @@ export function mockTasksByProjectForStore() {
   const byProject: Record<string, unknown[]> = {};
   for (const project of projects) {
     byProject[project.id] = tasks
-      .filter((task) => task.projectId === project.id)
+      .filter((task) => !task.archived && task.projectId === project.id)
       .map(cloneTask)
       .sort((a, b) =>
         Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
@@ -480,7 +494,7 @@ export function mockTasksByProjectForStore() {
 
 export function mockOrphansForStore() {
   return tasks
-    .filter((task) => task.projectId === null)
+    .filter((task) => !task.archived && task.projectId === null)
     .map(cloneTask)
     .sort((a, b) =>
       Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
@@ -807,11 +821,17 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "task_list": {
       const projectId = args.projectId as string | null | undefined;
       return tasks
-        .filter((task) => task.projectId === (projectId ?? null))
+        .filter((task) => !task.archived && task.projectId === (projectId ?? null))
         .map(cloneTask)
         .sort((a, b) =>
           Number(b.pinned) - Number(a.pinned) || a.sortOrder - b.sortOrder
         );
+    }
+
+    case "task_get": {
+      const id = String(args.id);
+      const row = tasks.find((task) => !task.archived && task.id === id);
+      return row ? cloneTask(row) : null;
     }
 
     case "task_toggle_pin": {
@@ -968,6 +988,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
 
     case "agent_timeline_list": {
+      if (agentTimelineDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, agentTimelineDelayMs));
+      }
       const taskId = String(args.taskId);
       return timelineEvents[taskId] ?? [];
     }
