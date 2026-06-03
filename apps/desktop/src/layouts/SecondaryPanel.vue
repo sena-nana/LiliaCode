@@ -52,7 +52,6 @@ import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { pickFolder } from "../services/projects";
 import { openPopupTask } from "../services/popupWindows";
 import type { ContextMenuItem } from "../composables/useContextMenu";
-import { markStartup } from "../services/startupTrace";
 
 import SidebarSearch from "../components/sidebar/SidebarSearch.vue";
 import ProjectTreeItem from "../components/sidebar/ProjectTreeItem.vue";
@@ -147,7 +146,7 @@ const savedTreeExpansion = loadProjectTreeExpansion();
 const expanded = reactive<Record<string, boolean>>({});
 const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
 const searchActive = ref(false);
-const firstScreenUsableMarked = ref(false);
+const sidebarDataReady = ref(false);
 
 function isProjectExpanded(projectId: string): boolean {
   if (String(route.params.projectId ?? "") === projectId) return true;
@@ -210,32 +209,16 @@ watch(
     if (syncProjectExpansion(nextProjects)) {
       persistProjectTreeExpansion();
     }
-    if (firstScreenUsableMarked.value) {
+    if (sidebarDataReady.value) {
       loadExpandedProjectTasks();
     }
   },
   { immediate: true },
 );
 
-function afterNextPaint(): Promise<void> {
-  if (typeof requestAnimationFrame !== "function") {
-    return new Promise((resolve) => window.setTimeout(resolve, 0));
-  }
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
-async function markFirstScreenUsable() {
-  markStartup("first screen usable wait start");
+async function loadInitialSidebarData() {
   await Promise.all([ensureProjectsLoaded(), ensureOrphansLoaded()]);
-  markStartup("sidebar data usable");
-  await nextTick();
-  await afterNextPaint();
-  markStartup("first screen usable");
-  firstScreenUsableMarked.value = true;
+  sidebarDataReady.value = true;
   window.setTimeout(loadExpandedProjectTasks, 0);
 }
 
@@ -243,7 +226,7 @@ watch(
   () => route.params.projectId,
   (projectId) => {
     if (
-      firstScreenUsableMarked.value &&
+      sidebarDataReady.value &&
       typeof projectId === "string" &&
       projectId.length > 0
     ) {
@@ -292,11 +275,9 @@ onBeforeUnmount(() => {
 });
 
 onMounted(() => {
-  markStartup("SecondaryPanel mounted");
-  void markFirstScreenUsable().catch((err) => {
+  void loadInitialSidebarData().catch((err) => {
     projectError.value = `加载首屏数据失败：${String(err)}`;
   });
-  markStartup("connection check scheduled");
   window.setTimeout(() => {
     void refresh(false);
   }, 0);

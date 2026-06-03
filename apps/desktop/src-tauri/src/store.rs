@@ -142,8 +142,8 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         version: 6,
-        name: "task_startup_indexes",
-        apply: migrate_task_startup_indexes,
+        name: "task_list_indexes",
+        apply: migrate_task_list_indexes,
     },
 ];
 
@@ -211,14 +211,14 @@ fn migrate_todo_attachments(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("lilia-store: 迁移 todo_attachments 失败：{e}"))
 }
 
-fn migrate_task_startup_indexes(conn: &Connection) -> Result<(), String> {
+fn migrate_task_list_indexes(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         CREATE INDEX IF NOT EXISTS idx_tasks_project_archived_order
           ON tasks(project_id, archived, pinned DESC, sort_order ASC);
         "#,
     )
-    .map_err(|e| format!("lilia-store: 迁移 task_startup_indexes 失败：{e}"))
+    .map_err(|e| format!("lilia-store: 迁移 task_list_indexes 失败：{e}"))
 }
 
 fn ensure_schema_with_migrations(
@@ -561,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn task_startup_indexes_migration_creates_composite_index() {
+    fn task_list_indexes_migration_creates_composite_index() {
         let mut conn = Connection::open_in_memory().unwrap();
         create_reset_baseline_schema(&conn);
         conn.execute_batch("PRAGMA user_version = 5;").unwrap();

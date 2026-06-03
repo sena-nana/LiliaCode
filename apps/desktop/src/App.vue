@@ -6,7 +6,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import ContextMenuHost from "./components/ContextMenuHost.vue";
 import { installAgentAskUserBridge } from "./composables/useAgentAskUserBridge";
 import { installToolConsentBridge } from "./composables/useToolConsentBridge";
-import { markStartup } from "./services/startupTrace";
 
 let unlistenConsent: (() => void) | null = null;
 let unlistenAskUser: (() => void) | null = null;
@@ -19,7 +18,6 @@ const isMainWindow = appWindow.label === "main";
 const isPopupWindow = appWindow.label.startsWith("popup-");
 
 onMounted(async () => {
-  markStartup("App mounted");
   const [consent, askUser] = await Promise.all([
     installToolConsentBridge(),
     installAgentAskUserBridge(),
