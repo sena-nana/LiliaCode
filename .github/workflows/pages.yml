@@ -33,10 +33,10 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: corepack yarn install --immutable
 
       - name: Build docs
-        run: yarn docs:build
+        run: corepack yarn docs:build
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
