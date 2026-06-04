@@ -56,6 +56,18 @@ yarn docs:preview
 
 GitHub Pages deployment is handled by the repository Actions workflow. After pushing to `main`, the site is built and published to `https://sena-nana.github.io/LiliaCode/`.
 
+## CI/CD
+
+GitHub Actions runs CI for pull requests to `main`, pushes to `main`, and manual workflow dispatches. CI runs `yarn verify` and builds the documentation site separately, covering desktop tests, frontend build, Tauri Rust check, contracts type check, and docs build.
+
+After pushing to `main`, the Pages workflow continues to publish the documentation site automatically. To publish a Windows desktop installer, push a `v*` tag:
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+The release workflow runs `yarn verify` first, then builds the Windows Tauri bundle and uploads it to a draft GitHub Release. Current release artifacts do not include code signing, macOS notarization, Linux/macOS installers, or auto-update support.
+
 ## Icons
 
 The Tauri icon source is `apps/desktop/src-tauri/icons/icon.svg`, which embeds PNG data inside an SVG container. To regenerate the full PNG or ICO set, run:

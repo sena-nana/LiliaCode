@@ -56,6 +56,18 @@ yarn docs:preview
 
 GitHub Pages 部署由仓库中的 Actions workflow 自动完成。推送到 `main` 后，站点会构建并发布到 `https://sena-nana.github.io/LiliaCode/`。
 
+## CI/CD
+
+GitHub Actions 会在 pull request 到 `main`、推送到 `main` 或手动触发时运行 CI。CI 会执行 `yarn verify`，并单独构建文档站，确保桌面测试、前端构建、Tauri Rust 检查、contracts 类型检查和文档构建都通过。
+
+推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包时推送 `v*` tag：
+
+```bash
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+Release workflow 会先运行 `yarn verify`，再构建 Windows Tauri 安装包，并上传到 draft GitHub Release。当前发布包暂不包含代码签名、macOS 公证、Linux/macOS 安装包或自动更新。
+
 ## 图标
 
 Tauri 图标的设计稿是 `apps/desktop/src-tauri/icons/icon.svg`，其中 PNG 嵌入在 SVG 容器内。要重新生成全套 PNG 或 ICO 时运行：

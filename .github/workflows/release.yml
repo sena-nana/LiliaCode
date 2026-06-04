@@ -1,22 +1,26 @@
-name: Release Gate
+name: Publish Windows Release
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
+      tag:
+        description: 要发布的 tag，例如 v0.1.0。
+        required: true
+        type: string
       ref:
-        description: 要验证的 tag、branch 或 commit。留空时使用当前默认 ref。
+        description: 要发布的 branch、tag 或 commit。留空时使用 tag。
         required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
-    name: Verify release ref
+    name: Verify release
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -25,10 +29,20 @@ jobs:
         id: release_ref
         shell: pwsh
         run: |
-          $ref = "${{ github.event.release.tag_name }}"
-          if (-not $ref) {
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
             $ref = "${{ inputs.ref }}"
+          } else {
+            $ref = $tag
           }
+          if (-not $ref) {
+            $ref = $tag
+          }
+          if (-not $tag) {
+            throw "Release tag is required."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
           if ($ref) {
             "ref=$ref" >> $env:GITHUB_OUTPUT
           }
@@ -42,15 +56,101 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Enable Corepack
         run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: corepack yarn install --immutable
 
       - name: Verify workspace
         run: corepack yarn verify
+
+  publish-windows:
+    name: Publish Windows bundle
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Resolve ref
+        id: release_ref
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+            $ref = "${{ inputs.ref }}"
+          } else {
+            $ref = $tag
+          }
+          if (-not $ref) {
+            $ref = $tag
+          }
+          if (-not $tag) {
+            throw "Release tag is required."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          if ($ref) {
+            "ref=$ref" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release_ref.outputs.ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: yarn.lock
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack yarn install --immutable
+
+      - name: Build and publish Windows bundle
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: yarn tauri
+          tagName: ${{ steps.release_ref.outputs.tag }}
+          releaseName: LiliaCode ${{ steps.release_ref.outputs.tag }}
+          releaseDraft: true
+          generateReleaseNotes: true
