@@ -2,18 +2,17 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
+  Archive,
+  Code2,
   Folder,
   FolderOpen,
   LayoutGrid,
-  ExternalLink,
-  MoreHorizontal,
-  Plus,
-  Pencil,
-  Archive,
-  Trash2,
-  Code2,
   MessageSquarePlus,
+  MoreHorizontal,
+  Pencil,
   Pin,
+  Plus,
+  Trash2,
 } from "lucide-vue-next";
 import type { Project, Task } from "@lilia/contracts";
 import { vContextMenu } from "../../directives/contextMenu";
@@ -31,7 +30,6 @@ import {
   archiveTask,
   isProjectTasksLoaded,
   listProjectConversations,
-  toggleTaskPin,
 } from "../../services/tasksStore";
 import type {
   TreeDragKind,
@@ -39,7 +37,8 @@ import type {
   TreeDropTarget,
 } from "../../composables/useSidebarTreeDrag";
 import { openInFileManager, openInVSCode } from "../../services/projects";
-import { openPopupNewChat, openPopupTask } from "../../services/popupWindows";
+import { openPopupNewChat } from "../../services/popupWindows";
+import SidebarTaskRow from "./SidebarTaskRow.vue";
 
 const props = defineProps<{
   project: Project;
@@ -65,7 +64,6 @@ const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 
-const confirmingId = ref<string | null>(null);
 const overflowExpanded = ref(false);
 
 const projectConversations = computed(() =>
@@ -134,39 +132,6 @@ watch(
     }
   },
 );
-async function onArchiveClick(e: MouseEvent, taskId: string) {
-  e.preventDefault();
-  e.stopPropagation();
-  if (confirmingId.value === taskId) {
-    try {
-      const archived = await archiveTask(taskId);
-      confirmingId.value = null;
-      if (archived && isActiveTask(taskId)) {
-        emit("archived");
-      }
-    } catch (err) {
-      confirmingId.value = null;
-      emit("error", `归档对话失败：${String(err)}`);
-    }
-  } else {
-    confirmingId.value = taskId;
-  }
-}
-
-async function onTaskPinClick(e: MouseEvent, taskId: string) {
-  e.preventDefault();
-  e.stopPropagation();
-  try {
-    await toggleTaskPin(taskId);
-  } catch (err) {
-    emit("error", `切换对话置顶失败：${String(err)}`);
-  }
-}
-
-function onRowLeave() {
-  confirmingId.value = null;
-}
-
 async function startRename() {
   editingId.value = props.project.id;
   editingValue.value = props.project.name;
@@ -259,14 +224,6 @@ async function openProjectChatInPopup() {
   }
 }
 
-async function openTaskInPopup(taskId: string) {
-  try {
-    await openPopupTask(taskId, props.project.id);
-  } catch (err) {
-    emit("error", `打开弹出窗口对话失败：${String(err)}`);
-  }
-}
-
 function onProjectAuxClick(e: MouseEvent) {
   if (e.button !== 1) return;
   e.preventDefault();
@@ -274,15 +231,23 @@ function onProjectAuxClick(e: MouseEvent) {
   void openProjectChatInPopup();
 }
 
-function onTaskAuxClick(e: MouseEvent, taskId: string) {
-  if (e.button !== 1) return;
-  e.preventDefault();
-  e.stopPropagation();
-  void openTaskInPopup(taskId);
-}
-
 function isActiveTask(taskId: string) {
   return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
+}
+
+function onTaskArchived(taskId: string) {
+  if (isActiveTask(taskId)) emit("archived");
+}
+
+async function archiveProjectTask(taskId: string): Promise<boolean> {
+  try {
+    const archived = await archiveTask(taskId);
+    if (archived) onTaskArchived(taskId);
+    return archived;
+  } catch (err) {
+    emit("error", `归档对话失败：${String(err)}`);
+    return false;
+  }
 }
 
 function openTask(taskId: string) {
@@ -385,17 +350,6 @@ function buildMenu(): ContextMenuItem[] {
   ];
 }
 
-function buildTaskMenu(task: Task): ContextMenuItem[] {
-  return [
-    {
-      id: "open-popup-task",
-      label: "在弹出窗口中打开",
-      icon: ExternalLink,
-      onSelect: () => openTaskInPopup(task.id),
-    },
-  ];
-}
-
 function onMoreClick(e: MouseEvent) {
   e.stopPropagation();
   const btn = e.currentTarget as HTMLElement | null;
@@ -465,39 +419,18 @@ function onMoreClick(e: MouseEvent) {
 
     <div class="sb-collapse" :class="{ 'is-open': isExpanded }" :aria-hidden="!isExpanded">
       <div class="sb-collapse__inner">
-        <div v-for="c in visibleProjectConversations" :key="c.id"
-          class="sb-tree__row sb-tree__row--child"
-          :class="[
-            { 'is-active': isActiveTask(c.id) },
-            treeRowStateClass('task', project.id, c.id),
-          ]"
-          draggable="false"
-          data-tree-kind="task"
-          :data-task-id="c.id"
-          :data-project-id="project.id"
-          :data-pinned="c.pinned ? 'true' : 'false'"
-          v-context-menu="() => buildTaskMenu(c)"
-          @click="openTask(c.id)"
-          @dragstart.prevent
-          @auxclick="onTaskAuxClick($event, c.id)"
-          @mouseleave="onRowLeave">
-          <span class="sb-tree__name">{{ c.title }}</span>
-          <div class="sb-tree__hover-tools" @click.stop>
-            <button type="button" class="sb-icon-btn" :class="{ 'is-pinned': c.pinned }"
-              :title="c.pinned ? '取消置顶' : '置顶'"
-              :aria-label="c.pinned ? '取消置顶' : '置顶'"
-              @click="onTaskPinClick($event, c.id)">
-              <Pin :size="13" aria-hidden="true" />
-            </button>
-            <button type="button" class="sb-icon-btn" :class="{ 'is-confirming': confirmingId === c.id }"
-              :title="confirmingId === c.id ? '确认归档，再点一次' : '归档'"
-              :aria-label="confirmingId === c.id ? '确认归档，再点一次' : '归档'"
-              @click="onArchiveClick($event, c.id)">
-              <template v-if="confirmingId === c.id">确认</template>
-              <Archive v-else :size="13" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+        <SidebarTaskRow
+          v-for="c in visibleProjectConversations"
+          :key="c.id"
+          :task="c"
+          :project-id="project.id"
+          row-kind="child"
+          :active="isActiveTask(c.id)"
+          :archive="archiveProjectTask"
+          :tree-row-state-class="treeRowStateClass"
+          @open="openTask"
+          @error="emit('error', $event)"
+        />
         <button
           v-if="showConversationOverflow"
           type="button"
