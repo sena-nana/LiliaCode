@@ -1,118 +1,12 @@
-/*!
- * lilia-store：SQLite 持久化层。Todo / Memory / Roadmap 一期都复用这一个库。
- *
- * 设计要点：
- * - **home 解析**：env `LILIA_HOME` > `~/.lilia/.redirect` 文件内容 > 默认 `~/.lilia/`。
- *   解析后立刻确保 `config/ db/ cache/` 三个子目录存在，避免后续每处都自己 mkdir。
- * - **连接池**：r2d2 + r2d2_sqlite。SQLite 单 writer，但读路径走多 reader 仍然受益。
- *   WAL 模式 + busy_timeout 让并发读写不互踩。
- * - **schema baseline**：新库 / 重置库直接创建当前 schema；
- *   旧库按 user_version 继续跑对应迁移。
- */
-
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use r2d2::{Pool, PooledConnection};
-use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 
-const LILIA_HOME_ENV: &str = "LILIA_HOME";
-const REDIRECT_FILE: &str = ".redirect";
-const DEFAULT_HOME_SUBDIR: &str = ".lilia";
+use super::migrations::{
+    ensure_schema_with_migrations, RESET_BASELINE_SCHEMA_VERSION, SCHEMA_MIGRATIONS,
+};
+#[cfg(test)]
+use super::migrations::SchemaMigration;
 
-/// 解析 lilia home 目录。返回前确保目录及 config/db/cache 三个子目录存在。
-///
-/// 顺序：
-/// 1. env `LILIA_HOME`（绝对路径）
-/// 2. `~/.lilia/.redirect` 内的路径（用户把数据搬到别处时留个跳板，不强制移动）
-/// 3. `~/.lilia/`
-///
-/// 任一步骤失败都向下兜底；最坏返回当前工作目录下的 `.lilia/` 让程序仍能跑起来。
-pub fn resolve_lilia_home() -> PathBuf {
-    let primary = resolve_home_candidate();
-    let home = primary.unwrap_or_else(|| PathBuf::from(".lilia"));
-    let _ = ensure_layout(&home);
-    home
-}
-
-fn resolve_home_candidate() -> Option<PathBuf> {
-    if let Ok(env_val) = env::var(LILIA_HOME_ENV) {
-        let trimmed = env_val.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
-    }
-
-    let default_home = dirs::home_dir().map(|d| d.join(DEFAULT_HOME_SUBDIR));
-
-    if let Some(home) = &default_home {
-        let redirect = home.join(REDIRECT_FILE);
-        if redirect.is_file() {
-            if let Ok(raw) = fs::read_to_string(&redirect) {
-                let target = raw.trim();
-                if !target.is_empty() {
-                    return Some(PathBuf::from(target));
-                }
-            }
-        }
-    }
-
-    default_home
-}
-
-fn ensure_layout(home: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(home)?;
-    for sub in ["config", "db", "cache"] {
-        fs::create_dir_all(home.join(sub))?;
-    }
-    Ok(())
-}
-
-pub struct LiliaStore {
-    pool: Pool<SqliteConnectionManager>,
-}
-
-impl LiliaStore {
-    /// 打开（或新建）`<home>/db/lilia.db`，启 WAL + foreign_keys，再确保当前 schema。
-    pub fn new(home: &Path) -> Result<Self, String> {
-        ensure_layout(home).map_err(|e| format!("lilia-store: 准备目录失败：{e}"))?;
-        let db_path = home.join("db").join("lilia.db");
-
-        let manager = SqliteConnectionManager::file(&db_path).with_init(|conn| {
-            // 每个 pooled 连接都要打开 foreign_keys；WAL/busy_timeout 是全库 PRAGMA。
-            conn.execute_batch(
-                "PRAGMA foreign_keys = ON;\
-                 PRAGMA journal_mode = WAL;\
-                 PRAGMA synchronous = NORMAL;\
-                 PRAGMA busy_timeout = 5000;",
-            )
-        });
-        let pool = Pool::builder()
-            .max_size(8)
-            .build(manager)
-            .map_err(|e| format!("lilia-store: 建连接池失败：{e}"))?;
-
-        {
-            let mut conn = pool
-                .get()
-                .map_err(|e| format!("lilia-store: 取连接失败：{e}"))?;
-            ensure_current_schema(&mut conn)?;
-            reset_orphaned_queued_guides(&conn)?;
-        }
-
-        Ok(LiliaStore { pool })
-    }
-
-    pub fn conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, String> {
-        self.pool
-            .get()
-            .map_err(|e| format!("lilia-store: 取连接失败：{e}"))
-    }
-}
-
-fn reset_orphaned_queued_guides(conn: &Connection) -> Result<(), String> {
+pub(super) fn reset_orphaned_queued_guides(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "UPDATE task_todos SET guide_status = 'pending' WHERE source = 'lilia' AND guide_status = 'queued'",
         [],
@@ -121,36 +15,7 @@ fn reset_orphaned_queued_guides(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("lilia-store: 重置 queued 引导失败：{e}"))
 }
 
-const RESET_BASELINE_SCHEMA_VERSION: i64 = 3;
-
-struct SchemaMigration {
-    version: i64,
-    name: &'static str,
-    apply: fn(&Connection) -> Result<(), String>,
-}
-
-const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
-    SchemaMigration {
-        version: 4,
-        name: "todo_guides",
-        apply: migrate_todo_guides,
-    },
-    SchemaMigration {
-        version: 5,
-        name: "todo_attachments",
-        apply: migrate_todo_attachments,
-    },
-    SchemaMigration {
-        version: 6,
-        name: "task_list_indexes",
-        apply: migrate_task_list_indexes,
-    },
-];
-
-/// baseline=3：`agent_timeline_events` 的 `order` 列拆成
-/// `(turn_seq, intra_turn_order)`，排序按 turn 隔离。跨过这个版本会触发
-/// reset，旧 dev 数据丢失。
-fn ensure_current_schema(conn: &mut Connection) -> Result<(), String> {
+pub(super) fn ensure_current_schema(conn: &mut Connection) -> Result<(), String> {
     ensure_schema_with_migrations(conn, current_schema_version(), SCHEMA_MIGRATIONS)
 }
 
@@ -161,103 +26,7 @@ fn current_schema_version() -> i64 {
         .unwrap_or(RESET_BASELINE_SCHEMA_VERSION)
 }
 
-fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE task_todos_next (
-          id           TEXT PRIMARY KEY,
-          task_id      TEXT NOT NULL,
-          text         TEXT NOT NULL,
-          done         INTEGER NOT NULL DEFAULT 0,
-          "order"      INTEGER NOT NULL,
-          source       TEXT NOT NULL CHECK (source IN ('lilia','agent')),
-          priority     TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('high','normal','low')),
-          guide_status TEXT CHECK (guide_status IS NULL OR guide_status IN ('pending','queued','sent')),
-          created_at   INTEGER NOT NULL,
-          updated_at   INTEGER NOT NULL
-        );
-
-        INSERT INTO task_todos_next
-          (id, task_id, text, done, "order", source, priority, guide_status, created_at, updated_at)
-        SELECT
-          id,
-          task_id,
-          text,
-          done,
-          "order",
-          CASE source WHEN 'user' THEN 'lilia' ELSE source END,
-          'normal',
-          CASE source WHEN 'agent' THEN NULL ELSE 'pending' END,
-          created_at,
-          updated_at
-        FROM task_todos;
-
-        DROP TABLE task_todos;
-        ALTER TABLE task_todos_next RENAME TO task_todos;
-        CREATE INDEX idx_task_todos_task_id_order
-          ON task_todos(task_id, "order");
-        "#,
-    )
-    .map_err(|e| format!("lilia-store: 迁移 todo_guides 失败：{e}"))
-}
-
-fn migrate_todo_attachments(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        ALTER TABLE task_todos
-          ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]';
-        "#,
-    )
-    .map_err(|e| format!("lilia-store: 迁移 todo_attachments 失败：{e}"))
-}
-
-fn migrate_task_list_indexes(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
-        r#"
-        CREATE INDEX IF NOT EXISTS idx_tasks_project_archived_order
-          ON tasks(project_id, archived, pinned DESC, sort_order ASC);
-        "#,
-    )
-    .map_err(|e| format!("lilia-store: 迁移 task_list_indexes 失败：{e}"))
-}
-
-fn ensure_schema_with_migrations(
-    conn: &mut Connection,
-    target_version: i64,
-    migrations: &[SchemaMigration],
-) -> Result<(), String> {
-    let current: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|e| format!("lilia-store: 读取 user_version 失败：{e}"))?;
-
-    if current < RESET_BASELINE_SCHEMA_VERSION || current > target_version {
-        reset_development_schema(conn)?;
-    }
-
-    let mut version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|e| format!("lilia-store: 读取重置后 user_version 失败：{e}"))?;
-
-    for migration in migrations {
-        if migration.version <= version {
-            continue;
-        }
-        if migration.version != version + 1 {
-            return Err(format!(
-                "lilia-store: schema migration {} 版本不连续，当前 {version}",
-                migration.name
-            ));
-        }
-        (migration.apply)(conn)?;
-        conn.execute_batch(&format!("PRAGMA user_version = {};", migration.version))
-            .map_err(|e| format!("lilia-store: 写 {} 版本失败：{e}", migration.name))?;
-        version = migration.version;
-    }
-
-    Ok(())
-}
-
-fn reset_development_schema(conn: &Connection) -> Result<(), String> {
+pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         PRAGMA foreign_keys = OFF;
