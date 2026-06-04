@@ -33,32 +33,19 @@ import {
   listProjectConversations,
   toggleTaskPin,
 } from "../../services/tasksStore";
+import type {
+  TreeDragKind,
+  TreeDragSource,
+  TreeDropTarget,
+} from "../../composables/useSidebarTreeDrag";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 import { openPopupNewChat, openPopupTask } from "../../services/popupWindows";
-
-type TreeDragKind = "project" | "task";
-type TreeDropPosition = "before" | "after" | "inside";
-
-interface TreeDragMarker {
-  kind: TreeDragKind;
-  active: boolean;
-  projectId: string | null;
-  taskId: string | null;
-}
-
-interface TreeDropMarker {
-  kind: "project" | "task" | "orphans";
-  projectId: string | null;
-  taskId: string | null;
-  position: TreeDropPosition;
-  valid: boolean;
-}
 
 const props = defineProps<{
   project: Project;
   isExpanded: boolean;
-  dragSource?: TreeDragMarker | null;
-  dropTarget?: TreeDropMarker | null;
+  dragSource?: TreeDragSource | null;
+  dropTarget?: TreeDropTarget | null;
 }>();
 
 const emit = defineEmits<{
@@ -308,7 +295,7 @@ function isActiveProject() {
 }
 
 function isSameTreeRow(
-  marker: TreeDragMarker | TreeDropMarker | null | undefined,
+  marker: TreeDragSource | TreeDropTarget | null | undefined,
   kind: TreeDragKind,
   projectId: string | null,
   taskId: string | null,
