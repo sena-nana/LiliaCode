@@ -1,15 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  X,
-} from "lucide-vue-next";
 import type { AskUserResult } from "@lilia/contracts";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
 import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
@@ -19,7 +9,8 @@ import type {
 } from "../../composables/usePendingAgentActions";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type { ToolConsentDecision } from "../../services/chat";
-import EditableCommandBlock from "./EditableCommandBlock.vue";
+import AskUserInlinePrompt from "./AskUserInlinePrompt.vue";
+import ToolConsentInlinePrompt from "./ToolConsentInlinePrompt.vue";
 
 const props = defineProps<{
   action: PendingAgentAction;
@@ -122,47 +113,23 @@ watch(actionKey, () => {
 </script>
 
 <template>
-  <section
+  <ToolConsentInlinePrompt
     v-if="props.action.kind === 'tool_consent' && toolRequest"
-    class="timeline-pending-action composer-inline composer-inline--tool"
-    :class="{
-      'composer-inline--danger': toolDanger,
-      'is-expanded': toolExpanded,
-      'is-editing-command': isEditingToolCommand,
-    }"
-    role="alert"
-    aria-live="assertive"
+    root-class="timeline-pending-action composer-inline composer-inline--tool"
+    :active-tool-consent="toolRequest"
+    :tool-danger="toolDanger"
+    :tool-icon="toolIcon"
+    :tool-headline="toolHeadline"
+    :tool-input-json="toolInputJson"
+    :tool-subtitle="toolSubtitle"
+    :tool-expanded="toolExpanded"
+    :is-editing-tool-command="isEditingToolCommand"
+    :has-editable-command="hasEditableCommand"
+    :tool-command-draft="toolCommandDraft"
+    @update-tool-expanded="toolExpanded = $event"
+    @update-tool-command-draft="toolCommandDraft = $event"
+    @begin-command-edit="beginCommandEdit"
   >
-    <div class="composer-inline__tool-row">
-      <span class="composer-inline__icon" aria-hidden="true">
-        <AlertTriangle v-if="toolDanger" :size="14" />
-        <component v-else :is="toolIcon" :size="14" />
-      </span>
-      <div class="composer-inline__tool-main">
-        <div class="composer-inline__tool-head">
-          <span class="composer-inline__tool-name">{{ toolRequest.toolName }}</span>
-          <span class="composer-inline__headline">{{ toolHeadline }}</span>
-        </div>
-        <p v-if="toolSubtitle" class="composer-inline__subtitle">{{ toolSubtitle }}</p>
-      </div>
-      <button
-        v-if="toolInputJson && toolInputJson !== '{}'"
-        type="button"
-        class="composer-inline__toggle"
-        :aria-expanded="toolExpanded"
-        @click="toolExpanded = !toolExpanded"
-      >
-        <component :is="toolExpanded ? ChevronDown : ChevronRight" :size="12" aria-hidden="true" />
-        {{ toolExpanded ? "收起" : "查看入参" }}
-      </button>
-    </div>
-    <EditableCommandBlock
-      v-if="hasEditableCommand"
-      v-model="toolCommandDraft"
-      :editing="isEditingToolCommand"
-      @begin-edit="beginCommandEdit"
-    />
-    <pre v-if="toolExpanded" class="composer-inline__details">{{ toolInputJson }}</pre>
     <div class="timeline-pending-action__row">
       <textarea
         v-model="toolMessage"
@@ -189,7 +156,7 @@ watch(actionKey, () => {
         </button>
       </div>
     </div>
-  </section>
+  </ToolConsentInlinePrompt>
 
   <section
     v-else-if="props.action.kind === 'plan_approval'"
@@ -218,153 +185,37 @@ watch(actionKey, () => {
     </div>
   </section>
 
-  <section
+  <AskUserInlinePrompt
     v-else-if="activeAsk && askQuestion"
-    class="timeline-pending-action composer-inline composer-inline--ask"
-    :class="{ 'composer-inline--danger': askQuestion.danger }"
-    role="region"
-    aria-live="assertive"
-    :aria-label="askTitle"
-  >
-    <header class="composer-inline__header">
-      <span class="composer-inline__icon" aria-hidden="true">
-        <AlertTriangle v-if="askQuestion.danger" :size="14" />
-        <CircleHelp v-else :size="14" />
-      </span>
-      <span class="composer-inline__title">{{ askTitle }}</span>
-      <span v-if="activeAsk.spec.source" class="composer-inline__source">
-        {{ activeAsk.spec.source }}
-      </span>
-      <span v-if="askTotal > 1" class="composer-inline__progress" aria-live="polite">
-        {{ askIndex + 1 }} / {{ askTotal }}
-      </span>
-      <button
-        v-if="askDismissable"
-        type="button"
-        class="composer-inline__close"
-        aria-label="关闭"
-        @click="cancelAsk"
-      >
-        <X :size="14" aria-hidden="true" />
-      </button>
-    </header>
-
-    <div class="composer-inline__body">
-      <div class="composer-inline__question">
-        <span v-if="askQuestion.header" class="composer-inline__chip">
-          {{ askQuestion.header }}
-        </span>
-        <p class="composer-inline__qtext">{{ askQuestion.question }}</p>
-      </div>
-
-      <div
-        v-if="askQuestion.mode !== 'confirm'"
-        class="composer-inline__main"
-        :class="{ 'composer-inline__main--with-preview': askHasPreview }"
-      >
-        <ul
-          class="composer-inline__options"
-          :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
-        >
-          <li
-            v-for="opt in askOptionsWithId"
-            :key="opt.id"
-            class="composer-inline__option"
-            :class="{
-              'is-active': activeOptionId === opt.id,
-              'is-picked': askQuestion.mode === 'single'
-                ? singlePick === opt.id
-                : multiPicks.has(opt.id),
-              'is-recommended': opt.recommended,
-              'is-danger': opt.danger,
-            }"
-          >
-            <button
-              type="button"
-              class="composer-inline__option-btn"
-              :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
-              :aria-checked="askQuestion.mode === 'single'
-                ? singlePick === opt.id
-                : multiPicks.has(opt.id)"
-              @mouseenter="highlightOption(opt.id)"
-              @mouseleave="clearOptionHighlight(opt.id)"
-              @focus="focusOption(opt.id)"
-              @click="askQuestion.mode === 'single' ? selectSingleOption(opt.id) : toggleMulti(opt.id)"
-            >
-              <span class="composer-inline__option-indicator" aria-hidden="true">
-                <Check v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)" :size="12" />
-              </span>
-              <span class="composer-inline__option-main">
-                <span class="composer-inline__option-label">
-                  {{ opt.label }}
-                  <span v-if="opt.recommended" class="composer-inline__badge">推荐</span>
-                </span>
-                <span v-if="opt.description" class="composer-inline__option-desc">
-                  {{ opt.description }}
-                </span>
-              </span>
-            </button>
-          </li>
-        </ul>
-
-        <aside
-          v-if="askHasPreview"
-          class="composer-inline__preview"
-          aria-label="选项预览"
-        >
-          <pre v-if="askFocusedOption?.preview" class="composer-inline__preview-pre">{{ askFocusedOption.preview }}</pre>
-          <p v-else class="composer-inline__preview-empty">
-            把鼠标移到选项上 / 用方向键聚焦，这里会显示对比预览。
-          </p>
-        </aside>
-      </div>
-
-    </div>
-
-    <footer class="composer-inline__actions">
-      <button
-        v-if="askQuestion.skippable !== false && askTotal > 1"
-        type="button"
-        class="ghost composer-inline__skip composer-inline__btn"
-        @click="skipAsk"
-      >
-        跳过
-      </button>
-      <span v-if="!askOtherSelected" class="composer-inline__spacer" />
-      <button
-        v-if="canGoPrev"
-        type="button"
-        class="ghost composer-inline__btn"
-        @click="backAsk"
-      >
-        <ArrowLeft :size="13" aria-hidden="true" />
-        上一题
-      </button>
-      <textarea
-        v-if="askQuestion.mode !== 'confirm' && askOtherSelected"
-        v-model="freeformText"
-        class="timeline-pending-action__input composer-inline__other-input"
-        rows="1"
-        placeholder="自定义回答"
-      />
-      <button
-        v-if="askQuestion.mode === 'confirm'"
-        type="button"
-        class="ghost composer-inline__btn"
-        @click="confirmAskNo"
-      >
-        {{ askQuestion.cancelLabel ?? "不要" }}
-      </button>
-      <button
-        type="button"
-        class="composer-inline__btn"
-        :class="askQuestion.danger ? 'ghost danger' : 'primary'"
-        :disabled="askQuestion.mode !== 'confirm' && !canAskSubmit"
-        @click="submitAsk"
-      >
-        {{ askQuestion.mode === "confirm" ? (askQuestion.confirmLabel ?? "好的") : askIsLast ? "完成" : "继续" }}
-        <ArrowRight v-if="askQuestion.mode !== 'confirm' && !askIsLast" :size="13" aria-hidden="true" />
-      </button>
-    </footer>
-  </section>
+    v-model:freeform-text="freeformText"
+    root-class="timeline-pending-action composer-inline composer-inline--ask"
+    input-class="timeline-pending-action__input composer-inline__other-input"
+    :active-ask="activeAsk"
+    :ask-question="askQuestion"
+    :ask-title="askTitle"
+    :ask-index="askIndex"
+    :ask-total="askTotal"
+    :ask-dismissable="askDismissable"
+    :ask-is-last="askIsLast"
+    :ask-options-with-id="askOptionsWithId"
+    :ask-has-preview="askHasPreview"
+    :ask-focused-option="askFocusedOption"
+    :active-option-id="activeOptionId"
+    :single-pick="singlePick"
+    :multi-picks="multiPicks"
+    :can-go-prev="canGoPrev"
+    :can-ask-submit="canAskSubmit"
+    :ask-other-selected="askOtherSelected"
+    show-choice-footer
+    @cancel-ask="cancelAsk"
+    @highlight-option="highlightOption"
+    @clear-option-highlight="clearOptionHighlight"
+    @focus-option="focusOption"
+    @select-single-option="selectSingleOption"
+    @toggle-multi="toggleMulti"
+    @skip-ask="skipAsk"
+    @back-ask="backAsk"
+    @confirm-ask-no="confirmAskNo"
+    @submit-ask="submitAsk"
+  />
 </template>

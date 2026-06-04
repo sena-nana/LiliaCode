@@ -16,10 +16,7 @@ import type {
   ChatComposerState,
   PermissionMode,
 } from "@lilia/contracts";
-import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
-import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
 import type { PendingAsk } from "../../composables/useAskUser";
-import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
@@ -42,6 +39,7 @@ import {
   isImageAttachment,
   type ChatImageViewerSource,
 } from "./imageViewer";
+import { useComposerPendingInteraction } from "./useComposerPendingInteraction";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -80,31 +78,82 @@ const COMPOSER_INPUT_TRANSITION_MS = 160;
 const LARGE_DIRECTORY_FILE_COUNT = 200;
 const LARGE_DIRECTORY_TOTAL_SIZE = 20 * 1024 * 1024;
 
-const pendingText = ref("");
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const textareaMeasure = ref<HTMLTextAreaElement | null>(null);
 let resizeFrameId: number | null = null;
 let overflowTimerId: number | null = null;
 
-const toolExpanded = ref(false);
-const toolSubmitting = ref<ToolConsentDecision | null>(null);
+let clearComposerContextState = () => {};
 
-const activeAsk = computed(() => props.pendingAsk ?? null);
-const activeToolConsent = computed(() =>
-  activeAsk.value ? null : props.toolConsent ?? null,
-);
-const hasPending = computed(() => !!activeAsk.value || !!activeToolConsent.value);
-const pendingKey = computed(() => {
-  if (activeAsk.value) return `ask:${activeAsk.value.id}`;
-  if (activeToolConsent.value) return `tool:${activeToolConsent.value.requestId}`;
-  return "none";
-});
-
-const inputValue = computed({
-  get: () => pendingText.value,
-  set: (value: string) => {
-    pendingText.value = value;
+const {
+  activeAsk,
+  activeAskOptionId,
+  activeToolConsent,
+  askDismissable,
+  askFocusedOption,
+  askHasPreview,
+  askIndex,
+  askIsLast,
+  askIsPlanApproval,
+  askOptionsWithId,
+  askOtherSelected,
+  askQuestion,
+  askTitle,
+  askTotal,
+  askUsesInputActions,
+  backAsk,
+  beginCommandEdit,
+  canAskSubmit,
+  canGoPrev,
+  cancelAsk,
+  cancelCommandEdit,
+  clearOptionHighlight,
+  confirmAskNo,
+  decideToolConsent,
+  focusOption,
+  hasEditableCommand,
+  hasPending,
+  hasPendingInputText,
+  hasPendingPanel,
+  highlightOption,
+  inputPlaceholder,
+  inputValue,
+  isEditingToolCommand,
+  modifyPlanApproval,
+  multiPicks,
+  pendingEntryActionsKey,
+  pendingText,
+  pendingKey,
+  selectSingleOption,
+  singleFocus,
+  singlePick,
+  skipAsk,
+  submitAsk,
+  submitAskFreeform,
+  toggleMulti,
+  toolCommandDraft,
+  toolCommandIsEmpty,
+  toolDanger,
+  toolExpanded,
+  toolHeadline,
+  toolIcon,
+  toolInlinePreview,
+  toolInputJson,
+  toolSubmitting,
+  toolSubtitle,
+} = useComposerPendingInteraction({
+  clearContextState: () => clearComposerContextState(),
+  pendingAsk: computed(() => props.pendingAsk),
+  queueResize,
+  resolveAsk: (result) => emit("resolve-ask-user", result),
+  resolveToolConsent: (decision, message, updatedInput) => {
+    if (updatedInput) {
+      emit("resolve-tool-consent", decision, message, updatedInput);
+    } else {
+      emit("resolve-tool-consent", decision, message);
+    }
   },
+  toolConsent: computed(() => props.toolConsent),
 });
 
 const attachmentsForView = computed(() => props.attachments ?? []);
@@ -125,96 +174,16 @@ const contextSearch = useComposerContextSearch({
   addContextAttachment: (attachment) => emit("add-context-attachment", attachment),
 });
 
-function clearComposerContextState() {
+clearComposerContextState = () => {
   contextSearch.clear();
   contextSearch.resetSuppression();
-}
+};
 
 const paste = useComposerPaste({
   richInput,
   clearContextSearch: clearComposerContextState,
   addContextAttachment: (attachment) => emit("add-context-attachment", attachment),
   hasPending: () => hasPending.value,
-});
-
-const {
-  askIndex,
-  askTotal,
-  askQuestion,
-  askDismissable,
-  askIsLast,
-  canGoPrev,
-  askTitle,
-  askIsPlanApproval,
-  askOptionsWithId,
-  askHasPreview,
-  askFocusedOption,
-  askOtherSelected,
-  canAskSubmit,
-  singleFocus,
-  activeOptionId: activeAskOptionId,
-  singlePick,
-  multiPicks,
-  focusOption,
-  highlightOption,
-  clearOptionHighlight,
-  selectSingleOption,
-  toggleMulti,
-  submitAsk,
-  submitAskFreeform,
-  confirmAskNo,
-  skipAsk,
-  backAsk,
-  cancelAsk,
-} = useAskUserInteraction(
-  activeAsk,
-  pendingText,
-  (result) => emit("resolve-ask-user", result),
-);
-
-const hasPendingPanel = computed(() =>
-  !!(activeAsk.value && askQuestion.value) || !!activeToolConsent.value,
-);
-const askUsesInputActions = computed(() =>
-  !!activeAsk.value && askQuestion.value?.mode !== "confirm",
-);
-const pendingInputText = computed(() => pendingText.value.trim());
-const hasPendingInputText = computed(() => pendingInputText.value.length > 0);
-const pendingEntryActionsKey = computed(() => {
-  if (askUsesInputActions.value) return "ask-input";
-  if (askIsPlanApproval.value) return "ask-plan";
-  if (activeAsk.value) return "ask-confirm";
-  if (activeToolConsent.value) return "tool";
-  return "none";
-});
-
-const {
-  toolDanger,
-  toolIcon,
-  toolHeadline,
-  toolInlinePreview,
-  toolInputJson,
-  toolSubtitle,
-} = useToolConsentPresentation(activeToolConsent);
-const {
-  commandDraft: toolCommandDraft,
-  isEditingCommand: isEditingToolCommand,
-  hasEditableCommand,
-  commandIsEmpty: toolCommandIsEmpty,
-  updatedCommandInput,
-  beginCommandEdit,
-  cancelCommandEdit,
-} = useEditableToolCommand(activeToolConsent);
-
-const inputPlaceholder = computed(() => {
-  if (activeToolConsent.value) return "输入拒绝理由，Enter 拒绝此次调用";
-  if (activeAsk.value) {
-    const q = askQuestion.value;
-    if (askIsPlanApproval.value) return "输入修改要求，Enter 退回计划";
-    if (q?.mode === "confirm") return "输入取消原因，Enter 返回给 Agent";
-    return "补充其他回答";
-  }
-  return "可向 agent 询问任何事，输入 @ 使用插件或提及文件";
 });
 
 const previewAttachments = computed(() => attachmentsForView.value.filter(isImageAttachment));
@@ -402,11 +371,6 @@ function onRichKeydown(e: KeyboardEvent) {
   }
 }
 
-function modifyPlanApproval() {
-  if (!hasPendingInputText.value) return;
-  submitAskFreeform();
-}
-
 function queueResize() {
   if (resizeFrameId !== null) return;
   resizeFrameId = window.requestAnimationFrame(() => {
@@ -493,42 +457,9 @@ function onInlineKeydown(e: KeyboardEvent) {
   }
 }
 
-function decideToolConsent(decision: ToolConsentDecision, explicitMessage?: string) {
-  const c = activeToolConsent.value;
-  if (!c || toolSubmitting.value) return;
-  if (decision === "allow" && toolCommandIsEmpty.value) return;
-  toolSubmitting.value = decision;
-  const message = decision === "deny"
-    ? explicitMessage?.trim() || pendingInputText.value || "用户拒绝了此次工具调用"
-    : undefined;
-  const updatedInput = decision === "allow" ? updatedCommandInput.value : undefined;
-  if (updatedInput) {
-    emit("resolve-tool-consent", decision, message, updatedInput);
-  } else {
-    emit("resolve-tool-consent", decision, message);
-  }
-  if (decision === "deny") pendingText.value = "";
-}
-
 watch(inputValue, () => {
   void nextTick(queueResize);
 });
-
-watch(pendingKey, () => {
-  if (!activeAsk.value) pendingText.value = "";
-  toolExpanded.value = false;
-  toolSubmitting.value = null;
-  clearComposerContextState();
-  void nextTick(queueResize);
-}, { immediate: true });
-
-watch(
-  () => askQuestion.value?.id,
-  () => {
-    void nextTick(queueResize);
-  },
-  { immediate: true },
-);
 
 onBeforeUnmount(() => {
   if (resizeFrameId !== null) {
