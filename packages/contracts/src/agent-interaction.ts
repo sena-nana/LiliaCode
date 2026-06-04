@@ -1,6 +1,7 @@
 import type { AskUserResult, AskUserSpec } from "./ask-user";
 import type {
   ChatBackendKind,
+  CodexToolConsentDecision,
   ToolConsentResponsePayload,
   ToolConsentUpdatedInput,
 } from "./chat";
@@ -18,6 +19,14 @@ export interface ToolConsentInteractionPayload {
   toolUseId?: string | null;
   toolUseID?: string | null;
   backend?: ChatBackendKind;
+  additionalPermissions?: unknown;
+  availableDecisions?: CodexToolConsentDecision[];
+  proposedExecpolicyAmendment?: unknown;
+  proposedNetworkPolicyAmendments?: unknown;
+  networkApprovalContext?: unknown;
+  cwd?: string | null;
+  reason?: string | null;
+  commandActions?: unknown;
 }
 
 export type AgentInteractionPayloadByKind = {

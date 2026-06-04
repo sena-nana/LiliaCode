@@ -54,7 +54,23 @@ pub struct CodexMcpServer {
     pub name: String,
     pub command: String,
     pub args: Vec<String>,
+    pub env_keys: Vec<String>,
     pub enabled: bool,
+    pub transport: String,
+    pub editable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMcpServerInput {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub remove_env_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

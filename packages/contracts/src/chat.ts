@@ -1,3 +1,5 @@
+import type { CodexComposerSettings, CodexProfileSettings } from "./provider";
+
 export type ChatRole = "user" | "assistant" | "system";
 
 export type ChatAttachmentKind = "file" | "directory" | "unknown";
@@ -54,6 +56,7 @@ export interface ChatComposerState {
   model: string;
   planMode: boolean;
   permission: PermissionMode;
+  codexSettings?: CodexComposerSettings;
 }
 
 export interface ChatModelOption {
@@ -63,6 +66,7 @@ export interface ChatModelOption {
 }
 
 export type ToolConsentDecision = "allow" | "deny";
+export type CodexToolConsentDecision = "accept" | "decline" | "cancel" | (string & {});
 export type ToolConsentUpdatedInput = Record<string, unknown>;
 
 export interface ToolConsentRequest {
@@ -78,6 +82,14 @@ export interface ToolConsentRequest {
   blockedPath: string | null;
   decisionReason: string | null;
   toolUseId: string | null;
+  additionalPermissions?: unknown;
+  availableDecisions?: CodexToolConsentDecision[];
+  proposedExecpolicyAmendment?: unknown;
+  proposedNetworkPolicyAmendments?: unknown;
+  networkApprovalContext?: unknown;
+  cwd?: string | null;
+  reason?: string | null;
+  commandActions?: unknown;
 }
 
 export interface ToolConsentResponsePayload {
@@ -86,9 +98,11 @@ export interface ToolConsentResponsePayload {
   decision: ToolConsentDecision;
   message: string | null;
   updatedInput?: ToolConsentUpdatedInput;
+  codexDecision?: CodexToolConsentDecision;
 }
 
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
+  codexProfile: CodexProfileSettings;
 }

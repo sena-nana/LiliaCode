@@ -149,6 +149,7 @@ pub(crate) fn default_composer(task_id: &str) -> ChatComposerState {
         model: default_model_for_backend(BACKEND_CLAUDE).to_string(),
         plan_mode: false,
         permission: "ask".to_string(),
+        codex_settings: Default::default(),
     }
 }
 

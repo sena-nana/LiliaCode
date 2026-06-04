@@ -94,6 +94,14 @@ export function emitToolConsentTimeline(protocol, id, payload, status, decisionM
     description: stringOrNull(payload?.description),
     blockedPath: stringOrNull(payload?.blockedPath),
     decisionReason: stringOrNull(payload?.decisionReason),
+    additionalPermissions: payload?.additionalPermissions ?? null,
+    availableDecisions: Array.isArray(payload?.availableDecisions) ? payload.availableDecisions : null,
+    proposedExecpolicyAmendment: payload?.proposedExecpolicyAmendment ?? null,
+    proposedNetworkPolicyAmendments: payload?.proposedNetworkPolicyAmendments ?? null,
+    networkApprovalContext: payload?.networkApprovalContext ?? null,
+    cwd: stringOrNull(payload?.cwd),
+    reason: stringOrNull(payload?.reason),
+    commandActions: payload?.commandActions ?? null,
   };
   if (payload?.commandEdited === true) {
     eventPayload.commandEdited = true;

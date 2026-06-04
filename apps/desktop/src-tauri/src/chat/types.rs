@@ -84,6 +84,30 @@ pub(crate) struct ChatComposerState {
     pub(crate) plan_mode: bool,
     /// "full" | "ask" | "readonly"
     pub(crate) permission: String,
+    #[serde(default)]
+    pub(crate) codex_settings: CodexComposerSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexComposerSettings {
+    #[serde(default)]
+    pub(crate) profile: Option<String>,
+    #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) runtime_workspace_roots: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) permissions: Option<CodexComposerPermissions>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexComposerPermissions {
+    #[serde(default)]
+    pub(crate) profile: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

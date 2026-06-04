@@ -49,14 +49,111 @@ function codexModelFromResult(result, fallback = null) {
   return stringOrNull(result.model) || stringOrNull(result.thread?.model) || fallback;
 }
 
+const CODEX_PERMISSION_PROFILE_IDS = {
+  readOnly: ":read-only",
+  workspaceWrite: ":workspace",
+  dangerFullAccess: ":danger-no-sandbox",
+};
+
+function stringArray(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    const text = stringOrNull(item)?.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
+function normalizeCodexSettings(cmd) {
+  const input = isRecord(cmd.codexSettings) ? cmd.codexSettings : {};
+  const permissions = isRecord(input.permissions) ? input.permissions : {};
+  const permissionProfile = stringOrNull(permissions.profile);
+  return {
+    profile: stringOrNull(input.profile) || "default",
+    model: stringOrNull(input.model) || stringOrNull(cmd.model) || null,
+    reasoningEffort: stringOrNull(input.reasoningEffort),
+    runtimeWorkspaceRoots: stringArray(input.runtimeWorkspaceRoots),
+    permissionProfile: CODEX_PERMISSION_PROFILE_IDS[permissionProfile] || null,
+  };
+}
+
+function codexSandboxPolicy(permission) {
+  if (permission === "full") return { type: "dangerFullAccess" };
+  if (permission === "readonly") return { type: "readOnly" };
+  return { type: "workspaceWrite" };
+}
+
+function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = false } = {}) {
+  if (settings.model) params.model = settings.model;
+  if (settings.reasoningEffort) {
+    params.reasoningEffort = settings.reasoningEffort;
+    params.effort = settings.reasoningEffort;
+  }
+  if (settings.runtimeWorkspaceRoots.length > 0) {
+    params.runtimeWorkspaceRoots = settings.runtimeWorkspaceRoots;
+  }
+  if (settings.permissionProfile) {
+    params.permissions = settings.permissionProfile;
+  } else if (includeSandbox) {
+    params.sandboxPolicy = codexSandboxPolicy(cmd.permission);
+  }
+}
+
+function buildCodexThreadSettingsParams(threadId, cmd) {
+  const settings = normalizeCodexSettings(cmd);
+  const params = { threadId };
+  assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
+  return params;
+}
+
+function hasCodexThreadSettingsParams(params) {
+  return Object.keys(params).some((key) => key !== "threadId");
+}
+
+function emitCodexSettingsUpdateDiagnostic(protocol, err, params) {
+  protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "error",
+    title: "Codex settings update failed",
+    summary: "thread/settings/update 失败，已降级为本轮 turn/start 参数。",
+    payload: {
+      backend: "codex",
+      subkind: "settings",
+      method: "thread/settings/update",
+      error: err?.message || String(err),
+      fallback: "turn/start",
+      settingsKeys: Object.keys(params).filter((key) => key !== "threadId"),
+    },
+    sourceId: "codex:settings:update",
+  });
+}
+
+export async function updateCodexThreadSettings(server, threadId, cmd, protocol) {
+  const params = buildCodexThreadSettingsParams(threadId, cmd);
+  if (!hasCodexThreadSettingsParams(params)) return { ok: true, fallback: false };
+  try {
+    await server.request("thread/settings/update", params);
+    return { ok: true, fallback: false };
+  } catch (err) {
+    emitCodexSettingsUpdateDiagnostic(protocol, err, params);
+    return { ok: false, fallback: true };
+  }
+}
+
 export async function startCodexAppServerSession(server, cmd, cwdFn = process.cwd) {
   const { cwd, model, resumeSessionId, permission } = cmd;
+  const settings = normalizeCodexSettings(cmd);
   const common = {
-    model: model || undefined,
+    model: settings.model || model || undefined,
     cwd: cwd || cwdFn(),
-    sandbox: mapCodexSandboxMode(permission),
     approvalPolicy: mapCodexApprovalPolicy(permission),
   };
+  assignCodexSettingsParams(common, settings, cmd);
+  if (!settings.permissionProfile) common.sandbox = mapCodexSandboxMode(permission);
   if (resumeSessionId) {
     const resumed = await server.request("thread/resume", {
       threadId: resumeSessionId,
@@ -143,12 +240,14 @@ export async function startCodexAppServerTurn(
   cwdFn = process.cwd,
   options = {},
 ) {
+  const settings = normalizeCodexSettings(cmd);
   const params = {
     threadId,
     input: [{ type: "text", text: prompt }],
     cwd: cmd.cwd || cwdFn(),
     approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
   };
+  assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   if (options.collaborationMode) params.collaborationMode = options.collaborationMode;
   return server.request("turn/start", params);
 }
@@ -192,7 +291,13 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     const session = await startCodexAppServerSession(server, cmd, context.cwd || process.cwd);
     const threadId = session.threadId;
     if (!threadId) throw new Error("Codex app-server did not return a thread id");
-    const selectedModel = cmd.model || session.model || null;
+    await updateCodexThreadSettings(
+      server,
+      threadId,
+      cmd,
+      context.protocol,
+    );
+    const selectedModel = normalizeCodexSettings(cmd).model || session.model || null;
     const planPreset = cmd.planMode === true ? await readCodexPlanModePreset(server) : null;
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);
     ctx.interactions = context.interactions;
@@ -284,7 +389,7 @@ export function emitCodexRuntimeExtensionsTimeline(protocol, extensions) {
     .map((server) => stringOrNull(server?.name))
     .filter(Boolean);
   protocol.emitTimeline({
-    kind: "mcp",
+    kind: "diagnostic",
     status: "info",
     title: "Codex MCP config",
     summary: count > 0

@@ -1,25 +1,4 @@
-// Lilia 工具协议 —— backend-agnostic 的事件分类 + 渲染规则。
-//
-// 协议形状：每条 timeline 事件按 `{kind, subkind?, payload}` 描述事实。
-//
-// | kind          | 必须 payload   | 可选 payload                                  | 常见 subkind        |
-// |---------------|----------------|-----------------------------------------------|---------------------|
-// | command       | command        | cwd / exit / output / stderr / duration       | —                   |
-// | file_read     | path           | offset / limit                                | —                   |
-// | file_change   | path           | editCount                                     | edit / multi_edit / write / notebook |
-// | search        | query          | path / glob                                   | glob / grep / web   |
-// | web_fetch     | url            | —                                             | —                   |
-// | subagent      | agentType      | description / prompt / result                 | —                   |
-// | plan          | plan           | approved / allowedPrompts / revisionRequest  | —                   |
-// | todo_list     | items[]        | —                                             | —                   |
-// | ask_user      | questions[]    | output / result / cancelled                   | —                   |
-// | tool          | toolName       | input / output                                | —（兜底）           |
-//
-// 派生 display 走 `deriveLiliaToolDisplay({kind, subkind, payload, ...})` —— 渲染时
-// 现算的视图缓存，绝不持久化到 DB。改派生规则可即时影响历史事件。
-//
-// 这是 .mjs 而非 .ts：runner 由 Tauri 直接 `node agent-runner.mjs` 拉起，
-// 不经过任何构建步骤；TS 端通过同目录 liliaTools.d.mts 拿到类型。
+// 这是 .mjs 而非 .ts：runner 由 Tauri 直接 `node agent-runner.mjs` 拉起。
 import {
   compactLine,
   isRecord,
@@ -213,23 +192,20 @@ const LILIA_TOOL_REGISTRY = {
       icon: "terminal",
       bucket: "command",
       unit: "条命令",
-      build(payload, status) {
-        const command = compactLine(pick(payload, ["command"]), 1200);
-        const output = readFirstText(payload, ["output", "stdout"], 6000);
-        const stderr = readFirstText(payload, ["stderr"], 6000);
-        const shouldShowCommand = command.length > 180 || Boolean(output || stderr);
-        return {
-          object: command,
-          details: [
-            isFailureStatus(status) ? fieldsDetail([
-              displayField("cwd", pick(payload, ["cwd"])),
-              displayField("exit", pick(payload, ["exit", "exitCode"])),
-              displayField("duration", pick(payload, ["duration"])),
-            ]) : null,
-            shouldShowCommand ? codeDetail("COMMAND", command, "shell") : null,
-            codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
-          ],
-        };
+      build: buildCommandDisplay,
+    },
+    subkinds: {
+      lilia_edit_exec: {
+        action: "执行已编辑命令",
+        icon: "terminal",
+        bucket: "command",
+        unit: "条命令",
+        build(payload, status) {
+          return buildCommandDisplay(payload, status, {
+            commandKeys: ["modifiedCommand", "command"],
+            includeEditedCommands: true,
+          });
+        },
       },
     },
   },
@@ -462,6 +438,32 @@ const LILIA_TOOL_REGISTRY = {
         };
       },
     },
+    subkinds: {
+      hook: {
+        action: "运行 Hook",
+        icon: "hook",
+        bucket: "tool",
+        unit: "个 Hook",
+        objectInLabel: true,
+        build(payload) {
+          const hookName = compactLine(pick(payload, ["hookName", "toolName", "name"]), 200);
+          const hookEvent = compactLine(pick(payload, ["hookEvent", "event"]), 200);
+          const output = readFirstText(payload, ["output", "stdout", "result", "response"], 6000);
+          const stderr = readFirstText(payload, ["stderr", "error", "message"], 6000);
+          return {
+            object: hookName || hookEvent,
+            details: [
+              fieldsDetail([
+                displayField("event", hookEvent),
+                displayField("exit", pick(payload, ["exitCode", "exit"])),
+              ]),
+              codeDetail("INPUT", pick(payload, ["input", "arguments", "args", "parameters"])),
+              codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", output || stderr),
+            ],
+          };
+        },
+      },
+    },
   },
 };
 
@@ -502,6 +504,40 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title, status }
       count,
     },
     defaultExpanded: built.defaultExpanded,
+  };
+}
+
+function buildCommandDisplay(payload, status, options = {}) {
+  const commandKeys = Array.isArray(options.commandKeys) ? options.commandKeys : ["command"];
+  const command = compactLine(pick(payload, commandKeys), 1200);
+  const output = readFirstText(payload, ["output", "aggregatedOutput", "stdout"], 6000);
+  const stderr = readFirstText(payload, ["stderr", "error"], 6000);
+  const combinedOutput = output && stderr && !output.includes(stderr)
+    ? `${output}\n${stderr}`.trim()
+    : output || stderr;
+  const shouldShowCommand = command.length > 180 ||
+    Boolean(output || stderr || options.includeEditedCommands);
+  return {
+    object: command,
+    details: [
+      fieldsDetail([
+        displayField("cwd", pick(payload, ["cwd"])),
+        displayField("exit", pick(payload, ["exit", "exitCode"])),
+        displayField("duration", pick(payload, ["duration", "durationMs"])),
+        displayField("approval", pick(payload, ["approvalId"])),
+        displayField("owner", pick(payload, ["executionOwner"])),
+      ]),
+      options.includeEditedCommands
+        ? codeDetail("ORIGINAL COMMAND", pick(payload, ["originalCommand"]), "shell")
+        : null,
+      options.includeEditedCommands
+        ? codeDetail("MODIFIED COMMAND", pick(payload, ["modifiedCommand", "command"]), "shell")
+        : null,
+      !options.includeEditedCommands && shouldShowCommand
+        ? codeDetail("COMMAND", command, "shell")
+        : null,
+      codeDetail(stderr ? "ERROR / OUTPUT" : "OUTPUT", combinedOutput),
+    ],
   };
 }
 

@@ -29,7 +29,10 @@ export function codexTimelineKindForItem(item) {
     case "reasoning":
       return { kind: "reasoning" };
     case "commandExecution":
-      return { kind: "command" };
+      return item?.subkind === "lilia_edit_exec" ||
+        (item?.executionOwner === "lilia" && item?.modifiedCommand)
+        ? { kind: "command", subkind: "lilia_edit_exec" }
+        : { kind: "command" };
     case "fileChange":
       return { kind: "file_change" };
     case "mcpToolCall":
@@ -67,12 +70,20 @@ export function summarizeCodexFileChanges(changes) {
     .join("\n");
 }
 
+function copyDefinedFields(target, source, fields) {
+  if (!source || typeof source !== "object") return target;
+  for (const field of fields) {
+    if (source[field] !== undefined) target[field] = source[field];
+  }
+  return target;
+}
+
 export function codexTimelineTitle(kind, item, eventType) {
   switch (kind) {
     case "reasoning":
       return "Reasoning";
     case "command":
-      return shortText(item.command, 200) || "Command";
+      return shortText(item.modifiedCommand || item.command, 200) || "Command";
     case "file_change":
       return "File change";
     case "mcp":
@@ -93,7 +104,7 @@ export function codexTimelineSummary(kind, item) {
     case "reasoning":
       return shortText(item.text || item.summary?.join?.("\n"), 1200) || "";
     case "command":
-      return shortText(item.command, 1200) || "";
+      return shortText(item.modifiedCommand || item.command, 1200) || "";
     case "file_change":
       return summarizeCodexFileChanges(item.changes);
     case "mcp":
@@ -124,13 +135,34 @@ export function codexTimelinePayload(kind, subkind, item, eventType) {
       return {
         ...base,
         command: item.command,
+        originalCommand: item.originalCommand,
+        modifiedCommand: item.modifiedCommand,
+        executionOwner: item.executionOwner,
+        cwd: item.cwd,
+        stdout: item.stdout,
+        stderr: item.stderr,
+        aggregatedOutput: item.aggregatedOutput,
+        exitCode: item.exitCode,
+        durationMs: item.durationMs,
+        approvalId: item.approvalId,
         output: item.aggregatedOutput,
         exit: item.exitCode,
       };
     case "file_change":
-      return { ...base, changes: item.changes };
+      return copyDefinedFields({ ...base }, item, [
+        "path",
+        "changes",
+        "grantRoot",
+        "output",
+        "error",
+      ]);
     case "mcp":
-      return { ...base, server: item.server, tool: item.tool };
+      return copyDefinedFields({ ...base, server: item.server, tool: item.tool }, item, [
+        "arguments",
+        "input",
+        "result",
+        "error",
+      ]);
     case "search":
       return { ...base, query: item.query };
     case "todo_list":

@@ -10,6 +10,7 @@ import type {
   ClaudePlugin,
   ClaudeSkill,
   CodexMcpServer,
+  CodexMcpServerInput,
   PluginScope,
   PluginsOverview,
 } from "@lilia/contracts";
@@ -20,6 +21,7 @@ export type {
   ClaudePlugin,
   ClaudeSkill,
   CodexMcpServer,
+  CodexMcpServerInput,
   PluginScope,
   PluginsOverview,
 };
@@ -121,6 +123,25 @@ export function openClaudeMcpConfig(): Promise<void> {
 
 export function listCodexMcpServers(): Promise<CodexMcpServer[]> {
   return invoke<CodexMcpServer[]>("plugins_list_codex_mcp_servers");
+}
+
+export function createCodexMcpServer(input: CodexMcpServerInput): Promise<CodexMcpServer> {
+  return invoke<CodexMcpServer>("plugins_create_codex_mcp_server", { input });
+}
+
+export function updateCodexMcpServer(
+  name: string,
+  input: CodexMcpServerInput,
+): Promise<CodexMcpServer> {
+  return invoke<CodexMcpServer>("plugins_update_codex_mcp_server", { name, input });
+}
+
+export function deleteCodexMcpServer(name: string): Promise<void> {
+  return invoke<void>("plugins_delete_codex_mcp_server", { name });
+}
+
+export function setCodexMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
+  return invoke<void>("plugins_set_codex_mcp_server_enabled", { name, enabled });
 }
 
 export function openCodexConfig(): Promise<void> {

@@ -11,8 +11,9 @@ use super::codex_probe::{build_codex_app_server_probe_status_cached, cli_availab
 use super::config::{
     known_provider_key_for_backend, load_active_backend, load_agent_interaction_settings,
     load_assistant_ai_config, load_cc_switch_config, load_provider_config, load_router_mode,
-    provider_key_for_backend, router_key_for_backend, AGENT_INTERACTION_KEY, ASSISTANT_AI_KEY,
-    CC_SWITCH_KEY, PROVIDER_ACTIVE_BACKEND_KEY, ROUTER_CC_SWITCH, ROUTER_DIRECT,
+    normalize_agent_interaction_settings, provider_key_for_backend, router_key_for_backend,
+    AGENT_INTERACTION_KEY, ASSISTANT_AI_KEY, CC_SWITCH_KEY, PROVIDER_ACTIVE_BACKEND_KEY,
+    ROUTER_CC_SWITCH, ROUTER_DIRECT,
 };
 use super::connection::{build_backend_env_status, build_cc_switch_status};
 use super::types::{
@@ -119,6 +120,7 @@ pub fn agent_interaction_set_settings(
     app: AppHandle,
     settings: AgentInteractionSettings,
 ) -> Result<(), String> {
+    let settings = normalize_agent_interaction_settings(Some(settings));
     save_store_value(&app, AGENT_INTERACTION_KEY, &settings)
 }
 

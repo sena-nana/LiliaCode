@@ -89,4 +89,49 @@ describe("Settings provider switch", () => {
     });
     expect(input.value).toBe("Ctrl+Alt+P");
   });
+
+  it("Codex profile settings 保存受控 permissions 与 workspace roots", async () => {
+    const view = render(Settings);
+
+    await fireEvent.click(view.getByRole("radio", { name: "High" }));
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "agent_interaction_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes("\"reasoningEffort\":\"high\"")
+        ),
+      ).toBe(true);
+    });
+    await fireEvent.click(view.getByRole("radio", { name: "工作区" }));
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "agent_interaction_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes("\"permissions\":{\"profile\":\"workspaceWrite\"}")
+        ),
+      ).toBe(true);
+    });
+
+    const roots = view.container.querySelector(".settings-input--textarea") as HTMLTextAreaElement;
+    await fireEvent.update(roots, "C:/repo\nC:/repo\nD:/shared\n");
+    await fireEvent.blur(roots);
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "agent_interaction_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes("\"runtimeWorkspaceRoots\":[\"C:/repo\",\"D:/shared\"]")
+        ),
+      ).toBe(true);
+    });
+  });
 });

@@ -9,6 +9,46 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) non_interrupt_mode: bool,
     #[serde(default)]
     pub(crate) debug: bool,
+    #[serde(default)]
+    pub(crate) codex_profile: CodexProfileSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexControlledPermissions {
+    pub(crate) profile: String,
+}
+
+impl Default for CodexControlledPermissions {
+    fn default() -> Self {
+        Self {
+            profile: "default".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexProfileSettings {
+    pub(crate) profile: String,
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) runtime_workspace_roots: Vec<String>,
+    #[serde(default)]
+    pub(crate) permissions: CodexControlledPermissions,
+}
+
+impl Default for CodexProfileSettings {
+    fn default() -> Self {
+        Self {
+            profile: "default".to_string(),
+            model: None,
+            reasoning_effort: None,
+            runtime_workspace_roots: Vec::new(),
+            permissions: CodexControlledPermissions::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

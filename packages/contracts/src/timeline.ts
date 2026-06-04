@@ -15,6 +15,7 @@ export type AgentTimelineKnownEventKind =
   | "web_fetch"
   | "mcp"
   | "web_search"
+  | "diagnostic"
   | "error"
   | "turn";
 
@@ -56,6 +57,7 @@ export type AgentTimelineDisplayBucket =
   | "search"
   | "web_search"
   | "subagent"
+  | "diagnostic"
   | "error"
   | "other"
   | (string & {});

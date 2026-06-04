@@ -22,9 +22,12 @@ use crate::chat::timeline_sink::{
 };
 use crate::chat::types::{
     AgentInteractionRequestEvent, AskUserRequestEvent, ChatAttachment, ChatComposerState,
-    DoneEvent, ToolConsentRequestEvent, TurnStartedEvent,
+    CodexComposerSettings, DoneEvent, ToolConsentRequestEvent, TurnStartedEvent,
 };
-use crate::provider::{build_codex_app_server_probe_status, resolve_connection_for};
+use crate::provider::{
+    build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
+    CodexProfileSettings,
+};
 use crate::store::LiliaStore;
 use crate::{plugins, BACKEND_CODEX};
 
@@ -113,7 +116,15 @@ pub(crate) fn spawn_agent_turn(
         };
 
         let extensions = plugins::runtime_extensions(&app_handle, Some(&project_cwd));
-        let stdin_payload = serde_json::json!({
+        let codex_settings = if backend_for_thread == BACKEND_CODEX {
+            Some(build_effective_codex_settings(
+                &app_handle,
+                &composer_for_thread,
+            ))
+        } else {
+            None
+        };
+        let mut stdin_payload = serde_json::json!({
             "backend": backend_for_thread,
             "cwd": project_cwd,
             "prompt": prompt_for_thread,
@@ -124,6 +135,9 @@ pub(crate) fn spawn_agent_turn(
             "permission": composer_for_thread.permission,
             "extensions": extensions,
         });
+        if let Some(settings) = codex_settings {
+            stdin_payload["codexSettings"] = settings;
+        }
 
         let mut cmd = Command::new("node");
         cmd.arg(&script_path)
@@ -419,6 +433,126 @@ pub(crate) fn spawn_agent_turn(
             !finished.interrupted && !finished.reset,
         );
     });
+}
+
+fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState) -> JsonValue {
+    let global = load_agent_interaction_settings(app).codex_profile;
+    let project = crate::project_shell::load_project_settings(app)
+        .codex_defaults
+        .unwrap_or_default();
+    let local = &composer.codex_settings;
+    let fallback_model = composer.model.trim();
+    let default_model = crate::chat::state::default_model_for_backend(BACKEND_CODEX);
+    let model = normalize_optional_string(local.model.clone())
+        .or_else(|| {
+            if !fallback_model.is_empty() && fallback_model != default_model {
+                Some(fallback_model.to_string())
+            } else {
+                normalize_optional_string(project.model.clone())
+                    .or_else(|| normalize_optional_string(global.model.clone()))
+            }
+        })
+        .or_else(|| normalize_optional_string(Some(fallback_model.to_string())));
+    let reasoning_effort = normalize_reasoning_effort(local.reasoning_effort.clone())
+        .or_else(|| normalize_reasoning_effort(project.reasoning_effort.clone()))
+        .or_else(|| normalize_reasoning_effort(global.reasoning_effort.clone()));
+    let runtime_workspace_roots = effective_runtime_workspace_roots(local, &project, &global);
+    let permissions_profile = normalize_permission_profile(
+        local
+            .permissions
+            .as_ref()
+            .map(|permissions| permissions.profile.clone())
+            .or_else(|| {
+                let project_profile =
+                    normalize_permission_profile(Some(project.permissions.profile.clone()));
+                if project_profile == "default" {
+                    None
+                } else {
+                    Some(project_profile)
+                }
+            })
+            .or_else(|| Some(global.permissions.profile.clone())),
+    );
+    let profile = normalize_codex_settings_profile(local.profile.clone())
+        .or_else(|| {
+            let project_profile = normalize_codex_settings_profile(Some(project.profile));
+            project_profile.filter(|value| value != "default")
+        })
+        .unwrap_or_else(|| normalize_codex_settings_profile(Some(global.profile)).unwrap());
+
+    serde_json::json!({
+        "profile": profile,
+        "model": model,
+        "reasoningEffort": reasoning_effort,
+        "runtimeWorkspaceRoots": runtime_workspace_roots,
+        "permissions": {
+            "profile": permissions_profile,
+        },
+    })
+}
+
+fn effective_runtime_workspace_roots(
+    local: &CodexComposerSettings,
+    project: &CodexProfileSettings,
+    global: &CodexProfileSettings,
+) -> Vec<String> {
+    match local.runtime_workspace_roots.clone() {
+        Some(roots) => normalize_runtime_workspace_roots(roots),
+        None if !project.runtime_workspace_roots.is_empty() => {
+            normalize_runtime_workspace_roots(project.runtime_workspace_roots.clone())
+        }
+        None => normalize_runtime_workspace_roots(global.runtime_workspace_roots.clone()),
+    }
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn normalize_reasoning_effort(value: Option<String>) -> Option<String> {
+    let value = normalize_optional_string(value)?;
+    match value.as_str() {
+        "low" | "medium" | "high" | "xhigh" => Some(value),
+        _ => None,
+    }
+}
+
+fn normalize_runtime_workspace_roots(roots: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for root in roots {
+        let trimmed = root.trim();
+        if trimmed.is_empty() || normalized.iter().any(|seen| seen == trimmed) {
+            continue;
+        }
+        normalized.push(trimmed.to_string());
+    }
+    normalized
+}
+
+fn normalize_permission_profile(value: Option<String>) -> String {
+    match normalize_optional_string(value).as_deref() {
+        Some("readOnly") => "readOnly".to_string(),
+        Some("workspaceWrite") => "workspaceWrite".to_string(),
+        Some("dangerFullAccess") => "dangerFullAccess".to_string(),
+        _ => "default".to_string(),
+    }
+}
+
+fn normalize_codex_settings_profile(value: Option<String>) -> Option<String> {
+    match normalize_optional_string(value).as_deref() {
+        Some("fast") => Some("fast".to_string()),
+        Some("balanced") => Some("balanced".to_string()),
+        Some("deep") => Some("deep".to_string()),
+        Some("default") => Some("default".to_string()),
+        _ => None,
+    }
 }
 
 pub(crate) fn finish_agent_turn(

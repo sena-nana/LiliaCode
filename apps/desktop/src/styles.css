@@ -1613,6 +1613,29 @@ button.ghost:hover {
   margin-top: 2px;
 }
 
+.settings-input {
+  width: min(360px, 45vw);
+  min-height: 34px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-input:focus {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.settings-input--textarea {
+  min-height: 78px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 .segmented {
   display: inline-flex;
   background: var(--bg);

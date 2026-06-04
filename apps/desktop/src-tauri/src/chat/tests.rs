@@ -223,6 +223,7 @@ mod agent_event_sink_tests {
             model: "claude-sonnet-4-6".to_string(),
             plan_mode: true,
             permission: "readonly".to_string(),
+            codex_settings: Default::default(),
         };
 
         let normalized = normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX);
@@ -242,6 +243,7 @@ mod agent_event_sink_tests {
             model: "gpt-5.4-mini".to_string(),
             plan_mode: false,
             permission: "ask".to_string(),
+            codex_settings: Default::default(),
         };
 
         let normalized = normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX);

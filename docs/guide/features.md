@@ -30,9 +30,8 @@
 - [x] Codex 对话：在 LiliaCode 中发起新对话并继续历史会话。
 - [x] Codex 过程展示：展示 Codex 的思考、命令、文件变更、搜索和最终回复。
 - [x] Codex 环境检查：提示 Codex CLI、API 和连接状态是否可用。
-- [x] Codex MCP 读取：沿用 Codex 配置接入 MCP server。
-- [ ] Codex MCP 管理：在 LiliaCode 内增删改 Codex MCP server。
-- [ ] Codex 配置档案：支持 profiles、沙箱、审批预设和项目级配置。
+- [x] Codex MCP 管理：读取并增删改启停用户级 stdio Codex MCP server，HTTP / OAuth / 未知 transport 只读展示。
+- [x] Codex 配置档案：支持 profiles、reasoning effort、runtime workspace roots、受控 permissions 和项目级默认。
 - [ ] Codex 专项工作流：支持代码审查、修复建议和批量改动等常用流程。
 - [ ] 内置浏览器交互：通过 IAB 与用户互动或调试代码。
 

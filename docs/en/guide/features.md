@@ -30,9 +30,8 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Codex conversations: start new conversations and continue history sessions in LiliaCode.
 - [x] Codex process display: show Codex reasoning, commands, file changes, searches, and final replies.
 - [x] Codex environment checks: show whether the Codex CLI, API, and connection state are available.
-- [x] Codex MCP discovery: reuse Codex configuration to connect MCP servers.
-- [ ] Codex MCP management: add, edit, and remove Codex MCP servers inside LiliaCode.
-- [ ] Codex profiles: support profiles, sandbox and approval presets, and project-level configuration.
+- [x] Codex MCP management: discover, create, edit, delete, and enable user-level stdio Codex MCP servers; HTTP / OAuth / unknown transports remain read-only.
+- [x] Codex profiles: support profiles, reasoning effort, runtime workspace roots, controlled permissions, and project-level defaults.
 - [ ] Codex workflows: support common flows such as code review, fix suggestions, and batch changes.
 - [ ] Built-in browser interaction: interact with users or debug code through IAB.
 

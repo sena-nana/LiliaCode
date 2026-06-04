@@ -178,13 +178,53 @@ const baseClaudeMcpServers = [{
   envKeys: ["WEATHER_TOKEN"],
   enabled: true,
 }];
+const baseCodexMcpServers = [
+  {
+    name: "mock-mcp",
+    command: "node",
+    args: ["mock-mcp.js"],
+    envKeys: ["MOCK_TOKEN"],
+    enabled: true,
+    transport: "stdio",
+    editable: true,
+  },
+  {
+    name: "remote-mcp",
+    command: "",
+    args: [],
+    envKeys: [],
+    enabled: true,
+    transport: "http",
+    editable: false,
+  },
+];
 let claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
 let claudeMcpServers = baseClaudeMcpServers.map((server) => ({
   ...server,
   args: [...server.args],
   envKeys: [...server.envKeys],
 }));
-let agentInteractionSettings = { nonInterruptMode: false, debug: false };
+let codexMcpServers = baseCodexMcpServers.map((server) => ({
+  ...server,
+  args: [...server.args],
+  envKeys: [...server.envKeys],
+}));
+function defaultAgentInteractionSettings() {
+  return {
+    nonInterruptMode: false,
+    debug: false,
+    codexProfile: {
+      profile: "default",
+      model: null,
+      reasoningEffort: null,
+      runtimeWorkspaceRoots: [] as string[],
+      permissions: { profile: "default" },
+    },
+  };
+}
+
+let agentInteractionSettings = defaultAgentInteractionSettings();
+let projectSettings = { cloneParentDir: null as string | null, codexDefaults: null as unknown };
 let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
 let nextPopupSettingsError: string | null = null;
 let popupLastProjectId: string | null = null;
@@ -383,7 +423,13 @@ export function resetTauriMockData() {
     args: [...server.args],
     envKeys: [...server.envKeys],
   }));
-  agentInteractionSettings = { nonInterruptMode: false, debug: false };
+  codexMcpServers = baseCodexMcpServers.map((server) => ({
+    ...server,
+    args: [...server.args],
+    envKeys: [...server.envKeys],
+  }));
+  agentInteractionSettings = defaultAgentInteractionSettings();
+  projectSettings = { cloneParentDir: null, codexDefaults: null };
   popupWindowSettings = { shortcut: null };
   nextPopupSettingsError = null;
   popupLastProjectId = null;
@@ -742,6 +788,24 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return projects.find((project) => project.id === id) ?? null;
     }
 
+    case "project_get_settings":
+      return { ...projectSettings };
+
+    case "project_set_settings": {
+      const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
+        ? args.settings as Record<string, unknown>
+        : {};
+      projectSettings = {
+        cloneParentDir: typeof settings.cloneParentDir === "string"
+          ? settings.cloneParentDir
+          : null,
+        codexDefaults: "codexDefaults" in settings
+          ? settings.codexDefaults
+          : null,
+      };
+      return undefined;
+    }
+
     case "project_create": {
       const name = String(args.name || "未命名项目");
       const cwd = typeof args.cwd === "string" ? args.cwd : null;
@@ -1035,14 +1099,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           envKeys: [...server.envKeys],
         })),
         claudeMcpConfigPath: "C:\\Users\\mock\\.lilia\\config\\claude-mcp-servers.json",
-        codexMcpServers: [
-          {
-            name: "mock-mcp",
-            command: "node",
-            args: ["mock-mcp.js"],
-            enabled: true,
-          },
-        ],
+        codexMcpServers: codexMcpServers.map((server) => ({
+          ...server,
+          args: [...server.args],
+          envKeys: [...server.envKeys],
+        })),
         codexConfigPath: "C:\\Users\\mock\\.codex\\config.toml",
         warnings: [],
       };
@@ -1125,6 +1186,79 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "plugins_open_claude_mcp_config":
       return undefined;
 
+    case "plugins_create_codex_mcp_server": {
+      const input = args.input as {
+        name?: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+      const server = {
+        name: String(input.name ?? ""),
+        command: String(input.command ?? ""),
+        args: Array.isArray(input.args) ? input.args.map(String) : [],
+        envKeys: Object.keys(input.env ?? {}),
+        enabled: true,
+        transport: "stdio",
+        editable: true,
+      };
+      codexMcpServers = [...codexMcpServers, server];
+      return { ...server, args: [...server.args], envKeys: [...server.envKeys] };
+    }
+
+    case "plugins_update_codex_mcp_server": {
+      const name = String(args.name);
+      const input = args.input as {
+        name?: string;
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+        removeEnvKeys?: string[];
+      };
+      let updated = codexMcpServers.find((server) => server.name === name);
+      if (!updated || !updated.editable) return undefined;
+      const removed = new Set(
+        Array.isArray(input.removeEnvKeys) ? input.removeEnvKeys.map(String) : [],
+      );
+      const envKeys = input.env
+        ? [
+            ...updated.envKeys.filter((key) => !removed.has(key) && !(key in input.env!)),
+            ...Object.keys(input.env),
+          ]
+        : updated.envKeys.filter((key) => !removed.has(key));
+      updated = {
+        ...updated,
+        name: String(input.name ?? updated.name),
+        command: String(input.command ?? updated.command),
+        args: Array.isArray(input.args) ? input.args.map(String) : updated.args,
+        envKeys,
+      };
+      codexMcpServers = codexMcpServers.map((server) =>
+        server.name === name ? updated : server
+      );
+      return { ...updated, args: [...updated.args], envKeys: [...updated.envKeys] };
+    }
+
+    case "plugins_delete_codex_mcp_server": {
+      const name = String(args.name);
+      codexMcpServers = codexMcpServers.filter((server) =>
+        server.name !== name || !server.editable
+      );
+      return undefined;
+    }
+
+    case "plugins_set_codex_mcp_server_enabled": {
+      const name = String(args.name);
+      const enabled = args.enabled === true;
+      codexMcpServers = codexMcpServers.map((server) =>
+        server.name === name && server.editable ? { ...server, enabled } : server
+      );
+      return undefined;
+    }
+
+    case "plugins_open_codex_config":
+      return undefined;
+
     case "chat_set_composer_state":
       return undefined;
 
@@ -1135,10 +1269,35 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const settings = args.settings as {
         nonInterruptMode?: unknown;
         debug?: unknown;
+        codexProfile?: {
+          profile?: unknown;
+          model?: unknown;
+          reasoningEffort?: unknown;
+          runtimeWorkspaceRoots?: unknown;
+          permissions?: { profile?: unknown };
+        };
       } | undefined;
+      const codexProfile = settings?.codexProfile;
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
+        codexProfile: {
+          profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
+          model: typeof codexProfile?.model === "string" && codexProfile.model.trim()
+            ? codexProfile.model.trim()
+            : null,
+          reasoningEffort: typeof codexProfile?.reasoningEffort === "string"
+            ? codexProfile.reasoningEffort
+            : null,
+          runtimeWorkspaceRoots: Array.isArray(codexProfile?.runtimeWorkspaceRoots)
+            ? codexProfile.runtimeWorkspaceRoots.map(String)
+            : [],
+          permissions: {
+            profile: typeof codexProfile?.permissions?.profile === "string"
+              ? codexProfile.permissions.profile
+              : "default",
+          },
+        },
       };
       return undefined;
     }

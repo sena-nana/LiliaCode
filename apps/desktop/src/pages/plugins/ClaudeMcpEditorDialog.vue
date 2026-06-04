@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Plus, Server, Trash2 } from "lucide-vue-next";
-import type { ClaudeMcpServer } from "../../services/plugins";
-import type { EnvDraftRow } from "./useClaudeMcpEditor";
+import type { EnvDraftRow, EditableMcpServer } from "./useMcpServerEditor";
 
 defineProps<{
   open: boolean;
@@ -9,8 +8,9 @@ defineProps<{
   command: string;
   argsText: string;
   envRows: EnvDraftRow[];
-  editingMcp: ClaudeMcpServer | null;
+  editingMcp: EditableMcpServer | null;
   title: string;
+  serverLabel: string;
   saving: boolean;
   error: string | null;
   configPath: string | null;
@@ -33,7 +33,7 @@ const emit = defineEmits<{
       <div
         v-if="open"
         class="search-palette"
-        role="dialog" aria-modal="true" aria-label="Claude MCP"
+        role="dialog" aria-modal="true" :aria-label="serverLabel"
         @click.self="emit('update:open', false)"
       >
         <div class="search-palette__card dialog__card">
@@ -106,7 +106,7 @@ const emit = defineEmits<{
             </div>
             <p v-if="error" class="plugins-create__error">{{ error }}</p>
             <p class="plugins-create__hint">
-              配置保存到 <code>{{ configPath || "~/.lilia/config/claude-mcp-servers.json" }}</code>。
+              配置保存到 <code>{{ configPath }}</code>。
             </p>
           </div>
           <div class="dialog__actions">

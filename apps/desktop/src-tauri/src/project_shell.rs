@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::provider::CodexProfileSettings;
 use crate::settings_store::{load_store_value, save_store_value};
 
 const PROJECT_CLONE_PARENT_KEY: &str = "project.cloneParentDir";
@@ -13,6 +14,8 @@ const PROJECT_CLONE_PARENT_KEY: &str = "project.cloneParentDir";
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectSettings {
     pub(crate) clone_parent_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) codex_defaults: Option<CodexProfileSettings>,
 }
 
 // ---------- Project / Git ----------
@@ -24,6 +27,7 @@ pub(crate) fn load_project_settings(app: &AppHandle) -> ProjectSettings {
             load_store_value::<String>(app, PROJECT_CLONE_PARENT_KEY).map(|clone_parent_dir| {
                 ProjectSettings {
                     clone_parent_dir: Some(clone_parent_dir),
+                    codex_defaults: None,
                 }
             })
         })

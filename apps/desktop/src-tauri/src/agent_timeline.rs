@@ -123,11 +123,7 @@ fn resolve_turn_seq(
     Ok(max.map_or(0, |m| m + 1))
 }
 
-fn next_intra_turn_order(
-    conn: &Connection,
-    task_id: &str,
-    turn_seq: i64,
-) -> Result<i64, String> {
+fn next_intra_turn_order(conn: &Connection, task_id: &str, turn_seq: i64) -> Result<i64, String> {
     let max: Option<i64> = conn
         .query_row(
             r#"SELECT MAX(intra_turn_order) FROM agent_timeline_events
@@ -166,10 +162,7 @@ pub fn insert(
         }
     };
 
-    let created_at = input
-        .created_at
-        .or(existing_created_at)
-        .unwrap_or(now);
+    let created_at = input.created_at.or(existing_created_at).unwrap_or(now);
     let updated_at = input
         .updated_at
         .unwrap_or(if existing.is_some() { now } else { created_at });
@@ -281,8 +274,8 @@ pub fn latest_session_id(
         .map_err(|e| format!("agent_timeline_latest_session_id: query 失败：{e}"))?;
 
     for row in rows {
-        let payload_text = row
-            .map_err(|e| format!("agent_timeline_latest_session_id: row 失败：{e}"))?;
+        let payload_text =
+            row.map_err(|e| format!("agent_timeline_latest_session_id: row 失败：{e}"))?;
         let Ok(payload) = serde_json::from_str::<JsonValue>(&payload_text) else {
             continue;
         };
@@ -372,7 +365,11 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_timeline_schema(&conn);
 
-        let saved = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        let saved = insert(
+            &conn,
+            input("e1", "task-1", Some("turn-a"), "reasoning", 100),
+        )
+        .unwrap();
 
         assert_eq!(saved.turn_seq, 0);
         assert_eq!(saved.intra_turn_order, 0);
@@ -383,7 +380,11 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_timeline_schema(&conn);
 
-        let a = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        let a = insert(
+            &conn,
+            input("e1", "task-1", Some("turn-a"), "reasoning", 100),
+        )
+        .unwrap();
         let b = insert(&conn, input("e2", "task-1", Some("turn-a"), "command", 110)).unwrap();
         let c = insert(&conn, input("e3", "task-1", Some("turn-a"), "message", 120)).unwrap();
 
@@ -400,8 +401,16 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_timeline_schema(&conn);
 
-        insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
-        let b = insert(&conn, input("e2", "task-1", Some("turn-b"), "reasoning", 200)).unwrap();
+        insert(
+            &conn,
+            input("e1", "task-1", Some("turn-a"), "reasoning", 100),
+        )
+        .unwrap();
+        let b = insert(
+            &conn,
+            input("e2", "task-1", Some("turn-b"), "reasoning", 200),
+        )
+        .unwrap();
         let c = insert(&conn, input("e3", "task-1", Some("turn-b"), "command", 210)).unwrap();
 
         assert_eq!(b.turn_seq, 1);
@@ -417,7 +426,11 @@ mod tests {
 
         // 流式 reasoning：先 running 一条，再用同 id 推一条 success。位置必须稳定，
         // 否则 turn 末尾 finalize 时事件会被推到 turn 最后。
-        let first = insert(&conn, input("e1", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
+        let first = insert(
+            &conn,
+            input("e1", "task-1", Some("turn-a"), "reasoning", 100),
+        )
+        .unwrap();
         insert(&conn, input("e2", "task-1", Some("turn-a"), "command", 110)).unwrap();
         let upserted = {
             let mut next = input("e1", "task-1", Some("turn-a"), "reasoning", 100);
@@ -439,9 +452,21 @@ mod tests {
         // 老 schema 下第二 turn 会"继承"第一 turn 的最小 order 被排到时间线最前；
         // 新 schema 下 upsert 保留原 (turn_seq, intra_turn_order)，所以最坏只是
         // 第二 turn 那条更新被无声"覆盖"掉，而不会污染时间线整体次序。
-        insert(&conn, input("dup-source-id", "task-1", Some("turn-a"), "reasoning", 100)).unwrap();
-        insert(&conn, input("turn-a-end", "task-1", Some("turn-a"), "message", 110)).unwrap();
-        insert(&conn, input("turn-b-start", "task-1", Some("turn-b"), "reasoning", 200)).unwrap();
+        insert(
+            &conn,
+            input("dup-source-id", "task-1", Some("turn-a"), "reasoning", 100),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            input("turn-a-end", "task-1", Some("turn-a"), "message", 110),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            input("turn-b-start", "task-1", Some("turn-b"), "reasoning", 200),
+        )
+        .unwrap();
         let collided = insert(&conn, {
             let mut next = input("dup-source-id", "task-1", Some("turn-b"), "reasoning", 210);
             next.status = "success".to_string();
@@ -477,20 +502,33 @@ mod tests {
         // turn-1 后入库 → turn_seq=1。最终列表完全按 (turn_seq, intra_turn_order) 排，
         // 不再按 created_at —— 这正是"按 turn 隔离"的核心：迟到的事件只在自己 turn 内
         // 排位，不会因为 created_at 早就插到别的 turn 里。
-        insert(&conn, input("t2-late", "task-1", Some("turn-2"), "message", 300)).unwrap();
-        insert(&conn, input("t1-first", "task-1", Some("turn-1"), "reasoning", 100)).unwrap();
-        insert(&conn, input("t1-second", "task-1", Some("turn-1"), "command", 200)).unwrap();
-        insert(&conn, input("t2-early", "task-1", Some("turn-2"), "reasoning", 400)).unwrap();
+        insert(
+            &conn,
+            input("t2-late", "task-1", Some("turn-2"), "message", 300),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            input("t1-first", "task-1", Some("turn-1"), "reasoning", 100),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            input("t1-second", "task-1", Some("turn-1"), "command", 200),
+        )
+        .unwrap();
+        insert(
+            &conn,
+            input("t2-early", "task-1", Some("turn-2"), "reasoning", 400),
+        )
+        .unwrap();
 
         let listed: Vec<_> = list(&conn, "task-1")
             .unwrap()
             .into_iter()
             .map(|e| e.id)
             .collect();
-        assert_eq!(
-            listed,
-            vec!["t2-late", "t2-early", "t1-first", "t1-second"],
-        );
+        assert_eq!(listed, vec!["t2-late", "t2-early", "t1-first", "t1-second"],);
     }
 
     #[test]

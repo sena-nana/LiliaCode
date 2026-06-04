@@ -5,9 +5,11 @@ import type {
   AgentTimelineEventKind,
   AgentInteractionRequest,
   AgentInteractionResponse,
+  AgentInteractionSettings,
   ChatAttachment,
   ChatContextSearchResult,
   ChatMessage,
+  CodexProfileSettings,
   TaskTodo,
   TimelineDisplayInput,
   ToolConsentRequest,
@@ -108,6 +110,30 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
   >
 >;
 
+export type CodexProfileSettingsShapeTypeTest = Assert<
+  Extends<
+    {
+      profile: "balanced";
+      model: "gpt-5.5";
+      reasoningEffort: "high";
+      runtimeWorkspaceRoots: ["C:/repo", "D:/shared"];
+      permissions: { profile: "workspaceWrite" };
+    },
+    CodexProfileSettings
+  >
+>;
+
+export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
+  Extends<
+    {
+      nonInterruptMode: false;
+      debug: true;
+      codexProfile: CodexProfileSettings;
+    },
+    AgentInteractionSettings
+  >
+>;
+
 export type TaskTodoAllowsGuideAttachmentsTypeTest = Assert<
   Extends<
     {
@@ -142,6 +168,14 @@ export type ToolConsentRequestTypeTest = Assert<
       blockedPath: null;
       decisionReason: null;
       toolUseId: null;
+      additionalPermissions: [{ permission: "network" }];
+      availableDecisions: ["accept", "decline"];
+      proposedExecpolicyAmendment: { sandbox: "workspace-write" };
+      proposedNetworkPolicyAmendments: [{ host: "example.com" }];
+      networkApprovalContext: { host: "example.com" };
+      cwd: "D:/PROJECT/workspace/Lilia";
+      reason: "needs tests";
+      commandActions: [{ text: "pwd" }];
     },
     ToolConsentRequest
   >
@@ -155,6 +189,7 @@ export type ToolConsentResponseUpdatedInputTypeTest = Assert<
       decision: "allow";
       message: null;
       updatedInput: { command: "pwd && echo ok" };
+      codexDecision: "accept";
     },
     ToolConsentResponsePayload
   >
@@ -195,6 +230,14 @@ export type AgentInteractionToolRequestTypeTest = Assert<
         input: { command: "yarn test" };
         title: "Run command";
         backend: "codex";
+        additionalPermissions: [{ permission: "network" }];
+        availableDecisions: ["accept", "decline", "cancel"];
+        proposedExecpolicyAmendment: { sandbox: "workspace-write" };
+        proposedNetworkPolicyAmendments: [{ host: "registry.npmjs.org" }];
+        networkApprovalContext: { host: "registry.npmjs.org" };
+        cwd: "D:/PROJECT/workspace/Lilia";
+        reason: "run tests";
+        commandActions: [{ text: "yarn test" }];
       };
     },
     AgentInteractionRequest
@@ -212,6 +255,7 @@ export type AgentInteractionToolResponseTypeTest = Assert<
         requestId: "tool-1";
         decision: "deny";
         message: "先不执行";
+        codexDecision: "decline";
       };
     },
     AgentInteractionResponse
