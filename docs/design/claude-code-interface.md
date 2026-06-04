@@ -57,7 +57,7 @@
 | `assistant` / `result` / `user` / `tool_result` | 已接入 | 映射为最终回复、turn 完成、工具结果等 timeline 事实事件。 |
 | `stream_event` text / thinking | 已接入 | 按 content block 类型区分最终回复文本和 reasoning，不做字段猜测。 |
 | 系统事件映射 | 已接入 | 已处理 tool progress / summary、auth status、subagent task、notification、api retry、status、session state、hook lifecycle、permission denied、mirror error。 |
-| Claude 内置工具显示 | 已接入 | 已归一化 Bash、Read/Write/Edit/MultiEdit、LS/Glob/Grep、NotebookRead/Edit、WebSearch/WebFetch、TodoWrite、Task/Agent、ExitPlanMode。 |
+| Claude 内置工具显示 | 已接入 | 已归一化 Bash、Read/Write/Edit/MultiEdit、Glob/Grep、NotebookEdit、WebSearch/WebFetch、TodoWrite、Task/Agent、ExitPlanMode。`LS`、`NotebookRead` 当前走未登记工具兜底，显示为通用 `tool`；如需精确展示，应补 `packages/contracts/src/claudeTools.mjs` 映射和测试。 |
 | 未登记工具兜底 | 已接入 | 未登记 Claude 工具落到 Lilia 通用 `tool` kind，保留 toolName 和 input。 |
 
 ## 部分接入接口
