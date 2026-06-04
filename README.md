@@ -52,53 +52,57 @@ Because LiliaCode uses its own session storage model instead of upstream CLI or 
 
 ## Feature Status
 
-The list below describes the intended product capabilities. Checked items are currently usable as user-facing features; unchecked items are planned but not fully complete.
+The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-04.
 
 ### Shared Agent Capabilities
 
-- [x] Permission modes: choose execution scope by risk level, including full access, ask-first, and read-only modes.
-- [x] Todo display: show the agent's current task list and progress.
-- [x] Process timeline: distinguish and display agent reasoning, commands, tool calls, file changes, and replies.
+- [x] Permission modes: choose execution scope by risk level, including full access, ask-first, and read-only modes, and map them into Claude / Codex runtime parameters.
+- [x] Todo display: mirror Claude `TodoWrite` and Codex `todo_list` events to show the agent's current task list and progress.
+- [x] Process timeline: distinguish and display agent reasoning, commands, tool calls, file changes, plans, and final replies.
 - [x] Key node navigation: highlight important timeline nodes in the scrollbar and support quick jumps.
 - [x] Non-interruptive interaction mode: move permission requests, agent questions, and plan confirmations into a pending area instead of taking over the input box.
-- [x] Guidance queue: provide a priority action queue so user messages and plugin behavior enter a unified guidance flow.
-- [x] Basic MCP integration: discover and connect MCP servers from agent configuration.
+- [x] Guidance queue: create, queue, and serially dispatch user guidance todos, with queue state recovered during active runs.
+- [x] Basic MCP integration: Claude stdio MCP servers can be managed by Lilia and injected into runtime; Codex MCP servers are read from `~/.codex/config.toml` and passed into runtime.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
-- [ ] Intelligent model selection: automatically choose model level and reasoning intensity based on request type.
-- [x] File context: mention files, directories, images, and other context with `@`.
-- [ ] Slash commands: support backend-native commands and project-defined commands.
+- [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
+- [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
+- [ ] Slash commands: backend-native commands and project-defined commands are not yet supported.
 
 ### Claude Code Integration
 
-- [x] Claude conversations: start new conversations and continue history sessions in LiliaCode.
-- [x] Claude Skills: manage user-level and project-level Claude Skills.
-- [x] Claude MCP management: add, edit, and remove external Claude MCP servers in the UI.
-- [ ] Claude Plugins: fully manage Claude Plugin installation, enablement, updates, and scope.
-- [ ] Claude Hooks: manage Claude Code Hooks and show execution results.
-- [ ] Claude Subagents: display and schedule Claude Code Subagents and custom agents.
+- [x] Claude conversations: start new turns through Claude Agent SDK `query()` and save the SDK `session_id` so the same task can resume.
+- [x] Claude Plan: mirror `ExitPlanMode`, route approval, cancellation, and revision through unified AskUser, then restore execution-phase permission mode after approval.
+- [x] Claude Skills: manage user-level and project-level Skills, and pass enabled skill names into the SDK.
+- [x] Claude tool display: normalize common tools including Bash, Read / Write / Edit / MultiEdit, Glob / Grep, NotebookEdit, WebSearch / WebFetch, TodoWrite, Task / Agent, and ExitPlanMode.
+- [ ] Claude MCP management (partial): the UI can create, edit, delete, and enable stdio MCP servers; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are not yet integrated.
+- [ ] Claude Plugins (partial): Lilia can discover and enable user-level local plugins, then pass enabled plugin paths to the SDK; installation, updates, project-level scope, and marketplace scope are not yet integrated.
+- [ ] Claude Hooks (partial): the runtime registers a small SDK hook set and can display some hook lifecycle events; hooks configuration management and execution result panels are not yet available.
+- [ ] Claude Subagents (partial): Task / Agent calls, task progress, and notifications can be displayed; subagent definitions, list management, and proactive scheduling UI are not yet available.
 
 ### Codex Integration
 
-- [x] Codex conversations: start new conversations and continue history sessions in LiliaCode.
-- [x] Codex process display: show Codex reasoning, commands, file changes, searches, and final replies.
-- [x] Codex environment checks: show whether the Codex CLI, API, and connection state are available.
-- [x] Codex MCP discovery: reuse Codex configuration to connect MCP servers.
-- [ ] Codex MCP management: add, edit, and remove Codex MCP servers inside LiliaCode.
-- [ ] Codex profiles: support profiles, sandbox and approval presets, and project-level configuration.
-- [ ] Codex workflows: support common flows such as code review, fix suggestions, and batch changes.
-- [ ] Built-in browser interaction: interact with users or debug code through IAB.
+- [x] Codex conversations: start or resume Codex app-server threads and save runtime state by task.
+- [x] Codex process display: show Codex reasoning, commands, file changes, searches, plans, and final replies.
+- [x] Codex environment checks: show whether the Codex CLI, app-server, API, and connection state are available.
+- [x] Codex Plan: enable the app-server experimental API, read the plan preset from `collaborationMode/list`, and pass `collaborationMode` to `turn/start`; after plan approval, Lilia explicitly returns to default mode for execution.
+- [x] Codex MCP discovery: reuse Codex configuration to read MCP servers and register them at runtime.
+- [ ] Codex approval bridge (partial): command and file-change approvals enter unified tool confirmation; `additionalPermissions` and `availableDecisions` are not yet displayed or used.
+- [ ] Codex MCP management (partial): the UI can show MCP servers and open the Codex config file; adding, editing, and removing Codex MCP servers inside LiliaCode is not yet available.
+- [ ] Codex profiles (partial): each turn passes cwd, sandbox, and approval policy; profiles, project-level config, and sticky `thread/settings/update` are not yet integrated.
+- [ ] Codex workflows: built-in code review, fix suggestion, and batch-change flows are not yet available.
+- [ ] Built-in browser interaction: IAB-based user interaction or browser debugging is not yet available.
 
 ### LiliaCode-Specific Features
 
-- [ ] Project management: manage local projects and GitHub-cloned projects, and view project-level progress, data, and cost.
-- [ ] Task-based conversations: manage conversations as tasks for project-level scheduling.
-- [ ] Task tree: manage parent-child tasks, dependencies, and blockers.
-- [ ] Automatic orchestration: schedule multiple agents based on task state, dependencies, and user strategy.
-- [ ] Plugin system: expose capabilities that change agent behavior as selectable plugins.
-- [ ] Memory: save user-level and project-level memory, and help agents use it at the right time.
-- [ ] Roadmap and milestones: show engineering progress across weeks and versions.
-- [ ] Helper agents: run lower-cost agents in a session to supervise and assist the main agent.
-- [ ] MutsukiCore integration: support remote task execution and mobile access.
+- [ ] Project management (partial): local projects, Git clone, project ordering, pinning, removal, and session counts are available; project-level progress, data, and cost views are not yet integrated.
+- [x] Task-based conversations: conversations are persisted as tasks, with draft promotion, project conversations, orphan conversations, archiving, pinning, and ordering.
+- [ ] Task tree (partial): the data layer has `parent_id` and `depends_on`, but full parent-child tree, dependency view, and blocker management UI are not yet available.
+- [ ] Plugin system (partial): Claude Skills / Plugins / MCP and Codex MCP management can feed runtime extensions; a generic plugin system with selectable behavior plugins is not yet complete.
+- [ ] Memory (partial): the project Memory tab and extension-host context candidate path exist; user-level / project-level memory storage, retrieval, and automatic injection are not yet user-facing.
+- [ ] Roadmap and milestones (partial): the project Roadmap tab and documentation template exist; cross-week and cross-version progress data views are not yet integrated.
+- [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
+- [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
+- [ ] MutsukiCore integration: remote task execution and mobile access are not yet available.
 
 ## Project Structure
 
