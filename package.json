@@ -11,6 +11,9 @@
     "tauri:dev": "yarn --cwd apps/desktop tauri dev",
     "tauri:build": "yarn --cwd apps/desktop tauri build",
     "dev": "yarn --cwd apps/desktop dev",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "build": "yarn --cwd apps/desktop build",
     "test": "yarn --cwd apps/desktop test",
     "verify": "yarn verify:desktop:test && yarn verify:desktop:build && yarn verify:tauri && yarn verify:contracts",
@@ -18,6 +21,9 @@
     "verify:desktop:build": "yarn --cwd apps/desktop build",
     "verify:tauri": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "verify:contracts": "node node_modules/typescript/bin/tsc -p packages/contracts/tsconfig.json"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
   },
   "packageManager": "yarn@4.14.1"
 }

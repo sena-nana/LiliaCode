@@ -1,8 +1,10 @@
-<!-- 若要更换主界面截图，保持文件名 .github/assets/main-window.png 以避免改动 README -->
+<!-- To replace the main window screenshot, keep the file name .github/assets/main-window.png to avoid README changes. -->
 
-> **开发状态声明**
+> English | [简体中文](README.zh-CN.md) | [Documentation](https://sena-nana.github.io/Lilia/)
+
+> **Development Status**
 >
-> LiliaCode 仍处于快速变更阶段；基本功能尚未完整补完；本地数据库结构可能随新功能调整，数据可能随时被清空或迁移。不建议在重度生产场景中依赖它保存唯一副本。
+> LiliaCode is still changing quickly. Core features are not fully complete, and the local database schema may change as new features land. Data may be cleared or migrated at any time, so do not rely on it as the only copy of important production work.
 
 <p align="center">
   <img src="./apps/desktop/src-tauri/icons/icon.png" width="128" alt="LiliaCode logo" />
@@ -12,135 +14,135 @@
 
 <p align="center">
   <a href="https://qm.qq.com/q/WViyGEq8oA">
-    <img alt="LiliaCode QQ 群" src="https://img.shields.io/badge/LiliaCode-289582454-blue">
+    <img alt="LiliaCode QQ group" src="https://img.shields.io/badge/LiliaCode-289582454-blue">
   </a>
 </p>
 
-<p align="center"><strong>面向代码工程的 Agent 协同桌面客户端。</strong></p>
+<p align="center"><strong>A desktop client for agent-assisted software engineering.</strong></p>
 
-<p align="center">LiliaCode 将 Claude Code 与 Codex 的工作过程整理为可恢复、可追踪、可调度的本地任务状态，帮助开发者管理项目里的会话、上下文、待办和执行过程。</p>
+<p align="center">LiliaCode organizes Claude Code and Codex workflows into recoverable, traceable, and schedulable local task state, helping developers manage project sessions, context, todos, and execution history.</p>
 
 <p align="center">
-  <img src="./.github/assets/main-window.png" alt="LiliaCode 主界面" />
+  <img src="./.github/assets/main-window.png" alt="LiliaCode main window" />
 </p>
 
 ---
 
-## 产品定位
+## Product Positioning
 
-LiliaCode 是 Lilia 系列中的代码工程工作台。它不是把 Claude Code 或 Codex 包进一个聊天窗口，而是在 Agent 执行层之外提供项目、任务、会话、权限和过程信息的桌面级组织层。
+LiliaCode is the software engineering workbench in the Lilia family. It does not simply wrap Claude Code or Codex in a chat window; instead, it adds a desktop-level organization layer for projects, tasks, sessions, permissions, and process state outside the agent execution layer.
 
-它面向需要长期推进工程项目的开发者：每条会话都可以被视作可管理的任务，Agent 的执行过程和待处理交互会沉淀为本地状态，并为后续任务树、自动编排和多 Agent 协同提供基础。
+It is built for developers who move engineering projects forward over time. Each conversation can be treated as a manageable task, while agent execution details and pending interactions are saved as local state. This provides the foundation for future task trees, automatic orchestration, and multi-agent collaboration.
 
-## Lilia 系列
+## The Lilia Family
 
-Lilia 是面向高 Agent 协同的工具链应用系列。系列目标是把不同 Agent、执行环境和工程工作流接入同一套可观察、可调度、可恢复的本地工作台。
+Lilia is a family of toolchain applications for high-collaboration agent workflows. Its goal is to connect different agents, execution environments, and engineering workflows into one observable, schedulable, and recoverable local workbench.
 
-LiliaCode 聚焦代码工程场景；同系列应用可以继续围绕其他高协同 Agent 工作流扩展，并共享项目状态、任务化会话、插件化能力和人机协作边界等基础理念。
+LiliaCode focuses on software engineering. Other applications in the same family may expand into additional agent collaboration workflows while sharing the same ideas around project state, task-based sessions, plugin capabilities, and human-agent collaboration boundaries.
 
-## 核心差异
+## What Makes It Different
 
-- 任务化会话：将对话作为任务管理，而不是只保存聊天记录。
-- 本地工程状态：记录项目、会话、待办、过程和关键交互，便于恢复和继续推进。
-- 过程可观察：用时间线呈现 Agent 的思考、工具调用、命令执行、文件变更和最终回复。
-- 非打断交互：权限请求、计划确认和 Agent 提问可以进入待处理区，减少对输入流的打断。
-- 面向协同调度：为任务树、依赖关系、自动编排和辅助 Agent 留出统一结构。
+- Task-based sessions: manage conversations as tasks instead of only saving chat history.
+- Local engineering state: record projects, sessions, todos, process details, and key interactions for easier recovery and continuation.
+- Observable process: use a timeline to show agent reasoning, tool calls, command execution, file changes, and final responses.
+- Non-interruptive interaction: move permission requests, plan confirmations, and agent questions into a pending area so they do not take over the input flow.
+- Collaboration-ready structure: provide a shared shape for task trees, dependencies, orchestration, and helper agents.
 
-由于会话存储模型与上游 CLI / SDK 的历史记录不同，LiliaCode 不以兼容原始对话历史为目标；它优先维护自己的可恢复任务结构。
+Because LiliaCode uses its own session storage model instead of upstream CLI or SDK history formats, compatibility with raw original conversation history is not a goal. It prioritizes its own recoverable task structure.
 
-## 功能状态
+## Feature Status
 
-以下按最终产品能力列出；勾选表示当前已经能作为用户功能使用，未勾选表示目标能力尚未完整补齐。
+The list below describes the intended product capabilities. Checked items are currently usable as user-facing features; unchecked items are planned but not fully complete.
 
-### 共通 Agent 能力
+### Shared Agent Capabilities
 
-- [x] 权限模式：按执行风险选择完全访问、询问、只读等执行范围。
-- [x] Todo 展示：展示 Agent 当前任务清单和执行进度。
-- [x] 过程时间线：区分并展示 Agent 的思考、命令、工具调用、文件变更和回复。
-- [x] 关键节点跳转：在滚动条中高亮关键节点，并支持快速跳转。
-- [x] 非打断交互切换：将权限请求、Agent 提问和计划确认收进待处理区，不抢占输入框。
-- [x] 引导功能：提供优先级操作队列，让用户消息和插件行为进入统一引导队列。
-- [x] MCP 基础接入：支持从 Agent 配置中发现并接入 MCP server。
-- [ ] 统一交互协议：跨后端统一计划确认、工具确认和 Agent 提问。
-- [ ] 智能模型选择：根据请求类型自动选择模型级别和思考强度。
-- [x] 文件上下文：支持通过 `@` 提及文件、目录和图片等上下文。
-- [ ] 斜杠命令：支持后端原生命令和项目自定义命令。
+- [x] Permission modes: choose execution scope by risk level, including full access, ask-first, and read-only modes.
+- [x] Todo display: show the agent's current task list and progress.
+- [x] Process timeline: distinguish and display agent reasoning, commands, tool calls, file changes, and replies.
+- [x] Key node navigation: highlight important timeline nodes in the scrollbar and support quick jumps.
+- [x] Non-interruptive interaction mode: move permission requests, agent questions, and plan confirmations into a pending area instead of taking over the input box.
+- [x] Guidance queue: provide a priority action queue so user messages and plugin behavior enter a unified guidance flow.
+- [x] Basic MCP integration: discover and connect MCP servers from agent configuration.
+- [ ] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
+- [ ] Intelligent model selection: automatically choose model level and reasoning intensity based on request type.
+- [x] File context: mention files, directories, images, and other context with `@`.
+- [ ] Slash commands: support backend-native commands and project-defined commands.
 
-### Claude Code 接入
+### Claude Code Integration
 
-- [x] Claude 对话：在 LiliaCode 中发起新对话并继续历史会话。
-- [x] Claude Skills：管理用户级和项目级 Claude Skills。
-- [x] Claude MCP 管理：在界面中增删改外部 Claude MCP server。
-- [ ] Claude Plugins：完整管理 Claude Plugin 的安装、启停、更新和作用域。
-- [ ] Claude Hooks：管理 Claude Code Hooks，并展示执行结果。
-- [ ] Claude Subagents：支持 Claude Code Subagents / 自定义 Agent 的展示与调度。
+- [x] Claude conversations: start new conversations and continue history sessions in LiliaCode.
+- [x] Claude Skills: manage user-level and project-level Claude Skills.
+- [x] Claude MCP management: add, edit, and remove external Claude MCP servers in the UI.
+- [ ] Claude Plugins: fully manage Claude Plugin installation, enablement, updates, and scope.
+- [ ] Claude Hooks: manage Claude Code Hooks and show execution results.
+- [ ] Claude Subagents: display and schedule Claude Code Subagents and custom agents.
 
-### Codex 接入
+### Codex Integration
 
-- [x] Codex 对话：在 LiliaCode 中发起新对话并继续历史会话。
-- [x] Codex 过程展示：展示 Codex 的思考、命令、文件变更、搜索和最终回复。
-- [x] Codex 环境检查：提示 Codex CLI、API 和连接状态是否可用。
-- [x] Codex MCP 读取：沿用 Codex 配置接入 MCP server。
-- [ ] Codex MCP 管理：在 LiliaCode 内增删改 Codex MCP server。
-- [ ] Codex 配置档案：支持 profiles、沙箱 / 审批预设和项目级配置。
-- [ ] Codex 专项工作流：支持代码审查、修复建议和批量改动等常用流程。
-- [ ] 内置浏览器交互：通过 IAB 与用户互动或调试代码。
+- [x] Codex conversations: start new conversations and continue history sessions in LiliaCode.
+- [x] Codex process display: show Codex reasoning, commands, file changes, searches, and final replies.
+- [x] Codex environment checks: show whether the Codex CLI, API, and connection state are available.
+- [x] Codex MCP discovery: reuse Codex configuration to connect MCP servers.
+- [ ] Codex MCP management: add, edit, and remove Codex MCP servers inside LiliaCode.
+- [ ] Codex profiles: support profiles, sandbox and approval presets, and project-level configuration.
+- [ ] Codex workflows: support common flows such as code review, fix suggestions, and batch changes.
+- [ ] Built-in browser interaction: interact with users or debug code through IAB.
 
-### LiliaCode 特色功能
+### LiliaCode-Specific Features
 
-- [ ] 项目级管理：管理本地项目和 GitHub clone 项目，查看项目级进度、数据和成本。
-- [ ] 会话任务化：把对话作为 Task 管理，从而允许项目级调度。
-- [ ] 任务树：完整管理父子任务、任务依赖和阻塞关系。
-- [ ] 自动编排：根据任务状态、依赖关系和用户策略调度多个 Agent。
-- [ ] 插件系统：将会改变 Agent 行为的能力做成可选择开启的插件。
-- [ ] Memory：保存用户级 / 项目级记忆，并在合适时机辅助 Agent 使用。
-- [ ] Roadmap / Milestone：用路线图和里程碑展示跨周、跨版本的工程进展。
-- [ ] 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent。
-- [ ] 接入 MutsukiCore：支持远程运行任务和手机端访问。
+- [ ] Project management: manage local projects and GitHub-cloned projects, and view project-level progress, data, and cost.
+- [ ] Task-based conversations: manage conversations as tasks for project-level scheduling.
+- [ ] Task tree: manage parent-child tasks, dependencies, and blockers.
+- [ ] Automatic orchestration: schedule multiple agents based on task state, dependencies, and user strategy.
+- [ ] Plugin system: expose capabilities that change agent behavior as selectable plugins.
+- [ ] Memory: save user-level and project-level memory, and help agents use it at the right time.
+- [ ] Roadmap and milestones: show engineering progress across weeks and versions.
+- [ ] Helper agents: run lower-cost agents in a session to supervise and assist the main agent.
+- [ ] MutsukiCore integration: support remote task execution and mobile access.
 
-## 项目结构
+## Project Structure
 
-> 当前仓库、包名、协议名和本地配置路径仍沿用 `lilia` 命名，以避免破坏既有协议和持久化路径。
+> The repository, package names, protocol names, and local configuration paths still use the `lilia` name to avoid breaking existing protocols and persistence paths.
 
 ```text
 Lilia/
 ├── apps/
-│   └── desktop/                # 主应用：Vue 3 + Tauri 2
+│   └── desktop/                # Main app: Vue 3 + Tauri 2
 │       ├── src/
 │       │   ├── layouts/        # AppShell / SecondaryPanel / TitleBar
-│       │   ├── components/     # ViewTabs / TodoFloat / ChatComposer 等
+│       │   ├── components/     # ViewTabs / TodoFloat / ChatComposer, etc.
 │       │   ├── pages/          # project/ProjectShell / TaskDetail / Settings
 │       │   ├── services/       # projectsStore / tasksStore / todos / chat
 │       │   ├── router.ts
 │       │   └── styles.css
-│       └── src-tauri/          # Tauri 2 Rust 端
+│       └── src-tauri/          # Tauri 2 Rust side
 │           └── src/
-│               ├── store.rs    # lilia-store：SQLite + r2d2 + 迁移
-│               ├── todos.rs    # TodoWrite / todo_list 事件拦截 → TaskTodo upsert
-│               ├── plugins.rs  # Claude skills / plugins / MCP 与 Codex MCP 发现
+│               ├── store.rs    # lilia-store: SQLite + r2d2 + migrations
+│               ├── todos.rs    # Intercepts TodoWrite / todo_list events -> TaskTodo upsert
+│               ├── plugins.rs  # Claude skills / plugins / MCP and Codex MCP discovery
 │               └── lib.rs      # chat / settings / project / plugin IPC
 └── packages/
-    └── contracts/              # 跨端共享 TS 类型与 timeline display 规则
+    └── contracts/              # Shared TS types and timeline display rules
 ```
 
-## 早期开发
+## Early Development
 
 ```bash
-# 1) 安装依赖（首次）
+# 1) Install dependencies first
 yarn install
 
-# 2) 仅启动 Vite 前端
+# 2) Start only the Vite frontend
 yarn dev
 
-# 3) 启动 Tauri 桌面端（需要本地有 Rust 工具链 + WebView2）
+# 3) Start the Tauri desktop app (requires a local Rust toolchain and WebView2)
 yarn tauri:dev
 
-# 4) 类型检查 / 单测 / Rust 编译检查 / 契约包检查 一键过
+# 4) Run type checks, unit tests, Rust check, and contracts check
 yarn verify
 ```
 
-Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg)（PNG 嵌入式 SVG 容器）。要重新生成全套 PNG / ICO 时跑 [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1)：`pwsh -File scripts/generate-icon.ps1`。如需 macOS `.icns` 或全套尺寸：`yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`。
+The Tauri icon source is [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg), which is an embedded PNG inside an SVG container. To regenerate the full PNG / ICO set, run [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1): `pwsh -File scripts/generate-icon.ps1`. For macOS `.icns` or a full size set, run `yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`.
 
-## 感谢
+## Thanks
 
-- Codex 为界面设计和交互整理提供了重要参考；LiliaCode 的用户交互在这些思考基础上继续迭代。
+- Codex provided important references for interface design and interaction organization; LiliaCode continues to iterate on top of those ideas.
