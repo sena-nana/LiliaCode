@@ -54,7 +54,7 @@ yarn docs:build
 yarn docs:preview
 ```
 
-GitHub Pages 部署由仓库中的 Actions workflow 自动完成。推送到 `main` 后，站点会构建并发布到 `https://sena-nana.github.io/Lilia/`。
+GitHub Pages 部署由仓库中的 Actions workflow 自动完成。推送到 `main` 后，站点会构建并发布到 `https://sena-nana.github.io/LiliaCode/`。
 
 ## 图标
 

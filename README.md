@@ -1,6 +1,6 @@
 <!-- To replace the main window screenshot, keep the file name .github/assets/main-window.png to avoid README changes. -->
 
-> English | [简体中文](README.zh-CN.md) | [Documentation](https://sena-nana.github.io/Lilia/)
+> English | [简体中文](README.zh-CN.md) | [Documentation](https://sena-nana.github.io/LiliaCode/)
 
 > **Development Status**
 >

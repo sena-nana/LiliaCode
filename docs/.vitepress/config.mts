@@ -3,17 +3,17 @@ import { defineConfig } from "vitepress";
 const githubUrl = "https://github.com/sena-nana/Lilia";
 
 export default defineConfig({
-  base: "/Lilia/",
+  base: "/LiliaCode/",
   title: "LiliaCode",
   description: "面向代码工程的 Agent 协同桌面客户端。",
   cleanUrls: true,
   srcExclude: ["design/**", "github/**"],
   lastUpdated: true,
   sitemap: {
-    hostname: "https://sena-nana.github.io/Lilia/",
+    hostname: "https://sena-nana.github.io/LiliaCode/",
   },
   head: [
-    ["link", { rel: "icon", href: "/Lilia/logo.png" }],
+    ["link", { rel: "icon", href: "/LiliaCode/logo.png" }],
     ["meta", { name: "theme-color", content: "#2f6b62" }],
   ],
   themeConfig: {

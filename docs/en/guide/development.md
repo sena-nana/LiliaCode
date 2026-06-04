@@ -54,7 +54,7 @@ yarn docs:build
 yarn docs:preview
 ```
 
-GitHub Pages deployment is handled by the repository Actions workflow. After pushing to `main`, the site is built and published to `https://sena-nana.github.io/Lilia/`.
+GitHub Pages deployment is handled by the repository Actions workflow. After pushing to `main`, the site is built and published to `https://sena-nana.github.io/LiliaCode/`.
 
 ## Icons
 

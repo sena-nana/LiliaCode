@@ -1,6 +1,6 @@
 <!-- 若要更换主界面截图，保持文件名 .github/assets/main-window.png 以避免改动 README -->
 
-> [English](README.md) | 简体中文 | [网页版文档](https://sena-nana.github.io/Lilia/)
+> [English](README.md) | 简体中文 | [网页版文档](https://sena-nana.github.io/LiliaCode/)
 
 > **开发状态声明**
 >
