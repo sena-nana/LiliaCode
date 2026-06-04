@@ -1,82 +1,21 @@
 <script setup lang="ts">
 /**
- * Task 详情 = 聊天面板。承载两种入口：
- *   /projects/:projectId/tasks/:taskId —— 绑定到某个项目的任务对话
- *   /chats/:taskId                     —— 不绑定项目的收集箱/草稿对话
- *
- * 用户输入、Agent 过程、最终回复和错误提示统一走 timeline 呈现；
- * 不再通过 transcript 维护第二套可见消息流。
- * projectId 缺省时进入 orphan 模式：cwd 退化到用户家目录；首次发送把草稿 promote 到收集箱。
+ * Task 详情 = 聊天面板。此页只编排路由上下文、timeline、composer 与附件控制器；
+ * 具体聊天布局由 TaskDetailChatSurface 负责。
  */
 
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { homeDir } from "@tauri-apps/api/path";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  getOrphanConversation,
-  ensureProjectTasksLoaded,
-  ensureTaskLoaded,
-  getTask,
-  promoteDraftOrphan,
-  promoteDraftTask,
-  resolveConversationRouteState,
-} from "../services/tasksStore";
-import { ensureProjectLoaded, getProject } from "../services/projectsStore";
-import ChatTranscript from "../components/chat/ChatTranscript.vue";
-import ChatComposer from "../components/chat/ChatComposer.vue";
-import ChatSidebarHost from "../components/chat/ChatSidebarHost.vue";
-import ImageViewer from "../components/chat/ImageViewer.vue";
-import type { ChatImageViewerSource } from "../components/chat/imageViewer";
-import TodoFloat from "../components/todo/TodoFloat.vue";
-import {
-  resolveAskUserById,
-  useAskUserForTask,
-  usePendingAsksForTask,
-} from "../composables/useAskUser";
-import {
-  usePendingAgentActionsForTask,
-  type PendingAgentActionResolution,
-} from "../composables/usePendingAgentActions";
-import {
-  respondConsent,
-  usePendingToolConsentsForTask,
-  useToolConsentForTask,
-} from "../composables/useToolConsentBridge";
-import { useGuideDispatch } from "../composables/useGuideDispatch";
-import type { TaskTodo } from "../services/todos";
-import {
-  getComposerState,
-  listAgentTimeline,
-  onAgentTimeline,
-  onDone,
-  onTurnStarted,
-  describeAttachments,
-  interruptTurn,
-  pickAttachmentFiles,
-  sendMessage,
-  setComposerState,
-  type ToolConsentDecision,
-  type ToolConsentUpdatedInput,
-} from "../services/chat";
-import { rememberPopupLastProject } from "../services/popupWindows";
-import {
-  loadAgentInteractionSettings,
-  useAgentInteractionSettings,
-} from "../composables/useAgentInteractionSettings";
-import { useConnectionStatus } from "../composables/useConnectionStatus";
-import { onDebugTimelineEvent } from "../composables/useDebugTimelineEvents";
+import type { ChatAttachment } from "@lilia/contracts";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
-import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
-import type {
-  AskUserResult,
-  AgentTimelineEvent,
-  AgentTimelinePayload,
-  ChatAttachment,
-  ChatComposerState,
-} from "@lilia/contracts";
+import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
+import { useTaskAttachments } from "./taskDetail/useTaskAttachments";
+import { useTaskComposerController } from "./taskDetail/useTaskComposerController";
+import {
+  useTaskConversationContext,
+  type TaskDetailRouteProps,
+} from "./taskDetail/useTaskConversationContext";
+import { useTaskTimeline } from "./taskDetail/useTaskTimeline";
 
 const props = withDefaults(defineProps<{
   projectId?: string;
@@ -86,771 +25,68 @@ const props = withDefaults(defineProps<{
   variant: "main",
 });
 
-const router = useRouter();
-
-interface TimelineRetryContext {
-  content: string;
-  attachments: ChatAttachment[];
-}
-
-const project = computed(() =>
-  props.projectId ? getProject(props.projectId) : undefined,
+const routeProps = props as TaskDetailRouteProps;
+const chatSurfaceRef = ref<InstanceType<typeof TaskDetailChatSurface> | null>(null);
+const chatPageRef = computed<HTMLElement | null>(() =>
+  chatSurfaceRef.value?.chatPageRef ?? null,
 );
-const isPopup = computed(() => props.variant === "popup");
-const projectTask = computed(() =>
-  props.projectId ? getTask(props.projectId, props.taskId) : undefined,
-);
-const orphan = computed(() =>
-  props.projectId ? undefined : getOrphanConversation(props.taskId),
-);
-const popupContextHydrating = ref(props.variant === "popup");
-const popupContextHydrated = ref(false);
-const popupContentReady = ref(props.variant !== "popup");
-const contextLoadingVisible = ref(false);
-const conversationRouteState = computed(() =>
-  resolveConversationRouteState(props.projectId, props.taskId),
-);
+const sharedAttachments = ref<ChatAttachment[]>([]);
 
-/** 路由是否已找到承载对话的项目或孤儿；都没有 → 显示未找到。 */
-const hasContext = computed(() => {
-  if (!isPopup.value) return !!project.value || !!orphan.value;
-  return props.projectId
-    ? !!project.value && !!projectTask.value
-    : !!orphan.value;
-});
-const isContextLoading = computed(() =>
-  isPopup.value
-    ? popupContextHydrating.value || (!popupContextHydrated.value && !hasContext.value)
-    : !hasContext.value && (!!props.projectId || !!props.taskId),
-);
-const isPopupContentLoading = computed(() =>
-  isPopup.value &&
-  hasContext.value &&
-  !conversationRouteState.value.isLiveDraft &&
-  !popupContentReady.value,
-);
-const isPopupPending = computed(() =>
-  isPopup.value && (isContextLoading.value || isPopupContentLoading.value),
-);
-const isBlockingLoading = computed(() =>
-  isPopup.value ? isPopupPending.value : isContextLoading.value,
-);
-const shouldRenderChat = computed(() =>
-  hasContext.value && (!isPopup.value || !isPopupContentLoading.value),
-);
-const shouldShowContextLoading = computed(() =>
-  isPopup.value ? isPopupPending.value && contextLoadingVisible.value : isContextLoading.value,
-);
-
-/** 空状态标题：绑了项目就用项目名补全。 */
-const emptyHeadline = computed(() =>
-  project.value
-    ? `要在 ${project.value.name} 中构建什么？`
-    : "今天想做什么？",
-);
-
-const persistedTimelineEvents = shallowRef<AgentTimelineEvent[]>([]);
-const overlayTimelineEvents = shallowRef<AgentTimelineEvent[]>([]);
-const timelineEvents = computed(() =>
-  mergeTimelineEvents(persistedTimelineEvents.value, overlayTimelineEvents.value),
-);
-const composer = ref<ChatComposerState | null>(null);
-const isTurnRunning = ref(false);
-const chatPageRef = ref<HTMLElement | null>(null);
-const droppedAttachmentAppendKey = ref(0);
-const fileDropActive = ref(false);
-const attachments = ref<ChatAttachment[]>([]);
-const viewingImage = ref<ChatImageViewerSource | null>(null);
-const userSendScrollKey = ref(0);
-const pendingAskUser = useAskUserForTask(() => props.taskId);
-const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
-const pendingToolConsent = useToolConsentForTask(() => props.taskId);
-const pendingToolConsents = usePendingToolConsentsForTask(() => props.taskId);
-const runtimePendingAgentActions = usePendingAgentActionsForTask(
-  pendingAskUsers,
-  pendingToolConsents,
-);
-const agentInteractionSettings = useAgentInteractionSettings();
-const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
-const { activeBackend } = useConnectionStatus({ probe: !isPopup.value });
-const composerForView = computed<ChatComposerState>(() =>
-  withActiveBackend(composer.value ?? {
-    taskId: props.taskId,
-    backend: activeBackend.value,
-    model: "",
-    planMode: false,
-    permission: "ask",
-  }),
-);
-const pendingAgentActions = computed(() =>
-  nonInterruptMode.value ? runtimePendingAgentActions.value : [],
-);
-
-const pendingPlanApproval = computed(() => {
-  const ask = nonInterruptMode.value
-    ? pendingAskUsers.value.find((item) => item.spec.intent === "plan_approval") ?? null
-    : pendingAskUser.value;
-  if (!ask) return null;
-  if (ask.spec.intent !== "plan_approval") return null;
-  const question = ask.spec.questions[0];
-  return question ? { questionId: question.id, turnId: ask.turnId } : null;
-});
-
-/** orphan 模式下的 fallback cwd——延迟解析。 */
-const orphanCwd = ref<string | null>(null);
-let optimisticMessageSeq = 0;
-let localErrorSeq = 0;
-const appWindow = getCurrentWindow();
-
-async function ensureOrphanCwd(): Promise<string> {
-  if (orphanCwd.value) return orphanCwd.value;
-  try {
-    orphanCwd.value = await homeDir();
-  } catch {
-    orphanCwd.value = "";
-  }
-  return orphanCwd.value;
-}
-
-const contextSearchCwd = computed(() => project.value?.cwd ?? orphanCwd.value ?? null);
-
-function withActiveBackend(state: ChatComposerState): ChatComposerState {
-  return {
-    ...state,
-    taskId: props.taskId,
-    backend: activeBackend.value,
-  };
-}
-
-function summarizeTitle(text: string): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 30) return normalized;
-  return normalized.slice(0, 30) + "…";
-}
-
-function titleForMessage(content: string, outgoingAttachments: ChatAttachment[]): string {
-  const normalized = content.replace(/\s+/g, " ").trim();
-  if (normalized) return summarizeTitle(normalized);
-  return outgoingAttachments[0]?.name ?? "附件";
-}
-
-function popupNewDraftRoute(projectId: string | undefined): string {
-  return projectId ? `/popup/projects/${projectId}/new` : "/popup/chats/new";
-}
-
-function isPointInsideElement(
-  point: { x: number; y: number } | null,
-  element: HTMLElement | null,
-): boolean {
-  if (!point || !element) return false;
-  const rect = element.getBoundingClientRect();
-  return point.x >= rect.left &&
-    point.x <= rect.right &&
-    point.y >= rect.top &&
-    point.y <= rect.bottom;
-}
-
-function canAcceptFileDropAt(point: { x: number; y: number } | null): boolean {
-  if (!hasContext.value) return false;
-  if (!nonInterruptMode.value && (pendingAskUser.value || pendingToolConsent.value)) return false;
-  if (!isPointInsideElement(point, chatPageRef.value)) return false;
-  const sidebar = chatPageRef.value?.querySelector(".chat-sidebar");
-  return !(sidebar instanceof HTMLElement && isPointInsideElement(point, sidebar));
-}
-
-async function normalizeDropPoint(
-  point: { x: number; y: number } | null,
-): Promise<{ x: number; y: number } | null> {
-  if (!point) return null;
-  try {
-    const scaleFactor = await appWindow.scaleFactor();
-    if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) return point;
-    return {
-      x: point.x / scaleFactor,
-      y: point.y / scaleFactor,
-    };
-  } catch {
-    return point;
-  }
-}
-
-function readDropPayload(payload: unknown): {
-  type: string;
-  paths: string[];
-  position: { x: number; y: number } | null;
-} | null {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const row = payload as Record<string, unknown>;
-  const paths = Array.isArray(row.paths)
-    ? row.paths.filter((path): path is string => typeof path === "string")
-    : [];
-  const position = row.position && typeof row.position === "object" && !Array.isArray(row.position)
-    ? row.position as Record<string, unknown>
-    : null;
-  const x = typeof position?.x === "number" ? position.x : null;
-  const y = typeof position?.y === "number" ? position.y : null;
-  return {
-    type: typeof row.type === "string" ? row.type : "",
-    paths,
-    position: x === null || y === null ? null : { x, y },
-  };
-}
-
-async function addAttachmentsFromPaths(paths: string[], appendToEnd = false) {
-  const uniquePaths = paths.filter((path, index) =>
-    paths.indexOf(path) === index &&
-    !attachments.value.some((attachment) => attachment.path === path)
-  );
-  if (uniquePaths.length === 0) return;
-  try {
-    const described = await describeAttachments(uniquePaths);
-    const existing = new Set(attachments.value.map((attachment) => attachment.path));
-    const nextAttachments = described.filter((attachment) => !existing.has(attachment.path));
-    if (appendToEnd && nextAttachments.length > 0) {
-      droppedAttachmentAppendKey.value += 1;
-    }
-    attachments.value = [
-      ...attachments.value,
-      ...nextAttachments,
-    ];
-  } catch (err) {
-    console.error("[chat] describeAttachments failed", err);
-  }
-}
-
-function addContextAttachment(attachment: ChatAttachment) {
-  if (attachment.exists === false) return;
-  if (attachments.value.some((item) => item.path === attachment.path)) return;
-  attachments.value = [...attachments.value, attachment];
-}
-
-async function onPickAttachments() {
-  try {
-    const paths = await pickAttachmentFiles();
-    await addAttachmentsFromPaths(paths);
-  } catch (err) {
-    console.error("[chat] pickAttachmentFiles failed", err);
-  }
-}
-
-function removeAttachment(attachmentId: string) {
-  attachments.value = attachments.value.filter((attachment) => attachment.id !== attachmentId);
-}
-
-async function ensureTaskReadyForMessage(
-  content: string,
-  outgoingAttachments: ChatAttachment[],
-) {
-  const routeState = resolveConversationRouteState(props.projectId, props.taskId);
-  if (props.projectId && routeState.isDraftRoute) {
-    if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
-    await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
-  } else if (!props.projectId && routeState.isDraftRoute) {
-    if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
-    await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
-  }
-}
-
-async function sendAgentMessage(
-  content: string,
-  outgoingAttachments: ChatAttachment[] = [],
-  guideId?: string,
-) {
-  if (!hasContext.value) return;
-  if (!content.trim() && outgoingAttachments.length === 0) return;
-
-  let optimisticId: string | null = null;
-  try {
-    await ensureComposerLoaded();
-    const currentComposer = composerForView.value;
-    await ensureTaskReadyForMessage(content, outgoingAttachments);
-    const cwd = project.value?.cwd ?? (await ensureOrphanCwd());
-
-    const optimistic = createMessageTimelineEvent({
-      id: nextOptimisticMessageId(),
-      taskId: props.taskId,
-      content,
-      attachments: outgoingAttachments,
-      createdAt: Date.now(),
-      queued: true,
-    });
-    optimisticId = optimistic.id;
-    upsertTimelineEvent(optimistic);
-    userSendScrollKey.value += 1;
-    await sendMessage(
-      props.taskId,
-      content,
-      currentComposer,
-      cwd,
-      outgoingAttachments,
-      guideId,
-    );
-    removeTimelineEvent(optimistic.id);
-  } catch (err) {
-    if (optimisticId) removeTimelineEvent(optimisticId);
-    isTurnRunning.value = false;
-    upsertTimelineEvent(createErrorTimelineEvent(`发送失败：${String(err)}`, {
-      content,
-      attachments: outgoingAttachments,
-    }));
-    throw err;
-  }
-}
-
-async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
-  if (!hasContext.value) return;
-  if (isTurnRunning.value || pendingAgentActions.value.length > 0) {
-    await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
-    return;
-  }
-
-  try {
-    await sendAgentMessage(content, outgoingAttachments);
-    attachments.value = [];
-  } catch {
-    // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-  }
-}
-
-function onInsertGuide(todo: TaskTodo) {
-  void guideDispatch.dispatchGuide(todo);
-}
-
-async function onInterrupt() {
-  if (!hasContext.value || !isTurnRunning.value) return;
-  try {
-    await interruptTurn(props.taskId);
-  } catch (err) {
-    upsertTimelineEvent(createErrorTimelineEvent(`打断失败：${String(err)}`));
-  }
-}
-
-function onResolveAskUser(result: AskUserResult) {
-  const ask = pendingAskUser.value;
-  if (!ask) return;
-  resolveAskUserById(ask.id, result);
-}
-
-async function onResolveToolConsent(
-  decision: ToolConsentDecision,
-  message?: string,
-  updatedInput?: ToolConsentUpdatedInput,
-) {
-  const request = pendingToolConsent.value;
-  if (!request) return;
-  try {
-    await respondConsent(request.taskId, request.requestId, decision, message, updatedInput);
-  } catch (err) {
-    console.error("[tool-consent] respond failed", err);
-  }
-}
-
-async function onResolvePendingAgentAction(resolution: PendingAgentActionResolution) {
-  if (resolution.kind === "tool_consent") {
-    const request = pendingToolConsents.value.find(
-      (item) => item.requestId === resolution.requestId,
-    );
-    if (!request) return;
-    try {
-      await respondConsent(
-        request.taskId,
-        request.requestId,
-        resolution.decision,
-        resolution.message,
-        resolution.updatedInput,
-      );
-    } catch (err) {
-      console.error("[tool-consent] respond failed", err);
-    }
-    return;
-  }
-  resolveAskUserById(resolution.askId, resolution.result);
-}
-
-async function onComposerUpdate(next: ChatComposerState) {
-  const normalized = withActiveBackend(next);
-  composer.value = normalized;
-  try { await setComposerState(normalized); }
-  catch (err) { console.error("[chat] setComposerState failed", err); }
-}
-
-function upsertTimelineEvent(event: AgentTimelineEvent) {
-  persistedTimelineEvents.value = upsertTimelineEventById(
-    persistedTimelineEvents.value,
-    event,
-  );
-}
-
-function upsertOverlayTimelineEvent(event: AgentTimelineEvent) {
-  overlayTimelineEvents.value = upsertTimelineEventById(
-    overlayTimelineEvents.value,
-    event,
-  );
-}
-
-function upsertTimelineEventById(
-  events: AgentTimelineEvent[],
-  event: AgentTimelineEvent,
-): AgentTimelineEvent[] {
-  const existingIndex = events.findIndex((item) => item.id === event.id);
-  if (existingIndex < 0) {
-    return [...events, event];
-  }
-  const next = events.slice();
-  next[existingIndex] = event;
-  return next;
-}
-
-function removeTimelineEvent(eventId: string) {
-  persistedTimelineEvents.value = persistedTimelineEvents.value.filter((item) =>
-    item.id !== eventId
-  );
-}
-
-function nextOptimisticMessageId(): string {
-  optimisticMessageSeq += 1;
-  return `pending-${Date.now()}-${optimisticMessageSeq}`;
-}
-
-function attachmentsToTimelinePayload(attachments: ChatAttachment[]): AgentTimelinePayload[] {
-  return attachments.map((attachment) => ({
-    id: attachment.id,
-    name: attachment.name,
-    path: attachment.path,
-    kind: attachment.kind,
-    size: attachment.size,
-    exists: attachment.exists ?? null,
-    mime: attachment.mime ?? null,
-    directory: attachment.directory
-      ? {
-        fileCount: attachment.directory.fileCount,
-        directoryCount: attachment.directory.directoryCount,
-        totalSize: attachment.directory.totalSize,
-        truncated: attachment.directory.truncated,
-        unreadableCount: attachment.directory.unreadableCount,
-      }
-      : null,
-  }));
-}
-
-function createMessageTimelineEvent(input: {
-  id: string;
-  taskId: string;
-  content: string;
-  attachments?: ChatAttachment[];
-  createdAt: number;
-  queued?: boolean;
-}): AgentTimelineEvent {
-  return {
-    id: input.id,
-    taskId: input.taskId,
-    turnId: null,
-    backend: composerForView.value.backend,
-    kind: "message",
-    status: input.queued ? "pending" : "success",
-    title: "用户输入",
-    summary: input.content,
-    payload: {
-      role: "user",
-      content: input.content,
-      attachments: attachmentsToTimelinePayload(input.attachments ?? []),
-      queued: input.queued === true,
-    },
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-    // 客户端乐观事件：排在末尾占位，等同 id 的 DB 事件回来后用真实
-    // turn_seq / intra_turn_order 覆盖。MAX_SAFE_INTEGER 保证乐观行不会
-    // 倒插到已存在事件之间，避免短暂闪烁。
-    turnSeq: Number.MAX_SAFE_INTEGER,
-    intraTurnOrder: 0,
-  };
-}
-
-function mergeTimelineEvents(
-  events: AgentTimelineEvent[],
-  current: AgentTimelineEvent[],
-): AgentTimelineEvent[] {
-  const byId = new Map<string, AgentTimelineEvent>();
-  for (const event of events) byId.set(event.id, event);
-  for (const event of current) {
-    if (!byId.has(event.id)) byId.set(event.id, event);
-  }
-  return [...byId.values()].sort((a, b) =>
-    a.turnSeq - b.turnSeq ||
-    a.intraTurnOrder - b.intraTurnOrder ||
-    a.createdAt - b.createdAt ||
-    a.id.localeCompare(b.id)
-  );
-}
-
-function mergeLoadedTimelineEvents(
-  loaded: AgentTimelineEvent[],
-  current: AgentTimelineEvent[],
-): AgentTimelineEvent[] {
-  const loadedKeys = new Set(
-    loaded
-      .filter(isUserMessageEvent)
-      .map(userMessageIdentityKey),
-  );
-  const optimisticEvents = current.filter((event) =>
-    isQueuedUserMessageEvent(event) && !loadedKeys.has(userMessageIdentityKey(event))
-  );
-  return mergeTimelineEvents(loaded, optimisticEvents);
-}
-
-function isUserMessageEvent(event: AgentTimelineEvent): boolean {
-  if (event.kind !== "message") return false;
-  const payload = readTimelineEventPayloadRecord(event);
-  return payload.role === "user" || payload.role === "system";
-}
-
-function isQueuedUserMessageEvent(event: AgentTimelineEvent): boolean {
-  return isUserMessageEvent(event) &&
-    readTimelineEventPayloadRecord(event).queued === true;
-}
-
-function userMessageIdentityKey(event: AgentTimelineEvent): string {
-  const payload = readTimelineEventPayloadRecord(event);
-  const content = typeof payload.content === "string" ? payload.content : event.summary ?? "";
-  const attachments = Array.isArray(payload.attachments)
-    ? payload.attachments
-      .map((attachment) => {
-        const row = readPayloadRecord(attachment);
-        return typeof row.path === "string" ? row.path : "";
-      })
-      .filter(Boolean)
-      .join("\u001f")
-    : "";
-  return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}`;
-}
-
-function canRetryTimelineEvent(event: AgentTimelineEvent): boolean {
-  return retryContextForTimelineEvent(event) !== null;
-}
-
-async function onRetryTimelineEvent(event: AgentTimelineEvent) {
-  const retryContext = retryContextForTimelineEvent(event);
-  if (!retryContext) return;
-  try {
-    await sendAgentMessage(retryContext.content, retryContext.attachments);
-  } catch (err) {
-    console.error("[chat] retry failed", err);
-  }
-}
-
-function retryContextForTimelineEvent(event: AgentTimelineEvent): TimelineRetryContext | null {
-  if (event.kind !== "error") return null;
-  const payload = readTimelineEventPayloadRecord(event);
-  const embedded = readRetryContext(payload.retryContext);
-  if (embedded) return embedded;
-  if (!event.turnId) return null;
-  const source = timelineEvents.value.find((candidate) => {
-    if (candidate.kind !== "message" || candidate.turnId !== event.turnId) return false;
-    return readTimelineEventPayloadRecord(candidate).role === "user";
-  });
-  if (!source) return null;
-  const sourcePayload = readTimelineEventPayloadRecord(source);
-  return readRetryContext({
-    content: typeof sourcePayload.content === "string" ? sourcePayload.content : source.summary ?? "",
-    attachments: sourcePayload.attachments,
-  });
-}
-
-function readRetryContext(value: unknown): TimelineRetryContext | null {
-  const payload = readPayloadRecord(value);
-  const content = typeof payload.content === "string" ? payload.content : "";
-  const attachments = Array.isArray(payload.attachments)
-    ? payload.attachments.filter(isChatAttachment)
-    : [];
-  if (!content.trim() && attachments.length === 0) return null;
-  return { content, attachments };
-}
-
-function isChatAttachment(value: unknown): value is ChatAttachment {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  return typeof row.id === "string" &&
-    typeof row.name === "string" &&
-    typeof row.path === "string" &&
-    (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
-    (typeof row.size === "number" || row.size === null);
-}
-
-function readTimelineEventPayloadRecord(event: AgentTimelineEvent): Record<string, unknown> {
-  return readPayloadRecord(event.payload);
-}
-
-function readPayloadRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function createErrorTimelineEvent(
-  message: string,
-  retryContext?: TimelineRetryContext,
-): AgentTimelineEvent {
-  const now = Date.now();
-  const payload: Record<string, AgentTimelinePayload> = { message };
-  if (retryContext) {
-    payload.retryContext = {
-      content: retryContext.content,
-      attachments: attachmentsToTimelinePayload(retryContext.attachments),
-    };
-  }
-  return {
-    id: `error-${now}-${++localErrorSeq}`,
-    taskId: props.taskId,
-    turnId: null,
-    backend: composerForView.value.backend,
-    kind: "error",
-    status: "error",
-    title: "错误",
-    summary: message,
-    payload,
-    createdAt: now,
-    updatedAt: now,
-    turnSeq: Number.MAX_SAFE_INTEGER,
-    intraTurnOrder: Number.MAX_SAFE_INTEGER,
-  };
-}
-
-async function loadTimelineEvents(taskId: string): Promise<AgentTimelineEvent[]> {
-  try {
-    return await listAgentTimeline(taskId);
-  } catch (err) {
-    console.error("[agent-timeline] list failed", err);
-    return [];
-  }
-}
-
-let loadSeq = 0;
-let composerLoad: Promise<ChatComposerState | null> | null = null;
-
-async function loadComposerForCurrentTask(taskId: string, seq: number): Promise<ChatComposerState | null> {
-  const comp = await getComposerState(taskId);
-  if (seq !== loadSeq || taskId !== props.taskId) return null;
-  composer.value = withActiveBackend(comp);
-  return composer.value;
-}
-
-async function ensureComposerLoaded(): Promise<ChatComposerState> {
-  if (composer.value) return composer.value;
-  const pending = composerLoad ?? loadComposerForCurrentTask(props.taskId, loadSeq);
-  const loaded = await pending;
-  if (!loaded) throw new Error("Composer 尚未就绪");
-  return loaded;
-}
-
-async function loadAll() {
-  const seq = ++loadSeq;
-  const taskId = props.taskId;
-  const projectId = props.projectId;
-  if (isPopup.value && !conversationRouteState.value.isLiveDraft) {
-    popupContentReady.value = false;
-  }
-  composer.value = null;
-  const nextComposerLoad = loadComposerForCurrentTask(taskId, seq).catch((err) => {
-    console.error("[chat] getComposerState failed", err);
-    return null;
-  });
-  composerLoad = nextComposerLoad;
-  try {
-    const [events, comp] = await Promise.all([loadTimelineEvents(taskId), nextComposerLoad]);
-    if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-    persistedTimelineEvents.value = mergeLoadedTimelineEvents(
-      events,
-      persistedTimelineEvents.value,
-    );
-    if (!comp) return;
-  } finally {
-    if (composerLoad === nextComposerLoad) composerLoad = null;
-    if (seq === loadSeq && taskId === props.taskId && projectId === props.projectId) {
-      if (isPopup.value) popupContentReady.value = true;
-    }
-  }
-}
-
-const guideDispatch = useGuideDispatch({
+const conversation = useTaskConversationContext(routeProps);
+const timeline = useTaskTimeline({
   taskId: () => props.taskId,
-  ensureReady: ensureTaskReadyForMessage,
-  sendAgentMessage,
-  ensureDispatchReady: async () => {
-    await ensureComposerLoaded();
-  },
-  hasPendingAgentAction: () => pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
-  isTurnRunning: () => isTurnRunning.value,
-  clearAttachments: () => {
-    attachments.value = [];
-  },
-  reportError: (message) => {
-    upsertTimelineEvent(createErrorTimelineEvent(message));
-  },
+  backend: () => composerController.composerForView.value.backend,
 });
+const composerController = useTaskComposerController({
+  props: routeProps,
+  context: conversation,
+  timeline,
+  attachments: sharedAttachments,
+});
+const attachmentController = useTaskAttachments({
+  chatPageRef,
+  attachments: sharedAttachments,
+  hasContext: () => conversation.hasContext.value,
+  canAcceptInteractiveDrop: composerController.canAcceptInteractiveDrop,
+});
+
+const {
+  isPopup,
+  project,
+  hasContext,
+  isContextLoading,
+  isPopupPending,
+  shouldRenderChat,
+  shouldShowContextLoading,
+  emptyHeadline,
+  contextSearchCwd,
+} = conversation;
+const {
+  timelineEvents,
+  canRetryEvent,
+} = timeline;
+const {
+  attachments,
+  viewingImage,
+  droppedAttachmentAppendKey,
+  fileDropActive,
+} = attachmentController;
+const {
+  composerForView,
+  isTurnRunning,
+  userSendScrollKey,
+  pendingAskUser,
+  pendingToolConsent,
+  pendingAgentActions,
+  pendingPlanApproval,
+  nonInterruptMode,
+} = composerController;
 
 const unlisteners: UnlistenFn[] = [];
-let unsubscribeDebugTimeline: (() => void) | null = null;
 let unregisterDebugPanel: (() => void) | null = null;
-let popupContextSeq = 0;
-let contextLoadingTimer: ReturnType<typeof setTimeout> | null = null;
-const POPUP_CONTEXT_LOADING_NOTICE_MS = 600;
-
-function clearContextLoadingTimer() {
-  if (contextLoadingTimer === null) return;
-  clearTimeout(contextLoadingTimer);
-  contextLoadingTimer = null;
-}
-
-async function hydratePopupContext() {
-  if (!isPopup.value) {
-    popupContextHydrating.value = false;
-    popupContextHydrated.value = true;
-    return;
-  }
-
-  const seq = ++popupContextSeq;
-  const projectId = props.projectId;
-  const taskId = props.taskId;
-  popupContextHydrating.value = true;
-  popupContextHydrated.value = false;
-  try {
-    if (projectId) {
-      await Promise.all([
-        ensureProjectLoaded(projectId),
-        ensureTaskLoaded(taskId, projectId),
-      ]);
-    } else {
-      await ensureTaskLoaded(taskId, null);
-    }
-  } catch (err) {
-    console.error("[popup] hydrate context failed", err);
-  } finally {
-    if (seq === popupContextSeq && taskId === props.taskId && projectId === props.projectId) {
-      popupContextHydrating.value = false;
-      popupContextHydrated.value = true;
-    }
-  }
-}
-
-async function hydrateMainContext() {
-  if (isPopup.value) return;
-  try {
-    if (props.projectId) {
-      await Promise.all([
-        ensureProjectLoaded(props.projectId),
-        ensureProjectTasksLoaded(props.projectId),
-        ensureTaskLoaded(props.taskId, props.projectId),
-      ]);
-    } else {
-      await ensureTaskLoaded(props.taskId, null);
-    }
-  } catch (err) {
-    console.error("[chat] hydrate context failed", err);
-  }
-}
 
 function syncDebugPanelRegistration() {
-  if (!hasContext.value || !agentInteractionSettings.debug.value) {
+  if (!hasContext.value || !composerController.agentInteractionSettings.debug.value) {
     unregisterDebugPanel?.();
     unregisterDebugPanel = null;
     return;
@@ -859,120 +95,40 @@ function syncDebugPanelRegistration() {
   unregisterDebugPanel = registerDebugChatSidebarPanel();
 }
 
-function resubscribeDebugTimeline() {
-  unsubscribeDebugTimeline?.();
-  unsubscribeDebugTimeline = onDebugTimelineEvent(props.taskId, upsertOverlayTimelineEvent);
-}
-
-resubscribeDebugTimeline();
-
 onMounted(async () => {
-  if (!props.projectId) await ensureOrphanCwd();
-  unlisteners.push(
-    await getCurrentWebview().onDragDropEvent(async (event) => {
-      const drop = readDropPayload(event.payload);
-      if (!drop) return;
-      if (drop.type === "leave") {
-        fileDropActive.value = false;
-        return;
-      }
-      const point = await normalizeDropPoint(drop.position);
-      const canAccept = canAcceptFileDropAt(point);
-      fileDropActive.value = (drop.type === "enter" || drop.type === "over") && canAccept;
-      if (drop.type !== "drop") return;
-      fileDropActive.value = false;
-      if (!canAccept || drop.paths.length === 0) return;
-      await addAttachmentsFromPaths(drop.paths, true);
-    }),
-  );
-  unlisteners.push(
-    await onAgentTimeline((e) => {
-      if (e.taskId !== props.taskId) return;
-      upsertTimelineEvent(e);
-      if (isAgentTimelineToolWindowKind(e.kind)) {
-        void guideDispatch.scheduleGuideInsertion("tool");
-      }
-    }),
-  );
-  unlisteners.push(
-    await onTurnStarted((e) => {
-      if (e.taskId !== props.taskId) return;
-      isTurnRunning.value = true;
-      let cleared = false;
-      persistedTimelineEvents.value = persistedTimelineEvents.value.map((event) => {
-        const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
-          ? event.payload as Record<string, unknown>
-          : {};
-        if (!cleared && event.kind === "message" && payload.queued === true) {
-          cleared = true;
-          return {
-            ...event,
-            status: "success",
-            payload: { ...payload, queued: false },
-            updatedAt: Date.now(),
-          };
-        }
-        return event;
-      });
-    }),
-  );
-  unlisteners.push(
-    await onDone((e) => {
-      if (e.taskId !== props.taskId) return;
-      isTurnRunning.value = false;
-      void guideDispatch.scheduleGuideInsertion("idle");
-    }),
-  );
-  if (isPopup.value) {
-    await loadAgentInteractionSettings();
+  if (!props.projectId) await conversation.ensureOrphanCwd();
+  unlisteners.push(await attachmentController.installDragDropListener());
+  unlisteners.push(...await composerController.installRuntimeListeners());
+  if (conversation.isPopup.value) {
+    await composerController.loadAgentInteractionSettings();
   } else {
-    await Promise.all([hydrateMainContext(), loadAll(), loadAgentInteractionSettings()]);
+    await Promise.all([
+      conversation.hydrateMainContext(),
+      composerController.loadAll(),
+      composerController.loadAgentInteractionSettings(),
+    ]);
   }
 });
 
 onUnmounted(async () => {
-  clearContextLoadingTimer();
-  unsubscribeDebugTimeline?.();
-  unsubscribeDebugTimeline = null;
+  timeline.disposeTimeline();
   unregisterDebugPanel?.();
   unregisterDebugPanel = null;
-  for (const u of unlisteners) {
-    try { await u(); } catch { /* ignore */ }
+  for (const unlisten of unlisteners) {
+    try {
+      await unlisten();
+    } catch {
+      // ignore
+    }
   }
   unlisteners.length = 0;
 });
 
 watch(
-  () => [props.variant, props.projectId, props.taskId] as const,
-  () => {
-    void hydratePopupContext();
-  },
-  { immediate: true },
-);
-
-watch(
-  isBlockingLoading,
-  (loading) => {
-    clearContextLoadingTimer();
-    if (!isPopup.value) {
-      contextLoadingVisible.value = loading;
-      return;
-    }
-    contextLoadingVisible.value = false;
-    if (!loading) return;
-    contextLoadingTimer = setTimeout(() => {
-      contextLoadingVisible.value = isBlockingLoading.value;
-      contextLoadingTimer = null;
-    }, POPUP_CONTEXT_LOADING_NOTICE_MS);
-  },
-  { immediate: true },
-);
-
-watch(
-  () => [props.variant, props.projectId, props.taskId, hasContext.value] as const,
+  () => [props.variant, props.projectId, props.taskId, conversation.hasContext.value] as const,
   ([variant, _projectId, _taskId, ready]) => {
     if (variant !== "popup" || !ready) return;
-    void loadAll();
+    void composerController.loadAll();
   },
   { immediate: true },
 );
@@ -980,53 +136,30 @@ watch(
 watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
-    popupContentReady.value = !isPopup.value || conversationRouteState.value.isLiveDraft;
-    isTurnRunning.value = false;
-    persistedTimelineEvents.value = [];
-    overlayTimelineEvents.value = [];
-    composer.value = null;
-    attachments.value = [];
-    fileDropActive.value = false;
-    viewingImage.value = null;
-    resubscribeDebugTimeline();
-    if (!props.projectId) await ensureOrphanCwd();
-    if (!isPopup.value) {
-      await hydrateMainContext();
-      await loadAll();
+    conversation.prepareForRouteChange();
+    composerController.resetForRouteChange();
+    timeline.resetTimeline();
+    attachmentController.resetAttachments();
+    timeline.resubscribeDebugTimeline();
+    if (!props.projectId) await conversation.ensureOrphanCwd();
+    if (!conversation.isPopup.value) {
+      await conversation.hydrateMainContext();
+      await composerController.loadAll();
     }
   },
 );
 
 watch(
-  () => props.projectId,
-  (projectId) => {
-    if (projectId) void rememberPopupLastProject(projectId);
-  },
-  { immediate: true },
-);
-
-watch(
-  () => [props.variant, props.projectId, props.taskId, popupContextHydrated.value] as const,
-  ([variant, projectId, _taskId, contextHydrated]) => {
-    if (variant !== "popup") return;
-    if (contextHydrated && conversationRouteState.value.isLostDraft) {
-      void router.replace(popupNewDraftRoute(projectId));
-    }
-  },
-  { immediate: true },
-);
-
-watch(
-  () => [hasContext.value, agentInteractionSettings.debug.value] as const,
+  () => [hasContext.value, composerController.agentInteractionSettings.debug.value] as const,
   syncDebugPanelRegistration,
   { immediate: true },
 );
 
 watch(
   () => [
-    pendingAskUsers.value.length,
-    pendingToolConsents.value.length,
-    pendingPlanApproval.value?.turnId ?? "",
+    composerController.pendingAskUsers.value.length,
+    composerController.pendingToolConsents.value.length,
+    composerController.pendingPlanApproval.value?.turnId ?? "",
   ] as const,
   ([askCount, consentCount, planTurn], [prevAskCount, prevConsentCount, prevPlanTurn]) => {
     if (
@@ -1034,115 +167,51 @@ watch(
       consentCount > prevConsentCount ||
       (planTurn && planTurn !== prevPlanTurn)
     ) {
-      void guideDispatch.scheduleGuideInsertion("user");
+      void composerController.scheduleUserGuideInsertion();
     }
   },
 );
 </script>
 
 <template>
-  <section
-    v-if="shouldRenderChat"
-    ref="chatPageRef"
-    class="chat-page"
-    :class="{ 'chat-page--popup': isPopup }"
-  >
-    <div class="chat">
-      <div class="chat-layout">
-        <div class="chat-layout__main">
-          <div
-            v-if="fileDropActive"
-            class="chat-file-drop-overlay"
-            aria-live="polite"
-            role="status"
-          >
-            <span class="chat-file-drop-overlay__icon" aria-hidden="true">+</span>
-            <span class="chat-file-drop-overlay__text">拖入文件以追加到输入框</span>
-          </div>
-          <ChatTranscript
-            :timeline-events="timelineEvents"
-            :empty-headline="emptyHeadline"
-            :is-thinking="isTurnRunning"
-            :project-cwd="project?.cwd ?? null"
-            :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
-            :force-scroll-bottom-key="userSendScrollKey"
-            :pending-agent-actions="pendingAgentActions"
-            :show-expired-pending-actions="nonInterruptMode"
-            :can-retry-event="canRetryTimelineEvent"
-            @resolve-pending-agent-action="onResolvePendingAgentAction"
-            @retry-event="onRetryTimelineEvent"
-            @open-image="viewingImage = $event"
-          >
-            <template #controls>
-              <div class="chat-controls">
-                <TodoFloat
-                  v-if="taskId"
-                  :task-id="taskId"
-                  @insert-guide="onInsertGuide"
-                />
-                <ChatComposer
-                  :state="composerForView"
-                  :attachments="attachments"
-                  :append-attachments-to-end-key="droppedAttachmentAppendKey"
-                  :project-cwd="contextSearchCwd"
-                  :sending="isTurnRunning"
-                  :pending-ask="nonInterruptMode ? null : pendingAskUser"
-                  :tool-consent="nonInterruptMode ? null : pendingToolConsent"
-                  @send="onSend"
-                  @interrupt="onInterrupt"
-                  @update:state="onComposerUpdate"
-                  @remove-attachment="removeAttachment"
-                  @pick-attachments="onPickAttachments"
-                  @add-context-attachment="addContextAttachment"
-                  @resolve-ask-user="onResolveAskUser"
-                  @resolve-tool-consent="onResolveToolConsent"
-                  @open-image="viewingImage = $event"
-                />
-              </div>
-            </template>
-          </ChatTranscript>
-        </div>
-        <ChatSidebarHost
-          v-if="!isPopup"
-          :task-id="taskId"
-          :project-id="projectId"
-          :project-cwd="project?.cwd ?? null"
-        />
-      </div>
-    </div>
-    <ImageViewer
-      v-if="viewingImage"
-      :image="viewingImage"
-      @close="viewingImage = null"
-    />
-  </section>
-
-  <section
-    v-else-if="isPopupPending"
-    class="chat-page chat-page--popup chat-page--pending"
-    aria-busy="true"
-  >
-    <div class="chat">
-      <div class="chat-layout">
-        <div class="chat-layout__main">
-          <div
-            v-if="shouldShowContextLoading"
-            class="popup-context-loading"
-            role="status"
-          >
-            正在加载对话…
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section v-else-if="isContextLoading">
-    <div class="empty-state">正在加载对话…</div>
-  </section>
-
-  <section v-else>
-    <div class="empty-state">未找到任务 <code>{{ taskId }}</code></div>
-  </section>
+  <TaskDetailChatSurface
+    ref="chatSurfaceRef"
+    :task-id="taskId"
+    :project-id="projectId"
+    :is-popup="isPopup"
+    :should-render-chat="shouldRenderChat"
+    :is-popup-pending="isPopupPending"
+    :should-show-context-loading="shouldShowContextLoading"
+    :is-context-loading="isContextLoading"
+    :file-drop-active="fileDropActive"
+    :timeline-events="timelineEvents"
+    :empty-headline="emptyHeadline"
+    :is-turn-running="isTurnRunning"
+    :project-cwd="project?.cwd ?? null"
+    :context-search-cwd="contextSearchCwd"
+    :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
+    :user-send-scroll-key="userSendScrollKey"
+    :pending-agent-actions="pendingAgentActions"
+    :show-expired-pending-actions="nonInterruptMode"
+    :can-retry-event="canRetryEvent"
+    :composer-state="composerForView"
+    :attachments="attachments"
+    :append-attachments-to-end-key="droppedAttachmentAppendKey"
+    :pending-ask="nonInterruptMode ? null : pendingAskUser"
+    :tool-consent="nonInterruptMode ? null : pendingToolConsent"
+    :viewing-image="viewingImage"
+    @resolve-pending-agent-action="composerController.onResolvePendingAgentAction"
+    @retry-event="composerController.onRetryTimelineEvent"
+    @open-image="viewingImage = $event"
+    @close-image="viewingImage = null"
+    @insert-guide="composerController.onInsertGuide"
+    @send="composerController.onSend"
+    @interrupt="composerController.onInterrupt"
+    @update-composer="composerController.onComposerUpdate"
+    @remove-attachment="attachmentController.removeAttachment"
+    @pick-attachments="attachmentController.onPickAttachments"
+    @add-context-attachment="attachmentController.addContextAttachment"
+    @resolve-ask-user="composerController.onResolveAskUser"
+    @resolve-tool-consent="composerController.onResolveToolConsent"
+  />
 </template>
-
