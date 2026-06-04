@@ -107,12 +107,21 @@ async function onFocusMain() {
     <div class="popup-titlebar__controls popup-titlebar__controls--left">
       <button
         type="button"
-        class="titlebar__btn titlebar__btn--danger"
-        aria-label="关闭弹出窗口"
-        title="关闭"
-        @click="onClose"
+        class="titlebar__btn"
+        aria-label="回到主窗口"
+        title="回到主窗口"
+        @click="onFocusMain"
       >
-        <X :size="15" aria-hidden="true" />
+        <ExternalLink :size="14" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        class="titlebar__btn"
+        aria-label="新对话"
+        title="新对话"
+        @click="onNewChat"
+      >
+        <MessageSquarePlus :size="15" aria-hidden="true" />
       </button>
     </div>
 
@@ -140,21 +149,12 @@ async function onFocusMain() {
     <div class="popup-titlebar__controls popup-titlebar__controls--right">
       <button
         type="button"
-        class="titlebar__btn"
-        aria-label="新对话"
-        title="新对话"
-        @click="onNewChat"
+        class="titlebar__btn titlebar__btn--danger"
+        aria-label="关闭弹出窗口"
+        title="关闭"
+        @click="onClose"
       >
-        <MessageSquarePlus :size="15" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        class="titlebar__btn"
-        aria-label="回到主窗口"
-        title="回到主窗口"
-        @click="onFocusMain"
-      >
-        <ExternalLink :size="14" aria-hidden="true" />
+        <X :size="15" aria-hidden="true" />
       </button>
     </div>
   </header>
