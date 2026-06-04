@@ -62,7 +62,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Key node navigation: highlight important timeline nodes in the scrollbar and support quick jumps.
 - [x] Non-interruptive interaction mode: move permission requests, agent questions, and plan confirmations into a pending area instead of taking over the input box.
 - [x] Guidance queue: create, queue, and serially dispatch user guidance todos, with queue state recovered during active runs.
-- [x] Basic MCP integration: Claude stdio MCP servers can be managed by Lilia and injected into runtime; Codex MCP servers are read from `~/.codex/config.toml` and passed into runtime.
+- [x] Basic MCP integration: Claude stdio MCP servers can be managed by Lilia and injected into runtime; Codex stdio MCP servers can be read from and managed in `~/.codex/config.toml`.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
 - [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
 - [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
@@ -85,10 +85,9 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex process display: show Codex reasoning, commands, file changes, searches, plans, and final replies.
 - [x] Codex environment checks: show whether the Codex CLI, app-server, API, and connection state are available.
 - [x] Codex Plan: enable the app-server experimental API, read the plan preset from `collaborationMode/list`, and pass `collaborationMode` to `turn/start`; after plan approval, Lilia explicitly returns to default mode for execution.
-- [x] Codex MCP discovery: reuse Codex configuration to read MCP servers and register them at runtime.
-- [ ] Codex approval bridge (partial): command and file-change approvals enter unified tool confirmation; `additionalPermissions` and `availableDecisions` are not yet displayed or used.
-- [ ] Codex MCP management (partial): the UI can show MCP servers and open the Codex config file; adding, editing, and removing Codex MCP servers inside LiliaCode is not yet available.
-- [ ] Codex profiles (partial): each turn passes cwd, sandbox, and approval policy; profiles, project-level config, and sticky `thread/settings/update` are not yet integrated.
+- [x] Codex approval bridge: command and file-change approvals enter unified tool confirmation with `additionalPermissions` / `availableDecisions`, and Lilia can execute user-edited Codex commands before steering the result back to Codex.
+- [x] Codex MCP management: the UI can view, create, edit, delete, and enable user-level stdio MCP servers in `~/.codex/config.toml`; HTTP / OAuth / unknown transports remain read-only.
+- [x] Codex profiles: support global and project-level profiles, reasoning effort, runtime workspace roots, controlled permissions, and sticky `thread/settings/update`.
 - [ ] Codex workflows: built-in code review, fix suggestion, and batch-change flows are not yet available.
 - [ ] Built-in browser interaction: IAB-based user interaction or browser debugging is not yet available.
 
@@ -123,7 +122,7 @@ Lilia/
 │           └── src/
 │               ├── store.rs    # lilia-store: SQLite + r2d2 + migrations
 │               ├── todos.rs    # Intercepts TodoWrite / todo_list events -> TaskTodo upsert
-│               ├── plugins.rs  # Claude skills / plugins / MCP and Codex MCP discovery
+│               ├── plugins.rs  # Claude skills / plugins / MCP and Codex MCP management
 │               └── lib.rs      # chat / settings / project / plugin IPC
 └── packages/
     └── contracts/              # Shared TS types and timeline display rules

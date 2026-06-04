@@ -518,9 +518,13 @@ export function mapClaudeSystemTimeline(msg, ctx) {
           summary: msg.output || msg.stderr || msg.stdout || msg.hook_event || "",
           payload: {
             backend: "claude",
+            subkind: "hook",
             hookName: msg.hook_name,
             hookEvent: msg.hook_event,
             exitCode: msg.exit_code,
+            stdout: msg.stdout,
+            stderr: msg.stderr,
+            output: msg.output,
             sessionId: msg.session_id,
           },
           sourceId: msg.uuid,

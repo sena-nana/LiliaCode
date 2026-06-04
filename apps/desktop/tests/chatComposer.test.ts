@@ -62,6 +62,20 @@ const bashToolConsent: ToolConsentRequest = {
   input: { command: "pwd" },
 };
 
+const codexCommandToolConsent: ToolConsentRequest = {
+  ...toolConsent,
+  backend: "codex",
+  requestId: "codex-command-tool-1",
+  toolName: "item/commandExecution/requestApproval",
+  input: { command: "yarn test" },
+  title: "Codex command approval",
+  displayName: "item/commandExecution/requestApproval",
+  description: "yarn test",
+  toolUseId: "codex-approval-1",
+  availableDecisions: ["accept", "decline", "cancel"],
+  cwd: "D:/PROJECT/workspace/Lilia",
+};
+
 const projectCwd = "D:\\PROJECT\\workspace\\Lilia";
 
 function renderRunningComposer() {
@@ -690,6 +704,26 @@ describe("ChatComposer", () => {
       "allow",
       undefined,
       { command: "pwd && echo ok" },
+    ]);
+  });
+
+  it("pending Codex command approval 同意时返回用户修改后的 updatedInput", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        toolConsent: codexCommandToolConsent,
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
+    await fireEvent.click(view.getByRole("button", { name: "同意" }));
+
+    expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([
+      "allow",
+      undefined,
+      { command: "yarn test --runInBand" },
     ]);
   });
 });

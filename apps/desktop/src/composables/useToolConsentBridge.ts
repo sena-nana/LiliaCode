@@ -101,6 +101,7 @@ export async function respondConsent(
   decision: ToolConsentDecision,
   message?: string,
   updatedInput?: ToolConsentUpdatedInput,
+  codexDecision?: string,
 ): Promise<void> {
   // 先乐观移除——用户已经做了选择，UI 不应再"卡"在原卡片上。
   // 即便 invoke 失败，也只是 runner 没收到决策，下次会用同 id 再发一次。
@@ -125,6 +126,7 @@ export async function respondConsent(
         decision,
         message: message ?? null,
         ...(updatedInput ? { updatedInput } : {}),
+        ...(codexDecision ? { codexDecision } : {}),
       },
     });
     return;

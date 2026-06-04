@@ -40,23 +40,11 @@ export function buildByKind({ kind, status, title, summary, payload }: KindBuild
         details: [markdownDetail(summary || pick(payload, ["text", "summary"]), "muted")]
           .filter((d): d is AgentTimelineDisplayDetail => d !== null),
       };
+    case "diagnostic":
+      return buildDiagnosticDisplay({ kind, status, title, summary, payload });
     case "mcp": {
       if (isCodexMcpConfigEvent(payload)) {
-        const count = typeof payload.serverCount === "number" && Number.isFinite(payload.serverCount)
-          ? payload.serverCount
-          : Array.isArray(payload.servers)
-            ? payload.servers.length
-            : null;
-        return {
-          icon: "plug",
-          label: "Codex MCP 配置",
-          preview: summary || (count && count > 0
-            ? `已发现 ${count} 个 MCP server`
-            : "未发现 Codex MCP server"),
-          details: [fieldsDetail([
-            displayField("config", pick(payload, ["configPath"])),
-          ])].filter((d): d is AgentTimelineDisplayDetail => d !== null),
-        };
+        return buildDiagnosticDisplay({ kind, status, title, summary, payload });
       }
       const target = [
         readFirstString(payload, ["server", "serverName", "mcpServer"], 200),
@@ -162,4 +150,40 @@ export function buildByKind({ kind, status, title, summary, payload }: KindBuild
 
 function isCodexMcpConfigEvent(payload: Record<string, unknown>): boolean {
   return payload.subkind === "config" || payload.source === "config.toml";
+}
+
+function buildDiagnosticDisplay({ status, summary, payload }: KindBuildInput): AgentTimelineDisplay {
+  const subkind = readFirstString(payload, ["subkind", "diagnosticType", "type"], 120);
+  const count = typeof payload.serverCount === "number" && Number.isFinite(payload.serverCount)
+    ? payload.serverCount
+    : Array.isArray(payload.servers)
+      ? payload.servers.length
+      : null;
+  const isConfig = subkind === "config" || subkind === "config_requirement" || payload.source === "config.toml";
+  const label = subkind === "config_requirement"
+    ? "配置要求"
+    : isConfig
+      ? "配置诊断"
+      : "诊断";
+  const preview = summary || (count && count > 0
+    ? `已发现 ${count} 个 MCP server`
+    : readFirstString(payload, ["message", "reason", "details"], 600));
+  return {
+    icon: "stethoscope",
+    label,
+    preview,
+    details: [
+      lineDetail(preview),
+      fieldsDetail([
+        displayField("backend", pick(payload, ["backend"])),
+        displayField("config", pick(payload, ["configPath", "path"])),
+        displayField("requirement", pick(payload, ["requirement", "name"])),
+        displayField("status", pick(payload, ["state", "status"])),
+      ]),
+      codeDetail(
+        isFailureStatus(status) ? "ERROR / OUTPUT" : "DETAILS",
+        pickValue(payload, ["warnings", "details", "message", "error", "servers"]),
+      ),
+    ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
+  };
 }

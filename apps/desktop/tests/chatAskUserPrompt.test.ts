@@ -440,6 +440,35 @@ describe("chat AskUser prompt", () => {
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
   });
 
+  it("统一 Codex 命令确认可编辑命令并回写 updatedInput", async () => {
+    const view = await renderTaskDetail();
+
+    emitUnifiedToolConsentRequest("t-002");
+
+    const prompt = await view.findByRole("alert");
+    const promptView = within(prompt);
+    expect(promptView.getByText("COMMAND")).toBeInTheDocument();
+
+    await fireEvent.click(promptView.getByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
+    await fireEvent.click(view.getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+        taskId: "t-002",
+        requestId: "unified-tool-t-002",
+        kind: "tool_consent",
+        result: {
+          taskId: "t-002",
+          requestId: "unified-tool-t-002",
+          decision: "allow",
+          message: null,
+          updatedInput: { command: "yarn test --runInBand" },
+        },
+      }, undefined);
+    });
+  });
+
 
   it("Bash 工具授权在 composer 中可编辑命令并同意回写 updatedInput", async () => {
     const view = await renderTaskDetail();

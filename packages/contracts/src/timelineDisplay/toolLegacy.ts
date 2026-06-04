@@ -18,10 +18,11 @@ export function tryDeriveToolDisplay(
   status: AgentTimelineEventStatus,
   isToolWindowKind: (kind: string) => boolean,
 ): AgentTimelineDisplay | null {
-  if (getLiliaToolRule(kind, asString(payload.subkind))) {
+  const subkind = normalizedDisplaySubkind(kind, payload);
+  if (getLiliaToolRule(kind, subkind)) {
     const display = deriveLiliaToolDisplay({
       kind,
-      subkind: asString(payload.subkind),
+      subkind,
       payload,
       title,
       status,
@@ -30,6 +31,13 @@ export function tryDeriveToolDisplay(
   }
 
   return tryDeriveLegacyClaudeToolDisplay(kind, payload, title, summary, status, isToolWindowKind);
+}
+
+function normalizedDisplaySubkind(kind: string, payload: Record<string, unknown>): string | null {
+  const declared = asString(payload.subkind);
+  if (declared) return declared;
+  if (kind === "tool" && (payload.hookName || payload.hookEvent)) return "hook";
+  return null;
 }
 
 function tryDeriveLegacyClaudeToolDisplay(

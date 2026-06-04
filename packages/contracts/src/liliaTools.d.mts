@@ -23,8 +23,10 @@ export type LiliaToolKind =
   | "ask_user"
   | "tool";
 
-/** 子分类：仅在 file_change / search 下有意义。其余 kind subkind 应留空。 */
+/** 工具子分类。 */
 export type LiliaToolSubkind =
+  // command
+  | "lilia_edit_exec"
   // file_change
   | "edit"
   | "multi_edit"
@@ -33,22 +35,35 @@ export type LiliaToolSubkind =
   // search
   | "glob"
   | "grep"
-  | "web";
+  | "web"
+  // tool
+  | "hook";
 
 /** 工具事件 payload 的协议字段并集 —— 实际 payload 是宽松的 Record。 */
 export interface LiliaToolPayload {
   // command
   command?: string;
+  originalCommand?: string;
+  modifiedCommand?: string;
+  executionOwner?: string;
   cwd?: string;
   exit?: number | string;
+  exitCode?: number | string;
   output?: string;
+  aggregatedOutput?: string;
+  stdout?: string;
   stderr?: string;
   duration?: number | string;
+  durationMs?: number | string;
+  approvalId?: string;
   // file_read / file_change
   path?: string;
   offset?: number;
   limit?: number;
   editCount?: number;
+  changes?: unknown;
+  grantRoot?: string;
+  error?: unknown;
   // search / web_fetch
   query?: string;
   glob?: string;
@@ -79,7 +94,11 @@ export interface LiliaToolPayload {
   structuredContent?: unknown;
   // tool 兜底
   toolName?: string;
+  hookName?: string;
+  hookEvent?: string;
   input?: unknown;
+  arguments?: unknown;
+  result?: unknown;
 }
 
 export interface LiliaToolEvent {

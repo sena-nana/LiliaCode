@@ -50,6 +50,16 @@ function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRe
     blockedPath: stringOrNull(payload.blockedPath),
     decisionReason: stringOrNull(payload.decisionReason),
     toolUseId: stringOrNull(payload.toolUseId) || stringOrNull(payload.toolUseID),
+    additionalPermissions: payload.additionalPermissions,
+    availableDecisions: Array.isArray(payload.availableDecisions)
+      ? payload.availableDecisions.filter((item): item is string => typeof item === "string")
+      : undefined,
+    proposedExecpolicyAmendment: payload.proposedExecpolicyAmendment,
+    proposedNetworkPolicyAmendments: payload.proposedNetworkPolicyAmendments,
+    networkApprovalContext: payload.networkApprovalContext,
+    cwd: stringOrNull(payload.cwd),
+    reason: stringOrNull(payload.reason),
+    commandActions: payload.commandActions,
   };
 }
 

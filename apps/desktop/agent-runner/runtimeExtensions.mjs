@@ -70,11 +70,11 @@ export function readCodexRuntimeExtensions(cmd) {
 export function emitRuntimeExtensionWarnings(protocol, backend, warnings) {
   if (!Array.isArray(warnings) || warnings.length === 0) return;
   protocol.emitTimeline({
-    kind: "error",
+    kind: "diagnostic",
     status: "info",
-    title: `${backend} extensions warning`,
+    title: `${backend} config requirement`,
     summary: warnings.join("\n"),
-    payload: { backend, warnings },
+    payload: { backend, subkind: "config_requirement", warnings },
     sourceId: `${backend}:extensions:warnings`,
   });
 }

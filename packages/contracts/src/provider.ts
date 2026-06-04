@@ -2,6 +2,36 @@ import type { ChatBackendKind } from "./chat";
 
 export type RouterMode = "cc-switch" | "direct";
 
+export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+export type CodexSettingsProfile = "default" | "fast" | "balanced" | "deep";
+
+export type CodexPermissionProfile =
+  | "default"
+  | "readOnly"
+  | "workspaceWrite"
+  | "dangerFullAccess";
+
+export interface CodexControlledPermissions {
+  profile: CodexPermissionProfile;
+}
+
+export interface CodexProfileSettings {
+  profile: CodexSettingsProfile;
+  model: string | null;
+  reasoningEffort: CodexReasoningEffort | null;
+  runtimeWorkspaceRoots: string[];
+  permissions: CodexControlledPermissions;
+}
+
+export interface CodexComposerSettings {
+  profile?: CodexSettingsProfile | null;
+  model?: string | null;
+  reasoningEffort?: CodexReasoningEffort | null;
+  runtimeWorkspaceRoots?: string[] | null;
+  permissions?: CodexControlledPermissions | null;
+}
+
 export interface ProviderConfig {
   backend: ChatBackendKind;
   baseUrl: string | null;

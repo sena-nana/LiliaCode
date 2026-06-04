@@ -1,10 +1,10 @@
 use rusqlite::Connection;
 
+#[cfg(test)]
+use super::migrations::SchemaMigration;
 use super::migrations::{
     ensure_schema_with_migrations, RESET_BASELINE_SCHEMA_VERSION, SCHEMA_MIGRATIONS,
 };
-#[cfg(test)]
-use super::migrations::SchemaMigration;
 
 pub(super) fn reset_orphaned_queued_guides(conn: &Connection) -> Result<(), String> {
     conn.execute(

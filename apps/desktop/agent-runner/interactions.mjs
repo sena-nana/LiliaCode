@@ -9,6 +9,7 @@ export function normalizeToolConsentResult(value) {
     updatedInput: row.updatedInput && typeof row.updatedInput === "object" && !Array.isArray(row.updatedInput)
       ? row.updatedInput
       : null,
+    codexDecision: stringOrNull(row.codexDecision),
   };
 }
 

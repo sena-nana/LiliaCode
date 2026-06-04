@@ -12,11 +12,14 @@ use super::claude_plugins::{list_claude_plugins, set_claude_plugin_enabled};
 use super::claude_skills::{
     create_claude_skill, delete_claude_skill, list_claude_skills, set_claude_skill_enabled,
 };
-use super::codex_mcp::{codex_config_path, list_codex_mcp_servers};
+use super::codex_mcp::{
+    codex_config_path, create_codex_mcp_server, delete_codex_mcp_server, list_codex_mcp_servers,
+    set_codex_mcp_server_enabled, update_codex_mcp_server,
+};
 use super::runtime::overview;
 use super::types::{
     ClaudeMcpServer, ClaudeMcpServerInput, ClaudePlugin, ClaudeSkill, CodexMcpServer,
-    PluginsOverview,
+    CodexMcpServerInput, PluginsOverview,
 };
 
 // ---------- Plugins / Skills ----------
@@ -147,6 +150,37 @@ pub fn plugins_open_claude_mcp_config(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn plugins_list_codex_mcp_servers(app: AppHandle) -> Vec<CodexMcpServer> {
     list_codex_mcp_servers(&app).0
+}
+
+#[tauri::command]
+pub fn plugins_create_codex_mcp_server(
+    app: AppHandle,
+    input: CodexMcpServerInput,
+) -> Result<CodexMcpServer, String> {
+    create_codex_mcp_server(&app, input)
+}
+
+#[tauri::command]
+pub fn plugins_update_codex_mcp_server(
+    app: AppHandle,
+    name: String,
+    input: CodexMcpServerInput,
+) -> Result<CodexMcpServer, String> {
+    update_codex_mcp_server(&app, &name, input)
+}
+
+#[tauri::command]
+pub fn plugins_delete_codex_mcp_server(app: AppHandle, name: String) -> Result<(), String> {
+    delete_codex_mcp_server(&app, &name)
+}
+
+#[tauri::command]
+pub fn plugins_set_codex_mcp_server_enabled(
+    app: AppHandle,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    set_codex_mcp_server_enabled(&app, &name, enabled)
 }
 
 /// 用系统默认编辑器打开 `~/.codex/config.toml`，文件不存在时先建一个空文件。

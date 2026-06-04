@@ -1,3 +1,5 @@
+import type { CodexComposerSettings } from "./provider";
+
 export interface Project {
   id: string;
   name: string;
@@ -19,6 +21,7 @@ export interface Session {
 
 export interface ProjectSettings {
   cloneParentDir: string | null;
+  codexDefaults?: CodexComposerSettings | null;
 }
 
 export interface PopupWindowSettings {

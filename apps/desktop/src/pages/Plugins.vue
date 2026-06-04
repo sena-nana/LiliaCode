@@ -5,18 +5,22 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
   createClaudeSkill,
   deleteClaudeMcpServer,
+  deleteCodexMcpServer,
   deleteClaudeSkill,
   openClaudeMcpConfig,
   openCodexConfig,
   setClaudeMcpServerEnabled,
+  setCodexMcpServerEnabled,
   setClaudePluginEnabled,
   setClaudeSkillEnabled,
   type ClaudeMcpServer,
   type ClaudePlugin,
   type ClaudeSkill,
+  type CodexMcpServer,
 } from "../services/plugins";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useClaudeMcpEditor } from "./plugins/useClaudeMcpEditor";
+import { useCodexMcpEditor } from "./plugins/useCodexMcpEditor";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
 import ClaudeSkillsTab from "./plugins/ClaudeSkillsTab.vue";
 import ClaudePluginsTab from "./plugins/ClaudePluginsTab.vue";
@@ -53,9 +57,11 @@ const creating = ref(false);
 const createError = ref<string | null>(null);
 const pendingRemoveSkill = ref<ClaudeSkill | null>(null);
 const pendingRemoveMcp = ref<ClaudeMcpServer | null>(null);
+const pendingRemoveCodexMcp = ref<CodexMcpServer | null>(null);
 const removing = ref(false);
 
 const mcpEditor = useClaudeMcpEditor({ refresh });
+const codexMcpEditor = useCodexMcpEditor({ refresh });
 
 function openCreate() {
   newName.value = "";
@@ -120,6 +126,16 @@ async function toggleMcp(server: ClaudeMcpServer) {
   }
 }
 
+async function toggleCodexMcp(server: CodexMcpServer) {
+  if (!server.editable) return;
+  try {
+    await setCodexMcpServerEnabled(server.name, !server.enabled);
+    server.enabled = !server.enabled;
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
 async function confirmRemove() {
   if (removing.value) return;
   removing.value = true;
@@ -135,6 +151,9 @@ async function confirmRemove() {
     } else if (pendingRemoveMcp.value) {
       await deleteClaudeMcpServer(pendingRemoveMcp.value.name);
       pendingRemoveMcp.value = null;
+    } else if (pendingRemoveCodexMcp.value) {
+      await deleteCodexMcpServer(pendingRemoveCodexMcp.value.name);
+      pendingRemoveCodexMcp.value = null;
     }
     await refresh();
   } catch (err) {
@@ -237,6 +256,10 @@ async function openCodex() {
       :servers="codexServers"
       :config-path="codexConfigPath"
       @open-config="openCodex"
+      @create="codexMcpEditor.openCreateMcp"
+      @edit="codexMcpEditor.openEditMcp"
+      @toggle="toggleCodexMcp"
+      @remove="pendingRemoveCodexMcp = $event"
     />
 
     <SkillCreateDialog
@@ -257,27 +280,49 @@ async function openCodex() {
       :env-rows="mcpEditor.mcpEnvRows.value"
       :editing-mcp="mcpEditor.editingMcp.value"
       :title="mcpEditor.mcpEditorTitle.value"
+      server-label="Claude MCP"
       :saving="mcpEditor.mcpSaving.value"
       :error="mcpEditor.mcpError.value"
-      :config-path="claudeMcpConfigPath"
+      :config-path="claudeMcpConfigPath || '~/.lilia/config/claude-mcp-servers.json'"
       @add-env-row="mcpEditor.addMcpEnvRow"
       @remove-env-row="mcpEditor.removeMcpEnvRow"
       @confirm="mcpEditor.saveMcpServer"
     />
 
+    <ClaudeMcpEditorDialog
+      v-model:open="codexMcpEditor.showMcpEditor.value"
+      v-model:name="codexMcpEditor.mcpName.value"
+      v-model:command="codexMcpEditor.mcpCommand.value"
+      v-model:args-text="codexMcpEditor.mcpArgsText.value"
+      :env-rows="codexMcpEditor.mcpEnvRows.value"
+      :editing-mcp="codexMcpEditor.editingMcp.value"
+      :title="codexMcpEditor.mcpEditorTitle.value"
+      server-label="Codex MCP"
+      :saving="codexMcpEditor.mcpSaving.value"
+      :error="codexMcpEditor.mcpError.value"
+      :config-path="codexConfigPath || '~/.codex/config.toml'"
+      @add-env-row="codexMcpEditor.addMcpEnvRow"
+      @remove-env-row="codexMcpEditor.removeMcpEnvRow"
+      @confirm="codexMcpEditor.saveMcpServer"
+    />
+
     <ConfirmDialog
-      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null"
+      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null || pendingRemoveCodexMcp !== null"
       :title="pendingRemoveSkill
         ? `删除 skill「${pendingRemoveSkill?.name ?? ''}」？`
-        : `删除 Claude MCP「${pendingRemoveMcp?.name ?? ''}」？`"
+        : pendingRemoveMcp
+          ? `删除 Claude MCP「${pendingRemoveMcp?.name ?? ''}」？`
+          : `删除 Codex MCP「${pendingRemoveCodexMcp?.name ?? ''}」？`"
       :message="pendingRemoveSkill
         ? '该 skill 目录会被整体删除，不可恢复。'
-        : '该 MCP server 会从 Lilia 配置中删除，不可恢复。'"
+        : pendingRemoveMcp
+          ? '该 MCP server 会从 Lilia 配置中删除，不可恢复。'
+          : '该 stdio MCP server 会从 Codex config.toml 中删除，不可恢复。'"
       confirm-text="删除"
       busy-text="删除中…"
       :busy="removing"
       danger
-      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null"
+      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null; pendingRemoveCodexMcp = null"
       @confirm="confirmRemove"
     />
   </section>

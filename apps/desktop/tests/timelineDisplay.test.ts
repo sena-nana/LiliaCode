@@ -100,6 +100,29 @@ describe("timeline display derivation", () => {
     expect(codeContent(display.details, "OUTPUT")).toBe("line one\nline two\nline three");
   });
 
+  it("Lilia 编辑后的命令执行展示原始命令和修改后命令", () => {
+    const display = deriveTimelineDisplay({
+      kind: "command",
+      status: "success",
+      title: "npm test -- --runInBand",
+      summary: "",
+      payload: {
+        subkind: "lilia_edit_exec",
+        executionOwner: "lilia",
+        originalCommand: "npm test",
+        modifiedCommand: "npm test -- --runInBand",
+        exitCode: 0,
+        output: "ok",
+      },
+    });
+
+    expect(display.action).toBe("执行已编辑命令");
+    expect(fieldValue(display.details, "owner")).toBe("lilia");
+    expect(codeContent(display.details, "ORIGINAL COMMAND")).toBe("npm test");
+    expect(codeContent(display.details, "MODIFIED COMMAND")).toBe("npm test -- --runInBand");
+    expect(codeContent(display.details, "OUTPUT")).toBe("ok");
+  });
+
   it("Claude AskUserQuestion 派生为提问事件并用问题文本做缩略", () => {
     const normalized = normalizeClaudeTool("AskUserQuestion", {
       questions: [
@@ -242,9 +265,9 @@ describe("timeline display derivation", () => {
     expect(codeContent(outputDisplay.details, "OUTPUT")).toBe("found docs");
   });
 
-  it("Codex MCP 配置发现不显示为 MCP 调用", () => {
+  it("Codex MCP 配置发现用诊断展示，不显示为 MCP 调用", () => {
     const display = deriveTimelineDisplay({
-      kind: "mcp",
+      kind: "diagnostic",
       status: "info",
       title: "Codex MCP config",
       summary: "已注册 2 个 MCP server",
@@ -258,7 +281,7 @@ describe("timeline display derivation", () => {
       },
     });
     const event = {
-      kind: "mcp",
+      kind: "diagnostic",
       status: "info" as const,
       title: "Codex MCP config",
       summary: "已注册 2 个 MCP server",
@@ -270,12 +293,51 @@ describe("timeline display derivation", () => {
       },
     };
 
-    expect(display.label).toBe("Codex MCP 配置");
+    expect(display.label).toBe("配置诊断");
     expect(display.action).toBeUndefined();
-    expect(timelineEventLabel(event)).toBe("Codex MCP 配置");
+    expect(timelineEventLabel(event)).toBe("配置诊断");
     expect(timelineInlinePreview(event)).toBe("已注册 2 个 MCP server");
     expect(display.group).toBeUndefined();
     expect(listItems(display.details)).toEqual([]);
+  });
+
+  it("配置要求用诊断事件展示", () => {
+    const display = deriveTimelineDisplay({
+      kind: "diagnostic",
+      status: "info",
+      title: "codex config requirement",
+      summary: "跳过外部 Codex MCP server：docs",
+      payload: {
+        backend: "codex",
+        subkind: "config_requirement",
+        warnings: ["跳过外部 Codex MCP server：docs"],
+      },
+    });
+
+    expect(display.label).toBe("配置要求");
+    expect(display.icon).toBe("stethoscope");
+    expect(display.group).toBeUndefined();
+    expect(codeContent(display.details, "DETAILS")).toContain("docs");
+  });
+
+  it("Hook runtime 事件用工具 hook 子类展示", () => {
+    const display = deriveTimelineDisplay({
+      kind: "tool",
+      status: "success",
+      title: "CommandEdit",
+      summary: "edited",
+      payload: {
+        subkind: "hook",
+        hookName: "CommandEdit",
+        hookEvent: "PostToolUse",
+        output: "edited",
+      },
+    });
+
+    expect(display.action).toBe("运行 Hook");
+    expect(display.object).toBe("CommandEdit");
+    expect(fieldValue(display.details, "event")).toBe("PostToolUse");
+    expect(codeContent(display.details, "OUTPUT")).toBe("edited");
   });
 
   it("兜底工具只展示输入输出，不重复工具名字段", () => {

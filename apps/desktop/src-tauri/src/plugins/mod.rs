@@ -10,10 +10,9 @@
 //!     `disabled: true` 控制是否传给 SDK 的 plugins 列表。
 //!   - 外部 MCP：Lilia 自管 `<LILIA_HOME>/config/claude-mcp-servers.json`，
 //!     当前只支持用户级 stdio server。
-//! - **Codex**：`~/.codex/config.toml` 的 `[mcp_servers.<name>]` 节，一期做只读 + 「打开配置」。
+//! - **Codex**：管理 `~/.codex/config.toml` 的 stdio MCP server。
 //!
-//! 文件解析全部手写极小子集（避免引入 yaml / toml 依赖）。解析失败按「跳过 + 记 warning」
-//! 处理，不让单个坏文件阻塞整个面板。
+//! 解析失败按「跳过 + 记 warning」处理，不让单个坏文件阻塞整个面板。
 
 mod claude_mcp;
 mod claude_plugins;

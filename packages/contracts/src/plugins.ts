@@ -40,7 +40,18 @@ export interface CodexMcpServer {
   name: string;
   command: string;
   args: string[];
+  envKeys: string[];
   enabled: boolean;
+  transport: "stdio" | "http" | "oauth" | "unknown" | string;
+  editable: boolean;
+}
+
+export interface CodexMcpServerInput {
+  name: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  removeEnvKeys?: string[];
 }
 
 export interface ClaudeRuntimePlugin {

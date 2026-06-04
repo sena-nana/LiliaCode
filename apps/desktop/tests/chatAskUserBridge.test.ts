@@ -129,6 +129,13 @@ describe("chat AskUser bridge service", () => {
     await expect(getAgentInteractionSettings()).resolves.toEqual({
       nonInterruptMode: false,
       debug: false,
+      codexProfile: {
+        profile: "default",
+        model: null,
+        reasoningEffort: null,
+        runtimeWorkspaceRoots: [],
+        permissions: { profile: "default" },
+      },
     });
 
     await setAgentInteractionSettings({ nonInterruptMode: true });
@@ -136,6 +143,13 @@ describe("chat AskUser bridge service", () => {
     await expect(getAgentInteractionSettings()).resolves.toEqual({
       nonInterruptMode: true,
       debug: false,
+      codexProfile: {
+        profile: "default",
+        model: null,
+        reasoningEffort: null,
+        runtimeWorkspaceRoots: [],
+        permissions: { profile: "default" },
+      },
     });
   });
 });
