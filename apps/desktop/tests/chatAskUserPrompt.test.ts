@@ -3,9 +3,8 @@ import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AskUserSpec } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
-import { installAgentAskUserBridge } from "../src/composables/useAgentAskUserBridge";
+import { installAgentInteractionBridge } from "../src/composables/useAgentInteractionBridge";
 import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
-import { installToolConsentBridge } from "../src/composables/useToolConsentBridge";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
@@ -103,6 +102,23 @@ function emitAskUserRequest(
   });
 }
 
+function emitUnifiedAskUserRequest(
+  taskId: string,
+  spec: AskUserSpec,
+  kind: "ask_user" | "plan_approval" = "ask_user",
+  backend = "codex",
+  turnId = "turn-unified-ask",
+) {
+  emitTauriEvent("chat:agent-interaction-request", {
+    taskId,
+    turnId,
+    backend,
+    requestId: `unified-${taskId}`,
+    kind,
+    payload: spec,
+  });
+}
+
 function emitAskUserTimelineEvent(
   taskId: string,
   spec: AskUserSpec = askUserSpec,
@@ -167,6 +183,26 @@ function emitToolConsentRequest(taskId: string) {
   });
 }
 
+function emitUnifiedToolConsentRequest(taskId: string) {
+  emitTauriEvent("chat:agent-interaction-request", {
+    taskId,
+    turnId: "turn-unified-tool",
+    backend: "codex",
+    requestId: `unified-tool-${taskId}`,
+    kind: "tool_consent",
+    payload: {
+      toolName: "item/commandExecution/requestApproval",
+      input: { command: "yarn test" },
+      title: "Codex command approval",
+      displayName: "item/commandExecution/requestApproval",
+      description: "yarn test",
+      blockedPath: null,
+      decisionReason: null,
+      toolUseId: "codex-tool-use",
+    },
+  });
+}
+
 function emitBashToolConsentRequest(taskId: string) {
   emitTauriEvent("chat:tool-consent-request", {
     taskId,
@@ -199,14 +235,28 @@ async function expectAskUserResponse(taskId: string) {
   });
 }
 
-let unlistenAskUser: (() => void) | null = null;
-let unlistenToolConsent: (() => void) | null = null;
+async function expectUnifiedAskUserResponse(taskId: string, kind: "ask_user" | "plan_approval" = "ask_user") {
+  await waitFor(() => {
+    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      taskId,
+      requestId: `unified-${taskId}`,
+      kind,
+      result: {
+        cancelled: false,
+        answers: {
+          "q-1": { questionId: "q-1", value: "o-2" },
+        },
+      },
+    }, undefined);
+  });
+}
+
+let unlistenInteraction: (() => void) | null = null;
 
 describe("chat AskUser prompt", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
-    unlistenAskUser = await installAgentAskUserBridge();
-    unlistenToolConsent = await installToolConsentBridge();
+    unlistenInteraction = await installAgentInteractionBridge();
   });
 
 
@@ -217,10 +267,8 @@ describe("chat AskUser prompt", () => {
     }
     await Promise.resolve();
 
-    unlistenAskUser?.();
-    unlistenToolConsent?.();
-    unlistenAskUser = null;
-    unlistenToolConsent = null;
+    unlistenInteraction?.();
+    unlistenInteraction = null;
   });
 
 
@@ -243,6 +291,24 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "完成" }));
 
     await expectAskUserResponse("t-002");
+  });
+
+  it("统一 Codex Agent 提问显示在 composer 内部，并用统一命令回写", async () => {
+    const view = await renderTaskDetail();
+
+    emitUnifiedAskUserRequest("t-002", {
+      ...askUserSpec,
+      title: "Codex 想确认一下",
+      source: "Codex",
+    });
+
+    const prompt = await view.findByRole("region", { name: "Codex 想确认一下" });
+    expect(prompt).toHaveClass("composer-inline");
+
+    await fireEvent.click(view.getByRole("radio", { name: "B" }));
+    await fireEvent.click(view.getByRole("button", { name: "完成" }));
+
+    await expectUnifiedAskUserResponse("t-002");
   });
 
 
@@ -340,6 +406,35 @@ describe("chat AskUser prompt", () => {
         decision: "deny",
         message: "先不要写这个文件",
         updatedInput: null,
+      }, undefined);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+  });
+
+  it("统一 Codex 工具确认显示在 composer 内部，并用统一命令回写", async () => {
+    const view = await renderTaskDetail();
+
+    emitUnifiedToolConsentRequest("t-002");
+
+    await view.findByRole("alert");
+    expect(view.container.querySelector(".chat-composer .composer-inline--tool"))
+      .toBeInTheDocument();
+
+    const input = await view.findByPlaceholderText("输入拒绝理由，Enter 拒绝此次调用");
+    await fireEvent.update(input, "先不跑测试");
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+        taskId: "t-002",
+        requestId: "unified-tool-t-002",
+        kind: "tool_consent",
+        result: {
+          taskId: "t-002",
+          requestId: "unified-tool-t-002",
+          decision: "deny",
+          message: "先不跑测试",
+        },
       }, undefined);
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);

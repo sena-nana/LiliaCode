@@ -5,6 +5,7 @@ export * from "./chat";
 export * from "./provider";
 export * from "./plugins";
 export * from "./ask-user";
+export * from "./agent-interaction";
 export * from "./timeline";
 
 export { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "./timelineDisplay";

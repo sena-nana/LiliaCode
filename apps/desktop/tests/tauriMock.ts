@@ -1163,6 +1163,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "chat_respond_tool_consent":
       return undefined;
 
+    case "chat_respond_agent_interaction":
+      return undefined;
+
     case "chat_describe_attachments": {
       const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
       return paths.map((path, index) => {

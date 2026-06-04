@@ -51,6 +51,14 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         spec: JsonValue,
     },
+    InteractionRequest {
+        id: String,
+        kind: String,
+        #[serde(default)]
+        backend: Option<String>,
+        #[serde(default)]
+        payload: JsonValue,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -112,6 +120,25 @@ impl AgentRuntimeEvent {
                 let id = value.get("id").and_then(|v| v.as_str())?.to_string();
                 let spec = value.get("spec").cloned().unwrap_or(JsonValue::Null);
                 Some(Self::AskUserRequest { id, spec })
+            }
+            "interaction_request" => {
+                let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+                let kind = value
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ask_user")
+                    .to_string();
+                let backend = value
+                    .get("backend")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string());
+                let payload = value.get("payload").cloned().unwrap_or(JsonValue::Null);
+                Some(Self::InteractionRequest {
+                    id,
+                    kind,
+                    backend,
+                    payload,
+                })
             }
             "done" => {
                 let session_id = value
@@ -421,6 +448,27 @@ mod tests {
                     json!({ "text": "Mirror provider todo", "completed": true }),
                     json!({ "content": "Keep Claude compatibility", "status": "pending" })
                 ],
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "interaction_request",
+                "id": "ask-1",
+                "kind": "ask_user",
+                "backend": "codex",
+                "payload": {
+                    "title": "Codex 想确认一下",
+                    "questions": []
+                }
+            })),
+            Some(AgentRuntimeEvent::InteractionRequest {
+                id: "ask-1".to_string(),
+                kind: "ask_user".to_string(),
+                backend: Some("codex".to_string()),
+                payload: json!({
+                    "title": "Codex 想确认一下",
+                    "questions": []
+                }),
             })
         );
         assert_eq!(

@@ -63,7 +63,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Non-interruptive interaction mode: move permission requests, agent questions, and plan confirmations into a pending area instead of taking over the input box.
 - [x] Guidance queue: provide a priority action queue so user messages and plugin behavior enter a unified guidance flow.
 - [x] Basic MCP integration: discover and connect MCP servers from agent configuration.
-- [ ] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
+- [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
 - [ ] Intelligent model selection: automatically choose model level and reasoning intensity based on request type.
 - [x] File context: mention files, directories, images, and other context with `@`.
 - [ ] Slash commands: support backend-native commands and project-defined commands.

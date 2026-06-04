@@ -1,6 +1,17 @@
 import { normalizeAskUserResult } from "./askUser.mjs";
 import { oneLineSummary, stringOrNull } from "./utils.mjs";
 
+export function normalizeToolConsentResult(value) {
+  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    decision: row.decision === "allow" ? "allow" : "deny",
+    message: stringOrNull(row.message) || "",
+    updatedInput: row.updatedInput && typeof row.updatedInput === "object" && !Array.isArray(row.updatedInput)
+      ? row.updatedInput
+      : null,
+  };
+}
+
 export function createInteractionBroker({
   protocol,
   emitToolConsentTimeline,
@@ -11,10 +22,21 @@ export function createInteractionBroker({
   const askUserPending = new Map();
   let askUserSeq = 1;
 
+  function emitInteractionRequest(id, kind, payload, backend = "claude") {
+    protocol.emit({
+      type: "interaction_request",
+      id,
+      kind,
+      backend,
+      payload,
+    });
+  }
+
   function requestUserConsent(payload) {
     const id = `consent-${consentSeq++}`;
     emitToolConsentTimeline(id, payload, "requires_action");
-    protocol.emit({ type: "consent_request", id, ...payload });
+    const backend = payload?.backend === "codex" ? "codex" : "claude";
+    emitInteractionRequest(id, "tool_consent", payload, backend);
     return new Promise((resolve) => {
       consentPending.set(id, (response) => resolve({ id, ...response }));
     });
@@ -22,6 +44,7 @@ export function createInteractionBroker({
 
   function requestAskUser(spec, options = {}) {
     const id = `ask-${askUserSeq++}`;
+    const kind = spec?.intent === "plan_approval" ? "plan_approval" : "ask_user";
     const emitTimelineEvent =
       options.emitTimelineEvent !== false && spec?.intent !== "plan_approval";
     const backend = options.backend === "codex" ? "codex" : "claude";
@@ -39,7 +62,7 @@ export function createInteractionBroker({
         }
         resolve(result);
       });
-      protocol.emit({ type: "ask_user_request", id, spec });
+      emitInteractionRequest(id, kind, spec, backend);
     });
   }
 
@@ -55,16 +78,29 @@ export function createInteractionBroker({
       const resolve = consentPending.get(msg.id);
       if (!resolve) return;
       consentPending.delete(msg.id);
-      resolve({
-        decision: msg.decision === "allow" ? "allow" : "deny",
-        message: stringOrNull(msg.message) || "",
-        updatedInput: msg.updatedInput && typeof msg.updatedInput === "object" && !Array.isArray(msg.updatedInput)
-          ? msg.updatedInput
-          : null,
-      });
+      resolve(normalizeToolConsentResult(msg));
       return;
     }
     if (msg.type === "ask_user_response") {
+      const resolve = askUserPending.get(msg.id);
+      if (!resolve) return;
+      askUserPending.delete(msg.id);
+      resolve(normalizeAskUserResult(msg.result));
+      return;
+    }
+    if (msg.type === "interaction_response") {
+      const kind = msg.kind === "tool_consent"
+        ? "tool_consent"
+        : msg.kind === "plan_approval"
+          ? "plan_approval"
+          : "ask_user";
+      if (kind === "tool_consent") {
+        const resolve = consentPending.get(msg.id);
+        if (!resolve) return;
+        consentPending.delete(msg.id);
+        resolve(normalizeToolConsentResult(msg.result));
+        return;
+      }
       const resolve = askUserPending.get(msg.id);
       if (!resolve) return;
       askUserPending.delete(msg.id);

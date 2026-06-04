@@ -173,6 +173,24 @@ pub fn chat_respond_ask_user(
     write_runner_stdin(&store, &task_id, payload)
 }
 
+/// 把用户对统一 Agent interaction 的响应写回 runner 的 stdin。
+#[tauri::command]
+pub fn chat_respond_agent_interaction(
+    task_id: String,
+    request_id: String,
+    kind: String,
+    result: JsonValue,
+    store: State<'_, ChatStore>,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "type": "interaction_response",
+        "id": request_id,
+        "kind": kind,
+        "result": result,
+    });
+    write_runner_stdin(&store, &task_id, payload)
+}
+
 #[tauri::command]
 pub fn chat_list_models(backend: String) -> Vec<ChatModelOption> {
     model_options_for_backend(&backend)

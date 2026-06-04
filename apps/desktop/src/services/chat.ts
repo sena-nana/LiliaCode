@@ -8,6 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentInteractionSettings,
+  AgentInteractionKind,
+  AgentInteractionRequest,
+  AgentInteractionResponse,
   AssistantAIConfig,
   AssistantAITestResult,
   BackendEnvStatus,
@@ -32,6 +35,9 @@ import type {
 
 export type {
   AgentInteractionSettings,
+  AgentInteractionKind,
+  AgentInteractionRequest,
+  AgentInteractionResponse,
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
@@ -232,6 +238,36 @@ export function onToolConsentRequest(
   );
 }
 
+function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {
+  const row = value as unknown as Record<string, unknown>;
+  const payload = row.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const taskId = stringField(row, "taskId", "task_id");
+  const turnId = stringField(row, "turnId", "turn_id");
+  const requestId = stringField(row, "requestId", "request_id");
+  const backend = stringField(row, "backend", "backend");
+  const kind = stringField(row, "kind", "kind");
+  if (!taskId || !requestId) return null;
+  if (kind !== "plan_approval" && kind !== "tool_consent" && kind !== "ask_user") return null;
+  return {
+    taskId,
+    turnId,
+    backend: backend === "codex" ? "codex" : "claude",
+    requestId,
+    kind,
+    payload,
+  } as AgentInteractionRequest;
+}
+
+export function onAgentInteractionRequest(
+  handler: (e: AgentInteractionRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentInteractionRequest>("chat:agent-interaction-request", (event) => {
+    const req = normalizeAgentInteractionRequest(event.payload);
+    if (req) handler(req);
+  });
+}
+
 function stringField(row: Record<string, unknown>, camel: string, snake: string): string {
   const value = row[camel] ?? row[snake];
   return typeof value === "string" ? value : "";
@@ -289,5 +325,14 @@ export function respondAskUser(
     taskId,
     requestId,
     result,
+  });
+}
+
+export function respondAgentInteraction(response: AgentInteractionResponse): Promise<void> {
+  return invoke<void>("chat_respond_agent_interaction", {
+    taskId: response.taskId,
+    requestId: response.requestId,
+    kind: response.kind,
+    result: response.result,
   });
 }

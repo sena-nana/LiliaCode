@@ -21,8 +21,8 @@ use crate::chat::timeline_sink::{
     timeline_input_from_runtime_event, TimelineThrottle,
 };
 use crate::chat::types::{
-    AskUserRequestEvent, ChatAttachment, ChatComposerState, DoneEvent, ToolConsentRequestEvent,
-    TurnStartedEvent,
+    AgentInteractionRequestEvent, AskUserRequestEvent, ChatAttachment, ChatComposerState,
+    DoneEvent, ToolConsentRequestEvent, TurnStartedEvent,
 };
 use crate::provider::{build_codex_app_server_probe_status, resolve_connection_for};
 use crate::store::LiliaStore;
@@ -308,6 +308,26 @@ pub(crate) fn spawn_agent_turn(
                                 backend: backend_for_thread.clone(),
                                 request_id: id.clone(),
                                 spec: spec.clone(),
+                            },
+                        );
+                    }
+                    AgentRuntimeEvent::InteractionRequest {
+                        id,
+                        kind,
+                        backend,
+                        payload,
+                    } => {
+                        let _ = app_handle.emit(
+                            "chat:agent-interaction-request",
+                            AgentInteractionRequestEvent {
+                                task_id: task_id_for_thread.clone(),
+                                turn_id: turn_id_for_thread.clone(),
+                                backend: backend
+                                    .clone()
+                                    .unwrap_or_else(|| backend_for_thread.clone()),
+                                request_id: id.clone(),
+                                kind: kind.clone(),
+                                payload: payload.clone(),
                             },
                         );
                     }

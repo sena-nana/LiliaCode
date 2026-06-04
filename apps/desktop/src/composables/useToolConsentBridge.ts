@@ -13,6 +13,7 @@
 import { reactive, computed, type ComputedRef } from "vue";
 import {
   onToolConsentRequest,
+  respondAgentInteraction,
   respondToolConsent,
   type ToolConsentDecision,
   type ToolConsentRequest,
@@ -20,6 +21,7 @@ import {
 } from "../services/chat";
 
 const pending = reactive<Record<string, ToolConsentRequest>>({});
+const unifiedRequestIds = new Set<string>();
 const localResolvers = new Map<
   string,
   (
@@ -42,8 +44,7 @@ export async function installToolConsentBridge(): Promise<() => void> {
   if (installed) return () => {};
   installed = true;
   unlisten = await onToolConsentRequest((req) => {
-    pending[req.taskId] = req;
-    localResolvers.delete(req.requestId);
+    handleToolConsentRequest(req, { unified: false });
   });
   return () => {
     unlisten?.();
@@ -83,6 +84,16 @@ export function requestLocalToolConsent(
   });
 }
 
+export function handleToolConsentRequest(
+  request: ToolConsentRequest,
+  options: { unified?: boolean } = {},
+) {
+  pending[request.taskId] = request;
+  localResolvers.delete(request.requestId);
+  if (options.unified) unifiedRequestIds.add(request.requestId);
+  else unifiedRequestIds.delete(request.requestId);
+}
+
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */
 export async function respondConsent(
   taskId: string,
@@ -100,6 +111,22 @@ export async function respondConsent(
   if (localResolve) {
     localResolvers.delete(requestId);
     localResolve(decision, message, updatedInput);
+    return;
+  }
+  if (unifiedRequestIds.has(requestId)) {
+    unifiedRequestIds.delete(requestId);
+    await respondAgentInteraction({
+      taskId,
+      requestId,
+      kind: "tool_consent",
+      result: {
+        taskId,
+        requestId,
+        decision,
+        message: message ?? null,
+        ...(updatedInput ? { updatedInput } : {}),
+      },
+    });
     return;
   }
   await respondToolConsent(taskId, requestId, decision, message, updatedInput);

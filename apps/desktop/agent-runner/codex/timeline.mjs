@@ -1,4 +1,4 @@
-import { buildPlanApprovalSpec, isPlanApprovalAccepted, readPlanRevisionRequest } from "../claudePlan.mjs";
+import { isPlanApprovalAccepted, readPlanRevisionRequest } from "../planApproval.mjs";
 import { createTextPacer } from "../protocol.mjs";
 import {
   fullTextOrNull,
@@ -134,7 +134,7 @@ export function codexTimelinePayload(kind, subkind, item, eventType) {
     case "search":
       return { ...base, query: item.query };
     case "todo_list":
-      return { ...base, items: item.items };
+      return { ...base, items: item.items, explanation: item.explanation };
     case "error":
       return { ...base, message: item.message };
     default:
@@ -142,29 +142,57 @@ export function codexTimelinePayload(kind, subkind, item, eventType) {
   }
 }
 
-export function maybeEmitCodexPlanApproval(eventType, item, ctx) {
-  if (!ctx?.planMode || ctx.planApprovalHandled) return false;
+export function recordCodexPlanMirror(item, ctx) {
+  if (!ctx) return;
   if (getCodexItemType(item) !== "plan") return false;
   const items = Array.isArray(item?.items) ? item.items : [];
-  if (items.length === 0 || items.every((todo) => todo?.completed === true)) return false;
-  ctx.planApprovalHandled = true;
-  ctx.pendingPlanPayload = {
-    source: "Codex plan",
+  if (items.length === 0) return false;
+  ctx.latestPlanPayload = {
+    source: "Codex Plan",
     plan: summarizeCodexTodoList(items),
     approved: null,
     executionPermission: ctx.executionPermission,
     items,
+    explanation: stringOrNull(item?.explanation),
+    sourceId: stringOrNull(item?.id) || "codex:plan",
+  };
+  return true;
+}
+
+export function codexPlanTextFromContext(ctx) {
+  const latestPlan = fullTextOrNull(ctx?.latestPlanPayload?.plan);
+  if (latestPlan) return latestPlan;
+  const deltaText = fullTextOrNull(ctx?.planDeltaText);
+  if (deltaText) return deltaText;
+  return (
+    fullTextOrNull(ctx?.assistantSnapshotText) ||
+    fullTextOrNull(ctx?.assistantDeltaText) ||
+    ""
+  );
+}
+
+export function emitCodexPlanApprovalRequired(ctx) {
+  if (!ctx || ctx.planApprovalHandled) return false;
+  const plan = codexPlanTextFromContext(ctx);
+  if (!plan) return false;
+  ctx.planApprovalHandled = true;
+  ctx.pendingPlanPayload = {
+    source: "Codex Plan",
+    ...(ctx.latestPlanPayload || {}),
+    plan,
+    approved: null,
+    executionPermission: ctx.executionPermission,
   };
   ctx.protocol.emitTimeline({
     kind: "plan",
     status: "requires_action",
     title: "Codex plan",
-    summary: oneLineSummary(ctx.pendingPlanPayload.plan),
+    summary: oneLineSummary(plan),
     payload: {
       backend: "codex",
       ...ctx.pendingPlanPayload,
     },
-    sourceId: item?.id || "codex:plan",
+    sourceId: ctx.pendingPlanPayload.sourceId || "codex:plan:approval",
   });
   return true;
 }
@@ -190,13 +218,10 @@ export function emitCodexPlanResolution(ctx, result) {
 }
 
 export function emitCodexItemTimeline(eventType, item, ctx = null) {
-  if (maybeEmitCodexPlanApproval(eventType, item, ctx)) {
-    ctx.protocol.emit({ type: "todo_list", items: item.items });
-    return;
-  }
   const route = codexTimelineKindForItem(item);
   if (!route) return;
   const { kind, subkind = null } = route;
+  if (kind === "todo_list") recordCodexPlanMirror(item, ctx);
   ctx.protocol.emitTimeline({
     kind,
     status: getCodexStatus(eventType, item),
@@ -250,9 +275,16 @@ export function mapCodexEventToNdjson(ev, ctx) {
     return;
   }
 
+  if (type === "plan.delta") {
+    const delta = stringOrNull(ev.delta) || "";
+    if (delta) ctx.planDeltaText += delta;
+    return;
+  }
+
   if (type === "thread.started") return;
 
   if (type === "turn.started") {
+    ctx.currentTurnId = stringOrNull(ev.turn?.id) || stringOrNull(ev.turnId) || ctx.currentTurnId;
     emitCodexTurnTimeline(type, ev, ctx);
     return;
   }
@@ -260,6 +292,9 @@ export function mapCodexEventToNdjson(ev, ctx) {
   if (type === "item.completed" || type === "item.started") {
     const item = ev.item || ev;
     const kind = item?.type;
+    if (kind === "plan") {
+      ctx.currentTurnId = stringOrNull(item.turnId) || stringOrNull(item.id) || ctx.currentTurnId;
+    }
     emitCodexItemTimeline(type, item, ctx);
     if (kind === "agentMessage") {
       const text = pickCodexAssistantText(item);
@@ -269,7 +304,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
       }
       return;
     }
-    if (type === "item.started") {
+    if (type === "item.started" && kind !== "plan") {
       const name = String(kind || "tool");
       const { type: _ignore, ...rest } = item || {};
       ctx.protocol.emit({ type: "tool_use", name, input: rest });
@@ -281,6 +316,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
     ctx.turnCompletedSeen = true;
     emitCodexAssistantSuccess(ctx);
     emitCodexTurnTimeline(type, ev, ctx);
+    if (ctx.activeTurnKind === "plan") return;
     ctx.protocol.emit({
       type: "done",
       sessionId: ctx.lastThreadId,
@@ -292,6 +328,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
   if (type === "turn.failed" || type === "error") {
     const msg = ev.error?.message || ev.message || "codex turn failed";
     ctx.turnCompletedSeen = true;
+    ctx.turnFailedSeen = true;
     ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
     ctx.protocol.emit({ type: "error", message: msg });
@@ -330,9 +367,20 @@ export function normalizeCodexAppServerEvent(msg) {
       type: "item.started",
       item: {
         id: stringOrNull(params.turnId) || "codex:plan",
+        turnId: stringOrNull(params.turnId),
         type: "plan",
+        explanation: stringOrNull(params.explanation),
         items: normalizeCodexPlanSteps(params.plan),
       },
+    };
+  }
+  if (method === "item/plan/delta") {
+    return {
+      type: "plan.delta",
+      threadId: stringOrNull(params.threadId),
+      turnId: stringOrNull(params.turnId),
+      id: stringOrNull(params.itemId) || "codex:plan",
+      delta: stringOrNull(params.delta) || "",
     };
   }
   if (method === "item/started") return { type: "item.started", item: params.item || params };
@@ -368,13 +416,21 @@ export function createCodexRunContext(cmd, protocol, sessionId = null) {
   return {
     protocol,
     lastThreadId: sessionId,
+    currentTurnId: null,
+    activeTurnKind: "default",
     assistantDeltaText: "",
     assistantSnapshotText: "",
+    planDeltaText: "",
     turnCompletedSeen: false,
+    turnFailedSeen: false,
     planMode: cmd.planMode === true,
     planApprovalHandled: false,
     planApprovalResolved: false,
+    planRevisionRequest: "",
+    planApproved: false,
+    planCancelled: false,
     pendingPlanPayload: null,
+    latestPlanPayload: null,
     executionPermission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
     assistantSuccessEmitted: false,
     pacer: createTextPacer({
@@ -395,11 +451,40 @@ export function emitCodexAssistantSuccess(ctx, finalText = null) {
   ctx.protocol.emitAssistantMessageTimeline(text, "success", "codex");
 }
 
-export async function maybeHandleCodexPlanApproval(ctx) {
+export function resolveCodexPlanApproval(ctx, result) {
   if (!ctx?.pendingPlanPayload || ctx.planApprovalResolved) return;
   ctx.planApprovalResolved = true;
-  const result = await ctx.interactions.requestAskUser(buildPlanApprovalSpec(), { emitTimelineEvent: false });
   emitCodexPlanResolution(ctx, result);
+  const revisionRequest = readPlanRevisionRequest(result);
+  if (revisionRequest) {
+    ctx.planRevisionRequest = revisionRequest;
+    return;
+  }
+  if (isPlanApprovalAccepted(result)) {
+    ctx.planApproved = true;
+  } else {
+    ctx.planCancelled = true;
+  }
+}
+
+export function resetCodexContextForNextTurn(ctx, options = {}) {
+  ctx.assistantDeltaText = "";
+  ctx.assistantSnapshotText = "";
+  ctx.planDeltaText = "";
+  ctx.turnCompletedSeen = false;
+  ctx.turnFailedSeen = false;
+  ctx.currentTurnId = null;
+  ctx.activeTurnKind = "default";
+  ctx.planMode = options.planMode === false ? false : ctx.planMode;
+  ctx.planApprovalHandled = false;
+  ctx.planApprovalResolved = false;
+  ctx.planRevisionRequest = "";
+  ctx.planApproved = false;
+  ctx.planCancelled = false;
+  ctx.pendingPlanPayload = null;
+  ctx.latestPlanPayload = null;
+  ctx.assistantSuccessEmitted = false;
+  ctx.pacer.finishImmediate();
 }
 
 export function finalizeCodexRunContext(ctx) {

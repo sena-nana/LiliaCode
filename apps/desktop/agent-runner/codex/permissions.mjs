@@ -24,7 +24,7 @@ export function mapCodexApprovalPolicy(permission) {
 }
 
 export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
-  const method = stringOrNull(msg.method);
+  const method = stringOrNull(msg.method) || "";
   const params = msg.params && typeof msg.params === "object" && !Array.isArray(msg.params)
     ? msg.params
     : {};
@@ -32,7 +32,7 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
     method === "item/commandExecution/requestApproval";
   const isFileChangeApproval =
     method === "item/fileChange/requestApproval";
-  if (!isCommandApproval && !isFileChangeApproval) return false;
+  if (!method.endsWith("/requestApproval")) return false;
   const requestId =
     stringOrNull(params.approvalId) ||
     stringOrNull(params.callId) ||
@@ -47,15 +47,21 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
       params.cmd ||
       params.commandActions,
   );
-  const patchSummary = oneLineSummary(params.grantRoot || params.reason || "Patch approval");
+  const description = isCommandApproval
+    ? command
+    : oneLineSummary(params.grantRoot || params.reason || method);
   const payload = {
     backend: "codex",
     toolName,
     input,
     toolUseID: requestId,
-    title: isCommandApproval ? "Codex command approval" : "Codex patch approval",
+    title: isCommandApproval
+      ? "Codex command approval"
+      : isFileChangeApproval
+        ? "Codex patch approval"
+        : "Codex tool approval",
     displayName: toolName,
-    description: isCommandApproval ? command : patchSummary,
+    description,
   };
   const { id, decision, message } = await ctx.interactions.requestUserConsent(payload);
   const accepted = decision === "allow";

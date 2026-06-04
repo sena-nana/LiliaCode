@@ -3,6 +3,8 @@ import type {
   AgentTimelineDisplayDetail,
   AgentTimelineEvent,
   AgentTimelineEventKind,
+  AgentInteractionRequest,
+  AgentInteractionResponse,
   ChatAttachment,
   ChatContextSearchResult,
   ChatMessage,
@@ -155,6 +157,64 @@ export type ToolConsentResponseUpdatedInputTypeTest = Assert<
       updatedInput: { command: "pwd && echo ok" };
     },
     ToolConsentResponsePayload
+  >
+>;
+
+export type AgentInteractionAskRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "codex";
+      requestId: "ask-1";
+      kind: "ask_user";
+      payload: {
+        title: "Codex 想确认一下";
+        questions: [{
+          id: "q-1";
+          question: "选哪个方案？";
+          mode: "single";
+          options: [{ id: "o-1"; label: "A" }, { id: "o-2"; label: "B" }];
+        }];
+      };
+    },
+    AgentInteractionRequest
+  >
+>;
+
+export type AgentInteractionToolRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "codex";
+      requestId: "tool-1";
+      kind: "tool_consent";
+      payload: {
+        toolName: "commandExecution";
+        input: { command: "yarn test" };
+        title: "Run command";
+        backend: "codex";
+      };
+    },
+    AgentInteractionRequest
+  >
+>;
+
+export type AgentInteractionToolResponseTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      requestId: "tool-1";
+      kind: "tool_consent";
+      result: {
+        taskId: "task-1";
+        requestId: "tool-1";
+        decision: "deny";
+        message: "先不执行";
+      };
+    },
+    AgentInteractionResponse
   >
 >;
 

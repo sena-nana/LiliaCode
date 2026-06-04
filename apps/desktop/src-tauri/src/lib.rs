@@ -98,6 +98,7 @@ pub fn run() {
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_tool_consent,
             chat::commands::chat_respond_ask_user,
+            chat::commands::chat_respond_agent_interaction,
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,
             chat::commands::chat_set_composer_state,
