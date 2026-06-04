@@ -52,6 +52,7 @@ const {
   processGroupLabel,
   processGroupRunning,
   showThinkingIndicator,
+  thinkingIndicatorLabel,
   timelineGroupEntryIds,
   turnState,
   userMessage,
@@ -236,7 +237,7 @@ function pendingState(event: AgentTimelineEvent) {
         <article class="agent-timeline__event">
           <div class="agent-timeline__rail" />
           <div class="agent-timeline__body">
-            <p class="agent-timeline__thinking-label">思考中…</p>
+            <p class="agent-timeline__thinking-label">{{ thinkingIndicatorLabel }}</p>
           </div>
         </article>
       </li>
