@@ -27,7 +27,7 @@ Lilia/
 
 ## Local Development
 
-This repository uses Yarn 4.14.1 through Corepack. Enable Corepack first, then run contributor commands from the repository root through the root `yarn ...` scripts. `npm`, `pnpm`, global Yarn 1.x, and direct subpackage script entrypoints are not supported.
+This repository uses Yarn 4.14.1 through Corepack. Enable Corepack first, then run contributor commands from the repository root through the root `yarn ...` scripts. `npm`, `pnpm`, global Yarn 1.x, and direct workspace script entrypoints are guarded and not supported as the contributor path.
 
 ```bash
 # 1. Enable Corepack and activate the repository Yarn version
@@ -47,7 +47,7 @@ yarn tauri:dev
 yarn verify
 ```
 
-If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts enforce the same package-manager path.
+If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce the same package-manager check so contributors hit one Corepack-managed Yarn path.
 
 ## Documentation Site
 
@@ -62,7 +62,7 @@ yarn docs:build
 yarn docs:preview
 ```
 
-Run documentation commands from the repository root.
+Run documentation commands from the repository root through the root `yarn ...` scripts.
 
 GitHub Pages deployment is handled by the repository Actions workflow. After pushing to `main`, the site is built and published to `https://sena-nana.github.io/LiliaCode/`.
 
