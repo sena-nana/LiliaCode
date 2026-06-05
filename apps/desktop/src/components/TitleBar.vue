@@ -22,6 +22,7 @@ import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar
 
 defineProps<{
   leftSidebarCollapsed?: boolean;
+  sidebarTogglesDisabled?: boolean;
 }>();
 
 defineEmits<{
@@ -148,6 +149,7 @@ function onToggleChatSidebar() {
         :aria-label="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
         :title="leftSidebarCollapsed ? '展开左侧栏' : '折叠左侧栏'"
         :aria-pressed="leftSidebarCollapsed"
+        :disabled="sidebarTogglesDisabled"
         @click="$emit('toggleLeftSidebar')"
       >
         <PanelLeftOpen
@@ -215,6 +217,7 @@ function onToggleChatSidebar() {
         :aria-label="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :title="chatSidebar.state.open ? '关闭对话侧栏' : '打开对话侧栏'"
         :aria-pressed="chatSidebar.state.open"
+        :disabled="sidebarTogglesDisabled"
         @click="onToggleChatSidebar"
       >
         <PanelRightClose

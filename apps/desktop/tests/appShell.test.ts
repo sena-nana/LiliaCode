@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell from "../src/layouts/AppShell.vue";
@@ -16,19 +16,24 @@ vi.mock("@tauri-apps/api/window", () => ({
 const COLLAPSED_STORAGE_KEY = "lilia.sidebarCollapsed";
 const WIDTH_STORAGE_KEY = "lilia.sidebarWidth";
 
-async function renderAppShell() {
+async function renderAppShell(initialRoute = "/") {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }],
   });
-  await router.push("/");
+  await router.push(initialRoute);
   await router.isReady();
 
-  return render(AppShell, {
+  const view = render(AppShell, {
     global: {
       plugins: [router],
     },
   });
+
+  return {
+    ...view,
+    router,
+  };
 }
 
 function shellElement(container: HTMLElement): HTMLElement {
@@ -76,6 +81,42 @@ describe("AppShell left sidebar collapse", () => {
     expect(shell).not.toHaveClass("is-sidebar-collapsed");
     expect(leftResizer(view.container)).not.toHaveAttribute("aria-disabled");
     expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("0");
+  });
+
+  it("设置页替换左侧栏、禁用折叠并保留折叠偏好", async () => {
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, "1");
+    const view = await renderAppShell("/settings");
+    const shell = shellElement(view.container);
+    const leftToggle = view.getByRole("button", { name: "折叠左侧栏" });
+
+    expect(shell).toHaveClass("is-settings-mode");
+    expect(shell).not.toHaveClass("is-sidebar-collapsed");
+    expect(leftToggle).toBeDisabled();
+    expect(view.getByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "新对话" })).not.toBeInTheDocument();
+    expect(view.getByRole("button", { name: /外观与窗口/ })).toHaveClass("is-active");
+    expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("1");
+
+    await fireEvent.click(view.getByRole("button", { name: /连接/ }));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=providers");
+    });
+    expect(view.getByRole("button", { name: /连接/ })).toHaveClass("is-active");
+
+    await view.router.push("/");
+    expect(shell).toHaveClass("is-sidebar-collapsed");
+    expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("1");
+  });
+
+  it("设置页返回进入设置前的主窗口路由", async () => {
+    const view = await renderAppShell("/projects/lilia");
+
+    await view.router.push("/settings?tab=agent");
+    await fireEvent.click(view.getByRole("button", { name: "返回" }));
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/projects/lilia");
+    });
   });
 
   it("左侧栏宽度可拖拽调整、写回存储并双击恢复默认", async () => {

@@ -1053,6 +1053,23 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "cc_switch_set_config":
       return undefined;
 
+    case "router_set_mode":
+      return undefined;
+
+    case "assistant_ai_get_config":
+      return { baseUrl: null, apiKey: null, model: null };
+
+    case "assistant_ai_set_config":
+      return undefined;
+
+    case "assistant_ai_test_connection":
+      return {
+        ok: true,
+        error: null,
+        models: ["gpt-4o-mini"],
+        modelMatched: null,
+      };
+
     case "agent_timeline_list": {
       if (agentTimelineDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, agentTimelineDelayMs));
