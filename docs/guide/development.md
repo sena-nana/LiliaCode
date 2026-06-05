@@ -27,7 +27,7 @@ Lilia/
 
 ## 本地运行
 
-本仓库通过 Corepack 使用 Yarn 4.14.1。首次运行前先启用 Corepack，让 `package.json` 里的 `packageManager` 字段接管 Yarn 版本；不要直接使用全局 Yarn 1.x。
+本仓库通过 Corepack 使用 Yarn 4.14.1。先启用 Corepack，再从仓库根目录通过根 `yarn ...` 脚本运行贡献命令。不支持 `npm`、`pnpm`、全局 Yarn 1.x，也不支持直接进入子包运行脚本。
 
 ```bash
 # 1. 启用 Corepack 并激活仓库要求的 Yarn 版本
@@ -43,11 +43,11 @@ yarn dev
 # 4. 启动 Tauri 桌面端，需要本地有 Rust 工具链和 WebView2
 yarn tauri:dev
 
-# 5. 类型检查、单测、Rust 编译检查、契约包检查
+# 5. 运行类型检查、单测、Rust 编译检查、契约包检查
 yarn verify
 ```
 
-如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本也会在检测到 Yarn 1 时给出同样的前置条件提示。
+如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本会统一检查包管理器路径。
 
 ## 文档站
 
@@ -61,6 +61,8 @@ yarn docs:build
 # 本地预览构建产物
 yarn docs:preview
 ```
+
+文档命令也需要从仓库根目录运行。
 
 GitHub Pages 部署由仓库中的 Actions workflow 自动完成。推送到 `main` 后，站点会构建并发布到 `https://sena-nana.github.io/LiliaCode/`。
 
