@@ -13,6 +13,7 @@ mod provider;
 mod settings_store;
 mod store;
 mod todos;
+mod tray;
 mod util;
 mod window_state;
 
@@ -72,6 +73,9 @@ pub fn run() {
                 }
             }
             popup_windows::register_initial_popup_shortcut(app.handle());
+            if let Err(err) = tray::setup_tray(app.handle()) {
+                eprintln!("[tray] setup failed: {err}");
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

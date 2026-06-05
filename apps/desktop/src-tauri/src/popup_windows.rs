@@ -191,6 +191,24 @@ pub(crate) fn open_popup_for_shortcut(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn open_task_window(
+    app: &AppHandle,
+    project_id: Option<String>,
+    task_id: String,
+) -> Result<(), String> {
+    let task_id = task_id.trim();
+    if task_id.is_empty() {
+        return Err("缺少对话 ID".to_string());
+    }
+    let route = if let Some(project_id) = normalize_optional_string(project_id) {
+        save_popup_last_project_id(app, &project_id)?;
+        format!("popup/projects/{project_id}/tasks/{task_id}")
+    } else {
+        format!("popup/chats/{task_id}")
+    };
+    build_popup_window(app, popup_task_label(task_id), route)
+}
+
 pub(crate) fn register_popup_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     app.global_shortcut()
         .register(shortcut)
@@ -266,21 +284,9 @@ pub async fn popup_open_task(
     project_id: Option<String>,
     task_id: String,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let task_id = task_id.trim();
-        if task_id.is_empty() {
-            return Err("缺少对话 ID".to_string());
-        }
-        let route = if let Some(project_id) = normalize_optional_string(project_id) {
-            save_popup_last_project_id(&app, &project_id)?;
-            format!("popup/projects/{project_id}/tasks/{task_id}")
-        } else {
-            format!("popup/chats/{task_id}")
-        };
-        build_popup_window(&app, popup_task_label(task_id), route)
-    })
-    .await
-    .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
+    tauri::async_runtime::spawn_blocking(move || open_task_window(&app, project_id, task_id))
+        .await
+        .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
 
 #[tauri::command]
