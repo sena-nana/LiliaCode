@@ -1,4 +1,4 @@
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { ComputedRef } from "vue";
 import type {
   AgentTimelineEvent,
@@ -161,6 +161,38 @@ export function useAgentTimelineEntries(options: UseAgentTimelineEntriesOptions)
     );
   });
 
+  const nowMs = ref(Date.now());
+  let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopThinkingTimer() {
+    if (!thinkingTimer) return;
+    clearInterval(thinkingTimer);
+    thinkingTimer = null;
+  }
+
+  watch(
+    showThinkingIndicator,
+    (visible) => {
+      stopThinkingTimer();
+      if (!visible) return;
+      nowMs.value = Date.now();
+      thinkingTimer = setInterval(() => {
+        nowMs.value = Date.now();
+      }, 1000);
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(stopThinkingTimer);
+
+  const thinkingIndicatorLabel = computed(() => {
+    const previousAt = previousVisibleEventTimeMs(chronologicalEntries.value);
+    const parts = [thinkingDurationLabel(previousAt, nowMs.value)];
+    const subagent = runningSubagentLabel(chronologicalEntries.value);
+    if (subagent) parts.push(subagent);
+    return parts.join("，");
+  });
+
   function previewText(event: AgentTimelineEvent): string {
     return eventPreviewCache.value.get(event.id) ?? "";
   }
@@ -186,11 +218,61 @@ export function useAgentTimelineEntries(options: UseAgentTimelineEntriesOptions)
     processGroupLabel,
     processGroupRunning,
     showThinkingIndicator,
+    thinkingIndicatorLabel,
     timelineGroupEntryIds,
     turnState,
     userMessage,
     visibleEvents,
   };
+}
+
+function previousVisibleEventTimeMs(entries: TimelineEventEntry[]): number | null {
+  const last = entries[entries.length - 1]?.event;
+  if (!last) return null;
+  const updatedAt = Number.isFinite(last.updatedAt) ? last.updatedAt : last.createdAt;
+  const time = Math.max(last.createdAt, updatedAt);
+  return Number.isFinite(time) ? time : null;
+}
+
+function thinkingDurationLabel(previousAt: number | null, now: number): string {
+  if (previousAt === null || !Number.isFinite(now)) return "思考中";
+  const seconds = Math.max(1, Math.floor((now - previousAt) / 1000));
+  if (seconds < 60) return `思考中 ${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  return `思考中 ${minutes} 分 ${seconds % 60} 秒`;
+}
+
+function runningSubagentLabel(entries: TimelineEventEntry[]): string {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const event = entries[i].event;
+    if (event.kind !== "subagent" || !isRunningStatus(event.status)) continue;
+    const payload = recordPayload(event.payload);
+    const name = stringField(payload.subagentType) ||
+      stringField(payload.agentType) ||
+      event.title.trim();
+    return `子代理${name || "任务"}${subagentAction(event, payload)}`;
+  }
+  return "";
+}
+
+function subagentAction(
+  event: AgentTimelineEvent,
+  payload: Record<string, unknown>,
+): string {
+  if (stringField(payload.lastToolName)) return "正在调用工具";
+  const summary = (event.summary ?? "").trim();
+  if (!summary) return "运行中";
+  return summary.startsWith("正在") ? summary : `正在${summary}`;
+}
+
+function recordPayload(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function timelineGroupEntryIds(entries: TimelineEntry[]): Set<string> {
