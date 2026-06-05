@@ -27,19 +27,27 @@ Lilia/
 
 ## Local Development
 
+This repository uses Yarn 4.14.1 through Corepack. Before running local development commands, enable Corepack so the `packageManager` field in `package.json` selects the right Yarn version. Global Yarn 1.x installs are not supported.
+
 ```bash
-# 1. Install dependencies first
+# 1. Enable Corepack and activate the repository Yarn version
+corepack enable
+corepack prepare yarn@4.14.1 --activate
+
+# 2. Install dependencies first
 yarn install
 
-# 2. Start only the Vite frontend
+# 3. Start only the Vite frontend
 yarn dev
 
-# 3. Start the Tauri desktop app, which requires a local Rust toolchain and WebView2
+# 4. Start the Tauri desktop app, which requires a local Rust toolchain and WebView2
 yarn tauri:dev
 
-# 4. Run type checks, unit tests, Rust check, and contracts check
+# 5. Run type checks, unit tests, Rust check, and contracts check
 yarn verify
 ```
+
+If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts also print this prerequisite hint when they detect Yarn 1.
 
 ## Documentation Site
 

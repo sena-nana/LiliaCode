@@ -1316,12 +1316,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       ];
     }
 
-    case "chat_respond_ask_user":
-      return undefined;
-
-    case "chat_respond_tool_consent":
-      return undefined;
-
     case "chat_respond_agent_interaction":
       return undefined;
 

@@ -1,5 +1,3 @@
-import type { ChatBackendKind } from "./chat";
-
 export type AskUserMode = "confirm" | "single" | "multi";
 
 export interface AskUserOption {
@@ -45,18 +43,4 @@ export interface AskUserAnswer {
 export interface AskUserResult {
   answers: Record<string, AskUserAnswer>;
   cancelled: boolean;
-}
-
-export interface AgentAskUserRequestEvent {
-  taskId: string;
-  turnId: string;
-  backend: ChatBackendKind;
-  requestId: string;
-  spec: AskUserSpec;
-}
-
-export interface AgentAskUserResponsePayload {
-  taskId: string;
-  requestId: string;
-  result: AskUserResult;
 }

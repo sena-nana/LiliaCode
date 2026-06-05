@@ -130,19 +130,27 @@ Lilia/
 
 ## Early Development
 
+LiliaCode uses Yarn 4.14.1 through Corepack. Before running any local development command, make sure Corepack is enabled so the `packageManager` field in [package.json](package.json) can select the right Yarn version. Global Yarn 1.x installs are not supported.
+
 ```bash
-# 1) Install dependencies first
+# 1) Enable Corepack and activate the repository Yarn version
+corepack enable
+corepack prepare yarn@4.14.1 --activate
+
+# 2) Install dependencies first
 yarn install
 
-# 2) Start only the Vite frontend
+# 3) Start only the Vite frontend
 yarn dev
 
-# 3) Start the Tauri desktop app (requires a local Rust toolchain and WebView2)
+# 4) Start the Tauri desktop app (requires a local Rust toolchain and WebView2)
 yarn tauri:dev
 
-# 4) Run type checks, unit tests, Rust check, and contracts check
+# 5) Run type checks, unit tests, Rust check, and contracts check
 yarn verify
 ```
+
+If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`.
 
 The Tauri icon source is [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg), which is an embedded PNG inside an SVG container. To regenerate the full PNG / ICO set, run [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1): `pwsh -File scripts/generate-icon.ps1`. For macOS `.icns` or a full size set, run `yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`.
 

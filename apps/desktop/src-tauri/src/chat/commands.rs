@@ -129,50 +129,6 @@ fn write_runner_stdin(store: &ChatStore, task_id: &str, payload: JsonValue) -> R
     Ok(())
 }
 
-/// 把用户对一次工具调用的决策（allow / deny）写回 runner 的 stdin。
-/// 通过 ChatStore.running_stdins 找到该 task 当前的 runner 子进程；若进程已退出
-/// （比如用户拖太久 turn 已 timeout / cancel），静默返回——SDK 端的 promise 也
-/// 会随子进程死亡被丢弃，没有进一步副作用。
-#[tauri::command]
-pub fn chat_respond_tool_consent(
-    task_id: String,
-    request_id: String,
-    decision: String,
-    message: Option<String>,
-    updated_input: Option<JsonValue>,
-    store: State<'_, ChatStore>,
-) -> Result<(), String> {
-    let decision_norm = if decision == "allow" { "allow" } else { "deny" };
-    let mut payload = serde_json::json!({
-        "type": "consent_response",
-        "id": request_id,
-        "decision": decision_norm,
-        "message": message.unwrap_or_default(),
-    });
-    if let Some(value) = updated_input {
-        if !value.is_null() {
-            payload["updatedInput"] = value;
-        }
-    }
-    write_runner_stdin(&store, &task_id, payload)
-}
-
-/// 把用户对 Claude AskUserQuestion 的回答写回 runner 的 stdin。
-#[tauri::command]
-pub fn chat_respond_ask_user(
-    task_id: String,
-    request_id: String,
-    result: JsonValue,
-    store: State<'_, ChatStore>,
-) -> Result<(), String> {
-    let payload = serde_json::json!({
-        "type": "ask_user_response",
-        "id": request_id,
-        "result": result,
-    });
-    write_runner_stdin(&store, &task_id, payload)
-}
-
 /// 把用户对统一 Agent interaction 的响应写回 runner 的 stdin。
 #[tauri::command]
 pub fn chat_respond_agent_interaction(

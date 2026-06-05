@@ -21,8 +21,8 @@ use crate::chat::timeline_sink::{
     timeline_input_from_runtime_event, TimelineThrottle,
 };
 use crate::chat::types::{
-    AgentInteractionRequestEvent, AskUserRequestEvent, ChatAttachment, ChatComposerState,
-    CodexComposerSettings, DoneEvent, ToolConsentRequestEvent, TurnStartedEvent,
+    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, CodexComposerSettings,
+    DoneEvent, TurnStartedEvent,
 };
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
@@ -212,7 +212,7 @@ pub(crate) fn spawn_agent_turn(
             },
         );
 
-        // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 consent_response
+        // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 interaction_response
         // 还要通过它写回 runner。stdin 存到 ChatStore，turn 结束时移除（Drop 关闭）。
         let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child_handle
             .lock()
@@ -283,47 +283,6 @@ pub(crate) fn spawn_agent_turn(
                             }
                             timeline_throttle.submit(&app_handle, input);
                         }
-                    }
-                    AgentRuntimeEvent::ConsentRequest {
-                        id,
-                        tool_name,
-                        input,
-                        title,
-                        display_name,
-                        description,
-                        blocked_path,
-                        decision_reason,
-                        tool_use_id,
-                    } => {
-                        let _ = app_handle.emit(
-                            "chat:tool-consent-request",
-                            ToolConsentRequestEvent {
-                                task_id: task_id_for_thread.clone(),
-                                turn_id: turn_id_for_thread.clone(),
-                                backend: backend_for_thread.clone(),
-                                request_id: id.clone(),
-                                tool_name: tool_name.clone(),
-                                input: input.clone(),
-                                title: title.clone(),
-                                display_name: display_name.clone(),
-                                description: description.clone(),
-                                blocked_path: blocked_path.clone(),
-                                decision_reason: decision_reason.clone(),
-                                tool_use_id: tool_use_id.clone(),
-                            },
-                        );
-                    }
-                    AgentRuntimeEvent::AskUserRequest { id, spec } => {
-                        let _ = app_handle.emit(
-                            "chat:ask-user-request",
-                            AskUserRequestEvent {
-                                task_id: task_id_for_thread.clone(),
-                                turn_id: turn_id_for_thread.clone(),
-                                backend: backend_for_thread.clone(),
-                                request_id: id.clone(),
-                                spec: spec.clone(),
-                            },
-                        );
                     }
                     AgentRuntimeEvent::InteractionRequest {
                         id,

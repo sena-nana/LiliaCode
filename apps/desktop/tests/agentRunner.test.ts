@@ -18,6 +18,7 @@ import {
   buildCodexPlanRevisionPrompt,
   readCodexPlanModePreset,
   runCodexAppServer,
+  maybeHandleCodexServerRequest,
   startCodexAppServerThread,
   updateCodexThreadSettings,
 } from "../agent-runner/codex/runCodex.mjs";
@@ -34,6 +35,15 @@ function captureProtocol() {
     lines,
     json: () => lines.map((line) => JSON.parse(line)),
   };
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 describe("agent runner entry", () => {
@@ -396,6 +406,132 @@ describe("Codex app-server mapping", () => {
 
     expect(handled).toBe(false);
     expect(calls).toEqual([]);
+  });
+
+  it("Codex Agent 提问通过统一 interaction_request/response 往返", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    const calls: any[] = [];
+
+    const handled = maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "request-user-input-1",
+        method: "item/tool/requestUserInput",
+        params: {
+          questions: [{
+            id: "choice",
+            header: "方案",
+            question: "选哪个方案？",
+            options: [
+              { label: "A", description: "先改合约" },
+              { label: "B", description: "先改 UI" },
+            ],
+          }],
+        },
+      },
+      { interactions: broker } as any,
+    );
+
+    await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+    expect(json()).toEqual([
+      {
+        type: "interaction_request",
+        id: "ask-1",
+        kind: "ask_user",
+        backend: "codex",
+        payload: expect.objectContaining({
+          title: "Codex 想确认一下",
+          source: "Codex",
+          questions: [expect.objectContaining({ id: "choice" })],
+        }),
+      },
+    ]);
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "ask-1",
+      kind: "ask_user",
+      result: {
+        cancelled: false,
+        answers: {
+          choice: { questionId: "choice", value: "B" },
+        },
+      },
+    }));
+
+    await expect(handled).resolves.toBe(true);
+    expect(calls).toEqual([
+      ["respond", "request-user-input-1", { answers: { choice: { answers: ["B"] } } }],
+    ]);
+  });
+
+  it("Codex 工具确认通过统一 interaction_request/response 往返", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    const calls: any[] = [];
+
+    const handled = maybeHandleCodexApprovalRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      },
+      {
+        id: "approval-rpc-unified",
+        method: "item/commandExecution/requestApproval",
+        params: {
+          approvalId: "approval-unified",
+          command: "yarn test",
+          cwd: "C:/repo",
+          availableDecisions: ["accept", "decline", "cancel"],
+        },
+      },
+      {
+        protocol,
+        interactions: broker,
+        emitToolConsentTimeline: () => {},
+      },
+    );
+
+    await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+    expect(json()).toEqual([
+      {
+        type: "interaction_request",
+        id: "consent-1",
+        kind: "tool_consent",
+        backend: "codex",
+        payload: expect.objectContaining({
+          backend: "codex",
+          toolName: "item/commandExecution/requestApproval",
+          input: expect.objectContaining({ command: "yarn test" }),
+          toolUseID: "approval-unified",
+        }),
+      },
+    ]);
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "consent-1",
+      kind: "tool_consent",
+      result: {
+        decision: "allow",
+        message: "",
+      },
+    }));
+
+    await expect(handled).resolves.toBe(true);
+    expect(calls).toEqual([
+      ["respond", "approval-rpc-unified", { decision: "accept" }],
+    ]);
   });
 
   it("passes Codex approval fields through and honors codexDecision first", async () => {
@@ -830,6 +966,117 @@ describe("Codex app-server mapping", () => {
         developer_instructions: null,
       },
     });
+  });
+
+  it("Codex 计划确认通过统一 interaction_request/response 往返", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    let turnStarts = 0;
+    let planSent = false;
+    let planCompletionSent = false;
+    let executionCompletionSent = false;
+    const server = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
+        if (method === "collaborationMode/list") return { data: [] };
+        if (method === "turn/start") {
+          turnStarts += 1;
+          return { turn: { id: `turn-${turnStarts}` } };
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        if (turnStarts === 1 && !planSent) {
+          planSent = true;
+          return [{
+            method: "turn/plan/updated",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              explanation: "计划草稿",
+              plan: [{ step: "改代码", status: "pending" }],
+            },
+          }];
+        }
+        if (turnStarts === 1 && !planCompletionSent) {
+          planCompletionSent = true;
+          return [{
+            method: "turn/completed",
+            params: { threadId: "thread-1", turn: { status: "completed" } },
+          }];
+        }
+        if (turnStarts === 2 && !executionCompletionSent) {
+          executionCompletionSent = true;
+          return [{
+            method: "turn/completed",
+            params: { threadId: "thread-1", turn: { status: "completed" } },
+          }];
+        }
+        return [];
+      },
+      close: () => {},
+    };
+
+    const run = runCodexAppServer({
+      backend: "codex",
+      prompt: "请制定计划",
+      permission: "ask",
+      planMode: true,
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: broker,
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    await waitUntil(() =>
+      json().some((line) => line.type === "interaction_request" && line.kind === "plan_approval")
+    );
+    const requests = json().filter((line) => line.type === "interaction_request");
+    expect(requests).toEqual([
+      {
+        type: "interaction_request",
+        id: "ask-1",
+        kind: "plan_approval",
+        backend: "codex",
+        payload: expect.objectContaining({
+          title: "确认 Codex 计划",
+          source: "Codex Plan",
+          intent: "plan_approval",
+        }),
+      },
+    ]);
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "ask-1",
+      kind: "plan_approval",
+      result: {
+        cancelled: false,
+        answers: {
+          "approve-plan": {
+            questionId: "approve-plan",
+            value: "yes",
+          },
+        },
+      },
+    }));
+
+    await run;
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "plan" &&
+      line.event.status === "success" &&
+      line.event.payload.approved === true
+    )).toBe(true);
   });
 
   it("Codex plan mode waits for the plan turn to complete before asking Lilia", async () => {

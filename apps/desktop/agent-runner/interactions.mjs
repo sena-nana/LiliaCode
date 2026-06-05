@@ -75,20 +75,6 @@ export function createInteractionBroker({
       return;
     }
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
-    if (msg.type === "consent_response") {
-      const resolve = consentPending.get(msg.id);
-      if (!resolve) return;
-      consentPending.delete(msg.id);
-      resolve(normalizeToolConsentResult(msg));
-      return;
-    }
-    if (msg.type === "ask_user_response") {
-      const resolve = askUserPending.get(msg.id);
-      if (!resolve) return;
-      askUserPending.delete(msg.id);
-      resolve(normalizeAskUserResult(msg.result));
-      return;
-    }
     if (msg.type === "interaction_response") {
       const kind = msg.kind === "tool_consent"
         ? "tool_consent"

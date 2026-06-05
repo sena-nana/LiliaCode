@@ -244,6 +244,30 @@ export type AgentInteractionToolRequestTypeTest = Assert<
   >
 >;
 
+export type AgentInteractionPlanApprovalRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "codex";
+      requestId: "plan-1";
+      kind: "plan_approval";
+      payload: {
+        title: "确认 Codex 计划";
+        source: "Codex Plan";
+        intent: "plan_approval";
+        questions: [{
+          id: "approve-plan";
+          question: "";
+          mode: "confirm";
+          confirmLabel: "按计划执行";
+        }];
+      };
+    },
+    AgentInteractionRequest
+  >
+>;
+
 export type AgentInteractionToolResponseTypeTest = Assert<
   Extends<
     {

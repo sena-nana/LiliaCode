@@ -96,8 +96,6 @@ pub fn run() {
             chat::attachments::chat_search_context_attachments,
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
-            chat::commands::chat_respond_tool_consent,
-            chat::commands::chat_respond_ask_user,
             chat::commands::chat_respond_agent_interaction,
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,

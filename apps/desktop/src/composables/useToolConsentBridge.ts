@@ -1,6 +1,6 @@
 /**
- * Tool-consent bridge：把 runner 通过 `chat:tool-consent-request` 推过来的工具
- * 授权请求收进一个按 taskId 索引的 reactive map，供 ChatComposer 在
+ * Tool-consent bridge：把统一 Agent interaction 推过来的工具授权请求
+ * 收进一个按 taskId 索引的 reactive map，供 ChatComposer 在
  * 各自任务的输入框内部 inline 渲染。
  *
  * 这里只做"收事件 + 写回决策"两件事，不接 askUser/弹窗；inline 卡片决定一切
@@ -12,16 +12,13 @@
 
 import { reactive, computed, type ComputedRef } from "vue";
 import {
-  onToolConsentRequest,
   respondAgentInteraction,
-  respondToolConsent,
   type ToolConsentDecision,
   type ToolConsentRequest,
   type ToolConsentUpdatedInput,
 } from "../services/chat";
 
 const pending = reactive<Record<string, ToolConsentRequest>>({});
-const unifiedRequestIds = new Set<string>();
 const localResolvers = new Map<
   string,
   (
@@ -30,27 +27,11 @@ const localResolvers = new Map<
     updatedInput?: ToolConsentUpdatedInput,
   ) => void
 >();
-let installed = false;
-let unlisten: (() => void) | null = null;
 
 type TaskIdSource = string | (() => string);
 
 function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
-}
-
-/** 在 App 启动时调用一次。返回 unlisten；重复 install 时返回 noop。 */
-export async function installToolConsentBridge(): Promise<() => void> {
-  if (installed) return () => {};
-  installed = true;
-  unlisten = await onToolConsentRequest((req) => {
-    handleToolConsentRequest(req, { unified: false });
-  });
-  return () => {
-    unlisten?.();
-    unlisten = null;
-    installed = false;
-  };
 }
 
 /** 给某个 task 订阅当前待决策项（没有就是 null）。 */
@@ -86,12 +67,9 @@ export function requestLocalToolConsent(
 
 export function handleToolConsentRequest(
   request: ToolConsentRequest,
-  options: { unified?: boolean } = {},
 ) {
   pending[request.taskId] = request;
   localResolvers.delete(request.requestId);
-  if (options.unified) unifiedRequestIds.add(request.requestId);
-  else unifiedRequestIds.delete(request.requestId);
 }
 
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */
@@ -114,22 +92,17 @@ export async function respondConsent(
     localResolve(decision, message, updatedInput);
     return;
   }
-  if (unifiedRequestIds.has(requestId)) {
-    unifiedRequestIds.delete(requestId);
-    await respondAgentInteraction({
+  await respondAgentInteraction({
+    taskId,
+    requestId,
+    kind: "tool_consent",
+    result: {
       taskId,
       requestId,
-      kind: "tool_consent",
-      result: {
-        taskId,
-        requestId,
-        decision,
-        message: message ?? null,
-        ...(updatedInput ? { updatedInput } : {}),
-        ...(codexDecision ? { codexDecision } : {}),
-      },
-    });
-    return;
-  }
-  await respondToolConsent(taskId, requestId, decision, message, updatedInput);
+      decision,
+      message: message ?? null,
+      ...(updatedInput ? { updatedInput } : {}),
+      ...(codexDecision ? { codexDecision } : {}),
+    },
+  });
 }

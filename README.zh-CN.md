@@ -130,19 +130,27 @@ Lilia/
 
 ## 早期开发
 
+LiliaCode 通过 Corepack 使用 Yarn 4.14.1。运行本地开发命令前，先启用 Corepack，让 [package.json](package.json) 里的 `packageManager` 字段接管 Yarn 版本；不支持直接使用全局 Yarn 1.x。
+
 ```bash
-# 1) 安装依赖（首次）
+# 1) 启用 Corepack 并激活仓库要求的 Yarn 版本
+corepack enable
+corepack prepare yarn@4.14.1 --activate
+
+# 2) 安装依赖（首次）
 yarn install
 
-# 2) 仅启动 Vite 前端
+# 3) 仅启动 Vite 前端
 yarn dev
 
-# 3) 启动 Tauri 桌面端（需要本地有 Rust 工具链 + WebView2）
+# 4) 启动 Tauri 桌面端（需要本地有 Rust 工具链 + WebView2）
 yarn tauri:dev
 
-# 4) 类型检查 / 单测 / Rust 编译检查 / 契约包检查 一键过
+# 5) 类型检查 / 单测 / Rust 编译检查 / 契约包检查 一键过
 yarn verify
 ```
+
+如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。
 
 Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg)（PNG 嵌入式 SVG 容器）。要重新生成全套 PNG / ICO 时跑 [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1)：`pwsh -File scripts/generate-icon.ps1`。如需 macOS `.icns` 或全套尺寸：`yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`。
 

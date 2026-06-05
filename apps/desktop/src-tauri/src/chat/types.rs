@@ -132,36 +132,6 @@ pub(crate) struct DoneEvent {
     pub(crate) subtype: Option<String>,
 }
 
-/// 工具调用授权请求：runner 调用 canUseTool 时通过 stdout 转过来的事实字段。
-/// 前端 ToolConsentBridge 收到后弹 AskUser 浮层，再用 chat_respond_tool_consent
-/// 把决策写回。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ToolConsentRequestEvent {
-    pub(crate) task_id: String,
-    pub(crate) turn_id: String,
-    pub(crate) backend: String,
-    pub(crate) request_id: String,
-    pub(crate) tool_name: String,
-    pub(crate) input: JsonValue,
-    pub(crate) title: Option<String>,
-    pub(crate) display_name: Option<String>,
-    pub(crate) description: Option<String>,
-    pub(crate) blocked_path: Option<String>,
-    pub(crate) decision_reason: Option<String>,
-    pub(crate) tool_use_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AskUserRequestEvent {
-    pub(crate) task_id: String,
-    pub(crate) turn_id: String,
-    pub(crate) backend: String,
-    pub(crate) request_id: String,
-    pub(crate) spec: JsonValue,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentInteractionRequestEvent {

@@ -3,13 +3,8 @@ import type {
   AskUserSpec,
   ToolConsentRequest,
 } from "@lilia/contracts";
-import {
-  onAgentInteractionRequest,
-  onAskUserRequest,
-  onToolConsentRequest,
-  type AgentAskUserRequest,
-} from "../services/chat";
-import { handleAgentAskUserRequest } from "./useAgentAskUserBridge";
+import { onAgentInteractionRequest } from "../services/chat";
+import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
 import { handleToolConsentRequest } from "./useToolConsentBridge";
 
 let installed = false;
@@ -65,25 +60,16 @@ function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRe
 
 function handleInteraction(req: AgentInteractionRequest) {
   if (req.kind === "tool_consent") {
-    handleToolConsentRequest(toolRequestFromInteraction(req), { unified: true });
+    handleToolConsentRequest(toolRequestFromInteraction(req));
     return;
   }
-  void handleAgentAskUserRequest(askRequestFromInteraction(req), {
-    unified: true,
-    kind: req.kind,
-  });
+  void handleAgentAskUserRequest(askRequestFromInteraction(req), req.kind);
 }
 
 export async function installAgentInteractionBridge(): Promise<() => void> {
   if (installed) return () => {};
   installed = true;
-  unlistenAll = await Promise.all([
-    onAgentInteractionRequest(handleInteraction),
-    onToolConsentRequest((req) => handleToolConsentRequest(req, { unified: false })),
-    onAskUserRequest((req) => {
-      void handleAgentAskUserRequest(req);
-    }),
-  ]);
+  unlistenAll = [await onAgentInteractionRequest(handleInteraction)];
   return () => {
     for (const unlisten of unlistenAll) unlisten();
     unlistenAll = [];

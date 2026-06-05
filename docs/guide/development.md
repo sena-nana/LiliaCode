@@ -27,19 +27,27 @@ Lilia/
 
 ## 本地运行
 
+本仓库通过 Corepack 使用 Yarn 4.14.1。首次运行前先启用 Corepack，让 `package.json` 里的 `packageManager` 字段接管 Yarn 版本；不要直接使用全局 Yarn 1.x。
+
 ```bash
-# 1. 首次安装依赖
+# 1. 启用 Corepack 并激活仓库要求的 Yarn 版本
+corepack enable
+corepack prepare yarn@4.14.1 --activate
+
+# 2. 首次安装依赖
 yarn install
 
-# 2. 仅启动 Vite 前端
+# 3. 仅启动 Vite 前端
 yarn dev
 
-# 3. 启动 Tauri 桌面端，需要本地有 Rust 工具链和 WebView2
+# 4. 启动 Tauri 桌面端，需要本地有 Rust 工具链和 WebView2
 yarn tauri:dev
 
-# 4. 类型检查、单测、Rust 编译检查、契约包检查
+# 5. 类型检查、单测、Rust 编译检查、契约包检查
 yarn verify
 ```
+
+如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本也会在检测到 Yarn 1 时给出同样的前置条件提示。
 
 ## 文档站
 

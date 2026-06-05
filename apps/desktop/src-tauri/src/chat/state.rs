@@ -45,7 +45,7 @@ pub(crate) struct ChatStore {
     pub(crate) interrupted_turns: Mutex<HashMap<String, RunningTurn>>,
     pub(crate) reset_turns: Mutex<HashMap<String, RunningTurn>>,
     /// 仍在运行的 runner 子进程 stdin。key = task_id，turn 结束时移除（Drop 即关 stdin）。
-    /// 让 chat_respond_tool_consent 命令能把决策写回给 runner。
+    /// 让统一 interaction response 命令能把决策写回给 runner。
     pub(crate) running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
 }
 

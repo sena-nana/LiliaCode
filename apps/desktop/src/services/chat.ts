@@ -21,8 +21,6 @@ import type {
   ChatContextSearchResult,
   ChatComposerState,
   AgentTimelineEvent,
-  AgentAskUserRequestEvent,
-  AskUserResult,
   ChatSendResult,
   ConnectionMode,
   EnvStatusReport,
@@ -56,8 +54,6 @@ export type {
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
-
-export type AgentAskUserRequest = AgentAskUserRequestEvent;
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
@@ -230,14 +226,6 @@ export function onAgentTimeline(
   return listen<AgentTimelineEvent>("agent:timeline", (event) => handler(event.payload));
 }
 
-export function onToolConsentRequest(
-  handler: (e: ToolConsentRequest) => void,
-): Promise<UnlistenFn> {
-  return listen<ToolConsentRequest>("chat:tool-consent-request", (event) =>
-    handler(event.payload),
-  );
-}
-
 function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {
   const row = value as unknown as Record<string, unknown>;
   const payload = row.payload;
@@ -271,61 +259,6 @@ export function onAgentInteractionRequest(
 function stringField(row: Record<string, unknown>, camel: string, snake: string): string {
   const value = row[camel] ?? row[snake];
   return typeof value === "string" ? value : "";
-}
-
-function normalizeAskUserRequest(value: AgentAskUserRequest): AgentAskUserRequest | null {
-  const row = value as unknown as Record<string, unknown>;
-  const spec = row.spec;
-  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
-  const taskId = stringField(row, "taskId", "task_id");
-  const requestId = stringField(row, "requestId", "request_id");
-  if (!taskId || !requestId) return null;
-  return {
-    taskId,
-    turnId: stringField(row, "turnId", "turn_id"),
-    backend: stringField(row, "backend", "backend") as AgentAskUserRequest["backend"],
-    requestId,
-    spec: spec as AgentAskUserRequest["spec"],
-  };
-}
-
-export function onAskUserRequest(
-  handler: (e: AgentAskUserRequest) => void,
-): Promise<UnlistenFn> {
-  return listen<AgentAskUserRequest>("chat:ask-user-request", (event) => {
-    const req = normalizeAskUserRequest(event.payload);
-    if (req) handler(req);
-  });
-}
-
-/** 把用户对一次 canUseTool 的决策写回 runner，让被卡住的工具继续 / 终止。 */
-export function respondToolConsent(
-  taskId: string,
-  requestId: string,
-  decision: ToolConsentDecision,
-  message?: string,
-  updatedInput?: ToolConsentUpdatedInput,
-): Promise<void> {
-  return invoke<void>("chat_respond_tool_consent", {
-    taskId,
-    requestId,
-    decision,
-    message: message ?? null,
-    updatedInput: updatedInput ?? null,
-  });
-}
-
-/** 把 AskUser 浮层收集到的结果写回 runner，让 Claude AskUserQuestion 继续。 */
-export function respondAskUser(
-  taskId: string,
-  requestId: string,
-  result: AskUserResult,
-): Promise<void> {
-  return invoke<void>("chat_respond_ask_user", {
-    taskId,
-    requestId,
-    result,
-  });
 }
 
 export function respondAgentInteraction(response: AgentInteractionResponse): Promise<void> {

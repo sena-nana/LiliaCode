@@ -93,12 +93,13 @@ function emitAskUserRequest(
   spec: AskUserSpec = askUserSpec,
   turnId = "turn-ask",
 ) {
-  emitTauriEvent("chat:ask-user-request", {
+  emitTauriEvent("chat:agent-interaction-request", {
     taskId,
     turnId,
     backend: "claude",
     requestId: `ask-${taskId}`,
-    spec,
+    kind: "ask_user",
+    payload: spec,
   });
 }
 
@@ -142,12 +143,13 @@ function emitAskUserTimelineEvent(
 }
 
 function emitPlanApprovalRequest(taskId: string) {
-  emitTauriEvent("chat:ask-user-request", {
+  emitTauriEvent("chat:agent-interaction-request", {
     taskId,
     turnId: "turn-plan",
     backend: "claude",
     requestId: `ask-${taskId}`,
-    spec: {
+    kind: "plan_approval",
+    payload: {
       title: "确认 Claude 计划",
       source: "Claude Plan",
       intent: "plan_approval",
@@ -167,19 +169,22 @@ function emitPlanApprovalRequest(taskId: string) {
 }
 
 function emitToolConsentRequest(taskId: string) {
-  emitTauriEvent("chat:tool-consent-request", {
+  emitTauriEvent("chat:agent-interaction-request", {
     taskId,
     turnId: "turn-tool",
     backend: "claude",
     requestId: `tool-${taskId}`,
-    toolName: "Write",
-    input: { file_path: "src/main.ts" },
-    title: null,
-    displayName: null,
-    description: null,
-    blockedPath: null,
-    decisionReason: null,
-    toolUseId: null,
+    kind: "tool_consent",
+    payload: {
+      toolName: "Write",
+      input: { file_path: "src/main.ts" },
+      title: null,
+      displayName: null,
+      description: null,
+      blockedPath: null,
+      decisionReason: null,
+      toolUseId: null,
+    },
   });
 }
 
@@ -204,27 +209,31 @@ function emitUnifiedToolConsentRequest(taskId: string) {
 }
 
 function emitBashToolConsentRequest(taskId: string) {
-  emitTauriEvent("chat:tool-consent-request", {
+  emitTauriEvent("chat:agent-interaction-request", {
     taskId,
     turnId: "turn-bash",
     backend: "claude",
     requestId: `bash-tool-${taskId}`,
-    toolName: "Bash",
-    input: { command: "pwd" },
-    title: null,
-    displayName: null,
-    description: null,
-    blockedPath: null,
-    decisionReason: null,
-    toolUseId: "bash-tool-use",
+    kind: "tool_consent",
+    payload: {
+      toolName: "Bash",
+      input: { command: "pwd" },
+      title: null,
+      displayName: null,
+      description: null,
+      blockedPath: null,
+      decisionReason: null,
+      toolUseId: "bash-tool-use",
+    },
   });
 }
 
 async function expectAskUserResponse(taskId: string) {
   await waitFor(() => {
-    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
       taskId,
       requestId: `ask-${taskId}`,
+      kind: "ask_user",
       result: {
         cancelled: false,
         answers: {
@@ -362,9 +371,10 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_ask_user", {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
         taskId: "t-002",
         requestId: "ask-t-002",
+        kind: "plan_approval",
         result: {
           cancelled: false,
           answers: {
@@ -400,12 +410,16 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
         taskId: "t-002",
         requestId: "tool-t-002",
-        decision: "deny",
-        message: "先不要写这个文件",
-        updatedInput: null,
+        kind: "tool_consent",
+        result: {
+          taskId: "t-002",
+          requestId: "tool-t-002",
+          decision: "deny",
+          message: "先不要写这个文件",
+        },
       }, undefined);
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
@@ -485,12 +499,17 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_tool_consent", {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
         taskId: "t-002",
         requestId: "bash-tool-t-002",
-        decision: "allow",
-        message: null,
-        updatedInput: { command: "pwd && echo ok" },
+        kind: "tool_consent",
+        result: {
+          taskId: "t-002",
+          requestId: "bash-tool-t-002",
+          decision: "allow",
+          message: null,
+          updatedInput: { command: "pwd && echo ok" },
+        },
       }, undefined);
     });
   });
