@@ -5,6 +5,7 @@ pub mod agent_events;
 mod agent_extensions;
 pub mod agent_timeline;
 mod chat;
+mod conversation_suggestions;
 mod plugins;
 mod popup_windows;
 mod project_shell;
@@ -125,6 +126,9 @@ pub fn run() {
             popup_windows::popup_focus_main,
             provider::router_get_mode,
             provider::router_set_mode,
+            conversation_suggestions::conversation_suggestions_get,
+            conversation_suggestions::conversation_suggestions_get_settings,
+            conversation_suggestions::conversation_suggestions_set_settings,
             project_shell::project_get_settings,
             project_shell::project_set_settings,
             project_shell::git_clone_repo,

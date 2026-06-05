@@ -15,6 +15,7 @@ import type {
   ChatAttachment,
   ChatComposerState,
   PermissionMode,
+  SuggestionItem,
 } from "@lilia/contracts";
 import type { PendingAsk } from "../../composables/useAskUser";
 import type {
@@ -50,6 +51,9 @@ const props = defineProps<{
   sending?: boolean;
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
+  suggestions?: SuggestionItem[];
+  suggestionsLoading?: boolean;
+  suggestionsVisible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -65,6 +69,7 @@ const emit = defineEmits<{
     updatedInput?: ToolConsentUpdatedInput,
   ];
   "open-image": [image: ChatImageViewerSource];
+  "refresh-suggestions": [];
   interrupt: [];
 }>();
 
@@ -314,6 +319,22 @@ function patch(next: Partial<ChatComposerState>) {
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
+const suggestionRows = computed(() => props.suggestions ?? []);
+const showSuggestions = computed(() =>
+  !hasPending.value &&
+  richInput.isEmpty.value &&
+  props.suggestionsVisible === true,
+);
+
+function fillSuggestion(suggestion: SuggestionItem) {
+  richInput.replaceRange(
+    0,
+    richInput.serializedText.value.length,
+    [textPart(suggestion.prompt)],
+  );
+  clearComposerContextState();
+}
+
 function send() {
   const value = hasPending.value ? inputValue.value.trim() : richInput.serializedText.value.trim();
   if (activeToolConsent.value) {
@@ -520,6 +541,39 @@ onBeforeUnmount(() => {
         @begin-command-edit="beginCommandEdit"
       />
     </Transition>
+
+    <div
+      v-if="showSuggestions"
+      class="chat-suggestions"
+      aria-label="新对话建议"
+    >
+      <div class="chat-suggestions__items">
+        <button
+          v-for="suggestion in suggestionRows"
+          :key="suggestion.id"
+          type="button"
+          class="chat-suggestion"
+          :title="suggestion.reason"
+          @click="fillSuggestion(suggestion)"
+        >
+          {{ suggestion.summary }}
+        </button>
+        <span v-if="suggestionsLoading && suggestionRows.length === 0" class="chat-suggestions__state">
+          正在生成建议…
+        </span>
+        <span v-else-if="suggestionRows.length === 0" class="chat-suggestions__state">
+          暂无建议
+        </span>
+      </div>
+      <button
+        type="button"
+        class="chat-suggestions__refresh"
+        :disabled="suggestionsLoading"
+        @click="emit('refresh-suggestions')"
+      >
+        刷新
+      </button>
+    </div>
 
     <div
       class="chat-composer__entry-row"

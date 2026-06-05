@@ -1,17 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { AlertTriangle, Plug, Save, Sparkles } from "lucide-vue-next";
-import type { AssistantAIConfig, AssistantAITestResult } from "@lilia/contracts";
+import type {
+  AssistantAIConfig,
+  AssistantAITestResult,
+  SuggestionSettings,
+  SuggestionSource,
+} from "@lilia/contracts";
 import {
+  getConversationSuggestionSettings,
   getAssistantAIConfig,
+  setConversationSuggestionSettings,
   setAssistantAIConfig,
   testAssistantAIConnection,
 } from "../../services/chat";
 
 const assistantAIForm = ref<AssistantAIConfig>({ baseUrl: null, apiKey: null, model: null });
+const suggestionSettings = ref<SuggestionSettings>({ enabled: true, source: "assistant-ai" });
 const savingAssistantAI = ref(false);
+const savingSuggestions = ref(false);
 const testingAssistantAI = ref(false);
 const assistantAIResult = ref<AssistantAITestResult | null>(null);
+
+const suggestionSourceOptions: Array<{ value: SuggestionSource; label: string }> = [
+  { value: "assistant-ai", label: "辅助模型" },
+  { value: "provider", label: "当前 Provider" },
+];
 
 const assistantAIBannerHint = computed(() => {
   const r = assistantAIResult.value;
@@ -39,6 +53,11 @@ async function loadAssistantAI() {
   catch (err) { console.error("[settings] load assistant ai config failed", err); }
 }
 
+async function loadSuggestionSettings() {
+  try { suggestionSettings.value = await getConversationSuggestionSettings(); }
+  catch (err) { console.error("[settings] load suggestion settings failed", err); }
+}
+
 async function saveAssistantAI() {
   savingAssistantAI.value = true;
   try {
@@ -59,7 +78,22 @@ async function testAssistantAI() {
   } finally { testingAssistantAI.value = false; }
 }
 
-onMounted(loadAssistantAI);
+async function setSuggestionPatch(patch: Partial<SuggestionSettings>) {
+  const next: SuggestionSettings = { ...suggestionSettings.value, ...patch };
+  suggestionSettings.value = next;
+  savingSuggestions.value = true;
+  try {
+    await setConversationSuggestionSettings(next);
+  } catch (err) {
+    console.error("[settings] save suggestion settings failed", err);
+  } finally {
+    savingSuggestions.value = false;
+  }
+}
+
+onMounted(() => {
+  void Promise.all([loadAssistantAI(), loadSuggestionSettings()]);
+});
 </script>
 
 <template>
@@ -128,6 +162,56 @@ onMounted(loadAssistantAI);
         >
           <Plug :size="12" aria-hidden="true" />
           {{ testingAssistantAI ? "测试中…" : "测试连接" }}
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">
+        <div>新对话建议</div>
+        <div class="settings-row__hint">为空白草稿生成两条低成本继续方向。</div>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="新对话建议">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="suggestionSettings.enabled"
+          :class="{ 'is-active': suggestionSettings.enabled }"
+          :disabled="savingSuggestions"
+          @click="setSuggestionPatch({ enabled: true })"
+        >
+          开启
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="!suggestionSettings.enabled"
+          :class="{ 'is-active': !suggestionSettings.enabled }"
+          :disabled="savingSuggestions"
+          @click="setSuggestionPatch({ enabled: false })"
+        >
+          关闭
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">
+        <div>生成来源</div>
+        <div class="settings-row__hint">辅助模型走 OpenAI 兼容接口；当前 Provider 复用全局连接。</div>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="建议生成来源">
+        <button
+          v-for="opt in suggestionSourceOptions"
+          :key="opt.value"
+          type="button"
+          role="radio"
+          :aria-checked="suggestionSettings.source === opt.value"
+          :class="{ 'is-active': suggestionSettings.source === opt.value }"
+          :disabled="savingSuggestions"
+          @click="setSuggestionPatch({ source: opt.value })"
+        >
+          {{ opt.label }}
         </button>
       </div>
     </div>

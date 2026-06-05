@@ -157,4 +157,22 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
   });
+
+  it("新对话建议生成来源可切换到当前 Provider", async () => {
+    const view = render(Settings);
+
+    await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "conversation_suggestions_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes("\"source\":\"provider\"")
+        ),
+      ).toBe(true);
+    });
+  });
 });

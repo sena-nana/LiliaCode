@@ -224,6 +224,10 @@ function defaultAgentInteractionSettings() {
 }
 
 let agentInteractionSettings = defaultAgentInteractionSettings();
+let conversationSuggestionSettings = {
+  enabled: true,
+  source: "assistant-ai" as "assistant-ai" | "provider",
+};
 let projectSettings = { cloneParentDir: null as string | null, codexDefaults: null as unknown };
 let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
 let nextPopupSettingsError: string | null = null;
@@ -429,6 +433,7 @@ export function resetTauriMockData() {
     envKeys: [...server.envKeys],
   }));
   agentInteractionSettings = defaultAgentInteractionSettings();
+  conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
   projectSettings = { cloneParentDir: null, codexDefaults: null };
   popupWindowSettings = { shortcut: null };
   nextPopupSettingsError = null;
@@ -1046,6 +1051,52 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "provider_set_config":
       return undefined;
+
+    case "assistant_ai_get_config":
+      return { baseUrl: null, apiKey: null, model: null };
+
+    case "assistant_ai_set_config":
+      return undefined;
+
+    case "assistant_ai_test_connection":
+      return { ok: false, error: "baseUrl / apiKey / model 必须全部填写", models: null, modelMatched: null };
+
+    case "conversation_suggestions_get_settings":
+      return { ...conversationSuggestionSettings };
+
+    case "conversation_suggestions_set_settings": {
+      const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
+        ? args.settings as Record<string, unknown>
+        : {};
+      conversationSuggestionSettings = {
+        enabled: settings.enabled !== false,
+        source: settings.source === "provider" ? "provider" : "assistant-ai",
+      };
+      return undefined;
+    }
+
+    case "conversation_suggestions_get":
+      if (!conversationSuggestionSettings.enabled) return [];
+      return [
+        {
+          id: "sg-1",
+          projectId: typeof args.projectId === "string" ? args.projectId : null,
+          taskIds: ["t-002"],
+          summary: "补齐建议缓存测试",
+          reason: "最近对话已经接入了设置与空草稿入口，但缓存失效路径还需要验证。",
+          prompt: "请检查新对话建议的缓存命中、强制刷新和最近 timeline 更新失效逻辑，并补齐最小测试。",
+          generatedAt: Date.now(),
+        },
+        {
+          id: "sg-2",
+          projectId: typeof args.projectId === "string" ? args.projectId : null,
+          taskIds: ["t-002"],
+          summary: "优化空状态体验",
+          reason: "空草稿页现在可以显示建议，下一步可以确认加载失败和无建议时的轻量反馈。",
+          prompt: "请优化空白新对话页的建议加载失败和无建议状态，保持不阻塞输入并符合现有样式。",
+          generatedAt: Date.now(),
+        },
+      ];
 
     case "cc_switch_get_config":
       return { baseUrl: "http://127.0.0.1:15721" };

@@ -26,6 +26,8 @@ import type {
   EnvStatusReport,
   ProviderConfig,
   RouterMode,
+  SuggestionItem,
+  SuggestionSettings,
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
@@ -47,6 +49,8 @@ export type {
   EnvStatusReport,
   ProviderConfig,
   RouterMode,
+  SuggestionItem,
+  SuggestionSettings,
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
@@ -207,6 +211,26 @@ export function testAssistantAIConnection(
   config: AssistantAIConfig,
 ): Promise<AssistantAITestResult> {
   return invoke<AssistantAITestResult>("assistant_ai_test_connection", { config });
+}
+
+export function getConversationSuggestions(
+  projectId?: string | null,
+  forceRefresh = false,
+): Promise<SuggestionItem[]> {
+  return invoke<SuggestionItem[]>("conversation_suggestions_get", {
+    projectId: projectId ?? null,
+    forceRefresh,
+  });
+}
+
+export function getConversationSuggestionSettings(): Promise<SuggestionSettings> {
+  return invoke<SuggestionSettings>("conversation_suggestions_get_settings");
+}
+
+export function setConversationSuggestionSettings(
+  settings: SuggestionSettings,
+): Promise<void> {
+  return invoke<void>("conversation_suggestions_set_settings", { settings });
 }
 
 // ---- 事件订阅 ----

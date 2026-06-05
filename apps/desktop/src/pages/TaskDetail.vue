@@ -6,7 +6,7 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { ChatAttachment } from "@lilia/contracts";
+import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
 import { useTaskAttachments } from "./taskDetail/useTaskAttachments";
@@ -16,6 +16,7 @@ import {
   type TaskDetailRouteProps,
 } from "./taskDetail/useTaskConversationContext";
 import { useTaskTimeline } from "./taskDetail/useTaskTimeline";
+import { getConversationSuggestions } from "../services/chat";
 
 const props = withDefaults(defineProps<{
   projectId?: string;
@@ -31,6 +32,9 @@ const chatPageRef = computed<HTMLElement | null>(() =>
   chatSurfaceRef.value?.chatPageRef ?? null,
 );
 const sharedAttachments = ref<ChatAttachment[]>([]);
+const suggestions = ref<SuggestionItem[]>([]);
+const suggestionsLoading = ref(false);
+let suggestionsSeq = 0;
 
 const conversation = useTaskConversationContext(routeProps);
 const timeline = useTaskTimeline({
@@ -54,6 +58,7 @@ const {
   isPopup,
   project,
   hasContext,
+  conversationRouteState,
   isContextLoading,
   isPopupPending,
   shouldRenderChat,
@@ -81,6 +86,34 @@ const {
   pendingPlanApproval,
   nonInterruptMode,
 } = composerController;
+
+const shouldLoadSuggestions = computed(() =>
+  shouldRenderChat.value &&
+  conversationRouteState.value.isLiveDraft &&
+  timelineEvents.value.length === 0 &&
+  !isTurnRunning.value &&
+  pendingAgentActions.value.length === 0 &&
+  !pendingAskUser.value &&
+  !pendingToolConsent.value,
+);
+
+async function loadSuggestions(forceRefresh = false) {
+  if (!shouldLoadSuggestions.value) {
+    suggestions.value = [];
+    return;
+  }
+  const seq = ++suggestionsSeq;
+  suggestionsLoading.value = true;
+  try {
+    const next = await getConversationSuggestions(props.projectId ?? null, forceRefresh);
+    if (seq === suggestionsSeq) suggestions.value = next;
+  } catch (err) {
+    console.error("[conversation-suggestions] load failed", err);
+    if (seq === suggestionsSeq) suggestions.value = [];
+  } finally {
+    if (seq === suggestionsSeq) suggestionsLoading.value = false;
+  }
+}
 
 const unlisteners: UnlistenFn[] = [];
 let unregisterDebugPanel: (() => void) | null = null;
@@ -136,6 +169,9 @@ watch(
 watch(
   () => [props.projectId, props.taskId] as const,
   async () => {
+    suggestionsSeq += 1;
+    suggestions.value = [];
+    suggestionsLoading.value = false;
     conversation.prepareForRouteChange();
     composerController.resetForRouteChange();
     timeline.resetTimeline();
@@ -147,6 +183,25 @@ watch(
       await composerController.loadAll();
     }
   },
+);
+
+watch(
+  () => [
+    shouldLoadSuggestions.value,
+    props.projectId ?? "",
+    props.taskId,
+    timelineEvents.value.length,
+  ] as const,
+  ([ready]) => {
+    if (!ready) {
+      suggestionsSeq += 1;
+      suggestions.value = [];
+      suggestionsLoading.value = false;
+      return;
+    }
+    void loadSuggestions(false);
+  },
+  { immediate: true },
 );
 
 watch(
@@ -200,6 +255,9 @@ watch(
     :pending-ask="nonInterruptMode ? null : pendingAskUser"
     :tool-consent="nonInterruptMode ? null : pendingToolConsent"
     :viewing-image="viewingImage"
+    :suggestions="suggestions"
+    :suggestions-loading="suggestionsLoading"
+    :suggestions-visible="shouldLoadSuggestions"
     @resolve-pending-agent-action="composerController.onResolvePendingAgentAction"
     @retry-event="composerController.onRetryTimelineEvent"
     @open-image="viewingImage = $event"
@@ -211,6 +269,7 @@ watch(
     @remove-attachment="attachmentController.removeAttachment"
     @pick-attachments="attachmentController.onPickAttachments"
     @add-context-attachment="attachmentController.addContextAttachment"
+    @refresh-suggestions="loadSuggestions(true)"
     @resolve-ask-user="composerController.onResolveAskUser"
     @resolve-tool-consent="composerController.onResolveToolConsent"
   />

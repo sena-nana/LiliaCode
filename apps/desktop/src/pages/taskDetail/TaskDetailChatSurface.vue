@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  SuggestionItem,
 } from "@lilia/contracts";
 import ChatTranscript from "../../components/chat/ChatTranscript.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
@@ -50,6 +51,9 @@ defineProps<{
   pendingAsk: PendingAsk | null;
   toolConsent: ToolConsentRequest | null;
   viewingImage: ChatImageViewerSource | null;
+  suggestions: SuggestionItem[];
+  suggestionsLoading: boolean;
+  suggestionsVisible: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -64,6 +68,7 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
   "add-context-attachment": [attachment: ChatAttachment];
+  "refresh-suggestions": [];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
     decision: ToolConsentDecision,
@@ -129,12 +134,16 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :sending="isTurnRunning"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
+                  :suggestions="suggestions"
+                  :suggestions-loading="suggestionsLoading"
+                  :suggestions-visible="suggestionsVisible"
                   @send="emitSend"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"
                   @pick-attachments="emit('pick-attachments')"
                   @add-context-attachment="emit('add-context-attachment', $event)"
+                  @refresh-suggestions="emit('refresh-suggestions')"
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"

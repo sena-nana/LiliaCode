@@ -3715,6 +3715,71 @@ button.ghost:hover {
   box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.45);
 }
 
+.chat-suggestions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-suggestions__items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.chat-suggestion,
+.chat-suggestions__refresh {
+  height: 26px;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.chat-suggestion {
+  flex: 0 1 auto;
+  max-width: 260px;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-suggestions__refresh {
+  flex: 0 0 auto;
+  padding: 0 7px;
+}
+
+.chat-suggestion:hover,
+.chat-suggestions__refresh:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.chat-suggestions__refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.chat-suggestions__state {
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .chat-composer__input {
   /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;
