@@ -254,11 +254,11 @@ function normalizeAgentInteractionRequest(value: AgentInteractionRequest): Agent
   const row = value as unknown as Record<string, unknown>;
   const payload = row.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const taskId = stringField(row, "taskId", "task_id");
-  const turnId = stringField(row, "turnId", "turn_id");
-  const requestId = stringField(row, "requestId", "request_id");
-  const backend = stringField(row, "backend", "backend");
-  const kind = stringField(row, "kind", "kind");
+  const taskId = stringField(row, "taskId");
+  const turnId = stringField(row, "turnId");
+  const requestId = stringField(row, "requestId");
+  const backend = stringField(row, "backend");
+  const kind = stringField(row, "kind");
   if (!taskId || !requestId) return null;
   if (kind !== "plan_approval" && kind !== "tool_consent" && kind !== "ask_user") return null;
   return {
@@ -280,8 +280,8 @@ export function onAgentInteractionRequest(
   });
 }
 
-function stringField(row: Record<string, unknown>, camel: string, snake: string): string {
-  const value = row[camel] ?? row[snake];
+function stringField(row: Record<string, unknown>, key: string): string {
+  const value = row[key];
   return typeof value === "string" ? value : "";
 }
 

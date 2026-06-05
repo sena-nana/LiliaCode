@@ -87,7 +87,6 @@ export function emitToolConsentTimeline(protocol, id, payload, status, decisionM
     toolName,
     ...normalized.payload,
     input,
-    permissionRequest: true,
     toolUseId: stringOrNull(payload?.toolUseID),
     title: stringOrNull(payload?.title),
     displayName: stringOrNull(payload?.displayName),

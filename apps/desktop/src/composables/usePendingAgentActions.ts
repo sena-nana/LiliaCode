@@ -72,22 +72,11 @@ export function pendingActionForTimelineEvent(
       continue;
     }
     if (action.kind === "ask_user" && event.kind === "ask_user") {
-      if (matchesRequestId(event, action.requestId)) return action;
-      if (!readEventRequestId(event) && action.turnId && event.turnId === action.turnId) return action;
+      if (action.requestId && readPayloadString(event, "requestId") === action.requestId) return action;
       continue;
     }
     if (action.kind === "tool_consent") {
-      if (matchesRequestId(event, action.requestId)) return action;
-      if (
-        !readEventRequestId(event) &&
-        action.turnId &&
-        event.turnId === action.turnId &&
-        event.kind !== "plan" &&
-        event.kind !== "ask_user" &&
-        readPayloadString(event, "toolName") === action.request.toolName
-      ) {
-        return action;
-      }
+      if (readPayloadString(event, "requestId") === action.requestId) return action;
     }
   }
   return null;
@@ -97,18 +86,7 @@ export function timelineEventRequiresAgentAction(event: AgentTimelineEvent): boo
   if (event.status !== "requires_action") return false;
   if (event.kind === "plan") return true;
   if (event.kind === "ask_user") return true;
-  return readPayloadString(event, "interaction") === "tool_consent" ||
-    readPayloadBoolean(event, "permissionRequest") === true;
-}
-
-function matchesRequestId(event: AgentTimelineEvent, requestId: string | null): boolean {
-  if (!requestId) return false;
-  return readEventRequestId(event) === requestId;
-}
-
-function readEventRequestId(event: AgentTimelineEvent): string | null {
-  return readPayloadString(event, "requestId") ||
-    readPayloadString(event, "request_id");
+  return readPayloadString(event, "interaction") === "tool_consent";
 }
 
 function readPayloadString(event: AgentTimelineEvent, key: string): string | null {
@@ -116,11 +94,4 @@ function readPayloadString(event: AgentTimelineEvent, key: string): string | nul
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const value = (payload as Record<string, unknown>)[key];
   return typeof value === "string" ? value : null;
-}
-
-function readPayloadBoolean(event: AgentTimelineEvent, key: string): boolean | null {
-  const payload = event.payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const value = (payload as Record<string, unknown>)[key];
-  return typeof value === "boolean" ? value : null;
 }

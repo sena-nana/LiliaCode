@@ -6,6 +6,7 @@ mod agent_event_sink_tests {
     use crate::agent_events::{AgentRuntimeEvent, AgentTurnContext};
     use crate::agent_timeline;
     use crate::agent_timeline::AgentTimelineEventInput;
+    use crate::chat::commands::agent_interaction_response_payload;
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
@@ -125,6 +126,39 @@ mod agent_event_sink_tests {
         );
 
         assert!(input.is_none());
+    }
+
+    #[test]
+    fn agent_interaction_response_payload_uses_runner_id_field() {
+        assert_eq!(
+            agent_interaction_response_payload(
+                "ask-1".to_string(),
+                "plan_approval".to_string(),
+                json!({
+                    "cancelled": false,
+                    "answers": {
+                        "approve-plan": {
+                            "questionId": "approve-plan",
+                            "value": "yes"
+                        }
+                    }
+                }),
+            ),
+            json!({
+                "type": "interaction_response",
+                "id": "ask-1",
+                "kind": "plan_approval",
+                "result": {
+                    "cancelled": false,
+                    "answers": {
+                        "approve-plan": {
+                            "questionId": "approve-plan",
+                            "value": "yes"
+                        }
+                    }
+                }
+            })
+        );
     }
 
     #[test]

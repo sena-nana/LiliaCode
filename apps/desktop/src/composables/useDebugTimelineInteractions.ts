@@ -431,7 +431,6 @@ export function useDebugTimelineInteractions(taskId: string) {
       payload: {
         subkind: "write",
         interaction: "tool_consent",
-        permissionRequest: true,
         requestId: ids.requestId,
         toolName: request.toolName,
         path: "apps/desktop/src/debug-fixture.ts",

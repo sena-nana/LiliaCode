@@ -39,7 +39,10 @@ export function createInteractionBroker({
     const backend = payload?.backend === "codex" ? "codex" : "claude";
     emitInteractionRequest(id, "tool_consent", payload, backend);
     return new Promise((resolve) => {
-      consentPending.set(id, (response) => resolve({ id, ...response }));
+      consentPending.set(id, {
+        kind: "tool_consent",
+        resolve: (response) => resolve({ id, ...response }),
+      });
     });
   }
 
@@ -51,17 +54,20 @@ export function createInteractionBroker({
     const backend = options.backend === "codex" ? "codex" : "claude";
     if (emitTimelineEvent) emitAskUserTimeline(id, spec, "requires_action", null, backend);
     return new Promise((resolve) => {
-      askUserPending.set(id, (result) => {
-        if (emitTimelineEvent) {
-          emitAskUserTimeline(
-            id,
-            spec,
-            result?.cancelled === true ? "cancelled" : "success",
-            result,
-            backend,
-          );
-        }
-        resolve(result);
+      askUserPending.set(id, {
+        kind,
+        resolve: (result) => {
+          if (emitTimelineEvent) {
+            emitAskUserTimeline(
+              id,
+              spec,
+              result?.cancelled === true ? "cancelled" : "success",
+              result,
+              backend,
+            );
+          }
+          resolve(result);
+        },
       });
       emitInteractionRequest(id, kind, spec, backend);
     });
@@ -76,22 +82,20 @@ export function createInteractionBroker({
     }
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
     if (msg.type === "interaction_response") {
-      const kind = msg.kind === "tool_consent"
-        ? "tool_consent"
-        : msg.kind === "plan_approval"
-          ? "plan_approval"
-          : "ask_user";
+      if (typeof msg.id !== "string") return;
+      const kind = msg.kind;
+      if (kind !== "tool_consent" && kind !== "plan_approval" && kind !== "ask_user") return;
       if (kind === "tool_consent") {
-        const resolve = consentPending.get(msg.id);
-        if (!resolve) return;
+        const pending = consentPending.get(msg.id);
+        if (!pending || pending.kind !== kind) return;
         consentPending.delete(msg.id);
-        resolve(normalizeToolConsentResult(msg.result));
+        pending.resolve(normalizeToolConsentResult(msg.result));
         return;
       }
-      const resolve = askUserPending.get(msg.id);
-      if (!resolve) return;
+      const pending = askUserPending.get(msg.id);
+      if (!pending || pending.kind !== kind) return;
       askUserPending.delete(msg.id);
-      resolve(normalizeAskUserResult(msg.result));
+      pending.resolve(normalizeAskUserResult(msg.result));
     }
   }
 

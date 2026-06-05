@@ -129,6 +129,19 @@ fn write_runner_stdin(store: &ChatStore, task_id: &str, payload: JsonValue) -> R
     Ok(())
 }
 
+pub(crate) fn agent_interaction_response_payload(
+    request_id: String,
+    kind: String,
+    result: JsonValue,
+) -> JsonValue {
+    serde_json::json!({
+        "type": "interaction_response",
+        "id": request_id,
+        "kind": kind,
+        "result": result,
+    })
+}
+
 /// 把用户对统一 Agent interaction 的响应写回 runner 的 stdin。
 #[tauri::command]
 pub fn chat_respond_agent_interaction(
@@ -138,12 +151,7 @@ pub fn chat_respond_agent_interaction(
     result: JsonValue,
     store: State<'_, ChatStore>,
 ) -> Result<(), String> {
-    let payload = serde_json::json!({
-        "type": "interaction_response",
-        "id": request_id,
-        "kind": kind,
-        "result": result,
-    });
+    let payload = agent_interaction_response_payload(request_id, kind, result);
     write_runner_stdin(&store, &task_id, payload)
 }
 
