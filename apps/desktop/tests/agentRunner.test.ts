@@ -596,6 +596,46 @@ describe("Codex app-server mapping", () => {
     ]);
   });
 
+  it("uses Codex cancel when a denied approval cannot decline", async () => {
+    const calls: any[] = [];
+    const seenTimeline: any[] = [];
+    const handled = await maybeHandleCodexApprovalRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      },
+      {
+        id: "approval-rpc-cancel-only",
+        method: "item/fileChange/requestApproval",
+        params: {
+          approvalId: "approval-cancel-only",
+          grantRoot: "C:/repo",
+          availableDecisions: ["accept", "cancel"],
+        },
+      },
+      {
+        interactions: {
+          requestUserConsent: async () => ({
+            id: "consent-cancel-only",
+            decision: "deny",
+            message: "暂不授权",
+          }),
+        },
+        emitToolConsentTimeline: (...args: any[]) => seenTimeline.push(args),
+      },
+    );
+
+    expect(handled).toBe(true);
+    expect(calls).toEqual([
+      ["respond", "approval-rpc-cancel-only", { decision: "cancel" }],
+    ]);
+    expect(seenTimeline[0]).toMatchObject([
+      "consent-cancel-only",
+      expect.objectContaining({ availableDecisions: ["accept", "cancel"] }),
+      "cancelled",
+      "暂不授权",
+    ]);
+  });
+
   it("runs edited Codex command approvals through Lilia and steers the result back", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];

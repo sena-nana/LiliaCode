@@ -30,10 +30,14 @@ function isRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function codexApprovalDecisionFromConsent(response) {
+function codexApprovalDecisionFromConsent(response, availableDecisions) {
   const explicit = stringOrNull(response?.codexDecision);
   if (explicit) return explicit;
-  return response?.decision === "allow" ? "accept" : "decline";
+  if (response?.decision === "allow") return "accept";
+  if (Array.isArray(availableDecisions) && !availableDecisions.includes("decline")) {
+    return codexCancelDecision(availableDecisions);
+  }
+  return "decline";
 }
 
 function codexCancelDecision(availableDecisions) {
@@ -371,7 +375,7 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
       }
     }
   }
-  const codexDecision = codexApprovalDecisionFromConsent(response);
+  const codexDecision = codexApprovalDecisionFromConsent(response, payload.availableDecisions);
   server.respond(msg.id, { decision: codexDecision });
   const accepted = codexDecision === "accept";
   ctx.emitToolConsentTimeline(id, payload, accepted ? "success" : "cancelled", accepted

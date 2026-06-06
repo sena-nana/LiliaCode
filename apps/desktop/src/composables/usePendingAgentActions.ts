@@ -66,6 +66,7 @@ export function pendingActionForTimelineEvent(
   event: AgentTimelineEvent,
   actions: readonly PendingAgentAction[],
 ): PendingAgentAction | null {
+  if (event.status !== "requires_action") return null;
   for (const action of actions) {
     if (action.kind === "plan_approval" && event.kind === "plan") {
       if (action.turnId && event.turnId === action.turnId) return action;
