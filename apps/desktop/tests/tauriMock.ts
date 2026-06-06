@@ -160,6 +160,12 @@ let codexAppServerStatus = {
   version: "codex-cli 0.128.0",
   available: true,
   supportsRequiredProtocol: true,
+  failureKind: null as
+    | "missingCli"
+    | "appServerUnavailable"
+    | "experimentalApiUnsupported"
+    | "providerIncompatible"
+    | null,
   issues: [] as string[],
 };
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
@@ -418,6 +424,7 @@ export function resetTauriMockData() {
     version: "codex-cli 0.128.0",
     available: true,
     supportsRequiredProtocol: true,
+    failureKind: null,
     issues: [],
   };
   composerStateHandler = null;

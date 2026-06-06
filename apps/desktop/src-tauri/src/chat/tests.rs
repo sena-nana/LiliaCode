@@ -232,18 +232,30 @@ mod agent_event_sink_tests {
             version: Some("codex-cli 0.125.0".to_string()),
             available: true,
             supports_required_protocol: false,
+            failure_kind: Some("experimentalApiUnsupported".to_string()),
             issues: vec!["当前 codex CLI 版本过低，需要 0.128.0 或更新版本。".to_string()],
         })
         .unwrap();
 
         assert!(reason.contains("当前 codex CLI 版本过低"));
         assert!(reason.contains("0.128.0"));
+        assert!(!reason.contains("OpenAI Responses API"));
+
+        let reason = codex_send_block_reason(&CodexAppServerStatus {
+            version: Some("codex-cli 0.128.0".to_string()),
+            available: true,
+            supports_required_protocol: false,
+            failure_kind: Some("providerIncompatible".to_string()),
+            issues: vec!["当前上游 provider 不兼容 Codex。".to_string()],
+        })
+        .unwrap();
         assert!(reason.contains("OpenAI Responses API"));
 
         assert!(codex_send_block_reason(&CodexAppServerStatus {
             version: Some("codex-cli 0.128.0".to_string()),
             available: true,
             supports_required_protocol: true,
+            failure_kind: None,
             issues: Vec::new(),
         })
         .is_none());

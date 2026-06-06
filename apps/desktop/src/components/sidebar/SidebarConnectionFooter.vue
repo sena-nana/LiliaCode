@@ -18,6 +18,15 @@ const backendLabel = computed(() =>
   activeBackend.value === "codex" ? "Codex" : "Claude",
 );
 
+function codexRuntimeIssueText(): string {
+  const status = codexAppServer.value;
+  const issue = status?.issues.join(" ") || "Codex app-server 环境不满足。";
+  if (status?.failureKind === "providerIncompatible") {
+    return `${issue} 请确认上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。点击进入设置。`;
+  }
+  return `${issue} 点击进入设置。`;
+}
+
 const runtimeIssue = computed(() => {
   if (!nodeAvailable.value) return "未找到 node（v18+）。点击进入设置。";
   if (activeBackend.value === "codex" && !codexCliAvailable.value) {
@@ -28,7 +37,7 @@ const runtimeIssue = computed(() => {
     codexAppServer.value &&
     !codexAppServer.value.supportsRequiredProtocol
   ) {
-    return `${codexAppServer.value.issues.join(" ") || "Codex app-server 环境不满足。"} 点击进入设置。`;
+    return codexRuntimeIssueText();
   }
   return null;
 });

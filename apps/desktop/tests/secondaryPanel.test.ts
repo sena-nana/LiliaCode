@@ -133,6 +133,7 @@ describe("SecondaryPanel project tree expansion", () => {
     setMockActiveBackend("codex");
     setMockCodexAppServerStatus({
       supportsRequiredProtocol: false,
+      failureKind: "experimentalApiUnsupported",
       issues: ["Codex app-server 环境不满足。"],
     });
     await useConnectionStatus().refresh();
@@ -143,6 +144,7 @@ describe("SecondaryPanel project tree expansion", () => {
       expect(card).toHaveClass("sb-conn--error");
       expect(card).toHaveTextContent("异常");
       expect(card).toHaveAttribute("title", expect.stringContaining("Codex app-server 环境不满足"));
+      expect(card).toHaveAttribute("title", expect.not.stringContaining("OpenAI Responses API"));
     });
   });
 

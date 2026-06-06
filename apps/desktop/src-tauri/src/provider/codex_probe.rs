@@ -7,10 +7,15 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{BACKEND_CODEX, MIN_CODEX_APP_SERVER_VERSION};
 
-use super::types::{CodexAppServerProbeStatus, CodexAppServerStatus, CodexCliProbe};
+use super::types::{CodexAppServerProbeStatus, CodexAppServerStatus};
 
 static CODEX_APP_SERVER_PROBE_CACHE: OnceLock<Mutex<Option<CodexAppServerProbeStatus>>> =
     OnceLock::new();
+
+const CODEX_FAILURE_MISSING_CLI: &str = "missingCli";
+const CODEX_FAILURE_APP_SERVER_UNAVAILABLE: &str = "appServerUnavailable";
+const CODEX_FAILURE_EXPERIMENTAL_API_UNSUPPORTED: &str = "experimentalApiUnsupported";
+const CODEX_FAILURE_PROVIDER_INCOMPATIBLE: &str = "providerIncompatible";
 
 pub(crate) fn cli_available(name: &str) -> bool {
     let candidates: &[&str] = if cfg!(windows) {
@@ -188,36 +193,8 @@ pub(crate) fn command_output_result(program: &str, args: &[&str]) -> Result<Stri
     }
 }
 
-pub(crate) fn resolve_codex_cli_probe_with<F>(
-    candidates: &[String],
-    mut command_output: F,
-) -> Option<CodexCliProbe>
-where
-    F: FnMut(&str, &[&str]) -> Result<String, String>,
-{
-    for candidate in candidates {
-        let version = match command_output(candidate, &["--version"]) {
-            Ok(output) => output,
-            Err(_) => continue,
-        };
-        let parsed_version = parse_codex_cli_version(&version);
-        let help = match command_output(candidate, &["app-server", "--help"]) {
-            Ok(output) => output,
-            Err(_) => continue,
-        };
-        let app_server_available = help.contains("codex app-server") || help.contains("Usage:");
-        let version_supported = parsed_version
-            .map(|version| codex_version_at_least(version, MIN_CODEX_APP_SERVER_VERSION))
-            .unwrap_or(false);
-        if app_server_available && version_supported {
-            return Some(CodexCliProbe {
-                program: candidate.clone(),
-                version_output: version,
-                app_server_help: help,
-            });
-        }
-    }
-    None
+fn codex_app_server_help_available(help: &str) -> bool {
+    help.contains("codex app-server") || help.contains("Usage:")
 }
 
 pub(crate) fn parse_codex_cli_version(output: &str) -> Option<(u32, u32, u32)> {
@@ -247,52 +224,102 @@ pub(crate) fn build_codex_app_server_probe_status_with<F>(
 where
     F: FnMut(&str, &[&str]) -> Result<String, String>,
 {
-    let codex_cli = resolve_codex_cli_probe_with(candidates, &mut command_output);
-    let mut issues = Vec::new();
-    let Some(codex_cli) = codex_cli else {
-        if candidates.is_empty() {
-            issues.push("未找到 codex CLI。请先安装 Codex CLI 后重新检测。".to_string());
-        } else {
-            issues.push("Codex app-server 环境不满足。".to_string());
-        }
-        return CodexAppServerProbeStatus {
-            public: CodexAppServerStatus {
-                version: None,
-                available: false,
-                supports_required_protocol: false,
-                issues,
-            },
-            path: None,
+    let mut app_server_unavailable: Option<CodexAppServerProbeStatus> = None;
+    let mut experimental_unsupported: Option<CodexAppServerProbeStatus> = None;
+
+    for candidate in candidates {
+        let version = match command_output(candidate, &["--version"]) {
+            Ok(output) => output,
+            Err(_) => continue,
         };
-    };
+        let path = Some(candidate.clone());
+        let parsed_version = parse_codex_cli_version(&version);
+        let help = match command_output(candidate, &["app-server", "--help"]) {
+            Ok(output) => output,
+            Err(_) => {
+                if app_server_unavailable.is_none() {
+                    app_server_unavailable = Some(CodexAppServerProbeStatus {
+                        public: CodexAppServerStatus {
+                            version: Some(version),
+                            available: false,
+                            supports_required_protocol: false,
+                            failure_kind: Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE.to_string()),
+                            issues: vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
+                        },
+                        path,
+                    });
+                }
+                continue;
+            }
+        };
+        let available = codex_app_server_help_available(&help);
+        if !available {
+            if app_server_unavailable.is_none() {
+                app_server_unavailable = Some(CodexAppServerProbeStatus {
+                    public: CodexAppServerStatus {
+                        version: Some(version),
+                        available: false,
+                        supports_required_protocol: false,
+                        failure_kind: Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE.to_string()),
+                        issues: vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
+                    },
+                    path,
+                });
+            }
+            continue;
+        }
 
-    let parsed_version = parse_codex_cli_version(&codex_cli.version_output);
-    if parsed_version.is_none() {
-        issues.push("无法读取 codex CLI 版本。".to_string());
+        let version_supported = parsed_version
+            .map(|version| codex_version_at_least(version, MIN_CODEX_APP_SERVER_VERSION))
+            .unwrap_or(false);
+        if version_supported {
+            return CodexAppServerProbeStatus {
+                public: CodexAppServerStatus {
+                    version: Some(version),
+                    available: true,
+                    supports_required_protocol: true,
+                    failure_kind: None,
+                    issues: Vec::new(),
+                },
+                path,
+            };
+        }
+
+        if experimental_unsupported.is_none() {
+            let issue = if parsed_version.is_none() {
+                "无法读取 codex CLI 版本，无法确认 experimental API 协议能力。".to_string()
+            } else {
+                "当前 codex CLI 版本过低，需要 0.128.0 或更新版本以支持 Lilia 的流式事件、工具审批和 AskUser。".to_string()
+            };
+            experimental_unsupported = Some(CodexAppServerProbeStatus {
+                public: CodexAppServerStatus {
+                    version: Some(version),
+                    available: true,
+                    supports_required_protocol: false,
+                    failure_kind: Some(CODEX_FAILURE_EXPERIMENTAL_API_UNSUPPORTED.to_string()),
+                    issues: vec![issue],
+                },
+                path,
+            });
+        }
     }
 
-    let available = codex_cli.app_server_help.contains("codex app-server")
-        || codex_cli.app_server_help.contains("Usage:");
-    if !available {
-        issues.push("当前 codex CLI 不支持 app-server 子命令。".to_string());
+    if let Some(status) = experimental_unsupported {
+        return status;
+    }
+    if let Some(status) = app_server_unavailable {
+        return status;
     }
 
-    let version_supported = parsed_version
-        .map(|version| codex_version_at_least(version, MIN_CODEX_APP_SERVER_VERSION))
-        .unwrap_or(false);
-    if !version_supported {
-        issues.push("当前 codex CLI 版本过低，需要 0.128.0 或更新版本以支持 Lilia 的流式事件、工具审批和 AskUser。".to_string());
-    }
-
-    let path = Some(codex_cli.program);
     CodexAppServerProbeStatus {
         public: CodexAppServerStatus {
-            version: Some(codex_cli.version_output),
-            available,
-            supports_required_protocol: available && version_supported,
-            issues,
+            version: None,
+            available: false,
+            supports_required_protocol: false,
+            failure_kind: Some(CODEX_FAILURE_MISSING_CLI.to_string()),
+            issues: vec!["未找到 codex CLI。请先安装 Codex CLI 后重新检测。".to_string()],
         },
-        path,
+        path: None,
     }
 }
 
@@ -328,8 +355,14 @@ pub(crate) fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<S
     } else {
         status.issues.join(" ")
     };
+    if status.failure_kind.as_deref() == Some(CODEX_FAILURE_PROVIDER_INCOMPATIBLE) {
+        return Some(format!(
+            "{detail} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。"
+        ));
+    }
+
     Some(format!(
-        "{detail} 请升级 Codex CLI 到 0.128.0 或更新版本；并确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。"
+        "{detail} 请安装或升级 Codex CLI 到 0.128.0 或更新版本后重新检测。"
     ))
 }
 
@@ -367,6 +400,10 @@ mod tests {
         assert!(!status.public.available);
         assert!(!status.public.supports_required_protocol);
         assert!(status.path.is_none());
+        assert_eq!(
+            status.public.failure_kind.as_deref(),
+            Some(CODEX_FAILURE_MISSING_CLI)
+        );
         assert!(status.public.issues[0].contains("未找到 codex CLI"));
     }
 
@@ -386,5 +423,44 @@ mod tests {
 
         assert_eq!(status.path.as_deref(), Some("new"));
         assert!(status.public.supports_required_protocol);
+        assert!(status.public.failure_kind.is_none());
+    }
+
+    #[test]
+    fn codex_probe_reports_old_cli_as_experimental_api_unsupported() {
+        let candidates = vec!["old".to_string()];
+        let status = build_codex_app_server_probe_status_with(&candidates, |_, args| match args {
+            ["--version"] => Ok("codex 0.127.0".to_string()),
+            ["app-server", "--help"] => Ok("Usage: codex app-server".to_string()),
+            _ => Err("unknown command".to_string()),
+        });
+
+        assert_eq!(status.path.as_deref(), Some("old"));
+        assert!(status.public.available);
+        assert!(!status.public.supports_required_protocol);
+        assert_eq!(
+            status.public.failure_kind.as_deref(),
+            Some(CODEX_FAILURE_EXPERIMENTAL_API_UNSUPPORTED)
+        );
+        assert!(status.public.issues.join(" ").contains("版本过低"));
+    }
+
+    #[test]
+    fn codex_probe_reports_missing_app_server_subcommand() {
+        let candidates = vec!["codex".to_string()];
+        let status = build_codex_app_server_probe_status_with(&candidates, |_, args| match args {
+            ["--version"] => Ok("codex 0.128.0".to_string()),
+            ["app-server", "--help"] => Err("unknown subcommand".to_string()),
+            _ => Err("unknown command".to_string()),
+        });
+
+        assert_eq!(status.path.as_deref(), Some("codex"));
+        assert!(!status.public.available);
+        assert!(!status.public.supports_required_protocol);
+        assert_eq!(
+            status.public.failure_kind.as_deref(),
+            Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE)
+        );
+        assert!(status.public.issues.join(" ").contains("app-server"));
     }
 }

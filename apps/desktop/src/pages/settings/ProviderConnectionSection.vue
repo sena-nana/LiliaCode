@@ -34,14 +34,31 @@ const selectedStatus = computed(() => statusFor(selectedBackend.value));
 const isClaude = computed(() => selectedBackend.value === "claude");
 const selectedOk = computed(() => selectedStatus.value?.connectionMode === "cc-switch");
 
+function codexRuntimeIssueText(): string {
+  const status = codexAppServer.value;
+  const issue = status?.issues.join(" ") ||
+    "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
+  if (status?.failureKind === "providerIncompatible") {
+    return `${issue} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。`;
+  }
+  if (status?.failureKind === "missingCli") {
+    return issue;
+  }
+  if (status?.failureKind === "appServerUnavailable") {
+    return `${issue} 请安装或升级 Codex CLI 到 0.128.0 或更新版本后重新检测。`;
+  }
+  if (status?.failureKind === "experimentalApiUnsupported") {
+    return `${issue} 请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。`;
+  }
+  return issue;
+}
+
 const selectedRuntimeIssue = computed<string | null>(() => {
   if (probing.value) return null;
   if (!nodeAvailable.value) return "未找到 node（v18+），SDK 需要本机 Node 运行时。";
   if (!isClaude.value && !codexCliAvailable.value) return "未找到 codex CLI。请先 npm i -g @openai/codex 再重新检测。";
   if (!isClaude.value && codexAppServer.value && !codexAppServer.value.supportsRequiredProtocol) {
-    const issue = codexAppServer.value.issues.join(" ") ||
-      "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
-    return `${issue} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。`;
+    return codexRuntimeIssueText();
   }
   return null;
 });

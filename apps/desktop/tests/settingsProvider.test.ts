@@ -54,10 +54,11 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("Codex app-server 环境不满足时在设置页连接 banner 显示原因", async () => {
+  it("Codex CLI 版本过低时设置页连接 banner 不显示 provider 兼容提示", async () => {
     setMockActiveBackend("codex");
     setMockCodexAppServerStatus({
       supportsRequiredProtocol: false,
+      failureKind: "experimentalApiUnsupported",
       issues: ["当前 codex CLI 版本过低，需要 0.128.0 或更新版本。"],
     });
 
@@ -66,7 +67,25 @@ describe("Settings provider switch", () => {
     await waitFor(() => {
       expect(view.getByText("Codex 运行环境不满足")).toBeInTheDocument();
       expect(view.getByText(/当前 codex CLI 版本过低/)).toBeInTheDocument();
+      expect(view.queryByText(/未找到 codex CLI/)).not.toBeInTheDocument();
+      expect(view.queryByText(/OpenAI Responses API/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("Codex provider 不兼容时设置页连接 banner 显示 Responses API 提示", async () => {
+    setMockActiveBackend("codex");
+    setMockCodexAppServerStatus({
+      supportsRequiredProtocol: false,
+      failureKind: "providerIncompatible",
+      issues: ["当前上游 provider 不兼容 Codex。"],
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByText("Codex 运行环境不满足")).toBeInTheDocument();
       expect(view.getByText(/OpenAI Responses API/)).toBeInTheDocument();
+      expect(view.getByText(/模型白名单/)).toBeInTheDocument();
     });
   });
 
@@ -159,7 +178,7 @@ describe("Settings provider switch", () => {
   });
 
   it("新对话建议生成来源可切换到当前 Provider", async () => {
-    const view = render(Settings);
+    const view = await renderSettings("/settings?tab=providers");
 
     await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
 

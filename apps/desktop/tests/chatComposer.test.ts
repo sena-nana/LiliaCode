@@ -695,6 +695,19 @@ describe("ChatComposer", () => {
     expect(view.emitted("send")).toBeUndefined();
   });
 
+  it("建议为空时显示暂无建议且保留刷新入口", () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        suggestions: [],
+        suggestionsVisible: true,
+      },
+    });
+
+    expect(view.getByText("暂无建议")).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "刷新" })).toBeInTheDocument();
+  });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {
     const view = render(ChatComposer, {

@@ -112,6 +112,7 @@ pub(crate) struct CodexAppServerStatus {
     pub(crate) version: Option<String>,
     pub(crate) available: bool,
     pub(crate) supports_required_protocol: bool,
+    pub(crate) failure_kind: Option<String>,
     pub(crate) issues: Vec<String>,
 }
 
@@ -150,13 +151,6 @@ pub(crate) struct BackendConnectionPlan {
     pub(crate) mode: ConnectionMode,
     pub(crate) base_url: Option<String>,
     pub(crate) api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CodexCliProbe {
-    pub(crate) program: String,
-    pub(crate) version_output: String,
-    pub(crate) app_server_help: String,
 }
 
 #[derive(Debug, Clone)]

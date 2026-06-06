@@ -73,6 +73,12 @@ export interface CodexAppServerStatus {
   version: string | null;
   available: boolean;
   supportsRequiredProtocol: boolean;
+  failureKind:
+    | "missingCli"
+    | "appServerUnavailable"
+    | "experimentalApiUnsupported"
+    | "providerIncompatible"
+    | null;
   issues: string[];
 }
 
