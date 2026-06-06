@@ -20,6 +20,7 @@ interface TaskRow {
   projectId: string | null;
   sessionId: string;
   title: string;
+  titleSource: "auto" | "manual";
   status: string;
   createdAt: number;
   parentId: string | null;
@@ -99,6 +100,7 @@ const baseTasks: TaskRow[] = [
     projectId: "lilia",
     sessionId: "0192-lilia-0001",
     title: "接入 Claude Code 会话发现",
+    titleSource: "auto",
     status: "done",
     createdAt: 1000,
     parentId: null,
@@ -111,6 +113,7 @@ const baseTasks: TaskRow[] = [
     projectId: "lilia",
     sessionId: "0192-lilia-0002",
     title: "打通 tsconfig paths 搜索",
+    titleSource: "auto",
     status: "running",
     createdAt: 2000,
     parentId: null,
@@ -123,6 +126,7 @@ const baseTasks: TaskRow[] = [
     projectId: "tools",
     sessionId: "0192-tools-0001",
     title: "整理窗口快捷键",
+    titleSource: "auto",
     status: "waiting",
     createdAt: 3000,
     parentId: null,
@@ -135,6 +139,7 @@ const baseTasks: TaskRow[] = [
     projectId: null,
     sessionId: "0192-orphan-0001",
     title: "随手问问 Claude：tsconfig paths",
+    titleSource: "auto",
     status: "running",
     createdAt: 4000,
     parentId: null,
@@ -234,7 +239,29 @@ let conversationSuggestionSettings = {
   enabled: true,
   source: "assistant-ai" as "assistant-ai" | "provider",
 };
-let projectSettings = { cloneParentDir: null as string | null, codexDefaults: null as unknown };
+let projectSettings = {
+  cloneParentDir: null as string | null,
+  codexDefaults: null as unknown,
+  githubBinding: null as Record<string, unknown> | null,
+};
+let mockPickedFolderPath: string | null = "C:\\Users\\mock";
+let githubBindingStatus = {
+  state: "unbound" as "unbound" | "bound",
+  clientIdConfigured: true,
+  clientIdSource: "bundled" as "none" | "bundled" | "custom",
+  binding: null as Record<string, unknown> | null,
+};
+let githubDeviceFlowStart = {
+  deviceCode: "device-code-1",
+  userCode: "ABCD-EFGH",
+  verificationUri: "https://github.com/login/device",
+  expiresAt: Date.now() + 15 * 60 * 1000,
+  intervalSeconds: 1,
+};
+let githubDeviceFlowPollQueue: Array<Record<string, unknown>> = [];
+let githubRepoPages: Record<number, { items: unknown[]; nextPage: number | null }> = {
+  1: { items: [], nextPage: null },
+};
 let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
 let nextPopupSettingsError: string | null = null;
 let popupLastProjectId: string | null = null;
@@ -441,7 +468,23 @@ export function resetTauriMockData() {
   }));
   agentInteractionSettings = defaultAgentInteractionSettings();
   conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
-  projectSettings = { cloneParentDir: null, codexDefaults: null };
+  projectSettings = { cloneParentDir: null, codexDefaults: null, githubBinding: null };
+  mockPickedFolderPath = "C:\\Users\\mock";
+  githubBindingStatus = {
+    state: "unbound",
+    clientIdConfigured: true,
+    clientIdSource: "bundled",
+    binding: null,
+  };
+  githubDeviceFlowStart = {
+    deviceCode: "device-code-1",
+    userCode: "ABCD-EFGH",
+    verificationUri: "https://github.com/login/device",
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    intervalSeconds: 1,
+  };
+  githubDeviceFlowPollQueue = [];
+  githubRepoPages = { 1: { items: [], nextPage: null } };
   popupWindowSettings = { shortcut: null };
   nextPopupSettingsError = null;
   popupLastProjectId = null;
@@ -776,6 +819,55 @@ export function failNextPopupSettingsSave(message: string) {
   nextPopupSettingsError = message;
 }
 
+export function setMockPickedFolderPath(path: string | null) {
+  mockPickedFolderPath = path;
+}
+
+export function setMockGitHubBindingStatus(
+  status: Partial<typeof githubBindingStatus>,
+) {
+  githubBindingStatus = {
+    ...githubBindingStatus,
+    ...status,
+    binding: "binding" in status ? (status.binding ?? null) : githubBindingStatus.binding,
+  };
+  projectSettings = {
+    ...projectSettings,
+    githubBinding: githubBindingStatus.binding,
+  };
+}
+
+export function setMockGitHubDeviceFlowStart(
+  next: Partial<typeof githubDeviceFlowStart>,
+) {
+  githubDeviceFlowStart = {
+    ...githubDeviceFlowStart,
+    ...next,
+  };
+}
+
+export function setMockGitHubPollSequence(
+  queue: Array<Record<string, unknown>>,
+) {
+  githubDeviceFlowPollQueue = queue.map((item) => ({ ...item }));
+}
+
+export function setMockGitHubRepos(
+  pages: Record<number, { items: unknown[]; nextPage: number | null }>,
+) {
+  githubRepoPages = Object.fromEntries(
+    Object.entries(pages).map(([page, value]) => [
+      Number(page),
+      {
+        items: Array.isArray(value.items)
+          ? value.items.map((item) => ({ ...(item as Record<string, unknown>) }))
+          : [],
+        nextPage: value.nextPage ?? null,
+      },
+    ]),
+  );
+}
+
 export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
@@ -788,6 +880,9 @@ export const mockListen = vi.fn(async (
 
 export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
   switch (cmd) {
+    case "plugin:dialog|open":
+      return mockPickedFolderPath;
+
     case "project_list":
       refreshSessionCounts();
       return projects
@@ -814,9 +909,94 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         codexDefaults: "codexDefaults" in settings
           ? settings.codexDefaults
           : null,
+        githubBinding: "githubBinding" in settings
+          ? settings.githubBinding as Record<string, unknown> | null
+          : null,
       };
       return undefined;
     }
+
+    case "git_clone_repo": {
+      const url = String(args.url ?? "").trim().replace(/\.git$/i, "").replace(/\/+$/, "");
+      const parentDir = String(args.parentDir ?? "").replace(/[\\/]+$/, "");
+      const base = url.split(/[/:]/).pop() || "repo";
+      return `${parentDir}\\${base}`;
+    }
+
+    case "github_get_binding_status":
+      return {
+        ...githubBindingStatus,
+        binding: githubBindingStatus.binding ? { ...githubBindingStatus.binding } : null,
+      };
+
+    case "github_start_device_flow":
+      return { ...githubDeviceFlowStart };
+
+    case "github_poll_device_flow": {
+      const next = githubDeviceFlowPollQueue.shift() ?? {
+        status: "pending",
+        intervalSeconds: githubDeviceFlowStart.intervalSeconds,
+        bindingStatus: null,
+        error: null,
+      };
+      const result = {
+        status: String(next.status ?? "pending"),
+        intervalSeconds: Number(next.intervalSeconds ?? githubDeviceFlowStart.intervalSeconds),
+        bindingStatus: next.bindingStatus ?? null,
+        error: next.error ?? null,
+      };
+      if (result.status === "authorized" && result.bindingStatus && typeof result.bindingStatus === "object") {
+        const bindingStatus = result.bindingStatus as Record<string, unknown>;
+        githubBindingStatus = {
+          state: bindingStatus.state === "bound" ? "bound" : "unbound",
+          clientIdConfigured: bindingStatus.clientIdConfigured !== false,
+          clientIdSource: bindingStatus.clientIdSource === "custom"
+            ? "custom"
+            : bindingStatus.clientIdSource === "none"
+              ? "none"
+              : "bundled",
+          binding: bindingStatus.binding && typeof bindingStatus.binding === "object"
+            ? bindingStatus.binding as Record<string, unknown>
+            : null,
+        };
+        projectSettings = {
+          ...projectSettings,
+          githubBinding: githubBindingStatus.binding,
+        };
+      }
+      return result;
+    }
+
+    case "github_unbind":
+      githubBindingStatus = {
+        ...githubBindingStatus,
+        state: "unbound",
+        binding: null,
+      };
+      projectSettings = { ...projectSettings, githubBinding: null };
+      return undefined;
+
+    case "github_list_repos": {
+      const page = typeof args.page === "number" ? args.page : 1;
+      const result = githubRepoPages[page] ?? { items: [], nextPage: null };
+      return {
+        items: result.items.map((item) => ({ ...(item as Record<string, unknown>) })),
+        nextPage: result.nextPage,
+      };
+    }
+
+    case "github_clone_repo": {
+      const repo = String(args.repo ?? "").trim().replace(/\/+$/, "");
+      const parentDir = String(args.parentDir ?? "").replace(/[\\/]+$/, "");
+      const cleaned = repo.replace(/\.git$/i, "");
+      const base = cleaned.split(/[/:]/).pop() || "repo";
+      return `${parentDir}\\${base}`;
+    }
+
+    case "system_open_path":
+    case "system_open_url":
+    case "system_open_in_vscode":
+      return undefined;
 
     case "project_create": {
       const name = String(args.name || "未命名项目");
@@ -912,6 +1092,27 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return row ? cloneTask(row) : null;
     }
 
+    case "task_update": {
+      const id = String(args.id);
+      const title = typeof args.title === "string" ? args.title : null;
+      const status = typeof args.status === "string" ? args.status : null;
+      let changedProjectId: string | null = null;
+      let changed = false;
+      tasks = tasks.map((task) => {
+        if (task.id !== id || task.archived) return task;
+        changedProjectId = task.projectId;
+        changed = true;
+        return {
+          ...task,
+          title: title ?? task.title,
+          titleSource: title === null ? task.titleSource : "manual",
+          status: status ?? task.status,
+        };
+      });
+      if (changed) emitTauriEvent("tasks:changed", { projectId: changedProjectId });
+      return undefined;
+    }
+
     case "task_toggle_pin": {
       const id = String(args.id);
       let pinned = false;
@@ -934,6 +1135,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         projectId,
         sessionId: id,
         title,
+        titleSource: "auto",
         status,
         createdAt: Date.now(),
         parentId: typeof args.parentId === "string" ? args.parentId : null,
@@ -958,6 +1160,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         projectId,
         sessionId: id,
         title,
+        titleSource: "auto",
         status: "running",
         createdAt: Date.now(),
         parentId: null,
@@ -1113,20 +1316,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "router_set_mode":
       return undefined;
-
-    case "assistant_ai_get_config":
-      return { baseUrl: null, apiKey: null, model: null };
-
-    case "assistant_ai_set_config":
-      return undefined;
-
-    case "assistant_ai_test_connection":
-      return {
-        ok: true,
-        error: null,
-        models: ["gpt-4o-mini"],
-        modelMatched: null,
-      };
 
     case "agent_timeline_list": {
       if (agentTimelineDelayMs > 0) {
@@ -1393,6 +1582,43 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "chat_respond_agent_interaction":
       return undefined;
+
+    case "chat_respond_title_update": {
+      const taskId = String(args.taskId);
+      const requestId = String(args.requestId);
+      const decision = args.decision === "accept" ? "accept" : "decline";
+      const eventId = `title-update:${taskId}:${requestId}`;
+      const event = (timelineEvents[taskId] ?? []).find((item) =>
+        item.id === eventId && item.kind === "title_update"
+      );
+      if (!event || event.status !== "requires_action") return undefined;
+      const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+        ? event.payload as Record<string, unknown>
+        : {};
+      const proposedTitle = typeof payload.proposedTitle === "string"
+        ? payload.proposedTitle
+        : event.summary ?? "";
+      if (decision === "accept" && proposedTitle.trim()) {
+        let changedProjectId: string | null = null;
+        tasks = tasks.map((task) => {
+          if (task.id !== taskId || task.archived) return task;
+          changedProjectId = task.projectId;
+          return { ...task, title: proposedTitle, titleSource: "manual" };
+        });
+        emitTauriEvent("tasks:changed", { projectId: changedProjectId });
+      }
+      emitMockTimelineEvent(taskId, {
+        ...event,
+        status: decision === "accept" ? "success" : "skipped",
+        payload: {
+          ...payload,
+          accepted: decision === "accept",
+          decision,
+        },
+        updatedAt: Date.now(),
+      });
+      return undefined;
+    }
 
     case "chat_describe_attachments": {
       const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];

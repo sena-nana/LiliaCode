@@ -22,17 +22,18 @@ pub(super) fn build_task(
 ) -> rusqlite::Result<TaskRow> {
     let id: String = row.get(0)?;
     let depends_on = deps.get(&id).cloned().unwrap_or_default();
-    let pinned: i64 = row.get(8)?;
+    let pinned: i64 = row.get(9)?;
     Ok(TaskRow {
         id: id.clone(),
         project_id: row.get(1)?,
         session_id: row.get(2)?,
         title: row.get(3)?,
-        status: row.get(4)?,
-        created_at: row.get(5)?,
-        parent_id: row.get(6)?,
+        title_source: row.get(4)?,
+        status: row.get(5)?,
+        created_at: row.get(6)?,
+        parent_id: row.get(7)?,
         depends_on,
-        sort_order: row.get(7)?,
+        sort_order: row.get(8)?,
         pinned: pinned != 0,
     })
 }

@@ -16,6 +16,7 @@ export type AgentTimelineKnownEventKind =
   | "mcp"
   | "web_search"
   | "diagnostic"
+  | "title_update"
   | "error"
   | "turn";
 

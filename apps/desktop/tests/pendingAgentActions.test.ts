@@ -3,8 +3,10 @@ import type { AgentTimelineEvent } from "@lilia/contracts";
 import {
   pendingActionForTimelineEvent,
   timelineEventRequiresAgentAction,
+  usePendingAgentActionsForTask,
   type PendingAgentAction,
 } from "../src/composables/usePendingAgentActions";
+import { computed, ref } from "vue";
 
 function timelineEvent(
   overrides: Partial<AgentTimelineEvent>,
@@ -91,5 +93,35 @@ describe("pending agent actions", () => {
 
     expect(timelineEventRequiresAgentAction(completed)).toBe(false);
     expect(pendingActionForTimelineEvent(completed, [action])).toBeNull();
+  });
+
+  it("derives nonblocking title update actions from actionable timeline events", () => {
+    const event = timelineEvent({
+      id: "title-update:task-1:req-1",
+      kind: "title_update",
+      status: "requires_action",
+      title: "标题已更新",
+      summary: "标题事件化",
+      payload: {
+        requestId: "req-1",
+        proposedTitle: "标题事件化",
+        previousTitle: "旧标题",
+      },
+    });
+    const actions = usePendingAgentActionsForTask(
+      computed(() => []),
+      computed(() => []),
+      ref([event]),
+    );
+
+    expect(actions.value).toHaveLength(1);
+    expect(actions.value[0]).toMatchObject({
+      kind: "title_update",
+      requestId: "req-1",
+      proposedTitle: "标题事件化",
+      previousTitle: "旧标题",
+    });
+    expect(timelineEventRequiresAgentAction(event)).toBe(true);
+    expect(pendingActionForTimelineEvent(event, actions.value)).toBe(actions.value[0]);
   });
 });

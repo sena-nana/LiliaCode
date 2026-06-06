@@ -3763,7 +3763,6 @@ button.ghost:hover {
   filter: none;
 }
 
-
 .chat-composer__input {
   /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;
@@ -4722,6 +4721,23 @@ button.ghost:hover {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: end;
+}
+
+.timeline-pending-action--title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.timeline-pending-action__title-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline-pending-action--expired {

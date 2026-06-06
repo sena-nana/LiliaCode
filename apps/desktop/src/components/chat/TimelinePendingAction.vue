@@ -28,10 +28,14 @@ const toolSubmitting = ref<ToolConsentDecision | null>(null);
 const actionKey = computed(() =>
   props.action.kind === "tool_consent"
     ? `tool:${props.action.requestId}`
-    : `ask:${props.action.ask.id}`,
+    : props.action.kind === "title_update"
+      ? `title:${props.action.requestId}`
+      : `ask:${props.action.ask.id}`,
 );
 const activeAsk = computed(() =>
-  props.action.kind === "tool_consent" ? null : props.action.ask,
+  props.action.kind === "ask_user" || props.action.kind === "plan_approval"
+    ? props.action.ask
+    : null,
 );
 const {
   askIndex,
@@ -65,6 +69,9 @@ const {
 const toolRequest = computed(() =>
   props.action.kind === "tool_consent" ? props.action.request : null,
 );
+const titleUpdateAction = computed(() =>
+  props.action.kind === "title_update" ? props.action : null,
+);
 const { toolDanger, toolIcon, toolHeadline, toolInputJson, toolSubtitle } =
   useToolConsentPresentation(toolRequest);
 const {
@@ -80,7 +87,7 @@ const hasFreeformText = computed(() => freeformText.value.trim().length > 0);
 const hasToolMessage = computed(() => toolMessage.value.trim().length > 0);
 
 function resolveAsk(result: AskUserResult) {
-  if (props.action.kind === "tool_consent") return;
+  if (props.action.kind !== "ask_user" && props.action.kind !== "plan_approval") return;
   emit("resolve", {
     kind: props.action.kind,
     requestId: props.action.requestId,
@@ -102,6 +109,15 @@ function decideTool(decision: ToolConsentDecision) {
       ? toolMessage.value.trim() || "用户拒绝了此次工具调用"
       : undefined,
     ...(updatedInput ? { updatedInput } : {}),
+  });
+}
+
+function decideTitleUpdate(decision: "accept" | "decline") {
+  if (props.action.kind !== "title_update") return;
+  emit("resolve", {
+    kind: "title_update",
+    requestId: props.action.requestId,
+    decision,
   });
 }
 
@@ -157,6 +173,33 @@ watch(actionKey, () => {
       </div>
     </div>
   </ToolConsentInlinePrompt>
+
+  <section
+    v-else-if="titleUpdateAction"
+    class="timeline-pending-action timeline-pending-action--title"
+    role="region"
+    aria-label="标题更新确认"
+  >
+    <span class="timeline-pending-action__title-preview">
+      {{ titleUpdateAction.proposedTitle }}
+    </span>
+    <div class="composer-inline__actions">
+      <button
+        type="button"
+        class="ghost composer-inline__btn"
+        @click="decideTitleUpdate('decline')"
+      >
+        忽略
+      </button>
+      <button
+        type="button"
+        class="primary composer-inline__btn"
+        @click="decideTitleUpdate('accept')"
+      >
+        同意
+      </button>
+    </div>
+  </section>
 
   <section
     v-else-if="props.action.kind === 'plan_approval'"

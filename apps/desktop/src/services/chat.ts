@@ -293,3 +293,11 @@ export function respondAgentInteraction(response: AgentInteractionResponse): Pro
     result: response.result,
   });
 }
+
+export function respondTitleUpdate(
+  taskId: string,
+  requestId: string,
+  decision: "accept" | "decline",
+): Promise<void> {
+  return invoke<void>("chat_respond_title_update", { taskId, requestId, decision });
+}

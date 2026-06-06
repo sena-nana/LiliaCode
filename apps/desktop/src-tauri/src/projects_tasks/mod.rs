@@ -1,4 +1,4 @@
-mod events;
+pub(crate) mod events;
 mod ordering;
 mod project_commands;
 mod queries;

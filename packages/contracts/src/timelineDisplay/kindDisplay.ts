@@ -42,6 +42,14 @@ export function buildByKind({ kind, status, title, summary, payload }: KindBuild
       };
     case "diagnostic":
       return buildDiagnosticDisplay({ kind, status, title, summary, payload });
+    case "title_update": {
+      const proposed = readFirstString(payload, ["proposedTitle", "title"], 120);
+      return {
+        icon: "text-cursor-input",
+        label: "标题已更新",
+        preview: proposed || summary,
+      };
+    }
     case "mcp": {
       if (isCodexMcpConfigEvent(payload)) {
         return buildDiagnosticDisplay({ kind, status, title, summary, payload });

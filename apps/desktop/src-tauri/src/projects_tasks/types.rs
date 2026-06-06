@@ -18,6 +18,7 @@ pub struct TaskRow {
     pub project_id: Option<String>,
     pub session_id: String,
     pub title: String,
+    pub title_source: String,
     pub status: String,
     pub created_at: i64,
     pub parent_id: Option<String>,

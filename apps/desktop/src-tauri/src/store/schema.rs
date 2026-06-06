@@ -82,6 +82,8 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           project_id  TEXT,
           session_id  TEXT NOT NULL,
           title       TEXT NOT NULL,
+          title_source TEXT NOT NULL DEFAULT 'auto'
+                        CHECK (title_source IN ('auto','manual')),
           status      TEXT NOT NULL DEFAULT 'waiting'
                         CHECK (status IN
                           ('draft','waiting','running','blocked','done','cancelled')),
@@ -264,6 +266,34 @@ mod tests {
     fn add_future_project_label_migration(conn: &Connection) -> Result<(), String> {
         conn.execute_batch("ALTER TABLE projects ADD COLUMN label TEXT;")
             .map_err(|e| format!("test migration: {e}"))
+    }
+
+    #[test]
+    fn task_title_source_migration_defaults_existing_tasks_to_auto() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_reset_baseline_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks
+               (id, session_id, title, status, created_at)
+               VALUES (?1, ?2, ?3, 'running', ?4)"#,
+            params!["task-title-source", "session-1", "旧标题", 1],
+        )
+        .unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
+        ))
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        let title_source: String = conn
+            .query_row(
+                "SELECT title_source FROM tasks WHERE id = 'task-title-source'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title_source, "auto");
     }
 
     #[test]

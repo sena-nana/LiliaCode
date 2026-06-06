@@ -5,9 +5,21 @@
  * 保持与 Tauri 端权限申明一致的最小依赖面。
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectSettings } from "@lilia/contracts";
+import type {
+  GitHubBindingStatus,
+  GitHubDeviceFlowPollResult,
+  GitHubDeviceFlowStart,
+  GitHubRepoPage,
+  ProjectSettings,
+} from "@lilia/contracts";
 
-export type { ProjectSettings };
+export type {
+  GitHubBindingStatus,
+  GitHubDeviceFlowPollResult,
+  GitHubDeviceFlowStart,
+  GitHubRepoPage,
+  ProjectSettings,
+};
 
 interface DialogOpenOptions {
   directory?: boolean;
@@ -42,6 +54,13 @@ export function gitCloneRepo(url: string, parentDir: string): Promise<string> {
   return invoke<string>("git_clone_repo", { url, parentDir });
 }
 
+export function gitHubCloneRepo(
+  repo: string,
+  parentDir: string,
+): Promise<string> {
+  return invoke<string>("github_clone_repo", { repo, parentDir });
+}
+
 export function getProjectSettings(): Promise<ProjectSettings> {
   return invoke<ProjectSettings>("project_get_settings");
 }
@@ -54,7 +73,37 @@ export function openInFileManager(path: string): Promise<void> {
   return invoke<void>("system_open_path", { path });
 }
 
+export function openUrl(url: string): Promise<void> {
+  return invoke<void>("system_open_url", { url });
+}
+
 /** PATH 里没 `code` 时 Rust 端会返回错误。 */
 export function openInVSCode(path: string): Promise<void> {
   return invoke<void>("system_open_in_vscode", { path });
+}
+
+export function getGitHubBindingStatus(): Promise<GitHubBindingStatus> {
+  return invoke<GitHubBindingStatus>("github_get_binding_status");
+}
+
+export function startGitHubDeviceFlow(): Promise<GitHubDeviceFlowStart> {
+  return invoke<GitHubDeviceFlowStart>("github_start_device_flow");
+}
+
+export function pollGitHubDeviceFlow(
+  deviceCode: string,
+  intervalSeconds?: number | null,
+): Promise<GitHubDeviceFlowPollResult> {
+  return invoke<GitHubDeviceFlowPollResult>("github_poll_device_flow", {
+    deviceCode,
+    intervalSeconds: intervalSeconds ?? null,
+  });
+}
+
+export function unbindGitHub(): Promise<void> {
+  return invoke<void>("github_unbind");
+}
+
+export function listGitHubRepos(page?: number | null): Promise<GitHubRepoPage> {
+  return invoke<GitHubRepoPage>("github_list_repos", { page: page ?? null });
 }
