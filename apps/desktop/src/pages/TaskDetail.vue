@@ -33,7 +33,6 @@ const chatPageRef = computed<HTMLElement | null>(() =>
 );
 const sharedAttachments = ref<ChatAttachment[]>([]);
 const suggestions = ref<SuggestionItem[]>([]);
-const suggestionsLoading = ref(false);
 let suggestionsSeq = 0;
 
 const conversation = useTaskConversationContext(routeProps);
@@ -83,16 +82,18 @@ const {
   pendingAskUser,
   pendingToolConsent,
   pendingAgentActions,
+  blockingPendingAgentActions,
   pendingPlanApproval,
   nonInterruptMode,
 } = composerController;
 
 const shouldLoadSuggestions = computed(() =>
+  !!props.projectId &&
   shouldRenderChat.value &&
   conversationRouteState.value.isLiveDraft &&
   timelineEvents.value.length === 0 &&
   !isTurnRunning.value &&
-  pendingAgentActions.value.length === 0 &&
+  blockingPendingAgentActions.value.length === 0 &&
   !pendingAskUser.value &&
   !pendingToolConsent.value,
 );
@@ -103,15 +104,12 @@ async function loadSuggestions(forceRefresh = false) {
     return;
   }
   const seq = ++suggestionsSeq;
-  suggestionsLoading.value = true;
   try {
     const next = await getConversationSuggestions(props.projectId ?? null, forceRefresh);
     if (seq === suggestionsSeq) suggestions.value = next;
   } catch (err) {
     console.error("[conversation-suggestions] load failed", err);
     if (seq === suggestionsSeq) suggestions.value = [];
-  } finally {
-    if (seq === suggestionsSeq) suggestionsLoading.value = false;
   }
 }
 
@@ -171,7 +169,6 @@ watch(
   async () => {
     suggestionsSeq += 1;
     suggestions.value = [];
-    suggestionsLoading.value = false;
     conversation.prepareForRouteChange();
     composerController.resetForRouteChange();
     timeline.resetTimeline();
@@ -196,7 +193,6 @@ watch(
     if (!ready) {
       suggestionsSeq += 1;
       suggestions.value = [];
-      suggestionsLoading.value = false;
       return;
     }
     void loadSuggestions(false);
@@ -256,7 +252,6 @@ watch(
     :tool-consent="nonInterruptMode ? null : pendingToolConsent"
     :viewing-image="viewingImage"
     :suggestions="suggestions"
-    :suggestions-loading="suggestionsLoading"
     :suggestions-visible="shouldLoadSuggestions"
     @resolve-pending-agent-action="composerController.onResolvePendingAgentAction"
     @retry-event="composerController.onRetryTimelineEvent"
@@ -269,7 +264,6 @@ watch(
     @remove-attachment="attachmentController.removeAttachment"
     @pick-attachments="attachmentController.onPickAttachments"
     @add-context-attachment="attachmentController.addContextAttachment"
-    @refresh-suggestions="loadSuggestions(true)"
     @resolve-ask-user="composerController.onResolveAskUser"
     @resolve-tool-consent="composerController.onResolveToolConsent"
   />

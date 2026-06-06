@@ -52,7 +52,6 @@ defineProps<{
   toolConsent: ToolConsentRequest | null;
   viewingImage: ChatImageViewerSource | null;
   suggestions: SuggestionItem[];
-  suggestionsLoading: boolean;
   suggestionsVisible: boolean;
 }>();
 
@@ -68,7 +67,6 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
   "add-context-attachment": [attachment: ChatAttachment];
-  "refresh-suggestions": [];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
     decision: ToolConsentDecision,
@@ -135,7 +133,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"
-                  :suggestions-loading="suggestionsLoading"
                   :suggestions-visible="suggestionsVisible"
                   @send="emitSend"
                   @interrupt="emit('interrupt')"
@@ -143,7 +140,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @remove-attachment="emit('remove-attachment', $event)"
                   @pick-attachments="emit('pick-attachments')"
                   @add-context-attachment="emit('add-context-attachment', $event)"
-                  @refresh-suggestions="emit('refresh-suggestions')"
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"

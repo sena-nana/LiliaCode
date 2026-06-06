@@ -181,7 +181,6 @@ describe("ChatTranscript scrollbar visibility", () => {
     vi.useRealTimers();
   });
 
-
   it("滚动时显示滚动条，并在滚动结束后短暂延时再隐藏", async () => {
     const { controls, transcript, view } = renderTranscriptWithControls([]);
     mockTranscriptViewport(transcript, controls);

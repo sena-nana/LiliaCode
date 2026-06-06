@@ -52,7 +52,6 @@ const props = defineProps<{
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
-  suggestionsLoading?: boolean;
   suggestionsVisible?: boolean;
 }>();
 
@@ -69,7 +68,6 @@ const emit = defineEmits<{
     updatedInput?: ToolConsentUpdatedInput,
   ];
   "open-image": [image: ChatImageViewerSource];
-  "refresh-suggestions": [];
   interrupt: [];
 }>();
 
@@ -323,7 +321,8 @@ const suggestionRows = computed(() => props.suggestions ?? []);
 const showSuggestions = computed(() =>
   !hasPending.value &&
   richInput.isEmpty.value &&
-  props.suggestionsVisible === true,
+  props.suggestionsVisible === true &&
+  suggestionRows.value.length > 0,
 );
 
 function fillSuggestion(suggestion: SuggestionItem) {
@@ -558,21 +557,7 @@ onBeforeUnmount(() => {
         >
           {{ suggestion.summary }}
         </button>
-        <span v-if="suggestionsLoading && suggestionRows.length === 0" class="chat-suggestions__state">
-          正在生成建议…
-        </span>
-        <span v-else-if="suggestionRows.length === 0" class="chat-suggestions__state">
-          暂无建议
-        </span>
       </div>
-      <button
-        type="button"
-        class="chat-suggestions__refresh"
-        :disabled="suggestionsLoading"
-        @click="emit('refresh-suggestions')"
-      >
-        刷新
-      </button>
     </div>
 
     <div

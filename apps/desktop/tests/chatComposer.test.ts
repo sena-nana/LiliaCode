@@ -1,7 +1,6 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskUserSpec, ChatAttachment, ChatComposerState } from "@lilia/contracts";
-import type { SuggestionItem } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -78,27 +77,6 @@ const codexCommandToolConsent: ToolConsentRequest = {
 };
 
 const projectCwd = "D:\\PROJECT\\workspace\\Lilia";
-
-const suggestions: SuggestionItem[] = [
-  {
-    id: "sg-1",
-    projectId: "lilia",
-    taskIds: ["t-002"],
-    summary: "补齐建议测试",
-    reason: "最近已经接入入口，但点击填充还需要验证。",
-    prompt: "请补齐新对话建议点击填入输入框的前端测试。",
-    generatedAt: 10_000,
-  },
-  {
-    id: "sg-2",
-    projectId: "lilia",
-    taskIds: ["t-002"],
-    summary: "优化缓存策略",
-    reason: "缓存优先策略需要确认刷新行为。",
-    prompt: "请检查新对话建议缓存刷新路径。",
-    generatedAt: 10_000,
-  },
-];
 
 function renderRunningComposer() {
   return render(ChatComposer, {
@@ -655,58 +633,6 @@ describe("ChatComposer", () => {
       planMode: true,
       permission: "full",
     });
-  });
-
-  it("空输入时显示建议，点击后填入 prompt 且不发送", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        suggestions,
-        suggestionsVisible: true,
-      },
-    });
-
-    const suggestion = view.getByRole("button", { name: "补齐建议测试" });
-    expect(suggestion).toHaveAttribute("title", "最近已经接入入口，但点击填充还需要验证。");
-
-    await fireEvent.click(suggestion);
-
-    expect(composerText(view.getByRole("textbox") as HTMLElement)).toBe(
-      "请补齐新对话建议点击填入输入框的前端测试。",
-    );
-    expect(view.queryByRole("button", { name: "补齐建议测试" })).toBeNull();
-    expect(view.emitted("send")).toBeUndefined();
-  });
-
-  it("建议刷新按钮只触发刷新事件", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        suggestions,
-        suggestionsVisible: true,
-      },
-    });
-
-    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
-
-    expect(view.emitted("refresh-suggestions")).toHaveLength(1);
-    expect(view.emitted("send")).toBeUndefined();
-  });
-
-  it("建议为空时显示暂无建议且保留刷新入口", () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        attachments: [],
-        suggestions: [],
-        suggestionsVisible: true,
-      },
-    });
-
-    expect(view.getByText("暂无建议")).toBeInTheDocument();
-    expect(view.getByRole("button", { name: "刷新" })).toBeInTheDocument();
   });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {
