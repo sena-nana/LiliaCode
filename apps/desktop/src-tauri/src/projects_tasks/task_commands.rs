@@ -22,7 +22,7 @@ pub fn task_list(
         Some(pid) => {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
+                    r#"SELECT id, project_id, session_id, title, title_source, status, created_at, parent_id, sort_order, pinned
                        FROM tasks
                        WHERE project_id = ?1 AND archived = 0
                        ORDER BY pinned DESC, sort_order ASC"#,
@@ -38,7 +38,7 @@ pub fn task_list(
         None => {
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
+                    r#"SELECT id, project_id, session_id, title, title_source, status, created_at, parent_id, sort_order, pinned
                        FROM tasks
                        WHERE project_id IS NULL AND archived = 0
                        ORDER BY pinned DESC, sort_order ASC"#,
@@ -61,7 +61,7 @@ pub fn task_get(id: String, store: State<'_, LiliaStore>) -> Result<Option<TaskR
     let deps_map = load_task_deps(&conn, &id)?;
     let result = conn
         .query_row(
-            r#"SELECT id, project_id, session_id, title, status, created_at, parent_id, sort_order, pinned
+            r#"SELECT id, project_id, session_id, title, title_source, status, created_at, parent_id, sort_order, pinned
                FROM tasks WHERE id = ?1 AND archived = 0"#,
             params![id],
             |row| build_task(row, &deps_map),
@@ -105,6 +105,7 @@ pub fn task_create(
         project_id: project_id.clone(),
         session_id: id,
         title,
+        title_source: "auto".to_string(),
         status,
         created_at: now,
         parent_id,
@@ -122,19 +123,36 @@ pub fn task_update(
     title: Option<String>,
     status: Option<String>,
     store: State<'_, LiliaStore>,
+    app: AppHandle,
 ) -> Result<(), String> {
     if title.is_none() && status.is_none() {
         return Ok(());
     }
     let conn = store.conn()?;
+    let project_id = conn
+        .query_row(
+            "SELECT project_id FROM tasks WHERE id = ?1 AND archived = 0",
+            params![id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|e| format!("task_update: 查询任务失败：{e}"))?
+        .flatten();
     if let Some(t) = title {
-        conn.execute("UPDATE tasks SET title = ?1 WHERE id = ?2", params![t, id])
-            .map_err(|e| format!("task_update(title): {e}"))?;
+        conn.execute(
+            "UPDATE tasks SET title = ?1, title_source = 'manual' WHERE id = ?2",
+            params![t, id.as_str()],
+        )
+        .map_err(|e| format!("task_update(title): {e}"))?;
     }
     if let Some(s) = status {
-        conn.execute("UPDATE tasks SET status = ?1 WHERE id = ?2", params![s, id])
-            .map_err(|e| format!("task_update(status): {e}"))?;
+        conn.execute(
+            "UPDATE tasks SET status = ?1 WHERE id = ?2",
+            params![s, id.as_str()],
+        )
+        .map_err(|e| format!("task_update(status): {e}"))?;
     }
+    emit_tasks_changed(&app, project_id);
     Ok(())
 }
 
@@ -178,6 +196,7 @@ pub fn task_promote(
         project_id: project_id.clone(),
         session_id: id,
         title,
+        title_source: "auto".to_string(),
         status: "running".to_string(),
         created_at: now,
         parent_id: None,

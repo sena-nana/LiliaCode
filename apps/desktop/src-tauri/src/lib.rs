@@ -6,6 +6,7 @@ mod agent_extensions;
 pub mod agent_timeline;
 mod chat;
 mod conversation_suggestions;
+mod github;
 mod plugins;
 mod popup_windows;
 mod project_shell;
@@ -102,6 +103,7 @@ pub fn run() {
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_agent_interaction,
+            chat::title_update::chat_respond_title_update,
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,
             chat::commands::chat_set_composer_state,
@@ -132,7 +134,14 @@ pub fn run() {
             project_shell::project_get_settings,
             project_shell::project_set_settings,
             project_shell::git_clone_repo,
+            github::github_get_binding_status,
+            github::github_start_device_flow,
+            github::github_poll_device_flow,
+            github::github_unbind,
+            github::github_list_repos,
+            github::github_clone_repo,
             project_shell::system_open_path,
+            project_shell::system_open_url,
             project_shell::system_open_in_vscode,
             plugins::plugins_overview,
             plugins::plugins_list_claude_skills,

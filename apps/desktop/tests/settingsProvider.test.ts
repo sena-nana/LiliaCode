@@ -1,11 +1,12 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Settings from "../src/pages/Settings.vue";
 import { createLiliaRouter } from "../src/router";
 import {
   failNextPopupSettingsSave,
   mockInvoke,
+  setMockGitHubPollSequence,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
 } from "./tauriMock";
@@ -23,6 +24,10 @@ async function renderSettings(initialRoute = "/settings") {
 }
 
 describe("Settings provider switch", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("非法 tab 默认显示外观分类", async () => {
     const invalid = await renderSettings("/settings?tab=unknown");
     expect(invalid.getByText("外观")).toBeInTheDocument();
@@ -193,5 +198,68 @@ describe("Settings provider switch", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it("项目设置页 GitHub 绑定流程冒烟", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    setMockGitHubPollSequence([
+      {
+        status: "authorized",
+        intervalSeconds: 1,
+        bindingStatus: {
+          state: "bound",
+          clientIdConfigured: true,
+          clientIdSource: "bundled",
+          binding: {
+            login: "octocat",
+            avatarUrl: null,
+            boundAt: 1,
+            scopes: ["repo", "read:user"],
+            clientIdSource: "bundled",
+          },
+        },
+        error: null,
+      },
+    ]);
+
+    const view = await renderSettings("/settings?tab=project");
+    await fireEvent.click(view.getByRole("button", { name: "绑定 GitHub" }));
+    await waitFor(() => {
+      expect(
+        view.getByRole("button", { name: "复制设备码并打开浏览器" }),
+      ).toBeInTheDocument();
+    });
+
+    await fireEvent.click(
+      view.getByRole("button", { name: "复制设备码并打开浏览器" }),
+    );
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await waitFor(() => {
+      expect(view.getByText("已绑定 GitHub")).toBeInTheDocument();
+      expect(view.getByText(/octocat/)).toBeInTheDocument();
+    });
+    expect(writeText).toHaveBeenCalledWith("ABCD-EFGH");
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "github_start_device_flow"),
+    ).toBe(true);
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "github_poll_device_flow"),
+    ).toBe(true);
+    expect(
+      mockInvoke.mock.calls.some(([cmd, args]) =>
+        cmd === "system_open_url" &&
+        typeof args === "object" &&
+        args !== null &&
+        "url" in args &&
+        args.url === "https://github.com/login/device"
+      ),
+    ).toBe(true);
   });
 });

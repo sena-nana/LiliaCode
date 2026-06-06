@@ -7,7 +7,11 @@ import type {
   ToolConsentUpdatedInput,
 } from "../services/chat";
 
-export type PendingAgentActionKind = "tool_consent" | "ask_user" | "plan_approval";
+export type PendingAgentActionKind =
+  | "tool_consent"
+  | "ask_user"
+  | "plan_approval"
+  | "title_update";
 
 export type PendingAgentAction =
   | {
@@ -23,6 +27,14 @@ export type PendingAgentAction =
       turnId: string | null;
       requestId: string | null;
       ask: PendingAsk;
+    }
+  | {
+      kind: "title_update";
+      taskId: string;
+      turnId: string | null;
+      requestId: string;
+      proposedTitle: string;
+      previousTitle: string | null;
     };
 
 export type PendingAgentActionResolution =
@@ -38,11 +50,17 @@ export type PendingAgentActionResolution =
       requestId: string | null;
       askId: number;
       result: AskUserResult;
+    }
+  | {
+      kind: "title_update";
+      requestId: string;
+      decision: "accept" | "decline";
     };
 
 export function usePendingAgentActionsForTask(
   asks: ComputedRef<PendingAsk[]>,
   toolConsents: ComputedRef<ToolConsentRequest[]>,
+  timelineEvents?: ComputedRef<AgentTimelineEvent[]>,
 ): ComputedRef<PendingAgentAction[]> {
   return computed(() => [
     ...asks.value.map((ask): PendingAgentAction => ({
@@ -59,7 +77,23 @@ export function usePendingAgentActionsForTask(
       requestId: request.requestId,
       request,
     })),
+    ...(timelineEvents?.value ?? []).flatMap(titleUpdateActionForEvent),
   ]);
+}
+
+function titleUpdateActionForEvent(event: AgentTimelineEvent): PendingAgentAction[] {
+  if (event.kind !== "title_update" || event.status !== "requires_action") return [];
+  const requestId = readPayloadString(event, "requestId");
+  const proposedTitle = readPayloadString(event, "proposedTitle");
+  if (!requestId || !proposedTitle) return [];
+  return [{
+    kind: "title_update",
+    taskId: event.taskId,
+    turnId: event.turnId,
+    requestId,
+    proposedTitle,
+    previousTitle: readPayloadString(event, "previousTitle"),
+  }];
 }
 
 export function pendingActionForTimelineEvent(
@@ -68,6 +102,10 @@ export function pendingActionForTimelineEvent(
 ): PendingAgentAction | null {
   if (event.status !== "requires_action") return null;
   for (const action of actions) {
+    if (action.kind === "title_update" && event.kind === "title_update") {
+      if (readPayloadString(event, "requestId") === action.requestId) return action;
+      continue;
+    }
     if (action.kind === "plan_approval" && event.kind === "plan") {
       if (action.turnId && event.turnId === action.turnId) return action;
       continue;
@@ -85,6 +123,7 @@ export function pendingActionForTimelineEvent(
 
 export function timelineEventRequiresAgentAction(event: AgentTimelineEvent): boolean {
   if (event.status !== "requires_action") return false;
+  if (event.kind === "title_update") return true;
   if (event.kind === "plan") return true;
   if (event.kind === "ask_user") return true;
   return readPayloadString(event, "interaction") === "tool_consent";

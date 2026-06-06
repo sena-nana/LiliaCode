@@ -25,6 +25,10 @@ vi.mock("@tauri-apps/api/window", async () => {
   return { getCurrentWindow: mockGetCurrentWindow };
 });
 
+vi.mock("@tauri-apps/api/path", () => ({
+  homeDir: vi.fn(async () => "C:\\Users\\mock"),
+}));
+
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
   configurable: true,
   value: {
@@ -36,6 +40,12 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
 
 beforeEach(async () => {
   resetTauriMockData();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: vi.fn(async () => undefined),
+    },
+  });
   const [{ PROJECTS }, tasksModule] = await Promise.all([
     import("../src/data/projects"),
     import("../src/data/tasks"),

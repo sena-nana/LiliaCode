@@ -11,7 +11,7 @@ pub(crate) use codex_probe::{
     build_codex_app_server_probe_status, validate_backend_ready_for_send,
 };
 pub(crate) use config::{
-    backend_api_key_env, load_active_backend, load_agent_interaction_settings,
+    backend_api_key_env, backend_direct_url, load_active_backend, load_agent_interaction_settings,
     load_assistant_ai_config,
 };
 pub(crate) use connection::resolve_connection_for;

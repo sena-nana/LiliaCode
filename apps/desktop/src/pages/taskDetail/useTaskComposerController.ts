@@ -32,6 +32,7 @@ import {
   onAgentTimeline,
   onDone,
   onTurnStarted,
+  respondTitleUpdate,
   sendMessage,
   setComposerState,
   type ToolConsentDecision,
@@ -58,6 +59,7 @@ export function useTaskComposerController(options: {
   const runtimePendingAgentActions = usePendingAgentActionsForTask(
     pendingAskUsers,
     pendingToolConsents,
+    timeline.timelineEvents,
   );
   const agentInteractionSettings = useAgentInteractionSettings();
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
@@ -75,7 +77,12 @@ export function useTaskComposerController(options: {
     }),
   );
   const pendingAgentActions = computed(() =>
-    nonInterruptMode.value ? runtimePendingAgentActions.value : [],
+    runtimePendingAgentActions.value.filter((action) =>
+      nonInterruptMode.value || action.kind === "title_update"
+    ),
+  );
+  const blockingPendingAgentActions = computed(() =>
+    pendingAgentActions.value.filter((action) => action.kind !== "title_update"),
   );
   const pendingPlanApproval = computed(() => {
     const ask = nonInterruptMode.value
@@ -139,7 +146,7 @@ export function useTaskComposerController(options: {
 
   async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
     if (!context.hasContext.value) return;
-    if (isTurnRunning.value || pendingAgentActions.value.length > 0) {
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
       await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
       return;
     }
@@ -186,6 +193,14 @@ export function useTaskComposerController(options: {
   }
 
   async function onResolvePendingAgentAction(resolution: PendingAgentActionResolution) {
+    if (resolution.kind === "title_update") {
+      try {
+        await respondTitleUpdate(props.taskId, resolution.requestId, resolution.decision);
+      } catch (err) {
+        console.error("[title-update] respond failed", err);
+      }
+      return;
+    }
     if (resolution.kind === "tool_consent") {
       const request = pendingToolConsents.value.find(
         (item) => item.requestId === resolution.requestId,
@@ -354,6 +369,7 @@ export function useTaskComposerController(options: {
     pendingToolConsent,
     pendingToolConsents,
     pendingAgentActions,
+    blockingPendingAgentActions,
     pendingPlanApproval,
     agentInteractionSettings,
     nonInterruptMode,

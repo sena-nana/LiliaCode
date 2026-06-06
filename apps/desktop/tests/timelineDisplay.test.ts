@@ -390,6 +390,27 @@ describe("timeline display derivation", () => {
     expect(display.label).toBe("发生错误");
     expect(display.preview).toBe("provider failed");
   });
+
+  it("标题更新事件只显示新标题概要且不可展开", () => {
+    const event = timelineEvent({
+      id: "title-update-1",
+      kind: "title_update",
+      status: "success",
+      title: "标题已更新",
+      summary: "对话标题事件化",
+      payload: {
+        proposedTitle: "对话标题事件化",
+        previousTitle: "对话标题能否更新",
+        source: "auto",
+      },
+    });
+    const display = deriveTimelineDisplay(event);
+
+    expect(display.label).toBe("标题已更新");
+    expect(timelineEventLabel(event)).toBe("标题已更新");
+    expect(timelineInlinePreview(event)).toBe("对话标题事件化");
+    expect(display.details).toBeUndefined();
+  });
 });
 
 describe("timeline event expansion", () => {

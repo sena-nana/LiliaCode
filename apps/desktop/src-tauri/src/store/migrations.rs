@@ -24,6 +24,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_list_indexes",
         apply: migrate_task_list_indexes,
     },
+    SchemaMigration {
+        version: 7,
+        name: "task_title_source",
+        apply: migrate_task_title_source,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -84,6 +89,17 @@ fn migrate_task_list_indexes(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_list_indexes 失败：{e}"))
+}
+
+fn migrate_task_title_source(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        ALTER TABLE tasks
+          ADD COLUMN title_source TEXT NOT NULL DEFAULT 'auto'
+          CHECK (title_source IN ('auto','manual'));
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_title_source 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

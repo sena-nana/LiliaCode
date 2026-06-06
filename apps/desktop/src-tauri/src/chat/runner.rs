@@ -20,6 +20,7 @@ use crate::chat::timeline_sink::{
     persist_and_emit_error_timeline_event, persist_and_emit_message_timeline_event,
     timeline_input_from_runtime_event, TimelineThrottle,
 };
+use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
     AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, CodexComposerSettings,
     DoneEvent, TurnStartedEvent,
@@ -381,6 +382,15 @@ pub(crate) fn spawn_agent_turn(
                 &backend_for_thread,
                 Some(&turn_id_for_thread),
                 format!("agent 进程异常退出：{}", stderr_text.trim()),
+            );
+        }
+
+        if !finished.interrupted && !finished.reset {
+            spawn_title_update(
+                app_handle.clone(),
+                task_id_for_thread.clone(),
+                backend_for_thread.clone(),
+                Some(turn_id_for_thread.clone()),
             );
         }
 
