@@ -157,7 +157,7 @@ yarn docs:preview
 
 如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本和 workspace 脚本都会执行同一个包管理器检查，让贡献者统一走 Corepack 管理的 Yarn 路径。
 
-Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg)（PNG 嵌入式 SVG 容器）。要重新生成全套 PNG / ICO 时跑 [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1)：`pwsh -File scripts/generate-icon.ps1`。如需 macOS `.icns` 或全套尺寸：`yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`。
+Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg)（PNG 嵌入式 SVG 容器）。要重新生成全套 PNG / ICO 时跑 `yarn icons:generate`。如需 macOS `.icns` 或全套尺寸：`yarn icons:tauri`。
 
 ## 感谢
 

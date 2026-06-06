@@ -5,9 +5,9 @@
 #       SVG 中的 <image href="data:image/png;base64,..."> 会被解码后用 GDI+
 #       高质量重采样到目标尺寸。
 # 用法：
-#   pwsh -File scripts/generate-icon.ps1
+#   yarn icons:generate
 # 若想要全平台图标集（含 .icns 等）：
-#   yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png
+#   yarn icons:tauri
 
 Add-Type -AssemblyName System.Drawing
 

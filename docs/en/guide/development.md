@@ -83,11 +83,11 @@ The release workflow runs `yarn verify` first, then builds the Windows Tauri bun
 The Tauri icon source is `apps/desktop/src-tauri/icons/icon.svg`, which embeds PNG data inside an SVG container. To regenerate the full PNG or ICO set, run:
 
 ```bash
-pwsh -File scripts/generate-icon.ps1
+yarn icons:generate
 ```
 
 For macOS `.icns` or a full size set, run:
 
 ```bash
-yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png
+yarn icons:tauri
 ```

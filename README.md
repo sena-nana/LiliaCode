@@ -157,7 +157,7 @@ yarn docs:preview
 
 If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce the same package-manager check so contributors hit one Corepack-managed Yarn path.
 
-The Tauri icon source is [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg), which is an embedded PNG inside an SVG container. To regenerate the full PNG / ICO set, run [`scripts/generate-icon.ps1`](scripts/generate-icon.ps1): `pwsh -File scripts/generate-icon.ps1`. For macOS `.icns` or a full size set, run `yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png`.
+The Tauri icon source is [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg), which is an embedded PNG inside an SVG container. To regenerate the full PNG / ICO set, run `yarn icons:generate`. For macOS `.icns` or a full size set, run `yarn icons:tauri`.
 
 ## Thanks
 
