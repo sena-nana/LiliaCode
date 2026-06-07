@@ -82,19 +82,20 @@ describe("MarkdownBlock", () => {
     expect(checkboxes[1]?.checked).toBe(true);
     expect(view.container.querySelector(".markdown-block__list .markdown-block__list"))
       .toHaveTextContent("子项");
-    expect(view.container.querySelector(".markdown-block__list li")).toHaveTextContent(
-      "待办 续行说明",
-    );
+    const firstItem = view.container.querySelector(".markdown-block__list li");
+    expect(firstItem).toHaveTextContent("待办");
+    expect(firstItem).toHaveTextContent("续行说明");
   });
 
 
-  it("渲染硬换行、删除线和自动链接", () => {
+  it("渲染普通换行、硬换行、删除线和自动链接", () => {
     const view = render(MarkdownBlock, {
       props: {
         content: [
           "第一行\\",
           "第二行  ",
           "第三行",
+          "第四行",
           "",
           "删除 ~~旧内容~~，链接 https://example.com/path).",
           "<mailto:test@example.com> 和 `https://code.example`",
@@ -102,7 +103,8 @@ describe("MarkdownBlock", () => {
       },
     });
 
-    expect(view.container.querySelectorAll(".markdown-block__paragraph br")).toHaveLength(2);
+    expect(view.container.querySelector(".markdown-block__paragraph")?.querySelectorAll("br"))
+      .toHaveLength(3);
     expect(view.container.querySelector("del")).toHaveTextContent("旧内容");
     expect(view.getByRole("link", { name: "https://example.com/path" }))
       .toHaveAttribute("href", "https://example.com/path");

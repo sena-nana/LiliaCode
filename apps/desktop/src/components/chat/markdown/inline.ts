@@ -24,15 +24,10 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
 export function parseInlineMarkdownLines(lines: string[]): InlineToken[] {
   const tokens: InlineToken[] = [];
   lines.forEach((line, index) => {
-    const hardBreak = /(?:\\| {2,})$/.test(line);
     const text = line.replace(/(?:\\| {2,})$/, "");
     tokens.push(...parseInlineMarkdown(index === 0 ? text.trimStart() : text.trim()));
     if (index < lines.length - 1) {
-      if (hardBreak) {
-        tokens.push(makeInlineToken("break", ""));
-      } else {
-        pushTextToken(tokens, " ");
-      }
+      tokens.push(makeInlineToken("break", ""));
     }
   });
   return tokens;
