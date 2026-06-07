@@ -132,10 +132,7 @@ onMounted(async () => {
     </h2>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>使用</div>
-        <div class="settings-row__hint">切换全局 Agent provider。</div>
-      </div>
+      <div class="settings-row__label">使用</div>
       <div class="segmented" role="radiogroup" aria-label="Backend">
         <button
           v-for="opt in backendOptions"
@@ -153,10 +150,7 @@ onMounted(async () => {
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>代理 URL</div>
-        <div class="settings-row__hint">默认 <code>http://127.0.0.1:15721</code>。</div>
-      </div>
+      <div class="settings-row__label">代理 URL</div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <input
           type="text"

@@ -140,10 +140,7 @@ onMounted(loadAgentInteraction);
     </h2>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>非打断模式</div>
-        <div class="settings-row__hint">权限、提问和计划确认留在时间线卡片中处理。</div>
-      </div>
+      <div class="settings-row__label">非打断模式</div>
       <div class="segmented" role="radiogroup" aria-label="非打断模式">
         <button
           type="button"
@@ -169,10 +166,7 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Codex Profile</div>
-        <div class="settings-row__hint">作为 Codex 新线程与恢复线程的全局默认。</div>
-      </div>
+      <div class="settings-row__label">Codex Profile</div>
       <div class="segmented" role="radiogroup" aria-label="Codex Profile">
         <button
           v-for="option in profileOptions"
@@ -190,25 +184,19 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Codex Model</div>
-        <div class="settings-row__hint">留空时使用当前 Codex 默认模型。</div>
-      </div>
+      <div class="settings-row__label">Codex Model</div>
       <input
         v-model="codexModelDraft"
         class="settings-input"
         type="text"
-        placeholder="gpt-5.5"
+        placeholder="默认 Codex 模型"
         :disabled="savingAgentInteraction"
         @blur="saveCodexModel"
       />
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Reasoning Effort</div>
-        <div class="settings-row__hint">Plan 模式仍按本轮计划预设传入。</div>
-      </div>
+      <div class="settings-row__label">Reasoning Effort</div>
       <div class="segmented" role="radiogroup" aria-label="Reasoning Effort">
         <button
           v-for="option in effortOptions"
@@ -226,13 +214,11 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Runtime Workspace Roots</div>
-        <div class="settings-row__hint">一行一个路径，用于 Codex :workspace_roots。</div>
-      </div>
+      <div class="settings-row__label">Runtime Workspace Roots</div>
       <textarea
         v-model="codexRootsDraft"
         class="settings-input settings-input--textarea"
+        placeholder="一行一个路径"
         rows="3"
         :disabled="savingAgentInteraction"
         @blur="saveCodexRoots"
@@ -240,10 +226,7 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Codex Permissions</div>
-        <div class="settings-row__hint">只允许选择 Lilia 预置 profile。</div>
-      </div>
+      <div class="settings-row__label">Codex Permissions</div>
       <div class="segmented" role="radiogroup" aria-label="Codex Permissions">
         <button
           v-for="option in codexPermissionOptions"
@@ -261,10 +244,7 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Debug 面板</div>
-        <div class="settings-row__hint">在对话侧栏加入临时事件注入面板。</div>
-      </div>
+      <div class="settings-row__label">Debug 面板</div>
       <div class="segmented" role="radiogroup" aria-label="Debug 面板">
         <button
           type="button"

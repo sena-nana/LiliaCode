@@ -109,7 +109,7 @@ onMounted(() => {
     </p>
 
     <div class="settings-row">
-      <div class="settings-row__label"><div>Base URL</div></div>
+      <div class="settings-row__label">Base URL</div>
       <input
         type="text"
         class="text-input"
@@ -119,7 +119,7 @@ onMounted(() => {
       />
     </div>
     <div class="settings-row">
-      <div class="settings-row__label"><div>API Key</div></div>
+      <div class="settings-row__label">API Key</div>
       <input
         type="password"
         class="text-input"
@@ -129,7 +129,7 @@ onMounted(() => {
       />
     </div>
     <div class="settings-row">
-      <div class="settings-row__label"><div>Model</div></div>
+      <div class="settings-row__label">Model</div>
       <input
         type="text"
         class="text-input"
@@ -140,10 +140,7 @@ onMounted(() => {
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>连通性</div>
-        <div class="settings-row__hint">GET <code>{baseUrl}/models</code>，不消耗 token。</div>
-      </div>
+      <div class="settings-row__label">连通性</div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <button
           type="button"
@@ -158,6 +155,7 @@ onMounted(() => {
           type="button"
           class="ghost"
           :disabled="testingAssistantAI || savingAssistantAI"
+          title="GET {baseUrl}/models，不消耗 token"
           @click="testAssistantAI"
         >
           <Plug :size="12" aria-hidden="true" />
@@ -167,10 +165,7 @@ onMounted(() => {
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>新对话建议</div>
-        <div class="settings-row__hint">为空白草稿生成两条低成本继续方向。</div>
-      </div>
+      <div class="settings-row__label">新对话建议</div>
       <div class="segmented" role="radiogroup" aria-label="新对话建议">
         <button
           type="button"
@@ -196,10 +191,7 @@ onMounted(() => {
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>生成来源</div>
-        <div class="settings-row__hint">辅助模型走 OpenAI 兼容接口；当前 Provider 复用全局连接。</div>
-      </div>
+      <div class="settings-row__label">生成来源</div>
       <div class="segmented" role="radiogroup" aria-label="建议生成来源">
         <button
           v-for="opt in suggestionSourceOptions"

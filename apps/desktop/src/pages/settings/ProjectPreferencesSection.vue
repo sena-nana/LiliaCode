@@ -205,9 +205,7 @@ onBeforeUnmount(() => {
     </h2>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>Clone 默认父目录</div>
-      </div>
+      <div class="settings-row__label">Clone 默认父目录</div>
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
         <span class="muted" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
           {{ projectSettings.cloneParentDir || "未设置（用家目录）" }}
@@ -224,9 +222,6 @@ onBeforeUnmount(() => {
         <div style="display: inline-flex; align-items: center; gap: 6px;">
           <Github :size="14" aria-hidden="true" />
           GitHub 绑定
-        </div>
-        <div class="settings-row__hint">
-          绑定后，GitHub clone 输入会变成仓库搜索框，并默认展示当前账号仓库。
         </div>
       </div>
       <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: min(420px, 100%);">

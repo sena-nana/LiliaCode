@@ -9,10 +9,7 @@ const { theme, setTheme } = useTheme();
   <div class="card">
     <h2>外观</h2>
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>主题</div>
-        <div class="settings-row__hint">立即生效并记忆到本地。</div>
-      </div>
+      <div class="settings-row__label">主题</div>
       <div class="segmented" role="radiogroup" aria-label="主题">
         <button
           type="button"
@@ -37,10 +34,7 @@ const { theme, setTheme } = useTheme();
       </div>
     </div>
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>语言</div>
-        <div class="settings-row__hint">界面语言</div>
-      </div>
+      <div class="settings-row__label">语言</div>
       <span class="muted">简体中文</span>
     </div>
   </div>

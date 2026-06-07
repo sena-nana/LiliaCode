@@ -60,10 +60,7 @@ function openTab(tab: SettingsTabKey) {
           :size="15"
           aria-hidden="true"
         />
-        <span class="settings-sidebar__tab-main">
-          <span class="settings-sidebar__tab-label">{{ tab.label }}</span>
-          <span class="settings-sidebar__tab-desc">{{ tab.description }}</span>
-        </span>
+        <span class="settings-sidebar__tab-label">{{ tab.label }}</span>
       </button>
     </nav>
   </aside>

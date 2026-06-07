@@ -97,10 +97,7 @@ onMounted(loadPopupWindowSettings);
     </h2>
 
     <div class="settings-row">
-      <div class="settings-row__label">
-        <div>全局快捷键</div>
-        <div class="settings-row__hint">留空时不注册；触发后按上次项目创建弹出窗口。</div>
-      </div>
+      <div class="settings-row__label">全局快捷键</div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <input
           type="text"
