@@ -10,6 +10,7 @@ import type {
   GitHubDeviceFlowPollResult,
   GitHubDeviceFlowStart,
   GitHubRepoPage,
+  GitHubRepoSummary,
   ProjectSettings,
 } from "@lilia/contracts";
 
@@ -18,8 +19,66 @@ export type {
   GitHubDeviceFlowPollResult,
   GitHubDeviceFlowStart,
   GitHubRepoPage,
+  GitHubRepoSummary,
   ProjectSettings,
 };
+
+const GITHUB_REPO_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let githubRepoCache: {
+  items: GitHubRepoSummary[];
+  nextPage: number | null;
+  fetchedAt: number;
+} | null = null;
+let githubRepoPreloadPromise: Promise<GitHubRepoPage> | null = null;
+let githubRepoCacheGeneration = 0;
+let githubRepoFirstPageRequestId = 0;
+
+function cloneRepoPage(page: GitHubRepoPage): GitHubRepoPage {
+  return {
+    items: page.items.map((repo) => ({ ...repo })),
+    nextPage: page.nextPage,
+  };
+}
+
+function writeGitHubRepoCache(page: GitHubRepoPage) {
+  githubRepoCache = {
+    items: page.items.map((repo) => ({ ...repo })),
+    nextPage: page.nextPage,
+    fetchedAt: Date.now(),
+  };
+}
+
+export function readCachedGitHubRepos(): GitHubRepoPage | null {
+  if (!githubRepoCache) return null;
+  return cloneRepoPage(githubRepoCache);
+}
+
+export function clearGitHubRepoCache() {
+  githubRepoCacheGeneration += 1;
+  githubRepoCache = null;
+  githubRepoPreloadPromise = null;
+}
+
+export function preloadGitHubRepos(opts: { force?: boolean } = {}): Promise<GitHubRepoPage> {
+  const now = Date.now();
+  if (
+    !opts.force &&
+    githubRepoCache &&
+    now - githubRepoCache.fetchedAt < GITHUB_REPO_CACHE_TTL_MS
+  ) {
+    return Promise.resolve(cloneRepoPage(githubRepoCache));
+  }
+  if (!opts.force && githubRepoPreloadPromise) return githubRepoPreloadPromise;
+  githubRepoPreloadPromise = listGitHubRepos(1).finally(() => {
+    githubRepoPreloadPromise = null;
+  });
+  return githubRepoPreloadPromise;
+}
+
+function preloadGitHubReposSilently() {
+  void preloadGitHubRepos().catch(() => undefined);
+}
 
 interface DialogOpenOptions {
   directory?: boolean;
@@ -82,8 +141,14 @@ export function openInVSCode(path: string): Promise<void> {
   return invoke<void>("system_open_in_vscode", { path });
 }
 
-export function getGitHubBindingStatus(): Promise<GitHubBindingStatus> {
-  return invoke<GitHubBindingStatus>("github_get_binding_status");
+export async function getGitHubBindingStatus(): Promise<GitHubBindingStatus> {
+  const status = await invoke<GitHubBindingStatus>("github_get_binding_status");
+  if (status.state === "bound") {
+    preloadGitHubReposSilently();
+  } else {
+    clearGitHubRepoCache();
+  }
+  return status;
 }
 
 export function startGitHubDeviceFlow(): Promise<GitHubDeviceFlowStart> {
@@ -101,9 +166,24 @@ export function pollGitHubDeviceFlow(
 }
 
 export function unbindGitHub(): Promise<void> {
-  return invoke<void>("github_unbind");
+  return invoke<void>("github_unbind").then(() => {
+    clearGitHubRepoCache();
+  });
 }
 
-export function listGitHubRepos(page?: number | null): Promise<GitHubRepoPage> {
-  return invoke<GitHubRepoPage>("github_list_repos", { page: page ?? null });
+export async function listGitHubRepos(page?: number | null): Promise<GitHubRepoPage> {
+  const pageNo = page ?? null;
+  const generation = githubRepoCacheGeneration;
+  const firstPageRequestId = (pageNo ?? 1) === 1
+    ? ++githubRepoFirstPageRequestId
+    : githubRepoFirstPageRequestId;
+  const result = await invoke<GitHubRepoPage>("github_list_repos", { page: pageNo });
+  if (
+    (pageNo ?? 1) === 1 &&
+    generation === githubRepoCacheGeneration &&
+    firstPageRequestId === githubRepoFirstPageRequestId
+  ) {
+    writeGitHubRepoCache(result);
+  }
+  return cloneRepoPage(result);
 }

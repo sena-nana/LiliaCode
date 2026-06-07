@@ -50,6 +50,8 @@ beforeEach(async () => {
     import("../src/data/projects"),
     import("../src/data/tasks"),
   ]);
+  const { clearGitHubRepoCache } = await import("../src/services/projects");
+  clearGitHubRepoCache();
   const { ORPHAN_LIST, TASKS, installTasksChangedListener } = tasksModule;
   installTasksChangedListener();
   PROJECTS.value = mockProjectsForStore();

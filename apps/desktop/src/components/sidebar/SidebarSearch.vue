@@ -3,11 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { FileText, Search, X } from "lucide-vue-next";
 import { searchSessions, type SearchResult } from "../../services/sessionSearch";
 import { ensureAllProjectTasksLoaded } from "../../services/tasksStore";
-
-interface Segment {
-  text: string;
-  mark: boolean;
-}
+import SearchDropdown from "../SearchDropdown.vue";
 
 const props = defineProps<{
   modelValue?: boolean;
@@ -23,7 +19,7 @@ const active = computed({
   set: (value) => emit("update:modelValue", value),
 });
 const query = ref("");
-const inputRef = ref<HTMLInputElement | null>(null);
+const inputRef = ref<{ focus: () => void } | null>(null);
 const selectedIdx = ref(0);
 const hydrating = ref(false);
 
@@ -89,36 +85,6 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
-function highlightSegments(
-  text: string,
-  ranges: Array<[number, number]>,
-): Segment[] {
-  if (!ranges.length) return [{ text, mark: false }];
-  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
-  const merged: Array<[number, number]> = [];
-  for (const [start, end] of sorted) {
-    const last = merged[merged.length - 1];
-    if (last && start <= last[1]) {
-      last[1] = Math.max(last[1], end);
-    } else {
-      merged.push([start, end]);
-    }
-  }
-
-  const segments: Segment[] = [];
-  let cursor = 0;
-  for (const [start, end] of merged) {
-    if (cursor < start) {
-      segments.push({ text: text.slice(cursor, start), mark: false });
-    }
-    segments.push({ text: text.slice(start, end), mark: true });
-    cursor = end;
-  }
-  if (cursor < text.length) {
-    segments.push({ text: text.slice(cursor), mark: false });
-  }
-  return segments;
-}
 </script>
 
 <template>
@@ -135,60 +101,62 @@ function highlightSegments(
   </template>
 
   <template v-else>
-    <div class="sb-search">
-      <Search :size="14" aria-hidden="true" class="sb-search__leading" />
-      <input
-        ref="inputRef"
-        v-model="query"
-        type="text"
-        class="sb-search__input"
-        placeholder="搜索会话…"
-        spellcheck="false"
-        @keydown="onKeydown"
-      />
-    </div>
-    <button
-      type="button"
-      class="sb-icon-action"
-      title="关闭搜索 (Esc)"
-      aria-label="关闭搜索"
-      @click="closeSearch"
+    <SearchDropdown
+      ref="inputRef"
+      v-model="query"
+      class="sidebar-search-dropdown"
+      placeholder="搜索会话…"
+      :spellcheck="false"
+      @keydown="onKeydown"
     >
-      <X :size="15" aria-hidden="true" />
-    </button>
-
-    <div class="sb-search-dd" role="listbox">
-      <template v-if="results.length">
+      <template #leading>
+        <Search :size="14" aria-hidden="true" class="search-dropdown__leading" />
+      </template>
+      <template #trailing>
         <button
-          v-for="(result, index) in results"
-          :key="result.route"
           type="button"
-          class="sb-search-dd__item"
-          :class="{ 'is-active': index === selectedIdx }"
-          role="option"
-          :aria-selected="index === selectedIdx"
-          @mouseenter="selectedIdx = index"
-          @click="selectResult(result)"
+          class="search-dropdown__action"
+          title="关闭搜索 (Esc)"
+          aria-label="关闭搜索"
+          @click="closeSearch"
         >
-          <span class="sb-search-dd__title">
-            <template
-              v-for="(segment, segmentIndex) in highlightSegments(result.title, result.highlights)"
-              :key="segmentIndex"
-            >
-              <mark v-if="segment.mark">{{ segment.text }}</mark>
-              <template v-else>{{ segment.text }}</template>
-            </template>
-          </span>
-          <span v-if="result.projectName" class="sb-search-dd__scope">
-            {{ result.projectName }}
-          </span>
+          <X :size="13" aria-hidden="true" />
         </button>
       </template>
-      <p v-else-if="query.trim()" class="sb-search-dd__empty">没有匹配</p>
-      <p v-else class="sb-search-dd__hint">
-        <FileText :size="11" aria-hidden="true" />
-        输入关键词
-      </p>
-    </div>
+
+      <template #default="{ highlightRangeSegments }">
+        <template v-if="results.length">
+          <button
+            v-for="(result, index) in results"
+            :key="result.route"
+            type="button"
+            class="search-dropdown__item"
+            :class="{ 'is-active': index === selectedIdx }"
+            role="option"
+            :aria-selected="index === selectedIdx"
+            @mouseenter="selectedIdx = index"
+            @click="selectResult(result)"
+          >
+            <span class="search-dropdown__title">
+              <template
+                v-for="(segment, segmentIndex) in highlightRangeSegments(result.title, result.highlights)"
+                :key="segmentIndex"
+              >
+                <mark v-if="segment.mark">{{ segment.text }}</mark>
+                <template v-else>{{ segment.text }}</template>
+              </template>
+            </span>
+            <span v-if="result.projectName" class="search-dropdown__scope">
+              {{ result.projectName }}
+            </span>
+          </button>
+        </template>
+        <p v-else-if="query.trim()" class="search-dropdown__empty">没有匹配</p>
+        <p v-else class="search-dropdown__hint">
+          <FileText :size="11" aria-hidden="true" />
+          输入关键词
+        </p>
+      </template>
+    </SearchDropdown>
   </template>
 </template>
