@@ -28,6 +28,7 @@ withDefaults(defineProps<{
   askTotal: number;
   canAskSubmit: boolean;
   canGoPrev: boolean;
+  actionsBlocked?: boolean;
   freeformText?: string;
   inputClass?: string;
   inputPlaceholder?: string;
@@ -42,6 +43,7 @@ withDefaults(defineProps<{
   askFocusedOption: null,
   askIsPlanApproval: false,
   askOtherSelected: false,
+  actionsBlocked: false,
   freeformText: "",
   inputClass: "composer-inline__other-input",
   inputPlaceholder: "自定义回答",
@@ -100,6 +102,7 @@ const emit = defineEmits<{
         type="button"
         class="composer-inline__close"
         aria-label="关闭"
+        :disabled="actionsBlocked"
         @click="emit('cancelAsk')"
       >
         <X :size="14" aria-hidden="true" />
@@ -187,6 +190,7 @@ const emit = defineEmits<{
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
         class="ghost composer-inline__skip composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
         跳过
@@ -196,19 +200,26 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ghost composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
         <ArrowLeft :size="13" aria-hidden="true" />
         上一题
       </button>
 
-      <button type="button" class="ghost composer-inline__btn" @click="emit('confirmAskNo')">
+      <button
+        type="button"
+        class="ghost composer-inline__btn"
+        :disabled="actionsBlocked"
+        @click="emit('confirmAskNo')"
+      >
         {{ askQuestion.cancelLabel ?? "不要" }}
       </button>
       <button
         type="button"
         class="composer-inline__btn"
         :class="askQuestion.danger ? 'ghost danger' : 'primary'"
+        :disabled="actionsBlocked"
         @click="emit('submitAsk')"
       >
         {{ askQuestion.confirmLabel ?? "好的" }}
@@ -220,6 +231,7 @@ const emit = defineEmits<{
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
         class="ghost composer-inline__skip composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
         跳过
@@ -229,6 +241,7 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ghost composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
         <ArrowLeft :size="13" aria-hidden="true" />
@@ -246,6 +259,7 @@ const emit = defineEmits<{
         v-if="askQuestion.mode === 'confirm'"
         type="button"
         class="ghost composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('confirmAskNo')"
       >
         {{ askQuestion.cancelLabel ?? "不要" }}
@@ -254,7 +268,7 @@ const emit = defineEmits<{
         type="button"
         class="composer-inline__btn"
         :class="askQuestion.danger ? 'ghost danger' : 'primary'"
-        :disabled="askQuestion.mode !== 'confirm' && !canAskSubmit"
+        :disabled="actionsBlocked || (askQuestion.mode !== 'confirm' && !canAskSubmit)"
         @click="emit('submitAsk')"
       >
         {{ askQuestion.mode === "confirm" ? (askQuestion.confirmLabel ?? "好的") : askIsLast ? "完成" : "继续" }}

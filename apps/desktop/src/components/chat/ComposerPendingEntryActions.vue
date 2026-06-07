@@ -18,6 +18,7 @@ defineProps<{
   toolCommandIsEmpty: boolean;
   canInterrupt: boolean;
   canSubmitEntry: boolean;
+  actionsBlocked: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -39,6 +40,7 @@ const emit = defineEmits<{
       v-if="askUsesInputActions && askQuestionSkippable && askTotal > 1"
       type="button"
       class="ghost composer-inline__skip composer-inline__btn"
+      :disabled="actionsBlocked"
       @click="emit('skipAsk')"
     >
       跳过
@@ -49,6 +51,7 @@ const emit = defineEmits<{
         v-if="canGoPrev"
         type="button"
         class="ghost composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
         <ArrowLeft :size="13" aria-hidden="true" />
@@ -57,7 +60,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="primary composer-inline__btn"
-        :disabled="!canAskSubmit"
+        :disabled="actionsBlocked || !canAskSubmit"
         @click="emit('submitAsk')"
       >
         {{ askIsLast ? "完成" : "继续" }}
@@ -69,7 +72,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ghost composer-inline__btn"
-        :disabled="!hasPendingInputText"
+        :disabled="actionsBlocked || !hasPendingInputText"
         @click="emit('modifyPlanApproval')"
       >
         {{ hasPendingInputText ? "修改" : "忽略" }}
@@ -77,6 +80,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="primary composer-inline__btn"
+        :disabled="actionsBlocked"
         @click="emit('submitAsk')"
       >
         同意
@@ -87,7 +91,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ghost composer-inline__btn"
-        :disabled="toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
+        :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
         @click="isEditingToolCommand ? emit('cancelToolCommandEdit') : emit('decideToolConsent', 'deny')"
       >
         {{ toolSubmitting === "deny" ? "处理中..." : isEditingToolCommand ? "取消" : hasPendingInputText ? "修改" : "忽略" }}
@@ -96,7 +100,7 @@ const emit = defineEmits<{
         type="button"
         class="composer-inline__btn"
         :class="toolDanger ? 'ghost danger' : 'primary'"
-        :disabled="toolSubmitting !== null || toolCommandIsEmpty"
+        :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
         @click="emit('decideToolConsent', 'allow')"
       >
         {{ toolSubmitting === "allow" ? "处理中..." : toolDanger ? "同意执行" : "同意" }}
@@ -108,7 +112,7 @@ const emit = defineEmits<{
       type="button"
       class="chat-composer__send"
       :class="{ 'chat-composer__send--interrupt': canInterrupt }"
-      :disabled="!canSubmitEntry"
+      :disabled="actionsBlocked || !canSubmitEntry"
       :title="sendTitle"
       :aria-label="sendAriaLabel"
       @click="emit('submitEntry')"

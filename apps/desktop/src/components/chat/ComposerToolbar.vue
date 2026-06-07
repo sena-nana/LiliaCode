@@ -10,6 +10,7 @@ defineProps<{
   previewAttachments: ChatAttachment[];
   canInterrupt: boolean;
   canSubmitEntry: boolean;
+  actionsBlocked: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -81,7 +82,7 @@ const emit = defineEmits<{
         type="button"
         class="chat-composer__send"
         :class="{ 'chat-composer__send--interrupt': canInterrupt }"
-        :disabled="!canSubmitEntry"
+        :disabled="actionsBlocked || !canSubmitEntry"
         :title="sendTitle"
         :aria-label="sendAriaLabel"
         @click="emit('submitEntry')"

@@ -78,13 +78,16 @@ const COMPOSER_INPUT_MIN_HEIGHT = COMPOSER_INPUT_LINE_HEIGHT + COMPOSER_INPUT_VE
 const COMPOSER_INPUT_MAX_HEIGHT =
   COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_INPUT_MAX_ROWS + COMPOSER_INPUT_VERTICAL_PADDING;
 const COMPOSER_INPUT_TRANSITION_MS = 160;
+const COMPOSER_ACTION_BLOCK_MS = 320;
 const LARGE_DIRECTORY_FILE_COUNT = 200;
 const LARGE_DIRECTORY_TOTAL_SIZE = 20 * 1024 * 1024;
 
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const textareaMeasure = ref<HTMLTextAreaElement | null>(null);
+const actionsBlocked = ref(false);
 let resizeFrameId: number | null = null;
 let overflowTimerId: number | null = null;
+let actionBlockTimerId: number | null = null;
 
 let clearComposerContextState = () => {};
 
@@ -203,6 +206,15 @@ const canInterrupt = computed(() =>
 );
 
 const canSubmitEntry = computed(() => canSend.value || canInterrupt.value);
+
+const interactionPhaseKey = computed(() => {
+  if (activeAsk.value) {
+    const questionId = askQuestion.value?.id ?? "unknown";
+    return `ask:${activeAsk.value.id}:${questionId}`;
+  }
+  if (activeToolConsent.value) return `tool:${activeToolConsent.value.requestId}`;
+  return "input";
+});
 
 const sendTitle = computed(() => {
   if (activeToolConsent.value) return "发送拒绝备注（Enter）";
@@ -332,6 +344,15 @@ function fillSuggestion(suggestion: SuggestionItem) {
     [textPart(suggestion.prompt)],
   );
   clearComposerContextState();
+}
+
+function blockActionsBriefly() {
+  actionsBlocked.value = true;
+  if (actionBlockTimerId !== null) window.clearTimeout(actionBlockTimerId);
+  actionBlockTimerId = window.setTimeout(() => {
+    actionsBlocked.value = false;
+    actionBlockTimerId = null;
+  }, COMPOSER_ACTION_BLOCK_MS);
 }
 
 function send() {
@@ -481,6 +502,8 @@ watch(inputValue, () => {
   void nextTick(queueResize);
 });
 
+watch(interactionPhaseKey, blockActionsBriefly);
+
 onBeforeUnmount(() => {
   if (resizeFrameId !== null) {
     window.cancelAnimationFrame(resizeFrameId);
@@ -489,6 +512,10 @@ onBeforeUnmount(() => {
   if (overflowTimerId !== null) {
     window.clearTimeout(overflowTimerId);
     overflowTimerId = null;
+  }
+  if (actionBlockTimerId !== null) {
+    window.clearTimeout(actionBlockTimerId);
+    actionBlockTimerId = null;
   }
 });
 </script>
@@ -524,6 +551,7 @@ onBeforeUnmount(() => {
         :is-editing-tool-command="isEditingToolCommand"
         :has-editable-command="hasEditableCommand"
         :tool-command-draft="toolCommandDraft"
+        :actions-blocked="actionsBlocked"
         @keydown="onInlineKeydown"
         @cancel-ask="cancelAsk"
         @highlight-option="highlightOption"
@@ -615,6 +643,7 @@ onBeforeUnmount(() => {
           :tool-command-is-empty="toolCommandIsEmpty"
           :can-interrupt="canInterrupt"
           :can-submit-entry="canSubmitEntry"
+          :actions-blocked="actionsBlocked"
           :send-title="sendTitle"
           :send-aria-label="sendAriaLabel"
           @skip-ask="skipAsk"
@@ -654,6 +683,7 @@ onBeforeUnmount(() => {
         :preview-attachments="previewAttachments"
         :can-interrupt="canInterrupt"
         :can-submit-entry="canSubmitEntry"
+        :actions-blocked="actionsBlocked"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"

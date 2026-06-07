@@ -665,6 +665,29 @@ describe("ChatComposer", () => {
     });
   });
 
+  it("状态切到工具授权后短暂屏蔽关键动作", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await view.rerender({
+      state: baseState,
+      attachments: [],
+      toolConsent,
+    });
+    await fireEvent.update(view.getByRole("textbox"), "先不要写这个文件");
+
+    expect(view.getByRole("button", { name: "同意" })).toBeDisabled();
+    expect(view.getByRole("button", { name: "修改" })).toBeDisabled();
+
+    await vi.advanceTimersByTimeAsync(320);
+    expect(view.getByRole("button", { name: "同意" })).not.toBeDisabled();
+    expect(view.getByRole("button", { name: "修改" })).not.toBeDisabled();
+  });
+
 
   it("pending 工具授权中输入文本后修改按钮会作为拒绝备注返回", async () => {
     const view = render(ChatComposer, {

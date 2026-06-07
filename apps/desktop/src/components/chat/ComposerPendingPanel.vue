@@ -34,6 +34,7 @@ defineProps<{
   isEditingToolCommand: boolean;
   hasEditableCommand: boolean;
   toolCommandDraft: string;
+  actionsBlocked: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -75,6 +76,7 @@ const emit = defineEmits<{
         :multi-picks="multiPicks"
         :can-go-prev="canGoPrev"
         :can-ask-submit="false"
+        :actions-blocked="actionsBlocked"
         :show-confirm-footer="true"
         tabindex="-1"
         @keydown="emit('keydown', $event)"
