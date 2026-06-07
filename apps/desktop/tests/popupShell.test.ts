@@ -67,6 +67,18 @@ function seedPersistedDraftPrefixTask() {
   };
 }
 
+function encodeDraftQueryText(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function expectComposerFocused(view: ReturnType<typeof render>) {
+  const input = view.getByRole("textbox");
+  expect(document.activeElement).toBe(input);
+  return input;
+}
+
 describe("Popup shell", () => {
   it("弹窗 index hash 入口使用 hash history", () => {
     expect(shouldUsePopupHashHistory("#/popup/chats/new")).toBe(true);
@@ -170,6 +182,36 @@ describe("Popup shell", () => {
       expect(view.router.currentRoute.value.fullPath).toMatch(
         /^\/popup\/projects\/lilia\/tasks\/t-draft-/,
       );
+    });
+  });
+
+  it("弹窗收集箱新对话 boot 到真实对话后自动聚焦输入框", async () => {
+    const view = await renderPopup("/popup/chats/new");
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toMatch(/^\/popup\/chats\/o-draft-/);
+      expectComposerFocused(view);
+    });
+  });
+
+  it("弹窗项目新对话 boot 到真实对话后自动聚焦输入框", async () => {
+    const view = await renderPopup("/popup/projects/lilia/new");
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toMatch(
+        /^\/popup\/projects\/lilia\/tasks\/t-draft-/,
+      );
+      expectComposerFocused(view);
+    });
+  });
+
+  it("弹窗初始草稿文本插入后焦点停留在输入框", async () => {
+    const text = "继续追一下弹窗草稿";
+    const view = await renderPopup(`/popup/chats/new?draft=${encodeDraftQueryText(text)}`);
+
+    await waitFor(() => {
+      const input = expectComposerFocused(view);
+      expect(input).toHaveTextContent(text);
     });
   });
 

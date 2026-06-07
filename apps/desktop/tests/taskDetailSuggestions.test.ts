@@ -39,6 +39,11 @@ async function renderOrphanDraftTaskDetail(taskId: string) {
   });
 }
 
+function expectComposerFocused(view: ReturnType<typeof render>) {
+  const input = view.getByRole("textbox");
+  expect(document.activeElement).toBe(input);
+}
+
 describe("TaskDetail conversation suggestions", () => {
   it("项目空白草稿会在输入框卡片内加载并展示新对话建议", async () => {
     await Promise.all([projectsReady, allTasksReady]);
@@ -55,6 +60,16 @@ describe("TaskDetail conversation suggestions", () => {
     expect(view.queryByRole("button", { name: "刷新" })).toBeNull();
   });
 
+  it("主窗口项目草稿进入对话后自动聚焦输入框", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expectComposerFocused(view);
+    });
+  });
+
   it("收集箱空白草稿不加载也不展示建议", async () => {
     await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftOrphan();
@@ -68,5 +83,15 @@ describe("TaskDetail conversation suggestions", () => {
       .toBe(false);
     expect(view.queryByLabelText("新对话建议")).toBeNull();
     expect(view.queryByRole("button", { name: "补齐建议缓存测试" })).toBeNull();
+  });
+
+  it("主窗口收集箱草稿进入对话后自动聚焦输入框", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    const draft = createDraftOrphan();
+    const view = await renderOrphanDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expectComposerFocused(view);
+    });
   });
 });

@@ -81,8 +81,13 @@ const emit = defineEmits<{
 }>();
 
 const chatPageRef = ref<HTMLElement | null>(null);
+const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
 
-defineExpose({ chatPageRef });
+function focusComposer() {
+  composerRef.value?.focusInput();
+}
+
+defineExpose({ chatPageRef, focusComposer });
 
 function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
   emit("send", content, outgoingAttachments);
@@ -132,6 +137,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @insert-guide="emit('insert-guide', $event)"
                 />
                 <ChatComposer
+                  ref="composerRef"
                   :state="composerState"
                   :attachments="attachments"
                   :append-attachments-to-end-key="appendAttachmentsToEndKey"

@@ -415,6 +415,7 @@ export function useComposerRichInput(options: {
     replaceWithText,
     insertAttachmentReference,
     resetInput,
+    focusAt,
     captureSelectionOffset,
     captureSelectionRange,
     hasAttachmentPath,
