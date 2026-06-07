@@ -44,6 +44,8 @@ defineProps<{
   userSendScrollKey: number;
   restoreDraftKey: number;
   restoreDraftContent: string;
+  insertDraftTextKey: number;
+  insertDraftTextContent: string;
   pendingAgentActions: PendingAgentAction[];
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
@@ -63,6 +65,7 @@ const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "close-image": [];
   "insert-guide": [todo: TaskTodo];
+  "insert-draft-text": [text: string];
   send: [content: string, attachments: ChatAttachment[]];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
@@ -108,6 +111,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
           <ChatTranscript
             :timeline-events="timelineEvents"
             :empty-headline="emptyHeadline"
+            :project-id="projectId"
             :is-thinking="isTurnRunning"
             :project-cwd="projectCwd"
             :active-plan-approval-turn-id="activePlanApprovalTurnId"
@@ -118,6 +122,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
+            @insert-draft-text="emit('insert-draft-text', $event)"
           >
             <template #controls>
               <div class="chat-controls">
@@ -138,6 +143,8 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :suggestions-visible="suggestionsVisible"
                   :restore-draft-key="restoreDraftKey"
                   :restore-draft-content="restoreDraftContent"
+                  :insert-draft-text-key="insertDraftTextKey"
+                  :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

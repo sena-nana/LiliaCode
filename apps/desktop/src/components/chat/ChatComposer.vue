@@ -55,6 +55,8 @@ const props = defineProps<{
   suggestionsVisible?: boolean;
   restoreDraftKey?: number;
   restoreDraftContent?: string;
+  insertDraftTextKey?: number;
+  insertDraftTextContent?: string;
 }>();
 
 const emit = defineEmits<{
@@ -513,6 +515,33 @@ watch(
     richInput.replaceWithText(props.restoreDraftContent ?? "");
     clearComposerContextState();
   },
+);
+
+watch(
+  () => props.insertDraftTextKey ?? 0,
+  (key, previousKey) => {
+    if (key === previousKey || key <= 0) return;
+    const text = props.insertDraftTextContent ?? "";
+    if (!text) return;
+    if (hasPending.value) {
+      const el = textarea.value;
+      const start = el?.selectionStart ?? inputValue.value.length;
+      const end = el?.selectionEnd ?? start;
+      inputValue.value = `${inputValue.value.slice(0, start)}${text}${inputValue.value.slice(end)}`;
+      const nextOffset = start + text.length;
+      richInput.inputSelection.value = nextOffset;
+      void nextTick(() => {
+        textarea.value?.focus();
+        textarea.value?.setSelectionRange(nextOffset, nextOffset);
+        queueResize();
+      });
+      return;
+    }
+    const offset = richInput.serializedText.value.length;
+    richInput.replaceRange(offset, offset, [textPart(text)]);
+    clearComposerContextState();
+  },
+  { immediate: true },
 );
 
 onBeforeUnmount(() => {

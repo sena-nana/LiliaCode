@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import {
   createDraftOrphan,
   createDraftTask,
@@ -11,15 +11,22 @@ const props = defineProps<{
 }>();
 
 const router = useRouter();
+const route = useRoute();
 
 onMounted(async () => {
   if (props.projectId) {
     const draft = createDraftTask(props.projectId);
-    await router.replace(`/popup/projects/${props.projectId}/tasks/${draft.id}`);
+    await router.replace({
+      path: `/popup/projects/${props.projectId}/tasks/${draft.id}`,
+      query: route.query,
+    });
     return;
   }
   const draft = createDraftOrphan();
-  await router.replace(`/popup/chats/${draft.id}`);
+  await router.replace({
+    path: `/popup/chats/${draft.id}`,
+    query: route.query,
+  });
 });
 </script>
 

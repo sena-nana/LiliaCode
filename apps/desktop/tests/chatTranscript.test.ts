@@ -313,3 +313,69 @@ describe("ChatTranscript scrollbar visibility", () => {
     });
   });
 });
+
+describe("ChatTranscript agent selection toolbar", () => {
+  it("拖选 Agent 回复后显示工具栏并可引用", async () => {
+    const view = render(ChatTranscript, {
+      props: {
+        timelineEvents: [
+          timelineEvent({
+            id: "assistant-1",
+            kind: "message",
+            payload: { role: "assistant", content: "这是一段可操作文本" },
+          }),
+        ],
+        emptyHeadline: "今天想做什么？",
+      },
+    });
+    const walker = document.createTreeWalker(view.container, NodeFilter.SHOW_TEXT);
+    let textNode = walker.nextNode() as Text | null;
+    while (textNode && !textNode.textContent?.includes("可操作文本")) {
+      textNode = walker.nextNode() as Text | null;
+    }
+    expect(textNode?.textContent).toContain("可操作文本");
+    const range = document.createRange();
+    const start = textNode!.textContent!.indexOf("可操作文本");
+    range.setStart(textNode!, start);
+    range.setEnd(textNode!, start + "可操作文本".length);
+    Object.defineProperty(range, "getBoundingClientRect", {
+      configurable: true,
+      value: vi.fn(() => ({
+        x: 40,
+        y: 80,
+        left: 40,
+        top: 80,
+        right: 160,
+        bottom: 100,
+        width: 120,
+        height: 20,
+        toJSON: () => ({}),
+      })),
+    });
+    mockElementRect(view.container.querySelector(".chat-transcript-frame") as HTMLElement, {
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 300,
+      width: 400,
+      height: 300,
+    });
+
+    const selectable = view.container.querySelector("[data-agent-selectable='true']");
+    expect(selectable).toBeInstanceOf(HTMLElement);
+    (selectable as HTMLElement).dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      composed: true,
+    }));
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    await nextTick();
+    await nextTick();
+
+    expect(view.getByRole("toolbar", { name: "Agent 选中文本操作" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "复制" })).toHaveAttribute("title", "复制");
+    await fireEvent.click(view.getByRole("button", { name: "引用" }));
+    expect(view.emitted("insert-draft-text")).toEqual([["> 可操作文本\n\n"]]);
+  });
+});

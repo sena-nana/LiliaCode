@@ -55,6 +55,8 @@ export function useTaskComposerController(options: {
   const userSendScrollKey = ref(0);
   const restoreDraftKey = ref(0);
   const restoreDraftContent = ref("");
+  const insertDraftTextKey = ref(0);
+  const insertDraftTextContent = ref("");
   const pendingAskUser = useAskUserForTask(() => props.taskId);
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
@@ -164,6 +166,12 @@ export function useTaskComposerController(options: {
 
   function onInsertGuide(todo: TaskTodo) {
     void guideDispatch.dispatchGuide(todo);
+  }
+
+  function onInsertDraftText(text: string) {
+    if (!text) return;
+    insertDraftTextContent.value = text;
+    insertDraftTextKey.value += 1;
   }
 
   async function onInterrupt() {
@@ -381,6 +389,8 @@ export function useTaskComposerController(options: {
     userSendScrollKey,
     restoreDraftKey,
     restoreDraftContent,
+    insertDraftTextKey,
+    insertDraftTextContent,
     pendingAskUser,
     pendingAskUsers,
     pendingToolConsent,
@@ -394,6 +404,7 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onInsertGuide,
+    onInsertDraftText,
     onInterrupt,
     onResolveAskUser,
     onResolveToolConsent,
@@ -415,7 +426,7 @@ function stripRestoredAttachmentReferences(
 ): string {
   let next = content;
   for (const attachment of attachments) {
-    next = next.replaceAll(serializeAttachmentReference(attachment), "");
+    next = next.split(serializeAttachmentReference(attachment)).join("");
   }
   return next.replace(/[ \t]{2,}/g, " ").trim();
 }

@@ -2401,6 +2401,52 @@ button.ghost:hover {
   height: 0;
 }
 
+.agent-selection-toolbar {
+  position: fixed;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  user-select: none;
+}
+
+.agent-selection-toolbar__button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-selection-toolbar__button:hover,
+.agent-selection-toolbar__button:focus-visible {
+  background: var(--bg-hover);
+  color: var(--accent);
+  filter: none;
+}
+
+.agent-selection-toolbar-enter-active,
+.agent-selection-toolbar-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.agent-selection-toolbar-enter-from,
+.agent-selection-toolbar-leave-to {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
 .scroll-map {
   width: 10px;
   opacity: 0;

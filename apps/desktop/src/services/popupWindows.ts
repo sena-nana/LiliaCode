@@ -17,8 +17,14 @@ export function rememberPopupLastProject(projectId: string): Promise<void> {
   return invoke<void>("popup_remember_last_project", { projectId });
 }
 
-export function openPopupNewChat(projectId?: string | null): Promise<void> {
-  return invoke<void>("popup_open_new_chat", { projectId: projectId ?? null });
+export function openPopupNewChat(
+  projectId?: string | null,
+  initialDraftContent?: string | null,
+): Promise<void> {
+  return invoke<void>("popup_open_new_chat", {
+    projectId: projectId ?? null,
+    initialDraftContent: initialDraftContent ?? null,
+  });
 }
 
 export function openPopupTask(

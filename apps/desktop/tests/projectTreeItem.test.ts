@@ -140,6 +140,7 @@ describe("ProjectTreeItem", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
       projectId: "lilia",
+      initialDraftContent: null,
     }, undefined);
   });
 
@@ -154,6 +155,7 @@ describe("ProjectTreeItem", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
       projectId: "lilia",
+      initialDraftContent: null,
     }, undefined);
   });
 

@@ -6,6 +6,7 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { useRoute } from "vue-router";
 import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
@@ -27,6 +28,7 @@ const props = withDefaults(defineProps<{
 });
 
 const routeProps = props as TaskDetailRouteProps;
+const route = useRoute();
 const chatSurfaceRef = ref<InstanceType<typeof TaskDetailChatSurface> | null>(null);
 const chatPageRef = computed<HTMLElement | null>(() =>
   chatSurfaceRef.value?.chatPageRef ?? null,
@@ -81,6 +83,8 @@ const {
   userSendScrollKey,
   restoreDraftKey,
   restoreDraftContent,
+  insertDraftTextKey,
+  insertDraftTextContent,
   pendingAskUser,
   pendingToolConsent,
   pendingAgentActions,
@@ -88,6 +92,25 @@ const {
   pendingPlanApproval,
   nonInterruptMode,
 } = composerController;
+
+function queryString(value: unknown): string | null {
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
+  return typeof value === "string" ? value : null;
+}
+
+function decodeDraftTextParam(value: string | null): string {
+  if (!value) return "";
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch (err) {
+    console.error("[popup] decode initial draft failed", err);
+    return "";
+  }
+}
 
 const shouldLoadSuggestions = computed(() =>
   !!props.projectId &&
@@ -224,6 +247,16 @@ watch(
     }
   },
 );
+
+watch(
+  () => [props.taskId, route.query.draft] as const,
+  ([taskId, draft]) => {
+    if (props.variant !== "popup" || !taskId) return;
+    const text = decodeDraftTextParam(queryString(draft));
+    if (text) composerController.onInsertDraftText(text);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -246,6 +279,8 @@ watch(
     :user-send-scroll-key="userSendScrollKey"
     :restore-draft-key="restoreDraftKey"
     :restore-draft-content="restoreDraftContent"
+    :insert-draft-text-key="insertDraftTextKey"
+    :insert-draft-text-content="insertDraftTextContent"
     :pending-agent-actions="pendingAgentActions"
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
@@ -262,6 +297,7 @@ watch(
     @open-image="viewingImage = $event"
     @close-image="viewingImage = null"
     @insert-guide="composerController.onInsertGuide"
+    @insert-draft-text="composerController.onInsertDraftText"
     @send="composerController.onSend"
     @interrupt="composerController.onInterrupt"
     @update-composer="composerController.onComposerUpdate"

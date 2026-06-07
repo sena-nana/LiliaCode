@@ -14,6 +14,7 @@ const props = withDefaults(defineProps<{
 
 const content = computed(() => timelineFinalText(props.event));
 const hasContent = computed(() => content.value.trim().length > 0);
+const isAssistantMessage = computed(() => props.event.kind === "message");
 
 const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   <section
     class="timeline-card timeline-card--final-reply"
     :class="{ 'is-streaming': streaming }"
+    :data-agent-selectable="isAssistantMessage ? 'true' : undefined"
   >
     <MarkdownBlock
       v-if="hasContent"

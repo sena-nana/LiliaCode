@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -160,9 +161,21 @@ pub(crate) fn build_popup_window(
     Ok(())
 }
 
+fn route_with_initial_draft(route: String, initial_draft_content: Option<String>) -> String {
+    let Some(content) = initial_draft_content else {
+        return route;
+    };
+    if content.trim().is_empty() {
+        return route;
+    }
+    let encoded = URL_SAFE_NO_PAD.encode(content.as_bytes());
+    format!("{route}?draft={encoded}")
+}
+
 pub(crate) fn open_new_chat_window(
     app: &AppHandle,
     project_id: Option<String>,
+    initial_draft_content: Option<String>,
     allow_orphan_fallback: bool,
 ) -> Result<(), String> {
     let route = if let Some(project_id) = normalize_optional_string(project_id) {
@@ -177,6 +190,7 @@ pub(crate) fn open_new_chat_window(
     } else {
         "popup/chats/new".to_string()
     };
+    let route = route_with_initial_draft(route, initial_draft_content);
     build_popup_window(app, unique_popup_label("new"), route)
 }
 
@@ -184,7 +198,7 @@ pub(crate) fn open_popup_for_shortcut(app: &AppHandle) -> Result<(), String> {
     let project_id = load_popup_last_project_id(app).filter(|id| project_exists(app, id));
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Err(err) = open_new_chat_window(&app, project_id, true) {
+        if let Err(err) = open_new_chat_window(&app, project_id, None, true) {
             eprintln!("{err}");
         }
     });
@@ -272,8 +286,14 @@ pub fn popup_remember_last_project(app: AppHandle, project_id: String) -> Result
 }
 
 #[tauri::command]
-pub async fn popup_open_new_chat(app: AppHandle, project_id: Option<String>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || open_new_chat_window(&app, project_id, false))
+pub async fn popup_open_new_chat(
+    app: AppHandle,
+    project_id: Option<String>,
+    initial_draft_content: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_new_chat_window(&app, project_id, initial_draft_content, false)
+    })
         .await
         .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
