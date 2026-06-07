@@ -5,6 +5,10 @@ import { fileURLToPath, URL } from "node:url";
 
 // @ts-expect-error process 是 Node.js 全局对象
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process 是 Node.js 全局对象
+const port = Number.parseInt(process.env.LILIA_DEV_PORT ?? "1420", 10);
+// @ts-expect-error process 是 Node.js 全局对象
+const strictPort = process.env.LILIA_DEV_STRICT_PORT === "1";
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -24,14 +28,13 @@ export default defineConfig(async () => ({
   // 这些 Vite 选项面向 Tauri 开发，只在 `tauri dev` 或 `tauri build` 中生效
   clearScreen: false,
   server: {
-    port: 1420,
-    strictPort: true,
+    port: Number.isFinite(port) ? port : 1420,
+    strictPort,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
         }
       : undefined,
     watch: {
