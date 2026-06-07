@@ -160,7 +160,7 @@ fn build_binding_status(binding: Option<GitHubBindingMetadata>) -> GitHubBinding
     }
 }
 
-fn build_client() -> Result<Client, String> {
+pub(crate) fn build_client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(8))
         .build()
@@ -212,7 +212,7 @@ fn normalize_scope_list(scope: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn reconcile_binding(
+pub(crate) fn reconcile_binding(
     app: &AppHandle,
     token_required: bool,
 ) -> Result<(Option<GitHubBindingMetadata>, Option<String>), String> {
@@ -229,7 +229,7 @@ fn reconcile_binding(
     Ok((Some(binding), token))
 }
 
-fn github_request_headers(
+pub(crate) fn github_request_headers(
     builder: reqwest::blocking::RequestBuilder,
     token: Option<&str>,
 ) -> reqwest::blocking::RequestBuilder {

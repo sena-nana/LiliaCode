@@ -10,6 +10,7 @@ import type {
   ChatContextSearchResult,
   ChatMessage,
   CodexProfileSettings,
+  SuggestionItem,
   TaskTodo,
   TimelineDisplayInput,
   ToolConsentRequest,
@@ -107,6 +108,29 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
       createdAt: 1;
     },
     ChatMessage
+  >
+>;
+
+export type SuggestionItemIncludesGitHubActivityTypeTest = Assert<
+  Extends<
+    {
+      id: "sg-1";
+      projectId: "project-1";
+      taskIds: [];
+      source: "github";
+      githubActivities: [{
+        id: "gh-1";
+        repoFullName: "sena-nana/LiliaCode";
+        kind: "pull_request";
+        title: "PR #1: 接入 GitHub 活动";
+        url: "https://github.com/sena-nana/LiliaCode/pull/1";
+      }];
+      summary: "跟进 PR";
+      reason: "近期 PR 有新活动。";
+      prompt: "请继续跟进 PR #1。";
+      generatedAt: 1;
+    },
+    SuggestionItem
   >
 >;
 
