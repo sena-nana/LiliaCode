@@ -120,6 +120,14 @@ export function gitHubCloneRepo(
   return invoke<string>("github_clone_repo", { repo, parentDir });
 }
 
+export function isGitHubBindingExpiredError(err: unknown): boolean {
+  const message = String(err);
+  return message.includes("GitHub 绑定已失效") ||
+    message.includes("HTTP 401") ||
+    message.includes("HTTP 403") ||
+    message.toLowerCase().includes("bad credentials");
+}
+
 export function getProjectSettings(): Promise<ProjectSettings> {
   return invoke<ProjectSettings>("project_get_settings");
 }
@@ -177,7 +185,13 @@ export async function listGitHubRepos(page?: number | null): Promise<GitHubRepoP
   const firstPageRequestId = (pageNo ?? 1) === 1
     ? ++githubRepoFirstPageRequestId
     : githubRepoFirstPageRequestId;
-  const result = await invoke<GitHubRepoPage>("github_list_repos", { page: pageNo });
+  const result = await invoke<GitHubRepoPage>("github_list_repos", { page: pageNo })
+    .catch((err) => {
+      if (isGitHubBindingExpiredError(err)) {
+        clearGitHubRepoCache();
+      }
+      throw err;
+    });
   if (
     (pageNo ?? 1) === 1 &&
     generation === githubRepoCacheGeneration &&

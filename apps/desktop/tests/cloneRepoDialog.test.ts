@@ -1,10 +1,12 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { describe, expect, it } from "vitest";
 import CloneRepoDialog from "../src/components/sidebar/CloneRepoDialog.vue";
 import {
   mockInvoke,
   setMockGitHubBindingStatus,
   setMockGitHubRepos,
+  setMockGitHubReposError,
 } from "./tauriMock";
 
 function mockBoundGitHubAccount() {
@@ -20,9 +22,27 @@ function mockBoundGitHubAccount() {
   });
 }
 
+async function renderCloneRepoDialog() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/", component: { template: "<div />" } },
+      { path: "/settings", component: { template: "<div />" } },
+    ],
+  });
+  await router.push("/");
+  await router.isReady();
+  const view = render(CloneRepoDialog, {
+    global: {
+      plugins: [router],
+    },
+  });
+  return { ...view, router };
+}
+
 describe("CloneRepoDialog", () => {
   it("未绑定时支持 owner/repo 直接克隆", async () => {
-    const view = render(CloneRepoDialog);
+    const view = await renderCloneRepoDialog();
 
     await waitFor(() => {
       expect(
@@ -84,7 +104,7 @@ describe("CloneRepoDialog", () => {
       },
     });
 
-    const view = render(CloneRepoDialog);
+    const view = await renderCloneRepoDialog();
 
     await waitFor(() => {
       expect(view.getByPlaceholderText("搜索仓库，或直接输入 owner/repo")).toBeInTheDocument();
@@ -115,4 +135,30 @@ describe("CloneRepoDialog", () => {
       ).toBe(true);
     });
   });
+
+  it("仓库列表遇到失效绑定时提示重新绑定入口", async () => {
+    mockBoundGitHubAccount();
+    setMockGitHubReposError("GitHub 绑定已失效，请重新绑定");
+
+    const view = await renderCloneRepoDialog();
+
+    await waitFor(() => {
+      expect(view.getByText("GitHub 绑定已失效，请重新绑定。")).toBeInTheDocument();
+    });
+
+    const input = view.getByPlaceholderText("搜索仓库，或直接输入 owner/repo");
+    await fireEvent.focus(input);
+
+    expect(
+      view.getByText("GitHub 绑定已失效，请重新绑定后再加载账号仓库。"),
+    ).toBeInTheDocument();
+
+    await fireEvent.click(view.getAllByRole("button", { name: "重新绑定 GitHub" })[0]!);
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/settings");
+      expect(view.router.currentRoute.value.query.tab).toBe("project");
+    });
+  });
+
 });

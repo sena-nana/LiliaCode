@@ -262,6 +262,7 @@ let githubDeviceFlowPollQueue: Array<Record<string, unknown>> = [];
 let githubRepoPages: Record<number, { items: unknown[]; nextPage: number | null }> = {
   1: { items: [], nextPage: null },
 };
+let githubReposError: string | null = null;
 let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
 let nextPopupSettingsError: string | null = null;
 let popupLastProjectId: string | null = null;
@@ -485,6 +486,7 @@ export function resetTauriMockData() {
   };
   githubDeviceFlowPollQueue = [];
   githubRepoPages = { 1: { items: [], nextPage: null } };
+  githubReposError = null;
   popupWindowSettings = { shortcut: null };
   nextPopupSettingsError = null;
   popupLastProjectId = null;
@@ -868,6 +870,10 @@ export function setMockGitHubRepos(
   );
 }
 
+export function setMockGitHubReposError(message: string | null) {
+  githubReposError = message;
+}
+
 export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
@@ -977,6 +983,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
 
     case "github_list_repos": {
+      if (githubReposError) {
+        throw new Error(githubReposError);
+      }
       const page = typeof args.page === "number" ? args.page : 1;
       const result = githubRepoPages[page] ?? { items: [], nextPage: null };
       return {

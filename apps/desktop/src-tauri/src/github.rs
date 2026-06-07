@@ -487,6 +487,15 @@ pub fn github_list_repos(app: AppHandle, page: Option<u32>) -> Result<GitHubRepo
     .send()
     .map_err(|e| format!("读取 GitHub 仓库失败：{e}"))?;
 
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED
+        || response.status() == reqwest::StatusCode::FORBIDDEN
+    {
+        return Err(format!(
+            "GitHub 绑定已失效，请重新绑定（账号 {}）",
+            binding.login
+        ));
+    }
+
     if !response.status().is_success() {
         return Err(format!(
             "读取 GitHub 仓库失败：HTTP {}（账号 {}）",
