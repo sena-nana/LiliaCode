@@ -49,8 +49,24 @@ export const ORPHANS_LOADED = ref(false);
 
 const DRAFT_TASKS = new Map<string, Task>();
 const DRAFT_ORPHANS = new Map<string, OrphanConversation>();
+const DRAFT_TASK_PROMOTIONS = new Map<string, Promise<void>>();
+const DRAFT_ORPHAN_PROMOTIONS = new Map<string, Promise<void>>();
 const projectTaskLoads = new Map<string, Promise<void>>();
 let orphanLoad: Promise<void> | null = null;
+
+function rememberDraftPromotion(
+  promotions: Map<string, Promise<void>>,
+  id: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  const existing = promotions.get(id);
+  if (existing) return existing;
+  const promotion = run().finally(() => {
+    if (promotions.get(id) === promotion) promotions.delete(id);
+  });
+  promotions.set(id, promotion);
+  return promotion;
+}
 
 async function refreshTasks(projectId: string): Promise<void> {
   const rows = await invoke<TaskRow[]>("task_list", { projectId });
@@ -284,22 +300,24 @@ export function createDraftTask(projectId: string): Task {
 
 export async function promoteDraftTask(id: string, title: string): Promise<void> {
   const draft = DRAFT_TASKS.get(id);
-  if (!draft) return;
-  DRAFT_TASKS.delete(id);
-  const row = await invoke<TaskRow>("task_promote", {
-    id,
-    projectId: draft.projectId,
-    title: title || draft.title,
-    dependsOn: draft.dependsOn,
+  if (!draft) return DRAFT_TASK_PROMOTIONS.get(id);
+  return rememberDraftPromotion(DRAFT_TASK_PROMOTIONS, id, async () => {
+    const row = await invoke<TaskRow>("task_promote", {
+      id,
+      projectId: draft.projectId,
+      title: title || draft.title,
+      dependsOn: draft.dependsOn,
+    });
+    const task = rowToTask(row);
+    const existing = TASKS.value[draft.projectId] ?? [];
+    if (!existing.some((t) => t.id === id)) {
+      TASKS.value = {
+        ...TASKS.value,
+        [draft.projectId]: [task, ...existing],
+      };
+    }
+    DRAFT_TASKS.delete(id);
   });
-  const task = rowToTask(row);
-  const existing = TASKS.value[draft.projectId] ?? [];
-  if (!existing.some((t) => t.id === id)) {
-    TASKS.value = {
-      ...TASKS.value,
-      [draft.projectId]: [task, ...existing],
-    };
-  }
 }
 
 export async function archiveTask(taskId: string): Promise<boolean> {
@@ -394,26 +412,28 @@ export function createDraftOrphan(): OrphanConversation {
 
 export async function promoteDraftOrphan(id: string, title: string): Promise<void> {
   const draft = DRAFT_ORPHANS.get(id);
-  if (!draft) return;
-  DRAFT_ORPHANS.delete(id);
-  const row = await invoke<TaskRow>("task_promote", {
-    id,
-    projectId: null,
-    title: title || draft.title,
-    dependsOn: [],
+  if (!draft) return DRAFT_ORPHAN_PROMOTIONS.get(id);
+  return rememberDraftPromotion(DRAFT_ORPHAN_PROMOTIONS, id, async () => {
+    const row = await invoke<TaskRow>("task_promote", {
+      id,
+      projectId: null,
+      title: title || draft.title,
+      dependsOn: [],
+    });
+    if (!ORPHAN_LIST.value.some((o) => o.id === id)) {
+      ORPHAN_LIST.value = [
+        {
+          id: row.id,
+          sessionId: row.sessionId,
+          title: row.title,
+          createdAt: row.createdAt,
+          pinned: row.pinned,
+        },
+        ...ORPHAN_LIST.value,
+      ];
+    }
+    DRAFT_ORPHANS.delete(id);
   });
-  if (!ORPHAN_LIST.value.some((o) => o.id === id)) {
-    ORPHAN_LIST.value = [
-      {
-        id: row.id,
-        sessionId: row.sessionId,
-        title: row.title,
-        createdAt: row.createdAt,
-        pinned: row.pinned,
-      },
-      ...ORPHAN_LIST.value,
-    ];
-  }
 }
 
 export async function reorderTasks(

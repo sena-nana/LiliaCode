@@ -19,6 +19,7 @@ import {
   setMockActiveBackend,
   setMockComposerStateHandler,
 } from "./tauriMock";
+import { createDraftTask } from "../src/services/tasksStore";
 import { createTodo, updateTodo } from "../src/services/todos";
 import {
   respondConsent,
@@ -34,6 +35,22 @@ async function renderTaskDetail() {
     props: {
       projectId: "lilia",
       taskId: "t-002",
+    },
+    global: {
+      plugins: [router],
+    },
+  });
+}
+
+async function renderProjectDraftTaskDetail(taskId: string) {
+  const router = createLiliaRouter(createMemoryHistory());
+  await router.push(`/projects/lilia/tasks/${taskId}`);
+  await router.isReady();
+
+  return render(TaskDetail, {
+    props: {
+      projectId: "lilia",
+      taskId,
     },
     global: {
       plugins: [router],
@@ -178,6 +195,35 @@ describe("chat scheduler", () => {
         model: "gpt-5.5",
       }),
     });
+  });
+
+  it("Codex 项目草稿首条消息会先提升草稿再发送", async () => {
+    setMockActiveBackend("codex");
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await sendText(view, "用 Codex 开始草稿对话");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(promote?.[1]).toMatchObject({
+      id: draft.id,
+      projectId: "lilia",
+      title: "用 Codex 开始草稿对话",
+    });
+    expect(send?.[1]).toMatchObject({
+      taskId: draft.id,
+      composer: expect.objectContaining({
+        backend: "codex",
+        model: "gpt-5.5",
+      }),
+    });
+    expect(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "task_promote"))
+      .toBeLessThan(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message"));
   });
 
   it("composer 尚未加载完成时发送会等待后端状态再发给 agent", async () => {
