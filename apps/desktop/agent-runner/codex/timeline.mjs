@@ -46,6 +46,19 @@ export function codexTimelineKindForItem(item) {
   }
 }
 
+function codexHistoryTimelineKindForItem(item) {
+  switch (getCodexItemType(item)) {
+    case "agentMessage":
+      return { kind: "message", subkind: "assistant" };
+    case "userMessage":
+      return { kind: "message", subkind: "user" };
+    case "plan":
+      return item?.text ? { kind: "plan", subkind: "history" } : { kind: "todo_list" };
+    default:
+      return codexTimelineKindForItem(item);
+  }
+}
+
 export function summarizeCodexTodoList(items) {
   if (!Array.isArray(items)) return "";
   return items
@@ -80,6 +93,8 @@ function copyDefinedFields(target, source, fields) {
 
 export function codexTimelineTitle(kind, item, eventType) {
   switch (kind) {
+    case "message":
+      return item?.type === "userMessage" ? "用户输入" : "Assistant";
     case "reasoning":
       return "Reasoning";
     case "command":
@@ -92,6 +107,8 @@ export function codexTimelineTitle(kind, item, eventType) {
       return shortText(item.query, 200) || "Web search";
     case "todo_list":
       return eventType === "item.completed" ? "Plan completed" : "Plan";
+    case "plan":
+      return "Codex plan";
     case "error":
       return "Error";
     default:
@@ -101,6 +118,8 @@ export function codexTimelineTitle(kind, item, eventType) {
 
 export function codexTimelineSummary(kind, item) {
   switch (kind) {
+    case "message":
+      return shortText(pickCodexMessageText(item), 1200) || "";
     case "reasoning":
       return shortText(item.text || item.summary?.join?.("\n"), 1200) || "";
     case "command":
@@ -113,6 +132,8 @@ export function codexTimelineSummary(kind, item) {
       return shortText(item.query, 1200) || "";
     case "todo_list":
       return summarizeCodexTodoList(item.items);
+    case "plan":
+      return shortText(item.text, 1200) || "";
     case "error":
       return shortText(item.message, 1200) || "";
     default:
@@ -129,6 +150,15 @@ export function codexTimelinePayload(kind, subkind, item, eventType) {
   };
   if (subkind) base.subkind = subkind;
   switch (kind) {
+    case "message":
+      return {
+        ...base,
+        role: subkind === "user" ? "user" : "assistant",
+        content: pickCodexMessageText(item),
+        clientId: item.clientId,
+        phase: item.phase,
+        memoryCitation: item.memoryCitation,
+      };
     case "reasoning":
       return { ...base, text: item.text, summary: item.summary, content: item.content };
     case "command":
@@ -167,11 +197,33 @@ export function codexTimelinePayload(kind, subkind, item, eventType) {
       return { ...base, query: item.query };
     case "todo_list":
       return { ...base, items: item.items, explanation: item.explanation };
+    case "plan":
+      return { ...base, source: "Codex Plan", plan: item.text, approved: true };
     case "error":
       return { ...base, message: item.message };
     default:
       return base;
   }
+}
+
+export function pickCodexMessageText(item) {
+  if (!item) return "";
+  if (typeof item.text === "string") return item.text;
+  if (typeof item.content === "string") return item.content;
+  if (Array.isArray(item.content)) {
+    return item.content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (!isRecord(part)) return "";
+        if (typeof part.text === "string") return part.text;
+        if (typeof part.content === "string") return part.content;
+        if (typeof part.path === "string") return part.path;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
 }
 
 export function recordCodexPlanMirror(item, ctx) {
@@ -265,6 +317,66 @@ export function emitCodexItemTimeline(eventType, item, ctx = null) {
   if (kind === "todo_list" && Array.isArray(item?.items)) {
     ctx.protocol.emit({ type: "todo_list", items: item.items });
   }
+}
+
+function secondsToMillis(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.trunc(value * 1000)
+    : null;
+}
+
+function codexHistoryStatusForItem(turn, item) {
+  const itemStatus = stringOrNull(item?.status);
+  if (itemStatus) return normalizeTimelineStatus(itemStatus);
+  const status = stringOrNull(turn?.status);
+  if (status === "failed") return "error";
+  if (status === "interrupted") return "cancelled";
+  if (status === "completed") return "success";
+  return normalizeTimelineStatus(status) || "info";
+}
+
+export function codexHistoryTimelineEventForItem(threadId, turn, item, itemIndex = 0) {
+  const turnId = stringOrNull(turn?.id);
+  const itemId = stringOrNull(item?.id);
+  if (!threadId || !turnId || !itemId) return null;
+  const route = codexHistoryTimelineKindForItem(item);
+  if (!route) return null;
+  const { kind, subkind = null } = route;
+  const startedAt = secondsToMillis(turn?.startedAt);
+  const completedAt = secondsToMillis(turn?.completedAt);
+  const createdAt = (startedAt ?? completedAt ?? Date.now()) + itemIndex;
+  const updatedAt = completedAt ?? createdAt;
+  const payload = codexTimelinePayload(kind, subkind, item, "history");
+  return {
+    kind,
+    status: codexHistoryStatusForItem(turn, item),
+    title: codexTimelineTitle(kind, item, "history"),
+    summary: codexTimelineSummary(kind, item),
+    payload: {
+      ...payload,
+      history: true,
+      threadId,
+      turnId,
+      itemId,
+    },
+    sourceId: `codex-history:${threadId}:${turnId}:${itemId}`,
+    turnIdOverride: turnId,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function codexHistoryTimelineEvents(threadId, turns) {
+  if (!threadId || !Array.isArray(turns)) return [];
+  const out = [];
+  for (const turn of turns) {
+    if (!isRecord(turn) || !Array.isArray(turn.items)) continue;
+    turn.items.forEach((item, index) => {
+      const event = codexHistoryTimelineEventForItem(threadId, turn, item, index);
+      if (event) out.push(event);
+    });
+  }
+  return out;
 }
 
 export function emitCodexTurnTimeline(eventType, ev, ctx) {

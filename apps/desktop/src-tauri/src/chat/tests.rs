@@ -75,6 +75,39 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn timeline_runtime_event_can_override_turn_and_timestamps_for_history() {
+        let input = timeline_input_from_runtime_event(
+            &turn_context(),
+            &AgentRuntimeEvent::Timeline {
+                event: json!({
+                    "kind": "message",
+                    "status": "success",
+                    "title": "Assistant",
+                    "summary": "历史回复",
+                    "payload": {
+                        "role": "assistant",
+                        "content": "历史回复",
+                        "history": true
+                    },
+                    "sourceId": "codex-history:thread-1:codex-turn-1:item-1",
+                    "turnIdOverride": "codex-turn-1",
+                    "createdAt": 10_000,
+                    "updatedAt": 12_000
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.id,
+            Some("task-1:codex-turn-1:codex-history:thread-1:codex-turn-1:item-1".to_string())
+        );
+        assert_eq!(input.turn_id, Some("codex-turn-1".to_string()));
+        assert_eq!(input.created_at, Some(10_000));
+        assert_eq!(input.updated_at, Some(12_000));
+    }
+
+    #[test]
     fn runner_error_duplicate_detection_uses_assistant_error_message() {
         let input = timeline_input_from_runtime_event(
             &turn_context(),

@@ -11,6 +11,7 @@ import {
 } from "../agent-runner/claude/permissions.mjs";
 import { maybeHandleCodexApprovalRequest } from "../agent-runner/codex/permissions.mjs";
 import {
+  codexHistoryTimelineEvents,
   createCodexRunContext,
   mapCodexEventToNdjson,
   normalizeCodexAppServerEvent,
@@ -23,6 +24,7 @@ import {
   runCodexAppServer,
   maybeHandleCodexServerRequest,
   startCodexAppServerThread,
+  syncCodexThreadHistory,
   updateCodexThreadSettings,
   applyCodexRuntimePermission,
   flushCodexRuntimeSettings,
@@ -935,6 +937,127 @@ describe("Codex app-server mapping", () => {
     expect(calls[0].params.includePlanTool).toBeUndefined();
   });
 
+  it("syncs Codex thread history only when resuming a thread", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/turns/list") {
+          return {
+            data: [{
+              id: "turn-old",
+              status: "completed",
+              startedAt: 10,
+              completedAt: 11,
+              items: [{ type: "agentMessage", id: "msg-1", text: "旧回复" }],
+            }],
+            nextCursor: null,
+            backwardsCursor: null,
+          };
+        }
+        return {};
+      },
+    };
+
+    await expect(syncCodexThreadHistory(
+      server as any,
+      "thread-1",
+      { resumeSessionId: "thread-1" },
+      protocol,
+    )).resolves.toEqual({ ok: true, skipped: false, count: 1 });
+    await expect(syncCodexThreadHistory(
+      server as any,
+      "thread-2",
+      {},
+      protocol,
+    )).resolves.toEqual({ ok: true, skipped: true, count: 0 });
+
+    expect(calls).toEqual([{
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-1",
+        limit: 50,
+        sortDirection: "asc",
+        itemsView: "full",
+      },
+    }]);
+    expect(json()).toEqual([
+      {
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "message",
+          sourceId: "codex-history:thread-1:turn-old:msg-1",
+          turnIdOverride: "turn-old",
+          createdAt: 10_000,
+          updatedAt: 11_000,
+          payload: expect.objectContaining({
+            history: true,
+            threadId: "thread-1",
+            turnId: "turn-old",
+            itemId: "msg-1",
+          }),
+        }),
+      },
+      {
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "diagnostic",
+          status: "info",
+          title: "Codex history synced",
+        }),
+      },
+    ]);
+  });
+
+  it("continues Codex run when history sync fails", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
+        if (method === "thread/turns/list") throw new Error("history unavailable");
+        if (method === "turn/start") return { turn: { id: "turn-new" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "hi",
+      resumeSessionId: "thread-1",
+      permission: "ask",
+      planMode: false,
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    const historyIndex = calls.findIndex((call) => call.method === "thread/turns/list");
+    const turnIndex = calls.findIndex((call) => call.method === "turn/start");
+    expect(historyIndex).toBeGreaterThan(-1);
+    expect(historyIndex).toBeLessThan(turnIndex);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "error" &&
+      line.event.title === "Codex history sync failed"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
   it("applies Codex sticky settings before the first turn", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
@@ -1067,6 +1190,104 @@ describe("Codex app-server mapping", () => {
         sandboxPolicy: { type: "readOnly" },
       },
     });
+  });
+
+  it("maps Codex thread history turns into stable timeline events", () => {
+    const events = codexHistoryTimelineEvents("thread-1", [{
+      id: "turn-old",
+      status: "completed",
+      startedAt: 10,
+      completedAt: 12,
+      items: [{
+        type: "userMessage",
+        id: "user-1",
+        clientId: "client-1",
+        content: [{ type: "text", text: "继续修复历史恢复" }],
+      }, {
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "yarn test",
+        cwd: "C:/repo",
+        status: "completed",
+        aggregatedOutput: "ok",
+        exitCode: 0,
+        durationMs: 120,
+      }, {
+        type: "mcpToolCall",
+        id: "mcp-1",
+        server: "docs",
+        tool: "search",
+        status: "completed",
+        arguments: { query: "thread/turns/list" },
+        result: { hits: 1 },
+        error: null,
+      }, {
+        type: "webSearch",
+        id: "search-1",
+        query: "codex history",
+      }, {
+        type: "agentMessage",
+        id: "assistant-1",
+        text: "历史已恢复",
+      }],
+    }]);
+
+    expect(events).toHaveLength(5);
+    expect(events[0]).toMatchObject({
+      kind: "message",
+      status: "success",
+      title: "用户输入",
+      summary: "继续修复历史恢复",
+      sourceId: "codex-history:thread-1:turn-old:user-1",
+      turnIdOverride: "turn-old",
+      createdAt: 10_000,
+      updatedAt: 12_000,
+      payload: {
+        history: true,
+        threadId: "thread-1",
+        turnId: "turn-old",
+        itemId: "user-1",
+        role: "user",
+        content: "继续修复历史恢复",
+      },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "command",
+      status: "success",
+      payload: {
+        command: "yarn test",
+        aggregatedOutput: "ok",
+        exitCode: 0,
+      },
+    });
+    expect(events[2]).toMatchObject({
+      kind: "mcp",
+      payload: {
+        server: "docs",
+        tool: "search",
+        arguments: { query: "thread/turns/list" },
+      },
+    });
+    expect(events[3]).toMatchObject({
+      kind: "search",
+      payload: { query: "codex history" },
+    });
+    expect(events[4]).toMatchObject({
+      kind: "message",
+      title: "Assistant",
+      summary: "历史已恢复",
+      payload: {
+        role: "assistant",
+        content: "历史已恢复",
+      },
+    });
+    expect(events.map((event) => event.createdAt)).toEqual([
+      10_000,
+      10_001,
+      10_002,
+      10_003,
+      10_004,
+    ]);
   });
 
   it("builds Codex plan collaboration mode from preset or fallback", async () => {

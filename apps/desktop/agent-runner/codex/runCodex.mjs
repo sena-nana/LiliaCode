@@ -19,6 +19,7 @@ import {
 } from "./permissions.mjs";
 import {
   createCodexRunContext,
+  codexHistoryTimelineEvents,
   emitCodexPlanApprovalRequired,
   finalizeCodexRunContext,
   mapCodexEventToNdjson,
@@ -249,6 +250,60 @@ export async function readCodexPlanModePreset(server) {
   }
 }
 
+function readCodexTurns(result) {
+  if (!isRecord(result)) return [];
+  return Array.isArray(result.data) ? result.data.filter(isRecord) : [];
+}
+
+export async function syncCodexThreadHistory(server, threadId, cmd, protocol) {
+  if (!cmd.resumeSessionId || !threadId) return { ok: true, skipped: true, count: 0 };
+  try {
+    const result = await server.request("thread/turns/list", {
+      threadId,
+      limit: 50,
+      sortDirection: "asc",
+      itemsView: "full",
+    });
+    const events = codexHistoryTimelineEvents(threadId, readCodexTurns(result));
+    for (const event of events) protocol.emitTimeline(event);
+    protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "info",
+      title: "Codex history synced",
+      summary: events.length > 0
+        ? `已同步 ${events.length} 条 Codex 历史事件`
+        : "没有需要同步的 Codex 历史事件",
+      payload: {
+        backend: "codex",
+        subkind: "history_sync",
+        threadId,
+        eventCount: events.length,
+        nextCursor: isRecord(result) ? result.nextCursor ?? null : null,
+      },
+      sourceId: `codex-history:${threadId}:sync`,
+      turnIdOverride: `codex-history:${threadId}`,
+    });
+    return { ok: true, skipped: false, count: events.length };
+  } catch (err) {
+    protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex history sync failed",
+      summary: "thread/turns/list 失败，已跳过历史回补并继续当前 turn。",
+      payload: {
+        backend: "codex",
+        subkind: "history_sync",
+        method: "thread/turns/list",
+        threadId,
+        error: err?.message || String(err),
+      },
+      sourceId: `codex-history:${threadId}:sync-error`,
+      turnIdOverride: `codex-history:${threadId}`,
+    });
+    return { ok: false, skipped: false, count: 0 };
+  }
+}
+
 export function buildCodexCollaborationMode(kind, model, preset = null) {
   const fallbackModel = stringOrNull(model) || stringOrNull(preset?.model) || "gpt-5";
   return {
@@ -329,6 +384,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
       cmd,
       context.protocol,
     );
+    await syncCodexThreadHistory(server, threadId, cmd, context.protocol);
     const selectedModel = normalizeCodexSettings(cmd).model || session.model || null;
     const planPreset = cmd.planMode === true ? await readCodexPlanModePreset(server) : null;
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);

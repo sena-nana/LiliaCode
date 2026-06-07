@@ -97,6 +97,7 @@ fn resolve_turn_seq(
     conn: &Connection,
     task_id: &str,
     turn_id: Option<&str>,
+    insert_before_created_at: Option<i64>,
 ) -> Result<i64, String> {
     let existing: Option<i64> = conn
         .query_row(
@@ -111,6 +112,35 @@ fn resolve_turn_seq(
     if let Some(seq) = existing {
         return Ok(seq);
     }
+    if let Some(created_at) = insert_before_created_at {
+        let insert_at: Option<i64> = conn
+            .query_row(
+                r#"SELECT turn_seq
+                   FROM (
+                     SELECT turn_seq, MIN(created_at) AS first_created_at
+                     FROM agent_timeline_events
+                     WHERE task_id = ?1
+                     GROUP BY turn_seq
+                   )
+                   WHERE first_created_at > ?2
+                   ORDER BY first_created_at ASC, turn_seq ASC
+                   LIMIT 1"#,
+                params![task_id, created_at],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("agent_timeline: 查询 history 插入位置失败：{e}"))?;
+        if let Some(seq) = insert_at {
+            conn.execute(
+                r#"UPDATE agent_timeline_events
+                   SET turn_seq = turn_seq + 1
+                   WHERE task_id = ?1 AND turn_seq >= ?2"#,
+                params![task_id, seq],
+            )
+            .map_err(|e| format!("agent_timeline: 移动 history 后续 turn_seq 失败：{e}"))?;
+            return Ok(seq);
+        }
+    }
     let max: Option<i64> = conn
         .query_row(
             r#"SELECT MAX(turn_seq) FROM agent_timeline_events WHERE task_id = ?1"#,
@@ -121,6 +151,14 @@ fn resolve_turn_seq(
         .map_err(|e| format!("agent_timeline: 查询 max(turn_seq) 失败：{e}"))?
         .flatten();
     Ok(max.map_or(0, |m| m + 1))
+}
+
+fn should_insert_by_created_at(input: &AgentTimelineEventInput) -> bool {
+    input
+        .payload
+        .get("history")
+        .and_then(|value| value.as_bool())
+        == Some(true)
 }
 
 fn next_intra_turn_order(conn: &Connection, task_id: &str, turn_seq: i64) -> Result<i64, String> {
@@ -142,6 +180,7 @@ pub fn insert(
     input: AgentTimelineEventInput,
 ) -> Result<AgentTimelineEvent, String> {
     let now = now_millis();
+    let insert_by_created_at = should_insert_by_created_at(&input);
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let existing: Option<(i64, i64, i64)> = conn
         .query_row(
@@ -153,10 +192,17 @@ pub fn insert(
         .optional()
         .map_err(|e| format!("agent_timeline_insert: 查询已有事件位置失败：{e}"))?;
 
+    let requested_created_at = input.created_at.unwrap_or(now);
     let (existing_created_at, turn_seq, intra_turn_order) = match existing {
         Some((created_at, turn_seq, intra)) => (Some(created_at), turn_seq, intra),
         None => {
-            let turn_seq = resolve_turn_seq(conn, &input.task_id, input.turn_id.as_deref())?;
+            let insert_before_created_at = insert_by_created_at.then_some(requested_created_at);
+            let turn_seq = resolve_turn_seq(
+                conn,
+                &input.task_id,
+                input.turn_id.as_deref(),
+                insert_before_created_at,
+            )?;
             let intra = next_intra_turn_order(conn, &input.task_id, turn_seq)?;
             (None, turn_seq, intra)
         }
@@ -529,6 +575,42 @@ mod tests {
             .map(|e| e.id)
             .collect();
         assert_eq!(listed, vec!["t2-late", "t2-early", "t1-first", "t1-second"],);
+    }
+
+    #[test]
+    fn history_event_with_older_created_at_is_inserted_before_current_turn() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_timeline_schema(&conn);
+
+        insert(
+            &conn,
+            input("current-message", "task-1", Some("turn-current"), "message", 10_000),
+        )
+        .unwrap();
+
+        let mut history = input("history-message", "task-1", Some("codex-turn-old"), "message", 1_000);
+        history.backend = "codex".to_string();
+        history.payload = json!({
+            "history": true,
+            "threadId": "thread-1",
+            "turnId": "codex-turn-old",
+            "itemId": "msg-1"
+        });
+        let saved = insert(&conn, history).unwrap();
+
+        assert_eq!(saved.turn_seq, 0);
+        let listed: Vec<_> = list(&conn, "task-1")
+            .unwrap()
+            .into_iter()
+            .map(|event| (event.id, event.turn_seq, event.intra_turn_order))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![
+                ("history-message".to_string(), 0, 0),
+                ("current-message".to_string(), 1, 0),
+            ]
+        );
     }
 
     #[test]

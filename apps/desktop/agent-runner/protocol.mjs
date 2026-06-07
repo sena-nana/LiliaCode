@@ -30,6 +30,20 @@ export function createProtocolEmitter({ write } = {}) {
     const summary = shortText(input.summary, 1200) || "";
     const payload = sanitizeTimelinePayload(input.payload);
     const sourceId = stringOrNull(input.sourceId);
+    if (
+      payload &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      input.payload &&
+      typeof input.payload === "object" &&
+      !Array.isArray(input.payload) &&
+      input.payload.history === true
+    ) {
+      for (const key of ["threadId", "turnId", "itemId"]) {
+        const value = stringOrNull(input.payload[key]);
+        if (value) payload[key] = value;
+      }
+    }
     const event = {
       kind,
       status,
@@ -38,6 +52,14 @@ export function createProtocolEmitter({ write } = {}) {
       payload: payload === undefined ? {} : payload,
     };
     if (sourceId) event.sourceId = sourceId;
+    const turnIdOverride = stringOrNull(input.turnIdOverride);
+    if (turnIdOverride) event.turnIdOverride = turnIdOverride;
+    if (typeof input.createdAt === "number" && Number.isFinite(input.createdAt)) {
+      event.createdAt = Math.trunc(input.createdAt);
+    }
+    if (typeof input.updatedAt === "number" && Number.isFinite(input.updatedAt)) {
+      event.updatedAt = Math.trunc(input.updatedAt);
+    }
     emit({ type: "timeline", event });
   }
 

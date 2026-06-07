@@ -44,20 +44,27 @@ pub(crate) fn timeline_input_from_runtime_event(
         .filter(|s| !s.is_empty());
     let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
     let source_id = obj.get("sourceId").and_then(|v| v.as_str());
-    let id = source_id.map(|sid| format!("{}:{}:{sid}", ctx.task_id, ctx.turn_id));
+    let turn_id = obj
+        .get("turnIdOverride")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| ctx.turn_id.clone());
+    let id = source_id.map(|sid| format!("{}:{}:{sid}", ctx.task_id, turn_id));
+    let created_at = obj.get("createdAt").and_then(|v| v.as_i64());
+    let updated_at = obj.get("updatedAt").and_then(|v| v.as_i64());
 
     Some(AgentTimelineEventInput {
         id,
         task_id: ctx.task_id.clone(),
-        turn_id: Some(ctx.turn_id.clone()),
+        turn_id: Some(turn_id),
         backend: ctx.backend.clone(),
         kind,
         status,
         title,
         summary,
         payload,
-        created_at: None,
-        updated_at: None,
+        created_at,
+        updated_at,
     })
 }
 
