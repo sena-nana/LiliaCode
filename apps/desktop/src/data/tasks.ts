@@ -22,6 +22,7 @@ export interface OrphanConversation {
   title: string;
   createdAt: number;
   pinned: boolean;
+  parentId: string | null;
 }
 
 interface TaskRow {
@@ -107,6 +108,7 @@ function rowToOrphan(r: TaskRow): OrphanConversation {
     title: r.title,
     createdAt: r.createdAt,
     pinned: r.pinned,
+    parentId: r.parentId,
   };
 }
 
@@ -281,7 +283,7 @@ export function resolveConversationRouteState(
   };
 }
 
-export function createDraftTask(projectId: string): Task {
+export function createDraftTask(projectId: string, parentId: string | null = null): Task {
   const id = `t-draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const draft: Task = {
     id,
@@ -291,7 +293,7 @@ export function createDraftTask(projectId: string): Task {
     status: "draft",
     createdAt: Date.now(),
     pinned: false,
-    parentId: null,
+    parentId,
     dependsOn: [],
   };
   DRAFT_TASKS.set(id, draft);
@@ -306,6 +308,7 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
       id,
       projectId: draft.projectId,
       title: title || draft.title,
+      parentId: draft.parentId,
       dependsOn: draft.dependsOn,
     });
     const task = rowToTask(row);
@@ -397,7 +400,7 @@ export function isDraftOrphan(id: string): boolean {
   return DRAFT_ORPHANS.has(id);
 }
 
-export function createDraftOrphan(): OrphanConversation {
+export function createDraftOrphan(parentId: string | null = null): OrphanConversation {
   const id = `o-draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const draft: OrphanConversation = {
     id,
@@ -405,6 +408,7 @@ export function createDraftOrphan(): OrphanConversation {
     title: "新对话",
     createdAt: Date.now(),
     pinned: false,
+    parentId,
   };
   DRAFT_ORPHANS.set(id, draft);
   return draft;
@@ -418,6 +422,7 @@ export async function promoteDraftOrphan(id: string, title: string): Promise<voi
       id,
       projectId: null,
       title: title || draft.title,
+      parentId: draft.parentId,
       dependsOn: [],
     });
     if (!ORPHAN_LIST.value.some((o) => o.id === id)) {
@@ -428,6 +433,7 @@ export async function promoteDraftOrphan(id: string, title: string): Promise<voi
           title: row.title,
           createdAt: row.createdAt,
           pinned: row.pinned,
+          parentId: row.parentId,
         },
         ...ORPHAN_LIST.value,
       ];

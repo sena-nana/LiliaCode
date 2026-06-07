@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { RouterLink } from "vue-router";
-import { Archive, ExternalLink, Pin } from "lucide-vue-next";
+import { Archive, ExternalLink, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
 import { vContextMenu } from "../../directives/contextMenu";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
 import { archiveTask, toggleTaskPin } from "../../services/tasksStore";
-import { openPopupTask } from "../../services/popupWindows";
+import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";
 
 type SidebarTask = Pick<Task, "id" | "title" | "pinned">;
 
@@ -33,14 +33,7 @@ const emit = defineEmits<{
 
 const confirming = ref(false);
 
-async function onArchiveClick(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  if (!confirming.value) {
-    confirming.value = true;
-    return;
-  }
-
+async function archiveCurrentTask() {
   try {
     const archived = await (props.archive ?? archiveTask)(props.task.id);
     confirming.value = false;
@@ -51,14 +44,29 @@ async function onArchiveClick(e: MouseEvent) {
   }
 }
 
-async function onPinClick(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
+async function toggleCurrentTaskPin() {
   try {
     await toggleTaskPin(props.task.id);
   } catch (err) {
     emit("error", `切换对话置顶失败：${String(err)}`);
   }
+}
+
+async function onArchiveClick(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!confirming.value) {
+    confirming.value = true;
+    return;
+  }
+
+  await archiveCurrentTask();
+}
+
+async function onPinClick(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  await toggleCurrentTaskPin();
 }
 
 function onRowLeave() {
@@ -73,6 +81,14 @@ async function openInPopup() {
   }
 }
 
+async function askInPopup() {
+  try {
+    await openPopupChildQuestion(props.task.id, props.projectId);
+  } catch (err) {
+    emit("error", `创建弹出窗口子对话失败：${String(err)}`);
+  }
+}
+
 function onAuxClick(e: MouseEvent) {
   if (e.button !== 1) return;
   e.preventDefault();
@@ -83,10 +99,30 @@ function onAuxClick(e: MouseEvent) {
 function buildMenu(): ContextMenuItem[] {
   return [
     {
-      id: "open-popup-task",
-      label: "在弹出窗口中打开",
+      id: "continue-popup-task",
+      label: "在弹出窗口继续",
       icon: ExternalLink,
       onSelect: () => openInPopup(),
+    },
+    {
+      id: "ask-popup-task",
+      label: "在弹出窗口询问",
+      icon: MessageSquarePlus,
+      onSelect: () => askInPopup(),
+    },
+    {
+      id: "pin-task",
+      label: props.task.pinned ? "取消置顶" : "置顶",
+      icon: Pin,
+      onSelect: () => toggleCurrentTaskPin(),
+    },
+    {
+      id: "archive-task",
+      label: "归档",
+      icon: Archive,
+      danger: true,
+      confirmLabel: "确认归档？再点一次",
+      onSelect: () => archiveCurrentTask(),
     },
   ];
 }

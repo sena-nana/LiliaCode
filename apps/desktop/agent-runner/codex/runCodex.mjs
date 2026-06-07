@@ -6,6 +6,12 @@ import {
   isLiliaAskUserTool,
 } from "../askUser.mjs";
 import {
+  codexQueryConversationContextDynamicTool,
+  conversationContextEnabled,
+  createConversationContextHandler,
+  isLiliaConversationContextTool,
+} from "../conversationContext.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
@@ -187,11 +193,15 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   };
   assignCodexSettingsParams(common, settings, cmd);
   if (!settings.permissionProfile) common.sandbox = mapCodexSandboxMode(permission);
+  const dynamicTools = [codexAskUserDynamicTool];
+  if (conversationContextEnabled(cmd.conversationContext)) {
+    dynamicTools.push(codexQueryConversationContextDynamicTool);
+  }
   if (resumeSessionId) {
     const resumed = await server.request("thread/resume", {
       threadId: resumeSessionId,
       ...common,
-      dynamicTools: [codexAskUserDynamicTool],
+      dynamicTools,
     });
     return {
       threadId: codexThreadIdFromResult(resumed, resumeSessionId),
@@ -200,7 +210,7 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   }
   const started = await server.request("thread/start", {
     ...common,
-    dynamicTools: [codexAskUserDynamicTool],
+    dynamicTools,
   });
   return {
     threadId: codexThreadIdFromResult(started),
@@ -345,11 +355,17 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
   if (method === "item/tool/call") {
     const params = isRecord(msg.params) ? msg.params : {};
     const toolName = stringOrNull(params.tool);
-    if (!isLiliaAskUserTool(toolName)) return false;
     const input = isRecord(params.arguments) ? params.arguments : {};
-    const output = await createCodexAskUserHandler(ctx.interactions.requestAskUser)(input);
+    let output = null;
+    if (isLiliaAskUserTool(toolName)) {
+      output = await createCodexAskUserHandler(ctx.interactions.requestAskUser)(input);
+    } else if (isLiliaConversationContextTool(toolName)) {
+      output = await createConversationContextHandler(ctx.cmd?.conversationContext)(input);
+    } else {
+      return false;
+    }
     server.respond(msg.id, {
-      success: output.cancelled !== true,
+      success: output.cancelled !== true && output.ok !== false,
       contentItems: [{ type: "inputText", text: JSON.stringify(output) }],
     });
     return true;
@@ -388,6 +404,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     const selectedModel = normalizeCodexSettings(cmd).model || session.model || null;
     const planPreset = cmd.planMode === true ? await readCodexPlanModePreset(server) : null;
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);
+    ctx.cmd = cmd;
     ctx.interactions = context.interactions;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
     ctx.settingsUpdatePromises = [];
