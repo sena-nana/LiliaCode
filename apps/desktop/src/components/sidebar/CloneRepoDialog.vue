@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { FolderOpen, Github, Lock, Sparkles } from "lucide-vue-next";
 import type {
   GitHubBindingStatus,
@@ -15,6 +16,7 @@ import {
   getProjectSettings,
   gitCloneRepo,
   gitHubCloneRepo,
+  isGitHubBindingExpiredError,
   listGitHubRepos,
   pickFolder,
   preloadGitHubRepos,
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   error: [msg: string];
 }>();
 
+const router = useRouter();
 const cloneInput = ref<{ focus: (options?: FocusOptions & { open?: boolean }) => void } | null>(null);
 const cloneBusy = ref(false);
 const cloneError = ref<string | null>(null);
@@ -38,11 +41,15 @@ const repoItems = ref<GitHubRepoSummary[]>([]);
 const repoDropdownOpen = ref(false);
 const repoLoading = ref(false);
 const repoLoadingMore = ref(false);
+const repoLoadError = ref<string | null>(null);
 const nextRepoPage = ref<number | null>(null);
 const selectedRepo = ref<GitHubRepoSummary | null>(null);
 
 const isBound = computed(() => bindingStatus.value?.state === "bound");
 const queryTrimmed = computed(() => query.value.trim());
+const githubBindingExpired = computed(() =>
+  cloneError.value?.includes("GitHub 绑定已失效") === true
+);
 
 function normalizeGitHubInput(input: string): string | null {
   const trimmed = input.trim().replace(/\/+$/, "");
@@ -68,10 +75,24 @@ function applyRepoPage(
   result: { items: GitHubRepoSummary[]; nextPage: number | null },
   append = false,
 ) {
+  repoLoadError.value = null;
   nextRepoPage.value = result.nextPage;
   repoItems.value = append
     ? dedupeRepos([...repoItems.value, ...result.items])
     : result.items;
+}
+
+function showRepoLoadError(err: unknown) {
+  const expired = isGitHubBindingExpiredError(err);
+  repoLoadError.value = expired
+    ? "GitHub 绑定已失效，请重新绑定后再加载账号仓库。"
+    : `仓库列表加载失败：${String(err)}`;
+  if (expired) {
+    cloneError.value = "GitHub 绑定已失效，请重新绑定。";
+  }
+  repoItems.value = [];
+  nextRepoPage.value = null;
+  selectedRepo.value = null;
 }
 
 const filteredRepos = computed(() => {
@@ -133,10 +154,7 @@ async function loadRepoPage(
       : await listGitHubRepos(page);
     applyRepoPage(result, append);
   } catch (err) {
-    if (!append && repoItems.value.length === 0) {
-      nextRepoPage.value = null;
-    }
-    throw err;
+    showRepoLoadError(err);
   } finally {
     if (showLoading) {
       repoLoading.value = false;
@@ -162,6 +180,7 @@ async function init() {
   cloneBusy.value = false;
   selectedRepo.value = null;
   repoDropdownOpen.value = false;
+  repoLoadError.value = null;
   repoItems.value = [];
   nextRepoPage.value = null;
   try {
@@ -189,6 +208,11 @@ async function init() {
   }
   await nextTick();
   cloneInput.value?.focus({ open: false });
+}
+
+async function openGitHubBindingSettings() {
+  emit("close");
+  await router.push({ path: "/settings", query: { tab: "project" } });
 }
 
 async function pickCloneParent() {
@@ -257,7 +281,11 @@ async function confirmClone() {
     emit("cloned", project);
     emit("close");
   } catch (err) {
-    cloneError.value = String(err);
+    if (isGitHubBindingExpiredError(err)) {
+      showRepoLoadError(err);
+    } else {
+      cloneError.value = String(err);
+    }
   } finally {
     cloneBusy.value = false;
   }
@@ -352,6 +380,7 @@ onMounted(() => {
                       手动输入
                     </span>
                   </button>
+                  <p v-else-if="repoLoadError" class="search-dropdown__empty">{{ repoLoadError }}</p>
                   <p v-else-if="repoLoading" class="search-dropdown__hint">正在加载仓库…</p>
                   <p v-else class="search-dropdown__empty">没有匹配仓库</p>
                 </template>
@@ -380,7 +409,17 @@ onMounted(() => {
             <p v-if="isBound && bindingStatus?.binding" class="plugins-create__hint">
               当前绑定账号：<code>{{ bindingStatus.binding.login }}</code>
             </p>
-            <p v-if="cloneError" class="plugins-create__error">{{ cloneError }}</p>
+            <div v-if="cloneError" class="plugins-create__error dialog__field-row">
+              <span>{{ cloneError }}</span>
+              <button
+                v-if="githubBindingExpired"
+                type="button"
+                class="ghost"
+                @click="openGitHubBindingSettings"
+              >
+                重新绑定 GitHub
+              </button>
+            </div>
           </div>
           <div class="dialog__actions">
             <button type="button" class="ghost" :disabled="cloneBusy" @click="emit('close')">取消</button>
