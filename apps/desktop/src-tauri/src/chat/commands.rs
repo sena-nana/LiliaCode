@@ -142,6 +142,22 @@ pub(crate) fn agent_interaction_response_payload(
     })
 }
 
+pub(crate) fn composer_permission_update_payload(
+    previous: Option<&ChatComposerState>,
+    next: &ChatComposerState,
+) -> Option<JsonValue> {
+    if !previous.is_some_and(|previous| previous.permission != next.permission) {
+        return None;
+    }
+    match next.permission.as_str() {
+        "full" | "readonly" | "ask" => Some(serde_json::json!({
+            "type": "settings_update",
+            "permission": next.permission,
+        })),
+        _ => None,
+    }
+}
+
 /// 把用户对统一 Agent interaction 的响应写回 runner 的 stdin。
 #[tauri::command]
 pub fn chat_respond_agent_interaction(
@@ -173,11 +189,19 @@ pub fn chat_get_composer_state(task_id: String, store: State<'_, ChatStore>) -> 
 
 #[tauri::command]
 pub fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatStore>) {
-    store
-        .composers
-        .lock()
-        .unwrap()
-        .insert(state.task_id.clone(), state);
+    let payload = {
+        let mut composers = store.composers.lock().unwrap();
+        let previous = composers.get(&state.task_id);
+        let payload = composer_permission_update_payload(previous, &state);
+        composers.insert(state.task_id.clone(), state.clone());
+        payload
+    };
+    let Some(payload) = payload else {
+        return;
+    };
+    if let Err(err) = write_runner_stdin(&store, &state.task_id, payload) {
+        eprintln!("[chat] runtime permission update failed: {err}");
+    }
 }
 
 #[tauri::command]

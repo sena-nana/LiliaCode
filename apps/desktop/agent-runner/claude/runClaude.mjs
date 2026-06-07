@@ -11,7 +11,12 @@ import {
 import {
   emitAssistantTextFragmentTimeline,
 } from "../protocol.mjs";
-import { mapClaudeInitialPermission, createClaudeCanUseTool, createClaudeHooks } from "./permissions.mjs";
+import {
+  applyClaudeRuntimePermission,
+  mapClaudeInitialPermission,
+  createClaudeCanUseTool,
+  createClaudeHooks,
+} from "./permissions.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -131,6 +136,9 @@ export async function runClaude(cmd, context) {
   const createClaudeQuery = context.createClaudeQuery || query;
   const claudeQuery = createClaudeQuery({ prompt: singleClaudePromptStream(prompt), options });
   ctx.query = claudeQuery;
+  context.interactions?.handleSettingsUpdate?.((update) => {
+    applyClaudeRuntimePermission(ctx, update?.permission);
+  });
   for await (const msg of claudeQuery) {
     if (msg.session_id) lastSessionId = msg.session_id;
 

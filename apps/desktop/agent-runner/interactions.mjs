@@ -22,6 +22,7 @@ export function createInteractionBroker({
   let consentSeq = 1;
   const askUserPending = new Map();
   let askUserSeq = 1;
+  let settingsUpdateHandler = null;
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
     protocol.emit({
@@ -96,6 +97,10 @@ export function createInteractionBroker({
       if (!pending || pending.kind !== kind) return;
       askUserPending.delete(msg.id);
       pending.resolve(normalizeAskUserResult(msg.result));
+      return;
+    }
+    if (msg.type === "settings_update") {
+      settingsUpdateHandler?.(msg);
     }
   }
 
@@ -103,6 +108,9 @@ export function createInteractionBroker({
     requestUserConsent,
     requestAskUser,
     handleControlLine,
+    handleSettingsUpdate: (handler) => {
+      settingsUpdateHandler = typeof handler === "function" ? handler : null;
+    },
     pendingCounts: () => ({
       consent: consentPending.size,
       askUser: askUserPending.size,

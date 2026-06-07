@@ -9,6 +9,7 @@ import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
+import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
 import {
@@ -105,13 +106,12 @@ function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = fal
 
 function buildCodexThreadSettingsParams(threadId, cmd) {
   const settings = normalizeCodexSettings(cmd);
-  const params = { threadId };
+  const params = {
+    threadId,
+    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
+  };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   return params;
-}
-
-function hasCodexThreadSettingsParams(params) {
-  return Object.keys(params).some((key) => key !== "threadId");
 }
 
 function emitCodexSettingsUpdateDiagnostic(protocol, err, params) {
@@ -134,7 +134,6 @@ function emitCodexSettingsUpdateDiagnostic(protocol, err, params) {
 
 export async function updateCodexThreadSettings(server, threadId, cmd, protocol) {
   const params = buildCodexThreadSettingsParams(threadId, cmd);
-  if (!hasCodexThreadSettingsParams(params)) return { ok: true, fallback: false };
   try {
     await server.request("thread/settings/update", params);
     return { ok: true, fallback: false };
@@ -142,6 +141,39 @@ export async function updateCodexThreadSettings(server, threadId, cmd, protocol)
     emitCodexSettingsUpdateDiagnostic(protocol, err, params);
     return { ok: false, fallback: true };
   }
+}
+
+export function applyCodexRuntimePermission(server, threadId, cmd, ctx, permission, protocol) {
+  const normalized = normalizeRuntimePermission(permission);
+  if (!normalized) return null;
+  cmd.permission = normalized;
+  ctx.executionPermission = normalized;
+  const pending = updateCodexThreadSettings(server, threadId, cmd, protocol)
+    .then((result) => {
+      if (!result.ok) return result;
+      protocol.emitTimeline({
+        kind: "diagnostic",
+        status: "info",
+        title: "Codex permission updated",
+        summary: `权限已切换为 ${normalized}`,
+        payload: {
+          backend: "codex",
+          subkind: "settings",
+          permission: normalized,
+          fallback: false,
+        },
+        sourceId: "codex:settings:permission",
+      });
+      return result;
+    });
+  ctx.settingsUpdatePromises.push(pending);
+  return pending;
+}
+
+export async function flushCodexRuntimeSettings(ctx) {
+  if (ctx.settingsUpdatePromises.length === 0) return;
+  const pending = ctx.settingsUpdatePromises.splice(0);
+  await Promise.allSettled(pending);
 }
 
 export async function startCodexAppServerSession(server, cmd, cwdFn = process.cwd) {
@@ -302,6 +334,17 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);
     ctx.interactions = context.interactions;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
+    ctx.settingsUpdatePromises = [];
+    context.interactions?.handleSettingsUpdate?.((update) => {
+      applyCodexRuntimePermission(
+        server,
+        threadId,
+        cmd,
+        ctx,
+        update?.permission,
+        context.protocol,
+      );
+    });
     let nextPrompt = cmd.prompt;
     let nextTurnKind = cmd.planMode === true ? "plan" : "default";
     let shouldStartTurn = true;
@@ -312,6 +355,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         nextTurnKind === "plan"
           ? buildCodexCollaborationMode("plan", selectedModel, planPreset)
           : buildCodexCollaborationMode("default", selectedModel, null);
+      await flushCodexRuntimeSettings(ctx);
       const startedTurn = await startCodexAppServerTurn(
         server,
         threadId,

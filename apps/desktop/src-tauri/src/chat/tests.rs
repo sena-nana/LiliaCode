@@ -6,7 +6,9 @@ mod agent_event_sink_tests {
     use crate::agent_events::{AgentRuntimeEvent, AgentTurnContext};
     use crate::agent_timeline;
     use crate::agent_timeline::AgentTimelineEventInput;
-    use crate::chat::commands::agent_interaction_response_payload;
+    use crate::chat::commands::{
+        agent_interaction_response_payload, composer_permission_update_payload,
+    };
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
@@ -159,6 +161,28 @@ mod agent_event_sink_tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn composer_permission_update_payload_requires_existing_changed_permission() {
+        let mut previous = default_composer("task-1");
+        previous.permission = "ask".to_string();
+        let mut next = previous.clone();
+
+        assert_eq!(composer_permission_update_payload(None, &next), None);
+        assert_eq!(composer_permission_update_payload(Some(&previous), &next), None);
+
+        next.permission = "readonly".to_string();
+        assert_eq!(
+            composer_permission_update_payload(Some(&previous), &next),
+            Some(json!({
+                "type": "settings_update",
+                "permission": "readonly",
+            }))
+        );
+
+        next.permission = "invalid".to_string();
+        assert_eq!(composer_permission_update_payload(Some(&previous), &next), None);
     }
 
     #[test]

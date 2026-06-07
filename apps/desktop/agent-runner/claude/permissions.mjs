@@ -9,6 +9,7 @@ import {
   readPlanRevisionRequest,
 } from "../claudePlan.mjs";
 import { isLiliaAskUserTool } from "../askUser.mjs";
+import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
 import { rememberClaudeTool } from "./state.mjs";
 
@@ -133,6 +134,44 @@ export function scheduleClaudePermissionModeRestore(ctx, mode) {
   }, 0);
 }
 
+export function applyClaudeRuntimePermission(ctx, permission) {
+  const normalized = normalizeRuntimePermission(permission);
+  if (!normalized) return false;
+  ctx.executionPermission = normalized;
+  const mode = normalizeClaudePermissionMode(normalized);
+  if (typeof ctx.query?.setPermissionMode === "function") {
+    ctx.query.setPermissionMode(mode).catch((err) => {
+      ctx.protocol.emitTimeline({
+        kind: "diagnostic",
+        status: "error",
+        title: "Claude permission update failed",
+        summary: err?.message || String(err),
+        payload: {
+          backend: "claude",
+          subkind: "settings",
+          permission: normalized,
+          permissionMode: mode,
+        },
+        sourceId: "claude:settings:permission",
+      });
+    });
+  }
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Claude permission updated",
+    summary: `权限已切换为 ${normalized}`,
+    payload: {
+      backend: "claude",
+      subkind: "settings",
+      permission: normalized,
+      permissionMode: mode,
+    },
+    sourceId: "claude:settings:permission",
+  });
+  return true;
+}
+
 export async function handleClaudePlanPermission(toolName, input, opts, ctx) {
   const sourceId = stringOrNull(opts?.toolUseID);
   const executionPermission = ctx.executionPermission;
@@ -238,6 +277,9 @@ export function createClaudeCanUseTool(ctx) {
     }
     if (isClaudePlanTool(toolName)) {
       return handleClaudePlanPermission(toolName, safeInput, opts, ctx);
+    }
+    if (ctx.executionPermission === "full") {
+      return { behavior: "allow", updatedInput: safeInput };
     }
     if (ctx.executionPermission === "readonly" && isReadonlyDeniedClaudeTool(toolName)) {
       emitReadonlyDeniedClaudeTool(toolName, safeInput, opts, ctx);

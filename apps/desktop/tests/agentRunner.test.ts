@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import { runAgentTurn } from "../agent-runner/core.mjs";
 import { createInteractionBroker } from "../agent-runner/interactions.mjs";
 import { createProtocolEmitter } from "../agent-runner/protocol.mjs";
-import { mapClaudeInitialPermission } from "../agent-runner/claude/permissions.mjs";
+import {
+  applyClaudeRuntimePermission,
+  mapClaudeInitialPermission,
+} from "../agent-runner/claude/permissions.mjs";
 import { maybeHandleCodexApprovalRequest } from "../agent-runner/codex/permissions.mjs";
 import {
   createCodexRunContext,
@@ -21,6 +24,9 @@ import {
   maybeHandleCodexServerRequest,
   startCodexAppServerThread,
   updateCodexThreadSettings,
+  applyCodexRuntimePermission,
+  flushCodexRuntimeSettings,
+  startCodexAppServerTurn,
 } from "../agent-runner/codex/runCodex.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
@@ -253,6 +259,30 @@ describe("interaction broker", () => {
 
     await expect(ask).resolves.toMatchObject({ cancelled: false });
   });
+
+  it("settings_update control lines are dispatched without disturbing pending interactions", async () => {
+    const { protocol } = captureProtocol();
+    const updates: any[] = [];
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    broker.handleSettingsUpdate((msg: any) => updates.push(msg));
+    const consent = broker.requestUserConsent({ toolName: "Bash", input: { command: "pwd" } });
+
+    broker.handleControlLine(JSON.stringify({ type: "settings_update", permission: "readonly" }));
+    expect(updates).toEqual([{ type: "settings_update", permission: "readonly" }]);
+    expect(broker.pendingCounts().consent).toBe(1);
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "consent-1",
+      kind: "tool_consent",
+      result: { decision: "allow" },
+    }));
+    await expect(consent).resolves.toMatchObject({ decision: "allow" });
+  });
 });
 
 describe("Claude helpers", () => {
@@ -263,6 +293,29 @@ describe("Claude helpers", () => {
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
     });
+  });
+
+  it("runtime permission update changes Claude SDK mode and Lilia gate", async () => {
+    const { protocol, json } = captureProtocol();
+    const modeCalls: string[] = [];
+    const ctx: any = {
+      protocol,
+      executionPermission: "ask",
+      query: {
+        setPermissionMode: async (mode: string) => {
+          modeCalls.push(mode);
+        },
+      },
+    };
+
+    expect(applyClaudeRuntimePermission(ctx, "readonly")).toBe(true);
+    expect(ctx.executionPermission).toBe("readonly");
+    expect(modeCalls).toEqual(["default"]);
+
+    expect(applyClaudeRuntimePermission(ctx, "full")).toBe(true);
+    expect(ctx.executionPermission).toBe("full");
+    expect(modeCalls).toEqual(["default", "bypassPermissions"]);
+    expect(json().filter((line) => line.type === "timeline")).toHaveLength(2);
   });
 });
 
@@ -974,6 +1027,46 @@ describe("Codex app-server mapping", () => {
         }),
       },
     ]);
+  });
+
+  it("runtime permission update refreshes Codex thread settings and later turn params", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "turn/start") return { turn: { id: "turn-1" } };
+        return {};
+      },
+    };
+    const cmd: any = {
+      permission: "ask",
+      cwd: "C:/repo",
+      codexSettings: {},
+    };
+    const ctx: any = createCodexRunContext(cmd, protocol, "thread-1");
+    ctx.settingsUpdatePromises = [];
+
+    applyCodexRuntimePermission(server as any, "thread-1", cmd, ctx, "readonly", protocol);
+    await flushCodexRuntimeSettings(ctx);
+    await startCodexAppServerTurn(server as any, "thread-1", "after update", cmd, () => "C:/repo");
+
+    expect(cmd.permission).toBe("readonly");
+    expect(ctx.executionPermission).toBe("readonly");
+    expect(calls[0]).toMatchObject({
+      method: "thread/settings/update",
+      params: {
+        threadId: "thread-1",
+        sandboxPolicy: { type: "readOnly" },
+      },
+    });
+    expect(calls[1]).toMatchObject({
+      method: "turn/start",
+      params: {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      },
+    });
   });
 
   it("builds Codex plan collaboration mode from preset or fallback", async () => {
