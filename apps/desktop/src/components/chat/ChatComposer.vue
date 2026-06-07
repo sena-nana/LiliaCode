@@ -386,6 +386,18 @@ function submitEntry() {
   send();
 }
 
+function focusInput() {
+  if (hasPending.value) {
+    const el = textarea.value;
+    if (!el) return;
+    el.focus();
+    const offset = inputValue.value.length;
+    el.setSelectionRange(offset, offset);
+    return;
+  }
+  richInput.focusAt(richInput.serializedText.value.length);
+}
+
 function onKeydown(e: KeyboardEvent) {
   updateInputSelection();
   if (e.isComposing) return;
@@ -558,6 +570,8 @@ onBeforeUnmount(() => {
     actionBlockTimerId = null;
   }
 });
+
+defineExpose({ focusInput });
 </script>
 
 <template>

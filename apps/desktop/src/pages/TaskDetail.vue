@@ -4,7 +4,7 @@
  * 具体聊天布局由 TaskDetailChatSurface 负责。
  */
 
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useRoute } from "vue-router";
 import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
@@ -32,6 +32,11 @@ const route = useRoute();
 const chatSurfaceRef = ref<InstanceType<typeof TaskDetailChatSurface> | null>(null);
 const chatPageRef = computed<HTMLElement | null>(() =>
   chatSurfaceRef.value?.chatPageRef ?? null,
+);
+const focusConversationKey = computed(() =>
+  shouldRenderChat.value
+    ? `${props.variant ?? "main"}:${props.projectId ?? ""}:${props.taskId}`
+    : "",
 );
 const sharedAttachments = ref<ChatAttachment[]>([]);
 const suggestions = ref<SuggestionItem[]>([]);
@@ -254,6 +259,16 @@ watch(
     if (props.variant !== "popup" || !taskId) return;
     const text = decodeDraftTextParam(queryString(draft));
     if (text) composerController.onInsertDraftText(text);
+  },
+  { immediate: true },
+);
+
+watch(
+  focusConversationKey,
+  async (key) => {
+    if (!key) return;
+    await nextTick();
+    chatSurfaceRef.value?.focusComposer();
   },
   { immediate: true },
 );
