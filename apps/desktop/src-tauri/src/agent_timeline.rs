@@ -21,6 +21,7 @@ use serde_json::Value as JsonValue;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::chat::types::ChatAttachment;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 
@@ -62,6 +63,13 @@ pub struct AgentTimelineEventInput {
     pub payload: JsonValue,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UserOnlyTurnRollback {
+    pub(crate) content: String,
+    pub(crate) attachments: Vec<ChatAttachment>,
+    pub(crate) removed_event_ids: Vec<String>,
 }
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTimelineEvent> {
@@ -296,6 +304,86 @@ pub fn clear(conn: &Connection, task_id: &str) -> Result<usize, String> {
         params![task_id],
     )
     .map_err(|e| format!("agent_timeline_clear_task: 删除失败：{e}"))
+}
+
+pub(crate) fn rollback_user_only_turn(
+    conn: &Connection,
+    task_id: &str,
+    turn_id: &str,
+) -> Result<Option<UserOnlyTurnRollback>, String> {
+    let Some(rollback) = user_only_turn_rollback_candidate(conn, task_id, turn_id)? else {
+        return Ok(None);
+    };
+
+    conn.execute(
+        r#"DELETE FROM agent_timeline_events
+           WHERE task_id = ?1 AND turn_id IS ?2"#,
+        params![task_id, Some(turn_id)],
+    )
+    .map_err(|e| format!("agent_timeline_rollback_turn: 删除失败：{e}"))?;
+
+    Ok(Some(rollback))
+}
+
+pub(crate) fn user_only_turn_rollback_candidate(
+    conn: &Connection,
+    task_id: &str,
+    turn_id: &str,
+) -> Result<Option<UserOnlyTurnRollback>, String> {
+    let events = events_for_turn(conn, task_id, turn_id)?;
+    let [event] = events.as_slice() else {
+        return Ok(None);
+    };
+    if event.kind != "message" {
+        return Ok(None);
+    }
+    let Some(payload) = event.payload.as_object() else {
+        return Ok(None);
+    };
+    if payload.get("role").and_then(|v| v.as_str()) != Some("user") {
+        return Ok(None);
+    }
+    let content = payload
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or(event.summary.as_deref().unwrap_or(""))
+        .to_string();
+    let attachments = match payload.get("attachments") {
+        Some(value) => serde_json::from_value::<Vec<ChatAttachment>>(value.clone())
+            .map_err(|e| format!("agent_timeline_rollback_turn: attachments 解析失败：{e}"))?,
+        None => Vec::new(),
+    };
+    let removed_event_ids = vec![event.id.clone()];
+
+    Ok(Some(UserOnlyTurnRollback {
+        content,
+        attachments,
+        removed_event_ids,
+    }))
+}
+
+fn events_for_turn(
+    conn: &Connection,
+    task_id: &str,
+    turn_id: &str,
+) -> Result<Vec<AgentTimelineEvent>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, task_id, turn_id, backend, kind, status, title, summary,
+                      payload, created_at, updated_at, turn_seq, intra_turn_order
+               FROM agent_timeline_events
+               WHERE task_id = ?1 AND turn_id IS ?2
+               ORDER BY intra_turn_order ASC, created_at ASC"#,
+        )
+        .map_err(|e| format!("agent_timeline_events_for_turn: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id, Some(turn_id)], row_to_event)
+        .map_err(|e| format!("agent_timeline_events_for_turn: query 失败：{e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("agent_timeline_events_for_turn: 行解析失败：{e}"))?);
+    }
+    Ok(out)
 }
 
 pub fn latest_session_id(

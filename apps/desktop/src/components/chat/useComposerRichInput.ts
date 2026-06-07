@@ -354,6 +354,13 @@ export function useComposerRichInput(options: {
     renderFromParts();
   }
 
+  function replaceWithText(text: string) {
+    composerParts.value = [textPart(text)];
+    inputSelection.value = text.length;
+    renderFromParts();
+    focusAt(inputSelection.value);
+  }
+
   function setEditor(element: HTMLDivElement | null) {
     richEditor.value = element;
   }
@@ -405,6 +412,7 @@ export function useComposerRichInput(options: {
     onInput,
     onSelection,
     replaceRange,
+    replaceWithText,
     insertAttachmentReference,
     resetInput,
     captureSelectionOffset,

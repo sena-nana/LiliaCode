@@ -1957,6 +1957,34 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       resetMockQueuedGuides(chatQueued[taskId]);
       chatQueued[taskId] = [];
       if (chatRunning[taskId] === true) {
+        const turnEvents = (timelineEvents[taskId] ?? []).filter((event) =>
+          event.turnId === turnId
+        );
+        const [onlyEvent] = turnEvents;
+        const payload = onlyEvent?.payload as Record<string, unknown> | null;
+        if (
+          turnEvents.length === 1 &&
+          onlyEvent?.kind === "message" &&
+          payload?.role === "user"
+        ) {
+          timelineEvents[taskId] = (timelineEvents[taskId] ?? []).filter((event) =>
+            event.id !== onlyEvent.id
+          );
+          chatRunning[taskId] = false;
+          queueMicrotask(() => {
+            emitTauriEvent("chat:done", {
+              taskId,
+              sessionId: null,
+              subtype: null,
+            });
+          });
+          return {
+            rolledBack: true,
+            restoredContent: typeof payload.content === "string" ? payload.content : "",
+            restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+            removedEventIds: [onlyEvent.id],
+          };
+        }
         emitMockTimelineEvent(taskId, {
           id: `tl-interrupted-${turnId}`,
           backend: activeBackend,
@@ -1980,7 +2008,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           });
         });
       }
-      return undefined;
+      return {
+        rolledBack: false,
+        restoredContent: "",
+        restoredAttachments: [],
+        removedEventIds: [],
+      };
     }
 
     case "chat_reset_session": {

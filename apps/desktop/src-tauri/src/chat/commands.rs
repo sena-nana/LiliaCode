@@ -11,7 +11,8 @@ use crate::chat::state::{
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatSendResult,
+    ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
+    ChatSendResult,
 };
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
@@ -106,8 +107,59 @@ pub fn chat_interrupt_turn(
     task_id: String,
     app: AppHandle,
     store: State<'_, ChatStore>,
-) -> Result<(), String> {
-    stop_running_turn(&app, &store, &task_id, true, false).map(|_| ())
+) -> Result<ChatInterruptResult, String> {
+    let running_turn = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(&task_id).cloned()
+    };
+    let Some(running_turn) = running_turn else {
+        return Ok(ChatInterruptResult::default());
+    };
+
+    let can_rollback = app
+        .try_state::<LiliaStore>()
+        .and_then(|lilia| {
+            let conn = lilia.conn().ok()?;
+            agent_timeline::user_only_turn_rollback_candidate(
+                &conn,
+                &task_id,
+                &running_turn.turn_id,
+            )
+            .ok()
+            .flatten()
+            .map(|_| ())
+        })
+        .is_some();
+
+    if can_rollback {
+        stop_running_turn(&app, &store, &task_id, false, true)?;
+        if let Some(rollback) =
+            rollback_current_user_only_turn(&app, &task_id, &running_turn.turn_id)?
+        {
+            return Ok(ChatInterruptResult {
+                rolled_back: true,
+                restored_content: rollback.content,
+                restored_attachments: rollback.attachments,
+                removed_event_ids: rollback.removed_event_ids,
+            });
+        }
+        return Ok(ChatInterruptResult::default());
+    }
+
+    stop_running_turn(&app, &store, &task_id, true, false)?;
+    Ok(ChatInterruptResult::default())
+}
+
+fn rollback_current_user_only_turn(
+    app: &AppHandle,
+    task_id: &str,
+    turn_id: &str,
+) -> Result<Option<agent_timeline::UserOnlyTurnRollback>, String> {
+    let Some(lilia) = app.try_state::<LiliaStore>() else {
+        return Ok(None);
+    };
+    let conn = lilia.conn()?;
+    agent_timeline::rollback_user_only_turn(&conn, task_id, turn_id)
 }
 
 fn write_runner_stdin(store: &ChatStore, task_id: &str, payload: JsonValue) -> Result<(), String> {

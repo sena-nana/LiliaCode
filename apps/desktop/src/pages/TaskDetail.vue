@@ -79,6 +79,8 @@ const {
   composerForView,
   isTurnRunning,
   userSendScrollKey,
+  restoreDraftKey,
+  restoreDraftContent,
   pendingAskUser,
   pendingToolConsent,
   pendingAgentActions,
@@ -242,6 +244,8 @@ watch(
     :context-search-cwd="contextSearchCwd"
     :active-plan-approval-turn-id="pendingPlanApproval?.turnId ?? null"
     :user-send-scroll-key="userSendScrollKey"
+    :restore-draft-key="restoreDraftKey"
+    :restore-draft-content="restoreDraftContent"
     :pending-agent-actions="pendingAgentActions"
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"

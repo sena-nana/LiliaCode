@@ -53,6 +53,8 @@ const props = defineProps<{
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
   suggestionsVisible?: boolean;
+  restoreDraftKey?: number;
+  restoreDraftContent?: string;
 }>();
 
 const emit = defineEmits<{
@@ -503,6 +505,15 @@ watch(inputValue, () => {
 });
 
 watch(interactionPhaseKey, blockActionsBriefly);
+
+watch(
+  () => props.restoreDraftKey ?? 0,
+  (key, previousKey) => {
+    if (key === previousKey || key <= 0 || hasPending.value) return;
+    richInput.replaceWithText(props.restoreDraftContent ?? "");
+    clearComposerContextState();
+  },
+);
 
 onBeforeUnmount(() => {
   if (resizeFrameId !== null) {

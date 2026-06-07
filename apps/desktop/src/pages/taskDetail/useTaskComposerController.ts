@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, nextTick, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
@@ -38,6 +38,7 @@ import {
   type ToolConsentDecision,
   type ToolConsentUpdatedInput,
 } from "../../services/chat";
+import { serializeAttachmentReference } from "../../components/chat/composerParts";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
@@ -52,6 +53,8 @@ export function useTaskComposerController(options: {
   const composer = ref<ChatComposerState | null>(null);
   const isTurnRunning = ref(false);
   const userSendScrollKey = ref(0);
+  const restoreDraftKey = ref(0);
+  const restoreDraftContent = ref("");
   const pendingAskUser = useAskUserForTask(() => props.taskId);
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
@@ -166,7 +169,19 @@ export function useTaskComposerController(options: {
   async function onInterrupt() {
     if (!context.hasContext.value || !isTurnRunning.value) return;
     try {
-      await interruptTurn(props.taskId);
+      const result = await interruptTurn(props.taskId);
+      if (!result.rolledBack) return;
+      isTurnRunning.value = false;
+      for (const eventId of result.removedEventIds) {
+        timeline.removeTimelineEvent(eventId);
+      }
+      restoreDraftContent.value = stripRestoredAttachmentReferences(
+        result.restoredContent,
+        result.restoredAttachments,
+      );
+      restoreDraftKey.value += 1;
+      await nextTick();
+      attachments.value = result.restoredAttachments;
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打断失败：${String(err)}`));
     }
@@ -364,6 +379,8 @@ export function useTaskComposerController(options: {
     composerForView,
     isTurnRunning,
     userSendScrollKey,
+    restoreDraftKey,
+    restoreDraftContent,
     pendingAskUser,
     pendingAskUsers,
     pendingToolConsent,
@@ -390,4 +407,15 @@ export function useTaskComposerController(options: {
     canAcceptInteractiveDrop,
     scheduleUserGuideInsertion: () => guideDispatch.scheduleGuideInsertion("user"),
   };
+}
+
+function stripRestoredAttachmentReferences(
+  content: string,
+  attachments: ChatAttachment[],
+): string {
+  let next = content;
+  for (const attachment of attachments) {
+    next = next.replaceAll(serializeAttachmentReference(attachment), "");
+  }
+  return next.replace(/[ \t]{2,}/g, " ").trim();
 }

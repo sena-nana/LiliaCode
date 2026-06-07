@@ -316,6 +316,35 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("发送后立即停止且 Agent 未输出时撤回用户消息并恢复输入和附件", async () => {
+    const view = await renderTaskDetail();
+    setChatDropBounds(view);
+
+    emitWebviewDragDropEvent({
+      type: "drop",
+      paths: ["D:\\PROJECT\\workspace\\Lilia\\README.md"],
+      position: { x: 120, y: 160 },
+    });
+    await waitFor(() => {
+      expect(view.getByText("README.md")).toBeInTheDocument();
+    });
+
+    await sendText(view, "先别发出去");
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+
+    await waitFor(() => {
+      const input = view.getByRole("textbox") as HTMLElement;
+      expect(input.textContent).toContain("先别发出去");
+      expect(input.textContent?.match(/README\.md/g)).toHaveLength(1);
+      expect(view.queryByText("Agent 已打断")).toBeNull();
+    });
+    expect(view.container.querySelectorAll(".chat-bubble")).toHaveLength(0);
+  });
+
 
   it("工具类 timeline 窗口会触发高优先级引导，但不会触发普通优先级引导", async () => {
     const view = await renderTaskDetail();

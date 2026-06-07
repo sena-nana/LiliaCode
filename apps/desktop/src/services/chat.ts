@@ -20,6 +20,7 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatComposerState,
+  ChatInterruptResult,
   AgentTimelineEvent,
   ChatSendResult,
   ConnectionMode,
@@ -41,6 +42,7 @@ export type {
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
+  ChatInterruptResult,
   ChatContextSearchResult,
   ConnectionMode,
   BackendEnvStatus,
@@ -86,8 +88,8 @@ export function sendMessage(
   });
 }
 
-export function interruptTurn(taskId: string): Promise<void> {
-  return invoke<void>("chat_interrupt_turn", { taskId });
+export function interruptTurn(taskId: string): Promise<ChatInterruptResult> {
+  return invoke<ChatInterruptResult>("chat_interrupt_turn", { taskId });
 }
 
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {

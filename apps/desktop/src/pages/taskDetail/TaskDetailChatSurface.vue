@@ -42,6 +42,8 @@ defineProps<{
   contextSearchCwd: string | null;
   activePlanApprovalTurnId: string | null;
   userSendScrollKey: number;
+  restoreDraftKey: number;
+  restoreDraftContent: string;
   pendingAgentActions: PendingAgentAction[];
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
@@ -134,6 +136,8 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"
                   :suggestions-visible="suggestionsVisible"
+                  :restore-draft-key="restoreDraftKey"
+                  :restore-draft-content="restoreDraftContent"
                   @send="emitSend"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

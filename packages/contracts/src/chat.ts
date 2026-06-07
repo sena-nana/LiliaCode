@@ -46,6 +46,13 @@ export interface ChatSendResult {
   queuedCount: number;
 }
 
+export interface ChatInterruptResult {
+  rolledBack: boolean;
+  restoredContent: string;
+  restoredAttachments: ChatAttachment[];
+  removedEventIds: string[];
+}
+
 export type PermissionMode = "full" | "ask" | "readonly";
 
 export type ChatBackendKind = "claude" | "codex";
