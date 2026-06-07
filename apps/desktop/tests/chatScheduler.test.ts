@@ -226,6 +226,25 @@ describe("chat scheduler", () => {
       .toBeLessThan(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message"));
   });
 
+  it("子对话草稿首条消息会携带父对话关系提升入库", async () => {
+    const draft = createDraftTask("lilia", "t-001");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await sendText(view, "基于父对话继续追问");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
+    expect(promote?.[1]).toMatchObject({
+      id: draft.id,
+      projectId: "lilia",
+      parentId: "t-001",
+      title: "基于父对话继续追问",
+    });
+  });
+
   it("composer 尚未加载完成时发送会等待后端状态再发给 agent", async () => {
     let resolveComposer!: (value: unknown) => void;
     setMockComposerStateHandler((taskId) =>

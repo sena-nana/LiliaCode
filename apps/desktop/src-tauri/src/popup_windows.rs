@@ -223,6 +223,29 @@ pub(crate) fn open_task_window(
     build_popup_window(app, popup_task_label(task_id), route)
 }
 
+pub(crate) fn open_child_question_window(
+    app: &AppHandle,
+    project_id: Option<String>,
+    parent_task_id: String,
+) -> Result<(), String> {
+    let parent_task_id = parent_task_id.trim();
+    if parent_task_id.is_empty() {
+        return Err("缺少父对话 ID".to_string());
+    }
+    let route = if let Some(project_id) = normalize_optional_string(project_id) {
+        save_popup_last_project_id(app, &project_id)?;
+        format!("popup/projects/{project_id}/new")
+    } else {
+        "popup/chats/new".to_string()
+    };
+    let encoded = URL_SAFE_NO_PAD.encode(parent_task_id.as_bytes());
+    build_popup_window(
+        app,
+        unique_popup_label("ask"),
+        format!("{route}?parentTaskId={encoded}"),
+    )
+}
+
 pub(crate) fn register_popup_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     app.global_shortcut()
         .register(shortcut)
@@ -307,6 +330,19 @@ pub async fn popup_open_task(
     tauri::async_runtime::spawn_blocking(move || open_task_window(&app, project_id, task_id))
         .await
         .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
+}
+
+#[tauri::command]
+pub async fn popup_open_child_question(
+    app: AppHandle,
+    project_id: Option<String>,
+    parent_task_id: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_child_question_window(&app, project_id, parent_task_id)
+    })
+    .await
+    .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
 
 #[tauri::command]

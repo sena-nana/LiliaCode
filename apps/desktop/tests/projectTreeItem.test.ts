@@ -5,6 +5,7 @@ import { defineComponent } from "vue";
 import type { Task } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
+import { installContextMenu } from "../src/composables/useContextMenu";
 import { TASKS } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
 
@@ -171,6 +172,32 @@ describe("ProjectTreeItem", () => {
     expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
       projectId: "lilia",
       taskId: "t-001",
+    }, undefined);
+  });
+
+  it("项目对话右键菜单拆分为弹窗继续和询问", async () => {
+    installContextMenu();
+    const view = await renderProjectTreeItem();
+    const row = view.getByText("接入 Claude Code 会话发现").closest(".sb-tree__row");
+
+    await fireEvent.contextMenu(row!, { clientX: 10, clientY: 10 });
+
+    expect(await view.findByRole("menuitem", { name: "在弹出窗口继续" })).toBeInTheDocument();
+    expect(await view.findByRole("menuitem", { name: "在弹出窗口询问" })).toBeInTheDocument();
+    expect(await view.findByRole("menuitem", { name: "置顶" })).toBeInTheDocument();
+    expect(await view.findByRole("menuitem", { name: "归档" })).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("menuitem", { name: "在弹出窗口继续" }));
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+      projectId: "lilia",
+      taskId: "t-001",
+    }, undefined);
+
+    await fireEvent.contextMenu(row!, { clientX: 10, clientY: 10 });
+    await fireEvent.click(await view.findByRole("menuitem", { name: "在弹出窗口询问" }));
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_child_question", {
+      projectId: "lilia",
+      parentTaskId: "t-001",
     }, undefined);
   });
 

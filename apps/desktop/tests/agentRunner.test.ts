@@ -9,6 +9,10 @@ import {
   applyClaudeRuntimePermission,
   mapClaudeInitialPermission,
 } from "../agent-runner/claude/permissions.mjs";
+import { createLiliaAskUserServer } from "../agent-runner/claude/runClaude.mjs";
+import {
+  createConversationContextHandler,
+} from "../agent-runner/conversationContext.mjs";
 import { maybeHandleCodexApprovalRequest } from "../agent-runner/codex/permissions.mjs";
 import {
   codexHistoryTimelineEvents,
@@ -288,6 +292,73 @@ describe("interaction broker", () => {
 });
 
 describe("Claude helpers", () => {
+  it("子对话才会注册 Claude 查询对话上下文工具", () => {
+    const createdTools: any[] = [];
+    const createTool = (...args: any[]) => {
+      createdTools.push(args);
+      return { name: args[0] };
+    };
+    const createServer = (config: any) => config;
+
+    const normal = createLiliaAskUserServer({
+      createServer,
+      createTool,
+      requestAskUser: async () => ({ cancelled: true, answers: {} }),
+    });
+    expect(normal.tools.map((tool: any) => tool.name)).toEqual(["ask_user_question"]);
+
+    const child = createLiliaAskUserServer({
+      createServer,
+      createTool,
+      requestAskUser: async () => ({ cancelled: true, answers: {} }),
+      conversationContext: {
+        currentTaskId: "child-1",
+        parentTaskId: "parent-1",
+        tasks: [],
+      },
+    });
+
+    expect(child.tools.map((tool: any) => tool.name)).toEqual([
+      "ask_user_question",
+      "query_conversation_context",
+    ]);
+    expect(createdTools.some((args) => args[0] === "query_conversation_context")).toBe(true);
+  });
+
+  it("查询对话上下文工具默认返回父对话消息摘要", async () => {
+    const handler = createConversationContextHandler({
+      currentTaskId: "child-1",
+      parentTaskId: "parent-1",
+      tasks: [{
+        taskId: "parent-1",
+        projectId: "lilia",
+        title: "父对话",
+        status: "done",
+        parentId: null,
+        createdAt: 1000,
+        messages: [
+          { role: "user", content: "父对话里的问题", createdAt: 1001 },
+          { role: "assistant", content: "父对话里的回答", createdAt: 1002 },
+        ],
+      }],
+    });
+
+    await expect(handler({})).resolves.toMatchObject({
+      ok: true,
+      currentTaskId: "child-1",
+      parentTaskId: "parent-1",
+      requestedTaskId: "parent-1",
+      task: {
+        taskId: "parent-1",
+        title: "父对话",
+        messages: [
+          { role: "user", content: "父对话里的问题" },
+          { role: "assistant", content: "父对话里的回答" },
+        ],
+      },
+    });
+  });
+
   it("plan mode 初始进入 Claude plan，确认后恢复原执行权限映射", () => {
     expect(mapClaudeInitialPermission("ask", true).permissionMode).toBe("plan");
     expect(mapClaudeInitialPermission("readonly", false).permissionMode).toBe("default");
@@ -525,6 +596,59 @@ describe("Codex app-server mapping", () => {
     expect(calls).toEqual([
       ["respond", "request-user-input-1", { answers: { choice: { answers: ["B"] } } }],
     ]);
+  });
+
+  it("Codex 子对话工具调用可查询父对话上下文", async () => {
+    const calls: any[] = [];
+    const handled = await maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "query-context-1",
+        method: "item/tool/call",
+        params: {
+          tool: "QueryConversationContext",
+          arguments: {},
+        },
+      },
+      {
+        cmd: {
+          conversationContext: {
+            currentTaskId: "child-1",
+            parentTaskId: "parent-1",
+            tasks: [{
+              taskId: "parent-1",
+              title: "父对话",
+              messages: [{ role: "user", content: "父问题", createdAt: 1 }],
+            }],
+          },
+        },
+        interactions: {
+          requestAskUser: async () => {
+            throw new Error("should not ask");
+          },
+        },
+      } as any,
+    );
+
+    expect(handled).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toBe("query-context-1");
+    expect(calls[0][2]).toMatchObject({
+      success: true,
+      contentItems: [expect.objectContaining({ type: "inputText" })],
+    });
+    const output = JSON.parse(calls[0][2].contentItems[0].text);
+    expect(output).toMatchObject({
+      ok: true,
+      currentTaskId: "child-1",
+      parentTaskId: "parent-1",
+      task: {
+        taskId: "parent-1",
+        messages: [{ role: "user", content: "父问题" }],
+      },
+    });
   });
 
   it("Codex 工具确认通过统一 interaction_request/response 往返", async () => {

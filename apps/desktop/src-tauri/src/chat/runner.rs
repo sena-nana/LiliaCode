@@ -5,6 +5,7 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use rusqlite::{params, OptionalExtension};
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -136,6 +137,10 @@ pub(crate) fn spawn_agent_turn(
             "permission": composer_for_thread.permission,
             "extensions": extensions,
         });
+        if let Some(context) = build_runner_conversation_context(&app_handle, &task_id_for_thread)
+        {
+            stdin_payload["conversationContext"] = context;
+        }
         if let Some(settings) = codex_settings {
             stdin_payload["codexSettings"] = settings;
         }
@@ -575,4 +580,243 @@ pub(crate) fn finish_agent_turn(
             turn.turn_id,
         );
     }
+}
+
+const CONVERSATION_CONTEXT_TASK_LIMIT: i64 = 24;
+const CONVERSATION_CONTEXT_MESSAGE_LIMIT: i64 = 24;
+const CONVERSATION_CONTEXT_TEXT_LIMIT: usize = 2_000;
+
+fn build_runner_conversation_context(app: &AppHandle, task_id: &str) -> Option<JsonValue> {
+    let store = app.try_state::<LiliaStore>()?;
+    let conn = store.conn().ok()?;
+    let current = load_context_task_row(&conn, task_id).ok().flatten()?;
+    let parent_task_id = current.parent_id.clone()?;
+    let project_id = current.project_id.clone();
+    let mut tasks = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    seen.insert(task_id.to_string());
+    if let Ok(task) = context_task_json(&conn, current, true) {
+        tasks.push(task);
+    }
+
+    if seen.insert(parent_task_id.clone()) {
+        if let Ok(Some(task)) = load_context_task(&conn, &parent_task_id, true) {
+            tasks.push(task);
+        }
+    }
+
+    if let Ok(mut related) = load_related_context_tasks(
+        &conn,
+        project_id.as_deref(),
+        CONVERSATION_CONTEXT_TASK_LIMIT,
+    ) {
+        for task in related.drain(..) {
+            let Some(id) = task.get("taskId").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            if seen.insert(id.to_string()) {
+                tasks.push(task);
+            }
+        }
+    }
+
+    Some(serde_json::json!({
+        "currentTaskId": task_id,
+        "parentTaskId": parent_task_id,
+        "tasks": tasks,
+    }))
+}
+
+struct ContextTaskRow {
+    id: String,
+    project_id: Option<String>,
+    title: String,
+    status: String,
+    created_at: i64,
+    parent_id: Option<String>,
+}
+
+fn load_context_task_row(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<ContextTaskRow>, String> {
+    conn.query_row(
+        r#"SELECT id, project_id, title, status, created_at, parent_id
+           FROM tasks
+           WHERE id = ?1 AND archived = 0"#,
+        params![task_id],
+        |row| {
+            Ok(ContextTaskRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get(4)?,
+                parent_id: row.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("conversation context: 查询任务失败：{e}"))
+}
+
+fn load_context_task(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    include_messages: bool,
+) -> Result<Option<JsonValue>, String> {
+    let Some(row) = load_context_task_row(conn, task_id)? else {
+        return Ok(None);
+    };
+    Ok(Some(context_task_json(
+        conn,
+        row,
+        include_messages,
+    )?))
+}
+
+fn load_related_context_tasks(
+    conn: &rusqlite::Connection,
+    project_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<JsonValue>, String> {
+    let rows = if let Some(project_id) = project_id {
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT id, project_id, title, status, created_at, parent_id
+                   FROM tasks
+                   WHERE project_id = ?1 AND archived = 0
+                   ORDER BY pinned DESC, sort_order ASC
+                   LIMIT ?2"#,
+            )
+            .map_err(|e| format!("conversation context: prepare 失败：{e}"))?;
+        let mapped = stmt
+            .query_map(params![project_id, limit], context_task_row_from_sql)
+            .map_err(|e| format!("conversation context: query 失败：{e}"))?;
+        collect_context_task_rows(mapped)?
+    } else {
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT id, project_id, title, status, created_at, parent_id
+                   FROM tasks
+                   WHERE project_id IS NULL AND archived = 0
+                   ORDER BY pinned DESC, sort_order ASC
+                   LIMIT ?1"#,
+            )
+            .map_err(|e| format!("conversation context: prepare 失败：{e}"))?;
+        let mapped = stmt
+            .query_map(params![limit], context_task_row_from_sql)
+            .map_err(|e| format!("conversation context: query 失败：{e}"))?;
+        collect_context_task_rows(mapped)?
+    };
+
+    rows.into_iter()
+        .map(|row| context_task_json(conn, row, false))
+        .collect()
+}
+
+fn context_task_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextTaskRow> {
+    Ok(ContextTaskRow {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        title: row.get(2)?,
+        status: row.get(3)?,
+        created_at: row.get(4)?,
+        parent_id: row.get(5)?,
+    })
+}
+
+fn collect_context_task_rows<I>(rows: I) -> Result<Vec<ContextTaskRow>, String>
+where
+    I: IntoIterator<Item = rusqlite::Result<ContextTaskRow>>,
+{
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("conversation context: row 失败：{e}"))?);
+    }
+    Ok(out)
+}
+
+fn context_task_json(
+    conn: &rusqlite::Connection,
+    task: ContextTaskRow,
+    include_messages: bool,
+) -> Result<JsonValue, String> {
+    let messages = if include_messages {
+        load_context_messages(conn, &task.id)?
+    } else {
+        Vec::new()
+    };
+    let truncated = include_messages && messages.len() as i64 >= CONVERSATION_CONTEXT_MESSAGE_LIMIT;
+    Ok(serde_json::json!({
+        "taskId": task.id,
+        "projectId": task.project_id,
+        "title": task.title,
+        "status": task.status,
+        "createdAt": task.created_at,
+        "parentId": task.parent_id,
+        "messages": messages,
+        "truncated": truncated,
+    }))
+}
+
+fn load_context_messages(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Vec<JsonValue>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT summary, payload, created_at
+               FROM agent_timeline_events
+               WHERE task_id = ?1 AND kind = 'message'
+               ORDER BY turn_seq ASC, intra_turn_order ASC, created_at ASC
+               LIMIT ?2"#,
+        )
+        .map_err(|e| format!("conversation context: prepare messages 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id, CONVERSATION_CONTEXT_MESSAGE_LIMIT], |row| {
+            let summary: Option<String> = row.get(0)?;
+            let payload_text: String = row.get(1)?;
+            let created_at: i64 = row.get(2)?;
+            Ok((summary, payload_text, created_at))
+        })
+        .map_err(|e| format!("conversation context: query messages 失败：{e}"))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (summary, payload_text, created_at) =
+            row.map_err(|e| format!("conversation context: message row 失败：{e}"))?;
+        let payload = serde_json::from_str::<JsonValue>(&payload_text).unwrap_or(JsonValue::Null);
+        let role = payload
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or("assistant");
+        let content = payload
+            .get("content")
+            .and_then(|value| value.as_str())
+            .or(summary.as_deref())
+            .unwrap_or("");
+        if content.trim().is_empty() {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "role": role,
+            "content": clip_context_text(content),
+            "createdAt": created_at,
+        }));
+    }
+    Ok(out)
+}
+
+fn clip_context_text(text: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= CONVERSATION_CONTEXT_TEXT_LIMIT {
+            out.push_str("...");
+            return out;
+        }
+        out.push(ch);
+    }
+    out
 }

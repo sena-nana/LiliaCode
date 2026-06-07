@@ -610,6 +610,7 @@ export function mockOrphansForStore() {
       title: task.title,
       createdAt: task.createdAt,
       pinned: task.pinned,
+      parentId: task.parentId,
     }));
 }
 
@@ -1081,6 +1082,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
+    case "popup_open_child_question": {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (projectId) popupLastProjectId = projectId;
+      return undefined;
+    }
+
     case "popup_focus_main":
       emitTauriEvent("lilia:main:navigate", { route: String(args.route ?? "/") });
       return undefined;
@@ -1172,7 +1179,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         titleSource: "auto",
         status: "running",
         createdAt: Date.now(),
-        parentId: null,
+        parentId: typeof args.parentId === "string" ? args.parentId : null,
         dependsOn,
         sortOrder,
         pinned: false,

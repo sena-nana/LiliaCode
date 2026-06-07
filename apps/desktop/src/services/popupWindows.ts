@@ -37,6 +37,16 @@ export function openPopupTask(
   });
 }
 
+export function openPopupChildQuestion(
+  parentTaskId: string,
+  projectId?: string | null,
+): Promise<void> {
+  return invoke<void>("popup_open_child_question", {
+    parentTaskId,
+    projectId: projectId ?? null,
+  });
+}
+
 export function focusMainWindow(route: string): Promise<void> {
   return invoke<void>("popup_focus_main", { route });
 }

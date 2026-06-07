@@ -5,6 +5,12 @@ import {
   createClaudeAskUserHandler,
 } from "../askUser.mjs";
 import {
+  buildConversationContextToolDescription,
+  conversationContextEnabled,
+  createConversationContextHandler,
+  queryConversationContextInputSchema,
+} from "../conversationContext.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readClaudeRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
@@ -60,19 +66,34 @@ export async function* singleClaudePromptStream(prompt) {
   };
 }
 
-export function createLiliaAskUserServer({ createServer = createSdkMcpServer, createTool = tool, requestAskUser }) {
+export function createLiliaAskUserServer({
+  createServer = createSdkMcpServer,
+  createTool = tool,
+  requestAskUser,
+  conversationContext = null,
+}) {
+  const tools = [
+    createTool(
+      "ask_user_question",
+      "Ask the human user one or more multiple-choice questions through Lilia.",
+      askUserQuestionInputSchema,
+      createClaudeAskUserHandler(requestAskUser),
+      { alwaysLoad: true },
+    ),
+  ];
+  if (conversationContextEnabled(conversationContext)) {
+    tools.push(createTool(
+      "query_conversation_context",
+      buildConversationContextToolDescription(),
+      queryConversationContextInputSchema,
+      createConversationContextHandler(conversationContext),
+      { alwaysLoad: true },
+    ));
+  }
   return createServer({
     name: "lilia",
     version: "0.1.0",
-    tools: [
-      createTool(
-        "ask_user_question",
-        "Ask the human user one or more multiple-choice questions through Lilia.",
-        askUserQuestionInputSchema,
-        createClaudeAskUserHandler(requestAskUser),
-        { alwaysLoad: true },
-      ),
-    ],
+    tools,
     alwaysLoad: true,
   });
 }
@@ -106,6 +127,7 @@ export async function runClaude(cmd, context) {
   };
   const liliaAskUserServer = createLiliaAskUserServer({
     requestAskUser: context.interactions.requestAskUser,
+    conversationContext: cmd.conversationContext,
     createServer: context.createSdkMcpServer || createSdkMcpServer,
     createTool: context.createClaudeTool || tool,
   });
@@ -123,9 +145,11 @@ export async function runClaude(cmd, context) {
     },
     toolAliases: {
       AskUserQuestion: "mcp__lilia__ask_user_question",
+      QueryConversationContext: "mcp__lilia__query_conversation_context",
     },
     toolConfig: {
       askUserQuestion: { previewFormat: "markdown" },
+      queryConversationContext: { previewFormat: "markdown" },
     },
     ...(runtimeExtensions.skills.length > 0 ? { skills: runtimeExtensions.skills } : {}),
     ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),
