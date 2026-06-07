@@ -40,10 +40,39 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const isBound = computed(() => bindingStatus.value?.state === "bound");
 const boundLogin = computed(() => bindingStatus.value?.binding?.login ?? "");
-const boundScopes = computed(() => bindingStatus.value?.binding?.scopes ?? []);
 const deviceCodeExpired = computed(() =>
   deviceFlow.value ? Date.now() >= deviceFlow.value.expiresAt : false,
 );
+const githubBindingView = computed(() => {
+  if (isBound.value && bindingStatus.value?.binding) {
+    return {
+      icon: CheckCircle2,
+      spinning: false,
+      text: `已绑定：${boundLogin.value}`,
+      code: null,
+      copied: false,
+      expired: false,
+    };
+  }
+  if (deviceFlow.value) {
+    return {
+      icon: LoaderCircle,
+      spinning: bindingBusy.value,
+      text: "等待授权：",
+      code: deviceFlow.value.userCode,
+      copied: copiedCode.value,
+      expired: deviceCodeExpired.value,
+    };
+  }
+  return {
+    icon: null,
+    spinning: false,
+    text: "未绑定 GitHub",
+    code: null,
+    copied: false,
+    expired: false,
+  };
+});
 
 function clearPollTimer() {
   if (pollTimer) {
@@ -206,8 +235,8 @@ onBeforeUnmount(() => {
 
     <div class="settings-row">
       <div class="settings-row__label">Clone 默认父目录</div>
-      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
-        <span class="muted" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+      <div class="settings-row__control">
+        <span class="settings-row__value muted">
           {{ projectSettings.cloneParentDir || "未设置（用家目录）" }}
         </span>
         <button type="button" class="ghost" :disabled="savingProject" @click="pickCloneParent">
@@ -217,87 +246,71 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="settings-row" style="align-items: flex-start;">
+    <div class="settings-row">
       <div class="settings-row__label">
-        <div style="display: inline-flex; align-items: center; gap: 6px;">
+        <div class="settings-row__label-with-icon">
           <Github :size="14" aria-hidden="true" />
           GitHub 绑定
         </div>
       </div>
-      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: min(420px, 100%);">
-        <div v-if="isBound && bindingStatus?.binding" class="conn-banner conn-banner--ok" style="margin: 0; width: min(420px, 100%);">
-          <CheckCircle2 :size="16" aria-hidden="true" />
-          <div style="min-width: 0;">
-            <div class="conn-banner__title">已绑定 GitHub</div>
-            <div class="conn-banner__hint">
-              当前账号：{{ boundLogin }}
-              <template v-if="boundScopes.length"> · 权限：{{ boundScopes.join("、") }}</template>
-            </div>
-          </div>
+      <div class="settings-row__control settings-row__control--loose">
+        <div class="settings-row__status muted">
+          <component
+            :is="githubBindingView.icon"
+            v-if="githubBindingView.icon"
+            :size="14"
+            aria-hidden="true"
+            :class="{ 'is-spinning': githubBindingView.spinning }"
+          />
+          <span class="settings-row__status-text">
+            {{ githubBindingView.text }}<code v-if="githubBindingView.code">{{ githubBindingView.code }}</code>
+            <template v-if="githubBindingView.copied"> · 已复制</template>
+            <template v-if="githubBindingView.expired"> · 已过期</template>
+          </span>
         </div>
 
-        <div v-else-if="deviceFlow" class="conn-banner conn-banner--probing" style="margin: 0; width: min(420px, 100%);">
-          <LoaderCircle :size="16" aria-hidden="true" :class="{ 'is-spinning': bindingBusy }" />
-          <div style="min-width: 0;">
-            <div class="conn-banner__title">等待 GitHub 授权</div>
-            <div class="conn-banner__hint">
-              设备码：<code>{{ deviceFlow.userCode }}</code>
-              <span v-if="copiedCode"> · 已复制</span>
-              <span v-if="deviceCodeExpired"> · 已过期</span>
-            </div>
-          </div>
-        </div>
+        <button
+          v-if="!isBound"
+          type="button"
+          class="primary"
+          :disabled="bindingBusy"
+          @click="startBinding"
+        >
+          <LoaderCircle v-if="bindingBusy && !deviceFlow" :size="12" aria-hidden="true" class="is-spinning" />
+          <Github v-else :size="12" aria-hidden="true" />
+          {{ deviceFlow ? "重新开始绑定" : "绑定 GitHub" }}
+        </button>
 
-        <div v-else class="muted" style="font-size: 12px;">
-          未绑定 GitHub
-        </div>
+        <button
+          v-if="deviceFlow"
+          type="button"
+          class="ghost"
+          @click="copyCodeAndOpenBrowser"
+        >
+          <Copy :size="12" aria-hidden="true" />
+          复制设备码并打开浏览器
+        </button>
 
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
-          <button
-            v-if="!isBound"
-            type="button"
-            class="primary"
-            :disabled="bindingBusy"
-            @click="startBinding"
-          >
-            <LoaderCircle v-if="bindingBusy && !deviceFlow" :size="12" aria-hidden="true" class="is-spinning" />
-            <Github v-else :size="12" aria-hidden="true" />
-            {{ deviceFlow ? "重新开始绑定" : "绑定 GitHub" }}
-          </button>
+        <button
+          v-if="deviceFlow"
+          type="button"
+          class="ghost"
+          @click="openUrl(deviceFlow.verificationUri)"
+        >
+          <Link2 :size="12" aria-hidden="true" />
+          仅打开 GitHub
+        </button>
 
-          <button
-            v-if="deviceFlow"
-            type="button"
-            class="ghost"
-            :disabled="bindingBusy && !deviceFlow"
-            @click="copyCodeAndOpenBrowser"
-          >
-            <Copy :size="12" aria-hidden="true" />
-            复制设备码并打开浏览器
-          </button>
-
-          <button
-            v-if="deviceFlow"
-            type="button"
-            class="ghost"
-            :disabled="bindingBusy && !deviceFlow"
-            @click="openUrl(deviceFlow.verificationUri)"
-          >
-            <Link2 :size="12" aria-hidden="true" />
-            仅打开 GitHub
-          </button>
-
-          <button
-            v-if="isBound"
-            type="button"
-            class="ghost danger"
-            :disabled="bindingBusy"
-            @click="handleUnbind"
-          >
-            <Unplug :size="12" aria-hidden="true" />
-            解绑
-          </button>
-        </div>
+        <button
+          v-if="isBound"
+          type="button"
+          class="ghost danger"
+          :disabled="bindingBusy"
+          @click="handleUnbind"
+        >
+          <Unplug :size="12" aria-hidden="true" />
+          解绑
+        </button>
       </div>
     </div>
 

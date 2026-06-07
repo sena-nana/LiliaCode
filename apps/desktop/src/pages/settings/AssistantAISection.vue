@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { AlertTriangle, Plug, Save, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, MessageSquarePlus, Plug, Save, Sparkles } from "lucide-vue-next";
 import type {
   AssistantAIConfig,
   AssistantAITestResult,
@@ -32,12 +32,12 @@ const assistantAIBannerHint = computed(() => {
   if (!r) return "";
   if (!r.ok) return r.error ?? "未知错误";
   if (r.modelMatched === false) {
-    return `已连接，但配置的 model 不在 /models 列表里（共 ${r.models?.length ?? 0} 个可用）。请确认模型名拼写。`;
+    return `已连接，但配置的模型不在 /models 列表里（共 ${r.models?.length ?? 0} 个可用）。请确认模型名拼写。`;
   }
   if (r.modelMatched === true) {
-    return "已连接，配置的 model 在端点 /models 列表里。";
+    return "已连接，配置的模型在端点 /models 列表里。";
   }
-  return "已连接（端点未返回 /models 列表，无法确认 model 名是否有效）。";
+  return "已连接（端点未返回 /models 列表，无法确认模型名是否有效）。";
 });
 
 function normalizedAssistantAI(): AssistantAIConfig {
@@ -109,7 +109,7 @@ onMounted(() => {
     </p>
 
     <div class="settings-row">
-      <div class="settings-row__label">Base URL</div>
+      <div class="settings-row__label">基础 URL</div>
       <input
         type="text"
         class="text-input"
@@ -119,7 +119,7 @@ onMounted(() => {
       />
     </div>
     <div class="settings-row">
-      <div class="settings-row__label">API Key</div>
+      <div class="settings-row__label">API 密钥</div>
       <input
         type="password"
         class="text-input"
@@ -129,7 +129,7 @@ onMounted(() => {
       />
     </div>
     <div class="settings-row">
-      <div class="settings-row__label">Model</div>
+      <div class="settings-row__label">模型</div>
       <input
         type="text"
         class="text-input"
@@ -164,8 +164,29 @@ onMounted(() => {
       </div>
     </div>
 
+    <div
+      v-if="assistantAIResult"
+      class="conn-banner"
+      :class="assistantAIResult.ok ? 'conn-banner--ok' : 'conn-banner--err'"
+    >
+      <component :is="assistantAIResult.ok ? Plug : AlertTriangle" :size="16" aria-hidden="true" />
+      <div>
+        <div class="conn-banner__title">{{ assistantAIResult.ok ? "可达" : "不可达" }}</div>
+        <div class="conn-banner__hint">{{ assistantAIBannerHint }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>
+      <span class="card-h2__title">
+        <MessageSquarePlus :size="14" aria-hidden="true" />
+        新对话建议
+      </span>
+    </h2>
+
     <div class="settings-row">
-      <div class="settings-row__label">新对话建议</div>
+      <div class="settings-row__label">启用状态</div>
       <div class="segmented" role="radiogroup" aria-label="新对话建议">
         <button
           type="button"
@@ -205,18 +226,6 @@ onMounted(() => {
         >
           {{ opt.label }}
         </button>
-      </div>
-    </div>
-
-    <div
-      v-if="assistantAIResult"
-      class="conn-banner"
-      :class="assistantAIResult.ok ? 'conn-banner--ok' : 'conn-banner--err'"
-    >
-      <component :is="assistantAIResult.ok ? Plug : AlertTriangle" :size="16" aria-hidden="true" />
-      <div>
-        <div class="conn-banner__title">{{ assistantAIResult.ok ? "可达" : "不可达" }}</div>
-        <div class="conn-banner__hint">{{ assistantAIBannerHint }}</div>
       </div>
     </div>
   </div>

@@ -26,10 +26,10 @@ const profileOptions: Array<{ value: CodexSettingsProfile; label: string }> = [
 
 const effortOptions: Array<{ value: CodexReasoningEffort | null; label: string }> = [
   { value: null, label: "默认" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "XHigh" },
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+  { value: "xhigh", label: "极高" },
 ];
 
 const codexPermissionOptions: Array<{ value: CodexPermissionProfile; label: string }> = [
@@ -166,8 +166,8 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">Codex Profile</div>
-      <div class="segmented" role="radiogroup" aria-label="Codex Profile">
+      <div class="settings-row__label">Codex 配置档案</div>
+      <div class="segmented" role="radiogroup" aria-label="Codex 配置档案">
         <button
           v-for="option in profileOptions"
           :key="option.value"
@@ -184,7 +184,7 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">Codex Model</div>
+      <div class="settings-row__label">Codex 模型</div>
       <input
         v-model="codexModelDraft"
         class="settings-input"
@@ -196,8 +196,8 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">Reasoning Effort</div>
-      <div class="segmented" role="radiogroup" aria-label="Reasoning Effort">
+      <div class="settings-row__label">推理强度</div>
+      <div class="segmented" role="radiogroup" aria-label="推理强度">
         <button
           v-for="option in effortOptions"
           :key="option.value ?? 'default'"
@@ -214,7 +214,7 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">Runtime Workspace Roots</div>
+      <div class="settings-row__label">运行时工作区根目录</div>
       <textarea
         v-model="codexRootsDraft"
         class="settings-input settings-input--textarea"
@@ -226,8 +226,8 @@ onMounted(loadAgentInteraction);
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">Codex Permissions</div>
-      <div class="segmented" role="radiogroup" aria-label="Codex Permissions">
+      <div class="settings-row__label">Codex 权限</div>
+      <div class="segmented" role="radiogroup" aria-label="Codex 权限">
         <button
           v-for="option in codexPermissionOptions"
           :key="option.value"

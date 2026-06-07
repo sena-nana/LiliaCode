@@ -30,8 +30,8 @@ describe("Settings provider switch", () => {
 
   it("非法 tab 默认显示外观分类", async () => {
     const invalid = await renderSettings("/settings?tab=unknown");
-    expect(invalid.getByText("外观")).toBeInTheDocument();
-    expect(invalid.getByLabelText("弹出窗口快捷键")).toBeInTheDocument();
+    expect(invalid.getByRole("heading", { level: 1, name: "外观" })).toBeInTheDocument();
+    expect(invalid.queryByLabelText("弹出窗口快捷键")).not.toBeInTheDocument();
     expect(invalid.queryByRole("radio", { name: "Codex" })).not.toBeInTheDocument();
   });
 
@@ -95,7 +95,7 @@ describe("Settings provider switch", () => {
   });
 
   it("弹出窗口快捷键默认关闭，可录入并保存全局快捷键", async () => {
-    const view = await renderSettings();
+    const view = await renderSettings("/settings?tab=window");
     const input = view.getByLabelText("弹出窗口快捷键") as HTMLInputElement;
     const card = input.closest(".card") as HTMLElement;
 
@@ -120,7 +120,7 @@ describe("Settings provider switch", () => {
 
   it("弹出窗口快捷键注册失败时显示错误并保留表单值", async () => {
     failNextPopupSettingsSave("快捷键已被占用");
-    const view = await renderSettings();
+    const view = await renderSettings("/settings?tab=window");
     const input = view.getByLabelText("弹出窗口快捷键") as HTMLInputElement;
     const card = input.closest(".card") as HTMLElement;
 
@@ -140,7 +140,7 @@ describe("Settings provider switch", () => {
   it("Codex profile settings 保存受控 permissions 与 workspace roots", async () => {
     const view = await renderSettings("/settings?tab=agent");
 
-    await fireEvent.click(view.getByRole("radio", { name: "High" }));
+    await fireEvent.click(view.getByRole("radio", { name: "高" }));
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(([cmd, args]) =>
@@ -183,7 +183,7 @@ describe("Settings provider switch", () => {
   });
 
   it("新对话建议生成来源可切换到当前 Provider", async () => {
-    const view = await renderSettings("/settings?tab=providers");
+    const view = await renderSettings("/settings?tab=assistant");
 
     await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
 
@@ -242,8 +242,8 @@ describe("Settings provider switch", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     await waitFor(() => {
-      expect(view.getByText("已绑定 GitHub")).toBeInTheDocument();
-      expect(view.getByText(/octocat/)).toBeInTheDocument();
+      expect(view.getByText(/已绑定：\s*octocat/)).toBeInTheDocument();
+      expect(view.queryByText(/权限：/)).not.toBeInTheDocument();
     });
     expect(writeText).toHaveBeenCalledWith("ABCD-EFGH");
     expect(

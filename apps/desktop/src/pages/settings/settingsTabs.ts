@@ -3,13 +3,17 @@ import {
   FolderCog,
   Info,
   Network,
+  PanelTop,
   Palette,
+  Sparkles,
 } from "lucide-vue-next";
 import type { Component } from "vue";
 
 export type SettingsTabKey =
   | "appearance"
+  | "window"
   | "providers"
+  | "assistant"
   | "agent"
   | "project"
   | "about";
@@ -23,13 +27,23 @@ export interface SettingsTab {
 export const SETTINGS_TABS: SettingsTab[] = [
   {
     key: "appearance",
-    label: "外观与窗口",
+    label: "外观",
     icon: Palette,
+  },
+  {
+    key: "window",
+    label: "窗口",
+    icon: PanelTop,
   },
   {
     key: "providers",
     label: "连接",
     icon: Network,
+  },
+  {
+    key: "assistant",
+    label: "辅助能力",
+    icon: Sparkles,
   },
   {
     key: "agent",

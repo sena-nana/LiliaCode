@@ -133,7 +133,7 @@ onMounted(async () => {
 
     <div class="settings-row">
       <div class="settings-row__label">使用</div>
-      <div class="segmented" role="radiogroup" aria-label="Backend">
+      <div class="segmented" role="radiogroup" aria-label="对话后端">
         <button
           v-for="opt in backendOptions"
           :key="opt.value"

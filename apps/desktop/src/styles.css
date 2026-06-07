@@ -1731,7 +1731,7 @@ button.ghost:hover {
   color: inherit;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1763,6 +1763,49 @@ button.ghost:hover {
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.settings-row__label-with-icon,
+.settings-row__control,
+.settings-row__status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.settings-row__label-with-icon {
+  gap: 6px;
+}
+
+.settings-row__control {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-row__control--loose {
+  column-gap: 14px;
+  row-gap: 8px;
+}
+
+.settings-row__value,
+.settings-row__status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-row__value {
+  max-width: 320px;
+}
+
+.settings-row__status {
+  min-width: 0;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.settings-row__status-text {
+  max-width: 220px;
 }
 
 .settings-input {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, type Component } from "vue";
 import { useRoute } from "vue-router";
 import AppearanceSection from "./settings/AppearanceSection.vue";
 import PopupWindowSection from "./settings/PopupWindowSection.vue";
@@ -8,35 +8,38 @@ import AssistantAISection from "./settings/AssistantAISection.vue";
 import AgentInteractionSection from "./settings/AgentInteractionSection.vue";
 import ProjectPreferencesSection from "./settings/ProjectPreferencesSection.vue";
 import AboutSection from "./settings/AboutSection.vue";
-import { normalizeSettingsTab } from "./settings/settingsTabs";
+import {
+  SETTINGS_TABS,
+  normalizeSettingsTab,
+  type SettingsTabKey,
+} from "./settings/settingsTabs";
+
+const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
+  appearance: AppearanceSection,
+  window: PopupWindowSection,
+  providers: ProviderConnectionSection,
+  assistant: AssistantAISection,
+  agent: AgentInteractionSection,
+  project: ProjectPreferencesSection,
+  about: AboutSection,
+};
 
 const route = useRoute();
 const activeTab = computed(() => normalizeSettingsTab(route.query.tab));
+const activeTabSection = computed(() => SETTINGS_SECTIONS[activeTab.value]);
+const activeTabLabel = computed(
+  () => SETTINGS_TABS.find((tab) => tab.key === activeTab.value)?.label ?? "设置",
+);
 </script>
 
 <template>
   <section class="settings-page">
     <div class="page-header">
       <div>
-        <h1>设置</h1>
-        <p v-if="activeTab === 'appearance'">调整界面外观和弹出窗口入口。</p>
-        <p v-else-if="activeTab === 'providers'">对话统一经 CC-Switch 本地代理转发。</p>
-        <p v-else-if="activeTab === 'agent'">设置 Agent 默认交互和 Codex profile。</p>
-        <p v-else-if="activeTab === 'project'">配置项目创建与默认偏好。</p>
-        <p v-else>查看 Lilia 的基础信息。</p>
+        <h1>{{ activeTabLabel }}</h1>
       </div>
     </div>
 
-    <template v-if="activeTab === 'appearance'">
-      <AppearanceSection />
-      <PopupWindowSection />
-    </template>
-    <template v-else-if="activeTab === 'providers'">
-      <ProviderConnectionSection />
-      <AssistantAISection />
-    </template>
-    <AgentInteractionSection v-else-if="activeTab === 'agent'" />
-    <ProjectPreferencesSection v-else-if="activeTab === 'project'" />
-    <AboutSection v-else />
+    <component :is="activeTabSection" />
   </section>
 </template>

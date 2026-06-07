@@ -94,7 +94,7 @@ describe("AppShell left sidebar collapse", () => {
     expect(leftToggle).toBeDisabled();
     expect(view.getByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
     expect(view.queryByRole("button", { name: "新对话" })).not.toBeInTheDocument();
-    expect(view.getByRole("button", { name: /外观与窗口/ })).toHaveClass("is-active");
+    expect(view.getByRole("button", { name: /外观/ })).toHaveClass("is-active");
     expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("1");
 
     await fireEvent.click(view.getByRole("button", { name: /连接/ }));
