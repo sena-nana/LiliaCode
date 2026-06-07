@@ -12,7 +12,7 @@
     "pretauri": "node scripts/check-package-manager.mjs",
     "tauri": "yarn check:package-manager && yarn --cwd apps/desktop tauri",
     "pretauri:dev": "node scripts/check-package-manager.mjs",
-    "tauri:dev": "yarn check:package-manager && yarn --cwd apps/desktop tauri dev",
+    "tauri:dev": "yarn check:package-manager && node scripts/tauri-dev.mjs",
     "pretauri:build": "node scripts/check-package-manager.mjs",
     "tauri:build": "yarn check:package-manager && yarn --cwd apps/desktop tauri build",
     "predev": "node scripts/check-package-manager.mjs",
