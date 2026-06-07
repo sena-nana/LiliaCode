@@ -4,6 +4,7 @@ export * from "./todo";
 export * from "./chat";
 export * from "./provider";
 export * from "./plugins";
+export * from "./codex-history";
 export * from "./ask-user";
 export * from "./agent-interaction";
 export * from "./timeline";

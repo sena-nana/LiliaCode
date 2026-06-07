@@ -34,6 +34,12 @@ import {
   flushCodexRuntimeSettings,
   startCodexAppServerTurn,
 } from "../agent-runner/codex/runCodex.mjs";
+import {
+  codexHistoryTimelineInputs,
+  readCodexThreadTurns,
+  searchCodexThreads,
+  syncCodexThreadHistoryForTask,
+} from "../agent-runner/codex/history.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
@@ -1788,5 +1794,164 @@ describe("Codex app-server mapping", () => {
       line.event.payload.revisionRequest === "先补充回滚方案"
     )).toBe(true);
     expect(json().some((line) => line.type === "user_message")).toBe(false);
+  });
+});
+
+describe("Codex history utility", () => {
+  it("searches Codex threads with cursor and archive params", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "initialize") return {};
+        if (method === "thread/search") {
+          return {
+            data: [{
+              id: "thread-1",
+              title: "修复构建",
+              model: "gpt-5.1",
+              updatedAt: 10,
+              preview: "最后一条回复",
+            }],
+            nextCursor: "cursor-2",
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      close: () => {},
+    };
+
+    await expect(searchCodexThreads({
+      searchTerm: "build",
+      cursor: "cursor-1",
+      archived: true,
+      limit: 30,
+    }, { createServer: () => server as any })).resolves.toEqual({
+      threads: [expect.objectContaining({
+        id: "thread-1",
+        title: "修复构建",
+        model: "gpt-5.1",
+        updatedAt: 10_000,
+        preview: "最后一条回复",
+      })],
+      nextCursor: "cursor-2",
+    });
+
+    expect(calls.find((call) => call.method === "thread/search")).toEqual({
+      method: "thread/search",
+      params: {
+        limit: 30,
+        sortDirection: "desc",
+        archived: true,
+        searchTerm: "build",
+        cursor: "cursor-1",
+      },
+    });
+  });
+
+  it("lists turns and backfills truncated turn items", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/turns/list") {
+          return {
+            data: [{
+              id: "turn-1",
+              status: "completed",
+              startedAt: 1,
+              completedAt: 2,
+              itemsTruncated: true,
+              items: [],
+            }],
+          };
+        }
+        if (method === "thread/turns/items/list") {
+          return {
+            data: [{ type: "agentMessage", id: "msg-1", text: "历史回复" }],
+          };
+        }
+        return {};
+      },
+    };
+
+    const result = await readCodexThreadTurns(server as any, "thread-1", { limit: 10 });
+
+    expect(calls).toEqual([
+      {
+        method: "thread/turns/list",
+        params: {
+          threadId: "thread-1",
+          limit: 10,
+          sortDirection: "asc",
+          itemsView: "full",
+        },
+      },
+      {
+        method: "thread/turns/items/list",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          limit: 200,
+          sortDirection: "asc",
+        },
+      },
+    ]);
+    expect(result.turns[0].items).toEqual([
+      { type: "agentMessage", id: "msg-1", text: "历史回复" },
+    ]);
+  });
+
+  it("syncs history into Lilia timeline inputs", async () => {
+    const server = {
+      request: async (method: string) => {
+        if (method === "initialize") return {};
+        if (method === "thread/turns/list") {
+          return {
+            data: [{
+              id: "turn-1",
+              status: "completed",
+              startedAt: 1,
+              completedAt: 2,
+              items: [
+                { type: "userMessage", id: "user-1", text: "旧问题" },
+                { type: "agentMessage", id: "msg-1", text: "旧回复" },
+              ],
+            }],
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      close: () => {},
+    };
+
+    const result = await syncCodexThreadHistoryForTask({
+      taskId: "task-1",
+      threadId: "thread-1",
+    }, { createServer: () => server as any });
+
+    expect(result.eventCount).toBe(2);
+    expect(result.events).toEqual([
+      expect.objectContaining({
+        taskId: "task-1",
+        turnId: "turn-1",
+        backend: "codex",
+        kind: "message",
+        payload: expect.objectContaining({
+          history: true,
+          threadId: "thread-1",
+          itemId: "user-1",
+        }),
+      }),
+      expect.objectContaining({
+        taskId: "task-1",
+        turnId: "turn-1",
+        kind: "message",
+        summary: "旧回复",
+      }),
+    ]);
+    expect(codexHistoryTimelineInputs("task-2", "thread-1", [])).toEqual([]);
   });
 });

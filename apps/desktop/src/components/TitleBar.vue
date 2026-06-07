@@ -41,7 +41,9 @@ const taskId = computed(() => paramAsString(route.params.taskId));
 const chatSidebar = useChatSidebar();
 
 const canToggleChatSidebar = computed(() =>
-  !!taskId.value && (route.path.startsWith("/chats/") || !!projectId.value),
+  !!taskId.value &&
+  (route.path.startsWith("/chats/") || !!projectId.value) &&
+  chatSidebar.panels.value.length > 0,
 );
 
 interface Crumb {

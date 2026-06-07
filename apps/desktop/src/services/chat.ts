@@ -20,6 +20,11 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatComposerState,
+  CodexThreadAttachInput,
+  CodexThreadAttachResult,
+  CodexThreadPreview,
+  CodexThreadSearchInput,
+  CodexThreadSearchResult,
   ChatInterruptResult,
   AgentTimelineEvent,
   ChatSendResult,
@@ -44,6 +49,11 @@ export type {
   ChatAttachment,
   ChatInterruptResult,
   ChatContextSearchResult,
+  CodexThreadAttachInput,
+  CodexThreadAttachResult,
+  CodexThreadPreview,
+  CodexThreadSearchInput,
+  CodexThreadSearchResult,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -63,6 +73,22 @@ export interface DoneEvent { taskId: string; sessionId: string | null; subtype: 
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
+}
+
+export function searchCodexThreads(
+  input: CodexThreadSearchInput,
+): Promise<CodexThreadSearchResult> {
+  return invoke<CodexThreadSearchResult>("codex_thread_search", { input });
+}
+
+export function previewCodexThread(threadId: string): Promise<CodexThreadPreview> {
+  return invoke<CodexThreadPreview>("codex_thread_preview", { threadId });
+}
+
+export function attachCodexThread(
+  input: CodexThreadAttachInput,
+): Promise<CodexThreadAttachResult> {
+  return invoke<CodexThreadAttachResult>("codex_thread_attach", { input });
 }
 
 /**

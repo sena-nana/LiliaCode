@@ -39,9 +39,9 @@ codex app-server generate-ts --out <experimental> --experimental
 | `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 未实现 | Lilia Memory 设计是旁路系统，不直接切 Codex 原生 memory mode。 |
 | `memory/reset` | 重置 Codex memory。无参数。 | 未实现 | 这是 Codex 自身全局/账户语义，Lilia 不应在没有明确用户动作时调用。 |
 | `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 未实现 | Lilia 目前只展示 Codex 命令事件，没有接管 Codex background terminal 生命周期。 |
-| `thread/search` | 搜索 threads。支持分页、排序、sourceKinds、archived、`searchTerm`。 | 未实现 | Lilia 使用自己的 task/session 存储与搜索；可作为“导入 / 继续 Codex 历史”增强入口。 |
-| `thread/turns/list` | 分页读取指定 thread 的 turns，可选择 item detail。 | 未实现 | Lilia 当前依赖运行期事件持久化，不从 Codex thread 回补完整 turn 页。 |
-| `thread/turns/items/list` | 分页读取指定 turn 的 items。 | 未实现 | 同上；适合未来做 Codex 历史恢复和时间线重建。 |
+| `thread/search` | 搜索 threads。支持分页、排序、sourceKinds、archived、`searchTerm`。 | 已实现 | Lilia 从左侧栏底部导入入口搜索 app-server threads，支持分页、关键词和归档开关，并可导入为新的 Lilia task。 |
+| `thread/turns/list` | 分页读取指定 thread 的 turns，可选择 item detail。 | 已实现 | Lilia 用它生成 Codex thread 预览和历史接入时的 timeline 回补。 |
+| `thread/turns/items/list` | 分页读取指定 turn 的 items。 | 已实现 | 当 turns 返回 items 缺失或标记截断时，Lilia 补拉 turn items 后再映射到统一 timeline。 |
 | `thread/realtime/start` | 启动 thread-scoped realtime session。参数包括输出模态、prompt、transport、voice。 | 未实现 | Lilia 当前没有 Codex realtime 语音 / 文本会话 UI。 |
 | `thread/realtime/appendAudio` | 向 realtime session 追加音频输入。 | 未实现 | 依赖 realtime UI 和音频采集。 |
 | `thread/realtime/appendText` | 向 realtime session 追加文本输入。 | 未实现 | 依赖 realtime 会话状态管理。 |
@@ -118,7 +118,7 @@ collaborationMode: {
 ## 接入优先级
 
 1. **Codex Plan collaboration mode**：`collaborationMode/list` + `turn/start.collaborationMode`。这是与 Codex Desktop 最接近的计划模式入口。
-2. **历史恢复**：根据需要接入 `thread/turns/list` 和 `thread/turns/items/list`，用于 Codex 历史线程的时间线回补。
+2. **Codex 历史入口**：已接入 `thread/search`、`thread/turns/list` 和 `thread/turns/items/list`，用于从左侧栏底部入口搜索、预览、导入和新建 Lilia task。
 3. **环境 / remote / realtime**：暂不默认接入；这些接口涉及更大的权限、UI 和生命周期边界，需要单独设计。
 4. **进程管理泛化**：`process/spawn` 当前只作为 Lilia 编辑后执行命令的 fallback，不作为通用终端 / 进程管理入口。
 

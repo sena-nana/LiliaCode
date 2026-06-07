@@ -5,6 +5,7 @@ pub mod agent_events;
 mod agent_extensions;
 pub mod agent_timeline;
 mod chat;
+mod codex_history;
 mod conversation_suggestions;
 mod github;
 mod plugins;
@@ -108,6 +109,9 @@ pub fn run() {
             chat::commands::chat_get_composer_state,
             chat::commands::chat_set_composer_state,
             chat::commands::chat_reset_session,
+            codex_history::codex_thread_search,
+            codex_history::codex_thread_preview,
+            codex_history::codex_thread_attach,
             provider::chat_check_env,
             provider::provider_get_config,
             provider::provider_set_config,

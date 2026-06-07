@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import {
   AlertTriangle,
+  Import,
   Puzzle,
   Settings,
   Sparkles,
 } from "lucide-vue-next";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 
+const ConversationImportDialog = defineAsyncComponent(
+  () => import("./ConversationImportDialog.vue"),
+);
+
 const { activeBackend, statusFor, nodeAvailable, codexCliAvailable, codexAppServer, refresh } =
   useConnectionStatus({ probe: false, loadBackend: false });
 
+const importOpen = ref(false);
 const activeStatus = computed(() => statusFor(activeBackend.value));
 
 const backendLabel = computed(() =>
@@ -80,6 +86,16 @@ onMounted(() => {
       <Puzzle :size="14" aria-hidden="true" />
     </RouterLink>
 
+    <button
+      type="button"
+      class="sb-footer__btn"
+      title="从 Claude / Codex 导入对话"
+      aria-label="从 Claude / Codex 导入对话"
+      @click="importOpen = true"
+    >
+      <Import :size="14" aria-hidden="true" />
+    </button>
+
     <RouterLink to="/settings" class="sb-conn" :class="`sb-conn--${connectionTone}`"
       :title="connectionTooltip" :aria-label="connectionTooltip">
       <template v-if="connectionTone !== 'ok'">
@@ -95,4 +111,9 @@ onMounted(() => {
       </template>
     </RouterLink>
   </div>
+
+  <ConversationImportDialog
+    v-if="importOpen"
+    @close="importOpen = false"
+  />
 </template>
