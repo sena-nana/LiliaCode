@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
-import { FolderOpen, Github, Lock, Search, Sparkles } from "lucide-vue-next";
+import { FolderOpen, Github, Lock, Sparkles } from "lucide-vue-next";
 import type {
   GitHubBindingStatus,
   GitHubRepoSummary,
@@ -17,7 +17,10 @@ import {
   gitHubCloneRepo,
   listGitHubRepos,
   pickFolder,
+  preloadGitHubRepos,
+  readCachedGitHubRepos,
 } from "../../services/projects";
+import SearchDropdown from "../SearchDropdown.vue";
 
 const emit = defineEmits<{
   close: [];
@@ -25,7 +28,7 @@ const emit = defineEmits<{
   error: [msg: string];
 }>();
 
-const cloneInput = ref<HTMLInputElement | null>(null);
+const cloneInput = ref<{ focus: (options?: FocusOptions & { open?: boolean }) => void } | null>(null);
 const cloneBusy = ref(false);
 const cloneError = ref<string | null>(null);
 const cloneParent = ref("");
@@ -59,6 +62,16 @@ function dedupeRepos(items: GitHubRepoSummary[]): GitHubRepoSummary[] {
     next.push(item);
   }
   return next;
+}
+
+function applyRepoPage(
+  result: { items: GitHubRepoSummary[]; nextPage: number | null },
+  append = false,
+) {
+  nextRepoPage.value = result.nextPage;
+  repoItems.value = append
+    ? dedupeRepos([...repoItems.value, ...result.items])
+    : result.items;
 }
 
 const filteredRepos = computed(() => {
@@ -102,28 +115,39 @@ async function loadBindingStatus() {
   bindingStatus.value = await getGitHubBindingStatus();
 }
 
-async function loadRepoPage(page = 1, append = false) {
+async function loadRepoPage(
+  page = 1,
+  append = false,
+  options: { force?: boolean; showLoading?: boolean } = {},
+) {
   if (!isBound.value) return;
+  const showLoading = options.showLoading ?? !append;
   if (append) {
     repoLoadingMore.value = true;
-  } else {
+  } else if (showLoading) {
     repoLoading.value = true;
   }
   try {
-    const result = await listGitHubRepos(page);
-    nextRepoPage.value = result.nextPage;
-    repoItems.value = append
-      ? dedupeRepos([...repoItems.value, ...result.items])
-      : result.items;
+    const result = page === 1
+      ? await preloadGitHubRepos({ force: options.force })
+      : await listGitHubRepos(page);
+    applyRepoPage(result, append);
+  } catch (err) {
+    if (!append && repoItems.value.length === 0) {
+      nextRepoPage.value = null;
+    }
+    throw err;
   } finally {
-    repoLoading.value = false;
+    if (showLoading) {
+      repoLoading.value = false;
+    }
     repoLoadingMore.value = false;
   }
 }
 
-async function ensureReposLoaded() {
+function startReposLoad() {
   if (!isBound.value || repoLoading.value || repoItems.value.length > 0) return;
-  await loadRepoPage(1);
+  void loadRepoPage(1).catch(() => undefined);
 }
 
 async function maybeLoadMoreRepos() {
@@ -151,13 +175,20 @@ async function init() {
       cloneParent.value = await safeHomeDir();
     }
     if (isBound.value) {
-      await ensureReposLoaded();
+      const cached = readCachedGitHubRepos();
+      if (cached) {
+        applyRepoPage(cached);
+      }
+      void loadRepoPage(1, false, {
+        force: Boolean(cached),
+        showLoading: !cached,
+      }).catch(() => undefined);
     }
   } catch {
     cloneParent.value = await safeHomeDir();
   }
   await nextTick();
-  cloneInput.value?.focus();
+  cloneInput.value?.focus({ open: false });
 }
 
 async function pickCloneParent() {
@@ -184,17 +215,17 @@ function clearSelectedRepoIfNeeded() {
   }
 }
 
-async function handleSearchFocus() {
+function openRepoDropdown() {
   repoDropdownOpen.value = true;
-  await ensureReposLoaded();
+  startReposLoad();
 }
 
-async function handleSearchInput() {
+function handleSearchInput() {
   clearSelectedRepoIfNeeded();
   repoDropdownOpen.value = true;
-  await ensureReposLoaded();
+  startReposLoad();
   if (queryTrimmed.value) {
-    await maybeLoadMoreRepos();
+    void maybeLoadMoreRepos();
   }
 }
 
@@ -247,7 +278,7 @@ onMounted(() => {
         aria-label="从 GitHub clone"
         @click.self="emit('close')"
       >
-        <div class="search-palette__card dialog__card">
+        <div class="search-palette__card dialog__card dialog__card--repo-dropdown">
           <div class="dialog__header">
             <Github :size="14" aria-hidden="true" />
             <span>从 Git 仓库克隆</span>
@@ -265,61 +296,67 @@ onMounted(() => {
               />
             </label>
 
-            <label v-else style="position: relative;">
+            <div v-else class="dialog__field">
               <span>GitHub 仓库</span>
-              <div class="sb-search" style="height: 34px;">
-                <Search :size="14" aria-hidden="true" class="sb-search__leading" />
-                <input
-                  ref="cloneInput"
-                  v-model="query"
-                  type="text"
-                  class="sb-search__input"
-                  placeholder="搜索仓库，或直接输入 owner/repo"
-                  spellcheck="false"
-                  @focus="handleSearchFocus"
-                  @input="handleSearchInput"
-                  @keydown.enter.prevent="confirmClone"
-                />
-              </div>
-
-              <div v-if="repoDropdownOpen" class="sb-search-dd" role="listbox" style="position: relative; top: 6px;">
-                <template v-if="filteredRepos.length">
+              <SearchDropdown
+                ref="cloneInput"
+                v-model="query"
+                v-model:open="repoDropdownOpen"
+                placeholder="搜索仓库，或直接输入 owner/repo"
+                close-on-outside
+                close-on-escape
+                :spellcheck="false"
+                @open-request="openRepoDropdown"
+                @input="handleSearchInput"
+                @keydown.enter.prevent="confirmClone"
+              >
+                <template #default="{ highlightQuerySegments }">
+                  <template v-if="filteredRepos.length">
+                    <button
+                      v-for="repo in filteredRepos"
+                      :key="repo.id"
+                      type="button"
+                      class="search-dropdown__item"
+                      :class="{ 'is-active': selectedRepo?.id === repo.id }"
+                      role="option"
+                      :aria-selected="selectedRepo?.id === repo.id"
+                      @click="selectRepo(repo)"
+                    >
+                      <span class="search-dropdown__title">
+                        <template
+                          v-for="(segment, segmentIndex) in highlightQuerySegments(repo.fullName)"
+                          :key="segmentIndex"
+                        >
+                          <mark v-if="segment.mark">{{ segment.text }}</mark>
+                          <template v-else>{{ segment.text }}</template>
+                        </template>
+                      </span>
+                      <span class="search-dropdown__scope">
+                        <Lock v-if="repo.private" :size="11" aria-hidden="true" />
+                        <template v-if="repo.private">私有</template>
+                        <template v-else>公开</template>
+                      </span>
+                    </button>
+                  </template>
                   <button
-                    v-for="repo in filteredRepos"
-                    :key="repo.id"
+                    v-else-if="directCloneRepo"
                     type="button"
-                    class="sb-search-dd__item"
-                    :class="{ 'is-active': selectedRepo?.id === repo.id }"
+                    class="search-dropdown__item"
                     role="option"
-                    :aria-selected="selectedRepo?.id === repo.id"
-                    @click="selectRepo(repo)"
+                    aria-selected="false"
+                    @click="selectedRepo = null; repoDropdownOpen = false"
                   >
-                    <span class="sb-search-dd__title">{{ repo.fullName }}</span>
-                    <span class="sb-search-dd__scope">
-                      <Lock v-if="repo.private" :size="11" aria-hidden="true" />
-                      <template v-if="repo.private">私有</template>
-                      <template v-else>公开</template>
+                    <span class="search-dropdown__title">直接克隆 {{ directCloneRepo }}</span>
+                    <span class="search-dropdown__scope">
+                      <Sparkles :size="11" aria-hidden="true" />
+                      手动输入
                     </span>
                   </button>
+                  <p v-else-if="repoLoading" class="search-dropdown__hint">正在加载仓库…</p>
+                  <p v-else class="search-dropdown__empty">没有匹配仓库</p>
                 </template>
-                <button
-                  v-else-if="directCloneRepo"
-                  type="button"
-                  class="sb-search-dd__item"
-                  role="option"
-                  aria-selected="false"
-                  @click="selectedRepo = null; repoDropdownOpen = false"
-                >
-                  <span class="sb-search-dd__title">直接克隆 {{ directCloneRepo }}</span>
-                  <span class="sb-search-dd__scope">
-                    <Sparkles :size="11" aria-hidden="true" />
-                    手动输入
-                  </span>
-                </button>
-                <p v-else-if="repoLoading" class="sb-search-dd__hint">正在加载仓库…</p>
-                <p v-else class="sb-search-dd__empty">没有匹配仓库</p>
-              </div>
-            </label>
+              </SearchDropdown>
+            </div>
 
             <label>
               <span>目标父目录</span>

@@ -405,30 +405,55 @@ pre code {
   filter: none;
 }
 
-.sb-search {
+.search-dropdown {
+  position: relative;
   flex: 1;
+  width: 100%;
   min-width: 0;
+}
+
+.search-dropdown__field {
   height: 30px;
   padding: 0 8px;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--bg-subtle);
-  border: 1px solid var(--border);
+  color: var(--text);
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 
-.sb-search:focus-within {
-  border-color: var(--accent);
+.sidebar-search-dropdown .search-dropdown__field {
+  display: grid;
+  grid-template-columns: var(--sb-project-icon-slot) minmax(0, 1fr) 30px;
+  gap: var(--sb-row-gap);
+  padding: 0 0 0 calc(var(--sb-project-row-padding-x) - 1px);
+}
+
+.search-dropdown__field:focus-within {
+  border-color: var(--border-strong);
   background: var(--bg);
 }
 
-.sb-search__leading {
+.search-dropdown.is-open .search-dropdown__field {
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+  background: var(--bg-elev);
+}
+
+.search-dropdown__leading {
   flex: 0 0 auto;
   color: var(--text-muted);
 }
 
-.sb-search__input {
+.sidebar-search-dropdown .search-dropdown__leading {
+  justify-self: center;
+}
+
+.search-dropdown__input {
   flex: 1;
   min-width: 0;
   height: 22px;
@@ -440,77 +465,122 @@ pre code {
   outline: none;
 }
 
-.sb-search__input::placeholder {
+.search-dropdown__input::placeholder {
   color: var(--text-faint);
 }
 
-.sb-search-dd {
+.search-dropdown__input:focus {
+  background: transparent;
+}
+
+.search-dropdown__action {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sidebar-search-dropdown .search-dropdown__action {
+  justify-self: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.search-dropdown__action:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.search-dropdown__menu {
+  --search-dropdown-row-height: 28px;
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% - 1px);
   left: 0;
   right: 0;
   z-index: 30;
-  max-height: min(60vh, 420px);
+  max-height: min(60vh, calc(var(--search-dropdown-row-height) * 6 + 8px));
   overflow-y: auto;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
   background: var(--bg-elev);
-  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
 }
 
-.sb-search-dd__item {
+.search-dropdown__item {
   width: 100%;
   min-width: 0;
+  height: var(--search-dropdown-row-height);
+  min-height: var(--search-dropdown-row-height);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
+  justify-content: flex-start;
+  font-weight: 500;
   text-align: left;
 }
 
-.sb-search-dd__item.is-active,
-.sb-search-dd__item:hover {
+.search-dropdown__item.is-active,
+.search-dropdown__item:hover {
   background: var(--bg-hover);
   filter: none;
 }
 
-.sb-search-dd__title {
+.search-dropdown__title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sb-search-dd__title mark {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 3px;
-  padding: 0 2px;
-}
-
-.sb-search-dd__scope {
-  flex: 0 1 auto;
-  max-width: 45%;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.1;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sb-search-dd__empty,
-.sb-search-dd__hint {
+.search-dropdown__title mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.search-dropdown__scope {
+  flex: 0 1 auto;
+  max-width: 45%;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-dropdown__empty,
+.search-dropdown__hint {
   margin: 0;
-  padding: 14px 12px;
+  padding: 10px 12px;
   color: var(--text-muted);
   text-align: center;
   font-size: 12px;
@@ -5495,6 +5565,10 @@ button.ghost.danger:hover {
   flex-direction: column;
 }
 
+.dialog__card--repo-dropdown {
+  overflow: visible;
+}
+
 .dialog__header {
   display: flex;
   align-items: center;
@@ -5522,7 +5596,8 @@ button.ghost.danger:hover {
   color: var(--text);
 }
 
-.dialog__body label {
+.dialog__body label,
+.dialog__field {
   display: flex;
   flex-direction: column;
   gap: 4px;

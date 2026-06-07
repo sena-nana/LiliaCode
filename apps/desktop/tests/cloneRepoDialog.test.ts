@@ -7,6 +7,19 @@ import {
   setMockGitHubRepos,
 } from "./tauriMock";
 
+function mockBoundGitHubAccount() {
+  setMockGitHubBindingStatus({
+    state: "bound",
+    binding: {
+      login: "octocat",
+      avatarUrl: null,
+      boundAt: 1,
+      scopes: ["repo", "read:user"],
+      clientIdSource: "bundled",
+    },
+  });
+}
+
 describe("CloneRepoDialog", () => {
   it("未绑定时支持 owner/repo 直接克隆", async () => {
     const view = render(CloneRepoDialog);
@@ -38,16 +51,7 @@ describe("CloneRepoDialog", () => {
   });
 
   it("已绑定时默认展示绑定账号仓库列表，并可选择克隆", async () => {
-    setMockGitHubBindingStatus({
-      state: "bound",
-      binding: {
-        login: "octocat",
-        avatarUrl: null,
-        boundAt: 1,
-        scopes: ["repo", "read:user"],
-        clientIdSource: "bundled",
-      },
-    });
+    mockBoundGitHubAccount();
     setMockGitHubRepos({
       1: {
         items: [
