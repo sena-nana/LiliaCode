@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, onMounted } from "vue";
+import { RouterLink, useRoute } from "vue-router";
 import {
   AlertTriangle,
   Import,
@@ -10,14 +10,10 @@ import {
 } from "lucide-vue-next";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 
-const ConversationImportDialog = defineAsyncComponent(
-  () => import("./ConversationImportDialog.vue"),
-);
-
 const { activeBackend, statusFor, nodeAvailable, codexCliAvailable, codexAppServer, refresh } =
   useConnectionStatus({ probe: false, loadBackend: false });
 
-const importOpen = ref(false);
+const route = useRoute();
 const activeStatus = computed(() => statusFor(activeBackend.value));
 
 const backendLabel = computed(() =>
@@ -69,6 +65,12 @@ const connectionTooltip = computed(() => {
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
 
+const importRoute = computed(() => {
+  const value = route.params.projectId;
+  const projectId = Array.isArray(value) ? value[0] : value;
+  return projectId ? { path: "/import", query: { projectId } } : "/import";
+});
+
 onMounted(() => {
   window.setTimeout(() => {
     void refresh(false);
@@ -86,15 +88,15 @@ onMounted(() => {
       <Puzzle :size="14" aria-hidden="true" />
     </RouterLink>
 
-    <button
-      type="button"
+    <RouterLink
+      :to="importRoute"
       class="sb-footer__btn"
+      active-class="is-active"
       title="从 Claude / Codex 导入对话"
       aria-label="从 Claude / Codex 导入对话"
-      @click="importOpen = true"
     >
       <Import :size="14" aria-hidden="true" />
-    </button>
+    </RouterLink>
 
     <RouterLink to="/settings" class="sb-conn" :class="`sb-conn--${connectionTone}`"
       :title="connectionTooltip" :aria-label="connectionTooltip">
@@ -112,8 +114,4 @@ onMounted(() => {
     </RouterLink>
   </div>
 
-  <ConversationImportDialog
-    v-if="importOpen"
-    @close="importOpen = false"
-  />
 </template>

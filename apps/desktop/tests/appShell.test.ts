@@ -119,6 +119,16 @@ describe("AppShell left sidebar collapse", () => {
     });
   });
 
+  it("侧栏导入入口进入主窗口导入页", async () => {
+    const view = await renderAppShell();
+
+    await fireEvent.click(view.getByRole("link", { name: "从 Claude / Codex 导入对话" }));
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/import");
+    });
+  });
+
   it("左侧栏宽度可拖拽调整、写回存储并双击恢复默认", async () => {
     localStorage.setItem(WIDTH_STORAGE_KEY, "260");
     const view = await renderAppShell();

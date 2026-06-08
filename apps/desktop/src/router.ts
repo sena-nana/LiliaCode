@@ -13,6 +13,7 @@ const MainTaskDetail = defineAsyncComponent(() => import("./pages/TaskDetail.vue
 const PopupDraftBoot = () => import("./pages/PopupDraftBoot.vue");
 const Settings = () => import("./pages/Settings.vue");
 const Plugins = () => import("./pages/Plugins.vue");
+const ConversationImport = () => import("./pages/ConversationImport.vue");
 const ProjectsOverview = () => import("./pages/project/ProjectsOverview.vue");
 const ProjectShell = () => import("./pages/project/ProjectShell.vue");
 const SessionsView = () => import("./pages/project/SessionsView.vue");
@@ -129,6 +130,7 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
           },
           { path: "settings", component: Settings },
           { path: "plugins", component: Plugins },
+          { path: "import", component: ConversationImport },
         ],
       },
       { path: "/:pathMatch(.*)*", redirect: "/" },
