@@ -173,6 +173,21 @@ export async function readCodexThreadTurns(
   };
 }
 
+async function readAllCodexThreadTurns(server, threadId, { limit = DEFAULT_TURN_LIMIT } = {}) {
+  const turns = [];
+  let cursor = null;
+  do {
+    const previousCursor = cursor;
+    const result = await readCodexThreadTurns(server, threadId, { limit, cursor });
+    turns.push(...result.turns);
+    cursor = stringOrNull(result.nextCursor)?.trim() || null;
+    if (cursor && cursor === previousCursor) {
+      throw new Error("Codex history preview 返回了重复 cursor，已停止读取。");
+    }
+  } while (cursor);
+  return turns;
+}
+
 export function codexHistoryTimelineInputs(taskId, threadId, turns) {
   return codexHistoryTimelineEvents(threadId, turns).map((event) => ({
     id: event.sourceId ? `${taskId}:${event.turnIdOverride || event.turnId || "history"}:${event.sourceId}` : null,
@@ -215,7 +230,7 @@ export async function previewCodexThread(threadId, { createServer = createCodexA
   const server = createServer();
   try {
     await initializeCodexAppServer(server);
-    const { turns } = await readCodexThreadTurns(server, threadId, { limit: 12 });
+    const turns = await readAllCodexThreadTurns(server, threadId);
     const events = codexHistoryTimelineInputs("preview", threadId, turns);
     const thread = normalizeThread({ id: threadId }, turns);
     return {

@@ -138,12 +138,22 @@ async function loadThreads(cursor: string | null = null) {
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    selectedItemId.value = null;
-    previewEventCount.value = null;
-    fullPreviewEvents.value = [];
+    resetPreviewState();
     importError.value = "";
     void loadThreads();
   }, 240);
+}
+
+function resetPreviewState() {
+  previewSeq += 1;
+  fullPreviewSeq += 1;
+  selectedItemId.value = null;
+  previewEventCount.value = null;
+  fullPreviewEvents.value = [];
+  previewError.value = "";
+  previewLoading.value = false;
+  fullPreviewError.value = "";
+  fullPreviewLoading.value = false;
 }
 
 async function selectItem(item: ImportItem) {
@@ -162,7 +172,7 @@ async function selectItem(item: ImportItem) {
       ? await previewClaudeSession({ sessionId: item.id, detail: "lite" })
       : await previewCodexThread({ threadId: item.id, detail: "lite" });
     if (seq !== previewSeq) return;
-    previewEventCount.value = result.eventCount;
+    previewEventCount.value = result.hasFullPreview ? null : result.eventCount;
     if (result.hasFullPreview) void loadFullPreview(item.id);
   } catch (err) {
     if (seq === previewSeq) previewError.value = String(err);
@@ -180,7 +190,10 @@ async function loadFullPreview(itemId: string = selectedItem.value?.id ?? "") {
     const result = source.value === "claude"
       ? await previewClaudeSession({ sessionId: itemId, detail: "full" })
       : await previewCodexThread({ threadId: itemId, detail: "full" });
-    if (seq === fullPreviewSeq) fullPreviewEvents.value = result.events;
+    if (seq === fullPreviewSeq) {
+      fullPreviewEvents.value = result.events;
+      previewEventCount.value = result.eventCount;
+    }
   } catch (err) {
     if (seq === fullPreviewSeq) fullPreviewError.value = String(err);
   } finally {
@@ -231,13 +244,9 @@ function setSource(next: ImportSource) {
   if (source.value === next) return;
   source.value = next;
   if (next === "claude") includeArchived.value = false;
-  selectedItemId.value = null;
+  resetPreviewState();
   items.value = [];
   nextCursor.value = null;
-  previewEventCount.value = null;
-  fullPreviewEvents.value = [];
-  previewError.value = "";
-  fullPreviewError.value = "";
   importError.value = "";
   void loadThreads();
 }
