@@ -246,6 +246,41 @@ function codexTurnIdFromStartResult(result) {
   return stringOrNull(turn?.id) || stringOrNull(result.turnId);
 }
 
+function readCodexWorkflow(cmd) {
+  return isRecord(cmd?.workflow) ? cmd.workflow : null;
+}
+
+function normalizeCodexReviewTarget(target) {
+  if (!isRecord(target)) return null;
+  const type = stringOrNull(target.type);
+  if (type === "uncommittedChanges") return { type };
+  if (type === "baseBranch") {
+    const branch = stringOrNull(target.branch)?.trim();
+    return branch ? { type, branch } : null;
+  }
+  if (type === "commit") {
+    const sha = stringOrNull(target.sha)?.trim();
+    return sha ? { type, sha, title: null } : null;
+  }
+  return null;
+}
+
+function readCodexReviewWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_review") return null;
+  const target = normalizeCodexReviewTarget(workflow.target);
+  if (!target) throw new Error("Codex review workflow missing a valid target");
+  const instructions = stringOrNull(workflow.instructions)?.trim() || "";
+  const delivery = workflow.delivery === "detached" ? "detached" : "inline";
+  return { target, instructions, delivery };
+}
+
+function codexReviewTargetSummary(target) {
+  if (target.type === "baseBranch") return `baseBranch:${target.branch}`;
+  if (target.type === "commit") return `commit:${target.sha}`;
+  return "uncommittedChanges";
+}
+
 function readCollaborationModes(result) {
   if (!isRecord(result)) return [];
   return Array.isArray(result.data) ? result.data.filter(isRecord) : [];
@@ -349,6 +384,59 @@ export async function startCodexAppServerTurn(
   return server.request("turn/start", params);
 }
 
+export async function startCodexReview(server, threadId, review) {
+  const params = {
+    threadId,
+    target: review.target,
+    delivery: review.delivery,
+  };
+  if (review.instructions) params.prompt = review.instructions;
+  return server.request("review/start", params);
+}
+
+async function drainCodexTurnNotifications(server, ctx, timeoutMessage) {
+  const startedAt = Date.now();
+  while (!ctx.turnCompletedSeen) {
+    const messages = server.drainNotifications();
+    for (const msg of messages) {
+      if (await maybeHandleCodexServerRequest(server, msg, ctx)) continue;
+      const ev = normalizeCodexAppServerEvent(msg);
+      if (ev) mapCodexEventToNdjson(ev, ctx);
+    }
+    if (Date.now() - startedAt > 1000 * 60 * 60) {
+      throw new Error(timeoutMessage);
+    }
+    if (!ctx.turnCompletedSeen) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+}
+
+async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
+  const review = readCodexReviewWorkflow(cmd);
+  if (!review) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const result = await startCodexReview(server, threadId, review);
+  ctx.currentTurnId = codexTurnIdFromStartResult(result) || ctx.currentTurnId;
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "started",
+    title: "Codex review started",
+    summary: codexReviewTargetSummary(review.target),
+    payload: {
+      backend: "codex",
+      subkind: "review",
+      method: "review/start",
+      target: review.target,
+      delivery: review.delivery,
+      hasInstructions: Boolean(review.instructions),
+    },
+    sourceId: `codex:review:start:${ctx.currentTurnId || codexReviewTargetSummary(review.target)}`,
+  });
+  await drainCodexTurnNotifications(server, ctx, "Codex review timed out");
+  return true;
+}
+
 export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
   if (!isRecord(msg)) return false;
   const method = stringOrNull(msg.method);
@@ -418,6 +506,10 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         context.protocol,
       );
     });
+    if (await runCodexReviewWorkflow(server, threadId, cmd, ctx)) {
+      finalizeCodexRunContext(ctx);
+      return;
+    }
     let nextPrompt = cmd.prompt;
     let nextTurnKind = cmd.planMode === true ? "plan" : "default";
     let shouldStartTurn = true;
@@ -438,21 +530,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         { collaborationMode },
       );
       ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
-      const startedAt = Date.now();
-      while (!ctx.turnCompletedSeen) {
-        const messages = server.drainNotifications();
-        for (const msg of messages) {
-          if (await maybeHandleCodexServerRequest(server, msg, ctx)) continue;
-          const ev = normalizeCodexAppServerEvent(msg);
-          if (ev) mapCodexEventToNdjson(ev, ctx);
-        }
-        if (Date.now() - startedAt > 1000 * 60 * 60) {
-          throw new Error("Codex app-server turn timed out");
-        }
-        if (!ctx.turnCompletedSeen) {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      }
+      await drainCodexTurnNotifications(server, ctx, "Codex app-server turn timed out");
       if (ctx.turnFailedSeen) {
         continue;
       }

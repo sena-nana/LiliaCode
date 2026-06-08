@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  CodexReviewTarget,
   SuggestionItem,
 } from "@lilia/contracts";
 import ChatTranscript from "../../components/chat/ChatTranscript.vue";
@@ -67,6 +68,11 @@ const emit = defineEmits<{
   "insert-guide": [todo: TaskTodo];
   "insert-draft-text": [text: string];
   send: [content: string, attachments: ChatAttachment[]];
+  "start-codex-review": [
+    content: string,
+    attachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -152,6 +158,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :insert-draft-text-key="insertDraftTextKey"
                   :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
+                  @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"

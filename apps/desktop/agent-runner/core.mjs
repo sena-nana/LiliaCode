@@ -27,6 +27,11 @@ export function createRunnerContext(deps = {}) {
 
 export async function runAgentTurn(cmd, deps = {}) {
   const context = createRunnerContext(deps);
+  const isCodexReviewWorkflow =
+    cmd?.backend === "codex" &&
+    cmd?.workflow &&
+    typeof cmd.workflow === "object" &&
+    cmd.workflow.type === "codex_review";
   if (typeof cmd?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
@@ -35,7 +40,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     ...cmd,
     prompt: buildPromptWithAttachments(cmd.prompt, cmd.attachments),
   };
-  if (nextCmd.prompt.trim().length === 0) {
+  if (nextCmd.prompt.trim().length === 0 && !isCodexReviewWorkflow) {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }

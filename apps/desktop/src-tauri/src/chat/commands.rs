@@ -7,12 +7,13 @@ use crate::chat::runner::spawn_agent_turn;
 use crate::chat::state::{
     clear_pending_turns, clear_running_handles, default_composer, model_options_for_backend,
     new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn,
-    reset_cleared_guide_queue, session_key, set_guide_status_for_app, stop_running_turn, ChatStore,
+    reset_cleared_guide_queue, session_key, set_guide_status_for_app,
+    should_persist_user_message, stop_running_turn, ChatStore,
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
-    ChatSendResult,
+    ChatSendResult, ChatWorkflow,
 };
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
@@ -27,11 +28,17 @@ pub fn chat_send_message(
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     guide_id: Option<String>,
+    workflow: Option<ChatWorkflow>,
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
     let active_backend = load_active_backend(&app);
     validate_backend_ready_for_send(&active_backend)?;
     let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
+    if matches!(workflow, Some(ChatWorkflow::CodexReview { .. }))
+        && composer.backend != BACKEND_CODEX
+    {
+        return Err("Codex review 只能在 Codex 后端中启动".to_string());
+    }
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {
         id: new_chat_message_id(),
@@ -44,6 +51,7 @@ pub fn chat_send_message(
     // turn_id 在 user 消息入库前就分配，并与 agent turn 共享 —— 让两者落到同一个
     // turn_seq，user 消息天然占据 turn 内 intra_turn_order=0 的位置。
     let turn_id = format!("turn-{}", now_millis());
+    let persist_user_message = should_persist_user_message(&content, &workflow);
     store
         .composers
         .lock()
@@ -62,17 +70,20 @@ pub fn chat_send_message(
                 composer.clone(),
                 project_cwd,
                 attachments,
+                workflow,
                 user_msg.clone(),
                 turn_id.clone(),
                 guide_id.clone(),
             );
-            persist_and_emit_message_timeline_event(
-                &app,
-                &user_msg,
-                &composer.backend,
-                &turn_id,
-                true,
-            );
+            if persist_user_message {
+                persist_and_emit_message_timeline_event(
+                    &app,
+                    &user_msg,
+                    &composer.backend,
+                    &turn_id,
+                    true,
+                );
+            }
             return Ok(ChatSendResult {
                 message: user_msg,
                 dispatch: "queued".to_string(),
@@ -83,7 +94,9 @@ pub fn chat_send_message(
     }
 
     set_guide_status_for_app(&app, guide_id.as_deref(), "sent")?;
-    persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, &turn_id, false);
+    if persist_user_message {
+        persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, &turn_id, false);
+    }
 
     spawn_agent_turn(
         app,
@@ -92,6 +105,7 @@ pub fn chat_send_message(
         composer,
         project_cwd,
         attachments,
+        workflow,
         turn_id,
     );
 

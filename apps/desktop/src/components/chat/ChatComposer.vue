@@ -14,6 +14,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  CodexReviewTarget,
   PermissionMode,
   SuggestionItem,
 } from "@lilia/contracts";
@@ -61,6 +62,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   send: [content: string, attachments: ChatAttachment[]];
+  "start-codex-review": [
+    content: string,
+    attachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
@@ -384,6 +390,14 @@ function submitEntry() {
     return;
   }
   send();
+}
+
+function startCodexReview(target: CodexReviewTarget) {
+  if (hasPending.value) return;
+  const value = richInput.serializedText.value.trim();
+  emit("start-codex-review", value, attachmentsForView.value, target);
+  richInput.resetInput();
+  clearComposerContextState();
 }
 
 function focusInput() {
@@ -738,11 +752,13 @@ defineExpose({ focusInput });
         :can-interrupt="canInterrupt"
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
+        :review-disabled="state.backend !== 'codex' || sending === true"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
+        @start-codex-review="startCodexReview"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

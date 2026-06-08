@@ -14,7 +14,8 @@ use crate::agent_extensions::TodoMirrorExtension;
 use crate::chat::state::{
     finish_running_turn_handles, is_turn_marked_reset, load_persisted_resume_session_id,
     persist_and_emit_interrupted_timeline_event, session_key, set_guide_status_for_app,
-    should_emit_runner_exit_error, take_next_pending_turn, ChatStore, RunningTurn,
+    should_emit_runner_exit_error, should_persist_user_message, take_next_pending_turn, ChatStore,
+    RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
@@ -24,7 +25,7 @@ use crate::chat::timeline_sink::{
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
     AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, CodexComposerSettings,
-    DoneEvent, TurnStartedEvent,
+    ChatWorkflow, DoneEvent, TurnStartedEvent,
 };
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
@@ -75,6 +76,7 @@ pub(crate) fn spawn_agent_turn(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    workflow: Option<ChatWorkflow>,
     turn_id: String,
 ) {
     let backend = composer.backend.clone();
@@ -101,6 +103,7 @@ pub(crate) fn spawn_agent_turn(
     let composer_for_thread = composer.clone();
     let prompt_for_thread = content.clone();
     let attachments_for_thread = attachments.clone();
+    let workflow_for_thread = workflow.clone();
     let backend_for_thread = backend.clone();
     let turn_id_for_thread = turn_id;
 
@@ -131,6 +134,7 @@ pub(crate) fn spawn_agent_turn(
             "cwd": project_cwd,
             "prompt": prompt_for_thread,
             "attachments": attachments_for_thread,
+            "workflow": workflow_for_thread,
             "model": composer_for_thread.model,
             "resumeSessionId": resume_session_id,
             "planMode": composer_for_thread.plan_mode,
@@ -563,13 +567,15 @@ pub(crate) fn finish_agent_turn(
         if let Err(err) = set_guide_status_for_app(&app_handle, turn.guide_id.as_deref(), "sent") {
             eprintln!("[todo-guides] mark queued guide sent failed: {err}");
         }
-        persist_and_emit_message_timeline_event(
-            &app_handle,
-            &turn.message,
-            &turn.composer.backend,
-            &turn.turn_id,
-            false,
-        );
+        if should_persist_user_message(&turn.content, &turn.workflow) {
+            persist_and_emit_message_timeline_event(
+                &app_handle,
+                &turn.message,
+                &turn.composer.backend,
+                &turn.turn_id,
+                false,
+            );
+        }
         spawn_agent_turn(
             app_handle,
             task_id,
@@ -577,6 +583,7 @@ pub(crate) fn finish_agent_turn(
             turn.composer,
             turn.project_cwd,
             turn.attachments,
+            turn.workflow,
             turn.turn_id,
         );
     }

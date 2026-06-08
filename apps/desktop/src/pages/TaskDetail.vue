@@ -315,6 +315,7 @@ watch(
     @insert-guide="composerController.onInsertGuide"
     @insert-draft-text="composerController.onInsertDraftText"
     @send="composerController.onSend"
+    @start-codex-review="composerController.onStartCodexReview"
     @interrupt="composerController.onInterrupt"
     @update-composer="composerController.onComposerUpdate"
     @remove-attachment="attachmentController.removeAttachment"

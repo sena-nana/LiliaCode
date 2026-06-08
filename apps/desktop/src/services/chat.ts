@@ -21,6 +21,7 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatComposerState,
+  ChatWorkflow,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
@@ -52,6 +53,7 @@ export type {
   ChatAttachment,
   ChatInterruptResult,
   ChatContextSearchResult,
+  ChatWorkflow,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
@@ -107,6 +109,7 @@ export function sendMessage(
   projectCwd: string,
   attachments: ChatAttachment[] = [],
   guideId?: string,
+  workflow?: ChatWorkflow | null,
 ): Promise<ChatSendResult> {
   return invoke<ChatSendResult>("chat_send_message", {
     taskId,
@@ -115,6 +118,7 @@ export function sendMessage(
     projectCwd,
     attachments,
     guideId: guideId ?? null,
+    workflow: workflow ?? null,
   });
 }
 

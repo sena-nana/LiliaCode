@@ -91,6 +91,37 @@ describe("runner core", () => {
     expect(json()).toEqual([{ type: "error", message: "missing prompt" }]);
   });
 
+  it("Codex review workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: {
+        type: "codex_review",
+        target: { type: "uncommittedChanges" },
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-review", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-review",
+      workflow: {
+        type: "codex_review",
+        target: { type: "uncommittedChanges" },
+      },
+    });
+  });
+
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
     const { protocol } = captureProtocol();
     let seen: any = null;
@@ -1242,6 +1273,106 @@ describe("Codex app-server mapping", () => {
       permissions: ":workspace",
     });
     expect(calls[updateIndex].params.collaborationMode).toBeUndefined();
+  });
+
+  it("starts Codex review workflow through review/start", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "review/start") return { turn: { id: "review-turn-1" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "重点看权限边界",
+      permission: "ask",
+      planMode: false,
+      workflow: {
+        type: "codex_review",
+        target: { type: "baseBranch", branch: "main" },
+        instructions: "重点看权限边界",
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "review/start")).toMatchObject({
+      params: {
+        threadId: "thread-1",
+        target: { type: "baseBranch", branch: "main" },
+        prompt: "重点看权限边界",
+        delivery: "inline",
+      },
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Codex review started" &&
+      line.event.payload.hasInstructions === true
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("normalizes Codex review commit target for app-server schema", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "review/start") return { turn: { id: "review-turn-1" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: {
+        type: "codex_review",
+        target: { type: "commit", sha: "abc123" },
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.find((call) => call.method === "review/start")).toMatchObject({
+      params: {
+        target: { type: "commit", sha: "abc123", title: null },
+      },
+    });
+    expect(calls.find((call) => call.method === "review/start").params).not.toHaveProperty("prompt");
   });
 
   it("falls back to turn/start settings and emits a diagnostic when thread settings update fails", async () => {
