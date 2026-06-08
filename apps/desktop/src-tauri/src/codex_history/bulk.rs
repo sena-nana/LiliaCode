@@ -11,6 +11,13 @@ use crate::util::now_millis;
 
 use super::types::AgentTimelineBatchPayload;
 
+fn history_id_prefix(event: &AgentTimelineEventInput) -> &'static str {
+    match event.backend.as_str() {
+        "claude" => "claude-history",
+        _ => "codex-history",
+    }
+}
+
 fn stable_history_event_id(task_id: &str, event: &AgentTimelineEventInput) -> Option<String> {
     let payload = event.payload.as_object()?;
     let thread_id = payload.get("threadId")?.as_str()?;
@@ -19,8 +26,9 @@ fn stable_history_event_id(task_id: &str, event: &AgentTimelineEventInput) -> Op
         .and_then(|value| value.as_str())
         .or(event.turn_id.as_deref())?;
     let item_id = payload.get("itemId")?.as_str()?;
+    let prefix = history_id_prefix(event);
     Some(format!(
-        "{task_id}:{turn_id}:codex-history:{thread_id}:{turn_id}:{item_id}"
+        "{task_id}:{turn_id}:{prefix}:{thread_id}:{turn_id}:{item_id}"
     ))
 }
 
@@ -315,7 +323,7 @@ fn emit_history_event_batches(app: &AppHandle, task_id: &str, events: Vec<AgentT
     }
 }
 
-pub(super) fn persist_history_events_batch(
+pub(crate) fn persist_history_events_batch(
     app: &AppHandle,
     task_id: &str,
     events: Vec<AgentTimelineEventInput>,

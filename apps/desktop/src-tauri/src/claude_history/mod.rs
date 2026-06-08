@@ -1,11 +1,10 @@
-pub(crate) mod bulk;
-pub(crate) mod preview;
 mod types;
 mod utility;
 
 pub use types::{
-    CodexThreadAttachInput, CodexThreadAttachResult, CodexThreadPreview, CodexThreadPreviewInput,
-    CodexThreadSearchInput, CodexThreadSearchResult, CodexThreadSummary,
+    ClaudeSessionAttachInput, ClaudeSessionAttachResult, ClaudeSessionPreview,
+    ClaudeSessionPreviewInput, ClaudeSessionSearchInput, ClaudeSessionSearchResult,
+    ClaudeSessionSummary,
 };
 
 use rusqlite::{params, OptionalExtension};
@@ -15,77 +14,77 @@ use uuid::Uuid;
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::state::{default_composer, session_key, ChatStore};
 use crate::chat::timeline_sink::persist_and_emit_input;
+use crate::codex_history::bulk::persist_history_events_batch;
+use crate::codex_history::preview::preview_events_from_inputs;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::BACKEND_CODEX;
+use crate::BACKEND_CLAUDE;
 
-use self::bulk::persist_history_events_batch;
-use self::preview::preview_events_from_inputs;
-use self::utility::run_codex_history_utility;
+use self::utility::run_claude_history_utility;
 
 #[tauri::command]
-pub async fn codex_thread_search(
+pub async fn claude_session_search(
     app: AppHandle,
-    input: CodexThreadSearchInput,
-) -> Result<CodexThreadSearchResult, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_search_blocking(app, input))
+    input: ClaudeSessionSearchInput,
+) -> Result<ClaudeSessionSearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_session_search_blocking(app, input))
         .await
-        .map_err(|err| format!("Codex history search 任务执行失败：{err}"))?
+        .map_err(|err| format!("Claude history search 任务执行失败：{err}"))?
 }
 
-fn codex_thread_search_blocking(
+fn claude_session_search_blocking(
     app: AppHandle,
-    input: CodexThreadSearchInput,
-) -> Result<CodexThreadSearchResult, String> {
-    let result = run_codex_history_utility(
+    input: ClaudeSessionSearchInput,
+) -> Result<ClaudeSessionSearchResult, String> {
+    let result = run_claude_history_utility(
         &app,
         serde_json::json!({
             "action": "search",
             "input": input,
         }),
     )?;
-    Ok(CodexThreadSearchResult {
-        threads: result.threads,
+    Ok(ClaudeSessionSearchResult {
+        sessions: result.sessions,
         next_cursor: result.next_cursor,
     })
 }
 
 #[tauri::command]
-pub async fn codex_thread_preview(
+pub async fn claude_session_preview(
     app: AppHandle,
-    input: CodexThreadPreviewInput,
-) -> Result<CodexThreadPreview, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_preview_blocking(app, input))
+    input: ClaudeSessionPreviewInput,
+) -> Result<ClaudeSessionPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_session_preview_blocking(app, input))
         .await
-        .map_err(|err| format!("Codex history preview 任务执行失败：{err}"))?
+        .map_err(|err| format!("Claude history preview 任务执行失败：{err}"))?
 }
 
-fn codex_thread_preview_blocking(
+fn claude_session_preview_blocking(
     app: AppHandle,
-    input: CodexThreadPreviewInput,
-) -> Result<CodexThreadPreview, String> {
+    input: ClaudeSessionPreviewInput,
+) -> Result<ClaudeSessionPreview, String> {
     let detail = input.detail.as_deref().unwrap_or("lite");
-    let result = run_codex_history_utility(
+    let result = run_claude_history_utility(
         &app,
         serde_json::json!({
             "action": "preview",
-            "threadId": input.thread_id,
+            "sessionId": input.session_id,
             "detail": detail,
         }),
     )?;
-    let thread = result
-        .thread
-        .ok_or_else(|| "Codex thread preview 缺少 thread 信息".to_string())?;
+    let session = result
+        .session
+        .ok_or_else(|| "Claude session preview 缺少 session 信息".to_string())?;
     let is_full = detail == "full";
     let events = if is_full {
         preview_events_from_inputs(result.events)?
     } else {
         Vec::new()
     };
-    Ok(CodexThreadPreview {
-        thread,
+    Ok(ClaudeSessionPreview {
+        session,
         event_count: if is_full {
             events.len()
         } else {
@@ -134,20 +133,20 @@ fn next_task_sort_order(
         |row| row.get::<_, i64>(0),
     )
     .map(|value| value + 1)
-    .map_err(|e| format!("Codex history: 查询 sort_order 失败：{e}"))
+    .map_err(|e| format!("Claude history: 查询 sort_order 失败：{e}"))
 }
 
-fn create_task_for_thread(
+fn create_task_for_session(
     app: &AppHandle,
     conn: &rusqlite::Connection,
     project_id: Option<String>,
-    thread: Option<&CodexThreadSummary>,
+    session: Option<&ClaudeSessionSummary>,
 ) -> Result<TaskRow, String> {
     let id = Uuid::new_v4().to_string();
-    let title = thread
-        .map(|thread| thread.title.trim())
+    let title = session
+        .map(|session| session.title.trim())
         .filter(|title| !title.is_empty())
-        .unwrap_or("Codex 历史对话")
+        .unwrap_or("Claude 历史对话")
         .to_string();
     let now = now_millis() as i64;
     let sort_order = next_task_sort_order(conn, project_id.as_deref())?;
@@ -156,62 +155,63 @@ fn create_task_for_thread(
            VALUES (?1, ?2, ?3, ?4, 'waiting', ?5, ?6)"#,
         params![id.as_str(), project_id, id.as_str(), title, now, sort_order],
     )
-    .map_err(|e| format!("创建 Codex 历史对话失败：{e}"))?;
+    .map_err(|e| format!("创建 Claude 历史对话失败：{e}"))?;
     emit_tasks_changed(app, project_id.clone());
-    task_row_by_id(conn, &id)?.ok_or_else(|| "创建 Codex 历史对话后读取失败".to_string())
+    task_row_by_id(conn, &id)?.ok_or_else(|| "创建 Claude 历史对话后读取失败".to_string())
 }
 
-fn insert_session_anchor(app: &AppHandle, task_id: &str, thread_id: &str) {
-    persist_and_emit_input(
-        app,
-        session_anchor_input(task_id, thread_id, now_millis() as i64),
-    );
-}
-
-fn session_anchor_input(task_id: &str, thread_id: &str, now: i64) -> AgentTimelineEventInput {
+fn session_anchor_input(task_id: &str, session_id: &str, now: i64) -> AgentTimelineEventInput {
     AgentTimelineEventInput {
-        id: Some(format!("{task_id}:codex-thread-attach:{thread_id}")),
+        id: Some(format!("{task_id}:claude-session-attach:{session_id}")),
         task_id: task_id.to_string(),
-        turn_id: Some(format!("codex-thread-attach:{thread_id}")),
-        backend: BACKEND_CODEX.to_string(),
+        turn_id: Some(format!("claude-session-attach:{session_id}")),
+        backend: BACKEND_CLAUDE.to_string(),
         kind: "turn".to_string(),
         status: "success".to_string(),
-        title: "Codex thread attached".to_string(),
-        summary: Some("已接入 Codex thread".to_string()),
+        title: "Claude session attached".to_string(),
+        summary: Some("已接入 Claude session".to_string()),
         payload: serde_json::json!({
-            "backend": "codex",
-            "sessionId": thread_id,
-            "subkind": "thread_attach",
+            "backend": "claude",
+            "sessionId": session_id,
+            "subkind": "session_attach",
         }),
         created_at: Some(now),
         updated_at: Some(now),
     }
 }
 
-fn remember_codex_thread_session(chat_store: &ChatStore, task_id: &str, thread_id: &str) {
+fn insert_session_anchor(app: &AppHandle, task_id: &str, session_id: &str) {
+    persist_and_emit_input(
+        app,
+        session_anchor_input(task_id, session_id, now_millis() as i64),
+    );
+}
+
+fn remember_claude_session(chat_store: &ChatStore, task_id: &str, session_id: &str) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    sessions.insert(session_key(BACKEND_CODEX, task_id), thread_id.to_string());
+    sessions.insert(session_key(BACKEND_CLAUDE, task_id), session_id.to_string());
 }
 
 fn history_sync_error_input(
     task_id: &str,
-    thread_id: &str,
+    session_id: &str,
     message: String,
 ) -> AgentTimelineEventInput {
     let now = now_millis() as i64;
     AgentTimelineEventInput {
-        id: Some(format!("{task_id}:codex-history-sync-error:{thread_id}")),
+        id: Some(format!("{task_id}:claude-history-sync-error:{session_id}")),
         task_id: task_id.to_string(),
-        turn_id: Some(format!("codex-history:{thread_id}")),
-        backend: BACKEND_CODEX.to_string(),
+        turn_id: Some(format!("claude-history:{session_id}")),
+        backend: BACKEND_CLAUDE.to_string(),
         kind: "diagnostic".to_string(),
         status: "error".to_string(),
-        title: "Codex history sync failed".to_string(),
-        summary: Some("Codex 历史后台同步失败，已保留 thread 接入。".to_string()),
+        title: "Claude history sync failed".to_string(),
+        summary: Some("Claude 历史后台同步失败，已保留 session 接入。".to_string()),
         payload: serde_json::json!({
-            "backend": "codex",
+            "backend": "claude",
             "subkind": "history_sync",
-            "threadId": thread_id,
+            "threadId": session_id,
+            "sessionId": session_id,
             "error": message,
         }),
         created_at: Some(now),
@@ -219,7 +219,7 @@ fn history_sync_error_input(
     }
 }
 
-const HISTORY_SYNC_LIMIT: i64 = 50;
+const HISTORY_SYNC_LIMIT: i64 = 120;
 
 fn normalize_next_cursor(cursor: Option<String>) -> Option<String> {
     cursor.and_then(|cursor| {
@@ -230,28 +230,29 @@ fn normalize_next_cursor(cursor: Option<String>) -> Option<String> {
 
 fn history_sync_success_input(
     task_id: &str,
-    thread_id: &str,
+    session_id: &str,
     event_count: usize,
     page_count: usize,
 ) -> AgentTimelineEventInput {
     let now = now_millis() as i64;
     AgentTimelineEventInput {
-        id: Some(format!("{task_id}:codex-history-sync:{thread_id}")),
+        id: Some(format!("{task_id}:claude-history-sync:{session_id}")),
         task_id: task_id.to_string(),
-        turn_id: Some(format!("codex-history:{thread_id}")),
-        backend: BACKEND_CODEX.to_string(),
+        turn_id: Some(format!("claude-history:{session_id}")),
+        backend: BACKEND_CLAUDE.to_string(),
         kind: "diagnostic".to_string(),
         status: "success".to_string(),
-        title: "Codex history synced".to_string(),
+        title: "Claude history synced".to_string(),
         summary: Some(if event_count > 0 {
-            format!("已同步 {event_count} 条 Codex 历史事件")
+            format!("已同步 {event_count} 条 Claude 历史事件")
         } else {
-            "没有需要同步的 Codex 历史事件".to_string()
+            "没有需要同步的 Claude 历史事件".to_string()
         }),
         payload: serde_json::json!({
-            "backend": "codex",
+            "backend": "claude",
             "subkind": "history_sync",
-            "threadId": thread_id,
+            "threadId": session_id,
+            "sessionId": session_id,
             "eventCount": event_count,
             "pageCount": page_count,
         }),
@@ -260,19 +261,19 @@ fn history_sync_success_input(
     }
 }
 
-fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) {
+fn spawn_claude_history_sync(app: AppHandle, task_id: String, session_id: String) {
     tauri::async_runtime::spawn_blocking(move || {
         let mut next_cursor: Option<String> = None;
         let mut page_count = 0usize;
         let mut event_count = 0usize;
         loop {
             let previous_cursor = next_cursor.clone();
-            let result = run_codex_history_utility(
+            let result = run_claude_history_utility(
                 &app,
                 serde_json::json!({
                     "action": "sync",
                     "taskId": task_id,
-                    "threadId": thread_id,
+                    "sessionId": session_id,
                     "limit": HISTORY_SYNC_LIMIT,
                     "cursor": next_cursor,
                 }),
@@ -282,7 +283,7 @@ fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) 
                 Err(err) => {
                     persist_and_emit_input(
                         &app,
-                        history_sync_error_input(&task_id, &thread_id, err),
+                        history_sync_error_input(&task_id, &session_id, err),
                     );
                     return;
                 }
@@ -294,7 +295,7 @@ fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) 
             if next_cursor.is_none() {
                 persist_and_emit_input(
                     &app,
-                    history_sync_success_input(&task_id, &thread_id, event_count, page_count),
+                    history_sync_success_input(&task_id, &session_id, event_count, page_count),
                 );
                 return;
             }
@@ -303,8 +304,8 @@ fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) 
                     &app,
                     history_sync_error_input(
                         &task_id,
-                        &thread_id,
-                        "Codex history sync 返回了重复 cursor，已停止后台同步。".to_string(),
+                        &session_id,
+                        "Claude history sync 返回了重复 cursor，已停止后台同步。".to_string(),
                     ),
                 );
                 return;
@@ -314,37 +315,37 @@ fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) 
 }
 
 #[tauri::command]
-pub async fn codex_thread_attach(
+pub async fn claude_session_attach(
     app: AppHandle,
-    input: CodexThreadAttachInput,
-) -> Result<CodexThreadAttachResult, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_attach_blocking(app, input))
+    input: ClaudeSessionAttachInput,
+) -> Result<ClaudeSessionAttachResult, String> {
+    tauri::async_runtime::spawn_blocking(move || claude_session_attach_blocking(app, input))
         .await
-        .map_err(|err| format!("Codex history attach 任务执行失败：{err}"))?
+        .map_err(|err| format!("Claude history attach 任务执行失败：{err}"))?
 }
 
-fn codex_thread_attach_blocking(
+fn claude_session_attach_blocking(
     app: AppHandle,
-    input: CodexThreadAttachInput,
-) -> Result<CodexThreadAttachResult, String> {
-    let thread_id = input.thread_id.trim().to_string();
-    if thread_id.is_empty() {
-        return Err("Codex threadId 不能为空".to_string());
+    input: ClaudeSessionAttachInput,
+) -> Result<ClaudeSessionAttachResult, String> {
+    let session_id = input.session_id.trim().to_string();
+    if session_id.is_empty() {
+        return Err("Claude sessionId 不能为空".to_string());
     }
     let mode = input.mode.as_str();
     if mode != "current" && mode != "new" {
-        return Err(format!("未知 Codex thread attach mode: {}", input.mode));
+        return Err(format!("未知 Claude session attach mode: {}", input.mode));
     }
 
     let store = app.state::<LiliaStore>();
     let chat_store = app.state::<ChatStore>();
     let conn = store.conn()?;
     let task = if mode == "new" {
-        Some(create_task_for_thread(
+        Some(create_task_for_session(
             &app,
             &conn,
             input.project_id.clone(),
-            input.thread.as_ref(),
+            input.session.as_ref(),
         )?)
     } else {
         let task_id = input
@@ -354,21 +355,21 @@ fn codex_thread_attach_blocking(
         Some(task_row_by_id(&conn, task_id)?.ok_or_else(|| format!("未找到任务：{task_id}"))?)
     };
     let task = task.expect("task is always set");
-    remember_codex_thread_session(&chat_store, &task.id, &thread_id);
+    remember_claude_session(&chat_store, &task.id, &session_id);
     {
         let mut composers = chat_store.composers.lock().unwrap();
         let composer = composers
             .entry(task.id.clone())
             .or_insert_with(|| default_composer(&task.id));
-        composer.backend = BACKEND_CODEX.to_string();
+        composer.backend = BACKEND_CLAUDE.to_string();
     }
 
-    insert_session_anchor(&app, &task.id, &thread_id);
-    spawn_codex_history_sync(app.clone(), task.id.clone(), thread_id.clone());
-    Ok(CodexThreadAttachResult {
+    insert_session_anchor(&app, &task.id, &session_id);
+    spawn_claude_history_sync(app.clone(), task.id.clone(), session_id.clone());
+    Ok(ClaudeSessionAttachResult {
         task_id: task.id.clone(),
         project_id: task.project_id.clone(),
-        thread_id,
+        session_id,
         task: Some(task),
         event_count: 0,
         history_sync: Some("queued".to_string()),
@@ -380,12 +381,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_anchor_records_codex_resume_thread_id() {
-        let input = session_anchor_input("task-1", "thread-1", 1234);
+    fn session_anchor_records_claude_resume_session_id() {
+        let input = session_anchor_input("task-1", "session-1", 1234);
 
         assert_eq!(
             input.id.as_deref(),
-            Some("task-1:codex-thread-attach:thread-1")
+            Some("task-1:claude-session-attach:session-1")
         );
         assert_eq!(input.kind, "turn");
         assert_eq!(input.status, "success");
@@ -394,90 +395,31 @@ mod tests {
                 .payload
                 .get("sessionId")
                 .and_then(|value| value.as_str()),
-            Some("thread-1")
+            Some("session-1")
         );
         assert_eq!(
             input
                 .payload
                 .get("subkind")
                 .and_then(|value| value.as_str()),
-            Some("thread_attach")
+            Some("session_attach")
         );
     }
 
     #[test]
-    fn remember_codex_thread_session_updates_chat_store() {
+    fn remember_claude_session_updates_chat_store() {
         let store = ChatStore::default();
 
-        remember_codex_thread_session(&store, "task-1", "thread-1");
+        remember_claude_session(&store, "task-1", "session-1");
 
         assert_eq!(
             store
                 .sdk_sessions
                 .lock()
                 .unwrap()
-                .get(&session_key(BACKEND_CODEX, "task-1"))
+                .get(&session_key(BACKEND_CLAUDE, "task-1"))
                 .cloned(),
-            Some("thread-1".to_string())
-        );
-    }
-
-    #[test]
-    fn history_sync_error_input_records_thread_and_stable_id() {
-        let input = history_sync_error_input("task-1", "thread-1", "network failed".to_string());
-
-        assert_eq!(
-            input.id.as_deref(),
-            Some("task-1:codex-history-sync-error:thread-1")
-        );
-        assert_eq!(input.kind, "diagnostic");
-        assert_eq!(input.status, "error");
-        assert_eq!(
-            input
-                .payload
-                .get("threadId")
-                .and_then(|value| value.as_str()),
-            Some("thread-1")
-        );
-        assert_eq!(
-            input.payload.get("error").and_then(|value| value.as_str()),
-            Some("network failed")
-        );
-    }
-
-    #[test]
-    fn normalize_next_cursor_trims_and_drops_empty_values() {
-        assert_eq!(
-            normalize_next_cursor(Some(" cursor-2 ".to_string())).as_deref(),
-            Some("cursor-2")
-        );
-        assert_eq!(normalize_next_cursor(Some("".to_string())), None);
-        assert_eq!(normalize_next_cursor(None), None);
-    }
-
-    #[test]
-    fn history_sync_success_input_records_total_events_and_pages() {
-        let input = history_sync_success_input("task-1", "thread-1", 5, 2);
-
-        assert_eq!(
-            input.id.as_deref(),
-            Some("task-1:codex-history-sync:thread-1")
-        );
-        assert_eq!(input.title, "Codex history synced");
-        assert_eq!(input.summary.as_deref(), Some("已同步 5 条 Codex 历史事件"));
-        assert_eq!(
-            input
-                .payload
-                .get("eventCount")
-                .and_then(|value| value.as_u64()),
-            Some(5)
-        );
-        assert_eq!(
-            input
-                .payload
-                .get("pageCount")
-                .and_then(|value| value.as_u64()),
-            Some(2)
+            Some("session-1".to_string())
         );
     }
 }

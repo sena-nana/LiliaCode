@@ -11,10 +11,13 @@ import {
   Loader2,
   Search,
 } from "lucide-vue-next";
-import type { AgentTimelineEvent, CodexThreadSummary } from "@lilia/contracts";
+import type { AgentTimelineEvent, ClaudeSessionSummary, CodexThreadSummary } from "@lilia/contracts";
 import {
+  attachClaudeSession,
   attachCodexThread,
+  previewClaudeSession,
   previewCodexThread,
+  searchClaudeSessions,
   searchCodexThreads,
 } from "../services/chat";
 import { ensureOrphansLoaded, ensureProjectTasksLoaded } from "../services/tasksStore";
@@ -23,6 +26,10 @@ import ChatScrollMap from "../components/chat/ChatScrollMap.vue";
 
 const route = useRoute();
 const router = useRouter();
+type ImportSource = "codex" | "claude";
+type ImportItem = CodexThreadSummary | ClaudeSessionSummary;
+
+const source = ref<ImportSource>("codex");
 const query = ref("");
 const includeArchived = ref(false);
 const loading = ref(false);
@@ -30,9 +37,9 @@ const loadingMore = ref(false);
 const importing = ref(false);
 const error = ref("");
 const importError = ref("");
-const threads = ref<CodexThreadSummary[]>([]);
+const items = ref<ImportItem[]>([]);
 const nextCursor = ref<string | null>(null);
-const selectedThreadId = ref<string | null>(null);
+const selectedItemId = ref<string | null>(null);
 const previewLoading = ref(false);
 const previewError = ref("");
 const fullPreviewLoading = ref(false);
@@ -57,16 +64,26 @@ const importTargetLabel = computed(() =>
   routeProjectId.value ? "导入到当前项目" : "导入到收集箱",
 );
 
-const selectedThread = computed(() =>
-  threads.value.find((thread) => thread.id === selectedThreadId.value) ?? null,
+const selectedItem = computed(() =>
+  items.value.find((item) => item.id === selectedItemId.value) ?? null,
 );
 
-const selectedThreadMeta = computed(() => {
-  const thread = selectedThread.value;
-  if (!thread) return "";
-  const parts = [formatTime(thread.updatedAt ?? thread.createdAt)];
+const sourceLabel = computed(() => source.value === "claude" ? "Claude session" : "Codex thread");
+const sourceListLabel = computed(() => `${sourceLabel.value} 列表`);
+const sourcePreviewLabel = computed(() => `${sourceLabel.value} 预览`);
+const searchPlaceholder = computed(() => `搜索 ${sourceLabel.value}`);
+const loadingLabel = computed(() => `正在读取 ${source.value === "claude" ? "Claude" : "Codex"} 历史`);
+const emptyListLabel = computed(() => `没有找到 ${sourceLabel.value}`);
+const emptyPreviewLabel = computed(() => `这个 ${sourceLabel.value} 暂无可预览事件。`);
+const choosePreviewLabel = computed(() => `选择一个 ${sourceLabel.value} 后查看摘要并导入。`);
+const showArchivedToggle = computed(() => source.value === "codex");
+
+const selectedItemMeta = computed(() => {
+  const item = selectedItem.value;
+  if (!item) return "";
+  const parts = [formatTime(item.updatedAt ?? item.createdAt)];
   if (previewEventCount.value) parts.push(`${previewEventCount.value} 条事件`);
-  if (thread.status) parts.push(thread.status);
+  if (item.status) parts.push(item.status);
   return parts.join(" · ");
 });
 
@@ -83,21 +100,30 @@ function formatTime(value: number | null): string {
 async function loadThreads(cursor: string | null = null) {
   const seq = ++searchSeq;
   const append = !!cursor;
+  const currentSource = source.value;
   if (append) loadingMore.value = true;
   else loading.value = true;
   error.value = "";
   try {
-    const result = await searchCodexThreads({
+    const input = {
       searchTerm: query.value.trim() || null,
       cursor,
       limit: 20,
-      archived: includeArchived.value,
-    });
-    if (seq !== searchSeq) return;
-    threads.value = append ? [...threads.value, ...result.threads] : result.threads;
-    nextCursor.value = result.nextCursor;
-    if (!selectedThreadId.value && threads.value[0]) {
-      void selectThread(threads.value[0]);
+      archived: currentSource === "codex" ? includeArchived.value : null,
+    };
+    if (currentSource === "claude") {
+      const result = await searchClaudeSessions(input);
+      if (seq !== searchSeq) return;
+      items.value = append ? [...items.value, ...result.sessions] : result.sessions;
+      nextCursor.value = result.nextCursor;
+    } else {
+      const result = await searchCodexThreads(input);
+      if (seq !== searchSeq) return;
+      items.value = append ? [...items.value, ...result.threads] : result.threads;
+      nextCursor.value = result.nextCursor;
+    }
+    if (!selectedItemId.value && items.value[0]) {
+      void selectItem(items.value[0]);
     }
   } catch (err) {
     if (seq === searchSeq) error.value = String(err);
@@ -112,7 +138,7 @@ async function loadThreads(cursor: string | null = null) {
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    selectedThreadId.value = null;
+    selectedItemId.value = null;
     previewEventCount.value = null;
     fullPreviewEvents.value = [];
     importError.value = "";
@@ -120,8 +146,8 @@ function scheduleSearch() {
   }, 240);
 }
 
-async function selectThread(thread: CodexThreadSummary) {
-  selectedThreadId.value = thread.id;
+async function selectItem(item: ImportItem) {
+  selectedItemId.value = item.id;
   previewEventCount.value = null;
   fullPreviewEvents.value = [];
   previewError.value = "";
@@ -132,10 +158,12 @@ async function selectThread(thread: CodexThreadSummary) {
   const seq = ++previewSeq;
   fullPreviewSeq += 1;
   try {
-    const result = await previewCodexThread({ threadId: thread.id, detail: "lite" });
+    const result = source.value === "claude"
+      ? await previewClaudeSession({ sessionId: item.id, detail: "lite" })
+      : await previewCodexThread({ threadId: item.id, detail: "lite" });
     if (seq !== previewSeq) return;
     previewEventCount.value = result.eventCount;
-    if (result.hasFullPreview) void loadFullPreview(thread.id);
+    if (result.hasFullPreview) void loadFullPreview(item.id);
   } catch (err) {
     if (seq === previewSeq) previewError.value = String(err);
   } finally {
@@ -143,13 +171,15 @@ async function selectThread(thread: CodexThreadSummary) {
   }
 }
 
-async function loadFullPreview(threadId: string = selectedThread.value?.id ?? "") {
-  if (!threadId || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
+async function loadFullPreview(itemId: string = selectedItem.value?.id ?? "") {
+  if (!itemId || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
   fullPreviewLoading.value = true;
   fullPreviewError.value = "";
   const seq = ++fullPreviewSeq;
   try {
-    const result = await previewCodexThread({ threadId, detail: "full" });
+    const result = source.value === "claude"
+      ? await previewClaudeSession({ sessionId: itemId, detail: "full" })
+      : await previewCodexThread({ threadId: itemId, detail: "full" });
     if (seq === fullPreviewSeq) fullPreviewEvents.value = result.events;
   } catch (err) {
     if (seq === fullPreviewSeq) fullPreviewError.value = String(err);
@@ -162,19 +192,27 @@ function showPreviewScrollbar() {
   previewScrollMap.value?.show();
 }
 
-async function importSelectedThread() {
-  const thread = selectedThread.value;
-  if (!thread || importing.value) return;
+async function importSelectedItem() {
+  const item = selectedItem.value;
+  if (!item || importing.value) return;
   importing.value = true;
   importError.value = "";
   try {
-    const result = await attachCodexThread({
-      mode: "new",
-      threadId: thread.id,
-      taskId: null,
-      projectId: routeProjectId.value ?? null,
-      thread,
-    });
+    const result = source.value === "claude"
+      ? await attachClaudeSession({
+        mode: "new",
+        sessionId: item.id,
+        taskId: null,
+        projectId: routeProjectId.value ?? null,
+        session: item as ClaudeSessionSummary,
+      })
+      : await attachCodexThread({
+        mode: "new",
+        threadId: item.id,
+        taskId: null,
+        projectId: routeProjectId.value ?? null,
+        thread: item as CodexThreadSummary,
+      });
     if (result.projectId) {
       await ensureProjectTasksLoaded(result.projectId, true);
       await router.push(`/projects/${result.projectId}/tasks/${result.taskId}`);
@@ -189,7 +227,25 @@ async function importSelectedThread() {
   }
 }
 
-watch(() => [query.value, includeArchived.value] as const, scheduleSearch);
+function setSource(next: ImportSource) {
+  if (source.value === next) return;
+  source.value = next;
+  if (next === "claude") includeArchived.value = false;
+  selectedItemId.value = null;
+  items.value = [];
+  nextCursor.value = null;
+  previewEventCount.value = null;
+  fullPreviewEvents.value = [];
+  previewError.value = "";
+  fullPreviewError.value = "";
+  importError.value = "";
+  void loadThreads();
+}
+
+watch(() => query.value, scheduleSearch);
+watch(() => includeArchived.value, () => {
+  if (source.value === "codex") scheduleSearch();
+});
 
 onMounted(() => {
   void loadThreads();
@@ -205,9 +261,11 @@ onMounted(() => {
             <div class="conversation-import__tabs ui-tabs ui-tabs--pill" role="tablist" aria-label="导入来源">
               <button
                 type="button"
-                class="ui-tabs__tab is-active"
+                class="ui-tabs__tab"
+                :class="{ 'is-active': source === 'codex' }"
                 role="tab"
-                aria-selected="true"
+                :aria-selected="source === 'codex'"
+                @click="setSource('codex')"
               >
                 <Code2 :size="13" aria-hidden="true" />
                 <span>Codex</span>
@@ -215,14 +273,13 @@ onMounted(() => {
               <button
                 type="button"
                 class="ui-tabs__tab"
-                disabled
+                :class="{ 'is-active': source === 'claude' }"
                 role="tab"
-                aria-selected="false"
-                title="Claude 历史接口待接入"
+                :aria-selected="source === 'claude'"
+                @click="setSource('claude')"
               >
                 <Clock3 :size="13" aria-hidden="true" />
                 <span>Claude</span>
-                <span class="ui-tabs__count">待接入</span>
               </button>
             </div>
           </div>
@@ -233,38 +290,38 @@ onMounted(() => {
               <input
                 v-model="query"
                 type="search"
-                placeholder="搜索 Codex thread"
-                aria-label="搜索 Codex thread"
+                :placeholder="searchPlaceholder"
+                :aria-label="searchPlaceholder"
               />
             </label>
-            <label class="conversation-import__toggle ui-switch">
+            <label v-if="showArchivedToggle" class="conversation-import__toggle ui-switch">
               <input v-model="includeArchived" type="checkbox" />
               <span>包含归档</span>
             </label>
           </div>
 
-          <section class="conversation-import__list ui-list" aria-label="Codex thread 列表">
+          <section class="conversation-import__list ui-list" :aria-label="sourceListLabel">
             <div v-if="error" class="conversation-import__notice is-error">{{ error }}</div>
             <div v-else-if="loading" class="conversation-import__notice">
               <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
-              <span>正在读取 Codex 历史</span>
+              <span>{{ loadingLabel }}</span>
             </div>
-            <div v-else-if="threads.length === 0" class="conversation-import__notice">
-              没有找到 Codex thread
+            <div v-else-if="items.length === 0" class="conversation-import__notice">
+              {{ emptyListLabel }}
             </div>
             <template v-else>
               <button
-                v-for="thread in threads"
-                :key="thread.id"
+                v-for="item in items"
+                :key="item.id"
                 type="button"
                 class="conversation-import__row ui-list-item"
-                :class="{ 'is-active': selectedThreadId === thread.id }"
-                :title="thread.title"
-                @click="selectThread(thread)"
+                :class="{ 'is-active': selectedItemId === item.id }"
+                :title="item.title"
+                @click="selectItem(item)"
               >
-                <span class="conversation-import__row-title">{{ thread.title }}</span>
+                <span class="conversation-import__row-title">{{ item.title }}</span>
                 <span class="conversation-import__row-time">
-                  {{ formatTime(thread.updatedAt ?? thread.createdAt) }}
+                  {{ formatTime(item.updatedAt ?? item.createdAt) }}
                 </span>
               </button>
             </template>
@@ -282,20 +339,20 @@ onMounted(() => {
           </section>
         </aside>
 
-        <section class="conversation-import__preview" aria-label="Codex thread 预览">
-          <template v-if="selectedThread">
+        <section class="conversation-import__preview" :aria-label="sourcePreviewLabel">
+          <template v-if="selectedItem">
             <div class="conversation-import__preview-head">
               <div class="conversation-import__preview-heading">
-                <div class="conversation-import__preview-title">{{ selectedThread.title }}</div>
+                <div class="conversation-import__preview-title">{{ selectedItem.title }}</div>
                 <div class="conversation-import__preview-meta">
-                  {{ selectedThreadMeta }}
+                  {{ selectedItemMeta }}
                 </div>
               </div>
               <button
                 type="button"
                 class="conversation-import__import-button ui-button ui-button--primary"
-                :disabled="!selectedThread || importing"
-                @click="importSelectedThread"
+                :disabled="!selectedItem || importing"
+                @click="importSelectedItem"
               >
                 <Loader2 v-if="importing" :size="14" class="is-spinning" aria-hidden="true" />
                 <Check v-else :size="14" aria-hidden="true" />
@@ -327,7 +384,7 @@ onMounted(() => {
                   :events="fullPreviewEvents"
                 />
                 <div v-else class="conversation-import__empty-preview">
-                  这个 thread 暂无可预览事件。
+                  {{ emptyPreviewLabel }}
                 </div>
               </div>
               <ChatScrollMap
@@ -346,7 +403,7 @@ onMounted(() => {
             <span>读取中</span>
           </div>
           <div v-else class="conversation-import__empty-preview">
-            选择一个 Codex thread 后查看摘要并导入。
+            {{ choosePreviewLabel }}
           </div>
         </section>
       </div>
