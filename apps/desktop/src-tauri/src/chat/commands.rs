@@ -34,10 +34,13 @@ pub fn chat_send_message(
     let active_backend = load_active_backend(&app);
     validate_backend_ready_for_send(&active_backend)?;
     let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
-    if matches!(workflow, Some(ChatWorkflow::CodexReview { .. }))
+    if matches!(
+        workflow,
+        Some(ChatWorkflow::CodexReview { .. }) | Some(ChatWorkflow::CodexGoal { .. })
+    )
         && composer.backend != BACKEND_CODEX
     {
-        return Err("Codex review 只能在 Codex 后端中启动".to_string());
+        return Err("Codex workflow 只能在 Codex 后端中启动".to_string());
     }
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {

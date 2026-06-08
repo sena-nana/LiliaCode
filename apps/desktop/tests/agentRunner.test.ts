@@ -134,6 +134,39 @@ describe("runner core", () => {
     });
   });
 
+  it("Codex goal workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: {
+        type: "codex_goal",
+        action: "set",
+        objective: "完成 Thread Goal 接入",
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-goal", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-goal",
+      workflow: {
+        type: "codex_goal",
+        action: "set",
+        objective: "完成 Thread Goal 接入",
+      },
+    });
+  });
+
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
     const { protocol } = captureProtocol();
     let seen: any = null;
@@ -1531,6 +1564,162 @@ describe("Codex app-server mapping", () => {
       },
     });
     expect(calls.find((call) => call.method === "review/start").params).not.toHaveProperty("prompt");
+  });
+
+  it("starts Codex goal workflow through thread/goal/set", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const goal = {
+      threadId: "thread-1",
+      objective: "完成 Thread Goal 接入",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 12,
+      timeUsedSeconds: 3,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/goal/set") return { goal };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: {
+        type: "codex_goal",
+        action: "set",
+        objective: "完成 Thread Goal 接入",
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "thread/goal/set")).toMatchObject({
+      params: {
+        threadId: "thread-1",
+        objective: "完成 Thread Goal 接入",
+        status: "active",
+        tokenBudget: null,
+      },
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "goal" &&
+      line.event.payload.goal.objective === "完成 Thread Goal 接入"
+    )).toBe(true);
+  });
+
+  it("refreshes and clears Codex goal without starting a turn", async () => {
+    for (const action of ["refresh", "clear"] as const) {
+      const { protocol, json } = captureProtocol();
+      const calls: any[] = [];
+      const server = {
+        request: async (method: string, params: any) => {
+          calls.push({ method, params });
+          if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+          if (method === "thread/goal/get") {
+            return {
+              goal: {
+                threadId: "thread-1",
+                objective: "现有目标",
+                status: "active",
+                tokenBudget: 100,
+                tokensUsed: 20,
+                timeUsedSeconds: 5,
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            };
+          }
+          return {};
+        },
+        notify: () => {},
+        respond: () => {},
+        drainNotifications: () => [],
+        close: () => {},
+      };
+
+      await runCodexAppServer({
+        backend: "codex",
+        prompt: "",
+        permission: "ask",
+        workflow: {
+          type: "codex_goal",
+          action,
+        },
+      }, { mcpServers: [], warnings: [] }, {
+        protocol,
+        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+        emitToolConsentTimeline: () => {},
+        createCodexAppServer: () => server,
+        env: {},
+        cwd: () => "C:/repo",
+      });
+
+      expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+      expect(calls.some((call) =>
+        call.method === (action === "refresh" ? "thread/goal/get" : "thread/goal/clear")
+      )).toBe(true);
+      expect(json().some((line) =>
+        line.type === "timeline" &&
+        line.event.kind === "goal" &&
+        line.event.payload.action === action
+      )).toBe(true);
+    }
+  });
+
+  it("maps Codex goal notifications to timeline events", () => {
+    const { protocol, json } = captureProtocol();
+    const ctx = createCodexRunContext({ permission: "ask" }, protocol, "thread-1");
+    const updated = normalizeCodexAppServerEvent({
+      method: "thread/goal/updated",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        goal: {
+          threadId: "thread-1",
+          objective: "同步目标",
+          status: "active",
+          tokenBudget: null,
+          tokensUsed: 8,
+          timeUsedSeconds: 1,
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      },
+    });
+    const cleared = normalizeCodexAppServerEvent({
+      method: "thread/goal/cleared",
+      params: { threadId: "thread-1" },
+    });
+
+    mapCodexEventToNdjson(updated, ctx);
+    mapCodexEventToNdjson(cleared, ctx);
+
+    const goalEvents = json()
+      .filter((line) => line.type === "timeline")
+      .map((line) => line.event)
+      .filter((event) => event.kind === "goal");
+    expect(goalEvents).toHaveLength(2);
+    expect(goalEvents[0].payload.goal.objective).toBe("同步目标");
+    expect(goalEvents[1].payload.cleared).toBe(true);
   });
 
   it("falls back to turn/start settings and emits a diagnostic when thread settings update fails", async () => {

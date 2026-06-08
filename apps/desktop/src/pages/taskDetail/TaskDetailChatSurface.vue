@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  CodexThreadGoal,
   CodexReviewTarget,
   SuggestionItem,
 } from "@lilia/contracts";
@@ -48,6 +49,7 @@ defineProps<{
   insertDraftTextKey: number;
   insertDraftTextContent: string;
   pendingAgentActions: PendingAgentAction[];
+  currentCodexGoal: CodexThreadGoal | null;
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
@@ -66,6 +68,9 @@ const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "close-image": [];
   "insert-guide": [todo: TaskTodo];
+  "set-codex-goal": [objective: string];
+  "refresh-codex-goal": [];
+  "clear-codex-goal": [];
   "insert-draft-text": [text: string];
   send: [content: string, attachments: ChatAttachment[]];
   "start-codex-review": [
@@ -140,7 +145,13 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                 <TodoFloat
                   v-if="taskId"
                   :task-id="taskId"
+                  :show-goal="composerState.backend === 'codex'"
+                  :goal="currentCodexGoal"
+                  :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== 'title_update')"
                   @insert-guide="emit('insert-guide', $event)"
+                  @set-codex-goal="emit('set-codex-goal', $event)"
+                  @refresh-codex-goal="emit('refresh-codex-goal')"
+                  @clear-codex-goal="emit('clear-codex-goal')"
                 />
                 <ChatComposer
                   ref="composerRef"

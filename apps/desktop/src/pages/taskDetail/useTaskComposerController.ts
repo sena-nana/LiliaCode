@@ -6,6 +6,8 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatWorkflow,
+  CodexGoalWorkflow,
+  CodexThreadGoal,
   CodexReviewTarget,
 } from "@lilia/contracts";
 import {
@@ -101,6 +103,9 @@ export function useTaskComposerController(options: {
     const question = ask.spec.questions[0];
     return question ? { questionId: question.id, turnId: ask.turnId } : null;
   });
+  const currentCodexGoal = computed<CodexThreadGoal | null>(() =>
+    latestCodexGoalFromTimeline(timeline.timelineEvents.value),
+  );
 
   function withActiveBackend(state: ChatComposerState): ChatComposerState {
     return {
@@ -189,6 +194,42 @@ export function useTaskComposerController(options: {
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
     }
+  }
+
+  async function sendCodexGoalWorkflow(workflow: CodexGoalWorkflow) {
+    if (!context.hasContext.value) return;
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
+    try {
+      await sendAgentMessage("", [], undefined, workflow);
+    } catch {
+      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+    }
+  }
+
+  async function onSetCodexGoal(objective: string) {
+    const trimmed = objective.trim();
+    if (!trimmed) return;
+    await sendCodexGoalWorkflow({
+      type: "codex_goal",
+      action: "set",
+      objective: trimmed,
+      status: "active",
+      tokenBudget: null,
+    });
+  }
+
+  async function onRefreshCodexGoal() {
+    await sendCodexGoalWorkflow({
+      type: "codex_goal",
+      action: "refresh",
+    });
+  }
+
+  async function onClearCodexGoal() {
+    await sendCodexGoalWorkflow({
+      type: "codex_goal",
+      action: "clear",
+    });
   }
 
   function onInsertGuide(todo: TaskTodo) {
@@ -432,12 +473,16 @@ export function useTaskComposerController(options: {
     pendingAgentActions,
     blockingPendingAgentActions,
     pendingPlanApproval,
+    currentCodexGoal,
     agentInteractionSettings,
     nonInterruptMode,
     activeBackend,
     sendAgentMessage,
     onSend,
     onStartCodexReview,
+    onSetCodexGoal,
+    onRefreshCodexGoal,
+    onClearCodexGoal,
     onInsertGuide,
     onInsertDraftText,
     onInterrupt,
@@ -464,4 +509,22 @@ function stripRestoredAttachmentReferences(
     next = next.split(serializeAttachmentReference(attachment)).join("");
   }
   return next.replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function latestCodexGoalFromTimeline(
+  events: readonly { kind: string; payload: unknown; updatedAt: number }[],
+): CodexThreadGoal | null {
+  let latest: { payload: unknown; updatedAt: number } | null = null;
+  for (const event of events) {
+    if (event.kind !== "goal") continue;
+    if (!latest || event.updatedAt >= latest.updatedAt) latest = event;
+  }
+  if (!latest) return null;
+  const payload = latest.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  if (row.cleared === true) return null;
+  const goal = row.goal;
+  if (!goal || typeof goal !== "object" || Array.isArray(goal)) return null;
+  return goal as CodexThreadGoal;
 }

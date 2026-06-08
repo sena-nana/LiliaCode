@@ -3023,6 +3023,10 @@
   padding-top: 4px;
 }
 
+.todo-float__section--goal + .todo-float__section {
+  border-top-color: var(--border);
+}
+
 .todo-float__list {
   display: flex;
   flex-direction: column;
@@ -3054,6 +3058,10 @@
   color: var(--text-muted);
 }
 
+.todo-float__row--goal {
+  background: var(--bg-subtle);
+}
+
 .todo-float__source {
   align-items: center;
   color: var(--text-faint);
@@ -3062,6 +3070,10 @@
   height: 16px;
   justify-content: center;
   width: 16px;
+}
+
+.todo-float__source--goal {
+  color: var(--accent);
 }
 
 .todo-float__priority {
@@ -3088,6 +3100,11 @@
 
 .todo-float__priority--low {
   color: var(--text-faint);
+}
+
+.todo-float__priority--goal {
+  font-weight: 600;
+  min-width: 0;
 }
 
 .todo-float__row.is-queued .todo-float__priority {
