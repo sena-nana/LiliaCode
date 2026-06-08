@@ -41,8 +41,18 @@ async function findAvailablePort(startPort) {
   throw new Error(`No available localhost port found from ${startPort}.`);
 }
 
-function yarnBin() {
-  return process.platform === "win32" ? "yarn.cmd" : "yarn";
+function yarnSpawn(args) {
+  if (process.platform === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", "yarn.cmd", ...args],
+    };
+  }
+
+  return {
+    command: "yarn",
+    args,
+  };
 }
 
 const startPort = parsePort(process.env.LILIA_DEV_PORT);
@@ -84,7 +94,8 @@ if (process.env.LILIA_TAURI_DEV_DRY_RUN === "1") {
 
 console.log(`[lilia] Starting Tauri dev server at ${devUrl}`);
 
-const child = spawn(yarnBin(), args, {
+const yarn = yarnSpawn(args);
+const child = spawn(yarn.command, yarn.args, {
   cwd: fileURLToPath(new URL("..", import.meta.url)),
   env,
   shell: false,
