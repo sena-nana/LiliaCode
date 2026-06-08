@@ -2374,12 +2374,6 @@ button.ghost:hover {
   flex-direction: column;
 }
 
-.conversation-import__page-header .primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .conversation-import {
   min-height: 0;
   flex: 1 1 auto;
@@ -2388,16 +2382,31 @@ button.ghost:hover {
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--panel);
+  background: var(--bg-elev);
+}
+
+.conversation-import__content {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.82fr) minmax(420px, 1.18fr);
+  overflow: hidden;
+}
+
+.conversation-import__sidebar {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-elev);
 }
 
 .conversation-import__source-bar {
-  min-height: 45px;
+  min-height: 38px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-soft);
   color: var(--text-muted);
 }
@@ -2409,15 +2418,15 @@ button.ghost:hover {
 }
 
 .conversation-import__tab {
-  height: 28px;
+  height: 26px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 9px;
+  gap: 5px;
+  padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
 }
@@ -2451,20 +2460,20 @@ button.ghost:hover {
 .conversation-import__search {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
-  padding: 12px;
+  padding: 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .conversation-import__searchbox {
   min-width: 0;
   flex: 1 1 auto;
-  height: 32px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 10px;
+  gap: 7px;
+  padding: 0 9px;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   background: var(--bg);
@@ -2483,7 +2492,7 @@ button.ghost:hover {
 }
 
 .conversation-import__toggle {
-  height: 32px;
+  height: 30px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -2499,26 +2508,20 @@ button.ghost:hover {
   accent-color: var(--accent);
 }
 
-.conversation-import__content {
-  min-height: 0;
-  flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: minmax(280px, 0.88fr) minmax(320px, 1.12fr);
-  overflow: hidden;
-}
-
-.conversation-import__list,
-.conversation-import__preview {
+.conversation-import__list {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   overflow-y: auto;
-  padding: 12px;
+  padding: 8px;
 }
 
 .conversation-import__preview {
-  border-left: 1px solid var(--border-soft);
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg-subtle);
 }
 
@@ -2539,11 +2542,14 @@ button.ghost:hover {
 
 .conversation-import__row {
   width: 100%;
-  min-height: 60px;
+  height: 28px;
+  min-height: 28px;
   display: grid;
-  gap: 3px;
-  padding: 8px 9px;
-  border: 1px solid var(--border-soft);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sb-row-gap);
+  padding: 0 8px;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
@@ -2553,28 +2559,26 @@ button.ghost:hover {
 
 .conversation-import__row:hover {
   background: var(--bg-hover);
-  border-color: var(--border);
   filter: none;
 }
 
 .conversation-import__row.is-active {
   background: var(--bg-active);
-  border-color: var(--accent);
+  color: var(--accent);
 }
 
-.conversation-import__row-title,
-.conversation-import__preview-title {
+.conversation-import__row-title {
   min-width: 0;
   overflow: hidden;
-  color: var(--text);
+  color: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversation-import__row-meta,
+.conversation-import__row-time,
 .conversation-import__preview-meta {
   min-width: 0;
   overflow: hidden;
@@ -2585,18 +2589,13 @@ button.ghost:hover {
   white-space: nowrap;
 }
 
-.conversation-import__row-preview {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.conversation-import__row-time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .conversation-import__more {
-  height: 30px;
+  height: 28px;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   background: transparent;
@@ -2624,94 +2623,78 @@ button.ghost:hover {
 
 .conversation-import__preview-head {
   min-width: 0;
-  padding-bottom: 4px;
-}
-
-.conversation-import__messages {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.conversation-import__message {
   display: grid;
-  gap: 4px;
-  padding: 8px 9px;
-  border-radius: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
 }
 
-.conversation-import__message span {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 700;
+.conversation-import__preview-heading {
+  min-width: 0;
 }
 
-.conversation-import__message p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
+.conversation-import__preview-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.conversation-import__full-preview {
-  align-self: flex-start;
+.conversation-import__import-button {
   height: 28px;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
+  padding: 0 8px;
   font-size: 12px;
-  font-weight: 600;
+  white-space: nowrap;
 }
 
-.conversation-import__full-preview:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border);
-  color: var(--text);
-  filter: none;
+.conversation-import__timeline-frame {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
 }
 
-.conversation-import__full-preview:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+.conversation-import__timeline-scroller {
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
 }
 
-.conversation-import__full-events {
-  display: grid;
-  gap: 6px;
-  padding-top: 2px;
+.conversation-import__timeline-loading {
+  width: 100%;
+  min-height: 100%;
+  justify-content: center;
 }
 
-.conversation-import__event {
-  display: grid;
-  gap: 3px;
-  padding: 7px 8px;
-  border-left: 2px solid var(--border);
-  background: var(--bg-subtle);
+.conversation-import__timeline-scroller > .agent-timeline {
+  width: min(100%, 860px);
+  margin: 0 auto;
 }
 
-.conversation-import__event span {
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 700;
+.conversation-import__timeline-scroller .agent-timeline__message-row {
+  background: var(--bg);
 }
 
-.conversation-import__event p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
+.conversation-import__timeline-frame .chat-scroll-map {
+  right: 6px;
+}
+
+.conversation-import__timeline-frame .chat-scroll-map__track {
+  bottom: 8px;
 }
 
 .conversation-import__empty-preview {
-  min-height: 180px;
+  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2728,25 +2711,33 @@ button.ghost:hover {
 }
 
 @media (max-width: 760px) {
-  .conversation-import__page-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .conversation-import__content {
     grid-template-columns: 1fr;
     min-height: 0;
     overflow-y: auto;
   }
 
-  .conversation-import__list,
-  .conversation-import__preview {
-    overflow: visible;
+  .conversation-import__sidebar {
+    min-height: 240px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .conversation-import__list {
+    overflow-y: auto;
   }
 
   .conversation-import__preview {
-    border-left: 0;
-    border-top: 1px solid var(--border-soft);
+    min-height: 420px;
+  }
+
+  .conversation-import__preview-head {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .conversation-import__import-button {
+    justify-self: start;
   }
 }
 

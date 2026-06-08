@@ -6,17 +6,18 @@ import {
   ChevronDown,
   Clock3,
   Code2,
-  Import,
   Loader2,
   Search,
 } from "lucide-vue-next";
-import type { CodexThreadSummary } from "@lilia/contracts";
+import type { AgentTimelineEvent, CodexThreadSummary } from "@lilia/contracts";
 import {
   attachCodexThread,
   previewCodexThread,
   searchCodexThreads,
 } from "../services/chat";
 import { ensureOrphansLoaded, ensureProjectTasksLoaded } from "../services/tasksStore";
+import AgentTimeline from "../components/chat/AgentTimeline.vue";
+import ChatScrollMap from "../components/chat/ChatScrollMap.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -39,20 +40,11 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let previewSeq = 0;
 let fullPreviewSeq = 0;
 
-interface PreviewMessage {
-  id: string;
-  role: string;
-  summary: string | null;
-}
-
-interface PreviewLite {
-  eventCount: number;
-  messages: PreviewMessage[];
-  hasFullPreview: boolean;
-}
-
-const preview = ref<PreviewLite | null>(null);
-const fullPreviewEvents = ref<Array<{ id: string; title: string; summary: string | null }>>([]);
+const previewEventCount = ref<number | null>(null);
+const fullPreviewEvents = ref<AgentTimelineEvent[]>([]);
+const previewFrame = ref<HTMLElement | null>(null);
+const previewScroller = ref<HTMLElement | null>(null);
+const previewScrollMap = ref<{ show: () => void } | null>(null);
 
 const routeProjectId = computed(() => {
   const value = route.query.projectId;
@@ -67,7 +59,14 @@ const selectedThread = computed(() =>
   threads.value.find((thread) => thread.id === selectedThreadId.value) ?? null,
 );
 
-const previewMessages = computed<PreviewMessage[]>(() => preview.value?.messages ?? []);
+const selectedThreadMeta = computed(() => {
+  const thread = selectedThread.value;
+  if (!thread) return "";
+  const parts = [formatTime(thread.updatedAt ?? thread.createdAt)];
+  if (previewEventCount.value) parts.push(`${previewEventCount.value} 条事件`);
+  if (thread.status) parts.push(thread.status);
+  return parts.join(" · ");
+});
 
 function formatTime(value: number | null): string {
   if (!value) return "未知时间";
@@ -77,26 +76,6 @@ function formatTime(value: number | null): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function toPreviewLite(result: Awaited<ReturnType<typeof previewCodexThread>>): PreviewLite {
-  return {
-    eventCount: result.eventCount,
-    messages: (result.messages ?? []).map((message) => ({
-      id: message.id,
-      role: message.role === "user" ? "用户" : "Codex",
-      summary: message.summary,
-    })),
-    hasFullPreview: result.hasFullPreview === true,
-  };
-}
-
-function toFullPreviewEvents(result: Awaited<ReturnType<typeof previewCodexThread>>) {
-  return result.events.map((event) => ({
-    id: event.id,
-    title: event.title,
-    summary: event.summary,
-  }));
 }
 
 async function loadThreads(cursor: string | null = null) {
@@ -132,7 +111,7 @@ function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     selectedThreadId.value = null;
-    preview.value = null;
+    previewEventCount.value = null;
     fullPreviewEvents.value = [];
     importError.value = "";
     void loadThreads();
@@ -141,17 +120,20 @@ function scheduleSearch() {
 
 async function selectThread(thread: CodexThreadSummary) {
   selectedThreadId.value = thread.id;
-  preview.value = null;
+  previewEventCount.value = null;
   fullPreviewEvents.value = [];
   previewError.value = "";
   fullPreviewError.value = "";
+  fullPreviewLoading.value = false;
   importError.value = "";
   previewLoading.value = true;
   const seq = ++previewSeq;
   fullPreviewSeq += 1;
   try {
     const result = await previewCodexThread({ threadId: thread.id, detail: "lite" });
-    if (seq === previewSeq) preview.value = toPreviewLite(result);
+    if (seq !== previewSeq) return;
+    previewEventCount.value = result.eventCount;
+    if (result.hasFullPreview) void loadFullPreview(thread.id);
   } catch (err) {
     if (seq === previewSeq) previewError.value = String(err);
   } finally {
@@ -159,20 +141,23 @@ async function selectThread(thread: CodexThreadSummary) {
   }
 }
 
-async function loadFullPreview() {
-  const thread = selectedThread.value;
-  if (!thread || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
+async function loadFullPreview(threadId: string = selectedThread.value?.id ?? "") {
+  if (!threadId || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
   fullPreviewLoading.value = true;
   fullPreviewError.value = "";
   const seq = ++fullPreviewSeq;
   try {
-    const result = await previewCodexThread({ threadId: thread.id, detail: "full" });
-    if (seq === fullPreviewSeq) fullPreviewEvents.value = toFullPreviewEvents(result);
+    const result = await previewCodexThread({ threadId, detail: "full" });
+    if (seq === fullPreviewSeq) fullPreviewEvents.value = result.events;
   } catch (err) {
     if (seq === fullPreviewSeq) fullPreviewError.value = String(err);
   } finally {
     if (seq === fullPreviewSeq) fullPreviewLoading.value = false;
   }
+}
+
+function showPreviewScrollbar() {
+  previewScrollMap.value?.show();
 }
 
 async function importSelectedThread() {
@@ -211,164 +196,144 @@ onMounted(() => {
 
 <template>
   <section class="conversation-import-page">
-    <div class="page-header conversation-import__page-header">
-      <div>
-        <h1>导入对话</h1>
-        <p>从已有 Claude / Codex 历史中选择一个对话，导入后继续处理。</p>
-      </div>
-      <button
-        type="button"
-        class="primary"
-        :disabled="!selectedThread || importing"
-        @click="importSelectedThread"
-      >
-        <Loader2 v-if="importing" :size="14" class="is-spinning" aria-hidden="true" />
-        <Check v-else :size="14" aria-hidden="true" />
-        <span>{{ importing ? "导入中…" : importTargetLabel }}</span>
-      </button>
-    </div>
-
     <div class="conversation-import">
-      <div class="conversation-import__source-bar">
-        <div class="conversation-import__tabs" role="tablist" aria-label="导入来源">
-          <button
-            type="button"
-            class="conversation-import__tab is-active"
-            role="tab"
-            aria-selected="true"
-          >
-            <Code2 :size="13" aria-hidden="true" />
-            <span>Codex</span>
-          </button>
-          <button
-            type="button"
-            class="conversation-import__tab"
-            disabled
-            role="tab"
-            aria-selected="false"
-            title="Claude 历史接口待接入"
-          >
-            <Clock3 :size="13" aria-hidden="true" />
-            <span>Claude</span>
-            <span class="conversation-import__tab-badge">待接入</span>
-          </button>
-        </div>
-        <Import :size="16" aria-hidden="true" />
-      </div>
-
-      <div class="conversation-import__search">
-        <label class="conversation-import__searchbox">
-          <Search :size="14" aria-hidden="true" />
-          <input
-            v-model="query"
-            type="search"
-            placeholder="搜索 Codex thread"
-            aria-label="搜索 Codex thread"
-          />
-        </label>
-        <label class="conversation-import__toggle">
-          <input v-model="includeArchived" type="checkbox" />
-          <span>包含归档</span>
-        </label>
-      </div>
-
       <div class="conversation-import__content">
-        <section class="conversation-import__list" aria-label="Codex thread 列表">
-          <div v-if="error" class="conversation-import__notice is-error">{{ error }}</div>
-          <div v-else-if="loading" class="conversation-import__notice">
-            <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
-            <span>正在读取 Codex 历史</span>
+        <aside class="conversation-import__sidebar" aria-label="导入来源和对话列表">
+          <div class="conversation-import__source-bar">
+            <div class="conversation-import__tabs" role="tablist" aria-label="导入来源">
+              <button
+                type="button"
+                class="conversation-import__tab is-active"
+                role="tab"
+                aria-selected="true"
+              >
+                <Code2 :size="13" aria-hidden="true" />
+                <span>Codex</span>
+              </button>
+              <button
+                type="button"
+                class="conversation-import__tab"
+                disabled
+                role="tab"
+                aria-selected="false"
+                title="Claude 历史接口待接入"
+              >
+                <Clock3 :size="13" aria-hidden="true" />
+                <span>Claude</span>
+                <span class="conversation-import__tab-badge">待接入</span>
+              </button>
+            </div>
           </div>
-          <div v-else-if="threads.length === 0" class="conversation-import__notice">
-            没有找到 Codex thread
+
+          <div class="conversation-import__search">
+            <label class="conversation-import__searchbox">
+              <Search :size="14" aria-hidden="true" />
+              <input
+                v-model="query"
+                type="search"
+                placeholder="搜索 Codex thread"
+                aria-label="搜索 Codex thread"
+              />
+            </label>
+            <label class="conversation-import__toggle">
+              <input v-model="includeArchived" type="checkbox" />
+              <span>包含归档</span>
+            </label>
           </div>
-          <template v-else>
+
+          <section class="conversation-import__list" aria-label="Codex thread 列表">
+            <div v-if="error" class="conversation-import__notice is-error">{{ error }}</div>
+            <div v-else-if="loading" class="conversation-import__notice">
+              <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+              <span>正在读取 Codex 历史</span>
+            </div>
+            <div v-else-if="threads.length === 0" class="conversation-import__notice">
+              没有找到 Codex thread
+            </div>
+            <template v-else>
+              <button
+                v-for="thread in threads"
+                :key="thread.id"
+                type="button"
+                class="conversation-import__row"
+                :class="{ 'is-active': selectedThreadId === thread.id }"
+                :title="thread.title"
+                @click="selectThread(thread)"
+              >
+                <span class="conversation-import__row-title">{{ thread.title }}</span>
+                <span class="conversation-import__row-time">
+                  {{ formatTime(thread.updatedAt ?? thread.createdAt) }}
+                </span>
+              </button>
+            </template>
             <button
-              v-for="thread in threads"
-              :key="thread.id"
+              v-if="nextCursor"
               type="button"
-              class="conversation-import__row"
-              :class="{ 'is-active': selectedThreadId === thread.id }"
-              :title="thread.title"
-              @click="selectThread(thread)"
+              class="conversation-import__more"
+              :disabled="loadingMore"
+              @click="loadThreads(nextCursor)"
             >
-              <span class="conversation-import__row-title">{{ thread.title }}</span>
-              <span class="conversation-import__row-meta">
-                {{ formatTime(thread.updatedAt ?? thread.createdAt) }}
-                <span v-if="thread.model"> · {{ thread.model }}</span>
-              </span>
-              <span v-if="thread.preview" class="conversation-import__row-preview">
-                {{ thread.preview }}
-              </span>
+              <Loader2 v-if="loadingMore" :size="14" class="is-spinning" aria-hidden="true" />
+              <ChevronDown v-else :size="14" aria-hidden="true" />
+              <span>加载更多</span>
             </button>
-          </template>
-          <button
-            v-if="nextCursor"
-            type="button"
-            class="conversation-import__more"
-            :disabled="loadingMore"
-            @click="loadThreads(nextCursor)"
-          >
-            <Loader2 v-if="loadingMore" :size="14" class="is-spinning" aria-hidden="true" />
-            <ChevronDown v-else :size="14" aria-hidden="true" />
-            <span>加载更多</span>
-          </button>
-        </section>
+          </section>
+        </aside>
 
         <section class="conversation-import__preview" aria-label="Codex thread 预览">
           <template v-if="selectedThread">
             <div class="conversation-import__preview-head">
-              <div class="conversation-import__preview-title">{{ selectedThread.title }}</div>
-              <div class="conversation-import__preview-meta">
-                {{ formatTime(selectedThread.updatedAt ?? selectedThread.createdAt) }}
-                <span v-if="preview?.eventCount"> · {{ preview.eventCount }} 条事件</span>
-                <span v-if="selectedThread.status"> · {{ selectedThread.status }}</span>
-              </div>
-            </div>
-
-            <div v-if="previewLoading" class="conversation-import__notice">
-              <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
-              <span>正在生成预览</span>
-            </div>
-            <div v-else-if="previewError" class="conversation-import__notice is-error">
-              {{ previewError }}
-            </div>
-            <div v-else class="conversation-import__messages">
-              <div
-                v-for="event in previewMessages"
-                :key="event.id"
-                class="conversation-import__message"
-              >
-                <span>{{ event.role }}</span>
-                <p>{{ event.summary }}</p>
-              </div>
-              <div v-if="previewMessages.length === 0" class="conversation-import__notice">
-                这个 thread 暂无可预览消息
-              </div>
-              <button
-                v-if="preview?.hasFullPreview"
-                type="button"
-                class="conversation-import__full-preview"
-                :disabled="fullPreviewLoading"
-                @click="loadFullPreview"
-              >
-                <Loader2 v-if="fullPreviewLoading" :size="13" class="is-spinning" aria-hidden="true" />
-                <ChevronDown v-else :size="13" aria-hidden="true" />
-                <span>{{ fullPreviewEvents.length ? "完整详情已加载" : "展开完整详情" }}</span>
-              </button>
-              <div v-if="fullPreviewError" class="conversation-import__notice is-error">
-                {{ fullPreviewError }}
-              </div>
-              <div v-if="fullPreviewEvents.length" class="conversation-import__full-events">
-                <div
-                  v-for="event in fullPreviewEvents"
-                  :key="event.id"
-                  class="conversation-import__event"
-                >
-                  <span>{{ event.title }}</span>
-                  <p>{{ event.summary }}</p>
+              <div class="conversation-import__preview-heading">
+                <div class="conversation-import__preview-title">{{ selectedThread.title }}</div>
+                <div class="conversation-import__preview-meta">
+                  {{ selectedThreadMeta }}
                 </div>
               </div>
+              <button
+                type="button"
+                class="conversation-import__import-button"
+                :disabled="!selectedThread || importing"
+                @click="importSelectedThread"
+              >
+                <Loader2 v-if="importing" :size="14" class="is-spinning" aria-hidden="true" />
+                <Check v-else :size="14" aria-hidden="true" />
+                <span>{{ importing ? "导入中…" : importTargetLabel }}</span>
+              </button>
+            </div>
+
+            <div ref="previewFrame" class="conversation-import__timeline-frame">
+              <div
+                ref="previewScroller"
+                class="conversation-import__timeline-scroller"
+                @scroll="showPreviewScrollbar"
+              >
+                <div
+                  v-if="previewLoading || fullPreviewLoading"
+                  class="conversation-import__notice conversation-import__timeline-loading"
+                >
+                  <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+                  <span>读取中</span>
+                </div>
+                <div v-else-if="previewError" class="conversation-import__notice is-error">
+                  {{ previewError }}
+                </div>
+                <div v-else-if="fullPreviewError" class="conversation-import__notice is-error">
+                  {{ fullPreviewError }}
+                </div>
+                <AgentTimeline
+                  v-else-if="fullPreviewEvents.length"
+                  :events="fullPreviewEvents"
+                />
+                <div v-else class="conversation-import__empty-preview">
+                  这个 thread 暂无可预览事件。
+                </div>
+              </div>
+              <ChatScrollMap
+                ref="previewScrollMap"
+                :events="fullPreviewEvents"
+                :hover-target="previewFrame"
+                :scroller="previewScroller"
+              />
             </div>
           </template>
           <div v-else class="conversation-import__empty-preview">
