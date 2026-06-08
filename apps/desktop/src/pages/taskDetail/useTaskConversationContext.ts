@@ -108,13 +108,13 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     outgoingAttachments: ChatAttachment[],
   ) {
     const routeState = resolveConversationRouteState(props.projectId, props.taskId);
-    if (props.projectId && routeState.isDraftRoute) {
-      if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
-      await promoteDraftTask(props.taskId, titleForMessage(content, outgoingAttachments));
-    } else if (!props.projectId && routeState.isDraftRoute) {
-      if (!routeState.isLiveDraft) throw new Error("草稿已失效，请重新创建对话");
-      await promoteDraftOrphan(props.taskId, titleForMessage(content, outgoingAttachments));
-    }
+    if (!routeState.isDraftRoute) return;
+    if (routeState.isLostDraft) throw new Error("草稿已失效，请重新创建对话");
+    if (!routeState.isLiveDraft) return;
+
+    const title = titleForMessage(content, outgoingAttachments);
+    if (props.projectId) await promoteDraftTask(props.taskId, title);
+    else await promoteDraftOrphan(props.taskId, title);
   }
 
   function popupNewDraftRoute(projectId: string | undefined): string {

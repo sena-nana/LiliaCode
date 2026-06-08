@@ -226,6 +226,35 @@ describe("chat scheduler", () => {
       .toBeLessThan(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message"));
   });
 
+  it("已入库的草稿前缀对话再次发送不会被判为失效草稿", async () => {
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await sendText(view, "创建草稿前缀对话");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message"))
+        .toHaveLength(1);
+    });
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "task_promote"))
+      .toHaveLength(1);
+
+    completeMockAgentTurn(draft.id);
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
+    });
+
+    mockInvoke.mockClear();
+    await sendText(view, "继续发送第二条消息");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message"))
+        .toHaveLength(1);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_promote")).toBe(false);
+    expect(view.queryByText(/草稿已失效，请重新创建对话/)).toBeNull();
+  });
+
   it("子对话草稿首条消息会携带父对话关系提升入库", async () => {
     const draft = createDraftTask("lilia", "t-001");
     const view = await renderProjectDraftTaskDetail(draft.id);
