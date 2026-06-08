@@ -10,13 +10,13 @@
 
 ## 标准类
 
-- 按钮使用 `.ui-button`，主操作加 `.ui-button--primary`，次级操作加 `.ui-button--ghost`，危险操作加 `.ui-button--danger`，纯图标按钮加 `.ui-icon-button`。
+- 按钮使用 `.ui-button`，主操作加 `.ui-button--primary`，普通操作加 `.ui-button--ghost`，危险操作加 `.ui-button--danger`，纯图标按钮加 `.ui-icon-button`；按钮不使用边框区分类型，普通按钮常态透明背景，主按钮使用低饱和蓝色，危险按钮使用低饱和红色。
 - 输入使用 `.ui-input`，多行输入再加 `.ui-textarea`。
 - 分段控制使用 `.ui-segmented`，直接子 `button` 由标准样式接管。
 - Tab 使用 `.ui-tabs` 和 `.ui-tabs__tab`。
 - 列表容器使用 `.ui-list`，可点击或可选行使用 `.ui-list-item`。
 - 紧凑状态使用 `.ui-badge`，数量或短状态可用 `.ui-pill`；语义色使用标准 modifier。
-- 页面 BEM 类只负责布局、区域命名和少量页面专属尺寸，不重新定义按钮、输入、tab、badge、列表项的基础外观。
+- 页面 BEM 类只负责布局、区域命名和少量页面专属尺寸，不重新定义按钮、输入、tab、badge、列表项的基础外观；页面按钮扩展不得用边框作为类型或状态区分。
 
 ## 扩展规则
 
