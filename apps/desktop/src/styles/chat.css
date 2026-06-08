@@ -271,13 +271,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
   padding: 0 7px;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .chat-sidebar__tab {
@@ -303,7 +303,6 @@
 .chat-sidebar__tab.is-active {
   background: var(--bg-active);
   color: var(--text);
-  border-color: var(--border-soft);
 }
 
 .chat-sidebar__tab:focus-visible {
@@ -348,7 +347,7 @@
 .debug-panel__button {
   width: 100%;
   height: 32px;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
@@ -359,12 +358,11 @@
   padding: 0 10px;
   font-size: 13px;
   font-weight: 500;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .debug-panel__button:hover {
   background: var(--bg-hover);
-  border-color: var(--border);
   filter: none;
 }
 
@@ -980,14 +978,13 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--text-muted);
 }
 
 .agent-timeline__retry:hover {
-  border-color: var(--border);
   background: var(--bg-hover);
   color: var(--accent);
   filter: none;
@@ -1879,14 +1876,14 @@
 .chat-suggestion {
   height: 26px;
   min-width: 0;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: 6px;
-  background: var(--bg-subtle);
+  background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .chat-suggestion {
@@ -1899,7 +1896,6 @@
 }
 
 .chat-suggestion:hover {
-  border-color: var(--border);
   background: var(--bg-hover);
   color: var(--text);
   filter: none;
@@ -1986,10 +1982,14 @@
 }
 
 .chat-file-reference:hover,
-.chat-file-reference:focus-visible,
+.chat-file-reference:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 .chat-attachment-chip--image-preview:hover,
 .chat-attachment-chip--image-preview:focus-visible {
-  border-color: var(--border-strong);
   background: var(--bg-hover);
   color: var(--text);
 }
@@ -2202,8 +2202,8 @@
   height: 30px;
   padding: 0;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--accent-soft);
+  color: var(--accent);
   border: 0;
   display: inline-flex;
   align-items: center;
@@ -2213,12 +2213,18 @@
 }
 
 .chat-composer__send:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  filter: none;
 }
 
 .chat-composer__send--interrupt {
-  background: var(--err);
-  color: var(--accent-text);
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.chat-composer__send--interrupt:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  filter: none;
 }
 
 .chat-composer__send:disabled {
@@ -2488,37 +2494,34 @@
   gap: 9px;
   align-items: flex-start;
   text-align: left;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 8px;
   background: var(--bg-subtle);
   color: var(--text);
   cursor: pointer;
   font-weight: 500;
-  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .composer-inline__option-btn:hover,
 .composer-inline__option.is-active .composer-inline__option-btn {
-  border-color: var(--accent);
   background: var(--bg-hover);
   filter: none;
 }
 
 .composer-inline__option.is-picked .composer-inline__option-btn {
-  border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--text);
 }
 
 .composer-inline__option.is-danger .composer-inline__option-btn {
-  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  background: transparent;
   color: var(--err);
 }
 
 .composer-inline__option.is-danger.is-active .composer-inline__option-btn,
 .composer-inline__option.is-danger.is-picked .composer-inline__option-btn {
   background: var(--err-soft);
-  border-color: var(--err);
 }
 
 .composer-inline__option-indicator {
@@ -2661,7 +2664,6 @@
 .composer-inline__skip {
   margin-right: auto;
   color: var(--text-muted);
-  border-color: transparent;
 }
 
 .composer-inline__skip:hover {
@@ -2771,7 +2773,6 @@
 }
 
 .editable-command__preview:hover {
-  border-color: var(--border-strong);
   background: var(--bg-hover);
 }
 
@@ -3152,7 +3153,7 @@
 .chat-chip {
   height: 28px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 999px;
   background: var(--bg-subtle);
   color: var(--text-muted);
@@ -3162,7 +3163,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 500;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .chat-chip:hover:not(.is-disabled):not(:disabled) {
@@ -3174,7 +3175,6 @@
 .chat-chip.is-open {
   background: var(--bg-hover);
   color: var(--text);
-  border-color: var(--border-strong);
 }
 
 .chat-chip:disabled,
@@ -3206,7 +3206,7 @@
   max-width: min(240px, 100%);
   height: 28px;
   padding: 0 6px 0 9px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 999px;
   background: var(--bg-subtle);
   color: var(--text-muted);
@@ -3234,7 +3234,6 @@
 }
 
 button.chat-attachment-chip--image-preview {
-  border-color: var(--border);
   background: var(--bg-subtle);
   color: var(--text-muted);
 }

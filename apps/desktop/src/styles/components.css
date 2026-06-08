@@ -73,10 +73,8 @@
 }
 
 input,
-button,
 select,
-.ui-input,
-.ui-button {
+.ui-input {
   font: inherit;
   height: 32px;
   padding: 6px 10px;
@@ -97,20 +95,26 @@ select:focus,
 
 button,
 .ui-button {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: transparent;
+  font: inherit;
+  height: 32px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  border: 0;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
 
 button:hover,
 .ui-button:hover {
-  filter: brightness(1.08);
+  background: var(--bg-hover);
+  filter: none;
 }
 
 button:disabled,
@@ -124,7 +128,6 @@ button:disabled,
 .ui-button--ghost {
   background: transparent;
   color: var(--text);
-  border-color: var(--border-strong);
   font-weight: 500;
 }
 
@@ -134,18 +137,25 @@ button:disabled,
 }
 
 .ui-button--primary {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ui-button--primary:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  filter: none;
 }
 
 .ui-button--danger {
+  background: var(--err-soft);
   color: var(--err);
-  border-color: rgba(244, 113, 116, 0.45);
+  font-weight: 600;
 }
 
 .ui-button--danger:hover {
-  background: var(--err-soft);
+  background: color-mix(in srgb, var(--err) 18%, transparent);
   filter: none;
 }
 

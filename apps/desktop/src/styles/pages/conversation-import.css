@@ -185,7 +185,7 @@
 
 .conversation-import__more {
   height: 28px;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
@@ -196,12 +196,11 @@
   padding: 0 10px;
   font-size: 12px;
   font-weight: 600;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .conversation-import__more:hover {
   background: var(--bg-hover);
-  border-color: var(--border);
   filter: none;
 }
 
