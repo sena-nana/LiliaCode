@@ -128,7 +128,7 @@ describe("ConversationImport", () => {
       }
       return {
         thread,
-        eventCount: 2,
+        eventCount: 99,
         messages: [],
         hasFullPreview: true,
         events: [],
@@ -140,6 +140,8 @@ describe("ConversationImport", () => {
     await waitFor(() => {
       expect(view.container.querySelector(".agent-timeline")).toBeInTheDocument();
     });
+    expect(view.getByText(/2 条事件/)).toBeInTheDocument();
+    expect(view.queryByText(/99 条事件/)).not.toBeInTheDocument();
 
     const sidebar = view.container.querySelector(".conversation-import__sidebar");
     expect(sidebar).toBeInstanceOf(HTMLElement);

@@ -2626,22 +2626,38 @@ describe("Codex history utility", () => {
     });
   });
 
-  it("previews Codex threads in full mode with timeline events", async () => {
+  it("previews Codex threads in full mode with all paginated timeline events", async () => {
+    const calls: any[] = [];
     const server = {
-      request: async (method: string) => {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/turns/list") {
+          if (!params.cursor) {
+            return {
+              data: [{
+                id: "turn-1",
+                status: "completed",
+                startedAt: 1,
+                completedAt: 2,
+                items: [
+                  { type: "userMessage", id: "user-1", text: "旧问题" },
+                ],
+              }],
+              nextCursor: "cursor-2",
+            };
+          }
           return {
             data: [{
-              id: "turn-1",
+              id: "turn-2",
               status: "completed",
-              startedAt: 1,
-              completedAt: 2,
+              startedAt: 3,
+              completedAt: 4,
               items: [
-                { type: "userMessage", id: "user-1", text: "旧问题" },
                 { type: "agentMessage", id: "assistant-1", text: "旧回复" },
               ],
             }],
+            nextCursor: null,
           };
         }
         return {};
@@ -2656,6 +2672,27 @@ describe("Codex history utility", () => {
     expect(result.events).toEqual([
       expect.objectContaining({ kind: "message", summary: "旧问题" }),
       expect.objectContaining({ kind: "message", summary: "旧回复" }),
+    ]);
+    expect(calls.filter((call) => call.method === "thread/turns/list")).toEqual([
+      {
+        method: "thread/turns/list",
+        params: {
+          threadId: "thread-1",
+          limit: 50,
+          sortDirection: "asc",
+          itemsView: "full",
+        },
+      },
+      {
+        method: "thread/turns/list",
+        params: {
+          threadId: "thread-1",
+          limit: 50,
+          sortDirection: "asc",
+          itemsView: "full",
+          cursor: "cursor-2",
+        },
+      },
     ]);
   });
 
