@@ -338,6 +338,13 @@ onMounted(() => {
               />
             </div>
           </template>
+          <div
+            v-else-if="loading"
+            class="conversation-import__notice conversation-import__timeline-loading"
+          >
+            <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+            <span>读取中</span>
+          </div>
           <div v-else class="conversation-import__empty-preview">
             选择一个 Codex thread 后查看摘要并导入。
           </div>
