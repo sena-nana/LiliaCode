@@ -46,6 +46,20 @@ export interface ChatSendResult {
   queuedCount: number;
 }
 
+export type CodexReviewTarget =
+  | { type: "uncommittedChanges" }
+  | { type: "baseBranch"; branch: string }
+  | { type: "commit"; sha: string };
+
+export interface CodexReviewWorkflow {
+  type: "codex_review";
+  target: CodexReviewTarget;
+  instructions?: string;
+  delivery?: "inline" | "detached";
+}
+
+export type ChatWorkflow = CodexReviewWorkflow;
+
 export interface ChatInterruptResult {
   rolledBack: boolean;
   restoredContent: string;

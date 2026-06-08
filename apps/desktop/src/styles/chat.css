@@ -3294,6 +3294,16 @@ button.chat-attachment-chip--bubble {
   display: inline-flex;
 }
 
+.chat-review-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.chat-review-menu__menu {
+  left: auto;
+  right: 0;
+}
+
 .dd__menu {
   position: absolute;
   left: 0;

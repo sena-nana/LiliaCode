@@ -10,7 +10,9 @@ use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::timeline_sink::persist_and_emit_input;
-use crate::chat::types::{ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption};
+use crate::chat::types::{
+    ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatWorkflow,
+};
 use crate::store::LiliaStore;
 use crate::{agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
 
@@ -19,6 +21,7 @@ pub(crate) struct PendingChatTurn {
     pub(crate) composer: ChatComposerState,
     pub(crate) project_cwd: String,
     pub(crate) attachments: Vec<ChatAttachment>,
+    pub(crate) workflow: Option<ChatWorkflow>,
     pub(crate) message: ChatMessage,
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
@@ -160,6 +163,7 @@ pub(crate) fn queue_pending_turn(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    workflow: Option<ChatWorkflow>,
     message: ChatMessage,
     turn_id: String,
     guide_id: Option<String>,
@@ -171,11 +175,16 @@ pub(crate) fn queue_pending_turn(
         composer,
         project_cwd,
         attachments,
+        workflow,
         message,
         turn_id,
         guide_id,
     });
     queue.len()
+}
+
+pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatWorkflow>) -> bool {
+    !(matches!(workflow, Some(ChatWorkflow::CodexReview { .. })) && content.trim().is_empty())
 }
 
 pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<String> {

@@ -14,6 +14,12 @@ const baseState: ChatComposerState = {
   permission: "full",
 };
 
+const codexState: ChatComposerState = {
+  ...baseState,
+  backend: "codex",
+  model: "gpt-5.5",
+};
+
 function pendingAsk(spec: AskUserSpec): PendingAsk {
   return {
     id: 1,
@@ -633,6 +639,90 @@ describe("ChatComposer", () => {
       planMode: true,
       permission: "full",
     });
+  });
+
+  it("Codex 后端可从工具栏发起未提交改动审查", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    const reviewButton = view.getByRole("button", { name: "代码审查" });
+    expect(reviewButton).not.toBeDisabled();
+    await fireEvent.click(reviewButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    expect(view.emitted("start-codex-review")?.[0]).toEqual([
+      "",
+      [],
+      { type: "uncommittedChanges" },
+    ]);
+  });
+
+  it("Codex review 会把输入框内容作为补充说明发出", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+    await setComposerText(view, "重点看权限边界");
+
+    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    expect(view.emitted("start-codex-review")?.[0]).toEqual([
+      "重点看权限边界",
+      [],
+      { type: "uncommittedChanges" },
+    ]);
+  });
+
+  it("Codex review 支持对比分支和指定提交目标", async () => {
+    const promptSpy = vi.spyOn(window, "prompt");
+    promptSpy.mockReturnValueOnce("main");
+    promptSpy.mockReturnValueOnce("abc123");
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /对比分支/ }));
+    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
+
+    expect(view.emitted("start-codex-review")?.[0]?.[2]).toEqual({
+      type: "baseBranch",
+      branch: "main",
+    });
+    expect(view.emitted("start-codex-review")?.[1]?.[2]).toEqual({
+      type: "commit",
+      sha: "abc123",
+    });
+  });
+
+  it("非 Codex 或运行中时禁用代码审查入口", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: true,
+    });
+
+    expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
   });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {

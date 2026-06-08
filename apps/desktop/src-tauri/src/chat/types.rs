@@ -73,6 +73,30 @@ pub(crate) struct ChatSendResult {
     pub(crate) queued_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub(crate) enum ChatWorkflow {
+    #[serde(rename = "codex_review")]
+    CodexReview {
+        target: CodexReviewTarget,
+        #[serde(default)]
+        instructions: Option<String>,
+        #[serde(default)]
+        delivery: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub(crate) enum CodexReviewTarget {
+    #[serde(rename = "uncommittedChanges")]
+    UncommittedChanges,
+    #[serde(rename = "baseBranch")]
+    BaseBranch { branch: String },
+    #[serde(rename = "commit")]
+    Commit { sha: String },
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatInterruptResult {

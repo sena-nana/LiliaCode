@@ -5,6 +5,8 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatWorkflow,
+  CodexReviewTarget,
 } from "@lilia/contracts";
 import {
   resolveAskUserById,
@@ -112,9 +114,10 @@ export function useTaskComposerController(options: {
     content: string,
     outgoingAttachments: ChatAttachment[] = [],
     guideId?: string,
+    workflow?: ChatWorkflow | null,
   ) {
     if (!context.hasContext.value) return;
-    if (!content.trim() && outgoingAttachments.length === 0) return;
+    if (!content.trim() && outgoingAttachments.length === 0 && !workflow) return;
 
     let optimisticId: string | null = null;
     try {
@@ -137,6 +140,7 @@ export function useTaskComposerController(options: {
         cwd,
         outgoingAttachments,
         guideId,
+        workflow,
       );
       timeline.removeTimelineEvent(optimistic.id);
     } catch (err) {
@@ -159,6 +163,28 @@ export function useTaskComposerController(options: {
 
     try {
       await sendAgentMessage(content, outgoingAttachments);
+      attachments.value = [];
+    } catch {
+      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+    }
+  }
+
+  async function onStartCodexReview(
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ) {
+    if (!context.hasContext.value) return;
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
+    const workflow: ChatWorkflow = {
+      type: "codex_review",
+      target,
+      delivery: "inline",
+    };
+    const instructions = content.trim();
+    if (instructions) workflow.instructions = instructions;
+    try {
+      await sendAgentMessage(instructions, outgoingAttachments, undefined, workflow);
       attachments.value = [];
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
@@ -411,6 +437,7 @@ export function useTaskComposerController(options: {
     activeBackend,
     sendAgentMessage,
     onSend,
+    onStartCodexReview,
     onInsertGuide,
     onInsertDraftText,
     onInterrupt,

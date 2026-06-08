@@ -219,6 +219,23 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn empty_codex_review_does_not_persist_user_message() {
+        let workflow = Some(ChatWorkflow::CodexReview {
+            target: CodexReviewTarget::UncommittedChanges,
+            instructions: None,
+            delivery: Some("inline".to_string()),
+        });
+
+        assert!(!should_persist_user_message("", &workflow));
+        assert!(!should_persist_user_message("  ", &workflow));
+        assert!(should_persist_user_message(
+            "重点看权限边界",
+            &workflow,
+        ));
+        assert!(should_persist_user_message("", &None));
+    }
+
+    #[test]
     fn chat_message_ids_do_not_reset_to_counter_values() {
         let first = new_chat_message_id();
         let second = new_chat_message_id();
@@ -361,6 +378,7 @@ mod agent_event_sink_tests {
             composer: default_composer("task-1"),
             project_cwd: "D:\\PROJECT\\workspace\\Lilia".to_string(),
             attachments: Vec::new(),
+            workflow: None,
             message: ChatMessage {
                 id: format!("u-{id}"),
                 task_id: "task-1".to_string(),
