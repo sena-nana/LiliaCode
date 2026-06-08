@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import "../styles/pages/plugins.css";
-import { ref } from "vue";
-import { AlertTriangle, RefreshCw } from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
+import {
+  AlertTriangle,
+  Check,
+  FolderOpen,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
   createClaudeSkill,
@@ -23,16 +32,11 @@ import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useClaudeMcpEditor } from "./plugins/useClaudeMcpEditor";
 import { useCodexMcpEditor } from "./plugins/useCodexMcpEditor";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
-import ClaudeSkillsTab from "./plugins/ClaudeSkillsTab.vue";
-import ClaudePluginsTab from "./plugins/ClaudePluginsTab.vue";
-import ClaudeMcpTab from "./plugins/ClaudeMcpTab.vue";
-import CodexMcpTab from "./plugins/CodexMcpTab.vue";
 import SkillCreateDialog from "./plugins/SkillCreateDialog.vue";
 import ClaudeMcpEditorDialog from "./plugins/ClaudeMcpEditorDialog.vue";
 
 const {
   tab,
-  scope,
   projectCwd,
   projectOptions,
   userSkills,
@@ -45,10 +49,7 @@ const {
   warnings,
   loading,
   errorText,
-  currentSkills,
-  currentScopeHint,
   refresh,
-  onProjectChange,
 } = usePluginsOverview();
 
 const showCreate = ref(false);
@@ -60,9 +61,242 @@ const pendingRemoveSkill = ref<ClaudeSkill | null>(null);
 const pendingRemoveMcp = ref<ClaudeMcpServer | null>(null);
 const pendingRemoveCodexMcp = ref<CodexMcpServer | null>(null);
 const removing = ref(false);
+const query = ref("");
+const selectedKey = ref<string | null>(null);
 
 const mcpEditor = useClaudeMcpEditor({ refresh });
 const codexMcpEditor = useCodexMcpEditor({ refresh });
+const USER_SKILLS_ROOT = "~/.claude/skills/";
+
+type PluginEntry =
+  | { kind: "skill"; key: string; title: string; meta: string; searchText: string; item: ClaudeSkill }
+  | { kind: "plugin"; key: string; title: string; meta: string; searchText: string; item: ClaudePlugin }
+  | {
+      kind: "claude-mcp";
+      key: string;
+      title: string;
+      meta: string;
+      searchText: string;
+      item: ClaudeMcpServer;
+    }
+  | {
+      kind: "codex-mcp";
+      key: string;
+      title: string;
+      meta: string;
+      searchText: string;
+      item: CodexMcpServer;
+    };
+
+interface DetailRow {
+  label: string;
+  value: string;
+  code?: boolean;
+}
+
+function enabledLabel(enabled: boolean) {
+  return enabled ? "已启用" : "已停用";
+}
+
+function codexTransportLabel(server: CodexMcpServer) {
+  if (server.transport === "stdio") return "stdio";
+  if (server.transport === "http") return "HTTP";
+  if (server.transport === "oauth") return "OAuth";
+  return "未知";
+}
+
+function commandLine(command: string, args: string[]) {
+  return [command, ...args].filter(Boolean).join(" ").trim();
+}
+
+function codexServerSummary(server: CodexMcpServer) {
+  return commandLine(server.command, server.args) || `${codexTransportLabel(server)} MCP server`;
+}
+
+function normalizePath(value: string | null | undefined) {
+  return (value ?? "").replace(/\\/g, "/").toLocaleLowerCase();
+}
+
+function projectFolderFromSkillPath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const marker = "/.claude/skills/";
+  const markerIndex = normalized.toLocaleLowerCase().indexOf(marker);
+  if (markerIndex <= 0) return "";
+  const projectPath = normalized.slice(0, markerIndex).replace(/\/+$/, "");
+  const parts = projectPath.split("/");
+  return parts[parts.length - 1] ?? "";
+}
+
+function projectSkillsRootFromPath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const marker = "/.claude/skills/";
+  const markerIndex = normalized.toLocaleLowerCase().indexOf(marker);
+  if (markerIndex <= 0) return "";
+  return `${normalized.slice(0, markerIndex)}\\.claude\\skills\\`;
+}
+
+function projectLabelForSkill(skill: ClaudeSkill) {
+  if (skill.scope !== "project") return "";
+  const skillPath = normalizePath(skill.path);
+  const matchedProject = projectOptions.value.find((project) =>
+    skillPath.startsWith(normalizePath(project.value)),
+  );
+  if (matchedProject) return matchedProject.label;
+  return projectFolderFromSkillPath(skill.path) || "项目";
+}
+
+function skillLocation(skill: ClaudeSkill) {
+  if (skill.scope === "user") return USER_SKILLS_ROOT;
+  const skillPath = normalizePath(skill.path);
+  const project = projectOptions.value.find((option) =>
+    skillPath.startsWith(normalizePath(option.value)),
+  );
+  return project
+    ? `${project.value}\\.claude\\skills\\`
+    : projectSkillsRootFromPath(skill.path) || "未选择项目";
+}
+
+const allEntries = computed<PluginEntry[]>(() => {
+  if (tab.value === "claude-skills") {
+    return [...userSkills.value, ...projectSkills.value].map((skill) => {
+      const projectLabel = projectLabelForSkill(skill);
+      return {
+        kind: "skill",
+        key: `skill:${skill.scope}:${skill.path}`,
+        title: skill.name,
+        meta: [enabledLabel(skill.enabled), projectLabel].filter(Boolean).join(" · "),
+        searchText: [skill.name, skill.description, skill.path, projectLabel].join("\n"),
+        item: skill,
+      };
+    });
+  }
+
+  if (tab.value === "claude-plugins") {
+    return claudePlugins.value.map((plugin) => ({
+      kind: "plugin",
+      key: `plugin:${plugin.path}`,
+      title: plugin.name,
+      meta: [enabledLabel(plugin.enabled), plugin.version ? `v${plugin.version}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+      searchText: [plugin.name, plugin.description, plugin.version, plugin.path].join("\n"),
+      item: plugin,
+    }));
+  }
+
+  if (tab.value === "claude-mcp") {
+    return claudeMcpServers.value.map((server) => ({
+      kind: "claude-mcp",
+      key: `claude-mcp:${server.name}`,
+      title: server.name,
+      meta: enabledLabel(server.enabled),
+      searchText: [server.name, server.command, server.args.join(" "), server.envKeys.join(" ")].join(
+        "\n",
+      ),
+      item: server,
+    }));
+  }
+
+  return codexServers.value.map((server) => ({
+    kind: "codex-mcp",
+    key: `codex-mcp:${server.name}`,
+    title: server.name,
+    meta: [
+      server.editable ? enabledLabel(server.enabled) : "只读",
+      codexTransportLabel(server),
+    ].join(" · "),
+    searchText: [
+      server.name,
+      server.transport,
+      server.command,
+      server.args.join(" "),
+      server.envKeys.join(" "),
+    ].join("\n"),
+    item: server,
+  }));
+});
+
+const filteredEntries = computed(() => {
+  const needle = query.value.trim().toLocaleLowerCase();
+  if (!needle) return allEntries.value;
+  return allEntries.value.filter((entry) =>
+    entry.searchText.toLocaleLowerCase().includes(needle),
+  );
+});
+
+const selectedEntry = computed(
+  () => filteredEntries.value.find((entry) => entry.key === selectedKey.value) ?? null,
+);
+
+const selectedMeta = computed(() => {
+  const entry = selectedEntry.value;
+  if (!entry) return "";
+  if (entry.kind === "skill") return `${entry.item.scope === "user" ? "全局" : "项目"} · ${entry.meta}`;
+  if (entry.kind === "plugin") return `Claude Plugin · ${entry.meta}`;
+  if (entry.kind === "claude-mcp") return `Claude MCP · ${entry.meta}`;
+  return `Codex MCP · ${entry.meta}`;
+});
+
+const detailRows = computed<DetailRow[]>(() => {
+  const entry = selectedEntry.value;
+  if (!entry) return [];
+  if (entry.kind === "skill") {
+    return [
+      { label: "描述", value: entry.item.description || "无描述" },
+      { label: "路径", value: entry.item.path, code: true },
+      { label: "Scope", value: entry.item.scope === "user" ? "全局" : "项目" },
+      ...(entry.item.scope === "project"
+        ? [{ label: "项目", value: projectLabelForSkill(entry.item) }]
+        : []),
+      { label: "位置", value: skillLocation(entry.item), code: true },
+    ];
+  }
+  if (entry.kind === "plugin") {
+    return [
+      { label: "描述", value: entry.item.description || "无描述" },
+      { label: "版本", value: entry.item.version || "-" },
+      { label: "路径", value: entry.item.path, code: true },
+    ];
+  }
+  if (entry.kind === "claude-mcp") {
+    return [
+      { label: "命令", value: commandLine(entry.item.command, entry.item.args) || "-", code: true },
+      { label: "环境变量", value: entry.item.envKeys.join(", ") || "-" },
+      {
+        label: "配置",
+        value: claudeMcpConfigPath.value || "~/.lilia/config/claude-mcp-servers.json",
+        code: true,
+      },
+    ];
+  }
+  return [
+    { label: "Transport", value: codexTransportLabel(entry.item) },
+    { label: "命令", value: codexServerSummary(entry.item), code: true },
+    { label: "环境变量", value: entry.item.envKeys.join(", ") || "-" },
+    { label: "权限", value: entry.item.editable ? "可编辑" : "只读" },
+    { label: "配置", value: codexConfigPath.value || "~/.codex/config.toml", code: true },
+  ];
+});
+
+const emptyText = computed(() => {
+  if (query.value.trim()) return "没有匹配项";
+  if (tab.value === "claude-skills") return "没有 Skill";
+  if (tab.value === "claude-plugins") return "没有 Plugin";
+  return "没有 MCP";
+});
+
+watch(
+  filteredEntries,
+  (entries) => {
+    if (entries.some((entry) => entry.key === selectedKey.value)) return;
+    selectedKey.value = entries[0]?.key ?? null;
+  },
+  { immediate: true },
+);
+
+watch(tab, () => {
+  query.value = "";
+});
 
 function openCreate() {
   newName.value = "";
@@ -74,15 +308,11 @@ function openCreate() {
 async function confirmCreate() {
   if (creating.value) return;
   createError.value = null;
-  if (scope.value === "project" && !projectCwd.value) {
-    createError.value = "项目 scope 需要先选择一个项目";
-    return;
-  }
   creating.value = true;
   try {
     await createClaudeSkill(
-      scope.value,
-      scope.value === "project" ? projectCwd.value : null,
+      "user",
+      null,
       newName.value,
       newDesc.value,
     );
@@ -179,95 +409,245 @@ async function openCodex() {
     errorText.value = String(err);
   }
 }
+
+function selectEntry(entry: PluginEntry) {
+  selectedKey.value = entry.key;
+}
+
+function openMcpCreate() {
+  if (tab.value === "claude-mcp") mcpEditor.openCreateMcp();
+  else if (tab.value === "codex-mcp") codexMcpEditor.openCreateMcp();
+}
+
+function canCreateInDetail() {
+  return tab.value === "claude-mcp" || tab.value === "codex-mcp";
+}
+
+function toggleSelected(entry: PluginEntry) {
+  if (entry.kind === "skill") void toggleSkill(entry.item);
+  else if (entry.kind === "plugin") void togglePlugin(entry.item);
+  else if (entry.kind === "claude-mcp") void toggleMcp(entry.item);
+  else void toggleCodexMcp(entry.item);
+}
+
+function editSelected(entry: PluginEntry) {
+  if (entry.kind === "claude-mcp") mcpEditor.openEditMcp(entry.item);
+  else if (entry.kind === "codex-mcp" && entry.item.editable) codexMcpEditor.openEditMcp(entry.item);
+}
+
+function removeSelected(entry: PluginEntry) {
+  if (entry.kind === "skill") pendingRemoveSkill.value = entry.item;
+  else if (entry.kind === "claude-mcp") pendingRemoveMcp.value = entry.item;
+  else if (entry.kind === "codex-mcp" && entry.item.editable) {
+    pendingRemoveCodexMcp.value = entry.item;
+  }
+}
+
+function openSelectedConfig(entry: PluginEntry) {
+  if (entry.kind === "claude-mcp") void openClaudeMcp();
+  else if (entry.kind === "codex-mcp") void openCodex();
+}
+
+function actionLabel(entry: PluginEntry) {
+  return entry.item.enabled ? "停用" : "启用";
+}
+
+function canToggle(entry: PluginEntry) {
+  return entry.kind !== "codex-mcp" || entry.item.editable;
+}
+
+function canEdit(entry: PluginEntry) {
+  return entry.kind === "claude-mcp" || (entry.kind === "codex-mcp" && entry.item.editable);
+}
+
+function canRemove(entry: PluginEntry) {
+  return entry.kind === "skill" || entry.kind === "claude-mcp" || (entry.kind === "codex-mcp" && entry.item.editable);
+}
+
+function canOpenConfig(entry: PluginEntry) {
+  return entry.kind === "claude-mcp" || entry.kind === "codex-mcp";
+}
 </script>
 
 <template>
   <section class="plugins-page">
-    <div class="page-header">
-      <div>
-        <h1>插件 / 技能</h1>
-        <p>统一管理 Claude 的 skills 与 plugins，以及 Codex 的 MCP servers。</p>
+    <div class="plugins-browser">
+      <div v-if="errorText" class="conn-banner conn-banner--err plugins-browser__banner">
+        <AlertTriangle :size="16" aria-hidden="true" />
+        <div>
+          <div class="conn-banner__title">操作失败</div>
+          <div class="conn-banner__hint">{{ errorText }}</div>
+        </div>
       </div>
-      <div class="page-header__actions">
-        <button type="button" class="ui-button ui-button--ghost" :disabled="loading" @click="refresh">
-          <RefreshCw :size="14" :class="loading ? 'is-spinning' : ''" aria-hidden="true" />
-          {{ loading ? "刷新中…" : "刷新" }}
-        </button>
+
+      <div v-if="warnings.length" class="conn-banner conn-banner--warn plugins-browser__banner">
+        <AlertTriangle :size="16" aria-hidden="true" />
+        <div>
+          <div class="conn-banner__title">解析期警告</div>
+          <ul class="plugins-warning-list">
+            <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="plugins-browser__topbar">
+        <PluginsTabBar
+          v-model="tab"
+          :skills-count="userSkills.length + projectSkills.length"
+          :plugins-count="claudePlugins.length"
+          :claude-mcp-count="claudeMcpServers.length"
+          :codex-mcp-count="codexServers.length"
+        />
+        <div class="plugins-browser__topbar-actions">
+          <button
+            v-if="tab === 'claude-skills'"
+            type="button"
+            class="ui-button ui-button--ghost"
+            @click="openCreate"
+          >
+            <Plus :size="14" aria-hidden="true" />
+            <span>新建 Skill</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="plugins-browser__content">
+        <aside class="plugins-browser__sidebar" aria-label="插件和技能列表">
+          <div class="plugins-browser__search">
+            <label class="plugins-browser__searchbox">
+              <Search :size="14" aria-hidden="true" />
+              <input
+                v-model="query"
+                type="search"
+                placeholder="搜索当前列表"
+                aria-label="搜索插件和技能"
+              />
+            </label>
+          </div>
+
+          <section class="plugins-browser__list ui-list" aria-label="检索结果">
+            <div v-if="loading && !filteredEntries.length" class="plugins-browser__notice">
+              <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+              <span>读取中</span>
+            </div>
+            <div v-else-if="!filteredEntries.length" class="plugins-browser__notice">
+              {{ emptyText }}
+            </div>
+            <template v-else>
+              <button
+                v-for="entry in filteredEntries"
+                :key="entry.key"
+                type="button"
+                class="plugins-browser__row ui-list-item"
+                :class="{ 'is-active': selectedKey === entry.key, 'is-disabled': !entry.item.enabled }"
+                :title="entry.title"
+                @click="selectEntry(entry)"
+              >
+                <span class="plugins-browser__row-title">{{ entry.title }}</span>
+                <span class="plugins-browser__row-meta">{{ entry.meta }}</span>
+              </button>
+            </template>
+          </section>
+        </aside>
+
+        <section class="plugins-browser__detail" aria-label="插件和技能详情">
+          <template v-if="selectedEntry">
+            <div class="plugins-browser__detail-head">
+              <div class="plugins-browser__detail-heading">
+                <div class="plugins-browser__detail-title">{{ selectedEntry.title }}</div>
+                <div class="plugins-browser__detail-meta">{{ selectedMeta }}</div>
+              </div>
+              <div class="plugins-browser__actions">
+                <button
+                  v-if="canCreateInDetail()"
+                  type="button"
+                  class="ui-button ui-button--ghost"
+                  @click="openMcpCreate"
+                >
+                  <Plus :size="14" aria-hidden="true" />
+                  <span>新增 MCP</span>
+                </button>
+                <button
+                  v-if="canOpenConfig(selectedEntry)"
+                  type="button"
+                  class="ui-button ui-button--ghost"
+                  @click="openSelectedConfig(selectedEntry)"
+                >
+                  <FolderOpen :size="14" aria-hidden="true" />
+                  <span>打开配置</span>
+                </button>
+                <button
+                  v-if="canEdit(selectedEntry)"
+                  type="button"
+                  class="ui-button ui-button--ghost"
+                  @click="editSelected(selectedEntry)"
+                >
+                  <Pencil :size="14" aria-hidden="true" />
+                  <span>编辑</span>
+                </button>
+                <button
+                  v-if="canRemove(selectedEntry)"
+                  type="button"
+                  class="ui-button ui-button--ghost ui-button--danger"
+                  @click="removeSelected(selectedEntry)"
+                >
+                  <Trash2 :size="14" aria-hidden="true" />
+                  <span>删除</span>
+                </button>
+                <button
+                  v-if="canToggle(selectedEntry)"
+                  type="button"
+                  class="ui-button ui-button--primary"
+                  @click="toggleSelected(selectedEntry)"
+                >
+                  <Check :size="14" aria-hidden="true" />
+                  <span>{{ actionLabel(selectedEntry) }}</span>
+                </button>
+              </div>
+            </div>
+
+            <dl class="plugins-browser__detail-list">
+              <div
+                v-for="row in detailRows"
+                :key="row.label"
+                class="plugins-browser__detail-row"
+              >
+                <dt>{{ row.label }}</dt>
+                <dd>
+                  <code v-if="row.code">{{ row.value }}</code>
+                  <span v-else>{{ row.value }}</span>
+                </dd>
+              </div>
+            </dl>
+          </template>
+          <template v-else>
+            <div class="plugins-browser__detail-head">
+              <div class="plugins-browser__detail-heading">
+                <div class="plugins-browser__detail-title">未选择</div>
+              </div>
+              <div class="plugins-browser__actions">
+                <button
+                  v-if="canCreateInDetail()"
+                  type="button"
+                  class="ui-button ui-button--ghost"
+                  @click="openMcpCreate"
+                >
+                  <Plus :size="14" aria-hidden="true" />
+                  <span>新增 MCP</span>
+                </button>
+              </div>
+            </div>
+            <div class="plugins-browser__empty-detail">选择一项</div>
+          </template>
+        </section>
       </div>
     </div>
-
-    <PluginsTabBar
-      v-model="tab"
-      :skills-count="userSkills.length + projectSkills.length"
-      :plugins-count="claudePlugins.length"
-      :claude-mcp-count="claudeMcpServers.length"
-      :codex-mcp-count="codexServers.length"
-    />
-
-    <div v-if="errorText" class="conn-banner conn-banner--err">
-      <AlertTriangle :size="16" aria-hidden="true" />
-      <div>
-        <div class="conn-banner__title">操作失败</div>
-        <div class="conn-banner__hint">{{ errorText }}</div>
-      </div>
-    </div>
-
-    <div v-if="warnings.length" class="conn-banner conn-banner--warn">
-      <AlertTriangle :size="16" aria-hidden="true" />
-      <div>
-        <div class="conn-banner__title">解析期警告</div>
-        <ul class="plugins-warning-list">
-          <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
-        </ul>
-      </div>
-    </div>
-
-    <ClaudeSkillsTab
-      v-if="tab === 'claude-skills'"
-      v-model:scope="scope"
-      :project-cwd="projectCwd"
-      :project-options="projectOptions"
-      :current-skills="currentSkills"
-      :current-scope-hint="currentScopeHint"
-      @project-change="onProjectChange"
-      @create="openCreate"
-      @toggle="toggleSkill"
-      @remove="pendingRemoveSkill = $event"
-    />
-
-    <ClaudePluginsTab
-      v-else-if="tab === 'claude-plugins'"
-      :plugins="claudePlugins"
-      @toggle="togglePlugin"
-    />
-
-    <ClaudeMcpTab
-      v-else-if="tab === 'claude-mcp'"
-      :servers="claudeMcpServers"
-      :config-path="claudeMcpConfigPath"
-      @open-config="openClaudeMcp"
-      @create="mcpEditor.openCreateMcp"
-      @edit="mcpEditor.openEditMcp"
-      @toggle="toggleMcp"
-      @remove="pendingRemoveMcp = $event"
-    />
-
-    <CodexMcpTab
-      v-else
-      :servers="codexServers"
-      :config-path="codexConfigPath"
-      @open-config="openCodex"
-      @create="codexMcpEditor.openCreateMcp"
-      @edit="codexMcpEditor.openEditMcp"
-      @toggle="toggleCodexMcp"
-      @remove="pendingRemoveCodexMcp = $event"
-    />
 
     <SkillCreateDialog
       v-model:open="showCreate"
       v-model:name="newName"
       v-model:description="newDesc"
-      :scope-hint="currentScopeHint"
+      :scope-hint="USER_SKILLS_ROOT"
       :creating="creating"
       :error="createError"
       @confirm="confirmCreate"
