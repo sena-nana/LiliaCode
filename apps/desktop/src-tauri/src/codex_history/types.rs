@@ -92,9 +92,9 @@ pub struct CodexThreadAttachResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct AgentTimelineBatchPayload {
-    pub(super) task_id: String,
-    pub(super) events: Vec<AgentTimelineEvent>,
+pub(crate) struct AgentTimelineBatchPayload {
+    pub(crate) task_id: String,
+    pub(crate) events: Vec<AgentTimelineEvent>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

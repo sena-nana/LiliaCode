@@ -5,6 +5,7 @@ pub mod agent_events;
 mod agent_extensions;
 pub mod agent_timeline;
 mod chat;
+mod claude_history;
 mod codex_history;
 mod conversation_suggestions;
 mod github;
@@ -109,6 +110,9 @@ pub fn run() {
             chat::commands::chat_get_composer_state,
             chat::commands::chat_set_composer_state,
             chat::commands::chat_reset_session,
+            claude_history::claude_session_search,
+            claude_history::claude_session_preview,
+            claude_history::claude_session_attach,
             codex_history::codex_thread_search,
             codex_history::codex_thread_preview,
             codex_history::codex_thread_attach,

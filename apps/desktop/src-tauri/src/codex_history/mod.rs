@@ -1,5 +1,5 @@
-mod bulk;
-mod preview;
+pub(crate) mod bulk;
+pub(crate) mod preview;
 mod types;
 mod utility;
 

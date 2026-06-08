@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runAgentTurn } from "../agent-runner/core.mjs";
@@ -43,6 +45,10 @@ import {
   searchCodexThreads,
   syncCodexThreadHistoryForTask,
 } from "../agent-runner/codex/history.mjs";
+import {
+  searchClaudeSessions,
+  syncClaudeSessionHistoryForTask,
+} from "../agent-runner/claude/history.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
@@ -2671,5 +2677,87 @@ describe("Codex history utility", () => {
       }),
     ]);
     expect(codexHistoryTimelineInputs("task-2", "thread-1", [])).toEqual([]);
+  });
+});
+
+describe("Claude history utility", () => {
+  async function withClaudeFixture(fn: (projectsDir: string) => Promise<void>) {
+    const root = join(tmpdir(), `lilia-claude-history-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const projectDir = join(root, "d--PROJECT-workspace-Lilia");
+    await mkdir(projectDir, { recursive: true });
+    const sessionPath = join(projectDir, "session-1.jsonl");
+    const rows = [
+      {
+        type: "ai-title",
+        sessionId: "session-1",
+        title: "补齐 Claude 历史导入",
+      },
+      {
+        type: "user",
+        uuid: "user-1",
+        timestamp: "2026-06-08T10:00:00.000Z",
+        sessionId: "session-1",
+        cwd: "D:\\PROJECT\\workspace\\Lilia",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "请导入 Claude 历史" }],
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "assistant-1",
+        timestamp: "2026-06-08T10:00:01.000Z",
+        sessionId: "session-1",
+        message: {
+          role: "assistant",
+          model: "claude-sonnet-4-5",
+          content: [{ type: "text", text: "已读取历史" }],
+        },
+      },
+    ];
+    await writeFile(sessionPath, rows.map((row) => JSON.stringify(row)).join("\n"), "utf8");
+    try {
+      await fn(root);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("searches and syncs Claude JSONL sessions", async () => {
+    await withClaudeFixture(async (projectsDir) => {
+      await expect(searchClaudeSessions({
+        searchTerm: "Claude 历史",
+        limit: 1,
+      }, { projectsDir })).resolves.toMatchObject({
+        sessions: [{
+          id: "session-1",
+          title: "补齐 Claude 历史导入",
+          model: "claude-sonnet-4-5",
+          sourceKind: "claude",
+          archived: false,
+          cwd: "D:\\PROJECT\\workspace\\Lilia",
+        }],
+        nextCursor: null,
+      });
+
+      const sync = await syncClaudeSessionHistoryForTask({
+        taskId: "task-1",
+        sessionId: "session-1",
+        limit: 2,
+      }, { projectsDir });
+      expect(sync.nextCursor).toBe("2");
+      expect(sync.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          taskId: "task-1",
+          turnId: "user-1",
+          backend: "claude",
+          payload: expect.objectContaining({
+            history: true,
+            sessionId: "session-1",
+            itemId: "user-1",
+          }),
+        }),
+      ]));
+    });
   });
 });

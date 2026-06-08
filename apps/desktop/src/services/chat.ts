@@ -22,6 +22,12 @@ import type {
   ChatContextSearchResult,
   ChatComposerState,
   ChatWorkflow,
+  ClaudeSessionAttachInput,
+  ClaudeSessionAttachResult,
+  ClaudeSessionPreviewInput,
+  ClaudeSessionPreview,
+  ClaudeSessionSearchInput,
+  ClaudeSessionSearchResult,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
@@ -54,6 +60,12 @@ export type {
   ChatInterruptResult,
   ChatContextSearchResult,
   ChatWorkflow,
+  ClaudeSessionAttachInput,
+  ClaudeSessionAttachResult,
+  ClaudeSessionPreviewInput,
+  ClaudeSessionPreview,
+  ClaudeSessionSearchInput,
+  ClaudeSessionSearchResult,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
@@ -95,6 +107,24 @@ export function attachCodexThread(
   input: CodexThreadAttachInput,
 ): Promise<CodexThreadAttachResult> {
   return invoke<CodexThreadAttachResult>("codex_thread_attach", { input });
+}
+
+export function searchClaudeSessions(
+  input: ClaudeSessionSearchInput,
+): Promise<ClaudeSessionSearchResult> {
+  return invoke<ClaudeSessionSearchResult>("claude_session_search", { input });
+}
+
+export function previewClaudeSession(
+  input: ClaudeSessionPreviewInput,
+): Promise<ClaudeSessionPreview> {
+  return invoke<ClaudeSessionPreview>("claude_session_preview", { input });
+}
+
+export function attachClaudeSession(
+  input: ClaudeSessionAttachInput,
+): Promise<ClaudeSessionAttachResult> {
+  return invoke<ClaudeSessionAttachResult>("claude_session_attach", { input });
 }
 
 /**

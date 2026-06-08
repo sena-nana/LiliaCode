@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::agent_timeline::{self, AgentTimelineEvent, AgentTimelineEventInput};
 
-pub(super) fn preview_events_from_inputs(
+pub(crate) fn preview_events_from_inputs(
     inputs: Vec<AgentTimelineEventInput>,
 ) -> Result<Vec<AgentTimelineEvent>, String> {
     let conn = Connection::open_in_memory()
