@@ -135,3 +135,8 @@ export interface AgentTimelineEvent {
   turnSeq: number;
   intraTurnOrder: number;
 }
+
+export interface AgentTimelineBatchEvent {
+  taskId: string;
+  events: AgentTimelineEvent[];
+}

@@ -36,6 +36,8 @@ import {
 } from "../agent-runner/codex/runCodex.mjs";
 import {
   codexHistoryTimelineInputs,
+  previewCodexThread,
+  previewCodexThreadLite,
   readCodexThreadTurns,
   searchCodexThreads,
   syncCodexThreadHistoryForTask,
@@ -1953,6 +1955,117 @@ describe("Codex history utility", () => {
     ]);
     expect(result.turns[0].items).toEqual([
       { type: "agentMessage", id: "msg-1", text: "历史回复" },
+    ]);
+  });
+
+  it("backfills truncated turn items concurrently while preserving turn order", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/turns/list") {
+          return {
+            data: [
+              { id: "turn-1", itemsTruncated: true, items: [] },
+              { id: "turn-2", itemsTruncated: true, items: [] },
+              { id: "turn-3", itemsTruncated: true, items: [] },
+            ],
+          };
+        }
+        if (method === "thread/turns/items/list") {
+          const delay = params.turnId === "turn-1" ? 30 : params.turnId === "turn-2" ? 10 : 0;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return { data: [{ type: "agentMessage", id: `msg-${params.turnId}`, text: params.turnId }] };
+        }
+        return {};
+      },
+    };
+
+    const result = await readCodexThreadTurns(server as any, "thread-1", {
+      limit: 10,
+      backfillConcurrency: 3,
+    });
+
+    expect(result.turns.map((turn: any) => turn.id)).toEqual(["turn-1", "turn-2", "turn-3"]);
+    expect(result.turns.map((turn: any) => turn.items[0].text)).toEqual(["turn-1", "turn-2", "turn-3"]);
+    expect(calls.filter((call) => call.method === "thread/turns/items/list")).toHaveLength(3);
+  });
+
+  it("previews Codex threads in lite mode without timeline event conversion", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "initialize") return {};
+        if (method === "thread/turns/list") {
+          return {
+            data: [{
+              id: "turn-1",
+              status: "completed",
+              startedAt: 1,
+              items: [
+                { type: "commandExecution", id: "cmd-1", command: "yarn test" },
+                { type: "userMessage", id: "user-1", text: "旧问题" },
+                { type: "agentMessage", id: "assistant-1", text: "旧回复" },
+              ],
+            }],
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      close: () => {},
+    };
+
+    const result = await previewCodexThreadLite("thread-1", { createServer: () => server as any });
+
+    expect(result.events).toBeUndefined();
+    expect(result.eventCount).toBe(3);
+    expect(result.messages).toEqual([
+      { id: "user-1", role: "user", summary: "旧问题" },
+      { id: "assistant-1", role: "assistant", summary: "旧回复" },
+    ]);
+    expect(calls.find((call) => call.method === "thread/turns/list")).toEqual({
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-1",
+        limit: 8,
+        sortDirection: "desc",
+        itemsView: "full",
+      },
+    });
+  });
+
+  it("previews Codex threads in full mode with timeline events", async () => {
+    const server = {
+      request: async (method: string) => {
+        if (method === "initialize") return {};
+        if (method === "thread/turns/list") {
+          return {
+            data: [{
+              id: "turn-1",
+              status: "completed",
+              startedAt: 1,
+              completedAt: 2,
+              items: [
+                { type: "userMessage", id: "user-1", text: "旧问题" },
+                { type: "agentMessage", id: "assistant-1", text: "旧回复" },
+              ],
+            }],
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      close: () => {},
+    };
+
+    const result = await previewCodexThread("thread-1", { createServer: () => server as any });
+
+    expect(result.eventCount).toBe(2);
+    expect(result.events).toEqual([
+      expect.objectContaining({ kind: "message", summary: "旧问题" }),
+      expect.objectContaining({ kind: "message", summary: "旧回复" }),
     ]);
   });
 

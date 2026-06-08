@@ -32,9 +32,12 @@ const nextCursor = ref<string | null>(null);
 const selectedThreadId = ref<string | null>(null);
 const previewLoading = ref(false);
 const previewError = ref("");
+const fullPreviewLoading = ref(false);
+const fullPreviewError = ref("");
 let searchSeq = 0;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let previewSeq = 0;
+let fullPreviewSeq = 0;
 
 interface PreviewMessage {
   id: string;
@@ -45,9 +48,11 @@ interface PreviewMessage {
 interface PreviewLite {
   eventCount: number;
   messages: PreviewMessage[];
+  hasFullPreview: boolean;
 }
 
 const preview = ref<PreviewLite | null>(null);
+const fullPreviewEvents = ref<Array<{ id: string; title: string; summary: string | null }>>([]);
 
 const routeProjectId = computed(() => {
   const value = route.query.projectId;
@@ -74,27 +79,24 @@ function formatTime(value: number | null): string {
   }).format(new Date(value));
 }
 
-function messageRole(payloadValue: unknown): string {
-  const payload = payloadValue && typeof payloadValue === "object" && !Array.isArray(payloadValue)
-    ? payloadValue as Record<string, unknown>
-    : {};
-  return payload.role === "user" ? "用户" : "Codex";
-}
-
 function toPreviewLite(result: Awaited<ReturnType<typeof previewCodexThread>>): PreviewLite {
-  const messages: PreviewMessage[] = [];
-  for (const event of result.events) {
-    if (event.kind !== "message") continue;
-    messages.push({
-      id: event.id,
-      role: messageRole(event.payload),
-      summary: event.summary,
-    });
-  }
   return {
     eventCount: result.eventCount,
-    messages: messages.slice(-5),
+    messages: (result.messages ?? []).map((message) => ({
+      id: message.id,
+      role: message.role === "user" ? "用户" : "Codex",
+      summary: message.summary,
+    })),
+    hasFullPreview: result.hasFullPreview === true,
   };
+}
+
+function toFullPreviewEvents(result: Awaited<ReturnType<typeof previewCodexThread>>) {
+  return result.events.map((event) => ({
+    id: event.id,
+    title: event.title,
+    summary: event.summary,
+  }));
 }
 
 async function loadThreads(cursor: string | null = null) {
@@ -131,6 +133,7 @@ function scheduleSearch() {
   searchTimer = setTimeout(() => {
     selectedThreadId.value = null;
     preview.value = null;
+    fullPreviewEvents.value = [];
     importError.value = "";
     void loadThreads();
   }, 240);
@@ -139,17 +142,36 @@ function scheduleSearch() {
 async function selectThread(thread: CodexThreadSummary) {
   selectedThreadId.value = thread.id;
   preview.value = null;
+  fullPreviewEvents.value = [];
   previewError.value = "";
+  fullPreviewError.value = "";
   importError.value = "";
   previewLoading.value = true;
   const seq = ++previewSeq;
+  fullPreviewSeq += 1;
   try {
-    const result = await previewCodexThread(thread.id);
+    const result = await previewCodexThread({ threadId: thread.id, detail: "lite" });
     if (seq === previewSeq) preview.value = toPreviewLite(result);
   } catch (err) {
     if (seq === previewSeq) previewError.value = String(err);
   } finally {
     if (seq === previewSeq) previewLoading.value = false;
+  }
+}
+
+async function loadFullPreview() {
+  const thread = selectedThread.value;
+  if (!thread || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
+  fullPreviewLoading.value = true;
+  fullPreviewError.value = "";
+  const seq = ++fullPreviewSeq;
+  try {
+    const result = await previewCodexThread({ threadId: thread.id, detail: "full" });
+    if (seq === fullPreviewSeq) fullPreviewEvents.value = toFullPreviewEvents(result);
+  } catch (err) {
+    if (seq === fullPreviewSeq) fullPreviewError.value = String(err);
+  } finally {
+    if (seq === fullPreviewSeq) fullPreviewLoading.value = false;
   }
 }
 
@@ -164,6 +186,7 @@ async function importSelectedThread() {
       threadId: thread.id,
       taskId: null,
       projectId: routeProjectId.value ?? null,
+      thread,
     });
     if (result.projectId) {
       await ensureProjectTasksLoaded(result.projectId, true);
@@ -199,7 +222,7 @@ onMounted(() => {
         :disabled="!selectedThread || importing"
         @click="importSelectedThread"
       >
-        <Loader2 v-if="importing" :size="14" aria-hidden="true" />
+        <Loader2 v-if="importing" :size="14" class="is-spinning" aria-hidden="true" />
         <Check v-else :size="14" aria-hidden="true" />
         <span>{{ importing ? "导入中…" : importTargetLabel }}</span>
       </button>
@@ -253,7 +276,7 @@ onMounted(() => {
         <section class="conversation-import__list" aria-label="Codex thread 列表">
           <div v-if="error" class="conversation-import__notice is-error">{{ error }}</div>
           <div v-else-if="loading" class="conversation-import__notice">
-            <Loader2 :size="14" aria-hidden="true" />
+            <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
             <span>正在读取 Codex 历史</span>
           </div>
           <div v-else-if="threads.length === 0" class="conversation-import__notice">
@@ -286,7 +309,7 @@ onMounted(() => {
             :disabled="loadingMore"
             @click="loadThreads(nextCursor)"
           >
-            <Loader2 v-if="loadingMore" :size="14" aria-hidden="true" />
+            <Loader2 v-if="loadingMore" :size="14" class="is-spinning" aria-hidden="true" />
             <ChevronDown v-else :size="14" aria-hidden="true" />
             <span>加载更多</span>
           </button>
@@ -304,7 +327,7 @@ onMounted(() => {
             </div>
 
             <div v-if="previewLoading" class="conversation-import__notice">
-              <Loader2 :size="14" aria-hidden="true" />
+              <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
               <span>正在生成预览</span>
             </div>
             <div v-else-if="previewError" class="conversation-import__notice is-error">
@@ -321,6 +344,30 @@ onMounted(() => {
               </div>
               <div v-if="previewMessages.length === 0" class="conversation-import__notice">
                 这个 thread 暂无可预览消息
+              </div>
+              <button
+                v-if="preview?.hasFullPreview"
+                type="button"
+                class="conversation-import__full-preview"
+                :disabled="fullPreviewLoading"
+                @click="loadFullPreview"
+              >
+                <Loader2 v-if="fullPreviewLoading" :size="13" class="is-spinning" aria-hidden="true" />
+                <ChevronDown v-else :size="13" aria-hidden="true" />
+                <span>{{ fullPreviewEvents.length ? "完整详情已加载" : "展开完整详情" }}</span>
+              </button>
+              <div v-if="fullPreviewError" class="conversation-import__notice is-error">
+                {{ fullPreviewError }}
+              </div>
+              <div v-if="fullPreviewEvents.length" class="conversation-import__full-events">
+                <div
+                  v-for="event in fullPreviewEvents"
+                  :key="event.id"
+                  class="conversation-import__event"
+                >
+                  <span>{{ event.title }}</span>
+                  <p>{{ event.summary }}</p>
+                </div>
               </div>
             </div>
           </template>

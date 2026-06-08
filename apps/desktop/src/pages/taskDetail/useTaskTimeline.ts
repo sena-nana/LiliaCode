@@ -122,6 +122,24 @@ export function upsertTimelineEventById(
   return next;
 }
 
+function compareTimelineEvents(a: AgentTimelineEvent, b: AgentTimelineEvent): number {
+  return a.turnSeq - b.turnSeq ||
+    a.intraTurnOrder - b.intraTurnOrder ||
+    a.createdAt - b.createdAt ||
+    a.id.localeCompare(b.id);
+}
+
+export function upsertTimelineEventsById(
+  events: AgentTimelineEvent[],
+  nextEvents: AgentTimelineEvent[],
+): AgentTimelineEvent[] {
+  if (nextEvents.length === 0) return events;
+  const byId = new Map<string, AgentTimelineEvent>();
+  for (const event of events) byId.set(event.id, event);
+  for (const event of nextEvents) byId.set(event.id, event);
+  return [...byId.values()].sort(compareTimelineEvents);
+}
+
 export function mergeTimelineEvents(
   events: AgentTimelineEvent[],
   current: AgentTimelineEvent[],
@@ -131,12 +149,7 @@ export function mergeTimelineEvents(
   for (const event of current) {
     if (!byId.has(event.id)) byId.set(event.id, event);
   }
-  return [...byId.values()].sort((a, b) =>
-    a.turnSeq - b.turnSeq ||
-    a.intraTurnOrder - b.intraTurnOrder ||
-    a.createdAt - b.createdAt ||
-    a.id.localeCompare(b.id)
-  );
+  return [...byId.values()].sort(compareTimelineEvents);
 }
 
 export function mergeLoadedTimelineEvents(
@@ -233,12 +246,59 @@ export function useTaskTimeline(options: {
   let optimisticMessageSeq = 0;
   let localErrorSeq = 0;
   let unsubscribeDebugTimeline: (() => void) | null = null;
+  let queuedTimelineEvents: AgentTimelineEvent[] = [];
+  let timelineBatchFrame: number | null = null;
+
+  function scheduleTimelineBatchFlush() {
+    if (timelineBatchFrame !== null) return;
+    const flush = () => {
+      timelineBatchFrame = null;
+      flushQueuedTimelineEvents();
+    };
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      timelineBatchFrame = window.requestAnimationFrame(flush);
+      return;
+    }
+    timelineBatchFrame = 0;
+    queueMicrotask(flush);
+  }
+
+  function flushQueuedTimelineEvents() {
+    if (queuedTimelineEvents.length === 0) return;
+    const events = queuedTimelineEvents;
+    queuedTimelineEvents = [];
+    persistedTimelineEvents.value = upsertTimelineEventsById(
+      persistedTimelineEvents.value,
+      events,
+    );
+  }
+
+  function clearQueuedTimelineBatch() {
+    if (timelineBatchFrame !== null && typeof window !== "undefined" && timelineBatchFrame > 0) {
+      window.cancelAnimationFrame(timelineBatchFrame);
+    }
+    timelineBatchFrame = null;
+    queuedTimelineEvents = [];
+  }
 
   function upsertTimelineEvent(event: AgentTimelineEvent) {
     persistedTimelineEvents.value = upsertTimelineEventById(
       persistedTimelineEvents.value,
       event,
     );
+  }
+
+  function upsertTimelineEvents(events: AgentTimelineEvent[]) {
+    persistedTimelineEvents.value = upsertTimelineEventsById(
+      persistedTimelineEvents.value,
+      events,
+    );
+  }
+
+  function queueTimelineEvents(events: AgentTimelineEvent[]) {
+    if (events.length === 0) return;
+    queuedTimelineEvents.push(...events);
+    scheduleTimelineBatchFlush();
   }
 
   function upsertOverlayTimelineEvent(event: AgentTimelineEvent) {
@@ -319,6 +379,7 @@ export function useTaskTimeline(options: {
   }
 
   function resetTimeline() {
+    clearQueuedTimelineBatch();
     persistedTimelineEvents.value = [];
     overlayTimelineEvents.value = [];
   }
@@ -340,6 +401,7 @@ export function useTaskTimeline(options: {
   }
 
   function disposeTimeline() {
+    clearQueuedTimelineBatch();
     unsubscribeDebugTimeline?.();
     unsubscribeDebugTimeline = null;
   }
@@ -351,6 +413,8 @@ export function useTaskTimeline(options: {
     persistedTimelineEvents,
     overlayTimelineEvents,
     upsertTimelineEvent,
+    upsertTimelineEvents,
+    queueTimelineEvents,
     upsertOverlayTimelineEvent,
     removeTimelineEvent,
     createOptimisticMessageEvent,

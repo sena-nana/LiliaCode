@@ -25,16 +25,37 @@ export interface CodexThreadSearchResult {
   nextCursor: string | null;
 }
 
+export interface CodexThreadPreviewMessage {
+  id: string;
+  role: "user" | "assistant";
+  summary: string | null;
+}
+
+export interface CodexThreadPreviewLite {
+  thread: CodexThreadSummary;
+  eventCount: number;
+  messages: CodexThreadPreviewMessage[];
+  hasFullPreview: boolean;
+}
+
+export interface CodexThreadPreviewInput {
+  threadId: string;
+  detail?: "lite" | "full" | null;
+}
+
 export interface CodexThreadPreview {
   thread: CodexThreadSummary;
   events: AgentTimelineEvent[];
   eventCount: number;
+  messages?: CodexThreadPreviewMessage[];
+  hasFullPreview?: boolean;
 }
 
 export interface CodexThreadAttachInput {
   threadId: string;
   taskId?: string | null;
   projectId?: string | null;
+  thread?: CodexThreadSummary | null;
   mode: "current" | "new";
 }
 
@@ -44,4 +65,5 @@ export interface CodexThreadAttachResult {
   threadId: string;
   task: Task | null;
   eventCount: number;
+  historySync?: "queued" | null;
 }

@@ -5,6 +5,9 @@ import { isRecord, shortText, stringOrNull } from "../utils.mjs";
 
 const DEFAULT_LIMIT = 20;
 const DEFAULT_TURN_LIMIT = 50;
+const PREVIEW_TURN_LIMIT = 8;
+const PREVIEW_MESSAGE_LIMIT = 5;
+const ITEM_BACKFILL_CONCURRENCY = 4;
 
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -125,18 +128,37 @@ async function readTurnItems(server, threadId, turn) {
   }
 }
 
-export async function readCodexThreadTurns(server, threadId, { limit = DEFAULT_TURN_LIMIT } = {}) {
+async function mapWithConcurrency(items, limit, mapper) {
+  const out = new Array(items.length);
+  let index = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      out[current] = await mapper(items[current], current);
+    }
+  }));
+  return out;
+}
+
+export async function readCodexThreadTurns(
+  server,
+  threadId,
+  { limit = DEFAULT_TURN_LIMIT, sortDirection = "asc", backfillConcurrency = ITEM_BACKFILL_CONCURRENCY } = {},
+) {
   const result = await server.request("thread/turns/list", {
     threadId,
     limit,
-    sortDirection: "asc",
+    sortDirection,
     itemsView: "full",
   });
   const turns = readArray(result?.data || result?.turns);
-  const out = [];
-  for (const turn of turns) {
-    out.push(needsItemBackfill(turn) ? await readTurnItems(server, threadId, turn) : turn);
-  }
+  const out = await mapWithConcurrency(
+    turns,
+    backfillConcurrency,
+    (turn) => needsItemBackfill(turn) ? readTurnItems(server, threadId, turn) : turn,
+  );
   return {
     turns: out,
     nextCursor: stringOrNull(result?.nextCursor) || stringOrNull(result?.next_cursor),
@@ -192,6 +214,90 @@ export async function previewCodexThread(threadId, { createServer = createCodexA
       thread,
       events,
       eventCount: events.length,
+    };
+  } finally {
+    server.close();
+  }
+}
+
+function previewRoleForItem(item) {
+  if (item?.type === "userMessage") return "user";
+  if (item?.type === "agentMessage") return "assistant";
+  return null;
+}
+
+function previewEventCountFromTurns(turns) {
+  return turns.reduce((count, turn) => count + readArray(turn?.items).filter((item) => {
+    switch (item.type) {
+      case "agentMessage":
+      case "userMessage":
+      case "reasoning":
+      case "commandExecution":
+      case "fileChange":
+      case "mcpToolCall":
+      case "webSearch":
+      case "plan":
+        return true;
+      default:
+        return false;
+    }
+  }).length, 0);
+}
+
+async function backfillTurnsUntilMessages(server, threadId, turns, messageLimit) {
+  const out = turns.slice();
+  const found = [];
+  for (let index = 0; index < out.length && found.length < messageLimit; index += 1) {
+    if (needsItemBackfill(out[index])) {
+      out[index] = await readTurnItems(server, threadId, out[index]);
+    }
+    const items = readArray(out[index]?.items);
+    for (let itemIndex = items.length - 1; itemIndex >= 0 && found.length < messageLimit; itemIndex -= 1) {
+      if (previewRoleForItem(items[itemIndex])) found.push(items[itemIndex]);
+    }
+  }
+  return out;
+}
+
+function previewMessagesFromTurns(turns, messageLimit = PREVIEW_MESSAGE_LIMIT) {
+  const messages = [];
+  for (const turn of turns) {
+    for (const item of readArray(turn?.items)) {
+      const role = previewRoleForItem(item);
+      if (!role) continue;
+      messages.push({
+        id: firstString(item.id, item.clientId) || `${role}:${messages.length}`,
+        role,
+        summary: shortText(pickMessageText(item), 1200) || null,
+      });
+    }
+  }
+  return messages.slice(-messageLimit);
+}
+
+export async function previewCodexThreadLite(threadId, { createServer = createCodexAppServer } = {}) {
+  const server = createServer();
+  try {
+    await initializeCodexAppServer(server);
+    const result = await server.request("thread/turns/list", {
+      threadId,
+      limit: PREVIEW_TURN_LIMIT,
+      sortDirection: "desc",
+      itemsView: "full",
+    });
+    const recentTurns = await backfillTurnsUntilMessages(
+      server,
+      threadId,
+      readArray(result?.data || result?.turns),
+      PREVIEW_MESSAGE_LIMIT,
+    );
+    const turns = recentTurns.slice().reverse();
+    const messages = previewMessagesFromTurns(turns);
+    return {
+      thread: normalizeThread({ id: threadId }, turns),
+      eventCount: previewEventCountFromTurns(turns),
+      messages,
+      hasFullPreview: true,
     };
   } finally {
     server.close();
