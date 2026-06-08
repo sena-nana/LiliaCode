@@ -117,8 +117,9 @@ Lilia/
 │       │   ├── components/     # ViewTabs / TodoFloat / ChatComposer, etc.
 │       │   ├── pages/          # project/ProjectShell / TaskDetail / Settings
 │       │   ├── services/       # projectsStore / tasksStore / todos / chat
+│       │   ├── styles/         # Theme tokens, standard components, shell, and lazy page styles
 │       │   ├── router.ts
-│       │   └── styles.css
+│       │   └── mainBootstrap.ts
 │       └── src-tauri/          # Tauri 2 Rust side
 │           └── src/
 │               ├── store.rs    # lilia-store: SQLite + r2d2 + migrations

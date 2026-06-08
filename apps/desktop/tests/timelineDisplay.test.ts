@@ -494,7 +494,7 @@ describe("timeline event expansion", () => {
   );
 
   it("时间线 icon 节点样式不包含背景声明", () => {
-    const css = readFileSync(resolve(__dirname, "../src/styles.css"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../src/styles/chat.css"), "utf8");
     const nodeRuleBodies = [...css.matchAll(/\.agent-timeline__node[^{]*\{([^}]*)\}/g)]
       .map((match) => match[1]);
 

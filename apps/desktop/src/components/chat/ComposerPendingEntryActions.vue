@@ -39,7 +39,7 @@ const emit = defineEmits<{
     <button
       v-if="askUsesInputActions && askQuestionSkippable && askTotal > 1"
       type="button"
-      class="ghost composer-inline__skip composer-inline__btn"
+      class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
       :disabled="actionsBlocked"
       @click="emit('skipAsk')"
     >
@@ -50,7 +50,7 @@ const emit = defineEmits<{
       <button
         v-if="canGoPrev"
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -59,7 +59,7 @@ const emit = defineEmits<{
       </button>
       <button
         type="button"
-        class="primary composer-inline__btn"
+        class="ui-button ui-button--primary composer-inline__btn"
         :disabled="actionsBlocked || !canAskSubmit"
         @click="emit('submitAsk')"
       >
@@ -71,7 +71,7 @@ const emit = defineEmits<{
     <div v-else-if="askIsPlanApproval" class="chat-composer__pending-actions">
       <button
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked || !hasPendingInputText"
         @click="emit('modifyPlanApproval')"
       >
@@ -79,7 +79,7 @@ const emit = defineEmits<{
       </button>
       <button
         type="button"
-        class="primary composer-inline__btn"
+        class="ui-button ui-button--primary composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('submitAsk')"
       >
@@ -90,7 +90,7 @@ const emit = defineEmits<{
     <div v-else-if="hasToolConsent" class="chat-composer__pending-actions">
       <button
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked || toolSubmitting !== null || (!isEditingToolCommand && !hasPendingInputText)"
         @click="isEditingToolCommand ? emit('cancelToolCommandEdit') : emit('decideToolConsent', 'deny')"
       >
@@ -99,7 +99,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
-        :class="toolDanger ? 'ghost danger' : 'primary'"
+        :class="toolDanger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked || toolSubmitting !== null || toolCommandIsEmpty"
         @click="emit('decideToolConsent', 'allow')"
       >

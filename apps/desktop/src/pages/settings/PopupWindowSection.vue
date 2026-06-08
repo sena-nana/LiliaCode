@@ -101,7 +101,7 @@ onMounted(loadPopupWindowSettings);
       <div style="display: flex; gap: 8px; align-items: center;">
         <input
           type="text"
-          class="text-input"
+          class="ui-input"
           readonly
           :value="shortcutLabel(popupWindowSettings.shortcut)"
           aria-label="弹出窗口快捷键"
@@ -110,7 +110,7 @@ onMounted(loadPopupWindowSettings);
         />
         <button
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           :disabled="savingPopupWindow"
           @click="clearPopupShortcut"
         >
@@ -119,7 +119,7 @@ onMounted(loadPopupWindowSettings);
         </button>
         <button
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           :disabled="savingPopupWindow"
           @click="savePopupWindowSettings"
         >

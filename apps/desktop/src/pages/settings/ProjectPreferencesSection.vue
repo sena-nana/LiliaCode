@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
         <span class="settings-row__value muted">
           {{ projectSettings.cloneParentDir || "未设置（用家目录）" }}
         </span>
-        <button type="button" class="ghost" :disabled="savingProject" @click="pickCloneParent">
+        <button type="button" class="ui-button ui-button--ghost" :disabled="savingProject" @click="pickCloneParent">
           <FolderOpen :size="12" aria-hidden="true" />
           选择
         </button>
@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
         <button
           v-if="!isBound"
           type="button"
-          class="primary"
+          class="ui-button ui-button--primary"
           :disabled="bindingBusy"
           @click="startBinding"
         >
@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
         <button
           v-if="deviceFlow"
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           @click="copyCodeAndOpenBrowser"
         >
           <Copy :size="12" aria-hidden="true" />
@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
         <button
           v-if="deviceFlow"
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           @click="openUrl(deviceFlow.verificationUri)"
         >
           <Link2 :size="12" aria-hidden="true" />
@@ -304,7 +304,7 @@ onBeforeUnmount(() => {
         <button
           v-if="isBound"
           type="button"
-          class="ghost danger"
+          class="ui-button ui-button--ghost ui-button--danger"
           :disabled="bindingBusy"
           @click="handleUnbind"
         >

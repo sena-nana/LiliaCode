@@ -318,7 +318,7 @@ onMounted(() => {
                 ref="cloneInput"
                 v-model="query"
                 type="text"
-                class="text-input"
+                class="ui-input"
                 placeholder="owner/repo 或 https://github.com/owner/repo.git"
                 @keydown.enter.prevent="confirmClone"
               />
@@ -393,11 +393,11 @@ onMounted(() => {
                 <input
                   :value="cloneParent"
                   type="text"
-                  class="text-input"
+                  class="ui-input"
                   placeholder="选择克隆到哪个目录下"
                   readonly
                 />
-                <button type="button" class="ghost" :disabled="cloneBusy" @click="pickCloneParent">
+                <button type="button" class="ui-button ui-button--ghost" :disabled="cloneBusy" @click="pickCloneParent">
                   <FolderOpen :size="12" aria-hidden="true" /> 选择
                 </button>
               </div>
@@ -414,7 +414,7 @@ onMounted(() => {
               <button
                 v-if="githubBindingExpired"
                 type="button"
-                class="ghost"
+                class="ui-button ui-button--ghost"
                 @click="openGitHubBindingSettings"
               >
                 重新绑定 GitHub
@@ -422,8 +422,8 @@ onMounted(() => {
             </div>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ghost" :disabled="cloneBusy" @click="emit('close')">取消</button>
-            <button type="button" class="primary" :disabled="cloneBusy" @click="confirmClone">
+            <button type="button" class="ui-button ui-button--ghost" :disabled="cloneBusy" @click="emit('close')">取消</button>
+            <button type="button" class="ui-button ui-button--primary" :disabled="cloneBusy" @click="confirmClone">
               {{ cloneBusy ? "克隆中…" : "克隆并添加" }}
             </button>
           </div>

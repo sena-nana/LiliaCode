@@ -133,7 +133,7 @@ onMounted(async () => {
 
     <div class="settings-row">
       <div class="settings-row__label">使用</div>
-      <div class="segmented" role="radiogroup" aria-label="对话后端">
+      <div class="ui-segmented" role="radiogroup" aria-label="对话后端">
         <button
           v-for="opt in backendOptions"
           :key="opt.value"
@@ -154,12 +154,12 @@ onMounted(async () => {
       <div style="display: flex; gap: 8px; align-items: center;">
         <input
           type="text"
-          class="text-input"
+          class="ui-input"
           placeholder="http://127.0.0.1:15721"
           :value="ccSwitchForm.baseUrl ?? ''"
           @input="(e) => (ccSwitchForm.baseUrl = (e.target as HTMLInputElement).value)"
         />
-        <button type="button" class="ghost" :disabled="savingCCSwitch" @click="saveCCSwitch">
+        <button type="button" class="ui-button ui-button--ghost" :disabled="savingCCSwitch" @click="saveCCSwitch">
           <Save :size="12" aria-hidden="true" />
           {{ savingCCSwitch ? "保存中…" : "保存" }}
         </button>
@@ -167,7 +167,7 @@ onMounted(async () => {
     </div>
 
     <div v-if="probing" class="conn-banner conn-banner--probing">
-      <Loader2 :size="14" class="status-pill__spin" aria-hidden="true" />
+      <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
       <div><div class="conn-banner__title">检查中…</div></div>
     </div>
     <div v-else-if="selectedRuntimeIssue" class="conn-banner conn-banner--err">

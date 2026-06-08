@@ -46,12 +46,12 @@ function onKeydown(e: KeyboardEvent) {
             <p>{{ message }}</p>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ghost" :disabled="busy" @click="emit('cancel')">
+            <button type="button" class="ui-button ui-button--ghost" :disabled="busy" @click="emit('cancel')">
               {{ cancelText ?? "取消" }}
             </button>
             <button
               type="button"
-              :class="danger ? 'ghost danger' : 'primary'"
+              :class="danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
               :disabled="busy"
               @click="emit('confirm')"
             >

@@ -165,7 +165,7 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
 
-    const roots = view.container.querySelector(".settings-input--textarea") as HTMLTextAreaElement;
+    const roots = view.container.querySelector(".ui-textarea") as HTMLTextAreaElement;
     await fireEvent.update(roots, "C:/repo\nC:/repo\nD:/shared\n");
     await fireEvent.blur(roots);
 

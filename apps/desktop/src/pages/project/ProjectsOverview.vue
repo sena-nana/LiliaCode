@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "../../styles/pages/project.css";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Pin } from "lucide-vue-next";
@@ -14,12 +15,12 @@ const projects = computed<Project[]>(() => listProjects());
       <h1 class="projects-overview__title">项目</h1>
     </header>
 
-    <div v-if="projects.length" class="projects-overview__list">
+    <div v-if="projects.length" class="projects-overview__list ui-list">
       <RouterLink
         v-for="project in projects"
         :key="project.id"
         :to="`/projects/${project.id}`"
-        class="projects-overview__row"
+        class="projects-overview__row ui-list-item"
       >
         <span class="projects-overview__main">
           <span class="projects-overview__name">
@@ -42,91 +43,3 @@ const projects = computed<Project[]>(() => listProjects());
     <div v-else class="projects-overview__empty">暂无项目</div>
   </section>
 </template>
-
-<style scoped>
-.projects-overview {
-  height: 100%;
-  min-width: 0;
-  padding: 20px;
-  overflow: auto;
-}
-
-.projects-overview__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.projects-overview__title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.projects-overview__list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.projects-overview__row {
-  min-height: 54px;
-  padding: 9px 12px;
-  border-radius: 6px;
-  background: var(--bg-elev);
-  color: var(--text);
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.projects-overview__row:hover {
-  background: var(--bg-hover);
-}
-
-.projects-overview__main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.projects-overview__name {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.projects-overview__pin {
-  flex-shrink: 0;
-  color: var(--accent);
-}
-
-.projects-overview__path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.projects-overview__count {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.projects-overview__empty {
-  padding: 28px 12px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-</style>

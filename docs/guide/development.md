@@ -13,8 +13,9 @@ Lilia/
 │       │   ├── components/     # ViewTabs / TodoFloat / ChatComposer 等
 │       │   ├── pages/          # project/ProjectShell / TaskDetail / Settings
 │       │   ├── services/       # projectsStore / tasksStore / todos / chat
+│       │   ├── styles/         # 主题令牌、标准组件样式、壳层样式和按需页面样式
 │       │   ├── router.ts
-│       │   └── styles.css
+│       │   └── mainBootstrap.ts
 │       └── src-tauri/          # Tauri 2 Rust 端
 │           └── src/
 │               ├── store.rs    # lilia-store：SQLite + r2d2 + 迁移

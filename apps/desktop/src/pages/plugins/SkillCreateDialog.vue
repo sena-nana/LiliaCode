@@ -37,7 +37,7 @@ const emit = defineEmits<{
               <span>名称</span>
               <input
                 :value="name" type="text"
-                class="text-input"
+                class="ui-input"
                 placeholder="kebab-case，仅 a-z 0-9 - _"
                 @input="emit('update:name', ($event.target as HTMLInputElement).value)"
               />
@@ -46,7 +46,7 @@ const emit = defineEmits<{
               <span>描述</span>
               <textarea
                 :value="description"
-                class="text-input"
+                class="ui-input"
                 rows="3"
                 placeholder="一行描述，告诉 Claude 什么时候应该用这个 skill"
                 @input="emit('update:description', ($event.target as HTMLTextAreaElement).value)"
@@ -58,10 +58,10 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ghost" :disabled="creating" @click="emit('update:open', false)">
+            <button type="button" class="ui-button ui-button--ghost" :disabled="creating" @click="emit('update:open', false)">
               取消
             </button>
-            <button type="button" class="primary" :disabled="creating" @click="emit('confirm')">
+            <button type="button" class="ui-button ui-button--primary" :disabled="creating" @click="emit('confirm')">
               {{ creating ? "创建中…" : "创建" }}
             </button>
           </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import "../styles/chat.css";
+import "../styles/pages/conversation-import.css";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -200,10 +202,10 @@ onMounted(() => {
       <div class="conversation-import__content">
         <aside class="conversation-import__sidebar" aria-label="导入来源和对话列表">
           <div class="conversation-import__source-bar">
-            <div class="conversation-import__tabs" role="tablist" aria-label="导入来源">
+            <div class="conversation-import__tabs ui-tabs ui-tabs--pill" role="tablist" aria-label="导入来源">
               <button
                 type="button"
-                class="conversation-import__tab is-active"
+                class="ui-tabs__tab is-active"
                 role="tab"
                 aria-selected="true"
               >
@@ -212,7 +214,7 @@ onMounted(() => {
               </button>
               <button
                 type="button"
-                class="conversation-import__tab"
+                class="ui-tabs__tab"
                 disabled
                 role="tab"
                 aria-selected="false"
@@ -220,7 +222,7 @@ onMounted(() => {
               >
                 <Clock3 :size="13" aria-hidden="true" />
                 <span>Claude</span>
-                <span class="conversation-import__tab-badge">待接入</span>
+                <span class="ui-tabs__count">待接入</span>
               </button>
             </div>
           </div>
@@ -235,13 +237,13 @@ onMounted(() => {
                 aria-label="搜索 Codex thread"
               />
             </label>
-            <label class="conversation-import__toggle">
+            <label class="conversation-import__toggle ui-switch">
               <input v-model="includeArchived" type="checkbox" />
               <span>包含归档</span>
             </label>
           </div>
 
-          <section class="conversation-import__list" aria-label="Codex thread 列表">
+          <section class="conversation-import__list ui-list" aria-label="Codex thread 列表">
             <div v-if="error" class="conversation-import__notice is-error">{{ error }}</div>
             <div v-else-if="loading" class="conversation-import__notice">
               <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
@@ -255,7 +257,7 @@ onMounted(() => {
                 v-for="thread in threads"
                 :key="thread.id"
                 type="button"
-                class="conversation-import__row"
+                class="conversation-import__row ui-list-item"
                 :class="{ 'is-active': selectedThreadId === thread.id }"
                 :title="thread.title"
                 @click="selectThread(thread)"
@@ -269,7 +271,7 @@ onMounted(() => {
             <button
               v-if="nextCursor"
               type="button"
-              class="conversation-import__more"
+              class="conversation-import__more ui-button ui-button--ghost"
               :disabled="loadingMore"
               @click="loadThreads(nextCursor)"
             >
@@ -291,7 +293,7 @@ onMounted(() => {
               </div>
               <button
                 type="button"
-                class="conversation-import__import-button"
+                class="conversation-import__import-button ui-button ui-button--primary"
                 :disabled="!selectedThread || importing"
                 @click="importSelectedThread"
               >

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "../styles/pages/plugins.css";
 import { ref } from "vue";
 import { AlertTriangle, RefreshCw } from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
@@ -188,7 +189,7 @@ async function openCodex() {
         <p>统一管理 Claude 的 skills 与 plugins，以及 Codex 的 MCP servers。</p>
       </div>
       <div class="page-header__actions">
-        <button type="button" class="ghost" :disabled="loading" @click="refresh">
+        <button type="button" class="ui-button ui-button--ghost" :disabled="loading" @click="refresh">
           <RefreshCw :size="14" :class="loading ? 'is-spinning' : ''" aria-hidden="true" />
           {{ loading ? "刷新中…" : "刷新" }}
         </button>

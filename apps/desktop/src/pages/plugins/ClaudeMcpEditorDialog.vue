@@ -46,7 +46,7 @@ const emit = defineEmits<{
               <span>名称</span>
               <input
                 :value="name" type="text"
-                class="text-input"
+                class="ui-input"
                 placeholder="weather-mcp"
                 @input="emit('update:name', ($event.target as HTMLInputElement).value)"
               />
@@ -55,7 +55,7 @@ const emit = defineEmits<{
               <span>Command</span>
               <input
                 :value="command" type="text"
-                class="text-input"
+                class="ui-input"
                 placeholder="node"
                 @input="emit('update:command', ($event.target as HTMLInputElement).value)"
               />
@@ -64,7 +64,7 @@ const emit = defineEmits<{
               <span>Args</span>
               <textarea
                 :value="argsText"
-                class="text-input"
+                class="ui-input"
                 rows="4"
                 placeholder="每行一个参数"
                 @input="emit('update:argsText', ($event.target as HTMLTextAreaElement).value)"
@@ -73,7 +73,7 @@ const emit = defineEmits<{
             <div class="plugins-env-editor">
               <div class="plugins-env-editor__head">
                 <span>Env</span>
-                <button type="button" class="ghost" @click="emit('add-env-row')">
+                <button type="button" class="ui-button ui-button--ghost" @click="emit('add-env-row')">
                   <Plus :size="12" aria-hidden="true" /> 添加
                 </button>
               </div>
@@ -85,18 +85,18 @@ const emit = defineEmits<{
                 <input
                   v-model="row.key"
                   type="text"
-                  class="text-input"
+                  class="ui-input"
                   placeholder="KEY"
                 />
                 <input
                   v-model="row.value"
                   type="password"
-                  class="text-input"
+                  class="ui-input"
                   :placeholder="editingMcp?.envKeys.includes(row.key) ? '留空保留现有值' : 'value'"
                 />
                 <button
                   type="button"
-                  class="ghost"
+                  class="ui-button ui-button--ghost"
                   aria-label="删除 Env"
                   @click="emit('remove-env-row', index)"
                 >
@@ -110,10 +110,10 @@ const emit = defineEmits<{
             </p>
           </div>
           <div class="dialog__actions">
-            <button type="button" class="ghost" :disabled="saving" @click="emit('update:open', false)">
+            <button type="button" class="ui-button ui-button--ghost" :disabled="saving" @click="emit('update:open', false)">
               取消
             </button>
-            <button type="button" class="primary" :disabled="saving" @click="emit('confirm')">
+            <button type="button" class="ui-button ui-button--primary" :disabled="saving" @click="emit('confirm')">
               {{ saving ? "保存中…" : "保存" }}
             </button>
           </div>

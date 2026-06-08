@@ -156,7 +156,7 @@ watch(actionKey, () => {
       <div class="composer-inline__actions">
         <button
           type="button"
-          class="ghost composer-inline__btn"
+          class="ui-button ui-button--ghost composer-inline__btn"
           :disabled="toolSubmitting !== null || (!isEditingToolCommand && !hasToolMessage)"
           @click="isEditingToolCommand ? cancelCommandEdit() : decideTool('deny')"
         >
@@ -164,7 +164,7 @@ watch(actionKey, () => {
         </button>
         <button
           type="button"
-          class="primary composer-inline__btn"
+          class="ui-button ui-button--primary composer-inline__btn"
           :disabled="toolSubmitting !== null || toolCommandIsEmpty"
           @click="decideTool('allow')"
         >
@@ -186,14 +186,14 @@ watch(actionKey, () => {
     <div class="composer-inline__actions">
       <button
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         @click="decideTitleUpdate('decline')"
       >
         忽略
       </button>
       <button
         type="button"
-        class="primary composer-inline__btn"
+        class="ui-button ui-button--primary composer-inline__btn"
         @click="decideTitleUpdate('accept')"
       >
         同意
@@ -216,13 +216,13 @@ watch(actionKey, () => {
     <div class="composer-inline__actions">
       <button
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="!hasFreeformText"
         @click="submitAskFreeform()"
       >
         {{ hasFreeformText ? "修改" : "忽略" }}
       </button>
-      <button type="button" class="primary composer-inline__btn" @click="submitAsk">
+      <button type="button" class="ui-button ui-button--primary composer-inline__btn" @click="submitAsk">
         同意
       </button>
     </div>
