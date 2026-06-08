@@ -6,7 +6,7 @@ use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 use crate::provider::{
@@ -20,6 +20,7 @@ use crate::{BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
 
 const SETTINGS_KEY: &str = "conversation-suggestions.settings";
 const CACHE_KEY: &str = "conversation-suggestions.cache";
+const CLAUDE_NATIVE_CACHE_KEY: &str = "conversation-suggestions.claude-native";
 const CACHE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const MAX_TASKS_PER_SCOPE: usize = 3;
 const TASK_CANDIDATE_LIMIT: usize = 12;
@@ -74,6 +75,7 @@ pub(crate) struct SuggestionItem {
 pub(crate) enum SuggestionItemSource {
     Task,
     Github,
+    Claude,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -95,6 +97,8 @@ struct SuggestionCacheEntry {
 }
 
 type SuggestionCache = HashMap<String, SuggestionCacheEntry>;
+
+type ClaudeNativeSuggestionCache = HashMap<String, SuggestionItem>;
 
 #[derive(Debug, Clone)]
 struct TaskSample {
@@ -177,6 +181,10 @@ pub fn conversation_suggestions_get(
         return Ok(Vec::new());
     }
 
+    if let Some(items) = load_claude_native_suggestions(&app, project_id.as_deref()) {
+        return Ok(items);
+    }
+
     let conn = store.conn()?;
     let Some(scope) = build_scope(&app, &conn, project_id.as_deref())? else {
         return Ok(Vec::new());
@@ -206,6 +214,55 @@ pub fn conversation_suggestions_get(
     }
 }
 
+pub(crate) fn save_claude_prompt_suggestion(
+    app: &AppHandle,
+    task_id: &str,
+    suggestion: &str,
+    uuid: Option<&str>,
+) -> Result<(), String> {
+    let prompt = truncate_chars(suggestion.trim(), PROMPT_LIMIT);
+    if prompt.is_empty() {
+        return Ok(());
+    }
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = store.conn()?;
+    let project_id = conn
+        .query_row(
+            "SELECT project_id FROM tasks WHERE id = ?1 AND archived = 0",
+            params![task_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|e| format!("conversation_suggestions: query Claude suggestion task 失败：{e}"))?
+        .flatten();
+    let Some(project_id) = project_id else {
+        return Ok(());
+    };
+
+    let item = SuggestionItem {
+        id: format!(
+            "claude-{}",
+            uuid.filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| task_id)
+        ),
+        project_id: Some(project_id.clone()),
+        task_ids: vec![task_id.to_string()],
+        source: SuggestionItemSource::Claude,
+        github_activities: Vec::new(),
+        summary: summarize_claude_prompt_suggestion(&prompt),
+        reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
+        prompt,
+        generated_at: now_millis(),
+    };
+
+    let mut cache: ClaudeNativeSuggestionCache =
+        load_store_value(app, CLAUDE_NATIVE_CACHE_KEY).unwrap_or_default();
+    cache.insert(project_id, item);
+    save_store_value(app, CLAUDE_NATIVE_CACHE_KEY, &cache)
+}
+
 fn normalize_settings(settings: Option<SuggestionSettings>) -> SuggestionSettings {
     let settings = settings.unwrap_or_default();
     SuggestionSettings {
@@ -233,6 +290,39 @@ fn load_cache_hit(app: &AppHandle, scope: &str, cache_key: &str) -> Option<Sugge
     let cache: SuggestionCache = load_store_value(app, CACHE_KEY).unwrap_or_default();
     let hit = cache.get(scope)?;
     cache_entry_is_valid(hit, cache_key, now_millis()).then(|| hit.clone())
+}
+
+fn load_claude_native_suggestions(
+    app: &AppHandle,
+    project_id: Option<&str>,
+) -> Option<Vec<SuggestionItem>> {
+    let project_id = project_id?;
+    let cache: ClaudeNativeSuggestionCache =
+        load_store_value(app, CLAUDE_NATIVE_CACHE_KEY).unwrap_or_default();
+    filter_claude_native_suggestions(&cache, project_id, now_millis())
+}
+
+fn filter_claude_native_suggestions(
+    cache: &ClaudeNativeSuggestionCache,
+    project_id: &str,
+    now: i64,
+) -> Option<Vec<SuggestionItem>> {
+    let hit = cache.get(project_id)?;
+    if now.saturating_sub(hit.generated_at) > CACHE_TTL_MS ||
+        hit.project_id.as_deref() != Some(project_id)
+    {
+        return None;
+    }
+    Some(vec![hit.clone()])
+}
+
+fn summarize_claude_prompt_suggestion(prompt: &str) -> String {
+    let compact = compact_line(prompt);
+    let compact = compact
+        .trim_start_matches("请")
+        .trim_start_matches("帮我")
+        .trim();
+    truncate_chars(if compact.is_empty() { prompt } else { compact }, SUMMARY_LIMIT)
 }
 
 fn cache_entry_is_valid(entry: &SuggestionCacheEntry, cache_key: &str, now: i64) -> bool {
@@ -1695,6 +1785,42 @@ mod tests {
         assert_eq!(items[0].source, SuggestionItemSource::Github);
         assert!(items[0].task_ids.is_empty());
         assert_eq!(items[0].github_activities[0].id, "gh-pr-1");
+    }
+
+    #[test]
+    fn claude_native_suggestions_are_project_scoped_and_ttl_limited() {
+        let now = 10_000;
+        let item = SuggestionItem {
+            id: "claude-suggestion-1".to_string(),
+            project_id: Some("p1".to_string()),
+            task_ids: vec!["task-1".to_string()],
+            source: SuggestionItemSource::Claude,
+            github_activities: Vec::new(),
+            summary: "继续检查建议展示".to_string(),
+            reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
+            prompt: "请继续检查 Claude 原生建议展示。".to_string(),
+            generated_at: now,
+        };
+        let mismatched = SuggestionItem {
+            project_id: Some("p2".to_string()),
+            ..item.clone()
+        };
+        let mut cache = ClaudeNativeSuggestionCache::new();
+        cache.insert("p1".to_string(), item.clone());
+        cache.insert("p2".to_string(), mismatched);
+        cache.insert("mismatch".to_string(), item.clone());
+        cache.insert("old".to_string(), SuggestionItem {
+            project_id: Some("old".to_string()),
+            generated_at: now - CACHE_TTL_MS - 1,
+            ..item.clone()
+        });
+
+        let items = filter_claude_native_suggestions(&cache, "p1", now).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, SuggestionItemSource::Claude);
+        assert_eq!(items[0].prompt, "请继续检查 Claude 原生建议展示。");
+        assert!(filter_claude_native_suggestions(&cache, "mismatch", now).is_none());
+        assert!(filter_claude_native_suggestions(&cache, "old", now).is_none());
     }
 
     #[test]

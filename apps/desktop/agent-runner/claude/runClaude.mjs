@@ -136,6 +136,7 @@ export async function runClaude(cmd, context) {
     model: model || undefined,
     resume: resumeSessionId || undefined,
     includePartialMessages: true,
+    promptSuggestions: true,
     canUseTool: createClaudeCanUseTool(ctx),
     hooks: createClaudeHooks(ctx),
     systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform),
@@ -225,6 +226,16 @@ export async function runClaude(cmd, context) {
             sessionId: msg.session_id || lastSessionId,
             subtype: msg.subtype,
           });
+          break;
+        }
+        case "prompt_suggestion": {
+          if (typeof msg.suggestion === "string" && msg.suggestion.trim()) {
+            context.protocol.emit({
+              type: "prompt_suggestion",
+              suggestion: msg.suggestion,
+              uuid: msg.uuid,
+            });
+          }
           break;
         }
         case "user":
