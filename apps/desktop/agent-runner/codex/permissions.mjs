@@ -327,7 +327,10 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
       ? "Codex patch approval"
       : "Codex tool approval";
   const payload = buildCodexApprovalPayload(toolName, params, requestId, title, description);
-  const response = await ctx.interactions.requestUserConsent(payload);
+  const response = await (ctx.withCodexElicitation
+    ? ctx.withCodexElicitation("tool_consent", () =>
+      ctx.interactions.requestUserConsent(payload))
+    : ctx.interactions.requestUserConsent(payload));
   const { id, decision, message, updatedInput } = response;
   if (isCommandApproval && decision === "allow" && !response.codexDecision) {
     const edit = readAllowedCodexCommandEdit(payload.input, updatedInput);
