@@ -1958,6 +1958,39 @@ describe("Codex history utility", () => {
     ]);
   });
 
+  it("passes cursor when listing Codex thread turns", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/turns/list") {
+          return {
+            data: [],
+            nextCursor: "cursor-3",
+          };
+        }
+        return {};
+      },
+    };
+
+    const result = await readCodexThreadTurns(server as any, "thread-1", {
+      limit: 10,
+      cursor: "cursor-2",
+    });
+
+    expect(calls).toEqual([{
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-1",
+        limit: 10,
+        sortDirection: "asc",
+        itemsView: "full",
+        cursor: "cursor-2",
+      },
+    }]);
+    expect(result.nextCursor).toBe("cursor-3");
+  });
+
   it("backfills truncated turn items concurrently while preserving turn order", async () => {
     const calls: any[] = [];
     const server = {
@@ -2070,8 +2103,10 @@ describe("Codex history utility", () => {
   });
 
   it("syncs history into Lilia timeline inputs", async () => {
+    const calls: any[] = [];
     const server = {
-      request: async (method: string) => {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
         if (method === "initialize") return {};
         if (method === "thread/turns/list") {
           return {
@@ -2085,6 +2120,7 @@ describe("Codex history utility", () => {
                 { type: "agentMessage", id: "msg-1", text: "旧回复" },
               ],
             }],
+            nextCursor: "cursor-2",
           };
         }
         return {};
@@ -2096,9 +2132,21 @@ describe("Codex history utility", () => {
     const result = await syncCodexThreadHistoryForTask({
       taskId: "task-1",
       threadId: "thread-1",
+      cursor: "cursor-1",
     }, { createServer: () => server as any });
 
     expect(result.eventCount).toBe(2);
+    expect(result.nextCursor).toBe("cursor-2");
+    expect(calls.find((call) => call.method === "thread/turns/list")).toEqual({
+      method: "thread/turns/list",
+      params: {
+        threadId: "thread-1",
+        limit: 50,
+        sortDirection: "asc",
+        itemsView: "full",
+        cursor: "cursor-1",
+      },
+    });
     expect(result.events).toEqual([
       expect.objectContaining({
         taskId: "task-1",

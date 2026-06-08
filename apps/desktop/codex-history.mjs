@@ -42,6 +42,7 @@ async function main() {
       taskId: String(input.taskId || ""),
       threadId: String(input.threadId || ""),
       limit: input.limit,
+      cursor: input.cursor,
     }));
     return;
   }

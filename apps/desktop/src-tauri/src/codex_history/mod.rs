@@ -219,49 +219,95 @@ fn history_sync_error_input(
     }
 }
 
+const HISTORY_SYNC_LIMIT: i64 = 50;
+
+fn normalize_next_cursor(cursor: Option<String>) -> Option<String> {
+    cursor.and_then(|cursor| {
+        let trimmed = cursor.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn history_sync_success_input(
+    task_id: &str,
+    thread_id: &str,
+    event_count: usize,
+    page_count: usize,
+) -> AgentTimelineEventInput {
+    let now = now_millis() as i64;
+    AgentTimelineEventInput {
+        id: Some(format!("{task_id}:codex-history-sync:{thread_id}")),
+        task_id: task_id.to_string(),
+        turn_id: Some(format!("codex-history:{thread_id}")),
+        backend: BACKEND_CODEX.to_string(),
+        kind: "diagnostic".to_string(),
+        status: "success".to_string(),
+        title: "Codex history synced".to_string(),
+        summary: Some(if event_count > 0 {
+            format!("已同步 {event_count} 条 Codex 历史事件")
+        } else {
+            "没有需要同步的 Codex 历史事件".to_string()
+        }),
+        payload: serde_json::json!({
+            "backend": "codex",
+            "subkind": "history_sync",
+            "threadId": thread_id,
+            "eventCount": event_count,
+            "pageCount": page_count,
+        }),
+        created_at: Some(now),
+        updated_at: Some(now),
+    }
+}
+
 fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) {
     tauri::async_runtime::spawn_blocking(move || {
-        let result = run_codex_history_utility(
-            &app,
-            serde_json::json!({
-                "action": "sync",
-                "taskId": task_id,
-                "threadId": thread_id,
-                "limit": 50,
-            }),
-        );
-        match result {
-            Ok(sync) => {
-                let event_count = persist_history_events_batch(&app, &task_id, sync.events);
-                let now = now_millis() as i64;
+        let mut next_cursor: Option<String> = None;
+        let mut page_count = 0usize;
+        let mut event_count = 0usize;
+        loop {
+            let previous_cursor = next_cursor.clone();
+            let result = run_codex_history_utility(
+                &app,
+                serde_json::json!({
+                    "action": "sync",
+                    "taskId": task_id,
+                    "threadId": thread_id,
+                    "limit": HISTORY_SYNC_LIMIT,
+                    "cursor": next_cursor,
+                }),
+            );
+            let sync = match result {
+                Ok(sync) => sync,
+                Err(err) => {
+                    persist_and_emit_input(
+                        &app,
+                        history_sync_error_input(&task_id, &thread_id, err),
+                    );
+                    return;
+                }
+            };
+            let page_event_count = persist_history_events_batch(&app, &task_id, sync.events);
+            event_count += page_event_count;
+            page_count += 1;
+            next_cursor = normalize_next_cursor(sync.next_cursor);
+            if next_cursor.is_none() {
                 persist_and_emit_input(
                     &app,
-                    AgentTimelineEventInput {
-                        id: Some(format!("{task_id}:codex-history-sync:{thread_id}")),
-                        task_id: task_id.clone(),
-                        turn_id: Some(format!("codex-history:{thread_id}")),
-                        backend: BACKEND_CODEX.to_string(),
-                        kind: "diagnostic".to_string(),
-                        status: "success".to_string(),
-                        title: "Codex history synced".to_string(),
-                        summary: Some(if event_count > 0 {
-                            format!("已同步 {event_count} 条 Codex 历史事件")
-                        } else {
-                            "没有需要同步的 Codex 历史事件".to_string()
-                        }),
-                        payload: serde_json::json!({
-                            "backend": "codex",
-                            "subkind": "history_sync",
-                            "threadId": thread_id,
-                            "eventCount": event_count,
-                        }),
-                        created_at: Some(now),
-                        updated_at: Some(now),
-                    },
+                    history_sync_success_input(&task_id, &thread_id, event_count, page_count),
                 );
+                return;
             }
-            Err(err) => {
-                persist_and_emit_input(&app, history_sync_error_input(&task_id, &thread_id, err))
+            if next_cursor == previous_cursor {
+                persist_and_emit_input(
+                    &app,
+                    history_sync_error_input(
+                        &task_id,
+                        &thread_id,
+                        "Codex history sync 返回了重复 cursor，已停止后台同步。".to_string(),
+                    ),
+                );
+                return;
             }
         }
     });
@@ -396,6 +442,42 @@ mod tests {
         assert_eq!(
             input.payload.get("error").and_then(|value| value.as_str()),
             Some("network failed")
+        );
+    }
+
+    #[test]
+    fn normalize_next_cursor_trims_and_drops_empty_values() {
+        assert_eq!(
+            normalize_next_cursor(Some(" cursor-2 ".to_string())).as_deref(),
+            Some("cursor-2")
+        );
+        assert_eq!(normalize_next_cursor(Some("".to_string())), None);
+        assert_eq!(normalize_next_cursor(None), None);
+    }
+
+    #[test]
+    fn history_sync_success_input_records_total_events_and_pages() {
+        let input = history_sync_success_input("task-1", "thread-1", 5, 2);
+
+        assert_eq!(
+            input.id.as_deref(),
+            Some("task-1:codex-history-sync:thread-1")
+        );
+        assert_eq!(input.title, "Codex history synced");
+        assert_eq!(input.summary.as_deref(), Some("已同步 5 条 Codex 历史事件"));
+        assert_eq!(
+            input
+                .payload
+                .get("eventCount")
+                .and_then(|value| value.as_u64()),
+            Some(5)
+        );
+        assert_eq!(
+            input
+                .payload
+                .get("pageCount")
+                .and_then(|value| value.as_u64()),
+            Some(2)
         );
     }
 }

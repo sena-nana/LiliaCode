@@ -145,14 +145,22 @@ async function mapWithConcurrency(items, limit, mapper) {
 export async function readCodexThreadTurns(
   server,
   threadId,
-  { limit = DEFAULT_TURN_LIMIT, sortDirection = "asc", backfillConcurrency = ITEM_BACKFILL_CONCURRENCY } = {},
+  {
+    limit = DEFAULT_TURN_LIMIT,
+    sortDirection = "asc",
+    backfillConcurrency = ITEM_BACKFILL_CONCURRENCY,
+    cursor = null,
+  } = {},
 ) {
-  const result = await server.request("thread/turns/list", {
+  const params = {
     threadId,
     limit,
     sortDirection,
     itemsView: "full",
-  });
+  };
+  const trimmedCursor = stringOrNull(cursor)?.trim();
+  if (trimmedCursor) params.cursor = trimmedCursor;
+  const result = await server.request("thread/turns/list", params);
   const turns = readArray(result?.data || result?.turns);
   const out = await mapWithConcurrency(
     turns,
@@ -305,13 +313,13 @@ export async function previewCodexThreadLite(threadId, { createServer = createCo
 }
 
 export async function syncCodexThreadHistoryForTask(
-  { taskId, threadId, limit = DEFAULT_TURN_LIMIT },
+  { taskId, threadId, limit = DEFAULT_TURN_LIMIT, cursor = null },
   { createServer = createCodexAppServer } = {},
 ) {
   const server = createServer();
   try {
     await initializeCodexAppServer(server);
-    const { turns, nextCursor } = await readCodexThreadTurns(server, threadId, { limit });
+    const { turns, nextCursor } = await readCodexThreadTurns(server, threadId, { limit, cursor });
     const events = codexHistoryTimelineInputs(taskId, threadId, turns);
     const thread = normalizeThread({ id: threadId }, turns);
     return {
