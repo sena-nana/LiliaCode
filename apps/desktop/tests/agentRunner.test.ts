@@ -33,6 +33,7 @@ import {
   applyCodexRuntimePermission,
   flushCodexRuntimeSettings,
   startCodexAppServerTurn,
+  withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
 import {
   codexHistoryTimelineInputs,
@@ -64,6 +65,17 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("timed out waiting for condition");
+}
+
+function trackedElicitation(calls: any[]) {
+  return async (kind: string, fn: () => Promise<unknown>) => {
+    calls.push(["increment", kind]);
+    try {
+      return await fn();
+    } finally {
+      calls.push(["decrement", kind]);
+    }
+  };
 }
 
 describe("agent runner entry", () => {
@@ -573,6 +585,84 @@ describe("Codex app-server mapping", () => {
     expect(calls).toEqual([]);
   });
 
+  it("tracks Codex elicitation around UI waits and cleans up on errors", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        return {};
+      },
+    };
+
+    await expect(withCodexElicitation(
+      server as any,
+      "thread-1",
+      { protocol } as any,
+      "ask_user",
+      async () => "ok",
+    )).resolves.toBe("ok");
+
+    await expect(withCodexElicitation(
+      server as any,
+      "thread-1",
+      { protocol } as any,
+      "plan_approval",
+      async () => {
+        throw new Error("user flow failed");
+      },
+    )).rejects.toThrow("user flow failed");
+
+    expect(calls).toEqual([
+      { method: "thread/increment_elicitation", params: { threadId: "thread-1" } },
+      { method: "thread/decrement_elicitation", params: { threadId: "thread-1" } },
+      { method: "thread/increment_elicitation", params: { threadId: "thread-1" } },
+      { method: "thread/decrement_elicitation", params: { threadId: "thread-1" } },
+    ]);
+    expect(json().filter((line) => line.type === "timeline")).toEqual([]);
+  });
+
+  it("continues Codex elicitation when increment fails and skips decrement", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/increment_elicitation") {
+          throw new Error("unsupported");
+        }
+        return {};
+      },
+    };
+
+    await expect(withCodexElicitation(
+      server as any,
+      "thread-1",
+      { protocol } as any,
+      "tool_consent",
+      async () => "continued",
+    )).resolves.toBe("continued");
+
+    expect(calls).toEqual([
+      { method: "thread/increment_elicitation", params: { threadId: "thread-1" } },
+    ]);
+    expect(json()).toEqual([
+      {
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "diagnostic",
+          status: "error",
+          payload: expect.objectContaining({
+            backend: "codex",
+            method: "thread/increment_elicitation",
+            interactionKind: "tool_consent",
+            error: "unsupported",
+          }),
+        }),
+      },
+    ]);
+  });
+
   it("Codex Agent 提问通过统一 interaction_request/response 往返", async () => {
     const { protocol, json } = captureProtocol();
     const broker = createInteractionBroker({
@@ -581,6 +671,7 @@ describe("Codex app-server mapping", () => {
       emitAskUserTimeline: () => {},
     });
     const calls: any[] = [];
+    const elicitationCalls: any[] = [];
 
     const handled = maybeHandleCodexServerRequest(
       {
@@ -601,7 +692,10 @@ describe("Codex app-server mapping", () => {
           }],
         },
       },
-      { interactions: broker } as any,
+      {
+        interactions: broker,
+        withCodexElicitation: trackedElicitation(elicitationCalls),
+      } as any,
     );
 
     await waitUntil(() => json().some((line) => line.type === "interaction_request"));
@@ -632,9 +726,67 @@ describe("Codex app-server mapping", () => {
     }));
 
     await expect(handled).resolves.toBe(true);
+    expect(elicitationCalls).toEqual([
+      ["increment", "ask_user"],
+      ["decrement", "ask_user"],
+    ]);
     expect(calls).toEqual([
       ["respond", "request-user-input-1", { answers: { choice: { answers: ["B"] } } }],
     ]);
+  });
+
+  it("Codex dynamic AskUser tool also marks elicitation", async () => {
+    const calls: any[] = [];
+    const elicitationCalls: any[] = [];
+    const handled = await maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "ask-tool-1",
+        method: "item/tool/call",
+        params: {
+          tool: "AskUserQuestion",
+          arguments: {
+            questions: [{
+              id: "choice",
+              header: "方案",
+              question: "选哪个方案？",
+              options: [
+                { label: "A", description: "先改合约" },
+                { label: "B", description: "先改 UI" },
+              ],
+            }],
+          },
+        },
+      },
+      {
+        interactions: {
+          requestAskUser: async () => ({
+            cancelled: false,
+            answers: {
+              "q-1": { questionId: "q-1", value: "o-2" },
+            },
+          }),
+        },
+        withCodexElicitation: trackedElicitation(elicitationCalls),
+      } as any,
+    );
+
+    expect(handled).toBe(true);
+    expect(elicitationCalls).toEqual([
+      ["increment", "ask_user"],
+      ["decrement", "ask_user"],
+    ]);
+    expect(calls[0][1]).toBe("ask-tool-1");
+    expect(calls[0][2]).toMatchObject({ success: true });
+    const output = JSON.parse(calls[0][2].contentItems[0].text);
+    expect(output).toMatchObject({
+      cancelled: false,
+      answers: {
+        "选哪个方案？": "B",
+      },
+    });
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {
@@ -698,6 +850,7 @@ describe("Codex app-server mapping", () => {
       emitAskUserTimeline: () => {},
     });
     const calls: any[] = [];
+    const elicitationCalls: any[] = [];
 
     const handled = maybeHandleCodexApprovalRequest(
       {
@@ -717,6 +870,7 @@ describe("Codex app-server mapping", () => {
         protocol,
         interactions: broker,
         emitToolConsentTimeline: () => {},
+        withCodexElicitation: trackedElicitation(elicitationCalls),
       },
     );
 
@@ -747,6 +901,10 @@ describe("Codex app-server mapping", () => {
     }));
 
     await expect(handled).resolves.toBe(true);
+    expect(elicitationCalls).toEqual([
+      ["increment", "tool_consent"],
+      ["decrement", "tool_consent"],
+    ]);
     expect(calls).toEqual([
       ["respond", "approval-rpc-unified", { decision: "accept" }],
     ]);
@@ -1788,6 +1946,12 @@ describe("Codex app-server mapping", () => {
 
     const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
     const askIndex = calls.findIndex((call) => call.type === "ask");
+    const incrementIndex = calls.findIndex((call) =>
+      call.type === "server" && call.method === "thread/increment_elicitation"
+    );
+    const decrementIndex = calls.findIndex((call) =>
+      call.type === "server" && call.method === "thread/decrement_elicitation"
+    );
     const executionStartIndex = calls.findIndex((call) =>
       call.type === "server" &&
       call.method === "turn/start" &&
@@ -1796,6 +1960,26 @@ describe("Codex app-server mapping", () => {
     expect(calls.some((call) => call.type === "server" && call.method === "collaborationMode/list")).toBe(true);
     expect(calls.some((call) => call.type === "server" && call.method === "turn/interrupt")).toBe(false);
     expect(askIndex).toBeGreaterThan(-1);
+    expect(incrementIndex).toBeGreaterThan(-1);
+    expect(decrementIndex).toBeGreaterThan(incrementIndex);
+    expect(incrementIndex).toBeLessThan(askIndex);
+    expect(decrementIndex).toBeLessThan(executionStartIndex);
+    expect(calls.filter((call) =>
+      call.type === "server" &&
+      (call.method === "thread/increment_elicitation" ||
+        call.method === "thread/decrement_elicitation")
+    )).toEqual([
+      {
+        type: "server",
+        method: "thread/increment_elicitation",
+        params: { threadId: "thread-1" },
+      },
+      {
+        type: "server",
+        method: "thread/decrement_elicitation",
+        params: { threadId: "thread-1" },
+      },
+    ]);
     expect(askIndex).toBeLessThan(executionStartIndex);
     expect(startCalls).toHaveLength(2);
     expect(startCalls[0].params.collaborationMode).toEqual({

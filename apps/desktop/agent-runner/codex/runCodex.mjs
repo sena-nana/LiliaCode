@@ -183,6 +183,52 @@ export async function flushCodexRuntimeSettings(ctx) {
   await Promise.allSettled(pending);
 }
 
+function emitCodexElicitationDiagnostic(ctx, method, kind, err) {
+  ctx?.protocol?.emitTimeline?.({
+    kind: "diagnostic",
+    status: "error",
+    title: "Codex elicitation update failed",
+    summary: `${method} 失败，Lilia 已继续等待用户交互。`,
+    payload: {
+      backend: "codex",
+      subkind: "elicitation",
+      method,
+      interactionKind: kind,
+      error: err?.message || String(err),
+    },
+    sourceId: `codex:elicitation:${method}:${kind}`,
+  });
+}
+
+export async function withCodexElicitation(server, threadId, ctx, kind, fn) {
+  if (typeof fn !== "function") return undefined;
+  if (!server || !threadId) return await fn();
+  let incremented = false;
+  try {
+    await server.request("thread/increment_elicitation", { threadId });
+    incremented = true;
+  } catch (err) {
+    emitCodexElicitationDiagnostic(ctx, "thread/increment_elicitation", kind, err);
+  }
+  try {
+    return await fn();
+  } finally {
+    if (incremented) {
+      try {
+        await server.request("thread/decrement_elicitation", { threadId });
+      } catch (err) {
+        emitCodexElicitationDiagnostic(ctx, "thread/decrement_elicitation", kind, err);
+      }
+    }
+  }
+}
+
+async function runCodexUiInteraction(ctx, kind, fn) {
+  return ctx?.withCodexElicitation
+    ? ctx.withCodexElicitation(kind, fn)
+    : await fn();
+}
+
 export async function startCodexAppServerSession(server, cmd, cwdFn = process.cwd) {
   const { cwd, model, resumeSessionId, permission } = cmd;
   const settings = normalizeCodexSettings(cmd);
@@ -446,7 +492,10 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
     const input = isRecord(params.arguments) ? params.arguments : {};
     let output = null;
     if (isLiliaAskUserTool(toolName)) {
-      output = await createCodexAskUserHandler(ctx.interactions.requestAskUser)(input);
+      const requestAskUser = (spec, options) =>
+        runCodexUiInteraction(ctx, "ask_user", () =>
+          ctx.interactions.requestAskUser(spec, options));
+      output = await createCodexAskUserHandler(requestAskUser)(input);
     } else if (isLiliaConversationContextTool(toolName)) {
       output = await createConversationContextHandler(ctx.cmd?.conversationContext)(input);
     } else {
@@ -465,7 +514,8 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
       server.respond(msg.id, { answers: {} });
       return true;
     }
-    const result = await ctx.interactions.requestAskUser(spec, { backend: "codex" });
+    const result = await runCodexUiInteraction(ctx, "ask_user", () =>
+      ctx.interactions.requestAskUser(spec, { backend: "codex" }));
     server.respond(msg.id, askUserResultToCodexRequestUserInputResponse(result, spec));
     return true;
   }
@@ -496,6 +546,8 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ctx.interactions = context.interactions;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
     ctx.settingsUpdatePromises = [];
+    ctx.withCodexElicitation = (kind, fn) =>
+      withCodexElicitation(server, threadId, ctx, kind, fn);
     context.interactions?.handleSettingsUpdate?.((update) => {
       applyCodexRuntimePermission(
         server,
@@ -538,10 +590,11 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         if (!emitCodexPlanApprovalRequired(ctx)) {
           throw new Error("Codex plan mode completed without a readable plan");
         }
-        const result = await ctx.interactions.requestAskUser(buildPlanApprovalSpec("codex"), {
-          backend: "codex",
-          emitTimelineEvent: false,
-        });
+        const result = await runCodexUiInteraction(ctx, "plan_approval", () =>
+          ctx.interactions.requestAskUser(buildPlanApprovalSpec("codex"), {
+            backend: "codex",
+            emitTimelineEvent: false,
+          }));
         resolveCodexPlanApproval(ctx, result);
         if (ctx.planRevisionRequest) {
           const revisionRequest = ctx.planRevisionRequest;

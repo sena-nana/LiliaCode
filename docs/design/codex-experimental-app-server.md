@@ -33,8 +33,8 @@ codex app-server generate-ts --out <experimental> --experimental
 
 | 方法 | 协议语义 | Lilia 状态 | 说明 |
 |---|---|---|---|
-| `thread/increment_elicitation` | 增加 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 未实现 | Lilia 目前用自己的 AskUser / pending interaction 状态，不回写 Codex 线程计数。 |
-| `thread/decrement_elicitation` | 减少 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 未实现 | 同上；若未来要让 Codex 原生线程知道 Lilia 正在等待外部输入，再接入。 |
+| `thread/increment_elicitation` | 增加 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 已实现 | Codex runner 在 AskUser、Plan approval、tool consent 等需要 Lilia UI 等待用户响应前调用；失败只写 diagnostic，不阻断交互。 |
+| `thread/decrement_elicitation` | 减少 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 已实现 | 与 increment 成对在 UI 等待结束后调用；仅 increment 成功后 decrement，避免误减计数。 |
 | `thread/settings/update` | 更新后续 turns 的 sticky 设置：`cwd`、approval、sandbox、permissions、model、effort、summary、`collaborationMode`、personality 等。 | 已实现 | Lilia 用它应用 Codex profile 的 reasoning effort、runtime workspace roots 和受控 permissions；Plan 仍只用 `turn/start.collaborationMode`，不写成 sticky 默认。 |
 | `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 未实现 | Lilia Memory 设计是旁路系统，不直接切 Codex 原生 memory mode。 |
 | `memory/reset` | 重置 Codex memory。无参数。 | 未实现 | 这是 Codex 自身全局/账户语义，Lilia 不应在没有明确用户动作时调用。 |
@@ -107,6 +107,8 @@ collaborationMode: {
 - 能通过 `dynamicTools` 接入 Codex AskUser。
 - 能把 Codex plan 事件映射到 Lilia 时间线与 `plan_approval` 展示。
 - 能处理 Codex command / file change approval 的通用确认请求、增强审批字段和 Lilia 编辑后执行流程。
+- 能在 Codex 等待 Lilia UI 交互时回写 `thread/increment_elicitation` / `thread/decrement_elicitation`。
+- 已有 `review/start` 代码审查 workflow 的 runner / UI 基础接入；修复建议、批量改动等专项工作流仍需后续单独设计。
 
 当前已接入：
 
