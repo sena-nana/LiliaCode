@@ -2655,6 +2655,61 @@ button.ghost:hover {
   overflow-wrap: anywhere;
 }
 
+.conversation-import__full-preview {
+  align-self: flex-start;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.conversation-import__full-preview:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text);
+  filter: none;
+}
+
+.conversation-import__full-preview:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.conversation-import__full-events {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.conversation-import__event {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border-left: 2px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.conversation-import__event span {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.conversation-import__event p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .conversation-import__empty-preview {
   min-height: 180px;
   display: flex;

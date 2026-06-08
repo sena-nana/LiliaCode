@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import {
   previewCodexThread,
+  previewCodexThreadLite,
   searchCodexThreads,
   syncCodexThreadHistoryForTask,
 } from "./agent-runner/codex/history.mjs";
@@ -30,7 +31,10 @@ async function main() {
     return;
   }
   if (action === "preview") {
-    writeJson(await previewCodexThread(String(input.threadId || "")));
+    const detail = input.detail === "full" ? "full" : "lite";
+    writeJson(detail === "full"
+      ? await previewCodexThread(String(input.threadId || ""))
+      : await previewCodexThreadLite(String(input.threadId || "")));
     return;
   }
   if (action === "sync") {

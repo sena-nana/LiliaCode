@@ -7,6 +7,7 @@ import {
   mergeLoadedTimelineEvents,
   mergeTimelineEvents,
   retryContextForTimelineEvent,
+  upsertTimelineEventsById,
 } from "../src/pages/taskDetail/useTaskTimeline";
 
 function event(overrides: Partial<AgentTimelineEvent>): AgentTimelineEvent {
@@ -51,6 +52,22 @@ describe("task detail timeline helpers", () => {
     );
 
     expect(merged.map((item) => item.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("批量 upsert timeline 事件时只保留同 id 最新快照并稳定排序", () => {
+    const merged = upsertTimelineEventsById(
+      [
+        event({ id: "a", turnSeq: 2, intraTurnOrder: 0, summary: "旧" }),
+        event({ id: "b", turnSeq: 1, intraTurnOrder: 1 }),
+      ],
+      [
+        event({ id: "a", turnSeq: 2, intraTurnOrder: 0, summary: "新" }),
+        event({ id: "c", turnSeq: 1, intraTurnOrder: 0 }),
+      ],
+    );
+
+    expect(merged.map((item) => item.id)).toEqual(["c", "b", "a"]);
+    expect(merged.find((item) => item.id === "a")?.summary).toBe("新");
   });
 
   it("加载持久化消息后去掉等价的乐观用户消息", () => {

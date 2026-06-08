@@ -11,6 +11,7 @@ import type {
   AgentInteractionKind,
   AgentInteractionRequest,
   AgentInteractionResponse,
+  AgentTimelineBatchEvent,
   AssistantAIConfig,
   AssistantAITestResult,
   BackendEnvStatus,
@@ -22,6 +23,7 @@ import type {
   ChatComposerState,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
+  CodexThreadPreviewInput,
   CodexThreadPreview,
   CodexThreadSearchInput,
   CodexThreadSearchResult,
@@ -44,6 +46,7 @@ export type {
   AgentInteractionKind,
   AgentInteractionRequest,
   AgentInteractionResponse,
+  AgentTimelineBatchEvent,
   AssistantAIConfig,
   AssistantAITestResult,
   ChatAttachment,
@@ -51,6 +54,7 @@ export type {
   ChatContextSearchResult,
   CodexThreadAttachInput,
   CodexThreadAttachResult,
+  CodexThreadPreviewInput,
   CodexThreadPreview,
   CodexThreadSearchInput,
   CodexThreadSearchResult,
@@ -81,8 +85,8 @@ export function searchCodexThreads(
   return invoke<CodexThreadSearchResult>("codex_thread_search", { input });
 }
 
-export function previewCodexThread(threadId: string): Promise<CodexThreadPreview> {
-  return invoke<CodexThreadPreview>("codex_thread_preview", { threadId });
+export function previewCodexThread(input: CodexThreadPreviewInput): Promise<CodexThreadPreview> {
+  return invoke<CodexThreadPreview>("codex_thread_preview", { input });
 }
 
 export function attachCodexThread(
@@ -276,6 +280,12 @@ export function onAgentTimeline(
   handler: (e: AgentTimelineEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<AgentTimelineEvent>("agent:timeline", (event) => handler(event.payload));
+}
+
+export function onAgentTimelineBatch(
+  handler: (e: AgentTimelineBatchEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<AgentTimelineBatchEvent>("agent:timeline-batch", (event) => handler(event.payload));
 }
 
 function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {

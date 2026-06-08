@@ -30,6 +30,7 @@ import {
   getComposerState,
   interruptTurn,
   onAgentTimeline,
+  onAgentTimelineBatch,
   onDone,
   onTurnStarted,
   respondTitleUpdate,
@@ -339,6 +340,13 @@ export function useTaskComposerController(options: {
         if (e.taskId !== props.taskId) return;
         timeline.upsertTimelineEvent(e);
         if (isAgentTimelineToolWindowKind(e.kind)) {
+          void guideDispatch.scheduleGuideInsertion("tool");
+        }
+      }),
+      onAgentTimelineBatch((e) => {
+        if (e.taskId !== props.taskId) return;
+        timeline.queueTimelineEvents(e.events);
+        if (e.events.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
           void guideDispatch.scheduleGuideInsertion("tool");
         }
       }),
