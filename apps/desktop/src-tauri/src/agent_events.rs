@@ -37,6 +37,10 @@ pub enum AgentRuntimeEvent {
         session_id: Option<String>,
         subtype: Option<String>,
     },
+    PromptSuggestion {
+        suggestion: String,
+        uuid: Option<String>,
+    },
     Error {
         message: String,
     },
@@ -99,6 +103,24 @@ impl AgentRuntimeEvent {
                 Some(Self::Done {
                     session_id,
                     subtype,
+                })
+            }
+            "prompt_suggestion" => {
+                let suggestion = value
+                    .get("suggestion")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if suggestion.trim().is_empty() {
+                    return None;
+                }
+                let uuid = value
+                    .get("uuid")
+                    .and_then(|v| v.as_str())
+                    .map(|uuid| uuid.to_string());
+                Some(Self::PromptSuggestion {
+                    suggestion,
+                    uuid,
                 })
             }
             "error" => {
@@ -427,6 +449,22 @@ mod tests {
                 subtype: Some("success".to_string()),
             })
         );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "prompt_suggestion",
+                "suggestion": "请继续检查 Claude 原生建议展示。",
+                "uuid": "suggestion-1"
+            })),
+            Some(AgentRuntimeEvent::PromptSuggestion {
+                suggestion: "请继续检查 Claude 原生建议展示。".to_string(),
+                uuid: Some("suggestion-1".to_string()),
+            })
+        );
+        assert!(AgentRuntimeEvent::from_runner_json(&json!({
+            "type": "prompt_suggestion",
+            "suggestion": " "
+        }))
+        .is_none());
         assert_eq!(
             AgentRuntimeEvent::from_runner_json(&json!({ "type": "error", "message": "failed" })),
             Some(AgentRuntimeEvent::Error {

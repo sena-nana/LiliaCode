@@ -32,7 +32,7 @@ use crate::provider::{
     CodexProfileSettings,
 };
 use crate::store::LiliaStore;
-use crate::{plugins, BACKEND_CODEX};
+use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX};
 
 // ---------- 子进程定位 ----------
 
@@ -317,6 +317,21 @@ pub(crate) fn spawn_agent_turn(
                     AgentRuntimeEvent::Done { session_id, .. } => {
                         if let Some(sid) = session_id {
                             last_session_id = Some(sid.clone());
+                        }
+                    }
+                    AgentRuntimeEvent::PromptSuggestion {
+                        suggestion,
+                        uuid,
+                    } => {
+                        if backend_for_thread == BACKEND_CLAUDE {
+                            if let Err(err) = crate::conversation_suggestions::save_claude_prompt_suggestion(
+                                &app_handle,
+                                &task_id_for_thread,
+                                suggestion,
+                                uuid.as_deref(),
+                            ) {
+                                eprintln!("[conversation-suggestions] save Claude prompt suggestion failed: {err}");
+                            }
                         }
                     }
                     AgentRuntimeEvent::Error { message } => {

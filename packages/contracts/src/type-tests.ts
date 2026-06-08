@@ -134,6 +134,23 @@ export type SuggestionItemIncludesGitHubActivityTypeTest = Assert<
   >
 >;
 
+export type SuggestionItemIncludesClaudeNativeSourceTypeTest = Assert<
+  Extends<
+    {
+      id: "claude-suggestion-1";
+      projectId: "project-1";
+      taskIds: ["task-1"];
+      source: "claude";
+      githubActivities: [];
+      summary: "继续检查建议展示";
+      reason: "Claude 根据上一轮对话预测的下一条提示。";
+      prompt: "请继续检查 Claude 原生建议展示。";
+      generatedAt: 1;
+    },
+    SuggestionItem
+  >
+>;
+
 export type CodexProfileSettingsShapeTypeTest = Assert<
   Extends<
     {

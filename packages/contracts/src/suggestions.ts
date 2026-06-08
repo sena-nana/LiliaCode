@@ -1,5 +1,5 @@
 export type SuggestionSource = "provider" | "assistant-ai";
-export type SuggestionItemSource = "task" | "github";
+export type SuggestionItemSource = "task" | "github" | "claude";
 
 export interface SuggestionGitHubActivityRef {
   id: string;

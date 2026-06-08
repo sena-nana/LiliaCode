@@ -11,7 +11,7 @@ import {
   applyClaudeRuntimePermission,
   mapClaudeInitialPermission,
 } from "../agent-runner/claude/permissions.mjs";
-import { createLiliaAskUserServer } from "../agent-runner/claude/runClaude.mjs";
+import { createLiliaAskUserServer, runClaude } from "../agent-runner/claude/runClaude.mjs";
 import {
   createConversationContextHandler,
 } from "../agent-runner/conversationContext.mjs";
@@ -446,6 +446,53 @@ describe("Claude helpers", () => {
           { role: "assistant", content: "父对话里的回答" },
         ],
       },
+    });
+  });
+
+  it("Claude turn enables SDK promptSuggestions and emits native suggestion frames", async () => {
+    const { protocol, json } = captureProtocol();
+    let seenOptions: any = null;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "继续实现",
+      model: "claude-sonnet-4-6",
+      permission: "ask",
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: ({ options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-session-1",
+            uuid: "result-1",
+          };
+          yield {
+            type: "prompt_suggestion",
+            suggestion: "请继续检查 Claude 原生建议展示。",
+            session_id: "claude-session-1",
+            uuid: "suggestion-1",
+          };
+        })();
+      },
+    } as any);
+
+    expect(seenOptions).toMatchObject({ promptSuggestions: true });
+    expect(json()).toContainEqual({
+      type: "prompt_suggestion",
+      suggestion: "请继续检查 Claude 原生建议展示。",
+      uuid: "suggestion-1",
     });
   });
 
