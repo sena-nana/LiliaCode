@@ -10,7 +10,7 @@ const { theme, setTheme } = useTheme();
     <h2>外观</h2>
     <div class="settings-row">
       <div class="settings-row__label">主题</div>
-      <div class="segmented" role="radiogroup" aria-label="主题">
+      <div class="ui-segmented" role="radiogroup" aria-label="主题">
         <button
           type="button"
           role="radio"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "../../styles/pages/project.css";
 /**
  * 项目主区壳：顶部挂 ViewTabs（sessions / roadmap / memory），下方 router-view 渲染当前 tab。
  * TaskDetail 不嵌在这里——/projects/:projectId/tasks/:taskId 是平级路由，
@@ -35,30 +36,3 @@ const activeTab = computed<"sessions" | "roadmap" | "memory">(() => {
     <div class="empty-state">未找到项目 <code>{{ projectId }}</code></div>
   </section>
 </template>
-
-<style scoped>
-.project-shell {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-}
-.project-shell__head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 0;
-  border-bottom: 1px solid var(--border, transparent);
-}
-.project-shell__title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.project-shell__body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-</style>

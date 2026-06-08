@@ -25,12 +25,12 @@ const tabs: Array<{ key: ViewKey; label: string; icon: any; path: (pid: string) 
 </script>
 
 <template>
-  <nav class="view-tabs" role="tablist" aria-label="项目视图">
+  <nav class="view-tabs ui-tabs" role="tablist" aria-label="项目视图">
     <RouterLink
       v-for="t in tabs"
       :key="t.key"
       :to="t.path(props.projectId)"
-      class="view-tabs__tab"
+      class="view-tabs__tab ui-tabs__tab"
       :class="{ 'is-active': active === t.key }"
       :aria-selected="active === t.key"
       role="tab"
@@ -40,32 +40,3 @@ const tabs: Array<{ key: ViewKey; label: string; icon: any; path: (pid: string) 
     </RouterLink>
   </nav>
 </template>
-
-<style scoped>
-.view-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-.view-tabs__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text-muted, #888);
-  text-decoration: none;
-  background: transparent;
-  transition: background-color 0.12s, color 0.12s;
-}
-.view-tabs__tab:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.view-tabs__tab.is-active {
-  background: var(--bg-active);
-  color: var(--text);
-}
-</style>

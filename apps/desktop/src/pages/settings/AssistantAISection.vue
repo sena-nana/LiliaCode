@@ -112,7 +112,7 @@ onMounted(() => {
       <div class="settings-row__label">基础 URL</div>
       <input
         type="text"
-        class="text-input"
+        class="ui-input"
         placeholder="https://api.example.com/v1"
         :value="assistantAIForm.baseUrl ?? ''"
         @input="(e) => (assistantAIForm.baseUrl = (e.target as HTMLInputElement).value)"
@@ -122,7 +122,7 @@ onMounted(() => {
       <div class="settings-row__label">API 密钥</div>
       <input
         type="password"
-        class="text-input"
+        class="ui-input"
         placeholder="sk-..."
         :value="assistantAIForm.apiKey ?? ''"
         @input="(e) => (assistantAIForm.apiKey = (e.target as HTMLInputElement).value)"
@@ -132,7 +132,7 @@ onMounted(() => {
       <div class="settings-row__label">模型</div>
       <input
         type="text"
-        class="text-input"
+        class="ui-input"
         placeholder="gpt-4o-mini"
         :value="assistantAIForm.model ?? ''"
         @input="(e) => (assistantAIForm.model = (e.target as HTMLInputElement).value)"
@@ -144,7 +144,7 @@ onMounted(() => {
       <div style="display: flex; gap: 8px; align-items: center;">
         <button
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           :disabled="savingAssistantAI || testingAssistantAI"
           @click="saveAssistantAI"
         >
@@ -153,7 +153,7 @@ onMounted(() => {
         </button>
         <button
           type="button"
-          class="ghost"
+          class="ui-button ui-button--ghost"
           :disabled="testingAssistantAI || savingAssistantAI"
           title="GET {baseUrl}/models，不消耗 token"
           @click="testAssistantAI"
@@ -187,7 +187,7 @@ onMounted(() => {
 
     <div class="settings-row">
       <div class="settings-row__label">启用状态</div>
-      <div class="segmented" role="radiogroup" aria-label="新对话建议">
+      <div class="ui-segmented" role="radiogroup" aria-label="新对话建议">
         <button
           type="button"
           role="radio"
@@ -213,7 +213,7 @@ onMounted(() => {
 
     <div class="settings-row">
       <div class="settings-row__label">生成来源</div>
-      <div class="segmented" role="radiogroup" aria-label="建议生成来源">
+      <div class="ui-segmented" role="radiogroup" aria-label="建议生成来源">
         <button
           v-for="opt in suggestionSourceOptions"
           :key="opt.value"

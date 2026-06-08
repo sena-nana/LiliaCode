@@ -22,27 +22,27 @@ const emit = defineEmits<{
       <span class="plugins-toolbar__hint">
         来自 <code>{{ configPath || "~/.lilia/config/claude-mcp-servers.json" }}</code>
       </span>
-      <button type="button" class="ghost" @click="emit('open-config')">
+      <button type="button" class="ui-button ui-button--ghost" @click="emit('open-config')">
         <FolderOpen :size="12" aria-hidden="true" /> 打开配置
       </button>
-      <button type="button" class="primary" @click="emit('create')">
+      <button type="button" class="ui-button ui-button--primary" @click="emit('create')">
         <Plus :size="14" aria-hidden="true" /> 新增 MCP
       </button>
     </div>
-    <ul v-if="servers.length" class="plugins-list">
+    <ul v-if="servers.length" class="plugins-list ui-list">
       <li
         v-for="s in servers"
         :key="s.name"
-        class="plugins-list__item"
+        class="plugins-list__item ui-list-item"
         :class="{ 'is-disabled': !s.enabled }"
       >
         <div class="plugins-list__head">
           <span class="plugins-list__name">{{ s.name }}</span>
-          <span v-if="s.enabled" class="plugins-list__badge plugins-list__badge--ok">
+          <span v-if="s.enabled" class="plugins-list__badge ui-badge ui-badge--ok">
             <Check :size="11" aria-hidden="true" /> 已启用
           </span>
-          <span v-else class="plugins-list__badge plugins-list__badge--mute">已停用</span>
-          <span v-if="s.envKeys.length" class="plugins-list__badge plugins-list__badge--mute">
+          <span v-else class="plugins-list__badge ui-badge ui-badge--muted">已停用</span>
+          <span v-if="s.envKeys.length" class="plugins-list__badge ui-badge ui-badge--muted">
             env {{ s.envKeys.length }}
           </span>
         </div>
@@ -53,13 +53,13 @@ const emit = defineEmits<{
           {{ s.envKeys.join(", ") }}
         </p>
         <div class="plugins-list__actions">
-          <button type="button" class="ghost" @click="emit('toggle', s)">
+          <button type="button" class="ui-button ui-button--ghost" @click="emit('toggle', s)">
             {{ s.enabled ? "停用" : "启用" }}
           </button>
-          <button type="button" class="ghost" @click="emit('edit', s)">
+          <button type="button" class="ui-button ui-button--ghost" @click="emit('edit', s)">
             <Pencil :size="12" aria-hidden="true" /> 编辑
           </button>
-          <button type="button" class="ghost danger" @click="emit('remove', s)">
+          <button type="button" class="ui-button ui-button--ghost ui-button--danger" @click="emit('remove', s)">
             <Trash2 :size="12" aria-hidden="true" /> 删除
           </button>
         </div>

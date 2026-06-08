@@ -189,7 +189,7 @@ const emit = defineEmits<{
       <button
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
-        class="ghost composer-inline__skip composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
@@ -199,7 +199,7 @@ const emit = defineEmits<{
       <button
         v-if="canGoPrev"
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -209,7 +209,7 @@ const emit = defineEmits<{
 
       <button
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('confirmAskNo')"
       >
@@ -218,7 +218,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
-        :class="askQuestion.danger ? 'ghost danger' : 'primary'"
+        :class="askQuestion.danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked"
         @click="emit('submitAsk')"
       >
@@ -230,7 +230,7 @@ const emit = defineEmits<{
       <button
         v-if="askQuestion.skippable !== false && askTotal > 1"
         type="button"
-        class="ghost composer-inline__skip composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('skipAsk')"
       >
@@ -240,7 +240,7 @@ const emit = defineEmits<{
       <button
         v-if="canGoPrev"
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('backAsk')"
       >
@@ -258,7 +258,7 @@ const emit = defineEmits<{
       <button
         v-if="askQuestion.mode === 'confirm'"
         type="button"
-        class="ghost composer-inline__btn"
+        class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
         @click="emit('confirmAskNo')"
       >
@@ -267,7 +267,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="composer-inline__btn"
-        :class="askQuestion.danger ? 'ghost danger' : 'primary'"
+        :class="askQuestion.danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
         :disabled="actionsBlocked || (askQuestion.mode !== 'confirm' && !canAskSubmit)"
         @click="emit('submitAsk')"
       >

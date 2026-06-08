@@ -141,7 +141,7 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">非打断模式</div>
-      <div class="segmented" role="radiogroup" aria-label="非打断模式">
+      <div class="ui-segmented" role="radiogroup" aria-label="非打断模式">
         <button
           type="button"
           role="radio"
@@ -167,7 +167,7 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">Codex 配置档案</div>
-      <div class="segmented" role="radiogroup" aria-label="Codex 配置档案">
+      <div class="ui-segmented" role="radiogroup" aria-label="Codex 配置档案">
         <button
           v-for="option in profileOptions"
           :key="option.value"
@@ -187,7 +187,7 @@ onMounted(loadAgentInteraction);
       <div class="settings-row__label">Codex 模型</div>
       <input
         v-model="codexModelDraft"
-        class="settings-input"
+        class="ui-input"
         type="text"
         placeholder="默认 Codex 模型"
         :disabled="savingAgentInteraction"
@@ -197,7 +197,7 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">推理强度</div>
-      <div class="segmented" role="radiogroup" aria-label="推理强度">
+      <div class="ui-segmented" role="radiogroup" aria-label="推理强度">
         <button
           v-for="option in effortOptions"
           :key="option.value ?? 'default'"
@@ -217,7 +217,7 @@ onMounted(loadAgentInteraction);
       <div class="settings-row__label">运行时工作区根目录</div>
       <textarea
         v-model="codexRootsDraft"
-        class="settings-input settings-input--textarea"
+        class="ui-input ui-textarea"
         placeholder="一行一个路径"
         rows="3"
         :disabled="savingAgentInteraction"
@@ -227,7 +227,7 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">Codex 权限</div>
-      <div class="segmented" role="radiogroup" aria-label="Codex 权限">
+      <div class="ui-segmented" role="radiogroup" aria-label="Codex 权限">
         <button
           v-for="option in codexPermissionOptions"
           :key="option.value"
@@ -245,7 +245,7 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">Debug 面板</div>
-      <div class="segmented" role="radiogroup" aria-label="Debug 面板">
+      <div class="ui-segmented" role="radiogroup" aria-label="Debug 面板">
         <button
           type="button"
           role="radio"

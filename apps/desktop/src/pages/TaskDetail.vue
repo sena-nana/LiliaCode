@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "../styles/chat.css";
 /**
  * Task 详情 = 聊天面板。此页只编排路由上下文、timeline、composer 与附件控制器；
  * 具体聊天布局由 TaskDetailChatSurface 负责。
