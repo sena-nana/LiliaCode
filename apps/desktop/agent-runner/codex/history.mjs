@@ -58,31 +58,33 @@ function previewFromTurns(turns) {
 }
 
 function normalizeThread(row, turns = []) {
-  const id = firstString(row?.id, row?.threadId, row?.thread?.id);
+  const thread = isRecord(row?.thread) ? row.thread : {};
+  const id = firstString(row?.id, row?.threadId, thread.id);
   if (!id) return null;
   const title = firstString(
     row.title,
     row.name,
     row.summary,
-    row.thread?.title,
+    thread.title,
+    thread.name,
     previewFromTurns(turns),
   ) || "Codex thread";
   return {
     id,
     title: shortText(title, 160) || "Codex thread",
-    status: firstString(row.status, row.thread?.status),
-    model: firstString(row.model, row.thread?.model),
+    status: firstString(row.status, thread.status),
+    model: firstString(row.model, row.modelProvider, thread.model, thread.modelProvider),
     sourceKind: firstString(row.sourceKind, row.source_kind, row.source?.kind),
-    createdAt: millisFromSeconds(row.createdAt ?? row.created_at ?? row.thread?.createdAt),
+    createdAt: millisFromSeconds(row.createdAt ?? row.created_at ?? thread.createdAt),
     updatedAt: millisFromSeconds(
       row.updatedAt ??
         row.updated_at ??
         row.lastUpdatedAt ??
-        row.thread?.updatedAt ??
-        row.thread?.lastUpdatedAt,
+        thread.updatedAt ??
+        thread.lastUpdatedAt,
     ),
-    archived: row.archived === true || row.thread?.archived === true,
-    preview: firstString(row.preview, row.description, previewFromTurns(turns)),
+    archived: row.archived === true,
+    preview: firstString(row.snippet, row.preview, row.description, thread.preview, previewFromTurns(turns)),
   };
 }
 
@@ -168,9 +170,12 @@ export async function searchCodexThreads(input = {}, { createServer = createCode
     };
     const searchTerm = stringOrNull(input.searchTerm)?.trim();
     const cursor = stringOrNull(input.cursor)?.trim();
-    if (searchTerm) params.searchTerm = searchTerm;
     if (cursor) params.cursor = cursor;
-    return normalizeSearchResult(await server.request("thread/search", params));
+    if (searchTerm) {
+      params.searchTerm = searchTerm;
+      return normalizeSearchResult(await server.request("thread/search", params));
+    }
+    return normalizeSearchResult(await server.request("thread/list", params));
   } finally {
     server.close();
   }

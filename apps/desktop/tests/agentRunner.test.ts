@@ -1850,6 +1850,59 @@ describe("Codex history utility", () => {
     });
   });
 
+  it("lists recent Codex threads when search term is empty", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "initialize") return {};
+        if (method === "thread/list") {
+          return {
+            data: [{
+              id: "thread-2",
+              name: "最近对话",
+              updatedAt: 20,
+              preview: "最近一条消息",
+            }],
+            nextCursor: "cursor-3",
+          };
+        }
+        if (method === "thread/search") {
+          throw new Error("thread/search should not be called without a searchTerm");
+        }
+        return {};
+      },
+      notify: () => {},
+      close: () => {},
+    };
+
+    await expect(searchCodexThreads({
+      searchTerm: null,
+      cursor: "cursor-2",
+      archived: false,
+      limit: 20,
+    }, { createServer: () => server as any })).resolves.toEqual({
+      threads: [expect.objectContaining({
+        id: "thread-2",
+        title: "最近对话",
+        updatedAt: 20_000,
+        preview: "最近一条消息",
+      })],
+      nextCursor: "cursor-3",
+    });
+
+    expect(calls.find((call) => call.method === "thread/list")).toEqual({
+      method: "thread/list",
+      params: {
+        limit: 20,
+        sortDirection: "desc",
+        archived: false,
+        cursor: "cursor-2",
+      },
+    });
+    expect(calls.some((call) => call.method === "thread/search")).toBe(false);
+  });
+
   it("lists turns and backfills truncated turn items", async () => {
     const calls: any[] = [];
     const server = {
