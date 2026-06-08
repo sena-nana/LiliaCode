@@ -269,12 +269,16 @@ describe("chat sidebar host", () => {
 
 describe("TaskDetail chat sidebar toggle", () => {
   it("通过标题栏右侧按钮打开和关闭侧栏，并写回本地存储", async () => {
-    const view = await renderTaskDetail();
+    const view = await enableDebugSidebar();
     const sidebar = sidebarElement(view.container);
-    const toggle = titlebarSidebarButton(view.container);
+    const toggle = await waitFor(() => titlebarSidebarButton(view.container));
 
-    expect(sidebar).not.toHaveClass("is-open");
-    expect(toggle).toHaveAttribute("aria-label", "打开对话侧栏");
+    closeChatSidebar();
+
+    await waitFor(() => {
+      expect(sidebar).not.toHaveClass("is-open");
+      expect(toggle).toHaveAttribute("aria-label", "打开对话侧栏");
+    });
 
     await fireEvent.click(toggle);
 
