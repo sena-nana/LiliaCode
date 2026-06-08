@@ -5,7 +5,6 @@ import {
   type ClaudePlugin,
   type ClaudeSkill,
   type CodexMcpServer,
-  type PluginScope,
 } from "../../services/plugins";
 import { listProjects } from "../../services/projectsStore";
 
@@ -13,7 +12,6 @@ export type PluginsTab = "claude-skills" | "claude-plugins" | "claude-mcp" | "co
 
 export function usePluginsOverview() {
   const tab = ref<PluginsTab>("claude-skills");
-  const scope = ref<PluginScope>("user");
   const projects = computed(() => listProjects());
   const projectsWithCwd = computed(() =>
     projects.value.filter((p): p is typeof p & { cwd: string } => !!p.cwd),
@@ -33,18 +31,6 @@ export function usePluginsOverview() {
   const warnings = ref<string[]>([]);
   const loading = ref(false);
   const errorText = ref<string | null>(null);
-
-  const currentSkills = computed(() =>
-    scope.value === "user" ? userSkills.value : projectSkills.value,
-  );
-
-  const currentScopeHint = computed(() =>
-    scope.value === "user"
-      ? "~/.claude/skills/"
-      : projectCwd.value
-        ? `${projectCwd.value}\\.claude\\skills\\`
-        : "未选择项目",
-  );
 
   async function refresh() {
     loading.value = true;
@@ -66,16 +52,10 @@ export function usePluginsOverview() {
     }
   }
 
-  function onProjectChange(cwd: string) {
-    projectCwd.value = cwd;
-    void refresh();
-  }
-
   onMounted(() => refresh());
 
   return {
     tab,
-    scope,
     projectCwd,
     projectOptions,
     userSkills,
@@ -88,9 +68,6 @@ export function usePluginsOverview() {
     warnings,
     loading,
     errorText,
-    currentSkills,
-    currentScopeHint,
     refresh,
-    onProjectChange,
   };
 }

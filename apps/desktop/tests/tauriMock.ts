@@ -1383,7 +1383,15 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             path: "C:\\Users\\mock\\.claude\\skills\\mock-skill\\SKILL.md",
           },
         ],
-        claudeProjectSkills: [],
+        claudeProjectSkills: [
+          {
+            scope: "project",
+            name: "project-skill",
+            description: "项目 Skill",
+            enabled: true,
+            path: "D:\\PROJECT\\workspace\\Lilia\\.claude\\skills\\project-skill\\SKILL.md",
+          },
+        ],
         claudeUserPlugins: claudePlugins.map((plugin) => ({ ...plugin })),
         claudeMcpServers: claudeMcpServers.map((server) => ({
           ...server,
