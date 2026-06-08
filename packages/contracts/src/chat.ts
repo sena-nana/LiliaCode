@@ -58,7 +58,34 @@ export interface CodexReviewWorkflow {
   delivery?: "inline" | "detached";
 }
 
-export type ChatWorkflow = CodexReviewWorkflow;
+export type CodexGoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
+
+export interface CodexGoalWorkflow {
+  type: "codex_goal";
+  action: "set" | "refresh" | "clear";
+  objective?: string;
+  status?: CodexGoalStatus;
+  tokenBudget?: number | null;
+}
+
+export interface CodexThreadGoal {
+  threadId: string;
+  objective: string;
+  status: CodexGoalStatus;
+  tokenBudget: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ChatWorkflow = CodexReviewWorkflow | CodexGoalWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

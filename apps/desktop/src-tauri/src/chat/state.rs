@@ -184,7 +184,10 @@ pub(crate) fn queue_pending_turn(
 }
 
 pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatWorkflow>) -> bool {
-    !(matches!(workflow, Some(ChatWorkflow::CodexReview { .. })) && content.trim().is_empty())
+    !(matches!(
+        workflow,
+        Some(ChatWorkflow::CodexReview { .. }) | Some(ChatWorkflow::CodexGoal { .. })
+    ) && content.trim().is_empty())
 }
 
 pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<String> {

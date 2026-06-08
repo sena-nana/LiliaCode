@@ -9,6 +9,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   Bot,
+  Goal,
+  Pencil,
+  RefreshCw,
   Send,
   Sparkles,
   Trash2,
@@ -20,13 +23,25 @@ import {
   onTodoChanged,
   type TaskTodoPriority,
 } from "../../services/todos";
-import type { TaskTodo } from "@lilia/contracts";
+import type { CodexThreadGoal, TaskTodo } from "@lilia/contracts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-const props = defineProps<{ taskId: string }>();
+const props = withDefaults(defineProps<{
+  taskId: string;
+  showGoal?: boolean;
+  goal?: CodexThreadGoal | null;
+  goalDisabled?: boolean;
+}>(), {
+  showGoal: false,
+  goal: null,
+  goalDisabled: false,
+});
 
 const emit = defineEmits<{
   "insert-guide": [todo: TaskTodo];
+  "set-codex-goal": [objective: string];
+  "refresh-codex-goal": [];
+  "clear-codex-goal": [];
 }>();
 
 const todos = ref<TaskTodo[]>([]);
@@ -44,13 +59,41 @@ const guides = computed(() =>
 );
 
 const hasVisibleTodos = computed(() =>
-  agentTodos.value.length > 0 || guides.value.length > 0,
+  props.showGoal || agentTodos.value.length > 0 || guides.value.length > 0,
 );
+
+const goalText = computed(() =>
+  props.goal?.objective?.trim() || "未设置 Codex goal",
+);
+
+const goalMeta = computed(() => {
+  if (!props.goal) return "Codex";
+  const status = goalStatusLabel(props.goal.status);
+  const used = Number.isFinite(props.goal.tokensUsed) ? props.goal.tokensUsed : 0;
+  const budget = props.goal.tokenBudget;
+  const tokenText = typeof budget === "number" && Number.isFinite(budget)
+    ? `${used}/${budget}`
+    : `${used}`;
+  return `${status} · ${tokenText} tokens`;
+});
+
+const GOAL_STATUS_LABELS: Record<CodexThreadGoal["status"], string> = {
+  active: "进行中",
+  paused: "已暂停",
+  blocked: "受阻",
+  usageLimited: "用量受限",
+  budgetLimited: "预算受限",
+  complete: "已完成",
+};
 
 function priorityLabel(priority: TaskTodoPriority): string {
   if (priority === "high") return "高";
   if (priority === "low") return "低";
   return "中";
+}
+
+function goalStatusLabel(status: CodexThreadGoal["status"]): string {
+  return GOAL_STATUS_LABELS[status] ?? status;
 }
 
 async function refresh() {
@@ -80,6 +123,23 @@ function onInsertGuide(todo: TaskTodo) {
   emit("insert-guide", todo);
 }
 
+function onSetGoal() {
+  if (props.goalDisabled) return;
+  const next = window.prompt("Codex goal", props.goal?.objective ?? "")?.trim();
+  if (!next) return;
+  emit("set-codex-goal", next);
+}
+
+function onRefreshGoal() {
+  if (props.goalDisabled) return;
+  emit("refresh-codex-goal");
+}
+
+function onClearGoal() {
+  if (props.goalDisabled || !props.goal) return;
+  emit("clear-codex-goal");
+}
+
 watch(
   () => props.taskId,
   () => {
@@ -104,6 +164,50 @@ onUnmounted(async () => {
 
 <template>
   <div v-if="hasVisibleTodos" class="todo-float" aria-label="Todo 与引导">
+    <section v-if="showGoal" class="todo-float__section todo-float__section--goal">
+      <ul class="todo-float__list">
+        <li class="todo-float__row todo-float__row--goal">
+          <span class="todo-float__source todo-float__source--goal" title="Codex Goal">
+            <Goal :size="12" aria-hidden="true" />
+          </span>
+          <span class="todo-float__text" :title="goalText">{{ goalText }}</span>
+          <span class="todo-float__priority todo-float__priority--goal">{{ goalMeta }}</span>
+          <div class="todo-float__actions">
+            <button
+              type="button"
+              class="todo-float__icon-btn"
+              :disabled="goalDisabled"
+              title="设置 Goal"
+              aria-label="设置 Codex goal"
+              @click="onSetGoal"
+            >
+              <Pencil :size="12" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="todo-float__icon-btn"
+              :disabled="goalDisabled"
+              title="刷新 Goal"
+              aria-label="刷新 Codex goal"
+              @click="onRefreshGoal"
+            >
+              <RefreshCw :size="12" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="todo-float__icon-btn todo-float__icon-btn--danger"
+              :disabled="goalDisabled || !goal"
+              title="清除 Goal"
+              aria-label="清除 Codex goal"
+              @click="onClearGoal"
+            >
+              <Trash2 :size="12" aria-hidden="true" />
+            </button>
+          </div>
+        </li>
+      </ul>
+    </section>
+
     <section v-if="agentTodos.length" class="todo-float__section">
       <ul class="todo-float__list">
         <li

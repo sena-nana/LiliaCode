@@ -16,7 +16,7 @@ codex app-server generate-ts --out <experimental> --experimental
 判定口径：
 
 - “experimental 接口”指 `--experimental` 相比普通 schema 新增的 JSON-RPC 方法，以及同名参数 / 响应类型新增的字段。
-- 当前核对结果里，`ClientRequest` 新增 27 个方法；`ClientNotification`、`ServerRequest`、`ServerNotification` 没有新增方法。
+- 当前核对结果里，`ClientRequest` 新增 27 个 experimental 方法；`ClientNotification`、`ServerRequest`、`ServerNotification` 没有新增 experimental 方法。`codex-cli 0.136.0` 同时包含若干非 experimental app-server 方法，例如 `thread/goal/*`、`thread/compact/start`、`command/exec/*`、`model/list` 等。
 - Lilia 已在 `initialize` 里声明 `capabilities: { experimentalApi: true }`，所以协议协商上具备调用 experimental 方法和字段的前置条件。
 - 官方来源：openai/codex 的 [Codex MCP Server Interface](https://raw.githubusercontent.com/openai/codex/main/codex-rs/docs/codex_mcp_interface.md)。该接口标注为 experimental，方法、字段和事件形状可能变化。
 
@@ -77,6 +77,11 @@ codex app-server generate-ts --out <experimental> --experimental
 | `item/commandExecution/requestApproval` | `additionalPermissions`、`availableDecisions` | 已实现 | Lilia 将增强字段透传到统一工具确认，支持可选 Codex decision；用户编辑命令后由 Lilia 执行修改版、取消原 approval，并通过 `turn/steer` 回灌结果。 |
 | `Config` | `apps` | 未实现 | Lilia 不读取 Codex app-server `config/read` 的 apps 配置。 |
 | `ConfigRequirements` | `allowedApprovalsReviewers`、`hooks`、`network` | 部分实现 | Lilia 可将配置要求作为 diagnostic timeline 展示；还没有配置修复或专门管理 UI。 |
+
+## 非 experimental 新接口备注
+
+- `thread/goal/set|get|clear` 和 `thread/goal/updated|cleared` 已接入：goal 包含 objective、status、tokenBudget、tokensUsed 等状态；runner 建立 / 恢复 Codex thread 后执行 goal workflow，UI 从 latest goal timeline event 派生 composer 顶部状态行。
+- `review/start` 在 `codex-cli 0.136.0` 生成的 `ReviewStartParams` 中只包含 `threadId`、`target`、`delivery`；当前 Lilia 仍会在有补充说明时传 `prompt`，该 schema 差异后续单独修正。
 
 ## Codex Plan 语义落点
 

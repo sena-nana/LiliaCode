@@ -84,6 +84,16 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         delivery: Option<String>,
     },
+    #[serde(rename = "codex_goal")]
+    CodexGoal {
+        action: String,
+        #[serde(default)]
+        objective: Option<String>,
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        token_budget: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

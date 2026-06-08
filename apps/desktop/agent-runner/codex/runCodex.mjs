@@ -311,6 +311,16 @@ function normalizeCodexReviewTarget(target) {
   return null;
 }
 
+const CODEX_GOAL_ACTIONS = new Set(["set", "refresh", "clear"]);
+const CODEX_GOAL_STATUSES = new Set([
+  "active",
+  "paused",
+  "blocked",
+  "usageLimited",
+  "budgetLimited",
+  "complete",
+]);
+
 function readCodexReviewWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
   if (workflow?.type !== "codex_review") return null;
@@ -319,6 +329,35 @@ function readCodexReviewWorkflow(cmd) {
   const instructions = stringOrNull(workflow.instructions)?.trim() || "";
   const delivery = workflow.delivery === "detached" ? "detached" : "inline";
   return { target, instructions, delivery };
+}
+
+function normalizeCodexGoalStatus(status) {
+  const value = stringOrNull(status);
+  return CODEX_GOAL_STATUSES.has(value) ? value : null;
+}
+
+function numberOrNull(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readCodexGoalWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_goal") return null;
+  const action = stringOrNull(workflow.action);
+  if (!CODEX_GOAL_ACTIONS.has(action)) {
+    throw new Error("Codex goal workflow missing a valid action");
+  }
+  const objective = stringOrNull(workflow.objective)?.trim() || "";
+  if (action === "set" && !objective) {
+    throw new Error("Codex goal workflow missing objective");
+  }
+  const tokenBudget = numberOrNull(workflow.tokenBudget);
+  return {
+    action,
+    objective,
+    status: normalizeCodexGoalStatus(workflow.status) || "active",
+    tokenBudget,
+  };
 }
 
 function codexReviewTargetSummary(target) {
@@ -440,6 +479,25 @@ export async function startCodexReview(server, threadId, review) {
   return server.request("review/start", params);
 }
 
+export async function runCodexGoal(server, threadId, goal) {
+  if (goal.action === "clear") {
+    await server.request("thread/goal/clear", { threadId });
+    return { action: goal.action, goal: null };
+  }
+  if (goal.action === "refresh") {
+    const result = await server.request("thread/goal/get", { threadId });
+    return { action: goal.action, goal: isRecord(result?.goal) ? result.goal : null };
+  }
+  const params = {
+    threadId,
+    objective: goal.objective,
+    status: goal.status,
+    tokenBudget: goal.tokenBudget ?? null,
+  };
+  const result = await server.request("thread/goal/set", params);
+  return { action: goal.action, goal: isRecord(result?.goal) ? result.goal : null };
+}
+
 async function drainCodexTurnNotifications(server, ctx, timeoutMessage) {
   const startedAt = Date.now();
   while (!ctx.turnCompletedSeen) {
@@ -480,6 +538,37 @@ async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
     sourceId: `codex:review:start:${ctx.currentTurnId || codexReviewTargetSummary(review.target)}`,
   });
   await drainCodexTurnNotifications(server, ctx, "Codex review timed out");
+  return true;
+}
+
+function emitCodexGoalWorkflowTimeline(ctx, action, goal) {
+  const cleared = action === "clear";
+  ctx.protocol.emitTimeline({
+    kind: "goal",
+    status: cleared ? "cancelled" : "info",
+    title: cleared ? "Codex goal cleared" : "Codex goal updated",
+    summary: cleared
+      ? "已清除 Codex thread goal"
+      : stringOrNull(goal?.objective) || "Codex thread goal",
+    payload: {
+      backend: "codex",
+      subkind: "thread_goal",
+      action,
+      cleared,
+      goal: goal ?? null,
+      goalStatus: stringOrNull(goal?.status),
+      threadId: ctx.threadId,
+    },
+    sourceId: `codex:goal:${action}:${ctx.threadId}`,
+  });
+}
+
+async function runCodexGoalWorkflow(server, threadId, cmd, ctx) {
+  const goal = readCodexGoalWorkflow(cmd);
+  if (!goal) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const result = await runCodexGoal(server, threadId, goal);
+  emitCodexGoalWorkflowTimeline(ctx, result.action, result.goal);
   return true;
 }
 
@@ -558,6 +647,10 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         context.protocol,
       );
     });
+    if (await runCodexGoalWorkflow(server, threadId, cmd, ctx)) {
+      finalizeCodexRunContext(ctx);
+      return;
+    }
     if (await runCodexReviewWorkflow(server, threadId, cmd, ctx)) {
       finalizeCodexRunContext(ctx);
       return;

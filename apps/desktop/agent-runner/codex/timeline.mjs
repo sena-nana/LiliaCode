@@ -319,6 +319,44 @@ export function emitCodexItemTimeline(eventType, item, ctx = null) {
   }
 }
 
+function codexGoalTimelineStatus(goal, cleared = false) {
+  if (cleared) return "cancelled";
+  const status = stringOrNull(goal?.status);
+  if (status === "complete") return "success";
+  if (status === "blocked") return "error";
+  if (status === "paused" || status === "usageLimited" || status === "budgetLimited") {
+    return "pending";
+  }
+  return "info";
+}
+
+function emitCodexGoalTimeline(eventType, params, ctx) {
+  if (!ctx) return;
+  const cleared = eventType === "thread.goal.cleared";
+  const goal = isRecord(params?.goal) ? params.goal : null;
+  ctx.protocol.emitTimeline({
+    kind: "goal",
+    status: codexGoalTimelineStatus(goal, cleared),
+    title: cleared ? "Codex goal cleared" : "Codex goal updated",
+    summary: cleared
+      ? "Codex thread goal 已清除"
+      : shortText(goal?.objective, 1200) || "Codex thread goal",
+    payload: {
+      backend: "codex",
+      eventType,
+      subkind: "thread_goal",
+      cleared,
+      threadId: stringOrNull(params?.threadId) || stringOrNull(goal?.threadId),
+      turnId: stringOrNull(params?.turnId),
+      goal,
+      goalStatus: stringOrNull(goal?.status),
+    },
+    sourceId: cleared
+      ? `codex:goal:cleared:${stringOrNull(params?.threadId) || "thread"}`
+      : `codex:goal:updated:${stringOrNull(goal?.threadId) || stringOrNull(params?.threadId) || "thread"}`,
+  });
+}
+
 function secondsToMillis(value) {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.trunc(value * 1000)
@@ -426,6 +464,11 @@ export function mapCodexEventToNdjson(ev, ctx) {
   }
 
   if (type === "thread.started") return;
+
+  if (type === "thread.goal.updated" || type === "thread.goal.cleared") {
+    emitCodexGoalTimeline(type, ev, ctx);
+    return;
+  }
 
   if (type === "turn.started") {
     ctx.currentTurnId = stringOrNull(ev.turn?.id) || stringOrNull(ev.turnId) || ctx.currentTurnId;
@@ -535,6 +578,12 @@ export function normalizeCodexAppServerEvent(msg) {
       id: stringOrNull(params.itemId) || "codex:agent-message",
       delta: stringOrNull(params.delta) || "",
     };
+  }
+  if (method === "thread/goal/updated") {
+    return { type: "thread.goal.updated", ...params };
+  }
+  if (method === "thread/goal/cleared") {
+    return { type: "thread.goal.cleared", ...params };
   }
   return null;
 }

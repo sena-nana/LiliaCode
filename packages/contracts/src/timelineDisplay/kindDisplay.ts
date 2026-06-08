@@ -50,6 +50,26 @@ export function buildByKind({ kind, status, title, summary, payload }: KindBuild
         preview: proposed || summary,
       };
     }
+    case "goal": {
+      const goalValue = pick(payload, ["goal"]);
+      const goal = isRecord(goalValue) ? goalValue : {};
+      const objective = readFirstString(goal, ["objective"], 600) || summary;
+      const goalStatus = readFirstString(payload, ["goalStatus", "status"], 80);
+      return {
+        icon: "goal",
+        label: payload.cleared === true ? "Goal 已清除" : "Codex Goal",
+        preview: objective,
+        details: [
+          lineDetail(objective, "muted"),
+          fieldsDetail([
+            displayField("status", goalStatus),
+            displayField("tokens", goalTokensText(goal)),
+            displayField("thread", pick(payload, ["threadId"])),
+          ]),
+        ].filter((d): d is AgentTimelineDisplayDetail => d !== null),
+        group: { key: "kind:goal", bucket: "goal", unit: "个 Goal", count: 1 },
+      };
+    }
     case "mcp": {
       if (isCodexMcpConfigEvent(payload)) {
         return buildDiagnosticDisplay({ kind, status, title, summary, payload });
@@ -154,6 +174,17 @@ export function buildByKind({ kind, status, title, summary, payload }: KindBuild
       };
     }
   }
+}
+
+function goalTokensText(goal: Record<string, unknown>): string {
+  const used = pick(goal, ["tokensUsed"]);
+  const budget = pick(goal, ["tokenBudget"]);
+  if (typeof used !== "number") return "";
+  return typeof budget === "number" ? `${used}/${budget}` : String(used);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isCodexMcpConfigEvent(payload: Record<string, unknown>): boolean {

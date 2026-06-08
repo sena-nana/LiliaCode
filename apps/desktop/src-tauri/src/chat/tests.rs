@@ -236,6 +236,20 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn empty_codex_goal_does_not_persist_user_message() {
+        let workflow = Some(ChatWorkflow::CodexGoal {
+            action: "set".to_string(),
+            objective: Some("完成 Thread Goal 接入".to_string()),
+            status: Some("active".to_string()),
+            token_budget: None,
+        });
+
+        assert!(!should_persist_user_message("", &workflow));
+        assert!(!should_persist_user_message("  ", &workflow));
+        assert!(should_persist_user_message("补充说明", &workflow));
+    }
+
+    #[test]
     fn chat_message_ids_do_not_reset_to_counter_values() {
         let first = new_chat_message_id();
         let second = new_chat_message_id();
