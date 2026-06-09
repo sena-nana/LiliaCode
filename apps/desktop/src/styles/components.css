@@ -748,23 +748,6 @@ button:disabled,
   color: var(--text);
 }
 
-.settings-inline-error {
-  color: var(--err);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.codex-advanced-settings {
-  display: grid;
-  gap: 0;
-  min-width: 0;
-}
-
-.codex-advanced-settings .ui-segmented {
-  flex-wrap: wrap;
-  height: auto;
-}
-
 /* 设置页连接模式横幅——挂在「Claude 连接」卡片顶部。 */
 .conn-banner {
   display: flex;
