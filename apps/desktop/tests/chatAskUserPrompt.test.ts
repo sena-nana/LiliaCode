@@ -1,10 +1,11 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskUserSpec } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { installAgentInteractionBridge } from "../src/composables/useAgentInteractionBridge";
 import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
+import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
@@ -14,7 +15,9 @@ import {
   emitMockTimelineEvent,
   mockInvoke,
   replaceMockTimelineEvents,
+  setMockActiveBackend,
   setMockChatRunning,
+  setMockComposerStateHandler,
 } from "./tauriMock";
 
 const askUserSpec: AskUserSpec = {
@@ -86,6 +89,51 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
 async function enableNonInterruptMode() {
   await setAgentInteractionSettings({ nonInterruptMode: true });
   mockInvoke.mockClear();
+}
+
+async function renderCodexTaskDetail(taskId = "t-002") {
+  setMockActiveBackend("codex");
+  await useConnectionStatus({ probe: false }).setActiveBackend("codex");
+  setMockComposerStateHandler((id) => ({
+    taskId: id,
+    backend: "codex",
+    model: "gpt-5.5",
+    planMode: false,
+    permission: "ask",
+  }));
+  const view = await renderTaskDetail(taskId);
+  await waitFor(() => {
+    expect(view.getByRole("button", { name: "代码审查" })).not.toBeDisabled();
+  });
+  mockInvoke.mockClear();
+  return view;
+}
+
+function latestChatSendArgs() {
+  const calls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+  return calls.at(-1)?.[1] as Record<string, unknown> | undefined;
+}
+
+async function expectLatestChatSend(partial: Record<string, unknown>) {
+  await waitFor(() => {
+    expect(latestChatSendArgs()).toMatchObject({
+      taskId: "t-002",
+      ...partial,
+    });
+  });
+}
+
+function finishCodexWorkflow(sessionId: string) {
+  emitTauriEvent("chat:done", { taskId: "t-002", sessionId, subtype: null });
+  mockInvoke.mockClear();
+}
+
+async function clickCodexNativeMenuItem(
+  view: ReturnType<typeof render>,
+  name: string | RegExp,
+) {
+  await fireEvent.click(view.getByRole("button", { name: "Codex 原生接口" }));
+  await fireEvent.click(view.getByRole("menuitem", { name }));
 }
 
 function emitAskUserRequest(
@@ -275,6 +323,8 @@ describe("chat AskUser prompt", () => {
       resolveAskUser({ answers: {}, cancelled: true });
     }
     await Promise.resolve();
+    await useConnectionStatus({ probe: false }).setActiveBackend("claude");
+    setMockComposerStateHandler(null);
 
     unlistenInteraction?.();
     unlistenInteraction = null;
@@ -481,6 +531,144 @@ describe("chat AskUser prompt", () => {
         },
       }, undefined);
     });
+  });
+
+  it("Codex review 和 fix suggestion 从用户入口透传完整 workflow 到发送命令", async () => {
+    const view = await renderCodexTaskDetail();
+
+    await setComposerText(view, "重点看权限边界");
+    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    await expectLatestChatSend({
+      content: "重点看权限边界",
+      workflow: {
+        type: "codex_review",
+        target: { type: "uncommittedChanges" },
+        instructions: "重点看权限边界",
+        delivery: "inline",
+      },
+    });
+
+    finishCodexWorkflow("thread-review");
+
+    await setComposerText(view, "优先给最小修复");
+    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    await expectLatestChatSend({
+      content: "优先给最小修复",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+        instructions: "优先给最小修复",
+        mode: "suggest",
+      },
+    });
+  });
+
+  it("Codex timeline batch apply 入口透传来源 turn、类型和摘要", async () => {
+    const view = await renderCodexTaskDetail();
+
+    emitMockTimelineEvent("t-002", {
+      id: "reply-apply-1",
+      taskId: "t-002",
+      turnId: "turn-source",
+      backend: "codex",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      summary: "建议修复权限边界",
+      payload: {
+        role: "assistant",
+        backend: "codex",
+        content: "建议修复权限边界",
+        workflowSource: {
+          sourceKind: "fix_suggestion",
+          codexTurnId: "codex-turn-1",
+        },
+      },
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    });
+
+    await fireEvent.click(await view.findByRole("button", { name: "应用建议" }));
+
+    await expectLatestChatSend({
+      content: "",
+      workflow: {
+        type: "codex_batch_apply",
+        sourceTurnId: "turn-source",
+        sourceKind: "fix_suggestion",
+        sourceSummary: "建议修复权限边界",
+      },
+    });
+  });
+
+  it("Codex goal 和原生接口动作以 workflow 进入发送命令", async () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("完成全链路收口");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      const view = await renderCodexTaskDetail();
+
+      await fireEvent.click(view.getByRole("button", { name: "设置 Codex goal" }));
+      const workflows = [
+        {
+          sessionId: "thread-goal",
+          run: async () => undefined,
+          workflow: {
+            type: "codex_goal",
+            action: "set",
+            objective: "完成全链路收口",
+            status: "active",
+            tokenBudget: null,
+          },
+        },
+        {
+          sessionId: "thread-compact",
+          run: () => fireEvent.click(view.getByRole("button", { name: "压缩 Codex 上下文" })),
+          workflow: { type: "codex_compact" },
+        },
+        {
+          sessionId: "thread-clean",
+          run: () => fireEvent.click(view.getByRole("button", { name: "清理 Codex 后台终端" })),
+          workflow: { type: "codex_background_terminals_clean" },
+        },
+        {
+          sessionId: "thread-memory",
+          run: () => clickCodexNativeMenuItem(view, "启用 Memory"),
+          workflow: { type: "codex_memory_mode", mode: "enabled" },
+        },
+        {
+          sessionId: "thread-memory-reset",
+          run: () => clickCodexNativeMenuItem(view, /重置 Memory/),
+          workflow: { type: "codex_memory_reset" },
+        },
+        {
+          sessionId: "thread-fork",
+          run: () => clickCodexNativeMenuItem(view, "Fork 当前 Thread"),
+          workflow: { type: "codex_thread_fork", excludeTurns: true },
+        },
+        {
+          sessionId: "thread-config",
+          run: () => clickCodexNativeMenuItem(view, "读取配置诊断"),
+          workflow: { type: "codex_config_diagnostics", includeLayers: true },
+        },
+      ];
+
+      for (const item of workflows) {
+        if (item.sessionId !== "thread-goal") {
+          await item.run();
+        }
+        await expectLatestChatSend({ content: "", workflow: item.workflow });
+        finishCodexWorkflow(item.sessionId);
+      }
+    } finally {
+      promptSpy.mockRestore();
+      confirmSpy.mockRestore();
+    }
   });
 
 
