@@ -79,6 +79,7 @@ const emit = defineEmits<{
   "clean-codex-background-terminals": [];
   "set-codex-memory-mode": [mode: "enabled" | "disabled"];
   "reset-codex-memory": [];
+  "set-codex-goal": [objective: string];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
   "update:state": [next: ChatComposerState];
@@ -824,6 +825,7 @@ defineExpose({ focusInput });
         @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
         @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
         @reset-codex-memory="emit('reset-codex-memory')"
+        @set-codex-goal="emit('set-codex-goal', $event)"
         @fork-codex-thread="emit('fork-codex-thread')"
         @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
         @submit-entry="submitEntry"

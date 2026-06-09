@@ -58,19 +58,24 @@ const guides = computed(() =>
   todos.value.filter((todo) => todo.source === "lilia" && todo.guideStatus !== "sent"),
 );
 
+const visibleGoal = computed(() =>
+  props.showGoal && props.goal?.objective.trim() ? props.goal : null,
+);
+
 const hasVisibleTodos = computed(() =>
-  props.showGoal || agentTodos.value.length > 0 || guides.value.length > 0,
+  visibleGoal.value !== null || agentTodos.value.length > 0 || guides.value.length > 0,
 );
 
 const goalText = computed(() =>
-  props.goal?.objective?.trim() || "未设置 Codex goal",
+  visibleGoal.value?.objective.trim() ?? "",
 );
 
 const goalMeta = computed(() => {
-  if (!props.goal) return "Codex";
-  const status = goalStatusLabel(props.goal.status);
-  const used = Number.isFinite(props.goal.tokensUsed) ? props.goal.tokensUsed : 0;
-  const budget = props.goal.tokenBudget;
+  const goal = visibleGoal.value;
+  if (!goal) return "";
+  const status = goalStatusLabel(goal.status);
+  const used = Number.isFinite(goal.tokensUsed) ? goal.tokensUsed : 0;
+  const budget = goal.tokenBudget;
   const tokenText = typeof budget === "number" && Number.isFinite(budget)
     ? `${used}/${budget}`
     : `${used}`;
@@ -164,7 +169,7 @@ onUnmounted(async () => {
 
 <template>
   <div v-if="hasVisibleTodos" class="todo-float" aria-label="Todo 与引导">
-    <section v-if="showGoal" class="todo-float__section todo-float__section--goal">
+    <section v-if="visibleGoal" class="todo-float__section todo-float__section--goal">
       <ul class="todo-float__list">
         <li class="todo-float__row todo-float__row--goal">
           <span class="todo-float__source todo-float__source--goal" title="Codex Goal">
