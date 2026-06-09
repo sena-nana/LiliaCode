@@ -9,6 +9,7 @@ mod agent_event_sink_tests {
     use crate::chat::commands::{
         agent_interaction_response_payload, composer_permission_update_payload,
     };
+    use crate::chat::runner::build_runner_stdin_payload;
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
@@ -304,6 +305,44 @@ mod agent_event_sink_tests {
         let diagnostics_json = serde_json::to_value(&diagnostics).unwrap();
         assert_eq!(diagnostics_json["includeLayers"], json!(false));
         assert!(diagnostics_json.get("include_layers").is_none());
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_ui_to_runner_contract() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            plan_mode: true,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let workflow = ChatWorkflow::CodexReview {
+            target: CodexReviewTarget::UncommittedChanges,
+            instructions: None,
+            delivery: Some("inline".to_string()),
+        };
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "重点看全链路",
+            &[],
+            Some(&workflow),
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["cwd"], json!("C:\\Files\\workspace\\Lilia"));
+        assert_eq!(payload["prompt"], json!("重点看全链路"));
+        assert_eq!(payload["resumeSessionId"], json!("thread-1"));
+        assert_eq!(payload["planMode"], json!(true));
+        assert_eq!(payload["permission"], json!("ask"));
+        assert_eq!(payload["workflow"]["type"], json!("codex_review"));
+        assert_eq!(payload["extensions"]["mcpServers"], json!([]));
+        assert_eq!(payload["model"], json!("gpt-5.5"));
     }
 
     #[test]

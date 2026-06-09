@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use rusqlite::{params, OptionalExtension};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -129,18 +130,16 @@ pub(crate) fn spawn_agent_turn(
         } else {
             None
         };
-        let mut stdin_payload = serde_json::json!({
-            "backend": backend_for_thread,
-            "cwd": project_cwd,
-            "prompt": prompt_for_thread,
-            "attachments": attachments_for_thread,
-            "workflow": workflow_for_thread,
-            "model": composer_for_thread.model,
-            "resumeSessionId": resume_session_id,
-            "planMode": composer_for_thread.plan_mode,
-            "permission": composer_for_thread.permission,
-            "extensions": extensions,
-        });
+        let mut stdin_payload = build_runner_stdin_payload(
+            &backend_for_thread,
+            &project_cwd,
+            &prompt_for_thread,
+            &attachments_for_thread,
+            workflow_for_thread.as_ref(),
+            &composer_for_thread,
+            resume_session_id.as_deref(),
+            &extensions,
+        );
         if let Some(context) = build_runner_conversation_context(&app_handle, &task_id_for_thread) {
             stdin_payload["conversationContext"] = context;
         }
@@ -424,6 +423,30 @@ pub(crate) fn spawn_agent_turn(
             !finished.interrupted && !finished.reset,
         );
     });
+}
+
+pub(crate) fn build_runner_stdin_payload<T: Serialize>(
+    backend: &str,
+    project_cwd: &str,
+    prompt: &str,
+    attachments: &[ChatAttachment],
+    workflow: Option<&ChatWorkflow>,
+    composer: &ChatComposerState,
+    resume_session_id: Option<&str>,
+    extensions: &T,
+) -> JsonValue {
+    serde_json::json!({
+        "backend": backend,
+        "cwd": project_cwd,
+        "prompt": prompt,
+        "attachments": attachments,
+        "workflow": workflow,
+        "model": composer.model,
+        "resumeSessionId": resume_session_id,
+        "planMode": composer.plan_mode,
+        "permission": composer.permission,
+        "extensions": extensions,
+    })
 }
 
 fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState) -> JsonValue {
