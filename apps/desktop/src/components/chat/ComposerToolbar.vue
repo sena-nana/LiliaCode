@@ -15,18 +15,15 @@ import {
   Paperclip,
   RotateCcw,
   ShieldCheck,
-  SlidersHorizontal,
   Square,
 } from "lucide-vue-next";
 import type {
   ChatAttachment,
   ChatComposerState,
-  CodexComposerSettings,
   CodexReviewTarget,
   PermissionMode,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
-import CodexAdvancedSettingsPanel from "./CodexAdvancedSettingsPanel.vue";
 import { attachmentImageSrc } from "./imageViewer";
 
 const props = defineProps<{
@@ -49,7 +46,6 @@ const emit = defineEmits<{
   pickAttachments: [];
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
-  updateCodexSettings: [patch: CodexComposerSettings];
   startCodexReview: [target: CodexReviewTarget];
   startCodexFixSuggestion: [target: CodexReviewTarget];
   startCodexCompact: [];
@@ -68,8 +64,6 @@ const fixSuggestionOpen = ref(false);
 const fixSuggestionRoot = ref<HTMLElement | null>(null);
 const codexWorkflowOpen = ref(false);
 const codexWorkflowRoot = ref<HTMLElement | null>(null);
-const codexSettingsOpen = ref(false);
-const codexSettingsRoot = ref<HTMLElement | null>(null);
 
 function closeReviewMenu() {
   reviewOpen.value = false;
@@ -98,15 +92,6 @@ function toggleCodexWorkflowMenu() {
   codexWorkflowOpen.value = !codexWorkflowOpen.value;
 }
 
-function closeCodexSettings() {
-  codexSettingsOpen.value = false;
-}
-
-function toggleCodexSettings() {
-  if (props.state.backend !== "codex" || props.actionsBlocked) return;
-  codexSettingsOpen.value = !codexSettingsOpen.value;
-}
-
 function onDocPointer(e: PointerEvent) {
   if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
   if (
@@ -117,9 +102,6 @@ function onDocPointer(e: PointerEvent) {
   }
   if (codexWorkflowRoot.value && !codexWorkflowRoot.value.contains(e.target as Node)) {
     closeCodexWorkflowMenu();
-  }
-  if (codexSettingsRoot.value && !codexSettingsRoot.value.contains(e.target as Node)) {
-    closeCodexSettings();
   }
 }
 
@@ -134,10 +116,6 @@ function onKey(e: KeyboardEvent) {
   }
   if (e.key === "Escape" && codexWorkflowOpen.value) {
     closeCodexWorkflowMenu();
-    e.stopPropagation();
-  }
-  if (e.key === "Escape" && codexSettingsOpen.value) {
-    closeCodexSettings();
     e.stopPropagation();
   }
 }
@@ -208,9 +186,9 @@ function syncDocumentListeners(open: boolean) {
 }
 
 watch(
-  [reviewOpen, fixSuggestionOpen, codexWorkflowOpen, codexSettingsOpen],
-  ([review, fixSuggestion, workflow, settings]) => {
-    syncDocumentListeners(review || fixSuggestion || workflow || settings);
+  [reviewOpen, fixSuggestionOpen, codexWorkflowOpen],
+  ([review, fixSuggestion, workflow]) => {
+    syncDocumentListeners(review || fixSuggestion || workflow);
   },
 );
 
@@ -366,32 +344,6 @@ onBeforeUnmount(() => {
               <GitCommit :size="14" aria-hidden="true" />
               <span class="dd__item-label">指定提交...</span>
             </button>
-          </div>
-        </div>
-        <div v-if="state.backend === 'codex'" ref="codexSettingsRoot" class="chat-review-menu">
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': codexSettingsOpen }"
-            :disabled="actionsBlocked"
-            title="Codex 高级字段"
-            aria-label="Codex 高级字段"
-            :aria-haspopup="true"
-            :aria-expanded="codexSettingsOpen"
-            @click="toggleCodexSettings"
-          >
-            <SlidersHorizontal :size="14" aria-hidden="true" />
-          </button>
-          <div
-            v-if="codexSettingsOpen"
-            class="dd__menu dd__menu--top chat-review-menu__menu chat-codex-settings-menu"
-            role="menu"
-          >
-            <CodexAdvancedSettingsPanel
-              :value="state.codexSettings"
-              :disabled="actionsBlocked"
-              @update="emit('updateCodexSettings', $event)"
-            />
           </div>
         </div>
         <div v-if="state.backend === 'codex'" ref="codexWorkflowRoot" class="chat-review-menu">

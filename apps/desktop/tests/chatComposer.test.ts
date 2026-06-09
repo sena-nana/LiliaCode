@@ -904,6 +904,7 @@ describe("ChatComposer", () => {
 
     const workflowButton = view.getByRole("button", { name: "Codex 原生接口" });
     expect(workflowButton).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "Codex 高级字段" })).toBeNull();
 
     await fireEvent.click(workflowButton);
     await fireEvent.click(view.getByRole("menuitem", { name: "启用 Memory" }));
