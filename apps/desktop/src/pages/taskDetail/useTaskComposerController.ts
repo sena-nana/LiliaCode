@@ -44,6 +44,7 @@ import {
   type ToolConsentUpdatedInput,
 } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
+import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
@@ -255,6 +256,17 @@ export function useTaskComposerController(options: {
     await sendCodexWorkflow({
       type: "codex_config_diagnostics",
       includeLayers: true,
+    });
+  }
+
+  async function onStartCodexBatchApply(input: CodexBatchApplyInput) {
+    const sourceSummary = input.sourceSummary.trim();
+    if (!sourceSummary) return;
+    await sendCodexWorkflow({
+      type: "codex_batch_apply",
+      sourceTurnId: input.sourceTurnId,
+      sourceKind: input.sourceKind,
+      sourceSummary,
     });
   }
 
@@ -539,6 +551,7 @@ export function useTaskComposerController(options: {
     onResetCodexMemory,
     onForkCodexThread,
     onReadCodexConfigDiagnostics,
+    onStartCodexBatchApply,
     onSetCodexGoal,
     onRefreshCodexGoal,
     onClearCodexGoal,

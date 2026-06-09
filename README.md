@@ -92,7 +92,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex profiles: support global and project-level profiles, reasoning effort, runtime workspace roots, controlled permissions, and sticky `thread/settings/update`.
 - [x] Codex history: search, preview, import, and continue existing Codex app-server threads from the left sidebar import entry.
 - [x] Codex workflows: built-in code review and fix suggestion flows.
-- [ ] Codex batch-change workflows are not yet available.
+- [x] Codex batch-change workflows: apply review / fix suggestions through a forced Plan approval flow.
 - [ ] Built-in browser interaction: IAB-based user interaction or browser debugging is not yet available.
 
 ### LiliaCode-Specific Features

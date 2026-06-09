@@ -238,6 +238,12 @@ mod agent_event_sink_tests {
                 instructions: None,
                 mode: Some("suggest".to_string()),
             },
+            ChatWorkflow::CodexBatchApply {
+                source_turn_id: "turn-source".to_string(),
+                source_kind: "fix_suggestion".to_string(),
+                source_summary: "建议修复权限边界".to_string(),
+                instructions: None,
+            },
             ChatWorkflow::CodexGoal {
                 action: "set".to_string(),
                 objective: Some("完成 Thread Goal 接入".to_string()),
@@ -299,6 +305,33 @@ mod agent_event_sink_tests {
         let fix_json = serde_json::to_value(&fix).unwrap();
         assert_eq!(fix_json["type"], json!("codex_fix_suggestion"));
         assert_eq!(fix_json["target"]["branch"], json!("main"));
+
+        let batch_apply = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "codex_batch_apply",
+            "sourceTurnId": "turn-source",
+            "sourceKind": "fix_suggestion",
+            "sourceSummary": "建议修复权限边界",
+            "instructions": "应用最小改动",
+        }))
+        .unwrap();
+        let ChatWorkflow::CodexBatchApply {
+            source_turn_id,
+            source_kind,
+            source_summary,
+            instructions,
+        } = &batch_apply
+        else {
+            panic!("unexpected workflow: {batch_apply:?}");
+        };
+        assert_eq!(source_turn_id, "turn-source");
+        assert_eq!(source_kind, "fix_suggestion");
+        assert_eq!(source_summary, "建议修复权限边界");
+        assert_eq!(instructions.as_deref(), Some("应用最小改动"));
+        let batch_apply_json = serde_json::to_value(&batch_apply).unwrap();
+        assert_eq!(batch_apply_json["sourceTurnId"], json!("turn-source"));
+        assert_eq!(batch_apply_json["sourceKind"], json!("fix_suggestion"));
+        assert_eq!(batch_apply_json["sourceSummary"], json!("建议修复权限边界"));
+        assert!(batch_apply_json.get("source_turn_id").is_none());
 
         let fork = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "codex_thread_fork",
@@ -365,6 +398,42 @@ mod agent_event_sink_tests {
         assert_eq!(payload["workflow"]["instructions"], json!("重点看全链路"));
         assert_eq!(payload["extensions"]["mcpServers"], json!([]));
         assert_eq!(payload["model"], json!("gpt-5.5"));
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_codex_batch_apply_workflow() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            plan_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let workflow = ChatWorkflow::CodexBatchApply {
+            source_turn_id: "turn-source".to_string(),
+            source_kind: "fix_suggestion".to_string(),
+            source_summary: "建议修复权限边界".to_string(),
+            instructions: None,
+        };
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "",
+            &[],
+            Some(&workflow),
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["prompt"], json!(""));
+        assert_eq!(payload["workflow"]["type"], json!("codex_batch_apply"));
+        assert_eq!(payload["workflow"]["sourceTurnId"], json!("turn-source"));
+        assert_eq!(payload["workflow"]["sourceKind"], json!("fix_suggestion"));
+        assert_eq!(payload["workflow"]["sourceSummary"], json!("建议修复权限边界"));
     }
 
     #[test]

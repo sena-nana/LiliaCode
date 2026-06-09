@@ -9,6 +9,7 @@ import type {
 import { openPopupNewChat } from "../../services/popupWindows";
 import AgentTimeline from "./AgentTimeline.vue";
 import ChatScrollMap from "./ChatScrollMap.vue";
+import type { CodexBatchApplyInput } from "./codexBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 
 const props = defineProps<{
@@ -22,6 +23,7 @@ const props = defineProps<{
   pendingAgentActions?: PendingAgentAction[];
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
+  canStartCodexBatchApply?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +31,7 @@ const emit = defineEmits<{
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
   "insert-draft-text": [text: string];
+  "start-codex-batch-apply": [input: CodexBatchApplyInput];
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -326,10 +329,12 @@ onBeforeUnmount(() => {
           :pending-actions="pendingAgentActions"
           :show-expired-pending-actions="showExpiredPendingActions"
           :can-retry-event="canRetryEvent"
+          :can-start-codex-batch-apply="canStartCodexBatchApply"
           @event-toggled="onTimelineEventToggled"
           @resolve-pending-action="emit('resolvePendingAgentAction', $event)"
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
+          @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
         />
       </template>
       <div class="chat-controls-wrap">

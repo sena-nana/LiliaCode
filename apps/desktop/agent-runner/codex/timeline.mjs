@@ -606,7 +606,7 @@ export function normalizeCodexPlanSteps(plan) {
 }
 
 export function createCodexRunContext(cmd, protocol, sessionId = null) {
-  return {
+  const ctx = {
     protocol,
     lastThreadId: sessionId,
     currentTurnId: null,
@@ -626,10 +626,30 @@ export function createCodexRunContext(cmd, protocol, sessionId = null) {
     latestPlanPayload: null,
     executionPermission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
     assistantSuccessEmitted: false,
-    pacer: createTextPacer({
-      emit: (text) => protocol.emitAssistantMessageTimeline(text, "running", "codex"),
-    }),
+    workflowSource: null,
+    pacer: null,
   };
+  ctx.pacer = createTextPacer({
+    emit: (text) =>
+      protocol.emitAssistantMessageTimeline(
+        text,
+        "running",
+        "codex",
+        ctxWorkflowPayload(ctx),
+      ),
+  });
+  return ctx;
+}
+
+function ctxWorkflowPayload(ctx) {
+  return isCodexSuggestionWorkflowSource(ctx?.workflowSource)
+    ? { workflowSource: ctx.workflowSource }
+    : null;
+}
+
+function isCodexSuggestionWorkflowSource(source) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return false;
+  return source.sourceKind === "review" || source.sourceKind === "fix_suggestion";
 }
 
 export function emitCodexAssistantSuccess(ctx, finalText = null) {
@@ -641,7 +661,12 @@ export function emitCodexAssistantSuccess(ctx, finalText = null) {
   ctx.pacer.finishImmediate();
   if (!text) return;
   ctx.assistantSuccessEmitted = true;
-  ctx.protocol.emitAssistantMessageTimeline(text, "success", "codex");
+  ctx.protocol.emitAssistantMessageTimeline(
+    text,
+    "success",
+    "codex",
+    ctxWorkflowPayload(ctx),
+  );
 }
 
 export function resolveCodexPlanApproval(ctx, result) {
@@ -677,6 +702,7 @@ export function resetCodexContextForNextTurn(ctx, options = {}) {
   ctx.pendingPlanPayload = null;
   ctx.latestPlanPayload = null;
   ctx.assistantSuccessEmitted = false;
+  ctx.workflowSource = options.workflowSource ?? null;
   ctx.pacer.finishImmediate();
 }
 

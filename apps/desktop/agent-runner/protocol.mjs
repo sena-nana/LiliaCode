@@ -67,8 +67,11 @@ export function createProtocolEmitter({ write } = {}) {
     emit({ type: "error", message, ...(payload ? { payload } : {}) });
   }
 
-  function emitAssistantMessageTimeline(text, status, backend = "assistant") {
+  function emitAssistantMessageTimeline(text, status, backend = "assistant", extraPayload = null) {
     const content = typeof text === "string" ? text : "";
+    const extras = extraPayload && typeof extraPayload === "object" && !Array.isArray(extraPayload)
+      ? extraPayload
+      : {};
     emitTimeline({
       kind: "message",
       status,
@@ -78,6 +81,7 @@ export function createProtocolEmitter({ write } = {}) {
         role: "assistant",
         content,
         backend,
+        ...extras,
       },
       sourceId: `${backend}:text:message`,
     });

@@ -1322,6 +1322,33 @@
   font-weight: 500;
 }
 
+.timeline-card--final-reply__actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.timeline-card--final-reply__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.timeline-card--final-reply__action:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 /* 流式生成时把光标贴到 markdown 块末尾，与 ChatBubble 用同一闪烁动画。 */
 .timeline-card--final-reply__cursor {
   align-self: flex-start;

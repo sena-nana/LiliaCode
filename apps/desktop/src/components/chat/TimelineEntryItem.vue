@@ -10,6 +10,7 @@ import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
 import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
 import TimelinePlanCard from "./TimelinePlanCard.vue";
+import type { CodexBatchApplyInput } from "./codexBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
 import {
@@ -41,6 +42,7 @@ const props = defineProps<{
   pendingActions?: PendingAgentAction[];
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
+  canStartCodexBatchApply?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +52,7 @@ const emit = defineEmits<{
   resolvePendingAction: [resolution: PendingAgentActionResolution];
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
+  "start-codex-batch-apply": [input: CodexBatchApplyInput];
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
@@ -397,12 +400,14 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 :pending-actions="pendingActions"
                 :show-expired-pending-actions="showExpiredPendingActions"
                 :can-retry-event="canRetryEvent"
+                :can-start-codex-batch-apply="canStartCodexBatchApply"
                 @toggle-event="emit('toggleEvent', $event)"
                 @toggle-group="emit('toggleGroup', $event)"
                 @toggle-process-group="emit('toggleProcessGroup', $event)"
                 @resolve-pending-action="emit('resolvePendingAction', $event)"
                 @retry-event="emit('retry-event', $event)"
                 @open-image="emit('open-image', $event)"
+                @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
               />
             </ol>
           </div>
@@ -416,7 +421,9 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               v-if="isTimelineFinalReply(entry.event)"
               :event="entry.event"
               :streaming="isTimelineFinalReplyStreaming(entry.event)"
+              :can-start-codex-batch-apply="canStartCodexBatchApply"
               @open-image="emit('open-image', $event)"
+              @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
             />
             <TimelineDeclaredEvent
               v-else

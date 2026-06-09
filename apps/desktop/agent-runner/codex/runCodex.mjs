@@ -39,6 +39,7 @@ import { buildPlanApprovalSpec } from "../planApproval.mjs";
 export const EMPTY_PROMPT_CODEX_WORKFLOWS = new Set([
   "codex_review",
   "codex_fix_suggestion",
+  "codex_batch_apply",
   "codex_goal",
   "codex_compact",
   "codex_background_terminals_clean",
@@ -386,6 +387,25 @@ function readCodexFixSuggestionWorkflow(cmd) {
   return { target, instructions, mode };
 }
 
+function readCodexBatchApplyWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_batch_apply") return null;
+  const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
+  const sourceKind = stringOrNull(workflow.sourceKind);
+  const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
+  if (!sourceTurnId) throw new Error("Codex batch apply workflow missing sourceTurnId");
+  if (sourceKind !== "review" && sourceKind !== "fix_suggestion") {
+    throw new Error("Codex batch apply workflow missing a valid sourceKind");
+  }
+  if (!sourceSummary) throw new Error("Codex batch apply workflow missing sourceSummary");
+  return {
+    sourceTurnId,
+    sourceKind,
+    sourceSummary,
+    instructions: stringOrNull(workflow.instructions)?.trim() || "",
+  };
+}
+
 function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
   if (workflow.mode !== "suggest") return cmd;
   const codexSettings = isRecord(cmd?.codexSettings) ? { ...cmd.codexSettings } : {};
@@ -581,6 +601,32 @@ export function buildCodexFixSuggestionPrompt(workflow, cmd) {
   ].join("\n");
 }
 
+export function buildCodexBatchApplyPrompt(workflow, cmd) {
+  const prompt = stringOrNull(cmd?.prompt)?.trim() || "";
+  const instructions = workflow.instructions || "";
+  const extraContext = prompt && prompt !== instructions ? prompt : "";
+  return [
+    "Lilia Codex batch apply workflow.",
+    "",
+    `Source kind: ${workflow.sourceKind}`,
+    `Source turn id: ${workflow.sourceTurnId}`,
+    `Workspace cwd: ${stringOrNull(cmd?.cwd) || ""}`,
+    "",
+    "Goal: turn the review or fix suggestions below into a concrete batch of safe code changes.",
+    "First produce a clear implementation plan and wait for Lilia plan approval before editing files or running modifying commands.",
+    "After approval, apply the changes in the current workspace, keep the patch focused on the source suggestions, and use existing Lilia/Codex approval prompts whenever user confirmation is needed.",
+    "",
+    "Source suggestions:",
+    workflow.sourceSummary,
+    "",
+    "User instructions:",
+    instructions || "(none)",
+    "",
+    "Additional composer context:",
+    extraContext || "(none)",
+  ].join("\n");
+}
+
 function readCollaborationModes(result) {
   if (!isRecord(result)) return [];
   return Array.isArray(result.data) ? result.data.filter(isRecord) : [];
@@ -753,12 +799,102 @@ async function drainCodexCompactNotifications(server, ctx, threadId, timeoutMess
   }
 }
 
+async function runCodexTurnLoop(
+  server,
+  threadId,
+  cmd,
+  ctx,
+  cwdFn,
+  {
+    initialPrompt,
+    initialTurnKind,
+    selectedModel,
+    planPreset,
+    timeoutMessage = "Codex app-server turn timed out",
+  },
+) {
+  let nextPrompt = initialPrompt;
+  let nextTurnKind = initialTurnKind === "plan" ? "plan" : "default";
+  let shouldStartTurn = true;
+  while (shouldStartTurn) {
+    shouldStartTurn = false;
+    ctx.activeTurnKind = nextTurnKind;
+    const collaborationMode =
+      nextTurnKind === "plan"
+        ? buildCodexCollaborationMode("plan", selectedModel, planPreset)
+        : buildCodexCollaborationMode("default", selectedModel, null);
+    await flushCodexRuntimeSettings(ctx);
+    const startedTurn = await startCodexAppServerTurn(
+      server,
+      threadId,
+      nextPrompt,
+      cmd,
+      cwdFn,
+      { collaborationMode },
+    );
+    ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
+    await drainCodexTurnNotifications(server, ctx, timeoutMessage);
+    if (ctx.turnFailedSeen) {
+      continue;
+    }
+    if (nextTurnKind === "plan") {
+      if (!emitCodexPlanApprovalRequired(ctx)) {
+        throw new Error("Codex plan mode completed without a readable plan");
+      }
+      const result = await runCodexUiInteraction(ctx, "plan_approval", () =>
+        ctx.interactions.requestAskUser(buildPlanApprovalSpec("codex"), {
+          backend: "codex",
+          emitTimelineEvent: false,
+        }));
+      resolveCodexPlanApproval(ctx, result);
+      if (ctx.planRevisionRequest) {
+        const revisionRequest = ctx.planRevisionRequest;
+        resetCodexContextForNextTurn(ctx);
+        nextPrompt = buildCodexPlanRevisionPrompt(revisionRequest);
+        nextTurnKind = "plan";
+        shouldStartTurn = true;
+      } else if (ctx.planApproved) {
+        const approvedPlan = ctx.pendingPlanPayload?.plan || "";
+        resetCodexContextForNextTurn(ctx, { planMode: false });
+        nextPrompt = buildCodexPlanExecutionPrompt(approvedPlan);
+        nextTurnKind = "default";
+        shouldStartTurn = true;
+      } else if (ctx.planCancelled) {
+        ctx.protocol.emit({
+          type: "done",
+          sessionId: ctx.lastThreadId,
+          subtype: "cancelled",
+        });
+      }
+    }
+  }
+  return !ctx.planCancelled;
+}
+
+function codexBatchApplyTimelinePayload(threadId, workflow, extra = {}) {
+  return {
+    backend: "codex",
+    subkind: "batch_apply",
+    method: "turn/start",
+    threadId,
+    sourceTurnId: workflow.sourceTurnId,
+    sourceKind: workflow.sourceKind,
+    forcedPlan: true,
+    ...extra,
+  };
+}
+
 async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
   const review = readCodexReviewWorkflow(cmd);
   if (!review) return false;
   await flushCodexRuntimeSettings(ctx);
   const result = await startCodexReview(server, threadId, review);
   ctx.currentTurnId = codexTurnIdFromStartResult(result) || ctx.currentTurnId;
+  ctx.workflowSource = {
+    sourceKind: "review",
+    codexTurnId: ctx.currentTurnId,
+    target: review.target,
+  };
   ctx.protocol.emitTimeline({
     kind: "diagnostic",
     status: "started",
@@ -814,6 +950,12 @@ async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn =
       { collaborationMode: buildCodexCollaborationMode("default", normalizeCodexSettings(turnCmd).model, null) },
     );
     ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
+    ctx.workflowSource = {
+      sourceKind: "fix_suggestion",
+      codexTurnId: ctx.currentTurnId,
+      target: workflow.target,
+      mode: workflow.mode,
+    };
     await drainCodexTurnNotifications(server, ctx, "Codex fix suggestion timed out");
     if (ctx.turnFailedSeen) {
       throw new Error("Codex fix suggestion turn failed");
@@ -852,6 +994,70 @@ async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn =
     },
     sourceId: `codex:fix-suggestion:completed:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
   });
+  return true;
+}
+
+async function runCodexBatchApplyWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const workflow = readCodexBatchApplyWorkflow(cmd);
+  if (!workflow) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const prompt = buildCodexBatchApplyPrompt(workflow, {
+    ...cmd,
+    cwd: cmd.cwd || cwdFn(),
+  });
+  const selectedModel = normalizeCodexSettings(cmd).model || ctx.selectedModel || null;
+  const planPreset = await readCodexPlanModePreset(server);
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "started",
+    title: "Codex batch apply started",
+    summary: workflow.sourceKind,
+    payload: codexBatchApplyTimelinePayload(threadId, workflow, {
+      hasInstructions: Boolean(workflow.instructions),
+    }),
+    sourceId: `codex:batch-apply:start:${threadId}:${workflow.sourceTurnId}`,
+  });
+  try {
+    const completed = await runCodexTurnLoop(
+      server,
+      threadId,
+      cmd,
+      ctx,
+      cwdFn,
+      {
+        initialPrompt: prompt,
+        initialTurnKind: "plan",
+        selectedModel,
+        planPreset,
+        timeoutMessage: "Codex batch apply timed out",
+      },
+    );
+    if (!completed) return true;
+    if (ctx.turnFailedSeen) {
+      throw new Error("Codex batch apply turn failed");
+    }
+  } catch (err) {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex batch apply failed",
+      summary: err?.message || String(err),
+      payload: codexBatchApplyTimelinePayload(threadId, workflow, {
+        error: err?.message || String(err),
+      }),
+      sourceId: `codex:batch-apply:error:${threadId}:${workflow.sourceTurnId}`,
+    });
+    throw err;
+  }
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "success",
+    title: "Codex batch apply completed",
+    summary: workflow.sourceKind,
+    payload: codexBatchApplyTimelinePayload(threadId, workflow),
+    sourceId: `codex:batch-apply:completed:${threadId}:${workflow.sourceTurnId}`,
+  });
+  finalizeCodexRunContext(ctx);
   return true;
 }
 
@@ -1113,6 +1319,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexMemoryResetWorkflow },
   { run: runCodexThreadForkWorkflow, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
+  { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },
 ];
@@ -1189,6 +1396,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     const planPreset = cmd.planMode === true ? await readCodexPlanModePreset(server) : null;
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);
     ctx.cmd = cmd;
+    ctx.selectedModel = selectedModel;
     ctx.interactions = context.interactions;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
     ctx.settingsUpdatePromises = [];
@@ -1213,62 +1421,20 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     )) {
       return;
     }
-    let nextPrompt = cmd.prompt;
-    let nextTurnKind = cmd.planMode === true ? "plan" : "default";
-    let shouldStartTurn = true;
-    while (shouldStartTurn) {
-      shouldStartTurn = false;
-      ctx.activeTurnKind = nextTurnKind;
-      const collaborationMode =
-        nextTurnKind === "plan"
-          ? buildCodexCollaborationMode("plan", selectedModel, planPreset)
-          : buildCodexCollaborationMode("default", selectedModel, null);
-      await flushCodexRuntimeSettings(ctx);
-      const startedTurn = await startCodexAppServerTurn(
-        server,
-        threadId,
-        nextPrompt,
-        cmd,
-        context.cwd || process.cwd,
-        { collaborationMode },
-      );
-      ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
-      await drainCodexTurnNotifications(server, ctx, "Codex app-server turn timed out");
-      if (ctx.turnFailedSeen) {
-        continue;
-      }
-      if (nextTurnKind === "plan") {
-        if (!emitCodexPlanApprovalRequired(ctx)) {
-          throw new Error("Codex plan mode completed without a readable plan");
-        }
-        const result = await runCodexUiInteraction(ctx, "plan_approval", () =>
-          ctx.interactions.requestAskUser(buildPlanApprovalSpec("codex"), {
-            backend: "codex",
-            emitTimelineEvent: false,
-          }));
-        resolveCodexPlanApproval(ctx, result);
-        if (ctx.planRevisionRequest) {
-          const revisionRequest = ctx.planRevisionRequest;
-          resetCodexContextForNextTurn(ctx);
-          nextPrompt = buildCodexPlanRevisionPrompt(revisionRequest);
-          nextTurnKind = "plan";
-          shouldStartTurn = true;
-        } else if (ctx.planApproved) {
-          const approvedPlan = ctx.pendingPlanPayload?.plan || "";
-          resetCodexContextForNextTurn(ctx, { planMode: false });
-          nextPrompt = buildCodexPlanExecutionPrompt(approvedPlan);
-          nextTurnKind = "default";
-          shouldStartTurn = true;
-        } else if (ctx.planCancelled) {
-          ctx.protocol.emit({
-            type: "done",
-            sessionId: ctx.lastThreadId,
-            subtype: "cancelled",
-          });
-        }
-      }
-    }
-    if (ctx.planCancelled) {
+    const completed = await runCodexTurnLoop(
+      server,
+      threadId,
+      cmd,
+      ctx,
+      context.cwd || process.cwd,
+      {
+        initialPrompt: cmd.prompt,
+        initialTurnKind: cmd.planMode === true ? "plan" : "default",
+        selectedModel,
+        planPreset,
+      },
+    );
+    if (!completed) {
       return;
     }
     finalizeCodexRunContext(ctx);

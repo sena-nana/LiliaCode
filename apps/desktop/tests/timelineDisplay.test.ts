@@ -608,6 +608,68 @@ describe("timeline event expansion", () => {
     expect(view.container.querySelector(".agent-timeline__preview")).not.toBeInTheDocument();
   });
 
+  it("Codex 修复建议最终回复可发起批量应用", async () => {
+    const view = render(AgentTimeline, {
+      props: {
+        canStartCodexBatchApply: true,
+        events: [
+          timelineEvent({
+            id: "reply-apply-1",
+            backend: "codex",
+            kind: "message",
+            status: "success",
+            title: "Assistant",
+            summary: "建议修复权限边界",
+            payload: {
+              role: "assistant",
+              backend: "codex",
+              content: "建议修复权限边界",
+              workflowSource: {
+                sourceKind: "fix_suggestion",
+                codexTurnId: "codex-turn-1",
+              },
+            },
+            turnId: "turn-source",
+          }),
+        ],
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "应用建议" }));
+
+    expect(view.emitted("start-codex-batch-apply")?.[0]).toEqual([{
+      sourceTurnId: "turn-source",
+      sourceKind: "fix_suggestion",
+      sourceSummary: "建议修复权限边界",
+    }]);
+  });
+
+  it("普通 Codex 最终回复不显示批量应用入口", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        canStartCodexBatchApply: true,
+        events: [
+          timelineEvent({
+            id: "reply-normal-1",
+            backend: "codex",
+            kind: "message",
+            status: "success",
+            title: "Assistant",
+            summary: "普通回复",
+            payload: {
+              role: "assistant",
+              backend: "codex",
+              content: "普通回复",
+            },
+            turnId: "turn-normal",
+          }),
+        ],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "应用建议" })).toBeNull();
+  });
+
   it("中断错误仍按过程状态渲染", () => {
     const view = render(AgentTimeline, {
       props: {
