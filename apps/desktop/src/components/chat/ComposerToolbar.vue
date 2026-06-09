@@ -7,6 +7,7 @@ import {
   Combine,
   FileQuestion,
   FileCog,
+  Goal,
   TerminalSquare,
   GitBranch,
   GitCommit,
@@ -52,6 +53,7 @@ const emit = defineEmits<{
   cleanCodexBackgroundTerminals: [];
   setCodexMemoryMode: [mode: "enabled" | "disabled"];
   resetCodexMemory: [];
+  setCodexGoal: [objective: string];
   forkCodexThread: [];
   readCodexConfigDiagnostics: [];
   submitEntry: [];
@@ -163,6 +165,13 @@ function resetMemory() {
   closeCodexWorkflowMenu();
   if (!window.confirm("重置 Codex memory？")) return;
   emit("resetCodexMemory");
+}
+
+function setGoal() {
+  closeCodexWorkflowMenu();
+  const objective = window.prompt("Codex goal")?.trim();
+  if (!objective) return;
+  emit("setCodexGoal", objective);
 }
 
 function forkThread() {
@@ -391,6 +400,15 @@ onBeforeUnmount(() => {
             >
               <RotateCcw :size="14" aria-hidden="true" />
               <span class="dd__item-label">重置 Memory...</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="setGoal"
+            >
+              <Goal :size="14" aria-hidden="true" />
+              <span class="dd__item-label">设置 Goal...</span>
             </button>
             <button
               type="button"

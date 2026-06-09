@@ -195,6 +195,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
                   @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
                   @reset-codex-memory="emit('reset-codex-memory')"
+                  @set-codex-goal="emit('set-codex-goal', $event)"
                   @fork-codex-thread="emit('fork-codex-thread')"
                   @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
                   @interrupt="emit('interrupt')"

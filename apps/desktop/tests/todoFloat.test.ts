@@ -20,6 +20,19 @@ const goal = {
 };
 
 describe("TodoFloat", () => {
+  it("does not render an empty Codex goal row when goal is unset", () => {
+    const view = render(TodoFloat, {
+      props: {
+        taskId: "task-1",
+        showGoal: true,
+        goal: null,
+      },
+    });
+
+    expect(view.queryByText("未设置 Codex goal")).toBeNull();
+    expect(view.container.querySelector(".todo-float__section--goal")).toBeNull();
+  });
+
   it("renders Codex goal above todo sections with a distinct row", () => {
     const view = render(TodoFloat, {
       props: {

@@ -893,8 +893,9 @@ describe("ChatComposer", () => {
     expect(view.emitted("clean-codex-background-terminals")?.length).toBe(1);
   });
 
-  it("Codex 后端可从原生接口菜单发起 memory、fork 和配置诊断 workflow", async () => {
+  it("Codex 后端可从原生接口菜单发起 memory、goal、fork 和配置诊断 workflow", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("新的 Codex 目标");
     const view = render(ChatComposer, {
       props: {
         state: codexState,
@@ -920,12 +921,18 @@ describe("ChatComposer", () => {
     expect(view.emitted("reset-codex-memory")?.length).toBe(1);
 
     await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: /设置 Goal/ }));
+    expect(promptSpy).toHaveBeenCalledWith("Codex goal");
+    expect(view.emitted("set-codex-goal")?.[0]).toEqual(["新的 Codex 目标"]);
+
+    await fireEvent.click(workflowButton);
     await fireEvent.click(view.getByRole("menuitem", { name: "Fork 当前 Thread" }));
     expect(view.emitted("fork-codex-thread")?.length).toBe(1);
 
     await fireEvent.click(workflowButton);
     await fireEvent.click(view.getByRole("menuitem", { name: "读取配置诊断" }));
     expect(view.emitted("read-codex-config-diagnostics")?.length).toBe(1);
+    promptSpy.mockRestore();
     confirmSpy.mockRestore();
   });
 
