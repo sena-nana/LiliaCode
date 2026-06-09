@@ -1903,31 +1903,59 @@
 }
 
 .chat-suggestion {
+  flex: 0 1 auto;
   height: 26px;
   min-width: 0;
+  max-width: 100%;
   border: 0;
   border-radius: 6px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-  transition: background-color 0.12s ease, color 0.12s ease;
-}
-
-.chat-suggestion {
-  flex: 0 1 auto;
-  max-width: 100%;
-  padding: 0 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .chat-suggestion:hover {
   background: var(--bg-hover);
   color: var(--text);
   filter: none;
+}
+
+.chat-suggestion--with-source {
+  height: 38px;
+  min-width: 150px;
+  max-width: min(100%, 280px);
+  padding-block: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.chat-suggestion__summary,
+.chat-suggestion__source {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-suggestion__source {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.chat-suggestion:hover .chat-suggestion__source {
+  color: var(--text-muted);
 }
 
 .chat-suggestions__status {
