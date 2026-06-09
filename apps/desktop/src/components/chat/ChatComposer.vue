@@ -377,6 +377,47 @@ const suggestionStatusText = computed(() => {
   }
 });
 
+type SuggestionGitHubActivity = SuggestionItem["githubActivities"][number];
+
+function githubActivityAnchor(activity: SuggestionGitHubActivity): string {
+  const title = activity.title.trim();
+  if (activity.kind === "pull_request") {
+    const number = title.match(/#(\d+)/)?.[1];
+    return number ? `PR #${number}` : "PR";
+  }
+  if (activity.kind === "issue") {
+    const number = title.match(/#(\d+)/)?.[1];
+    return number ? `Issue #${number}` : "Issue";
+  }
+  if (activity.kind === "push") {
+    const branch = title.match(/^Push\s+([^:]+):/i)?.[1]?.trim();
+    return branch ? `Push ${branch}` : "Push";
+  }
+  return title || activity.kind || "GitHub";
+}
+
+function suggestionGitHubSourceLabel(suggestion: SuggestionItem): string {
+  const [activity] = suggestion.githubActivities;
+  if (!activity) return "";
+  const source = [
+    activity.repoFullName.trim(),
+    githubActivityAnchor(activity),
+  ].filter(Boolean).join(" · ");
+  const extraCount = suggestion.githubActivities.length - 1;
+  return extraCount > 0 ? `${source} +${extraCount}` : source;
+}
+
+const suggestionViewRows = computed(() =>
+  suggestionRows.value.map((suggestion) => {
+    const sourceLabel = suggestionGitHubSourceLabel(suggestion);
+    return {
+      suggestion,
+      sourceLabel,
+      title: sourceLabel ? `${suggestion.reason}\n${sourceLabel}` : suggestion.reason,
+    };
+  }),
+);
+
 function fillSuggestion(suggestion: SuggestionItem) {
   richInput.replaceRange(
     0,
@@ -683,14 +724,21 @@ defineExpose({ focusInput });
       <div class="chat-suggestions__items">
         <template v-if="suggestionRows.length > 0">
           <button
-            v-for="suggestion in suggestionRows"
-            :key="suggestion.id"
+            v-for="row in suggestionViewRows"
+            :key="row.suggestion.id"
             type="button"
             class="chat-suggestion"
-            :title="suggestion.reason"
-            @click="fillSuggestion(suggestion)"
+            :class="{ 'chat-suggestion--with-source': row.sourceLabel }"
+            :title="row.title"
+            @click="fillSuggestion(row.suggestion)"
           >
-            {{ suggestion.summary }}
+            <span class="chat-suggestion__summary">{{ row.suggestion.summary }}</span>
+            <span
+              v-if="row.sourceLabel"
+              class="chat-suggestion__source"
+            >
+              {{ row.sourceLabel }}
+            </span>
           </button>
         </template>
         <div

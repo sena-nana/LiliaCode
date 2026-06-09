@@ -64,6 +64,42 @@ describe("TaskDetail conversation suggestions", () => {
     expect(view.getByRole("button", { name: "刷新新对话建议" })).toBeInTheDocument();
   });
 
+  it("GitHub 建议会展示可扫描来源且点击仍填入 prompt", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    setMockConversationSuggestions([
+      {
+        id: "sg-github-pr",
+        projectId: "lilia",
+        taskIds: [],
+        source: "github",
+        githubActivities: [
+          {
+            id: "gh-pr-12",
+            repoFullName: "sena-nana/LiliaCode",
+            kind: "pull_request",
+            title: "PR #12: 补齐 GitHub 建议来源",
+            url: "https://github.com/sena-nana/LiliaCode/pull/12",
+          },
+        ],
+        summary: "跟进 GitHub 建议来源",
+        reason: "近期 PR 活动触发了新对话建议。",
+        prompt: "请继续跟进 PR #12 的建议来源展示。",
+        generatedAt: Date.now(),
+      },
+    ]);
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expect(view.getByText("跟进 GitHub 建议来源")).toBeInTheDocument();
+      expect(view.getByText("sena-nana/LiliaCode · PR #12")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByText("跟进 GitHub 建议来源"));
+
+    expect(view.getByRole("textbox")).toHaveTextContent("请继续跟进 PR #12 的建议来源展示。");
+  });
+
   it("点击刷新入口会强制刷新新对话建议", async () => {
     await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftTask("lilia");
