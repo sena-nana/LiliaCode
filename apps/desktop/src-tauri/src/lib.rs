@@ -116,6 +116,8 @@ pub fn run() {
             codex_history::codex_thread_search,
             codex_history::codex_thread_preview,
             codex_history::codex_thread_attach,
+            codex_history::codex_thread_runtime_states,
+            codex_history::codex_thread_clean_background_terminals,
             provider::chat_check_env,
             provider::provider_get_config,
             provider::provider_set_config,

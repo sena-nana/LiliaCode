@@ -76,7 +76,6 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
-  "clean-codex-background-terminals": [];
   "set-codex-memory-mode": [mode: "enabled" | "disabled"];
   "reset-codex-memory": [];
   "set-codex-goal": [objective: string];
@@ -860,7 +859,6 @@ defineExpose({ focusInput });
         :review-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :fix-suggestion-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
-        :background-terminals-clean-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :codex-workflow-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
@@ -870,7 +868,6 @@ defineExpose({ focusInput });
         @start-codex-review="startCodexReview"
         @start-codex-fix-suggestion="startCodexFixSuggestion"
         @start-codex-compact="emit('start-codex-compact')"
-        @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
         @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
         @reset-codex-memory="emit('reset-codex-memory')"
         @set-codex-goal="emit('set-codex-goal', $event)"

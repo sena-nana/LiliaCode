@@ -92,6 +92,19 @@ pub struct CodexThreadAttachResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CodexThreadRuntimeState {
+    pub thread_id: String,
+    pub task_id: String,
+    pub task_title: String,
+    pub project_id: Option<String>,
+    pub running: bool,
+    pub queued: bool,
+    pub pending: bool,
+    pub queued_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AgentTimelineBatchPayload {
     pub(crate) task_id: String,
     pub(crate) events: Vec<AgentTimelineEvent>,

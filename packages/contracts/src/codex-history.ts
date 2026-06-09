@@ -67,3 +67,14 @@ export interface CodexThreadAttachResult {
   eventCount: number;
   historySync?: "queued" | null;
 }
+
+export interface CodexThreadRuntimeState {
+  threadId: string;
+  taskId: string;
+  taskTitle: string;
+  projectId: string | null;
+  running: boolean;
+  queued: boolean;
+  pending: boolean;
+  queuedCount: number;
+}

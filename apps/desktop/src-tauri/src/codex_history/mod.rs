@@ -5,7 +5,7 @@ mod utility;
 
 pub use types::{
     CodexThreadAttachInput, CodexThreadAttachResult, CodexThreadPreview, CodexThreadPreviewInput,
-    CodexThreadSearchInput, CodexThreadSearchResult, CodexThreadSummary,
+    CodexThreadRuntimeState, CodexThreadSearchInput, CodexThreadSearchResult, CodexThreadSummary,
 };
 
 use rusqlite::{params, OptionalExtension};
@@ -50,6 +50,92 @@ fn codex_thread_search_blocking(
         threads: result.threads,
         next_cursor: result.next_cursor,
     })
+}
+
+#[tauri::command]
+pub fn codex_thread_runtime_states(
+    app: AppHandle,
+    chat_store: tauri::State<'_, ChatStore>,
+) -> Result<Vec<CodexThreadRuntimeState>, String> {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(Vec::new());
+    };
+    let conn = store.conn()?;
+    query_codex_thread_runtime_states(&conn, &chat_store)
+}
+
+fn query_codex_thread_runtime_states(
+    conn: &rusqlite::Connection,
+    chat_store: &ChatStore,
+) -> Result<Vec<CodexThreadRuntimeState>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT s.session_id, t.id, t.title, t.project_id
+               FROM task_agent_sessions s
+               JOIN tasks t ON t.id = s.task_id
+               WHERE s.backend = ?1 AND t.archived = 0
+               ORDER BY s.updated_at DESC"#,
+        )
+        .map_err(|e| format!("Codex thread runtime states: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![BACKEND_CODEX], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|e| format!("Codex thread runtime states: query 失败：{e}"))?;
+
+    let running = chat_store.running_tasks.lock().unwrap();
+    let running_turns = chat_store.running_turns.lock().unwrap();
+    let pending_turns = chat_store.pending_turns.lock().unwrap();
+    let mut out = Vec::new();
+    for row in rows {
+        let (thread_id, task_id, task_title, project_id) =
+            row.map_err(|e| format!("Codex thread runtime states: row 失败：{e}"))?;
+        let queued_count = pending_turns.get(&task_id).map(|queue| queue.len()).unwrap_or(0);
+        let is_running = running.get(&task_id).copied().unwrap_or(false)
+            || running_turns
+                .get(&task_id)
+                .is_some_and(|turn| turn.backend == BACKEND_CODEX);
+        out.push(CodexThreadRuntimeState {
+            thread_id,
+            task_id,
+            task_title,
+            project_id,
+            running: is_running,
+            queued: queued_count > 0,
+            pending: is_running || queued_count > 0,
+            queued_count,
+        });
+    }
+    Ok(out)
+}
+
+fn clean_background_terminals_payload(thread_id: &str) -> Result<serde_json::Value, String> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return Err("Codex threadId 不能为空".to_string());
+    }
+    Ok(serde_json::json!({
+        "action": "cleanBackgroundTerminals",
+        "threadId": thread_id,
+    }))
+}
+
+#[tauri::command]
+pub async fn codex_thread_clean_background_terminals(
+    app: AppHandle,
+    thread_id: String,
+) -> Result<(), String> {
+    let payload = clean_background_terminals_payload(&thread_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        run_codex_history_utility(&app, payload).map(|_| ())
+    })
+    .await
+    .map_err(|err| format!("Codex thread clean 任务执行失败：{err}"))?
 }
 
 #[tauri::command]
@@ -394,6 +480,15 @@ mod tests {
     fn create_task_agent_sessions_schema(conn: &rusqlite::Connection) {
         conn.execute_batch(
             r#"
+            CREATE TABLE tasks (
+              id           TEXT PRIMARY KEY,
+              project_id   TEXT,
+              session_id   TEXT NOT NULL,
+              title        TEXT NOT NULL,
+              status       TEXT NOT NULL,
+              created_at   INTEGER NOT NULL,
+              archived     INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE task_agent_sessions (
               task_id    TEXT NOT NULL,
               backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
@@ -500,6 +595,66 @@ mod tests {
         );
         assert_eq!(normalize_next_cursor(Some("".to_string())), None);
         assert_eq!(normalize_next_cursor(None), None);
+    }
+
+    #[test]
+    fn runtime_states_join_codex_sessions_with_running_queue_state() {
+        let store = ChatStore::default();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_task_agent_sessions_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks
+               (id, project_id, session_id, title, status, created_at)
+               VALUES ('task-1', 'project-1', 'task-1', 'Codex task', 'running', 1)"#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO task_agent_sessions
+               (task_id, backend, session_id, updated_at)
+               VALUES ('task-1', 'codex', 'thread-1', 2)"#,
+            [],
+        )
+        .unwrap();
+        store.running_tasks.lock().unwrap().insert("task-1".to_string(), true);
+        store.pending_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            std::collections::VecDeque::from([crate::chat::state::PendingChatTurn {
+                content: "queued".to_string(),
+                composer: default_composer("task-1"),
+                project_cwd: "D:/repo".to_string(),
+                attachments: Vec::new(),
+                workflow: None,
+                message: crate::chat::types::ChatMessage {
+                    id: "msg-1".to_string(),
+                    task_id: "task-1".to_string(),
+                    role: "user".to_string(),
+                    content: "queued".to_string(),
+                    attachments: Vec::new(),
+                    created_at: 1,
+                },
+                turn_id: "turn-1".to_string(),
+                guide_id: None,
+            }]),
+        );
+
+        let states = query_codex_thread_runtime_states(&conn, &store).unwrap();
+
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].thread_id, "thread-1");
+        assert_eq!(states[0].task_title, "Codex task");
+        assert!(states[0].running);
+        assert!(states[0].queued);
+        assert_eq!(states[0].queued_count, 1);
+    }
+
+    #[test]
+    fn clean_background_terminals_payload_trims_and_validates_thread_id() {
+        let payload = clean_background_terminals_payload(" thread-1 ").unwrap();
+
+        assert_eq!(payload["action"], "cleanBackgroundTerminals");
+        assert_eq!(payload["threadId"], "thread-1");
+        assert!(clean_background_terminals_payload("  ").is_err());
     }
 
     #[test]

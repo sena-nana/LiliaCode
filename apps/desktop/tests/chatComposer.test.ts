@@ -878,7 +878,7 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "压缩 Codex 上下文" })).toBeDisabled();
   });
 
-  it("Codex 后端可从工具栏清理后台终端", async () => {
+  it("Codex 后端不再从工具栏清理后台终端", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
@@ -886,11 +886,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    const cleanButton = view.getByRole("button", { name: "清理 Codex 后台终端" });
-    expect(cleanButton).not.toBeDisabled();
-    await fireEvent.click(cleanButton);
-
-    expect(view.emitted("clean-codex-background-terminals")?.length).toBe(1);
+    expect(view.queryByRole("button", { name: "清理 Codex 后台终端" })).toBeNull();
   });
 
   it("Codex 后端可从原生接口菜单发起 memory、goal、fork 和配置诊断 workflow", async () => {
@@ -978,7 +974,7 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "Codex 原生接口" })).toBeDisabled();
   });
 
-  it("非 Codex 时隐藏后台终端清理入口，运行中或阻塞 pending 时禁用", async () => {
+  it("后台终端清理入口不再显示在 composer 工具栏", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -993,7 +989,7 @@ describe("ChatComposer", () => {
       attachments: [],
       sending: true,
     });
-    expect(view.getByRole("button", { name: "清理 Codex 后台终端" })).toBeDisabled();
+    expect(view.queryByRole("button", { name: "清理 Codex 后台终端" })).toBeNull();
 
     await view.rerender({
       state: codexState,
@@ -1001,7 +997,7 @@ describe("ChatComposer", () => {
       sending: false,
       compactDisabled: true,
     });
-    expect(view.getByRole("button", { name: "清理 Codex 后台终端" })).toBeDisabled();
+    expect(view.queryByRole("button", { name: "清理 Codex 后台终端" })).toBeNull();
   });
 
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {

@@ -8,7 +8,6 @@ import {
   FileQuestion,
   FileCog,
   Goal,
-  TerminalSquare,
   GitBranch,
   GitCommit,
   GitFork,
@@ -37,7 +36,6 @@ const props = defineProps<{
   reviewDisabled: boolean;
   fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
-  backgroundTerminalsCleanDisabled: boolean;
   codexWorkflowDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
@@ -50,7 +48,6 @@ const emit = defineEmits<{
   startCodexReview: [target: CodexReviewTarget];
   startCodexFixSuggestion: [target: CodexReviewTarget];
   startCodexCompact: [];
-  cleanCodexBackgroundTerminals: [];
   setCodexMemoryMode: [mode: "enabled" | "disabled"];
   resetCodexMemory: [];
   setCodexGoal: [objective: string];
@@ -441,18 +438,6 @@ onBeforeUnmount(() => {
           @click="emit('startCodexCompact')"
         >
           <Combine :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="state.backend === 'codex'"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :class="{ 'is-disabled': backgroundTerminalsCleanDisabled }"
-          :disabled="backgroundTerminalsCleanDisabled || actionsBlocked"
-          title="清理 Codex 后台终端"
-          aria-label="清理 Codex 后台终端"
-          @click="emit('cleanCodexBackgroundTerminals')"
-        >
-          <TerminalSquare :size="14" aria-hidden="true" />
         </button>
       </div>
 

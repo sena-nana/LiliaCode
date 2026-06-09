@@ -32,6 +32,7 @@ import type {
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
   CodexThreadPreview,
+  CodexThreadRuntimeState,
   CodexThreadSearchInput,
   CodexThreadSearchResult,
   ChatInterruptResult,
@@ -70,6 +71,7 @@ export type {
   CodexThreadAttachResult,
   CodexThreadPreviewInput,
   CodexThreadPreview,
+  CodexThreadRuntimeState,
   CodexThreadSearchInput,
   CodexThreadSearchResult,
   ConnectionMode,
@@ -107,6 +109,14 @@ export function attachCodexThread(
   input: CodexThreadAttachInput,
 ): Promise<CodexThreadAttachResult> {
   return invoke<CodexThreadAttachResult>("codex_thread_attach", { input });
+}
+
+export function listCodexThreadRuntimeStates(): Promise<CodexThreadRuntimeState[]> {
+  return invoke<CodexThreadRuntimeState[]>("codex_thread_runtime_states");
+}
+
+export function cleanCodexThreadBackgroundTerminals(threadId: string): Promise<void> {
+  return invoke<void>("codex_thread_clean_background_terminals", { threadId });
 }
 
 export function searchClaudeSessions(

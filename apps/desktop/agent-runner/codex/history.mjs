@@ -226,6 +226,22 @@ export async function searchCodexThreads(input = {}, { createServer = createCode
   }
 }
 
+export async function cleanCodexThreadBackgroundTerminals(
+  threadId,
+  { createServer = createCodexAppServer } = {},
+) {
+  const trimmed = stringOrNull(threadId)?.trim();
+  if (!trimmed) throw new Error("Codex threadId is required");
+  const server = createServer();
+  try {
+    await initializeCodexAppServer(server);
+    await server.request("thread/backgroundTerminals/clean", { threadId: trimmed });
+    return { threadId: trimmed, cleaned: true };
+  } finally {
+    server.close();
+  }
+}
+
 export async function previewCodexThread(threadId, { createServer = createCodexAppServer } = {}) {
   const server = createServer();
   try {

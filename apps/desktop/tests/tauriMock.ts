@@ -30,6 +30,18 @@ interface TaskRow {
   archived?: boolean;
 }
 
+interface CodexThreadRow {
+  id: string;
+  title: string;
+  status: string | null;
+  model: string | null;
+  sourceKind: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+  archived: boolean;
+  preview: string | null;
+}
+
 /**
  * 与 @lilia/contracts 同形，display 已从持久层下线：前端用
  * `deriveTimelineDisplay()` 现算，mock 这里也只塞「事实」字段。
@@ -149,8 +161,47 @@ const baseTasks: TaskRow[] = [
   },
 ];
 
+const baseCodexThreads: CodexThreadRow[] = [
+  {
+    id: "thread-1",
+    title: "打通 tsconfig paths 搜索",
+    status: null,
+    model: "gpt-5.5",
+    sourceKind: "lilia",
+    createdAt: 10_000,
+    updatedAt: 20_000,
+    archived: false,
+    preview: "最近在检查路径别名和上下文搜索。",
+  },
+  {
+    id: "thread-2",
+    title: "整理 Codex 会话管理",
+    status: "idle",
+    model: "gpt-5.4",
+    sourceKind: "app-server",
+    createdAt: 30_000,
+    updatedAt: 40_000,
+    archived: false,
+    preview: "讨论设置页中的会话维护入口。",
+  },
+  {
+    id: "thread-archived",
+    title: "已归档的旧会话",
+    status: "completed",
+    model: "gpt-5.4-mini",
+    sourceKind: "app-server",
+    createdAt: 5_000,
+    updatedAt: 6_000,
+    archived: true,
+    preview: "旧的 Codex thread。",
+  },
+];
+
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
+let codexThreads: CodexThreadRow[] = [];
+let codexTaskSessions: Record<string, string> = {};
+let cleanedCodexThreads: string[] = [];
 let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
@@ -440,6 +491,9 @@ function normalizeComposer(input: unknown, taskId: string) {
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
+  codexThreads = baseCodexThreads.map((thread) => ({ ...thread }));
+  codexTaskSessions = { "t-002": "thread-1" };
+  cleanedCodexThreads = [];
   todosByTaskId = {};
   todoSeq = 0;
   timelineEvents = {
@@ -1371,6 +1425,63 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           generatedAt: Date.now(),
         },
       ];
+
+    case "codex_thread_search": {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const term = String(input.searchTerm ?? "").trim().toLowerCase();
+      const includeArchived = input.archived === true;
+      const limit = typeof input.limit === "number" ? Math.max(1, input.limit) : 20;
+      const cursor = typeof input.cursor === "string" && input.cursor.startsWith("offset:")
+        ? Number(input.cursor.slice("offset:".length))
+        : 0;
+      const filtered = codexThreads
+        .filter((thread) => includeArchived || !thread.archived)
+        .filter((thread) => {
+          if (!term) return true;
+          return [
+            thread.title,
+            thread.id,
+            thread.preview,
+            thread.model,
+            thread.status,
+          ].some((value) => String(value ?? "").toLowerCase().includes(term));
+        })
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      const page = filtered.slice(cursor, cursor + limit);
+      const nextOffset = cursor + limit;
+      return {
+        threads: page.map((thread) => ({ ...thread })),
+        nextCursor: nextOffset < filtered.length ? `offset:${nextOffset}` : null,
+      };
+    }
+
+    case "codex_thread_runtime_states": {
+      return Object.entries(codexTaskSessions).flatMap(([taskId, threadId]) => {
+        const task = tasks.find((row) => row.id === taskId && !row.archived);
+        if (!task) return [];
+        const queuedCount = chatQueued[taskId]?.length ?? 0;
+        const running = chatRunning[taskId] === true;
+        return [{
+          threadId,
+          taskId,
+          taskTitle: task.title,
+          projectId: task.projectId,
+          running,
+          queued: queuedCount > 0,
+          pending: running || queuedCount > 0,
+          queuedCount,
+        }];
+      });
+    }
+
+    case "codex_thread_clean_background_terminals": {
+      const threadId = String(args.threadId ?? "").trim();
+      if (!threadId) throw new Error("Codex threadId 不能为空");
+      cleanedCodexThreads.push(threadId);
+      return undefined;
+    }
 
     case "cc_switch_get_config":
       return { baseUrl: "http://127.0.0.1:15721" };
