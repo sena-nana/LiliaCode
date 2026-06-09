@@ -10,11 +10,19 @@ import {
   Code2,
   Loader2,
   Search,
+  TerminalSquare,
 } from "lucide-vue-next";
-import type { AgentTimelineEvent, ClaudeSessionSummary, CodexThreadSummary } from "@lilia/contracts";
+import type {
+  AgentTimelineEvent,
+  ClaudeSessionSummary,
+  CodexThreadRuntimeState,
+  CodexThreadSummary,
+} from "@lilia/contracts";
 import {
   attachClaudeSession,
   attachCodexThread,
+  cleanCodexThreadBackgroundTerminals,
+  listCodexThreadRuntimeStates,
   previewClaudeSession,
   previewCodexThread,
   searchClaudeSessions,
@@ -28,6 +36,12 @@ const route = useRoute();
 const router = useRouter();
 type ImportSource = "codex" | "claude";
 type ImportItem = CodexThreadSummary | ClaudeSessionSummary;
+interface ImportRow {
+  item: ImportItem;
+  runtime: CodexThreadRuntimeState | null;
+  metaParts: string[];
+  canCleanThread: boolean;
+}
 
 const source = ref<ImportSource>("codex");
 const query = ref("");
@@ -39,6 +53,9 @@ const error = ref("");
 const importError = ref("");
 const items = ref<ImportItem[]>([]);
 const nextCursor = ref<string | null>(null);
+const runtimeStates = ref<CodexThreadRuntimeState[]>([]);
+const cleaningThreadId = ref<string | null>(null);
+const rowMessages = ref<Record<string, { kind: "ok" | "error"; text: string }>>({});
 const selectedItemId = ref<string | null>(null);
 const previewLoading = ref(false);
 const previewError = ref("");
@@ -66,6 +83,29 @@ const importTargetLabel = computed(() =>
 
 const selectedItem = computed(() =>
   items.value.find((item) => item.id === selectedItemId.value) ?? null,
+);
+
+const runtimeByThreadId = computed(() => {
+  const map = new Map<string, CodexThreadRuntimeState>();
+  for (const state of runtimeStates.value) map.set(state.threadId, state);
+  return map;
+});
+
+const importRows = computed<ImportRow[]>(() =>
+  items.value.map((item) => {
+    const runtime = source.value === "codex"
+      ? runtimeByThreadId.value.get(item.id) ?? null
+      : null;
+    const metaParts: string[] = [];
+    if (source.value === "codex" && item.model) metaParts.push(item.model);
+    if (runtime) metaParts.push(`Lilia: ${runtime.taskTitle}`);
+    return {
+      item,
+      runtime,
+      metaParts,
+      canCleanThread: runtime?.running === true,
+    };
+  }),
 );
 
 const sourceLabel = computed(() => source.value === "claude" ? "Claude session" : "Codex thread");
@@ -97,6 +137,93 @@ function formatTime(value: number | null): string {
   }).format(new Date(value));
 }
 
+function localThreadFromRuntime(state: CodexThreadRuntimeState): CodexThreadSummary {
+  return {
+    id: state.threadId,
+    title: state.taskTitle.trim() || state.threadId,
+    status: state.running ? "running" : state.queued ? "queued" : null,
+    model: null,
+    sourceKind: "lilia",
+    createdAt: null,
+    updatedAt: null,
+    archived: false,
+    preview: null,
+  };
+}
+
+function runtimeMatchesSearch(state: CodexThreadRuntimeState, searchTerm: string): boolean {
+  const term = searchTerm.trim().toLowerCase();
+  if (!term) return true;
+  return [state.taskTitle, state.threadId]
+    .some((value) => value.toLowerCase().includes(term));
+}
+
+function localThreadsFromRuntimeStates(
+  states: CodexThreadRuntimeState[],
+  searchTerm: string,
+): CodexThreadSummary[] {
+  return states
+    .filter((state) => runtimeMatchesSearch(state, searchTerm))
+    .map(localThreadFromRuntime);
+}
+
+function mergeCodexThread(
+  existing: CodexThreadSummary,
+  incoming: CodexThreadSummary,
+): CodexThreadSummary {
+  return {
+    id: existing.id,
+    title: incoming.title.trim() ? incoming.title : existing.title,
+    status: incoming.status ?? existing.status,
+    model: incoming.model ?? existing.model,
+    sourceKind: incoming.sourceKind ?? existing.sourceKind,
+    createdAt: incoming.createdAt ?? existing.createdAt,
+    updatedAt: incoming.updatedAt ?? existing.updatedAt,
+    archived: incoming.archived || existing.archived,
+    preview: incoming.preview ?? existing.preview,
+  };
+}
+
+function mergeCodexThreads(
+  base: CodexThreadSummary[],
+  incoming: CodexThreadSummary[],
+): CodexThreadSummary[] {
+  const indexById = new Map<string, number>();
+  const out = base.map((item, index) => {
+    indexById.set(item.id, index);
+    return item;
+  });
+  for (const thread of incoming) {
+    const index = indexById.get(thread.id);
+    if (index === undefined) {
+      indexById.set(thread.id, out.length);
+      out.push(thread);
+    } else {
+      out[index] = mergeCodexThread(out[index], thread);
+    }
+  }
+  return out;
+}
+
+function selectFirstItemIfNeeded() {
+  if (!selectedItemId.value && items.value[0]) {
+    void selectItem(items.value[0]);
+  }
+}
+
+async function loadRuntimeStates(): Promise<CodexThreadRuntimeState[]> {
+  if (source.value !== "codex") return [];
+  try {
+    const states = await listCodexThreadRuntimeStates();
+    runtimeStates.value = states;
+    return states;
+  } catch (err) {
+    console.error("[conversation-import] Codex runtime states load failed", err);
+    runtimeStates.value = [];
+    return [];
+  }
+}
+
 async function loadThreads(cursor: string | null = null) {
   const seq = ++searchSeq;
   const append = !!cursor;
@@ -117,14 +244,36 @@ async function loadThreads(cursor: string | null = null) {
       items.value = append ? [...items.value, ...result.sessions] : result.sessions;
       nextCursor.value = result.nextCursor;
     } else {
-      const result = await searchCodexThreads(input);
+      if (append) {
+        const result = await searchCodexThreads(input);
+        if (seq !== searchSeq) return;
+        items.value = mergeCodexThreads(items.value as CodexThreadSummary[], result.threads);
+        nextCursor.value = result.nextCursor;
+        return;
+      }
+
+      const runtimePromise = loadRuntimeStates();
+      const searchPromise = searchCodexThreads(input);
+      const states = await runtimePromise;
       if (seq !== searchSeq) return;
-      items.value = append ? [...items.value, ...result.threads] : result.threads;
+      items.value = localThreadsFromRuntimeStates(states, input.searchTerm ?? "");
+      nextCursor.value = null;
+      loading.value = false;
+      selectFirstItemIfNeeded();
+
+      let result;
+      try {
+        result = await searchPromise;
+      } catch (err) {
+        if (seq === searchSeq && items.value.length === 0) error.value = String(err);
+        else console.error("[conversation-import] Codex history search failed", err);
+        return;
+      }
+      if (seq !== searchSeq) return;
+      items.value = mergeCodexThreads(items.value as CodexThreadSummary[], result.threads);
       nextCursor.value = result.nextCursor;
     }
-    if (!selectedItemId.value && items.value[0]) {
-      void selectItem(items.value[0]);
-    }
+    selectFirstItemIfNeeded();
   } catch (err) {
     if (seq === searchSeq) error.value = String(err);
   } finally {
@@ -139,6 +288,7 @@ function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     resetPreviewState();
+    rowMessages.value = {};
     importError.value = "";
     void loadThreads();
   }, 240);
@@ -247,8 +397,34 @@ function setSource(next: ImportSource) {
   resetPreviewState();
   items.value = [];
   nextCursor.value = null;
+  if (next === "claude") runtimeStates.value = [];
+  rowMessages.value = {};
   importError.value = "";
   void loadThreads();
+}
+
+async function cleanThread(item: ImportItem) {
+  if (source.value !== "codex" || cleaningThreadId.value) return;
+  cleaningThreadId.value = item.id;
+  rowMessages.value = {
+    ...rowMessages.value,
+    [item.id]: { kind: "ok", text: "正在清理后台终端..." },
+  };
+  try {
+    await cleanCodexThreadBackgroundTerminals(item.id);
+    rowMessages.value = {
+      ...rowMessages.value,
+      [item.id]: { kind: "ok", text: "后台终端已清理" },
+    };
+    await loadRuntimeStates();
+  } catch (err) {
+    rowMessages.value = {
+      ...rowMessages.value,
+      [item.id]: { kind: "error", text: `清理失败：${String(err)}` },
+    };
+  } finally {
+    cleaningThreadId.value = null;
+  }
 }
 
 watch(() => query.value, scheduleSearch);
@@ -319,20 +495,74 @@ onMounted(() => {
               {{ emptyListLabel }}
             </div>
             <template v-else>
-              <button
-                v-for="item in items"
-                :key="item.id"
-                type="button"
+              <div
+                v-for="row in importRows"
+                :key="row.item.id"
                 class="conversation-import__row ui-list-item"
-                :class="{ 'is-active': selectedItemId === item.id }"
-                :title="item.title"
-                @click="selectItem(item)"
+                :class="{ 'is-active': selectedItemId === row.item.id }"
               >
-                <span class="conversation-import__row-title">{{ item.title }}</span>
-                <span class="conversation-import__row-time">
-                  {{ formatTime(item.updatedAt ?? item.createdAt) }}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  class="conversation-import__row-select"
+                  :title="row.item.title"
+                  @click="selectItem(row.item)"
+                >
+                  <span class="conversation-import__row-head">
+                    <span class="conversation-import__row-title">{{ row.item.title }}</span>
+                    <span v-if="row.runtime" class="conversation-import__row-source ui-badge ui-badge--accent">
+                      LiliaCode
+                    </span>
+                    <span v-else class="conversation-import__row-time">
+                      {{ formatTime(row.item.updatedAt ?? row.item.createdAt) }}
+                    </span>
+                  </span>
+                  <span v-if="source === 'codex'" class="conversation-import__row-badges">
+                    <span v-if="row.runtime?.running" class="ui-badge conversation-import__status--running">
+                      运行中
+                    </span>
+                    <span v-else-if="row.runtime?.queued" class="ui-badge conversation-import__status--queued">
+                      排队中
+                    </span>
+                    <span v-if="row.item.archived" class="ui-badge ui-badge--muted">已归档</span>
+                  </span>
+                  <span v-if="row.metaParts.length" class="conversation-import__row-meta">
+                    <span v-for="part in row.metaParts" :key="part">{{ part }}</span>
+                  </span>
+                  <span v-if="source === 'codex' && row.item.preview" class="conversation-import__row-preview">
+                    {{ row.item.preview }}
+                  </span>
+                  <span
+                    v-if="rowMessages[row.item.id]"
+                    class="conversation-import__row-message"
+                    :class="`is-${rowMessages[row.item.id].kind}`"
+                  >
+                    <Check
+                      v-if="rowMessages[row.item.id].kind === 'ok'"
+                      :size="13"
+                      aria-hidden="true"
+                    />
+                    <span>{{ rowMessages[row.item.id].text }}</span>
+                  </span>
+                </button>
+                <div v-if="row.canCleanThread" class="conversation-import__row-actions">
+                  <button
+                    type="button"
+                    class="conversation-import__clean-button ui-button ui-button--ghost"
+                    :disabled="cleaningThreadId !== null"
+                    title="清理后台终端"
+                    aria-label="清理后台终端"
+                    @click="cleanThread(row.item)"
+                  >
+                    <Loader2
+                      v-if="cleaningThreadId === row.item.id"
+                      :size="14"
+                      class="is-spinning"
+                      aria-hidden="true"
+                    />
+                    <TerminalSquare v-else :size="14" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
             </template>
             <button
               v-if="nextCursor"

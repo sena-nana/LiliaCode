@@ -35,6 +35,13 @@ describe("Settings provider switch", () => {
     expect(invalid.queryByRole("radio", { name: "Codex" })).not.toBeInTheDocument();
   });
 
+  it("旧 Codex 会话 tab 回落到外观分类", async () => {
+    const view = await renderSettings("/settings?tab=codex-sessions");
+
+    expect(view.getByRole("heading", { level: 1, name: "外观" })).toBeInTheDocument();
+    expect(view.queryByText("Codex 会话管理")).not.toBeInTheDocument();
+  });
+
   it("点击 Codex 会写入全局 active provider", async () => {
     const view = await renderSettings("/settings?tab=providers");
 
