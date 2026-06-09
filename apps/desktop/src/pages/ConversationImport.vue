@@ -36,12 +36,6 @@ const route = useRoute();
 const router = useRouter();
 type ImportSource = "codex" | "claude";
 type ImportItem = CodexThreadSummary | ClaudeSessionSummary;
-interface ImportRow {
-  item: ImportItem;
-  runtime: CodexThreadRuntimeState | null;
-  metaParts: string[];
-  canCleanThread: boolean;
-}
 
 const source = ref<ImportSource>("codex");
 const query = ref("");
@@ -91,18 +85,14 @@ const runtimeByThreadId = computed(() => {
   return map;
 });
 
-const importRows = computed<ImportRow[]>(() =>
+const importRows = computed(() =>
   items.value.map((item) => {
     const runtime = source.value === "codex"
       ? runtimeByThreadId.value.get(item.id) ?? null
       : null;
-    const metaParts: string[] = [];
-    if (source.value === "codex" && item.model) metaParts.push(item.model);
-    if (runtime) metaParts.push(`Lilia: ${runtime.taskTitle}`);
     return {
       item,
       runtime,
-      metaParts,
       canCleanThread: runtime?.running === true,
     };
   }),
@@ -509,11 +499,11 @@ onMounted(() => {
                 >
                   <span class="conversation-import__row-head">
                     <span class="conversation-import__row-title">{{ row.item.title }}</span>
-                    <span v-if="row.runtime" class="conversation-import__row-source ui-badge ui-badge--accent">
-                      LiliaCode
-                    </span>
-                    <span v-else class="conversation-import__row-time">
-                      {{ formatTime(row.item.updatedAt ?? row.item.createdAt) }}
+                    <span
+                      v-if="row.runtime || (row.item.updatedAt ?? row.item.createdAt)"
+                      class="conversation-import__row-time"
+                    >
+                      {{ row.runtime ? "LiliaCode" : formatTime(row.item.updatedAt ?? row.item.createdAt) }}
                     </span>
                   </span>
                   <span v-if="source === 'codex'" class="conversation-import__row-badges">
@@ -524,12 +514,6 @@ onMounted(() => {
                       排队中
                     </span>
                     <span v-if="row.item.archived" class="ui-badge ui-badge--muted">已归档</span>
-                  </span>
-                  <span v-if="row.metaParts.length" class="conversation-import__row-meta">
-                    <span v-for="part in row.metaParts" :key="part">{{ part }}</span>
-                  </span>
-                  <span v-if="source === 'codex' && row.item.preview" class="conversation-import__row-preview">
-                    {{ row.item.preview }}
                   </span>
                   <span
                     v-if="rowMessages[row.item.id]"

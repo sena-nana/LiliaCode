@@ -246,9 +246,9 @@ describe("ConversationImport", () => {
       })).toBeInTheDocument();
     });
     expect(within(sidebar as HTMLElement).getAllByText("LiliaCode")).toHaveLength(1);
-    expect(within(sidebar as HTMLElement).getByText("gpt-5.5")).toBeInTheDocument();
-    expect(within(sidebar as HTMLElement).getByText("app-server 返回的预览摘要。"))
-      .toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByText("gpt-5.5")).not.toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByText("app-server 返回的预览摘要。"))
+      .not.toBeInTheDocument();
   });
 
   it("搜索词可直接命中 Lilia 本地任务标题", async () => {
@@ -328,13 +328,13 @@ describe("ConversationImport", () => {
     expect(sidebar).toBeInstanceOf(HTMLElement);
 
     await waitFor(() => {
-      expect(within(sidebar as HTMLElement).getByText("LiliaCode")).toBeInTheDocument();
+      expect(within(sidebar as HTMLElement).getByText("运行中")).toBeInTheDocument();
     });
-    expect(within(sidebar as HTMLElement).getByText("运行中")).toBeInTheDocument();
-    expect(within(sidebar as HTMLElement).getByText("Lilia: 打通 tsconfig paths 搜索"))
-      .toBeInTheDocument();
-    expect(within(sidebar as HTMLElement).getByText("讨论设置页中的会话维护入口。"))
-      .toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).getByText("LiliaCode")).toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByText("Lilia: 打通 tsconfig paths 搜索"))
+      .not.toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByText("讨论设置页中的会话维护入口。"))
+      .not.toBeInTheDocument();
 
     await fireEvent.click(within(sidebar as HTMLElement).getByRole("button", {
       name: "清理后台终端",
