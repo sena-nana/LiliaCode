@@ -96,6 +96,8 @@ pub(crate) enum ChatWorkflow {
     },
     #[serde(rename = "codex_compact")]
     CodexCompact,
+    #[serde(rename = "codex_background_terminals_clean")]
+    CodexBackgroundTerminalsClean,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

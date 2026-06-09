@@ -70,6 +70,7 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
+  "clean-codex-background-terminals": [];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
@@ -766,6 +767,7 @@ defineExpose({ focusInput });
         :actions-blocked="actionsBlocked"
         :review-disabled="state.backend !== 'codex' || sending === true"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
+        :background-terminals-clean-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -774,6 +776,7 @@ defineExpose({ focusInput });
         @update-codex-settings="updateCodexSettings"
         @start-codex-review="startCodexReview"
         @start-codex-compact="emit('start-codex-compact')"
+        @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

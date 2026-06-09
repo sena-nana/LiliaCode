@@ -216,6 +216,16 @@ export function useTaskComposerController(options: {
     }
   }
 
+  async function onCleanCodexBackgroundTerminals() {
+    if (!context.hasContext.value) return;
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
+    try {
+      await sendAgentMessage("", [], undefined, { type: "codex_background_terminals_clean" });
+    } catch {
+      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+    }
+  }
+
   async function onSetCodexGoal(objective: string) {
     const trimmed = objective.trim();
     if (!trimmed) return;
@@ -491,6 +501,7 @@ export function useTaskComposerController(options: {
     onSend,
     onStartCodexReview,
     onStartCodexCompact,
+    onCleanCodexBackgroundTerminals,
     onSetCodexGoal,
     onRefreshCodexGoal,
     onClearCodexGoal,

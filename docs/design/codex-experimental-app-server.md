@@ -38,7 +38,7 @@ codex app-server generate-ts --out <experimental> --experimental
 | `thread/settings/update` | 更新后续 turns 的 sticky 设置：`cwd`、approval、sandbox、permissions、model、effort、summary、`collaborationMode`、personality 等。 | 已实现 | Lilia 用它应用 Codex profile 的 reasoning effort、runtime workspace roots 和受控 permissions；Plan 仍只用 `turn/start.collaborationMode`，不写成 sticky 默认。 |
 | `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 未实现 | Lilia Memory 设计是旁路系统，不直接切 Codex 原生 memory mode。 |
 | `memory/reset` | 重置 Codex memory。无参数。 | 未实现 | 这是 Codex 自身全局/账户语义，Lilia 不应在没有明确用户动作时调用。 |
-| `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 未实现 | Lilia 目前只展示 Codex 命令事件，没有接管 Codex background terminal 生命周期。 |
+| `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 已实现 | Lilia 暴露为用户手动触发的 Codex workflow；runner 调用后写入 diagnostic timeline，但不接管 Codex background terminal 生命周期。 |
 | `thread/search` | 搜索 threads。支持分页、排序、sourceKinds、archived、`searchTerm`。 | 已实现 | Lilia 从左侧栏底部导入入口搜索 app-server threads，支持分页、关键词和归档开关，并可导入为新的 Lilia task。 |
 | `thread/turns/list` | 分页读取指定 thread 的 turns，可选择 item detail。 | 已实现 | Lilia 用它生成 Codex thread 预览和历史接入时的 timeline 回补。 |
 | `thread/turns/items/list` | 分页读取指定 turn 的 items。 | 已实现 | 当 turns 返回 items 缺失或标记截断时，Lilia 补拉 turn items 后再映射到统一 timeline。 |

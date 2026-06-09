@@ -322,6 +322,7 @@ watch(
     @send="composerController.onSend"
     @start-codex-review="composerController.onStartCodexReview"
     @start-codex-compact="composerController.onStartCodexCompact"
+    @clean-codex-background-terminals="composerController.onCleanCodexBackgroundTerminals"
     @interrupt="composerController.onInterrupt"
     @update-composer="composerController.onComposerUpdate"
     @remove-attachment="attachmentController.removeAttachment"

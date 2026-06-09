@@ -80,6 +80,7 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
+  "clean-codex-background-terminals": [];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -174,6 +175,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @send="emitSend"
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
+                  @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"

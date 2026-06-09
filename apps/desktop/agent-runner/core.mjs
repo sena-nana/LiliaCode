@@ -33,7 +33,8 @@ export async function runAgentTurn(cmd, deps = {}) {
     typeof cmd.workflow === "object" &&
     (cmd.workflow.type === "codex_review" ||
       cmd.workflow.type === "codex_goal" ||
-      cmd.workflow.type === "codex_compact");
+      cmd.workflow.type === "codex_compact" ||
+      cmd.workflow.type === "codex_background_terminals_clean");
   if (typeof cmd?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
