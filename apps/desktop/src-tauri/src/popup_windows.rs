@@ -317,8 +317,8 @@ pub async fn popup_open_new_chat(
     tauri::async_runtime::spawn_blocking(move || {
         open_new_chat_window(&app, project_id, initial_draft_content, false)
     })
-        .await
-        .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
+    .await
+    .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
 }
 
 #[tauri::command]

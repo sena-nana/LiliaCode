@@ -1,5 +1,5 @@
-use tauri::AppHandle;
 use serde_json::Value as JsonValue;
+use tauri::AppHandle;
 
 use crate::chat::state::normalize_backend;
 use crate::settings_store::load_store_value;
@@ -221,7 +221,10 @@ mod tests {
             normalized.responses_api_client_metadata,
             Some(serde_json::json!({ "surface": "lilia" }))
         );
-        assert_eq!(normalized.additional_context.as_deref(), Some("extra context"));
+        assert_eq!(
+            normalized.additional_context.as_deref(),
+            Some("extra context")
+        );
         assert_eq!(normalized.persist_extended_history, Some(true));
         assert_eq!(normalized.initial_turns_page, None);
         assert_eq!(normalized.exclude_turns, vec!["turn-1"]);

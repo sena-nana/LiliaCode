@@ -48,7 +48,10 @@ pub(crate) fn load_project_settings(app: &AppHandle) -> ProjectSettings {
         .unwrap_or_default()
 }
 
-pub(crate) fn save_project_settings(app: &AppHandle, settings: &ProjectSettings) -> Result<(), String> {
+pub(crate) fn save_project_settings(
+    app: &AppHandle,
+    settings: &ProjectSettings,
+) -> Result<(), String> {
     save_store_value(app, PROJECT_SETTINGS_KEY, settings)
 }
 

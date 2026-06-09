@@ -118,10 +118,7 @@ impl AgentRuntimeEvent {
                     .get("uuid")
                     .and_then(|v| v.as_str())
                     .map(|uuid| uuid.to_string());
-                Some(Self::PromptSuggestion {
-                    suggestion,
-                    uuid,
-                })
+                Some(Self::PromptSuggestion { suggestion, uuid })
             }
             "error" => {
                 let message = value

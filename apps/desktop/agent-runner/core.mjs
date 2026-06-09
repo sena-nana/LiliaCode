@@ -3,7 +3,7 @@ import { createProtocolEmitter } from "./protocol.mjs";
 import { createInteractionBroker, emitAskUserTimeline } from "./interactions.mjs";
 import { emitToolConsentTimeline } from "./toolConsentTimeline.mjs";
 import { runClaude } from "./claude/runClaude.mjs";
-import { runCodex } from "./codex/runCodex.mjs";
+import { EMPTY_PROMPT_CODEX_WORKFLOWS, runCodex } from "./codex/runCodex.mjs";
 import { runDryRun } from "./dryRun.mjs";
 
 export function createRunnerContext(deps = {}) {
@@ -31,10 +31,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     cmd?.backend === "codex" &&
     cmd?.workflow &&
     typeof cmd.workflow === "object" &&
-    (cmd.workflow.type === "codex_review" ||
-      cmd.workflow.type === "codex_goal" ||
-      cmd.workflow.type === "codex_compact" ||
-      cmd.workflow.type === "codex_background_terminals_clean");
+    EMPTY_PROMPT_CODEX_WORKFLOWS.has(cmd.workflow.type);
   if (typeof cmd?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };

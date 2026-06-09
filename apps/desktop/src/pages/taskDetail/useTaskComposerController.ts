@@ -6,7 +6,7 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatWorkflow,
-  CodexGoalWorkflow,
+  CodexMemoryMode,
   CodexThreadGoal,
   CodexReviewTarget,
 } from "@lilia/contracts";
@@ -196,7 +196,7 @@ export function useTaskComposerController(options: {
     }
   }
 
-  async function sendCodexGoalWorkflow(workflow: CodexGoalWorkflow) {
+  async function sendCodexWorkflow(workflow: ChatWorkflow) {
     if (!context.hasContext.value) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
     try {
@@ -207,29 +207,39 @@ export function useTaskComposerController(options: {
   }
 
   async function onStartCodexCompact() {
-    if (!context.hasContext.value) return;
-    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
-    try {
-      await sendAgentMessage("", [], undefined, { type: "codex_compact" });
-    } catch {
-      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-    }
+    await sendCodexWorkflow({ type: "codex_compact" });
   }
 
   async function onCleanCodexBackgroundTerminals() {
-    if (!context.hasContext.value) return;
-    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
-    try {
-      await sendAgentMessage("", [], undefined, { type: "codex_background_terminals_clean" });
-    } catch {
-      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-    }
+    await sendCodexWorkflow({ type: "codex_background_terminals_clean" });
+  }
+
+  async function onSetCodexMemoryMode(mode: CodexMemoryMode) {
+    await sendCodexWorkflow({ type: "codex_memory_mode", mode });
+  }
+
+  async function onResetCodexMemory() {
+    await sendCodexWorkflow({ type: "codex_memory_reset" });
+  }
+
+  async function onForkCodexThread() {
+    await sendCodexWorkflow({
+      type: "codex_thread_fork",
+      excludeTurns: true,
+    });
+  }
+
+  async function onReadCodexConfigDiagnostics() {
+    await sendCodexWorkflow({
+      type: "codex_config_diagnostics",
+      includeLayers: true,
+    });
   }
 
   async function onSetCodexGoal(objective: string) {
     const trimmed = objective.trim();
     if (!trimmed) return;
-    await sendCodexGoalWorkflow({
+    await sendCodexWorkflow({
       type: "codex_goal",
       action: "set",
       objective: trimmed,
@@ -239,14 +249,14 @@ export function useTaskComposerController(options: {
   }
 
   async function onRefreshCodexGoal() {
-    await sendCodexGoalWorkflow({
+    await sendCodexWorkflow({
       type: "codex_goal",
       action: "refresh",
     });
   }
 
   async function onClearCodexGoal() {
-    await sendCodexGoalWorkflow({
+    await sendCodexWorkflow({
       type: "codex_goal",
       action: "clear",
     });
@@ -502,6 +512,10 @@ export function useTaskComposerController(options: {
     onStartCodexReview,
     onStartCodexCompact,
     onCleanCodexBackgroundTerminals,
+    onSetCodexMemoryMode,
+    onResetCodexMemory,
+    onForkCodexThread,
+    onReadCodexConfigDiagnostics,
     onSetCodexGoal,
     onRefreshCodexGoal,
     onClearCodexGoal,

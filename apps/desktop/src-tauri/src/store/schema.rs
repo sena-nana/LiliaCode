@@ -32,6 +32,7 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         PRAGMA foreign_keys = OFF;
 
         DROP TABLE IF EXISTS agent_timeline_events;
+        DROP TABLE IF EXISTS task_agent_sessions;
         DROP TABLE IF EXISTS task_dependencies;
         DROP TABLE IF EXISTS tasks;
         DROP TABLE IF EXISTS projects;
@@ -110,6 +111,15 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE task_agent_sessions (
+          task_id    TEXT NOT NULL,
+          backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          session_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE agent_timeline_events (
           id                TEXT PRIMARY KEY,
           task_id           TEXT NOT NULL,
@@ -128,6 +138,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_agent_timeline_events_task_id_turn
           ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+
         "#,
     )
     .map_err(|e| format!("lilia-store: 创建当前 schema 失败：{e}"))
@@ -294,6 +305,52 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title_source, "auto");
+    }
+
+    #[test]
+    fn task_agent_sessions_migration_creates_backend_checkpoint_table() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO tasks (id, session_id, title, status, created_at)
+              VALUES ('task-session', 'legacy-session', '会话任务', 'running', 1);
+            PRAGMA user_version = 7;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_agent_sessions (task_id, backend, session_id, updated_at)
+               VALUES ('task-session', 'codex', 'codex-thread', 2)"#,
+            [],
+        )
+        .unwrap();
+        let row: (String, String) = conn
+            .query_row(
+                "SELECT s.session_id, t.title FROM task_agent_sessions s JOIN tasks t ON t.id = s.task_id WHERE s.task_id = 'task-session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("codex-thread".to_string(), "会话任务".to_string()));
     }
 
     #[test]

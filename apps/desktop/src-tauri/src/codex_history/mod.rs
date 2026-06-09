@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
-use crate::chat::state::{default_composer, session_key, ChatStore};
+use crate::chat::state::{default_composer, remember_agent_session, ChatStore};
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
@@ -188,9 +188,20 @@ fn session_anchor_input(task_id: &str, thread_id: &str, now: i64) -> AgentTimeli
     }
 }
 
-fn remember_codex_thread_session(chat_store: &ChatStore, task_id: &str, thread_id: &str) {
-    let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    sessions.insert(session_key(BACKEND_CODEX, task_id), thread_id.to_string());
+fn remember_codex_thread_session(
+    conn: &rusqlite::Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+    thread_id: &str,
+) {
+    remember_agent_session(
+        conn,
+        chat_store,
+        task_id,
+        BACKEND_CODEX,
+        thread_id,
+        "Codex attach",
+    );
 }
 
 fn history_sync_error_input(
@@ -354,7 +365,7 @@ fn codex_thread_attach_blocking(
         Some(task_row_by_id(&conn, task_id)?.ok_or_else(|| format!("未找到任务：{task_id}"))?)
     };
     let task = task.expect("task is always set");
-    remember_codex_thread_session(&chat_store, &task.id, &thread_id);
+    remember_codex_thread_session(&conn, &chat_store, &task.id, &thread_id);
     {
         let mut composers = chat_store.composers.lock().unwrap();
         let composer = composers
@@ -378,6 +389,48 @@ fn codex_thread_attach_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::state::session_key;
+
+    fn create_task_agent_sessions_schema(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE task_agent_sessions (
+              task_id    TEXT NOT NULL,
+              backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              session_id TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend)
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn assert_agent_session_checkpoint(
+        conn: &rusqlite::Connection,
+        store: &ChatStore,
+        task_id: &str,
+        backend: &str,
+        expected: &str,
+    ) {
+        assert_eq!(
+            store
+                .sdk_sessions
+                .lock()
+                .unwrap()
+                .get(&session_key(backend, task_id))
+                .cloned(),
+            Some(expected.to_string())
+        );
+        let session_id: String = conn
+            .query_row(
+                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2",
+                params![task_id, backend],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_id, expected);
+    }
 
     #[test]
     fn session_anchor_records_codex_resume_thread_id() {
@@ -408,18 +461,12 @@ mod tests {
     #[test]
     fn remember_codex_thread_session_updates_chat_store() {
         let store = ChatStore::default();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_task_agent_sessions_schema(&conn);
 
-        remember_codex_thread_session(&store, "task-1", "thread-1");
+        remember_codex_thread_session(&conn, &store, "task-1", "thread-1");
 
-        assert_eq!(
-            store
-                .sdk_sessions
-                .lock()
-                .unwrap()
-                .get(&session_key(BACKEND_CODEX, "task-1"))
-                .cloned(),
-            Some("thread-1".to_string())
-        );
+        assert_agent_session_checkpoint(&conn, &store, "task-1", BACKEND_CODEX, "thread-1");
     }
 
     #[test]

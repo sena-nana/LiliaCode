@@ -36,6 +36,17 @@ import {
 } from "./timeline.mjs";
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
 
+export const EMPTY_PROMPT_CODEX_WORKFLOWS = new Set([
+  "codex_review",
+  "codex_goal",
+  "codex_compact",
+  "codex_background_terminals_clean",
+  "codex_memory_mode",
+  "codex_memory_reset",
+  "codex_thread_fork",
+  "codex_config_diagnostics",
+]);
+
 export async function initializeCodexAppServer(server) {
   await server.request("initialize", {
     clientInfo: {
@@ -352,6 +363,7 @@ const CODEX_GOAL_STATUSES = new Set([
   "budgetLimited",
   "complete",
 ]);
+const CODEX_MEMORY_MODES = new Set(["enabled", "disabled"]);
 
 function readCodexReviewWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
@@ -402,6 +414,37 @@ function readCodexBackgroundTerminalsCleanWorkflow(cmd) {
   return workflow?.type === "codex_background_terminals_clean";
 }
 
+function readCodexMemoryModeWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_memory_mode") return null;
+  const mode = stringOrNull(workflow.mode);
+  if (!CODEX_MEMORY_MODES.has(mode)) {
+    throw new Error("Codex memory mode workflow missing a valid mode");
+  }
+  return { mode };
+}
+
+function readCodexMemoryResetWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  return workflow?.type === "codex_memory_reset";
+}
+
+function readCodexThreadForkWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_thread_fork") return null;
+  return {
+    excludeTurns: workflow.excludeTurns !== false,
+  };
+}
+
+function readCodexConfigDiagnosticsWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_config_diagnostics") return null;
+  return {
+    includeLayers: workflow.includeLayers !== false,
+  };
+}
+
 function emitCodexWorkflowTimeline(ctx, config, threadId, status, error = null) {
   const failed = status === "error";
   const completed = status === "success";
@@ -435,6 +478,34 @@ function emitCodexWorkflowDone(ctx, threadId) {
     sessionId: threadId,
     subtype: "success",
   });
+}
+
+function compactConfigRequirements(requirements) {
+  if (!isRecord(requirements)) return null;
+  return {
+    allowedApprovalsReviewers: requirements.allowedApprovalsReviewers ?? null,
+    hooks: requirements.hooks ?? null,
+    network: requirements.network ?? null,
+    allowedApprovalPolicies: requirements.allowedApprovalPolicies ?? null,
+    allowedSandboxModes: requirements.allowedSandboxModes ?? null,
+    allowedPermissions: requirements.allowedPermissions ?? null,
+  };
+}
+
+function compactCodexConfig(config) {
+  if (!isRecord(config)) return null;
+  return {
+    model: config.model ?? null,
+    modelProvider: config.model_provider ?? config.modelProvider ?? null,
+    approvalPolicy: config.approval_policy ?? config.approvalPolicy ?? null,
+    sandboxMode: config.sandbox_mode ?? config.sandboxMode ?? null,
+    permissions: config.permissions ?? null,
+    apps: config.apps ?? null,
+  };
+}
+
+function codexThreadIdFromForkResult(result) {
+  return codexThreadIdFromResult(result) || stringOrNull(result?.forkedThreadId);
 }
 
 function codexReviewTargetSummary(target) {
@@ -715,34 +786,202 @@ async function runCodexCompactWorkflow(server, threadId, cmd, ctx) {
 }
 
 async function runCodexBackgroundTerminalsCleanWorkflow(server, threadId, cmd, ctx) {
-  if (!readCodexBackgroundTerminalsCleanWorkflow(cmd)) return false;
+  return runCodexRequestWorkflow(server, threadId, cmd, ctx, {
+    read: readCodexBackgroundTerminalsCleanWorkflow,
+    timeline: CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
+    params: () => ({ threadId }),
+  });
+}
+
+const CODEX_MEMORY_MODE_TIMELINE = {
+  subkind: "memory_mode",
+  method: "thread/memoryMode/set",
+  sourcePrefix: "codex:memory-mode",
+  startedTitle: "Codex memory mode update started",
+  successTitle: "Codex memory mode updated",
+  errorTitle: "Codex memory mode update failed",
+  startedSummary: "正在更新 Codex thread memory mode",
+  successSummary: "Codex thread memory mode 已更新",
+};
+
+const CODEX_MEMORY_RESET_TIMELINE = {
+  subkind: "memory_reset",
+  method: "memory/reset",
+  sourcePrefix: "codex:memory-reset",
+  startedTitle: "Codex memory reset started",
+  successTitle: "Codex memory reset completed",
+  errorTitle: "Codex memory reset failed",
+  startedSummary: "正在重置 Codex memory",
+  successSummary: "Codex memory 已重置",
+};
+
+const CODEX_THREAD_FORK_TIMELINE = {
+  subkind: "thread_fork",
+  method: "thread/fork",
+  sourcePrefix: "codex:thread-fork",
+  startedTitle: "Codex thread fork started",
+  successTitle: "Codex thread fork completed",
+  errorTitle: "Codex thread fork failed",
+  startedSummary: "正在 fork 当前 Codex thread",
+  successSummary: "Codex thread 已 fork",
+};
+
+async function runCodexMemoryModeWorkflow(server, threadId, cmd, ctx) {
+  return runCodexRequestWorkflow(server, threadId, cmd, ctx, {
+    read: readCodexMemoryModeWorkflow,
+    timeline: (workflow) => ({
+      ...CODEX_MEMORY_MODE_TIMELINE,
+      startedSummary: `正在${workflow.mode === "enabled" ? "启用" : "关闭"} Codex memory mode`,
+      successSummary: `Codex memory mode 已${workflow.mode === "enabled" ? "启用" : "关闭"}`,
+    }),
+    params: (workflow) => ({ threadId, mode: workflow.mode }),
+  });
+}
+
+async function runCodexMemoryResetWorkflow(server, threadId, cmd, ctx) {
+  return runCodexRequestWorkflow(server, threadId, cmd, ctx, {
+    read: readCodexMemoryResetWorkflow,
+    timeline: CODEX_MEMORY_RESET_TIMELINE,
+    params: () => null,
+  });
+}
+
+async function runCodexThreadForkWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const workflow = readCodexThreadForkWorkflow(cmd);
+  if (!workflow) return false;
   await flushCodexRuntimeSettings(ctx);
-  emitCodexWorkflowTimeline(
-    ctx,
-    CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
+  emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "started");
+  const settings = normalizeCodexSettings(cmd);
+  const params = {
     threadId,
-    "started",
-  );
+    cwd: cmd.cwd || cwdFn(),
+    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
+    excludeTurns: workflow.excludeTurns,
+  };
+  assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
+  assignCodexAdvancedThreadParams(params, settings);
   try {
-    await server.request("thread/backgroundTerminals/clean", { threadId });
+    const result = await server.request("thread/fork", params);
+    const forkedThreadId = codexThreadIdFromForkResult(result);
+    if (!forkedThreadId) throw new Error("Codex thread/fork did not return a thread id");
+    ctx.lastThreadId = forkedThreadId;
+    ctx.threadId = forkedThreadId;
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "success",
+      title: CODEX_THREAD_FORK_TIMELINE.successTitle,
+      summary: CODEX_THREAD_FORK_TIMELINE.successSummary,
+      payload: {
+        backend: "codex",
+        subkind: CODEX_THREAD_FORK_TIMELINE.subkind,
+        method: CODEX_THREAD_FORK_TIMELINE.method,
+        sourceThreadId: threadId,
+        threadId: forkedThreadId,
+        excludeTurns: workflow.excludeTurns,
+      },
+      sourceId: `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:completed:${threadId}:${forkedThreadId}`,
+    });
+    emitCodexWorkflowDone(ctx, forkedThreadId);
   } catch (err) {
-    emitCodexWorkflowTimeline(
-      ctx,
-      CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
-      threadId,
-      "error",
-      err,
-    );
+    emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "error", err);
     throw err;
   }
-  emitCodexWorkflowTimeline(
-    ctx,
-    CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
-    threadId,
-    "success",
-  );
+  return true;
+}
+
+async function runCodexConfigDiagnosticsWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const workflow = readCodexConfigDiagnosticsWorkflow(cmd);
+  if (!workflow) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const configParams = {
+    cwd: cmd.cwd || cwdFn(),
+    includeLayers: workflow.includeLayers,
+  };
+  try {
+    const [configResult, requirementsResult] = await Promise.all([
+      server.request("config/read", configParams),
+      server.request("configRequirements/read", null),
+    ]);
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "info",
+      title: "Codex config diagnostics",
+      summary: "已读取 Codex config 与 requirements",
+      payload: {
+        backend: "codex",
+        subkind: "config_diagnostics",
+        methods: ["config/read", "configRequirements/read"],
+        threadId,
+        includeLayers: workflow.includeLayers,
+        config: compactCodexConfig(configResult?.config),
+        apps: isRecord(configResult?.config) ? configResult.config.apps ?? null : null,
+        origins: isRecord(configResult) ? configResult.origins ?? null : null,
+        layers: workflow.includeLayers && isRecord(configResult) ? configResult.layers ?? null : null,
+        requirements: compactConfigRequirements(requirementsResult?.requirements),
+      },
+      sourceId: `codex:config-diagnostics:${threadId}`,
+    });
+  } catch (err) {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex config diagnostics failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "config_diagnostics",
+        methods: ["config/read", "configRequirements/read"],
+        threadId,
+        error: err?.message || String(err),
+      },
+      sourceId: `codex:config-diagnostics:error:${threadId}`,
+    });
+    throw err;
+  }
   emitCodexWorkflowDone(ctx, threadId);
   return true;
+}
+
+async function runCodexRequestWorkflow(server, threadId, cmd, ctx, config) {
+  const workflow = config.read(cmd);
+  if (!workflow) return false;
+  const timeline = typeof config.timeline === "function"
+    ? config.timeline(workflow)
+    : config.timeline;
+  await flushCodexRuntimeSettings(ctx);
+  emitCodexWorkflowTimeline(ctx, timeline, threadId, "started");
+  try {
+    await server.request(timeline.method, config.params(workflow));
+  } catch (err) {
+    emitCodexWorkflowTimeline(ctx, timeline, threadId, "error", err);
+    throw err;
+  }
+  emitCodexWorkflowTimeline(ctx, timeline, threadId, "success");
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
+const CODEX_WORKFLOW_RUNNERS = [
+  { run: runCodexGoalWorkflow, finalize: true },
+  { run: runCodexCompactWorkflow },
+  { run: runCodexBackgroundTerminalsCleanWorkflow },
+  { run: runCodexMemoryModeWorkflow },
+  { run: runCodexMemoryResetWorkflow },
+  { run: runCodexThreadForkWorkflow, needsCwd: true },
+  { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
+  { run: runCodexReviewWorkflow, finalize: true },
+];
+
+async function runCodexWorkflowIfPresent(server, threadId, cmd, ctx, cwdFn) {
+  for (const runner of CODEX_WORKFLOW_RUNNERS) {
+    const handled = runner.needsCwd
+      ? await runner.run(server, threadId, cmd, ctx, cwdFn)
+      : await runner.run(server, threadId, cmd, ctx);
+    if (!handled) continue;
+    if (runner.finalize) finalizeCodexRunContext(ctx);
+    return true;
+  }
+  return false;
 }
 
 export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
@@ -820,18 +1059,13 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         context.protocol,
       );
     });
-    if (await runCodexGoalWorkflow(server, threadId, cmd, ctx)) {
-      finalizeCodexRunContext(ctx);
-      return;
-    }
-    if (await runCodexCompactWorkflow(server, threadId, cmd, ctx)) {
-      return;
-    }
-    if (await runCodexBackgroundTerminalsCleanWorkflow(server, threadId, cmd, ctx)) {
-      return;
-    }
-    if (await runCodexReviewWorkflow(server, threadId, cmd, ctx)) {
-      finalizeCodexRunContext(ctx);
+    if (await runCodexWorkflowIfPresent(
+      server,
+      threadId,
+      cmd,
+      ctx,
+      context.cwd || process.cwd,
+    )) {
       return;
     }
     let nextPrompt = cmd.prompt;

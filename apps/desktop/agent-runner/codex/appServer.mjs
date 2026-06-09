@@ -109,12 +109,12 @@ export function createCodexAppServer({
     }
     notifications.push(msg);
   });
-  function request(method, params = {}) {
+  function request(method, params = null) {
     if (closed || !child.stdin) {
       return Promise.reject(new Error("Codex app-server is not running"));
     }
     const id = seq++;
-    const payload = { method, id, params };
+    const payload = { method, id, params: params ?? null };
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
       child.stdin.write(`${JSON.stringify(payload)}\n`);

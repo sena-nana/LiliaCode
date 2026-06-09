@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runAgentTurn } from "../agent-runner/core.mjs";
@@ -37,6 +39,9 @@ import {
   startCodexAppServerTurn,
   withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
+import {
+  createCodexAppServer,
+} from "../agent-runner/codex/appServer.mjs";
 import {
   codexHistoryTimelineInputs,
   previewCodexThread,
@@ -221,6 +226,38 @@ describe("runner core", () => {
       sessionId: "thread-clean",
       workflow: { type: "codex_background_terminals_clean" },
     });
+  });
+
+  it("Codex native workflow 允许空 prompt 进入 Codex 后端", async () => {
+    for (const workflow of [
+      { type: "codex_memory_mode", mode: "enabled" },
+      { type: "codex_memory_reset" },
+      { type: "codex_thread_fork" },
+      { type: "codex_config_diagnostics" },
+    ]) {
+      const { protocol, json } = captureProtocol();
+      const result = await runAgentTurn({
+        backend: "codex",
+        prompt: "",
+        workflow,
+      }, {
+        protocol,
+        env: {},
+        runCodex: async (cmd: any) => {
+          protocol.emit({ type: "done", sessionId: "thread-native", workflow: cmd.workflow });
+        },
+        runClaude: async () => {
+          throw new Error("wrong backend");
+        },
+      });
+
+      expect(result).toEqual({ ok: true, exitCode: 0 });
+      expect(json()[0]).toMatchObject({
+        type: "done",
+        sessionId: "thread-native",
+        workflow,
+      });
+    }
   });
 
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
@@ -580,6 +617,45 @@ describe("Claude helpers", () => {
 });
 
 describe("Codex app-server mapping", () => {
+  it("serializes Codex app-server request params, including null for no-arg methods", async () => {
+    const writes: string[] = [];
+    const stdout = new PassThrough();
+    const child: any = new EventEmitter();
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    child.stdin = {
+      write: (line: string) => {
+        writes.push(line);
+        const payload = JSON.parse(line);
+        queueMicrotask(() => {
+          stdout.write(`${JSON.stringify({ id: payload.id, result: { ok: true } })}\n`);
+        });
+        return true;
+      },
+    };
+    child.kill = () => {};
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    await expect(server.request("memory/reset")).resolves.toEqual({ ok: true });
+    await expect(server.request("config/read", { cwd: "C:/repo" })).resolves.toEqual({ ok: true });
+    server.close();
+
+    expect(JSON.parse(writes[0])).toEqual({
+      id: 1,
+      method: "memory/reset",
+      params: null,
+    });
+    expect(JSON.parse(writes[1])).toEqual({
+      id: 2,
+      method: "config/read",
+      params: { cwd: "C:/repo" },
+    });
+  });
+
   it("normalizes app-server turn and plan events", () => {
     expect(normalizeCodexAppServerEvent({
       method: "turn/completed",
@@ -1874,6 +1950,246 @@ describe("Codex app-server mapping", () => {
       line.event.status === "error" &&
       line.event.title === "Codex background terminals clean failed"
     )).toBe(true);
+  });
+
+  it("updates Codex memory mode through thread/memoryMode/set", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_memory_mode", mode: "enabled" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "thread/memoryMode/set")).toMatchObject({
+      params: { threadId: "thread-1", mode: "enabled" },
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.method === "thread/memoryMode/set"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("rejects invalid Codex memory mode workflow", async () => {
+    const { protocol } = captureProtocol();
+    const server = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_memory_mode", mode: "maybe" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("Codex memory mode workflow missing a valid mode");
+  });
+
+  it("resets Codex memory through memory/reset", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_memory_reset" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "memory/reset")).toEqual({
+      method: "memory/reset",
+      params: null,
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.method === "memory/reset"
+    )).toBe(true);
+  });
+
+  it("forks Codex thread and returns the forked session id", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/fork") return { thread: { id: "thread-fork" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      codexSettings: {
+        model: "gpt-5.5",
+        runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+        permissions: { profile: "workspaceWrite" },
+      },
+      workflow: { type: "codex_thread_fork" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "thread/fork")).toMatchObject({
+      params: {
+        threadId: "thread-1",
+        cwd: "C:/repo",
+        model: "gpt-5.5",
+        runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+        permissions: ":workspace",
+        excludeTurns: true,
+      },
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.sourceThreadId === "thread-1" &&
+      line.event.payload.threadId === "thread-fork"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-fork")).toBe(true);
+  });
+
+  it("reads Codex config diagnostics through config/read and configRequirements/read", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "config/read") {
+          return {
+            config: {
+              model: "gpt-5.5",
+              apps: { lilia: { enabled: true } },
+              model_provider: "openai",
+              approval_policy: "on-request",
+              sandbox_mode: "workspace-write",
+            },
+            origins: { model: { source: "user" } },
+            layers: [{ name: "user" }],
+          };
+        }
+        if (method === "configRequirements/read") {
+          return {
+            requirements: {
+              allowedApprovalsReviewers: ["user"],
+              hooks: { allowManagedHooksOnly: true },
+              network: { disabled: false },
+            },
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_config_diagnostics" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "config/read")).toMatchObject({
+      params: { cwd: "C:/repo", includeLayers: true },
+    });
+    expect(calls.find((call) => call.method === "configRequirements/read")).toEqual({
+      method: "configRequirements/read",
+      params: null,
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Codex config diagnostics" &&
+      line.event.payload.apps?.lilia?.enabled === true &&
+      line.event.payload.config?.modelProvider === "openai" &&
+      line.event.payload.config?.approvalPolicy === "on-request" &&
+      line.event.payload.config?.sandboxMode === "workspace-write" &&
+      line.event.payload.requirements?.allowedApprovalsReviewers?.[0] === "user"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
   });
 
   it("normalizes Codex review commit target for app-server schema", async () => {

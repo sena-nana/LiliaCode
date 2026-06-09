@@ -781,6 +781,83 @@ describe("ChatComposer", () => {
     expect(view.emitted("clean-codex-background-terminals")?.length).toBe(1);
   });
 
+  it("Codex 后端可从原生接口菜单发起 memory、fork 和配置诊断 workflow", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    const workflowButton = view.getByRole("button", { name: "Codex 原生接口" });
+    expect(workflowButton).not.toBeDisabled();
+
+    await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: "启用 Memory" }));
+    expect(view.emitted("set-codex-memory-mode")?.[0]).toEqual(["enabled"]);
+
+    await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: "关闭 Memory" }));
+    expect(view.emitted("set-codex-memory-mode")?.[1]).toEqual(["disabled"]);
+
+    await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: /重置 Memory/ }));
+    expect(confirmSpy).toHaveBeenCalledWith("重置 Codex memory？");
+    expect(view.emitted("reset-codex-memory")?.length).toBe(1);
+
+    await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: "Fork 当前 Thread" }));
+    expect(view.emitted("fork-codex-thread")?.length).toBe(1);
+
+    await fireEvent.click(workflowButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: "读取配置诊断" }));
+    expect(view.emitted("read-codex-config-diagnostics")?.length).toBe(1);
+    confirmSpy.mockRestore();
+  });
+
+  it("取消确认时不发起 Codex memory reset", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "Codex 原生接口" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /重置 Memory/ }));
+
+    expect(view.emitted("reset-codex-memory")).toBeUndefined();
+    confirmSpy.mockRestore();
+  });
+
+  it("非 Codex 时隐藏原生接口入口，运行中或阻塞 pending 时禁用", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "Codex 原生接口" })).toBeNull();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: true,
+    });
+    expect(view.getByRole("button", { name: "Codex 原生接口" })).toBeDisabled();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: false,
+      compactDisabled: true,
+    });
+    expect(view.getByRole("button", { name: "Codex 原生接口" })).toBeDisabled();
+  });
+
   it("非 Codex 时隐藏后台终端清理入口，运行中或阻塞 pending 时禁用", async () => {
     const view = render(ChatComposer, {
       props: {

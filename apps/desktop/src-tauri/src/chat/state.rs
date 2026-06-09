@@ -4,7 +4,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -61,9 +61,85 @@ pub(crate) fn load_persisted_resume_session_id(
     task_id: &str,
     backend: &str,
 ) -> Option<String> {
+    if let Ok(Some(session_id)) = load_task_agent_session_id(conn, task_id, backend) {
+        return Some(session_id);
+    }
     agent_timeline::latest_session_id(conn, task_id, backend)
         .ok()
         .flatten()
+}
+
+fn load_task_agent_session_id(
+    conn: &Connection,
+    task_id: &str,
+    backend: &str,
+) -> Result<Option<String>, String> {
+    let session_id = conn
+        .query_row(
+            r#"SELECT session_id
+               FROM task_agent_sessions
+               WHERE task_id = ?1 AND backend = ?2"#,
+            params![task_id, backend],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("读取 agent session checkpoint 失败：{e}"))?;
+    Ok(session_id.and_then(|sid| {
+        let trimmed = sid.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }))
+}
+
+pub(crate) fn persist_agent_session_id(
+    conn: &Connection,
+    task_id: &str,
+    backend: &str,
+    session_id: &str,
+) -> Result<(), String> {
+    let trimmed = session_id.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        r#"INSERT INTO task_agent_sessions (task_id, backend, session_id, updated_at)
+           VALUES (?1, ?2, ?3, ?4)
+           ON CONFLICT(task_id, backend) DO UPDATE SET
+             session_id = excluded.session_id,
+             updated_at = excluded.updated_at"#,
+        params![task_id, backend, trimmed, now_millis() as i64],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 agent session checkpoint 失败：{e}"))
+}
+
+pub(crate) fn remember_agent_session(
+    conn: &Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+    backend: &str,
+    session_id: &str,
+    log_context: &str,
+) {
+    chat_store
+        .sdk_sessions
+        .lock()
+        .unwrap()
+        .insert(session_key(backend, task_id), session_id.to_string());
+    if let Err(err) = persist_agent_session_id(conn, task_id, backend, session_id) {
+        eprintln!("[agent-session] persist {log_context} checkpoint failed: {err}");
+    }
+}
+
+pub(crate) fn clear_agent_sessions_for_task(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM task_agent_sessions WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("清理 agent session checkpoint 失败：{e}"))
 }
 
 pub(crate) fn now_millis() -> u64 {
@@ -190,6 +266,10 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
+            | Some(ChatWorkflow::CodexMemoryMode { .. })
+            | Some(ChatWorkflow::CodexMemoryReset)
+            | Some(ChatWorkflow::CodexThreadFork { .. })
+            | Some(ChatWorkflow::CodexConfigDiagnostics { .. })
     ) && content.trim().is_empty())
 }
 

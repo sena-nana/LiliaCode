@@ -672,11 +672,23 @@ mod tests {
 
         insert(
             &conn,
-            input("current-message", "task-1", Some("turn-current"), "message", 10_000),
+            input(
+                "current-message",
+                "task-1",
+                Some("turn-current"),
+                "message",
+                10_000,
+            ),
         )
         .unwrap();
 
-        let mut history = input("history-message", "task-1", Some("codex-turn-old"), "message", 1_000);
+        let mut history = input(
+            "history-message",
+            "task-1",
+            Some("codex-turn-old"),
+            "message",
+            1_000,
+        );
         history.backend = "codex".to_string();
         history.payload = json!({
             "history": true,

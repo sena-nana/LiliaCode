@@ -317,8 +317,8 @@ fn filter_claude_native_suggestions(
     now: i64,
 ) -> Option<Vec<SuggestionItem>> {
     let hit = cache.get(project_id)?;
-    if now.saturating_sub(hit.generated_at) > CACHE_TTL_MS ||
-        hit.project_id.as_deref() != Some(project_id)
+    if now.saturating_sub(hit.generated_at) > CACHE_TTL_MS
+        || hit.project_id.as_deref() != Some(project_id)
     {
         return None;
     }
@@ -331,7 +331,10 @@ fn summarize_claude_prompt_suggestion(prompt: &str) -> String {
         .trim_start_matches("请")
         .trim_start_matches("帮我")
         .trim();
-    truncate_chars(if compact.is_empty() { prompt } else { compact }, SUMMARY_LIMIT)
+    truncate_chars(
+        if compact.is_empty() { prompt } else { compact },
+        SUMMARY_LIMIT,
+    )
 }
 
 fn cache_entry_is_valid(entry: &SuggestionCacheEntry, cache_key: &str, now: i64) -> bool {
@@ -1818,11 +1821,14 @@ mod tests {
         cache.insert("p1".to_string(), item.clone());
         cache.insert("p2".to_string(), mismatched);
         cache.insert("mismatch".to_string(), item.clone());
-        cache.insert("old".to_string(), SuggestionItem {
-            project_id: Some("old".to_string()),
-            generated_at: now - CACHE_TTL_MS - 1,
-            ..item.clone()
-        });
+        cache.insert(
+            "old".to_string(),
+            SuggestionItem {
+                project_id: Some("old".to_string()),
+                generated_at: now - CACHE_TTL_MS - 1,
+                ..item.clone()
+            },
+        );
 
         let items = filter_claude_native_suggestions(&cache, "p1", now).unwrap();
         assert_eq!(items.len(), 1);

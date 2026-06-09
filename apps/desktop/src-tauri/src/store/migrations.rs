@@ -29,6 +29,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_title_source",
         apply: migrate_task_title_source,
     },
+    SchemaMigration {
+        version: 8,
+        name: "task_agent_sessions",
+        apply: migrate_task_agent_sessions,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -100,6 +105,22 @@ fn migrate_task_title_source(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_title_source 失败：{e}"))
+}
+
+fn migrate_task_agent_sessions(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_agent_sessions (
+          task_id    TEXT NOT NULL,
+          backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          session_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_agent_sessions 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

@@ -36,8 +36,8 @@ codex app-server generate-ts --out <experimental> --experimental
 | `thread/increment_elicitation` | 增加 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 已实现 | Codex runner 在 AskUser、Plan approval、tool consent 等需要 Lilia UI 等待用户响应前调用；失败只写 diagnostic，不阻断交互。 |
 | `thread/decrement_elicitation` | 减少 thread 的 out-of-band elicitation 计数。参数：`threadId`。 | 已实现 | 与 increment 成对在 UI 等待结束后调用；仅 increment 成功后 decrement，避免误减计数。 |
 | `thread/settings/update` | 更新后续 turns 的 sticky 设置：`cwd`、approval、sandbox、permissions、model、effort、summary、`collaborationMode`、personality 等。 | 已实现 | Lilia 用它应用 Codex profile 的 reasoning effort、runtime workspace roots 和受控 permissions；Plan 仍只用 `turn/start.collaborationMode`，不写成 sticky 默认。 |
-| `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 未实现 | Lilia Memory 设计是旁路系统，不直接切 Codex 原生 memory mode。 |
-| `memory/reset` | 重置 Codex memory。无参数。 | 未实现 | 这是 Codex 自身全局/账户语义，Lilia 不应在没有明确用户动作时调用。 |
+| `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 已实现 | Codex 工具栏原生接口菜单可手动启用 / 关闭，runner 调用 `mode: "enabled" | "disabled"` 并写 diagnostic timeline。 |
+| `memory/reset` | 重置 Codex memory。无参数。 | 已实现 | Codex 工具栏原生接口菜单提供二次确认后手动触发；这是 Codex 自身全局 / 账户语义，不会在普通 turn 中自动调用。 |
 | `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 已实现 | Lilia 暴露为用户手动触发的 Codex workflow；runner 调用后写入 diagnostic timeline，但不接管 Codex background terminal 生命周期。 |
 | `thread/search` | 搜索 threads。支持分页、排序、sourceKinds、archived、`searchTerm`。 | 已实现 | Lilia 从左侧栏底部导入入口搜索 app-server threads，支持分页、关键词和归档开关，并可导入为新的 Lilia task。 |
 | `thread/turns/list` | 分页读取指定 thread 的 turns，可选择 item detail。 | 已实现 | Lilia 用它生成 Codex thread 预览和历史接入时的 timeline 回补。 |
@@ -69,14 +69,14 @@ codex app-server generate-ts --out <experimental> --experimental
 | `thread/start` | `dynamicTools` | 已实现 | Lilia 用它注册 `AskUserQuestion`，将 Codex 的提问接入统一 AskUser。 |
 | `thread/start` | `runtimeWorkspaceRoots`、`permissions`、`environments`、`mockExperimentalField`、`experimentalRawEvents`、`persistExtendedHistory` | 已实现 / 不接入 | 已接入 profile 解析出的 `runtimeWorkspaceRoots`、受控 `permissions` 和 `persistExtendedHistory`；`environments`、raw events 和 mock 字段不接入。 |
 | `thread/resume` | `history`、`path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`initialTurnsPage`、`persistExtendedHistory` | 已实现 / 不接入 | 已接入 profile 解析出的 `runtimeWorkspaceRoots`、受控 `permissions`、`excludeTurns`、`initialTurnsPage` 和 `persistExtendedHistory`；不注入 Codex history 或 path。 |
-| `thread/fork` | `path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`persistExtendedHistory` | 未实现 | Lilia 当前没有通过 Codex app-server fork thread。 |
+| `thread/fork` | `path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`persistExtendedHistory` | 已实现 / 不接入 | 已从 Codex 工具栏原生接口菜单接入当前 thread fork，沿用 profile roots / permissions，默认 `excludeTurns: true`，成功后把新 thread id 作为 runner `done.sessionId`；不支持按 `path` fork，也不注入 `config` / instructions。 |
 | `turn/start` | `collaborationMode` | 已实现 | Lilia 在计划轮传 `mode: "plan"`，确认后执行轮显式传 `mode: "default"`，避免 plan mode 泄漏。 |
 | `turn/start` | `responsesapiClientMetadata`、`additionalContext`、`environments`、`runtimeWorkspaceRoots`、`permissions` | 已实现 / 不接入 | 已传本轮 `cwd`、approval policy、collaboration mode、profile roots / permissions、`responsesapiClientMetadata` 和 `additionalContext`；`environments` 不接入。 |
 | `turn/steer` | `responsesapiClientMetadata`、`additionalContext` | 已实现 / 不接入 | Lilia 在“编辑后执行 Codex 命令”后用统一 `additionalContext` builder 回灌修改命令、退出码和输出摘要；不暴露通用 steer UI。 |
 | `command/exec` | `permissionProfile` | 已实现 | Lilia 优先用它执行用户编辑后的 Codex 命令，并可传 Codex 高级设置里的 `commandExecPermissionProfile`；普通 Codex agent 命令仍由 app-server 内部事件上报。 |
 | `item/commandExecution/requestApproval` | `additionalPermissions`、`availableDecisions` | 已实现 | Lilia 将增强字段透传到统一工具确认，支持可选 Codex decision；用户编辑命令后由 Lilia 执行修改版、取消原 approval，并通过 `turn/steer` 回灌结果。 |
-| `Config` | `apps` | 未实现 | Lilia 不读取 Codex app-server `config/read` 的 apps 配置。 |
-| `ConfigRequirements` | `allowedApprovalsReviewers`、`hooks`、`network` | 部分实现 | Lilia 可将配置要求作为 diagnostic timeline 展示；还没有配置修复或专门管理 UI。 |
+| `Config` | `apps` | 已实现 | Codex 工具栏原生接口菜单可读取 `config/read`，将 effective config 的 `apps`、origins、layers 等作为 diagnostic timeline 展示；runner 会把 app-server snake_case config 字段规范化为 Lilia diagnostic payload，不写配置。 |
+| `ConfigRequirements` | `allowedApprovalsReviewers`、`hooks`、`network` | 已实现 / 诊断接入 | Codex 工具栏原生接口菜单可读取 `configRequirements/read`，将 reviewer / hooks / network 等关键要求写入 diagnostic timeline；不做配置修复或专门管理 UI。 |
 
 ## 非 experimental 新接口备注
 
@@ -127,8 +127,9 @@ collaborationMode: {
 
 1. **Codex Plan collaboration mode**：`collaborationMode/list` + `turn/start.collaborationMode`。这是与 Codex Desktop 最接近的计划模式入口。
 2. **Codex 历史入口**：已接入 `thread/search`、`thread/turns/list` 和 `thread/turns/items/list`，用于从左侧栏底部入口搜索、预览、导入和新建 Lilia task。
-3. **环境 / remote / realtime**：暂不默认接入；这些接口涉及更大的权限、UI 和生命周期边界，需要单独设计。
-4. **进程管理泛化**：`process/spawn` 当前只作为 Lilia 编辑后执行命令的 fallback，不作为通用终端 / 进程管理入口。
+3. **Codex 原生手动动作**：已从 composer 工具栏打通到 runner，包括 memory mode、memory reset、thread fork、config / requirements diagnostics；这些动作只在 Codex 后端、无运行中 turn / 阻塞交互时可触发。
+4. **环境 / remote / realtime**：暂不默认接入；这些接口涉及更大的权限、UI 和生命周期边界，需要单独设计。
+5. **进程管理泛化**：`process/spawn` 当前只作为 Lilia 编辑后执行命令的 fallback，不作为通用终端 / 进程管理入口。
 
 ## 复核脚本片段
 
