@@ -48,7 +48,7 @@ LiliaCode focuses on software engineering. Other applications in the same family
 - Non-interruptive interaction: move permission requests, plan confirmations, and agent questions into a pending area so they do not take over the input flow.
 - Collaboration-ready structure: provide a shared shape for task trees, dependencies, orchestration, and helper agents.
 
-Because LiliaCode uses its own session storage model instead of upstream CLI or SDK history formats, compatibility with raw original conversation history is not a goal. It prioritizes its own recoverable task structure.
+LiliaCode still prioritizes its own recoverable task structure over upstream CLI or SDK history formats. Raw Claude / Codex history can be imported as a bridge into Lilia tasks, but the local task timeline remains the primary working model.
 
 ## Feature Status
 
@@ -72,6 +72,8 @@ The list below tracks the current real integration surface. Only capabilities th
 
 - [x] Claude conversations: start new turns through Claude Agent SDK `query()` and save the SDK `session_id` so the same task can resume.
 - [x] Claude Plan: mirror `ExitPlanMode`, route approval, cancellation, and revision through unified AskUser, then restore execution-phase permission mode after approval.
+- [x] Claude prompt suggestions: consume native `prompt_suggestion` events and surface them in the composer suggestion area.
+- [x] Claude history: search local Claude JSONL sessions, preview messages / timeline, import them as Lilia tasks, and continue from the attached SDK session.
 - [x] Claude Skills: manage user-level and project-level Skills, and pass enabled skill names into the SDK.
 - [x] Claude tool display: normalize common tools including Bash, Read / Write / Edit / MultiEdit, Glob / Grep, NotebookEdit, WebSearch / WebFetch, TodoWrite, Task / Agent, and ExitPlanMode.
 - [ ] Claude MCP management (partial): the UI can create, edit, delete, and enable stdio MCP servers; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are not yet integrated.

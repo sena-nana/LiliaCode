@@ -181,8 +181,10 @@ pub fn conversation_suggestions_get(
         return Ok(Vec::new());
     }
 
-    if let Some(items) = load_claude_native_suggestions(&app, project_id.as_deref()) {
-        return Ok(items);
+    if should_use_claude_native_suggestions(&settings, force_refresh) {
+        if let Some(items) = load_claude_native_suggestions(&app, project_id.as_deref()) {
+            return Ok(items);
+        }
     }
 
     let conn = store.conn()?;
@@ -300,6 +302,13 @@ fn load_claude_native_suggestions(
     let cache: ClaudeNativeSuggestionCache =
         load_store_value(app, CLAUDE_NATIVE_CACHE_KEY).unwrap_or_default();
     filter_claude_native_suggestions(&cache, project_id, now_millis())
+}
+
+fn should_use_claude_native_suggestions(
+    settings: &SuggestionSettings,
+    force_refresh: Option<bool>,
+) -> bool {
+    matches!(settings.source, SuggestionSource::AssistantAi) && !force_refresh.unwrap_or(false)
 }
 
 fn filter_claude_native_suggestions(
@@ -1821,6 +1830,25 @@ mod tests {
         assert_eq!(items[0].prompt, "请继续检查 Claude 原生建议展示。");
         assert!(filter_claude_native_suggestions(&cache, "mismatch", now).is_none());
         assert!(filter_claude_native_suggestions(&cache, "old", now).is_none());
+    }
+
+    #[test]
+    fn claude_native_suggestions_are_skipped_for_provider_source_or_force_refresh() {
+        for (source, force_refresh, expected) in [
+            (SuggestionSource::AssistantAi, None, true),
+            (SuggestionSource::AssistantAi, Some(true), false),
+            (SuggestionSource::Provider, None, false),
+            (SuggestionSource::Provider, Some(false), false),
+        ] {
+            let settings = SuggestionSettings {
+                enabled: true,
+                source,
+            };
+            assert_eq!(
+                should_use_claude_native_suggestions(&settings, force_refresh),
+                expected
+            );
+        }
     }
 
     #[test]
