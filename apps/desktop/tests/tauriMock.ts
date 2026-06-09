@@ -257,6 +257,8 @@ let conversationSuggestionSettings = {
   enabled: true,
   source: "assistant-ai" as "assistant-ai" | "provider",
 };
+let conversationSuggestionsOverride: unknown[] | null = null;
+let nextConversationSuggestionsError: string | null = null;
 let projectSettings = {
   cloneParentDir: null as string | null,
   codexDefaults: null as unknown,
@@ -487,6 +489,8 @@ export function resetTauriMockData() {
   }));
   agentInteractionSettings = defaultAgentInteractionSettings();
   conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
+  conversationSuggestionsOverride = null;
+  nextConversationSuggestionsError = null;
   projectSettings = { cloneParentDir: null, codexDefaults: null, githubBinding: null };
   mockPickedFolderPath = "C:\\Users\\mock";
   githubBindingStatus = {
@@ -572,6 +576,14 @@ export function setMockTaskArchived(taskId: string, archived: boolean) {
 
 export function setMockAgentTimelineDelay(delayMs: number) {
   agentTimelineDelayMs = delayMs;
+}
+
+export function setMockConversationSuggestions(items: unknown[]) {
+  conversationSuggestionsOverride = items;
+}
+
+export function failNextMockConversationSuggestions(message: string) {
+  nextConversationSuggestionsError = message;
 }
 
 export function bindMockProjectPinUpdater(
@@ -1321,6 +1333,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "conversation_suggestions_get":
       if (!conversationSuggestionSettings.enabled) return [];
+      if (nextConversationSuggestionsError) {
+        const message = nextConversationSuggestionsError;
+        nextConversationSuggestionsError = null;
+        throw new Error(message);
+      }
+      if (conversationSuggestionsOverride) return conversationSuggestionsOverride;
       return [
         {
           id: "sg-1",

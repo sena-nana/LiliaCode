@@ -61,6 +61,7 @@ defineProps<{
   toolConsent: ToolConsentRequest | null;
   viewingImage: ChatImageViewerSource | null;
   suggestions: SuggestionItem[];
+  suggestionsStatus: "idle" | "loading" | "empty" | "error";
   suggestionsVisible: boolean;
 }>();
 
@@ -103,6 +104,7 @@ const emit = defineEmits<{
     message?: string,
     updatedInput?: ToolConsentUpdatedInput,
   ];
+  "refresh-suggestions": [];
 }>();
 
 const chatPageRef = ref<HTMLElement | null>(null);
@@ -180,6 +182,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"
+                  :suggestions-status="suggestionsStatus"
                   :suggestions-visible="suggestionsVisible"
                   :restore-draft-key="restoreDraftKey"
                   :restore-draft-content="restoreDraftContent"
@@ -202,6 +205,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"
+                  @refresh-suggestions="emit('refresh-suggestions')"
                 />
               </div>
             </template>
