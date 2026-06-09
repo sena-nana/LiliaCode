@@ -725,6 +725,47 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
   });
 
+  it("Codex 后端可从工具栏发起上下文压缩", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    const compactButton = view.getByRole("button", { name: "压缩 Codex 上下文" });
+    expect(compactButton).not.toBeDisabled();
+    await fireEvent.click(compactButton);
+
+    expect(view.emitted("start-codex-compact")?.length).toBe(1);
+  });
+
+  it("非 Codex 时隐藏 compact 入口，运行中或阻塞 pending 时禁用", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "压缩 Codex 上下文" })).toBeNull();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: true,
+    });
+    expect(view.getByRole("button", { name: "压缩 Codex 上下文" })).toBeDisabled();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: false,
+      compactDisabled: true,
+    });
+    expect(view.getByRole("button", { name: "压缩 Codex 上下文" })).toBeDisabled();
+  });
+
   it("pending AskUser 只有点击允许的其他选项后才显示输入框并返回 other", async () => {
     const view = render(ChatComposer, {
       props: {

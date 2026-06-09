@@ -74,6 +74,10 @@ export interface CodexGoalWorkflow {
   tokenBudget?: number | null;
 }
 
+export interface CodexCompactWorkflow {
+  type: "codex_compact";
+}
+
 export interface CodexThreadGoal {
   threadId: string;
   objective: string;
@@ -85,7 +89,7 @@ export interface CodexThreadGoal {
   updatedAt: number;
 }
 
-export type ChatWorkflow = CodexReviewWorkflow | CodexGoalWorkflow;
+export type ChatWorkflow = CodexReviewWorkflow | CodexGoalWorkflow | CodexCompactWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

@@ -81,7 +81,8 @@ codex app-server generate-ts --out <experimental> --experimental
 ## 非 experimental 新接口备注
 
 - `thread/goal/set|get|clear` 和 `thread/goal/updated|cleared` 已接入：goal 包含 objective、status、tokenBudget、tokensUsed 等状态；runner 建立 / 恢复 Codex thread 后执行 goal workflow，UI 从 latest goal timeline event 派生 composer 顶部状态行。
-- `review/start` 在 `codex-cli 0.136.0` 生成的 `ReviewStartParams` 中只包含 `threadId`、`target`、`delivery`；当前 Lilia 仍会在有补充说明时传 `prompt`，该 schema 差异后续单独修正。
+- `thread/compact/start` 已接入：Lilia 提供手动 Codex compact workflow，从聊天工具栏触发后调用 `{ threadId }`，成功 / 失败都写入 diagnostic timeline；不做自动 token 阈值压缩。
+- `review/start` 在 `codex-cli 0.136.0` 生成的 `ReviewStartParams` 中只包含 `threadId`、`target`、`delivery`；Lilia 已停止向该请求传 `prompt`。
 
 ## Codex Plan 语义落点
 

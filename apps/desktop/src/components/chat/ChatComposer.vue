@@ -50,6 +50,7 @@ const props = defineProps<{
   projectCwd?: string | null;
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
+  compactDisabled?: boolean;
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
@@ -67,6 +68,7 @@ const emit = defineEmits<{
     attachments: ChatAttachment[],
     target: CodexReviewTarget,
   ];
+  "start-codex-compact": [];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
@@ -753,12 +755,14 @@ defineExpose({ focusInput });
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
         :review-disabled="state.backend !== 'codex' || sending === true"
+        :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
         @start-codex-review="startCodexReview"
+        @start-codex-compact="emit('start-codex-compact')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

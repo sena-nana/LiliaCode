@@ -94,6 +94,8 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         token_budget: Option<u64>,
     },
+    #[serde(rename = "codex_compact")]
+    CodexCompact,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

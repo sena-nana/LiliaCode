@@ -360,6 +360,11 @@ function readCodexGoalWorkflow(cmd) {
   };
 }
 
+function readCodexCompactWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  return workflow?.type === "codex_compact";
+}
+
 function codexReviewTargetSummary(target) {
   if (target.type === "baseBranch") return `baseBranch:${target.branch}`;
   if (target.type === "commit") return `commit:${target.sha}`;
@@ -475,7 +480,6 @@ export async function startCodexReview(server, threadId, review) {
     target: review.target,
     delivery: review.delivery,
   };
-  if (review.instructions) params.prompt = review.instructions;
   return server.request("review/start", params);
 }
 
@@ -513,6 +517,28 @@ async function drainCodexTurnNotifications(server, ctx, timeoutMessage) {
     if (!ctx.turnCompletedSeen) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+  }
+}
+
+async function drainCodexCompactNotifications(server, ctx, threadId, timeoutMessage) {
+  const startedAt = Date.now();
+  while (true) {
+    const messages = server.drainNotifications();
+    for (const msg of messages) {
+      if (await maybeHandleCodexServerRequest(server, msg, ctx)) continue;
+      if (
+        msg?.method === "thread/compacted" &&
+        stringOrNull(msg?.params?.threadId) === threadId
+      ) {
+        return msg.params;
+      }
+      const ev = normalizeCodexAppServerEvent(msg);
+      if (ev) mapCodexEventToNdjson(ev, ctx);
+    }
+    if (Date.now() - startedAt > 1000 * 60 * 60) {
+      throw new Error(timeoutMessage);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
 
@@ -569,6 +595,58 @@ async function runCodexGoalWorkflow(server, threadId, cmd, ctx) {
   await flushCodexRuntimeSettings(ctx);
   const result = await runCodexGoal(server, threadId, goal);
   emitCodexGoalWorkflowTimeline(ctx, result.action, result.goal);
+  return true;
+}
+
+function emitCodexCompactTimeline(ctx, threadId, status, error = null) {
+  const failed = status === "error";
+  const completed = status === "success";
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status,
+    title: failed
+      ? "Codex compact failed"
+      : completed
+        ? "Codex compact completed"
+        : "Codex compact started",
+    summary: failed
+      ? error?.message || String(error)
+      : completed
+        ? "Codex thread 上下文已压缩"
+        : "正在压缩 Codex thread 上下文",
+    payload: {
+      backend: "codex",
+      subkind: "compact",
+      method: "thread/compact/start",
+      threadId,
+      ...(failed ? { error: error?.message || String(error) } : {}),
+    },
+    sourceId: `codex:compact:${failed ? "error" : completed ? "completed" : "start"}:${threadId}`,
+  });
+}
+
+async function runCodexCompactWorkflow(server, threadId, cmd, ctx) {
+  if (!readCodexCompactWorkflow(cmd)) return false;
+  await flushCodexRuntimeSettings(ctx);
+  emitCodexCompactTimeline(ctx, threadId, "started");
+  try {
+    await server.request("thread/compact/start", { threadId });
+    await drainCodexCompactNotifications(
+      server,
+      ctx,
+      threadId,
+      "Codex compact timed out",
+    );
+  } catch (err) {
+    emitCodexCompactTimeline(ctx, threadId, "error", err);
+    throw err;
+  }
+  emitCodexCompactTimeline(ctx, threadId, "success");
+  ctx.protocol.emit({
+    type: "done",
+    sessionId: threadId,
+    subtype: "success",
+  });
   return true;
 }
 
@@ -649,6 +727,9 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     });
     if (await runCodexGoalWorkflow(server, threadId, cmd, ctx)) {
       finalizeCodexRunContext(ctx);
+      return;
+    }
+    if (await runCodexCompactWorkflow(server, threadId, cmd, ctx)) {
       return;
     }
     if (await runCodexReviewWorkflow(server, threadId, cmd, ctx)) {
