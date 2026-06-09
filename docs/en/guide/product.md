@@ -22,4 +22,4 @@ LiliaCode focuses on software engineering. Other applications in the same family
 
 ## Storage Boundary
 
-Because LiliaCode uses its own session storage model instead of upstream CLI or SDK history formats, compatibility with raw original conversation history is not a goal. It prioritizes its own recoverable task structure.
+LiliaCode still prioritizes its own recoverable task structure over upstream CLI or SDK history formats. Raw Claude / Codex history can be imported as a bridge into Lilia tasks, but the local task timeline remains the primary working model.

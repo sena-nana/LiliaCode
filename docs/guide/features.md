@@ -19,6 +19,8 @@
 ## Claude Code 接入
 
 - [x] Claude 对话：在 LiliaCode 中发起新对话并继续历史会话。
+- [x] Claude 提示建议：展示 Claude 原生建议的后续用户提示。
+- [x] Claude 历史导入：搜索、预览并导入本地 Claude 历史会话。
 - [x] Claude Skills：管理用户级和项目级 Claude Skills。
 - [x] Claude MCP 管理：在界面中增删改外部 Claude MCP server。
 - [ ] Claude Plugins：完整管理 Claude Plugin 的安装、启停、更新和作用域。

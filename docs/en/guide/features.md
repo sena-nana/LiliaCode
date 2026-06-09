@@ -19,6 +19,8 @@ The list below describes the intended product capabilities. Checked items are cu
 ## Claude Code Integration
 
 - [x] Claude conversations: start new conversations and continue history sessions in LiliaCode.
+- [x] Claude prompt suggestions: show native Claude suggestions for the next user prompt.
+- [x] Claude history import: search, preview, and import local Claude history sessions.
 - [x] Claude Skills: manage user-level and project-level Claude Skills.
 - [x] Claude MCP management: add, edit, and remove external Claude MCP servers in the UI.
 - [ ] Claude Plugins: fully manage Claude Plugin installation, enablement, updates, and scope.
