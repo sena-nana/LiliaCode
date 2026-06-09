@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ProjectSettings } from "@lilia/contracts";
 import Settings from "../src/pages/Settings.vue";
 import { createLiliaRouter } from "../src/router";
 import {
@@ -179,6 +180,54 @@ describe("Settings provider switch", () => {
           JSON.stringify(args.settings).includes("\"runtimeWorkspaceRoots\":[\"C:/repo\",\"D:/shared\"]")
         ),
       ).toBe(true);
+    });
+
+    await fireEvent.click(view.getByText("Codex 高级字段"));
+    const metadata = view.getByPlaceholderText('{"surface":"lilia"}') as HTMLTextAreaElement;
+    await fireEvent.update(metadata, '{"surface":"settings-test"}');
+    await fireEvent.blur(metadata);
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "agent_interaction_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes('"responsesApiClientMetadata":{"surface":"settings-test"}')
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("项目设置页保存 Codex 默认高级字段", async () => {
+    const view = await renderSettings("/settings?tab=project");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "project_get_settings")).toBe(true);
+    });
+
+    await fireEvent.click(view.getByText("Codex 项目默认高级字段"));
+    const context = view.getByPlaceholderText("发送给 Codex 的本轮附加上下文") as HTMLTextAreaElement;
+    await fireEvent.update(context, "project extra context");
+    await fireEvent.blur(context);
+
+    await waitFor(() => {
+      const call = mockInvoke.mock.calls.find(([cmd, args]) =>
+        cmd === "project_set_settings" &&
+        typeof args === "object" &&
+        args !== null &&
+        "settings" in args &&
+        (args.settings as ProjectSettings).codexDefaults?.additionalContext === "project extra context"
+      );
+      expect(call?.[1]).toMatchObject({
+        settings: {
+          codexDefaults: {
+            profile: "default",
+            additionalContext: "project extra context",
+          },
+        },
+      });
     });
   });
 

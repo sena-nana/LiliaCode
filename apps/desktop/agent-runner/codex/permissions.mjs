@@ -1,5 +1,6 @@
 import { oneLineSummary, stringOrNull } from "../utils.mjs";
 import { stringifyCodexCommand } from "../toolConsentTimeline.mjs";
+import { codexPermissionProfileId } from "./settings.mjs";
 
 const EDIT_EXEC_OUTPUT_LIMIT = 6000;
 const EDIT_EXEC_WAIT_MS = 1000 * 60 * 30;
@@ -214,11 +215,12 @@ async function waitForSpawnedProcess(server, processId) {
   throw new Error("Edited Codex command execution timed out");
 }
 
-async function executeEditedCodexCommand(server, edit, cwd) {
+async function executeEditedCodexCommand(server, edit, cwd, permissionProfile = null) {
   const params = {
     command: edit.modifiedCommand,
     cwd: cwd || undefined,
   };
+  if (permissionProfile) params.permissionProfile = permissionProfile;
   try {
     return normalizeExecResult(await server.request("command/exec", params));
   } catch (commandExecError) {
@@ -336,7 +338,14 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
     const edit = readAllowedCodexCommandEdit(payload.input, updatedInput);
     if (edit) {
       try {
-        const result = await executeEditedCodexCommand(server, edit, payload.cwd);
+        const result = await executeEditedCodexCommand(
+          server,
+          edit,
+          payload.cwd,
+          codexPermissionProfileId(ctx?.cmd?.codexSettings?.commandExecPermissionProfile, {
+            allowAppServerId: true,
+          }),
+        );
         emitLiliaEditedCommandTimeline(ctx, payload, edit, result, result.exitCode === 0 ? "success" : "error");
         server.respond(msg.id, { decision: codexCancelDecision(payload.availableDecisions) });
         try {

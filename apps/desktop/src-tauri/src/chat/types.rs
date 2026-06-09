@@ -146,6 +146,18 @@ pub(crate) struct CodexComposerSettings {
     pub(crate) runtime_workspace_roots: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) permissions: Option<CodexComposerPermissions>,
+    #[serde(default)]
+    pub(crate) responses_api_client_metadata: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) additional_context: Option<String>,
+    #[serde(default)]
+    pub(crate) persist_extended_history: Option<bool>,
+    #[serde(default)]
+    pub(crate) initial_turns_page: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) exclude_turns: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) command_exec_permission_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

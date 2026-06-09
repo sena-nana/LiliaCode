@@ -67,13 +67,13 @@ codex app-server generate-ts --out <experimental> --experimental
 |---|---|---|---|
 | `InitializeCapabilities` | `experimentalApi` | 已实现 | `initializeCodexAppServer` 已发送 `capabilities: { experimentalApi: true }`。这是使用 experimental 方法 / 字段的协议前置条件。 |
 | `thread/start` | `dynamicTools` | 已实现 | Lilia 用它注册 `AskUserQuestion`，将 Codex 的提问接入统一 AskUser。 |
-| `thread/start` | `runtimeWorkspaceRoots`、`permissions`、`environments`、`mockExperimentalField`、`experimentalRawEvents`、`persistExtendedHistory` | 部分实现 / 不接入 | 已接入 profile 解析出的 `runtimeWorkspaceRoots` 和受控 `permissions`；`environments`、raw events、extended history 和 mock 字段不接入。 |
-| `thread/resume` | `history`、`path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`initialTurnsPage`、`persistExtendedHistory` | 部分实现 | 已接入 profile 解析出的 `runtimeWorkspaceRoots` 和受控 `permissions`；未注入 Codex history、分页恢复或 excludeTurns。 |
+| `thread/start` | `runtimeWorkspaceRoots`、`permissions`、`environments`、`mockExperimentalField`、`experimentalRawEvents`、`persistExtendedHistory` | 已实现 / 不接入 | 已接入 profile 解析出的 `runtimeWorkspaceRoots`、受控 `permissions` 和 `persistExtendedHistory`；`environments`、raw events 和 mock 字段不接入。 |
+| `thread/resume` | `history`、`path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`initialTurnsPage`、`persistExtendedHistory` | 已实现 / 不接入 | 已接入 profile 解析出的 `runtimeWorkspaceRoots`、受控 `permissions`、`excludeTurns`、`initialTurnsPage` 和 `persistExtendedHistory`；不注入 Codex history 或 path。 |
 | `thread/fork` | `path`、`runtimeWorkspaceRoots`、`permissions`、`excludeTurns`、`persistExtendedHistory` | 未实现 | Lilia 当前没有通过 Codex app-server fork thread。 |
 | `turn/start` | `collaborationMode` | 已实现 | Lilia 在计划轮传 `mode: "plan"`，确认后执行轮显式传 `mode: "default"`，避免 plan mode 泄漏。 |
-| `turn/start` | `responsesapiClientMetadata`、`additionalContext`、`environments`、`runtimeWorkspaceRoots`、`permissions` | 部分实现 | 已传本轮 `cwd`、approval policy、collaboration mode，并可带 profile roots / permissions 兜底；metadata、additionalContext 和 environments 未作为通用入口接入。 |
-| `turn/steer` | `responsesapiClientMetadata`、`additionalContext` | 部分实现 | Lilia 在“编辑后执行 Codex 命令”后用 `additionalContext` 回灌修改命令、退出码和输出摘要；未作为通用 steer UI 暴露。 |
-| `command/exec` | `permissionProfile` | 部分实现 | Lilia 优先用它执行用户编辑后的 Codex 命令；普通 Codex agent 命令仍由 app-server 内部事件上报。 |
+| `turn/start` | `responsesapiClientMetadata`、`additionalContext`、`environments`、`runtimeWorkspaceRoots`、`permissions` | 已实现 / 不接入 | 已传本轮 `cwd`、approval policy、collaboration mode、profile roots / permissions、`responsesapiClientMetadata` 和 `additionalContext`；`environments` 不接入。 |
+| `turn/steer` | `responsesapiClientMetadata`、`additionalContext` | 已实现 / 不接入 | Lilia 在“编辑后执行 Codex 命令”后用统一 `additionalContext` builder 回灌修改命令、退出码和输出摘要；不暴露通用 steer UI。 |
+| `command/exec` | `permissionProfile` | 已实现 | Lilia 优先用它执行用户编辑后的 Codex 命令，并可传 Codex 高级设置里的 `commandExecPermissionProfile`；普通 Codex agent 命令仍由 app-server 内部事件上报。 |
 | `item/commandExecution/requestApproval` | `additionalPermissions`、`availableDecisions` | 已实现 | Lilia 将增强字段透传到统一工具确认，支持可选 Codex decision；用户编辑命令后由 Lilia 执行修改版、取消原 approval，并通过 `turn/steer` 回灌结果。 |
 | `Config` | `apps` | 未实现 | Lilia 不读取 Codex app-server `config/read` 的 apps 配置。 |
 | `ConfigRequirements` | `allowedApprovalsReviewers`、`hooks`、`network` | 部分实现 | Lilia 可将配置要求作为 diagnostic timeline 展示；还没有配置修复或专门管理 UI。 |

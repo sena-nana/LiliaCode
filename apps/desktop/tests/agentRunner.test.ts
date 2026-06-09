@@ -1156,6 +1156,11 @@ describe("Codex app-server mapping", () => {
         protocol,
         threadId: "thread-1",
         currentTurnId: "turn-1",
+        cmd: {
+          codexSettings: {
+            commandExecPermissionProfile: "workspaceWrite",
+          },
+        },
         interactions: {
           requestUserConsent: async () => ({
             id: "consent-2",
@@ -1170,7 +1175,11 @@ describe("Codex app-server mapping", () => {
 
     expect(handled).toBe(true);
     expect(calls).toEqual([
-      ["request", "command/exec", { command: "yarn test --runInBand", cwd: "C:/repo" }],
+      ["request", "command/exec", {
+        command: "yarn test --runInBand",
+        cwd: "C:/repo",
+        permissionProfile: ":workspace",
+      }],
       ["respond", "approval-rpc-2", { decision: "cancel" }],
       ["request", "turn/steer", expect.objectContaining({
         threadId: "thread-1",
@@ -1519,6 +1528,12 @@ describe("Codex app-server mapping", () => {
         reasoningEffort: "high",
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
         permissions: { profile: "workspaceWrite" },
+        responsesApiClientMetadata: { surface: "lilia-test" },
+        additionalContext: "extra context",
+        persistExtendedHistory: true,
+        initialTurnsPage: { limit: 20 },
+        excludeTurns: ["turn-old", "turn-old", ""],
+        commandExecPermissionProfile: "workspaceWrite",
       },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
@@ -1540,8 +1555,66 @@ describe("Codex app-server mapping", () => {
       effort: "high",
       runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
       permissions: ":workspace",
+      persistExtendedHistory: true,
     });
     expect(calls[updateIndex].params.collaborationMode).toBeUndefined();
+    const startCall = calls.find((call) => call.method === "turn/start");
+    expect(startCall.params).toMatchObject({
+      responsesapiClientMetadata: { surface: "lilia-test" },
+      additionalContext: "extra context",
+      runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+      permissions: ":workspace",
+    });
+    expect(startCall.params.initialTurnsPage).toBeUndefined();
+    expect(startCall.params.excludeTurns).toBeUndefined();
+  });
+
+  it("passes Codex resume-only advanced fields to thread/resume", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/turns/list") return { data: [] };
+        if (method === "turn/start") return { turn: { id: "turn-1" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "resume",
+      permission: "ask",
+      planMode: false,
+      resumeSessionId: "thread-1",
+      codexSettings: {
+        persistExtendedHistory: false,
+        initialTurnsPage: { cursor: "cursor-1", limit: 10 },
+        excludeTurns: ["turn-a", "turn-a", " turn-b "],
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.find((call) => call.method === "thread/resume").params).toMatchObject({
+      threadId: "thread-1",
+      persistExtendedHistory: false,
+      initialTurnsPage: { cursor: "cursor-1", limit: 10 },
+      excludeTurns: ["turn-a", "turn-b"],
+    });
   });
 
   it("starts Codex review workflow through review/start", async () => {

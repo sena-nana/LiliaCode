@@ -12,10 +12,12 @@ import {
   Unplug,
 } from "lucide-vue-next";
 import type {
+  CodexComposerSettings,
   GitHubBindingStatus,
   GitHubDeviceFlowStart,
   ProjectSettings,
 } from "@lilia/contracts";
+import CodexAdvancedSettingsPanel from "../../components/chat/CodexAdvancedSettingsPanel.vue";
 import {
   getGitHubBindingStatus,
   getProjectSettings,
@@ -106,6 +108,31 @@ async function persistProjectSettings() {
   } finally {
     savingProject.value = false;
   }
+}
+
+async function setProjectCodexDefaults(patch: CodexComposerSettings) {
+  const current = projectSettings.value.codexDefaults ?? {};
+  const nextDefaults: CodexComposerSettings = {
+    profile: "default",
+    model: null,
+    reasoningEffort: null,
+    runtimeWorkspaceRoots: [],
+    permissions: { profile: "default" },
+    responsesApiClientMetadata: null,
+    additionalContext: null,
+    persistExtendedHistory: null,
+    initialTurnsPage: null,
+    excludeTurns: [],
+    commandExecPermissionProfile: null,
+    ...current,
+    ...patch,
+  };
+  nextDefaults.excludeTurns = [...(patch.excludeTurns ?? current.excludeTurns ?? [])];
+  projectSettings.value = {
+    ...projectSettings.value,
+    codexDefaults: nextDefaults,
+  };
+  await persistProjectSettings();
 }
 
 async function pickCloneParent() {
@@ -313,6 +340,15 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <details class="settings-disclosure">
+      <summary>Codex 项目默认高级字段</summary>
+      <CodexAdvancedSettingsPanel
+        :value="projectSettings.codexDefaults"
+        :disabled="savingProject"
+        @update="setProjectCodexDefaults"
+      />
+    </details>
 
     <div v-if="bindingError" class="conn-banner conn-banner--err">
       <AlertTriangle :size="16" aria-hidden="true" />

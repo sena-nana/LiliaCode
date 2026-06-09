@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -27,16 +28,35 @@ impl Default for CodexControlledPermissions {
     }
 }
 
+fn default_codex_profile_name() -> String {
+    "default".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CodexProfileSettings {
+    #[serde(default = "default_codex_profile_name")]
     pub(crate) profile: String,
+    #[serde(default)]
     pub(crate) model: Option<String>,
+    #[serde(default)]
     pub(crate) reasoning_effort: Option<String>,
     #[serde(default)]
     pub(crate) runtime_workspace_roots: Vec<String>,
     #[serde(default)]
     pub(crate) permissions: CodexControlledPermissions,
+    #[serde(default)]
+    pub(crate) responses_api_client_metadata: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) additional_context: Option<String>,
+    #[serde(default)]
+    pub(crate) persist_extended_history: Option<bool>,
+    #[serde(default)]
+    pub(crate) initial_turns_page: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) exclude_turns: Vec<String>,
+    #[serde(default)]
+    pub(crate) command_exec_permission_profile: Option<String>,
 }
 
 impl Default for CodexProfileSettings {
@@ -47,6 +67,12 @@ impl Default for CodexProfileSettings {
             reasoning_effort: None,
             runtime_workspace_roots: Vec::new(),
             permissions: CodexControlledPermissions::default(),
+            responses_api_client_metadata: None,
+            additional_context: None,
+            persist_extended_history: None,
+            initial_turns_page: None,
+            exclude_turns: Vec::new(),
+            command_exec_permission_profile: None,
         }
     }
 }

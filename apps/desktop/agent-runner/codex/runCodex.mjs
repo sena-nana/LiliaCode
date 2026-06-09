@@ -18,6 +18,7 @@ import {
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
+import { codexPermissionProfileId } from "./settings.mjs";
 import {
   mapCodexApprovalPolicy,
   mapCodexSandboxMode,
@@ -57,12 +58,6 @@ function codexModelFromResult(result, fallback = null) {
   return stringOrNull(result.model) || stringOrNull(result.thread?.model) || fallback;
 }
 
-const CODEX_PERMISSION_PROFILE_IDS = {
-  readOnly: ":read-only",
-  workspaceWrite: ":workspace",
-  dangerFullAccess: ":danger-no-sandbox",
-};
-
 function stringArray(value) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
@@ -76,6 +71,14 @@ function stringArray(value) {
   return out;
 }
 
+function jsonObjectOrNull(value) {
+  return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
+}
+
+function booleanOrNull(value) {
+  return typeof value === "boolean" ? value : null;
+}
+
 function normalizeCodexSettings(cmd) {
   const input = isRecord(cmd.codexSettings) ? cmd.codexSettings : {};
   const permissions = isRecord(input.permissions) ? input.permissions : {};
@@ -85,7 +88,13 @@ function normalizeCodexSettings(cmd) {
     model: stringOrNull(input.model) || stringOrNull(cmd.model) || null,
     reasoningEffort: stringOrNull(input.reasoningEffort),
     runtimeWorkspaceRoots: stringArray(input.runtimeWorkspaceRoots),
-    permissionProfile: CODEX_PERMISSION_PROFILE_IDS[permissionProfile] || null,
+    permissionProfile: codexPermissionProfileId(permissionProfile),
+    responsesApiClientMetadata: jsonObjectOrNull(input.responsesApiClientMetadata),
+    additionalContext: stringOrNull(input.additionalContext)?.trim() || null,
+    persistExtendedHistory: booleanOrNull(input.persistExtendedHistory),
+    initialTurnsPage: jsonObjectOrNull(input.initialTurnsPage),
+    excludeTurns: stringArray(input.excludeTurns),
+    commandExecPermissionProfile: codexPermissionProfileId(input.commandExecPermissionProfile),
   };
 }
 
@@ -111,6 +120,25 @@ function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = fal
   }
 }
 
+function assignCodexAdvancedThreadParams(params, settings) {
+  if (settings.persistExtendedHistory !== null) {
+    params.persistExtendedHistory = settings.persistExtendedHistory;
+  }
+}
+
+function assignCodexResumeParams(params, settings) {
+  assignCodexAdvancedThreadParams(params, settings);
+  if (settings.excludeTurns.length > 0) params.excludeTurns = settings.excludeTurns;
+  if (settings.initialTurnsPage) params.initialTurnsPage = settings.initialTurnsPage;
+}
+
+function assignCodexTurnParams(params, settings) {
+  if (settings.responsesApiClientMetadata) {
+    params.responsesapiClientMetadata = settings.responsesApiClientMetadata;
+  }
+  if (settings.additionalContext) params.additionalContext = settings.additionalContext;
+}
+
 function buildCodexThreadSettingsParams(threadId, cmd) {
   const settings = normalizeCodexSettings(cmd);
   const params = {
@@ -118,6 +146,7 @@ function buildCodexThreadSettingsParams(threadId, cmd) {
     approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
+  assignCodexAdvancedThreadParams(params, settings);
   return params;
 }
 
@@ -238,17 +267,20 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
     approvalPolicy: mapCodexApprovalPolicy(permission),
   };
   assignCodexSettingsParams(common, settings, cmd);
+  assignCodexAdvancedThreadParams(common, settings);
   if (!settings.permissionProfile) common.sandbox = mapCodexSandboxMode(permission);
   const dynamicTools = [codexAskUserDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
   }
   if (resumeSessionId) {
-    const resumed = await server.request("thread/resume", {
+    const resumeParams = {
       threadId: resumeSessionId,
       ...common,
       dynamicTools,
-    });
+    };
+    assignCodexResumeParams(resumeParams, settings);
+    const resumed = await server.request("thread/resume", resumeParams);
     return {
       threadId: codexThreadIdFromResult(resumed, resumeSessionId),
       model: codexModelFromResult(resumed, model || null),
@@ -470,6 +502,7 @@ export async function startCodexAppServerTurn(
     approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
+  assignCodexTurnParams(params, settings);
   if (options.collaborationMode) params.collaborationMode = options.collaborationMode;
   return server.request("turn/start", params);
 }

@@ -14,6 +14,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  CodexComposerSettings,
   CodexReviewTarget,
   PermissionMode,
   SuggestionItem,
@@ -340,6 +341,15 @@ function patch(next: Partial<ChatComposerState>) {
 
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
+function updateCodexSettings(next: CodexComposerSettings) {
+  patch({
+    codexSettings: {
+      ...(props.state.codexSettings ?? {}),
+      ...next,
+      excludeTurns: [...(next.excludeTurns ?? [])],
+    },
+  });
+}
 
 const suggestionRows = computed(() => props.suggestions ?? []);
 const showSuggestions = computed(() =>
@@ -761,6 +771,7 @@ defineExpose({ focusInput });
         @pick-attachments="emit('pick-attachments')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
+        @update-codex-settings="updateCodexSettings"
         @start-codex-review="startCodexReview"
         @start-codex-compact="emit('start-codex-compact')"
         @submit-entry="submitEntry"

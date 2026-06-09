@@ -3321,6 +3321,26 @@ button.chat-attachment-chip--bubble {
   right: 0;
 }
 
+.chat-codex-settings-menu {
+  width: min(520px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - 32px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: 10px;
+}
+
+.chat-codex-settings-menu .settings-row {
+  padding: 8px 0;
+}
+
+.chat-codex-settings-menu .settings-row .ui-input {
+  width: 100%;
+}
+
+.chat-codex-settings-menu .settings-row__label {
+  font-size: 12px;
+}
+
 .dd__menu {
   position: absolute;
   left: 0;
