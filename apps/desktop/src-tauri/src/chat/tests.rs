@@ -233,6 +233,11 @@ mod agent_event_sink_tests {
                 instructions: None,
                 delivery: Some("inline".to_string()),
             },
+            ChatWorkflow::CodexFixSuggestion {
+                target: CodexReviewTarget::UncommittedChanges,
+                instructions: None,
+                mode: Some("suggest".to_string()),
+            },
             ChatWorkflow::CodexGoal {
                 action: "set".to_string(),
                 objective: Some("完成 Thread Goal 接入".to_string()),
@@ -280,6 +285,21 @@ mod agent_event_sink_tests {
         assert_eq!(goal_json["tokenBudget"], json!(100));
         assert!(goal_json.get("token_budget").is_none());
 
+        let fix = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "codex_fix_suggestion",
+            "target": { "type": "baseBranch", "branch": "main" },
+            "instructions": "只给建议",
+            "mode": "suggest",
+        }))
+        .unwrap();
+        let ChatWorkflow::CodexFixSuggestion { mode, .. } = &fix else {
+            panic!("unexpected workflow: {fix:?}");
+        };
+        assert_eq!(mode.as_deref(), Some("suggest"));
+        let fix_json = serde_json::to_value(&fix).unwrap();
+        assert_eq!(fix_json["type"], json!("codex_fix_suggestion"));
+        assert_eq!(fix_json["target"]["branch"], json!("main"));
+
         let fork = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "codex_thread_fork",
             "excludeTurns": false,
@@ -317,10 +337,10 @@ mod agent_event_sink_tests {
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
-        let workflow = ChatWorkflow::CodexReview {
+        let workflow = ChatWorkflow::CodexFixSuggestion {
             target: CodexReviewTarget::UncommittedChanges,
-            instructions: None,
-            delivery: Some("inline".to_string()),
+            instructions: Some("重点看全链路".to_string()),
+            mode: Some("suggest".to_string()),
         };
 
         let payload = build_runner_stdin_payload(
@@ -340,7 +360,9 @@ mod agent_event_sink_tests {
         assert_eq!(payload["resumeSessionId"], json!("thread-1"));
         assert_eq!(payload["planMode"], json!(true));
         assert_eq!(payload["permission"], json!("ask"));
-        assert_eq!(payload["workflow"]["type"], json!("codex_review"));
+        assert_eq!(payload["workflow"]["type"], json!("codex_fix_suggestion"));
+        assert_eq!(payload["workflow"]["mode"], json!("suggest"));
+        assert_eq!(payload["workflow"]["instructions"], json!("重点看全链路"));
         assert_eq!(payload["extensions"]["mcpServers"], json!([]));
         assert_eq!(payload["model"], json!("gpt-5.5"));
     }

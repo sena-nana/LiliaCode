@@ -88,6 +88,14 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         delivery: Option<String>,
     },
+    #[serde(rename = "codex_fix_suggestion")]
+    CodexFixSuggestion {
+        target: CodexReviewTarget,
+        #[serde(default)]
+        instructions: Option<String>,
+        #[serde(default)]
+        mode: Option<String>,
+    },
     #[serde(rename = "codex_goal")]
     CodexGoal {
         action: String,

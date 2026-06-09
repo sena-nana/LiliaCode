@@ -706,6 +706,72 @@ describe("ChatComposer", () => {
     });
   });
 
+  it("Codex 后端可从工具栏发起修复建议", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    const fixButton = view.getByRole("button", { name: "修复建议" });
+    expect(fixButton).not.toBeDisabled();
+    await fireEvent.click(fixButton);
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    expect(view.emitted("start-codex-fix-suggestion")?.[0]).toEqual([
+      "",
+      [],
+      { type: "uncommittedChanges" },
+    ]);
+  });
+
+  it("Codex 修复建议会把输入框内容作为补充说明发出", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+    await setComposerText(view, "优先给最小修复");
+
+    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+
+    expect(view.emitted("start-codex-fix-suggestion")?.[0]).toEqual([
+      "优先给最小修复",
+      [],
+      { type: "uncommittedChanges" },
+    ]);
+  });
+
+  it("Codex 修复建议支持对比分支和指定提交目标", async () => {
+    const promptSpy = vi.spyOn(window, "prompt");
+    promptSpy.mockReturnValueOnce("main");
+    promptSpy.mockReturnValueOnce("abc123");
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /对比分支/ }));
+    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
+
+    expect(view.emitted("start-codex-fix-suggestion")?.[0]?.[2]).toEqual({
+      type: "baseBranch",
+      branch: "main",
+    });
+    expect(view.emitted("start-codex-fix-suggestion")?.[1]?.[2]).toEqual({
+      type: "commit",
+      sha: "abc123",
+    });
+    promptSpy.mockRestore();
+  });
+
   it("非 Codex 或运行中时禁用代码审查入口", async () => {
     const view = render(ChatComposer, {
       props: {
@@ -725,6 +791,25 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
   });
 
+  it("非 Codex 或运行中时隐藏或禁用修复建议入口", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: true,
+    });
+
+    expect(view.getByRole("button", { name: "修复建议" })).toBeDisabled();
+  });
+
   it("阻塞 pending 交互时禁用代码审查入口", async () => {
     const view = render(ChatComposer, {
       props: {
@@ -737,6 +822,19 @@ describe("ChatComposer", () => {
     expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
     expect(view.queryByRole("menuitem", { name: /未提交改动/ })).toBeNull();
     expect(view.emitted("start-codex-review")).toBeUndefined();
+  });
+
+  it("阻塞 pending 交互时隐藏修复建议入口", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+        pendingAsk: pendingAsk(singleAskWithOtherSpec),
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
+    expect(view.emitted("start-codex-fix-suggestion")).toBeUndefined();
   });
 
   it("Codex 后端可从工具栏发起上下文压缩", async () => {

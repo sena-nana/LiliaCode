@@ -196,6 +196,28 @@ export function useTaskComposerController(options: {
     }
   }
 
+  async function onStartCodexFixSuggestion(
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ) {
+    if (!context.hasContext.value) return;
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
+    const workflow: ChatWorkflow = {
+      type: "codex_fix_suggestion",
+      target,
+      mode: "suggest",
+    };
+    const instructions = content.trim();
+    if (instructions) workflow.instructions = instructions;
+    try {
+      await sendAgentMessage(instructions, outgoingAttachments, undefined, workflow);
+      attachments.value = [];
+    } catch {
+      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+    }
+  }
+
   async function sendCodexWorkflow(workflow: ChatWorkflow) {
     if (!context.hasContext.value) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
@@ -510,6 +532,7 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onStartCodexReview,
+    onStartCodexFixSuggestion,
     onStartCodexCompact,
     onCleanCodexBackgroundTerminals,
     onSetCodexMemoryMode,

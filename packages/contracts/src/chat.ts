@@ -58,6 +58,13 @@ export interface CodexReviewWorkflow {
   delivery?: "inline" | "detached";
 }
 
+export interface CodexFixSuggestionWorkflow {
+  type: "codex_fix_suggestion";
+  target: CodexReviewTarget;
+  instructions?: string;
+  mode?: "suggest" | "apply";
+}
+
 export type CodexGoalStatus =
   | "active"
   | "paused"
@@ -116,6 +123,7 @@ export interface CodexThreadGoal {
 
 export type ChatWorkflow =
   | CodexReviewWorkflow
+  | CodexFixSuggestionWorkflow
   | CodexGoalWorkflow
   | CodexCompactWorkflow
   | CodexBackgroundTerminalsCleanWorkflow

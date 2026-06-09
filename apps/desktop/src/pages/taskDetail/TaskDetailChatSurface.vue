@@ -79,6 +79,11 @@ const emit = defineEmits<{
     attachments: ChatAttachment[],
     target: CodexReviewTarget,
   ];
+  "start-codex-fix-suggestion": [
+    content: string,
+    attachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ];
   "start-codex-compact": [];
   "clean-codex-background-terminals": [];
   "set-codex-memory-mode": [mode: "enabled" | "disabled"];
@@ -178,6 +183,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
+                  @start-codex-fix-suggestion="(content, outgoingAttachments, target) => emit('start-codex-fix-suggestion', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
                   @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
                   @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"

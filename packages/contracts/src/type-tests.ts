@@ -9,6 +9,8 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatMessage,
+  ChatWorkflow,
+  CodexReviewTarget,
   CodexProfileSettings,
   SuggestionItem,
   TaskTodo,
@@ -108,6 +110,35 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
       createdAt: 1;
     },
     ChatMessage
+  >
+>;
+
+export type CodexFixSuggestionWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "codex_fix_suggestion";
+      target: { type: "baseBranch"; branch: "main" };
+      instructions: "只给建议";
+      mode: "suggest";
+    },
+    ChatWorkflow
+  >
+>;
+
+export type CodexFixSuggestionTargetTypeTest = Assert<
+  Extends<{ type: "commit"; sha: "abc123" }, CodexReviewTarget>
+>;
+
+export type CodexFixSuggestionRejectsInvalidTargetTypeTest = Assert<
+  Extends<
+    Extends<
+      {
+        type: "codex_fix_suggestion";
+        target: { type: "baseBranch" };
+      },
+      ChatWorkflow
+    >,
+    false
   >
 >;
 

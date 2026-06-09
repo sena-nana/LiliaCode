@@ -27,6 +27,7 @@ import {
 } from "../agent-runner/codex/timeline.mjs";
 import {
   buildCodexCollaborationMode,
+  buildCodexFixSuggestionPrompt,
   buildCodexPlanRevisionPrompt,
   readCodexPlanModePreset,
   runCodexAppServer,
@@ -89,6 +90,38 @@ function trackedElicitation(calls: any[]) {
   };
 }
 
+function createCodexTurnTestServer(
+  calls: any[],
+  turn: Record<string, unknown> = { status: "completed" },
+) {
+  return {
+    request: async (method: string, params: any) => {
+      calls.push({ method, params });
+      if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+      if (method === "turn/start") return { turn: { id: "fix-turn-1" } };
+      return {};
+    },
+    notify: () => {},
+    respond: () => {},
+    drainNotifications: () => [{
+      method: "turn/completed",
+      params: { threadId: "thread-1", turn },
+    }],
+    close: () => {},
+  };
+}
+
+async function runCodexAppServerTestTurn({ protocol, server, ...cmd }: any) {
+  await runCodexAppServer(cmd, { mcpServers: [], warnings: [] }, {
+    protocol,
+    interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+    emitToolConsentTimeline: () => {},
+    createCodexAppServer: () => server,
+    env: {},
+    cwd: () => "C:/repo",
+  });
+}
+
 describe("agent runner entry", () => {
   it("入口保持薄 CLI，真实实现从 runner core 进入", () => {
     expect(runnerSource).toContain("runAgentTurn");
@@ -141,6 +174,39 @@ describe("runner core", () => {
       workflow: {
         type: "codex_review",
         target: { type: "uncommittedChanges" },
+      },
+    });
+  });
+
+  it("Codex fix suggestion workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+        mode: "suggest",
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-fix", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-fix",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+        mode: "suggest",
       },
     });
   });
@@ -1772,6 +1838,211 @@ describe("Codex app-server mapping", () => {
       line.event.payload.hasInstructions === true
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("starts Codex fix suggestion workflow through turn/start in suggest mode", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = createCodexTurnTestServer(calls);
+
+    await runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "重点看权限边界",
+      permission: "ask",
+      planMode: false,
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "baseBranch", branch: "main" },
+        instructions: "重点看权限边界",
+      },
+      protocol,
+      server,
+    });
+
+    expect(calls.some((call) => call.method === "review/start")).toBe(false);
+    expect(calls.findIndex((call) => call.method === "thread/settings/update"))
+      .toBeLessThan(calls.findIndex((call) => call.method === "turn/start"));
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart).toMatchObject({
+      params: {
+        threadId: "thread-1",
+        cwd: "C:/repo",
+        approvalPolicy: "never",
+        permissions: ":read-only",
+        collaborationMode: { mode: "default" },
+      },
+    });
+    const prompt = turnStart.params.input[0].text;
+    expect(prompt).toContain("Lilia Codex fix suggestion workflow.");
+    expect(prompt).toContain("Target: baseBranch:main");
+    expect(prompt).toContain("Workspace cwd: C:/repo");
+    expect(prompt).toContain("Mode: suggest");
+    expect(prompt).toContain("Do not edit files or run modifying commands.");
+    expect(prompt).toContain("重点看权限边界");
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "started" &&
+      line.event.payload.subkind === "fix_suggestion" &&
+      line.event.payload.target.branch === "main" &&
+      line.event.payload.effectivePermission === "readonly"
+    )).toBe(true);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.subkind === "fix_suggestion"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("forces Codex fix suggestion suggest mode to readonly even when composer permission is full", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = createCodexTurnTestServer(calls);
+
+    await runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "",
+      permission: "full",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+        mode: "suggest",
+      },
+      protocol,
+      server,
+    });
+
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart.params.approvalPolicy).toBe("never");
+    expect(turnStart.params.permissions).toBe(":read-only");
+    expect(turnStart.params.sandboxPolicy).toBeUndefined();
+  });
+
+  it("overrides Codex fix suggestion suggest mode permission profiles to read only", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = createCodexTurnTestServer(calls);
+
+    await runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      codexSettings: {
+        permissions: { profile: "dangerFullAccess" },
+        runtimeWorkspaceRoots: ["C:/repo"],
+      },
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+        mode: "suggest",
+      },
+      protocol,
+      server,
+    });
+
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart.params.permissions).toBe(":read-only");
+    expect(turnStart.params.runtimeWorkspaceRoots).toEqual(["C:/repo"]);
+  });
+
+  it("builds Codex fix suggestion prompts for apply and commit targets", () => {
+    const prompt = buildCodexFixSuggestionPrompt({
+      target: { type: "commit", sha: "abc123", title: null },
+      instructions: "可以直接修",
+      mode: "apply",
+    }, {
+      prompt: "可以直接修",
+      cwd: "C:/repo",
+    });
+
+    expect(prompt).toContain("Target: commit:abc123");
+    expect(prompt).toContain("Inspect the specified commit: abc123");
+    expect(prompt).toContain("Mode: apply");
+    expect(prompt).toContain("You may edit files and run commands as needed");
+    expect(prompt).toContain("User instructions:\n可以直接修");
+  });
+
+  it("starts Codex fix suggestion workflow through turn/start in apply mode", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = createCodexTurnTestServer(calls);
+
+    await runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "可以直接修",
+      permission: "full",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "commit", sha: "abc123" },
+        instructions: "可以直接修",
+        mode: "apply",
+      },
+      protocol,
+      server,
+    });
+
+    expect(calls.some((call) => call.method === "review/start")).toBe(false);
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart.params.input[0].text).toContain("Mode: apply");
+    expect(turnStart.params.input[0].text).toContain("You may edit files and run commands as needed");
+    expect(turnStart.params.input[0].text).toContain("Target: commit:abc123");
+    expect(turnStart.params.approvalPolicy).toBe("never");
+    expect(turnStart.params.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
+    expect(turnStart.params.permissions).toBeUndefined();
+  });
+
+  it("uses uncommitted target prompt for Codex fix suggestion workflow", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = createCodexTurnTestServer(calls);
+
+    await runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "uncommittedChanges" },
+      },
+      protocol,
+      server,
+    });
+
+    const prompt = calls.find((call) => call.method === "turn/start").params.input[0].text;
+    expect(prompt).toContain("Target: uncommittedChanges");
+    expect(prompt).toContain("Inspect the current uncommitted workspace changes.");
+  });
+
+  it("emits an error diagnostic when Codex fix suggestion turn fails", async () => {
+    const { protocol, json } = captureProtocol();
+    const server = createCodexTurnTestServer([], {
+      status: "failed",
+      error: { message: "fix failed" },
+    });
+
+    await expect(runCodexAppServerTestTurn({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: {
+        type: "codex_fix_suggestion",
+        target: { type: "baseBranch", branch: "main" },
+      },
+      protocol,
+      server,
+    })).rejects.toThrow("Codex fix suggestion turn failed");
+
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "error" &&
+      line.event.title === "Codex fix suggestion failed" &&
+      line.event.payload.method === "turn/start" &&
+      line.event.payload.target.branch === "main" &&
+      line.event.payload.error === "Codex fix suggestion turn failed"
+    )).toBe(true);
   });
 
   it("starts Codex compact workflow through thread/compact/start", async () => {
