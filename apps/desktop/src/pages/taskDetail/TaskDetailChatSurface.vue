@@ -14,6 +14,7 @@ import ChatTranscript from "../../components/chat/ChatTranscript.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatSidebarHost from "../../components/chat/ChatSidebarHost.vue";
 import ImageViewer from "../../components/chat/ImageViewer.vue";
+import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
 import type { ChatImageViewerSource } from "../../components/chat/imageViewer";
 import TodoFloat from "../../components/todo/TodoFloat.vue";
 import type { PendingAsk } from "../../composables/useAskUser";
@@ -90,6 +91,7 @@ const emit = defineEmits<{
   "reset-codex-memory": [];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
+  "start-codex-batch-apply": [input: CodexBatchApplyInput];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -147,10 +149,12 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="showExpiredPendingActions"
             :can-retry-event="canRetryEvent"
+            :can-start-codex-batch-apply="composerState.backend === 'codex' && !isTurnRunning && !hasBlockingPendingAction"
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
             @insert-draft-text="emit('insert-draft-text', $event)"
+            @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
           >
             <template #controls>
               <div class="chat-controls">

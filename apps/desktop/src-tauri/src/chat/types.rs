@@ -96,6 +96,14 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         mode: Option<String>,
     },
+    #[serde(rename = "codex_batch_apply")]
+    CodexBatchApply {
+        source_turn_id: String,
+        source_kind: String,
+        source_summary: String,
+        #[serde(default)]
+        instructions: Option<String>,
+    },
     #[serde(rename = "codex_goal")]
     CodexGoal {
         action: String,

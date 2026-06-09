@@ -65,6 +65,14 @@ export interface CodexFixSuggestionWorkflow {
   mode?: "suggest" | "apply";
 }
 
+export interface CodexBatchApplyWorkflow {
+  type: "codex_batch_apply";
+  sourceTurnId: string;
+  sourceKind: "review" | "fix_suggestion";
+  sourceSummary: string;
+  instructions?: string;
+}
+
 export type CodexGoalStatus =
   | "active"
   | "paused"
@@ -124,6 +132,7 @@ export interface CodexThreadGoal {
 export type ChatWorkflow =
   | CodexReviewWorkflow
   | CodexFixSuggestionWorkflow
+  | CodexBatchApplyWorkflow
   | CodexGoalWorkflow
   | CodexCompactWorkflow
   | CodexBackgroundTerminalsCleanWorkflow

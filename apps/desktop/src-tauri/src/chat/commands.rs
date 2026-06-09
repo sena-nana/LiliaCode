@@ -38,6 +38,7 @@ pub fn chat_send_message(
         workflow,
         Some(ChatWorkflow::CodexReview { .. })
             | Some(ChatWorkflow::CodexFixSuggestion { .. })
+            | Some(ChatWorkflow::CodexBatchApply { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)

@@ -7,6 +7,7 @@ import type {
 } from "../../composables/usePendingAgentActions";
 import ChatBubble from "./ChatBubble.vue";
 import TimelineEntryItem from "./TimelineEntryItem.vue";
+import type { CodexBatchApplyInput } from "./codexBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { processGroupEntries, type TimelineGroupEntry } from "./timelineEntries";
 import {
@@ -31,6 +32,7 @@ const props = defineProps<{
   pendingActions?: PendingAgentAction[];
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
+  canStartCodexBatchApply?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -38,6 +40,7 @@ const emit = defineEmits<{
   resolvePendingAction: [resolution: PendingAgentActionResolution];
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
+  "start-codex-batch-apply": [input: CodexBatchApplyInput];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -221,12 +224,14 @@ function pendingState(event: AgentTimelineEvent) {
           :pending-actions="pendingActions"
           :show-expired-pending-actions="showExpiredPendingActions"
           :can-retry-event="canRetryEvent"
+          :can-start-codex-batch-apply="canStartCodexBatchApply"
           @toggle-event="toggleEvent"
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"
           @resolve-pending-action="emit('resolvePendingAction', $event)"
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
+          @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
         />
       </template>
       <li

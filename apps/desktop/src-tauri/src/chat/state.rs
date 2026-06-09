@@ -264,6 +264,7 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
         workflow,
         Some(ChatWorkflow::CodexReview { .. })
             | Some(ChatWorkflow::CodexFixSuggestion { .. })
+            | Some(ChatWorkflow::CodexBatchApply { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)

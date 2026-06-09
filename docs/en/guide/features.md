@@ -35,7 +35,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Codex MCP management: discover, create, edit, delete, and enable user-level stdio Codex MCP servers; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support profiles, reasoning effort, runtime workspace roots, controlled permissions, and project-level defaults.
 - [x] Codex workflows: support code review and fix suggestions.
-- [ ] Codex batch-change workflows are not yet available.
+- [x] Codex batch-change workflows: apply review / fix suggestions through a forced Plan approval flow.
 - [ ] Built-in browser interaction: interact with users or debug code through IAB.
 
 ## LiliaCode-Specific Features

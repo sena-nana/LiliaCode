@@ -27,6 +27,7 @@ import {
 } from "../agent-runner/codex/timeline.mjs";
 import {
   buildCodexCollaborationMode,
+  buildCodexBatchApplyPrompt,
   buildCodexFixSuggestionPrompt,
   buildCodexPlanRevisionPrompt,
   readCodexPlanModePreset,
@@ -207,6 +208,40 @@ describe("runner core", () => {
         type: "codex_fix_suggestion",
         target: { type: "uncommittedChanges" },
         mode: "suggest",
+      },
+    });
+  });
+
+  it("Codex batch apply workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: {
+        type: "codex_batch_apply",
+        sourceTurnId: "turn-source",
+        sourceKind: "fix_suggestion",
+        sourceSummary: "建议修复权限边界",
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-batch", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-batch",
+      workflow: {
+        type: "codex_batch_apply",
+        sourceTurnId: "turn-source",
+        sourceKind: "fix_suggestion",
       },
     });
   });
@@ -1962,6 +1997,144 @@ describe("Codex app-server mapping", () => {
     expect(prompt).toContain("Mode: apply");
     expect(prompt).toContain("You may edit files and run commands as needed");
     expect(prompt).toContain("User instructions:\n可以直接修");
+  });
+
+  it("builds Codex batch apply prompt from review suggestions", () => {
+    const prompt = buildCodexBatchApplyPrompt({
+      sourceTurnId: "turn-source",
+      sourceKind: "review",
+      sourceSummary: "建议统一权限边界。",
+      instructions: "应用最小改动",
+    }, {
+      prompt: "应用最小改动",
+      cwd: "C:/repo",
+    });
+
+    expect(prompt).toContain("Lilia Codex batch apply workflow.");
+    expect(prompt).toContain("Source kind: review");
+    expect(prompt).toContain("Source turn id: turn-source");
+    expect(prompt).toContain("Workspace cwd: C:/repo");
+    expect(prompt).toContain("wait for Lilia plan approval");
+    expect(prompt).toContain("Source suggestions:\n建议统一权限边界。");
+    expect(prompt).toContain("User instructions:\n应用最小改动");
+  });
+
+  it("Codex batch apply workflow 强制先走 Plan，确认后再执行", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    let turnStarts = 0;
+    const completedTurns = new Set<number>();
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "collaborationMode/list") {
+          return {
+            data: [{
+              mode: "plan",
+              reasoning_effort: "high",
+            }],
+          };
+        }
+        if (method === "turn/start") {
+          turnStarts += 1;
+          return { turn: { id: `turn-${turnStarts}` } };
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        if (turnStarts > 0 && !completedTurns.has(turnStarts)) {
+          completedTurns.add(turnStarts);
+          if (turnStarts === 1) {
+            return [{
+              method: "item/agentMessage/delta",
+              params: { delta: "计划：先改代码，再补测试。" },
+            }, {
+              method: "turn/completed",
+              params: { threadId: "thread-1", turn: { status: "completed" } },
+            }];
+          }
+          return [{
+            method: "item/agentMessage/delta",
+            params: { delta: "已应用建议。" },
+          }, {
+            method: "turn/completed",
+            params: { threadId: "thread-1", turn: { status: "completed" } },
+          }];
+        }
+        return [];
+      },
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      planMode: false,
+      workflow: {
+        type: "codex_batch_apply",
+        sourceTurnId: "turn-source",
+        sourceKind: "fix_suggestion",
+        sourceSummary: "建议修复权限边界",
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: {
+        requestAskUser: async () => ({
+          cancelled: false,
+          answers: {
+            "approve-plan": {
+              questionId: "approve-plan",
+              value: "yes",
+            },
+          },
+        }),
+      },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    const startCalls = calls.filter((call) => call.method === "turn/start");
+    expect(startCalls).toHaveLength(2);
+    expect(startCalls[0].params.collaborationMode).toMatchObject({
+      mode: "plan",
+      settings: {
+        model: "gpt-5.5",
+        reasoning_effort: "high",
+      },
+    });
+    expect(startCalls[0].params.input[0].text).toContain("Lilia Codex batch apply workflow.");
+    expect(startCalls[0].params.input[0].text).toContain("Source suggestions:\n建议修复权限边界");
+    expect(startCalls[1].params.collaborationMode).toMatchObject({
+      mode: "default",
+      settings: { model: "gpt-5.5" },
+    });
+    expect(startCalls[1].params.input[0].text).toContain("用户已确认上一版计划");
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "started" &&
+      line.event.payload.subkind === "batch_apply" &&
+      line.event.payload.forcedPlan === true
+    )).toBe(true);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.subkind === "batch_apply"
+    )).toBe(true);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "message" &&
+      line.event.status === "success" &&
+      line.event.payload.content === "已应用建议。" &&
+      line.event.payload.workflowSource
+    )).toBe(false);
   });
 
   it("starts Codex fix suggestion workflow through turn/start in apply mode", async () => {

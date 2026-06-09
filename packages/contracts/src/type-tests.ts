@@ -125,6 +125,19 @@ export type CodexFixSuggestionWorkflowTypeTest = Assert<
   >
 >;
 
+export type CodexBatchApplyWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "codex_batch_apply";
+      sourceTurnId: "turn-1";
+      sourceKind: "fix_suggestion";
+      sourceSummary: "建议修复权限边界";
+      instructions: "应用最小改动";
+    },
+    ChatWorkflow
+  >
+>;
+
 export type CodexFixSuggestionTargetTypeTest = Assert<
   Extends<{ type: "commit"; sha: "abc123" }, CodexReviewTarget>
 >;
