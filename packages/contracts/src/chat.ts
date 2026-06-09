@@ -82,6 +82,27 @@ export interface CodexBackgroundTerminalsCleanWorkflow {
   type: "codex_background_terminals_clean";
 }
 
+export type CodexMemoryMode = "enabled" | "disabled";
+
+export interface CodexMemoryModeWorkflow {
+  type: "codex_memory_mode";
+  mode: CodexMemoryMode;
+}
+
+export interface CodexMemoryResetWorkflow {
+  type: "codex_memory_reset";
+}
+
+export interface CodexThreadForkWorkflow {
+  type: "codex_thread_fork";
+  excludeTurns?: boolean;
+}
+
+export interface CodexConfigDiagnosticsWorkflow {
+  type: "codex_config_diagnostics";
+  includeLayers?: boolean;
+}
+
 export interface CodexThreadGoal {
   threadId: string;
   objective: string;
@@ -97,7 +118,11 @@ export type ChatWorkflow =
   | CodexReviewWorkflow
   | CodexGoalWorkflow
   | CodexCompactWorkflow
-  | CodexBackgroundTerminalsCleanWorkflow;
+  | CodexBackgroundTerminalsCleanWorkflow
+  | CodexMemoryModeWorkflow
+  | CodexMemoryResetWorkflow
+  | CodexThreadForkWorkflow
+  | CodexConfigDiagnosticsWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

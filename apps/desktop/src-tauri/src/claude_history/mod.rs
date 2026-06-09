@@ -7,12 +7,12 @@ pub use types::{
     ClaudeSessionSummary,
 };
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
-use crate::chat::state::{default_composer, session_key, ChatStore};
+use crate::chat::state::{default_composer, remember_agent_session, ChatStore};
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::codex_history::bulk::persist_history_events_batch;
 use crate::codex_history::preview::preview_events_from_inputs;
@@ -187,9 +187,20 @@ fn insert_session_anchor(app: &AppHandle, task_id: &str, session_id: &str) {
     );
 }
 
-fn remember_claude_session(chat_store: &ChatStore, task_id: &str, session_id: &str) {
-    let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    sessions.insert(session_key(BACKEND_CLAUDE, task_id), session_id.to_string());
+fn remember_claude_session(
+    conn: &Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+    session_id: &str,
+) {
+    remember_agent_session(
+        conn,
+        chat_store,
+        task_id,
+        BACKEND_CLAUDE,
+        session_id,
+        "Claude attach",
+    );
 }
 
 fn history_sync_error_input(
@@ -355,7 +366,7 @@ fn claude_session_attach_blocking(
         Some(task_row_by_id(&conn, task_id)?.ok_or_else(|| format!("未找到任务：{task_id}"))?)
     };
     let task = task.expect("task is always set");
-    remember_claude_session(&chat_store, &task.id, &session_id);
+    remember_claude_session(&conn, &chat_store, &task.id, &session_id);
     {
         let mut composers = chat_store.composers.lock().unwrap();
         let composer = composers
@@ -379,6 +390,48 @@ fn claude_session_attach_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::state::session_key;
+
+    fn create_task_agent_sessions_schema(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE task_agent_sessions (
+              task_id    TEXT NOT NULL,
+              backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              session_id TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend)
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn assert_agent_session_checkpoint(
+        conn: &Connection,
+        store: &ChatStore,
+        task_id: &str,
+        backend: &str,
+        expected: &str,
+    ) {
+        assert_eq!(
+            store
+                .sdk_sessions
+                .lock()
+                .unwrap()
+                .get(&session_key(backend, task_id))
+                .cloned(),
+            Some(expected.to_string())
+        );
+        let session_id: String = conn
+            .query_row(
+                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2",
+                params![task_id, backend],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_id, expected);
+    }
 
     #[test]
     fn session_anchor_records_claude_resume_session_id() {
@@ -409,17 +462,11 @@ mod tests {
     #[test]
     fn remember_claude_session_updates_chat_store() {
         let store = ChatStore::default();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_task_agent_sessions_schema(&conn);
 
-        remember_claude_session(&store, "task-1", "session-1");
+        remember_claude_session(&conn, &store, "task-1", "session-1");
 
-        assert_eq!(
-            store
-                .sdk_sessions
-                .lock()
-                .unwrap()
-                .get(&session_key(BACKEND_CLAUDE, "task-1"))
-                .cloned(),
-            Some("session-1".to_string())
-        );
+        assert_agent_session_checkpoint(&conn, &store, "task-1", BACKEND_CLAUDE, "session-1");
     }
 }

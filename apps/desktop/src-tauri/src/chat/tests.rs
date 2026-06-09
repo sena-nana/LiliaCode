@@ -203,7 +203,10 @@ mod agent_event_sink_tests {
         let mut next = previous.clone();
 
         assert_eq!(composer_permission_update_payload(None, &next), None);
-        assert_eq!(composer_permission_update_payload(Some(&previous), &next), None);
+        assert_eq!(
+            composer_permission_update_payload(Some(&previous), &next),
+            None
+        );
 
         next.permission = "readonly".to_string();
         assert_eq!(
@@ -215,7 +218,10 @@ mod agent_event_sink_tests {
         );
 
         next.permission = "invalid".to_string();
-        assert_eq!(composer_permission_update_payload(Some(&previous), &next), None);
+        assert_eq!(
+            composer_permission_update_payload(Some(&previous), &next),
+            None
+        );
     }
 
     #[test]
@@ -234,6 +240,16 @@ mod agent_event_sink_tests {
             },
             ChatWorkflow::CodexCompact,
             ChatWorkflow::CodexBackgroundTerminalsClean,
+            ChatWorkflow::CodexMemoryMode {
+                mode: "enabled".to_string(),
+            },
+            ChatWorkflow::CodexMemoryReset,
+            ChatWorkflow::CodexThreadFork {
+                exclude_turns: Some(true),
+            },
+            ChatWorkflow::CodexConfigDiagnostics {
+                include_layers: Some(true),
+            },
         ];
 
         for workflow in workflows {
@@ -243,6 +259,51 @@ mod agent_event_sink_tests {
             assert!(should_persist_user_message("补充说明", &workflow));
         }
         assert!(should_persist_user_message("", &None));
+    }
+
+    #[test]
+    fn chat_workflow_serializes_struct_variant_fields_as_camel_case() {
+        let goal = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "codex_goal",
+            "action": "set",
+            "objective": "完成接口接入",
+            "status": "active",
+            "tokenBudget": 100,
+        }))
+        .unwrap();
+        let ChatWorkflow::CodexGoal { token_budget, .. } = &goal else {
+            panic!("unexpected workflow: {goal:?}");
+        };
+        assert_eq!(*token_budget, Some(100));
+        let goal_json = serde_json::to_value(&goal).unwrap();
+        assert_eq!(goal_json["tokenBudget"], json!(100));
+        assert!(goal_json.get("token_budget").is_none());
+
+        let fork = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "codex_thread_fork",
+            "excludeTurns": false,
+        }))
+        .unwrap();
+        let ChatWorkflow::CodexThreadFork { exclude_turns } = &fork else {
+            panic!("unexpected workflow: {fork:?}");
+        };
+        assert_eq!(*exclude_turns, Some(false));
+        let fork_json = serde_json::to_value(&fork).unwrap();
+        assert_eq!(fork_json["excludeTurns"], json!(false));
+        assert!(fork_json.get("exclude_turns").is_none());
+
+        let diagnostics = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "codex_config_diagnostics",
+            "includeLayers": false,
+        }))
+        .unwrap();
+        let ChatWorkflow::CodexConfigDiagnostics { include_layers } = &diagnostics else {
+            panic!("unexpected workflow: {diagnostics:?}");
+        };
+        assert_eq!(*include_layers, Some(false));
+        let diagnostics_json = serde_json::to_value(&diagnostics).unwrap();
+        assert_eq!(diagnostics_json["includeLayers"], json!(false));
+        assert!(diagnostics_json.get("include_layers").is_none());
     }
 
     #[test]
@@ -643,6 +704,13 @@ mod agent_event_sink_tests {
               id TEXT PRIMARY KEY,
               session_id TEXT NOT NULL
             );
+            CREATE TABLE task_agent_sessions (
+              task_id    TEXT NOT NULL,
+              backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              session_id TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend)
+            );
             CREATE TABLE agent_timeline_events (
               id                TEXT PRIMARY KEY,
               task_id           TEXT NOT NULL,
@@ -661,6 +729,45 @@ mod agent_event_sink_tests {
             "#,
         )
         .unwrap();
+    }
+
+    fn insert_resume_task(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO tasks (id, session_id) VALUES ('task-1', 'legacy-session')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn insert_codex_timeline_session(conn: &Connection, event_id: &str, session_id: &str, at: i64) {
+        agent_timeline::insert(
+            conn,
+            AgentTimelineEventInput {
+                id: Some(event_id.to_string()),
+                task_id: "task-1".to_string(),
+                turn_id: Some("turn-1".to_string()),
+                backend: BACKEND_CODEX.to_string(),
+                kind: "turn".to_string(),
+                status: "success".to_string(),
+                title: "Codex done".to_string(),
+                summary: None,
+                payload: json!({ "sessionId": session_id }),
+                created_at: Some(at),
+                updated_at: Some(at),
+            },
+        )
+        .unwrap();
+    }
+
+    fn assert_resume_session(
+        conn: &Connection,
+        backend: &str,
+        expected: Option<&str>,
+    ) {
+        assert_eq!(
+            load_persisted_resume_session_id(conn, "task-1", backend),
+            expected.map(|sid| sid.to_string())
+        );
     }
 
     #[test]
@@ -698,5 +805,53 @@ mod agent_event_sink_tests {
             load_persisted_resume_session_id(&conn, "task-1", BACKEND_CLAUDE),
             None
         );
+    }
+
+    #[test]
+    fn persisted_resume_session_id_reads_backend_scoped_checkpoint() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+
+        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
+
+        assert_resume_session(&conn, BACKEND_CLAUDE, Some("claude-session"));
+        assert_resume_session(&conn, BACKEND_CODEX, Some("codex-thread"));
+    }
+
+    #[test]
+    fn persisted_resume_session_id_prefers_checkpoint_over_timeline() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        insert_codex_timeline_session(&conn, "codex-turn-old", "timeline-thread", 100);
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "checkpoint-thread").unwrap();
+
+        assert_resume_session(&conn, BACKEND_CODEX, Some("checkpoint-thread"));
+    }
+
+    #[test]
+    fn persisted_resume_session_id_falls_back_to_timeline_without_checkpoint() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        insert_codex_timeline_session(&conn, "codex-turn", "timeline-thread", 200);
+
+        assert_resume_session(&conn, BACKEND_CODEX, Some("timeline-thread"));
+    }
+
+    #[test]
+    fn clear_agent_sessions_for_task_removes_backend_checkpoints() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
+
+        clear_agent_sessions_for_task(&conn, "task-1").unwrap();
+
+        assert_resume_session(&conn, BACKEND_CLAUDE, None);
+        assert_resume_session(&conn, BACKEND_CODEX, None);
     }
 }

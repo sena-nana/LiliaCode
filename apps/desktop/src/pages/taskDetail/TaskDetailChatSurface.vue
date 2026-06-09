@@ -81,6 +81,10 @@ const emit = defineEmits<{
   ];
   "start-codex-compact": [];
   "clean-codex-background-terminals": [];
+  "set-codex-memory-mode": [mode: "enabled" | "disabled"];
+  "reset-codex-memory": [];
+  "fork-codex-thread": [];
+  "read-codex-config-diagnostics": [];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -176,6 +180,10 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
                   @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
+                  @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
+                  @reset-codex-memory="emit('reset-codex-memory')"
+                  @fork-codex-thread="emit('fork-codex-thread')"
+                  @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"

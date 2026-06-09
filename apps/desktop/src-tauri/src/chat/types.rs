@@ -74,7 +74,11 @@ pub(crate) struct ChatSendResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub(crate) enum ChatWorkflow {
     #[serde(rename = "codex_review")]
     CodexReview {
@@ -98,6 +102,20 @@ pub(crate) enum ChatWorkflow {
     CodexCompact,
     #[serde(rename = "codex_background_terminals_clean")]
     CodexBackgroundTerminalsClean,
+    #[serde(rename = "codex_memory_mode")]
+    CodexMemoryMode { mode: String },
+    #[serde(rename = "codex_memory_reset")]
+    CodexMemoryReset,
+    #[serde(rename = "codex_thread_fork")]
+    CodexThreadFork {
+        #[serde(default)]
+        exclude_turns: Option<bool>,
+    },
+    #[serde(rename = "codex_config_diagnostics")]
+    CodexConfigDiagnostics {
+        #[serde(default)]
+        include_layers: Option<bool>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

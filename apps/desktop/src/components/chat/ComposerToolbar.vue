@@ -2,13 +2,17 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
+  Brain,
   CodeXml,
   Combine,
+  FileCog,
   TerminalSquare,
   GitBranch,
   GitCommit,
+  GitFork,
   ListChecks,
   Paperclip,
+  RotateCcw,
   ShieldCheck,
   SlidersHorizontal,
   Square,
@@ -34,6 +38,7 @@ const props = defineProps<{
   reviewDisabled: boolean;
   compactDisabled: boolean;
   backgroundTerminalsCleanDisabled: boolean;
+  codexWorkflowDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -46,12 +51,18 @@ const emit = defineEmits<{
   startCodexReview: [target: CodexReviewTarget];
   startCodexCompact: [];
   cleanCodexBackgroundTerminals: [];
+  setCodexMemoryMode: [mode: "enabled" | "disabled"];
+  resetCodexMemory: [];
+  forkCodexThread: [];
+  readCodexConfigDiagnostics: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
 
 const reviewOpen = ref(false);
 const reviewRoot = ref<HTMLElement | null>(null);
+const codexWorkflowOpen = ref(false);
+const codexWorkflowRoot = ref<HTMLElement | null>(null);
 const codexSettingsOpen = ref(false);
 const codexSettingsRoot = ref<HTMLElement | null>(null);
 
@@ -59,9 +70,18 @@ function closeReviewMenu() {
   reviewOpen.value = false;
 }
 
+function closeCodexWorkflowMenu() {
+  codexWorkflowOpen.value = false;
+}
+
 function toggleReviewMenu() {
   if (props.reviewDisabled || props.actionsBlocked) return;
   reviewOpen.value = !reviewOpen.value;
+}
+
+function toggleCodexWorkflowMenu() {
+  if (props.codexWorkflowDisabled || props.actionsBlocked) return;
+  codexWorkflowOpen.value = !codexWorkflowOpen.value;
 }
 
 function closeCodexSettings() {
@@ -75,6 +95,9 @@ function toggleCodexSettings() {
 
 function onDocPointer(e: PointerEvent) {
   if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
+  if (codexWorkflowRoot.value && !codexWorkflowRoot.value.contains(e.target as Node)) {
+    closeCodexWorkflowMenu();
+  }
   if (codexSettingsRoot.value && !codexSettingsRoot.value.contains(e.target as Node)) {
     closeCodexSettings();
   }
@@ -83,6 +106,10 @@ function onDocPointer(e: PointerEvent) {
 function onKey(e: KeyboardEvent) {
   if (e.key === "Escape" && reviewOpen.value) {
     closeReviewMenu();
+    e.stopPropagation();
+  }
+  if (e.key === "Escape" && codexWorkflowOpen.value) {
+    closeCodexWorkflowMenu();
     e.stopPropagation();
   }
   if (e.key === "Escape" && codexSettingsOpen.value) {
@@ -108,6 +135,27 @@ function startCommitReview() {
   else closeReviewMenu();
 }
 
+function setMemoryMode(mode: "enabled" | "disabled") {
+  closeCodexWorkflowMenu();
+  emit("setCodexMemoryMode", mode);
+}
+
+function resetMemory() {
+  closeCodexWorkflowMenu();
+  if (!window.confirm("重置 Codex memory？")) return;
+  emit("resetCodexMemory");
+}
+
+function forkThread() {
+  closeCodexWorkflowMenu();
+  emit("forkCodexThread");
+}
+
+function readConfigDiagnostics() {
+  closeCodexWorkflowMenu();
+  emit("readCodexConfigDiagnostics");
+}
+
 function syncDocumentListeners(open: boolean) {
   if (open) {
     document.addEventListener("pointerdown", onDocPointer, true);
@@ -118,8 +166,8 @@ function syncDocumentListeners(open: boolean) {
   }
 }
 
-watch([reviewOpen, codexSettingsOpen], ([review, settings]) => {
-  syncDocumentListeners(review || settings);
+watch([reviewOpen, codexWorkflowOpen, codexSettingsOpen], ([review, workflow, settings]) => {
+  syncDocumentListeners(review || workflow || settings);
 });
 
 onBeforeUnmount(() => {
@@ -252,6 +300,72 @@ onBeforeUnmount(() => {
               :disabled="actionsBlocked"
               @update="emit('updateCodexSettings', $event)"
             />
+          </div>
+        </div>
+        <div v-if="state.backend === 'codex'" ref="codexWorkflowRoot" class="chat-review-menu">
+          <button
+            type="button"
+            class="chat-chip chat-chip--icon"
+            :class="{ 'is-open': codexWorkflowOpen, 'is-disabled': codexWorkflowDisabled }"
+            :disabled="codexWorkflowDisabled || actionsBlocked"
+            title="Codex 原生接口"
+            aria-label="Codex 原生接口"
+            :aria-haspopup="true"
+            :aria-expanded="codexWorkflowOpen"
+            @click="toggleCodexWorkflowMenu"
+          >
+            <Brain :size="14" aria-hidden="true" />
+          </button>
+          <div
+            v-if="codexWorkflowOpen"
+            class="dd__menu dd__menu--top chat-review-menu__menu"
+            role="menu"
+          >
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="setMemoryMode('enabled')"
+            >
+              <Brain :size="14" aria-hidden="true" />
+              <span class="dd__item-label">启用 Memory</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="setMemoryMode('disabled')"
+            >
+              <Brain :size="14" aria-hidden="true" />
+              <span class="dd__item-label">关闭 Memory</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="resetMemory"
+            >
+              <RotateCcw :size="14" aria-hidden="true" />
+              <span class="dd__item-label">重置 Memory...</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="forkThread"
+            >
+              <GitFork :size="14" aria-hidden="true" />
+              <span class="dd__item-label">Fork 当前 Thread</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="readConfigDiagnostics"
+            >
+              <FileCog :size="14" aria-hidden="true" />
+              <span class="dd__item-label">读取配置诊断</span>
+            </button>
           </div>
         </div>
         <button

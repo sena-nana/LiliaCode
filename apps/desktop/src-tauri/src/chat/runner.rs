@@ -13,9 +13,9 @@ use crate::agent_events::{AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_extensions::TodoMirrorExtension;
 use crate::chat::state::{
     finish_running_turn_handles, is_turn_marked_reset, load_persisted_resume_session_id,
-    persist_and_emit_interrupted_timeline_event, session_key, set_guide_status_for_app,
-    should_emit_runner_exit_error, should_persist_user_message, take_next_pending_turn, ChatStore,
-    RunningTurn,
+    persist_agent_session_id, persist_and_emit_interrupted_timeline_event, session_key,
+    set_guide_status_for_app, should_emit_runner_exit_error, should_persist_user_message,
+    take_next_pending_turn, ChatStore, RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
@@ -24,8 +24,8 @@ use crate::chat::timeline_sink::{
 };
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
-    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, CodexComposerSettings,
-    ChatWorkflow, DoneEvent, TurnStartedEvent,
+    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatWorkflow,
+    CodexComposerSettings, DoneEvent, TurnStartedEvent,
 };
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
@@ -141,8 +141,7 @@ pub(crate) fn spawn_agent_turn(
             "permission": composer_for_thread.permission,
             "extensions": extensions,
         });
-        if let Some(context) = build_runner_conversation_context(&app_handle, &task_id_for_thread)
-        {
+        if let Some(context) = build_runner_conversation_context(&app_handle, &task_id_for_thread) {
             stdin_payload["conversationContext"] = context;
         }
         if let Some(settings) = codex_settings {
@@ -319,17 +318,16 @@ pub(crate) fn spawn_agent_turn(
                             last_session_id = Some(sid.clone());
                         }
                     }
-                    AgentRuntimeEvent::PromptSuggestion {
-                        suggestion,
-                        uuid,
-                    } => {
+                    AgentRuntimeEvent::PromptSuggestion { suggestion, uuid } => {
                         if backend_for_thread == BACKEND_CLAUDE {
-                            if let Err(err) = crate::conversation_suggestions::save_claude_prompt_suggestion(
-                                &app_handle,
-                                &task_id_for_thread,
-                                suggestion,
-                                uuid.as_deref(),
-                            ) {
+                            if let Err(err) =
+                                crate::conversation_suggestions::save_claude_prompt_suggestion(
+                                    &app_handle,
+                                    &task_id_for_thread,
+                                    suggestion,
+                                    uuid.as_deref(),
+                                )
+                            {
                                 eprintln!("[conversation-suggestions] save Claude prompt suggestion failed: {err}");
                             }
                         }
@@ -466,9 +464,10 @@ fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState)
             })
             .or_else(|| Some(global.permissions.profile.clone())),
     );
-    let responses_api_client_metadata = normalize_json_object(local.responses_api_client_metadata.clone())
-        .or_else(|| normalize_json_object(project.responses_api_client_metadata.clone()))
-        .or_else(|| normalize_json_object(global.responses_api_client_metadata.clone()));
+    let responses_api_client_metadata =
+        normalize_json_object(local.responses_api_client_metadata.clone())
+            .or_else(|| normalize_json_object(project.responses_api_client_metadata.clone()))
+            .or_else(|| normalize_json_object(global.responses_api_client_metadata.clone()));
     let additional_context = normalize_optional_string(local.additional_context.clone())
         .or_else(|| normalize_optional_string(project.additional_context.clone()))
         .or_else(|| normalize_optional_string(global.additional_context.clone()));
@@ -484,11 +483,18 @@ fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState)
         &project.exclude_turns,
         &global.exclude_turns,
     );
-    let command_exec_permission_profile = normalize_optional_permission_profile(
-        local.command_exec_permission_profile.clone(),
-    )
-    .or_else(|| normalize_optional_permission_profile(project.command_exec_permission_profile.clone()))
-    .or_else(|| normalize_optional_permission_profile(global.command_exec_permission_profile.clone()));
+    let command_exec_permission_profile =
+        normalize_optional_permission_profile(local.command_exec_permission_profile.clone())
+            .or_else(|| {
+                normalize_optional_permission_profile(
+                    project.command_exec_permission_profile.clone(),
+                )
+            })
+            .or_else(|| {
+                normalize_optional_permission_profile(
+                    global.command_exec_permission_profile.clone(),
+                )
+            });
     let profile = normalize_codex_settings_profile(local.profile.clone())
         .or_else(|| {
             let project_profile = normalize_codex_settings_profile(Some(project.profile));
@@ -627,6 +633,15 @@ pub(crate) fn finish_agent_turn(
             .lock()
             .unwrap()
             .insert(session_key(&backend, &task_id), sid.clone());
+        if let Some(store) = app_handle.try_state::<LiliaStore>() {
+            match store
+                .conn()
+                .and_then(|conn| persist_agent_session_id(&conn, &task_id, &backend, &sid))
+            {
+                Ok(()) => {}
+                Err(err) => eprintln!("[agent-session] persist checkpoint failed: {err}"),
+            }
+        }
     }
 
     let _ = app_handle.emit(
@@ -755,11 +770,7 @@ fn load_context_task(
     let Some(row) = load_context_task_row(conn, task_id)? else {
         return Ok(None);
     };
-    Ok(Some(context_task_json(
-        conn,
-        row,
-        include_messages,
-    )?))
+    Ok(Some(context_task_json(conn, row, include_messages)?))
 }
 
 fn load_related_context_tasks(
@@ -861,12 +872,15 @@ fn load_context_messages(
         )
         .map_err(|e| format!("conversation context: prepare messages 失败：{e}"))?;
     let rows = stmt
-        .query_map(params![task_id, CONVERSATION_CONTEXT_MESSAGE_LIMIT], |row| {
-            let summary: Option<String> = row.get(0)?;
-            let payload_text: String = row.get(1)?;
-            let created_at: i64 = row.get(2)?;
-            Ok((summary, payload_text, created_at))
-        })
+        .query_map(
+            params![task_id, CONVERSATION_CONTEXT_MESSAGE_LIMIT],
+            |row| {
+                let summary: Option<String> = row.get(0)?;
+                let payload_text: String = row.get(1)?;
+                let created_at: i64 = row.get(2)?;
+                Ok((summary, payload_text, created_at))
+            },
+        )
         .map_err(|e| format!("conversation context: query messages 失败：{e}"))?;
 
     let mut out = Vec::new();

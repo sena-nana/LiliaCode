@@ -5,9 +5,9 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::chat::runner::spawn_agent_turn;
 use crate::chat::state::{
-    clear_pending_turns, clear_running_handles, default_composer, model_options_for_backend,
-    new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn,
-    reset_cleared_guide_queue, session_key, set_guide_status_for_app,
+    clear_agent_sessions_for_task, clear_pending_turns, clear_running_handles, default_composer,
+    model_options_for_backend, new_chat_message_id, normalize_composer_for_backend, now_millis,
+    queue_pending_turn, reset_cleared_guide_queue, session_key, set_guide_status_for_app,
     should_persist_user_message, stop_running_turn, ChatStore,
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
@@ -40,8 +40,11 @@ pub fn chat_send_message(
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
-    )
-        && composer.backend != BACKEND_CODEX
+            | Some(ChatWorkflow::CodexMemoryMode { .. })
+            | Some(ChatWorkflow::CodexMemoryReset)
+            | Some(ChatWorkflow::CodexThreadFork { .. })
+            | Some(ChatWorkflow::CodexConfigDiagnostics { .. })
+    ) && composer.backend != BACKEND_CODEX
     {
         return Err("Codex workflow 只能在 Codex 后端中启动".to_string());
     }
@@ -101,7 +104,13 @@ pub fn chat_send_message(
 
     set_guide_status_for_app(&app, guide_id.as_deref(), "sent")?;
     if persist_user_message {
-        persist_and_emit_message_timeline_event(&app, &user_msg, &composer.backend, &turn_id, false);
+        persist_and_emit_message_timeline_event(
+            &app,
+            &user_msg,
+            &composer.backend,
+            &turn_id,
+            false,
+        );
     }
 
     spawn_agent_turn(
@@ -301,10 +310,10 @@ pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app
     }
     clear_running_handles(&chat_store, &task_id);
     if let Some(store) = app.try_state::<LiliaStore>() {
-        if let Err(err) = store
-            .conn()
-            .and_then(|conn| agent_timeline::clear(&conn, &task_id).map(|_| ()))
-        {
+        if let Err(err) = store.conn().and_then(|conn| {
+            clear_agent_sessions_for_task(&conn, &task_id)?;
+            agent_timeline::clear(&conn, &task_id).map(|_| ())
+        }) {
             eprintln!("[agent-timeline] clear on reset failed: {err}");
         }
     }

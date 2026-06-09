@@ -3,8 +3,8 @@ use std::process::{Command, Stdio};
 
 use tauri::AppHandle;
 
-use crate::chat::runner::locate_agent_runner;
 use super::types::ClaudeHistoryUtilityOutput;
+use crate::chat::runner::locate_agent_runner;
 
 fn locate_claude_history_utility(app: &AppHandle) -> std::path::PathBuf {
     let runner = locate_agent_runner(app);

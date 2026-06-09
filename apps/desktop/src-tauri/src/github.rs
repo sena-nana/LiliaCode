@@ -314,7 +314,10 @@ fn store_binding(
     token: &str,
 ) -> Result<GitHubBindingStatus, String> {
     let mut settings = load_project_settings(app);
-    let previous_login = settings.github_binding.as_ref().map(|binding| binding.login.clone());
+    let previous_login = settings
+        .github_binding
+        .as_ref()
+        .map(|binding| binding.login.clone());
     let binding = GitHubBindingMetadata {
         login: user.login.clone(),
         avatar_url: user.avatar_url.clone(),
@@ -357,7 +360,10 @@ pub fn github_start_device_flow() -> Result<GitHubDeviceFlowStart, String> {
         .map_err(|e| format!("启动 GitHub 设备授权失败：{e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("启动 GitHub 设备授权失败：HTTP {}", response.status()));
+        return Err(format!(
+            "启动 GitHub 设备授权失败：HTTP {}",
+            response.status()
+        ));
     }
 
     let body = response
@@ -397,7 +403,10 @@ pub fn github_poll_device_flow(
         .map_err(|e| format!("轮询 GitHub 设备授权失败：{e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("轮询 GitHub 设备授权失败：HTTP {}", response.status()));
+        return Err(format!(
+            "轮询 GitHub 设备授权失败：HTTP {}",
+            response.status()
+        ));
     }
 
     let body = response
@@ -553,11 +562,7 @@ pub fn github_clone_repo(
         Ok(_) => None,
         Err(err) => return Err(err),
     };
-    run_git_clone(
-        &normalized.clone_url,
-        &target,
-        auth_header.as_deref(),
-    )?;
+    run_git_clone(&normalized.clone_url, &target, auth_header.as_deref())?;
 
     Ok(target.to_string_lossy().to_string())
 }
@@ -580,7 +585,10 @@ mod tests {
         assert_eq!(normalized.owner, "sena-nana");
         assert_eq!(normalized.name, "Lilia");
         assert_eq!(normalized.full_name, "sena-nana/Lilia");
-        assert_eq!(normalized.clone_url, "https://github.com/sena-nana/Lilia.git");
+        assert_eq!(
+            normalized.clone_url,
+            "https://github.com/sena-nana/Lilia.git"
+        );
     }
 
     #[test]

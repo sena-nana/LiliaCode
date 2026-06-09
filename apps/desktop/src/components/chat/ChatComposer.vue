@@ -71,6 +71,10 @@ const emit = defineEmits<{
   ];
   "start-codex-compact": [];
   "clean-codex-background-terminals": [];
+  "set-codex-memory-mode": [mode: "enabled" | "disabled"];
+  "reset-codex-memory": [];
+  "fork-codex-thread": [];
+  "read-codex-config-diagnostics": [];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
@@ -768,6 +772,7 @@ defineExpose({ focusInput });
         :review-disabled="state.backend !== 'codex' || sending === true"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :background-terminals-clean-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
+        :codex-workflow-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -777,6 +782,10 @@ defineExpose({ focusInput });
         @start-codex-review="startCodexReview"
         @start-codex-compact="emit('start-codex-compact')"
         @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
+        @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
+        @reset-codex-memory="emit('reset-codex-memory')"
+        @fork-codex-thread="emit('fork-codex-thread')"
+        @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />
