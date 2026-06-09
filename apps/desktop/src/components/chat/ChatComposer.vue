@@ -769,7 +769,7 @@ defineExpose({ focusInput });
         :can-interrupt="canInterrupt"
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
-        :review-disabled="state.backend !== 'codex' || sending === true"
+        :review-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :background-terminals-clean-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :codex-workflow-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"

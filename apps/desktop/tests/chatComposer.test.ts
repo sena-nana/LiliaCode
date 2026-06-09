@@ -725,6 +725,20 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
   });
 
+  it("阻塞 pending 交互时禁用代码审查入口", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+        pendingAsk: pendingAsk(singleAskWithOtherSpec),
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
+    expect(view.queryByRole("menuitem", { name: /未提交改动/ })).toBeNull();
+    expect(view.emitted("start-codex-review")).toBeUndefined();
+  });
+
   it("Codex 后端可从工具栏发起上下文压缩", async () => {
     const view = render(ChatComposer, {
       props: {

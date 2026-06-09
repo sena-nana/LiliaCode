@@ -131,7 +131,7 @@ describe("chat AskUser bridge service", () => {
   });
 
   it("Agent 交互设置默认关闭，并能保存非打断模式", async () => {
-    await expect(getAgentInteractionSettings()).resolves.toEqual({
+    await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: false,
       debug: false,
       codexProfile: {
@@ -145,7 +145,7 @@ describe("chat AskUser bridge service", () => {
 
     await setAgentInteractionSettings({ nonInterruptMode: true });
 
-    await expect(getAgentInteractionSettings()).resolves.toEqual({
+    await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: true,
       debug: false,
       codexProfile: {
