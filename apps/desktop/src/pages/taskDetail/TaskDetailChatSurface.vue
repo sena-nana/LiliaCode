@@ -87,7 +87,6 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
-  "clean-codex-background-terminals": [];
   "set-codex-memory-mode": [mode: "enabled" | "disabled"];
   "reset-codex-memory": [];
   "fork-codex-thread": [];
@@ -192,7 +191,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @start-codex-fix-suggestion="(content, outgoingAttachments, target) => emit('start-codex-fix-suggestion', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
-                  @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
                   @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
                   @reset-codex-memory="emit('reset-codex-memory')"
                   @set-codex-goal="emit('set-codex-goal', $event)"

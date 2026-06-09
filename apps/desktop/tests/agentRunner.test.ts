@@ -45,6 +45,7 @@ import {
   createCodexAppServer,
 } from "../agent-runner/codex/appServer.mjs";
 import {
+  cleanCodexThreadBackgroundTerminals,
   codexHistoryTimelineInputs,
   previewCodexThread,
   previewCodexThreadLite,
@@ -3521,6 +3522,44 @@ describe("Codex history utility", () => {
       },
     });
     expect(calls.some((call) => call.method === "thread/search")).toBe(false);
+  });
+
+  it("cleans Codex thread background terminals through history utility", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        return {};
+      },
+      notify: () => {},
+      close: () => calls.push({ method: "close", params: null }),
+    };
+
+    await expect(cleanCodexThreadBackgroundTerminals(" thread-1 ", {
+      createServer: () => server as any,
+    })).resolves.toEqual({
+      threadId: "thread-1",
+      cleaned: true,
+    });
+
+    expect(calls).toEqual([
+      {
+        method: "initialize",
+        params: {
+          clientInfo: {
+            name: "lilia",
+            title: "LiliaCode",
+            version: "0.1.0",
+          },
+          capabilities: { experimentalApi: true },
+        },
+      },
+      {
+        method: "thread/backgroundTerminals/clean",
+        params: { threadId: "thread-1" },
+      },
+      { method: "close", params: null },
+    ]);
   });
 
   it("lists turns and backfills truncated turn items", async () => {

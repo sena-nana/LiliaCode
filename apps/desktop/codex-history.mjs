@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import {
+  cleanCodexThreadBackgroundTerminals,
   previewCodexThread,
   previewCodexThreadLite,
   searchCodexThreads,
@@ -44,6 +45,10 @@ async function main() {
       limit: input.limit,
       cursor: input.cursor,
     }));
+    return;
+  }
+  if (action === "cleanBackgroundTerminals") {
+    writeJson(await cleanCodexThreadBackgroundTerminals(String(input.threadId || "")));
     return;
   }
   throw new Error(`unknown codex history action: ${action || ""}`);

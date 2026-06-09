@@ -336,7 +336,6 @@ watch(
     @start-codex-review="composerController.onStartCodexReview"
     @start-codex-fix-suggestion="composerController.onStartCodexFixSuggestion"
     @start-codex-compact="composerController.onStartCodexCompact"
-    @clean-codex-background-terminals="composerController.onCleanCodexBackgroundTerminals"
     @set-codex-memory-mode="composerController.onSetCodexMemoryMode"
     @reset-codex-memory="composerController.onResetCodexMemory"
     @fork-codex-thread="composerController.onForkCodexThread"

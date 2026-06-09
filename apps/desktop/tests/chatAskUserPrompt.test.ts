@@ -613,11 +613,10 @@ describe("chat AskUser prompt", () => {
     try {
       const view = await renderCodexTaskDetail();
 
-      await fireEvent.click(view.getByRole("button", { name: "设置 Codex goal" }));
       const workflows = [
         {
           sessionId: "thread-goal",
-          run: async () => undefined,
+          run: () => clickCodexNativeMenuItem(view, /设置 Goal/),
           workflow: {
             type: "codex_goal",
             action: "set",
@@ -630,11 +629,6 @@ describe("chat AskUser prompt", () => {
           sessionId: "thread-compact",
           run: () => fireEvent.click(view.getByRole("button", { name: "压缩 Codex 上下文" })),
           workflow: { type: "codex_compact" },
-        },
-        {
-          sessionId: "thread-clean",
-          run: () => fireEvent.click(view.getByRole("button", { name: "清理 Codex 后台终端" })),
-          workflow: { type: "codex_background_terminals_clean" },
         },
         {
           sessionId: "thread-memory",
@@ -659,9 +653,7 @@ describe("chat AskUser prompt", () => {
       ];
 
       for (const item of workflows) {
-        if (item.sessionId !== "thread-goal") {
-          await item.run();
-        }
+        await item.run();
         await expectLatestChatSend({ content: "", workflow: item.workflow });
         finishCodexWorkflow(item.sessionId);
       }

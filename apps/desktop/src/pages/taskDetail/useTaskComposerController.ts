@@ -233,10 +233,6 @@ export function useTaskComposerController(options: {
     await sendCodexWorkflow({ type: "codex_compact" });
   }
 
-  async function onCleanCodexBackgroundTerminals() {
-    await sendCodexWorkflow({ type: "codex_background_terminals_clean" });
-  }
-
   async function onSetCodexMemoryMode(mode: CodexMemoryMode) {
     await sendCodexWorkflow({ type: "codex_memory_mode", mode });
   }
@@ -546,7 +542,6 @@ export function useTaskComposerController(options: {
     onStartCodexReview,
     onStartCodexFixSuggestion,
     onStartCodexCompact,
-    onCleanCodexBackgroundTerminals,
     onSetCodexMemoryMode,
     onResetCodexMemory,
     onForkCodexThread,
