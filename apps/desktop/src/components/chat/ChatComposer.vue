@@ -9,6 +9,7 @@ import {
   Folder,
   Image,
   Paperclip,
+  RefreshCcw,
 } from "lucide-vue-next";
 import type {
   AskUserResult,
@@ -54,6 +55,7 @@ const props = defineProps<{
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
+  suggestionsStatus?: "idle" | "loading" | "empty" | "error";
   suggestionsVisible?: boolean;
   restoreDraftKey?: number;
   restoreDraftContent?: string;
@@ -90,6 +92,7 @@ const emit = defineEmits<{
     updatedInput?: ToolConsentUpdatedInput,
   ];
   "open-image": [image: ChatImageViewerSource];
+  "refresh-suggestions": [];
   interrupt: [];
 }>();
 
@@ -352,12 +355,26 @@ function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
 const suggestionRows = computed(() => props.suggestions ?? []);
+const suggestionStatus = computed(() => props.suggestionsStatus ?? "idle");
 const showSuggestions = computed(() =>
   !hasPending.value &&
   richInput.isEmpty.value &&
   props.suggestionsVisible === true &&
-  suggestionRows.value.length > 0,
+  (suggestionRows.value.length > 0 || suggestionStatus.value !== "idle"),
 );
+const suggestionStatusText = computed(() => {
+  if (suggestionRows.value.length > 0) return "";
+  switch (suggestionStatus.value) {
+    case "loading":
+      return "正在更新建议…";
+    case "empty":
+      return "暂无可用建议";
+    case "error":
+      return "建议暂时不可用";
+    default:
+      return "";
+  }
+});
 
 function fillSuggestion(suggestion: SuggestionItem) {
   richInput.replaceRange(
@@ -663,17 +680,36 @@ defineExpose({ focusInput });
       aria-label="新对话建议"
     >
       <div class="chat-suggestions__items">
-        <button
-          v-for="suggestion in suggestionRows"
-          :key="suggestion.id"
-          type="button"
-          class="chat-suggestion"
-          :title="suggestion.reason"
-          @click="fillSuggestion(suggestion)"
+        <template v-if="suggestionRows.length > 0">
+          <button
+            v-for="suggestion in suggestionRows"
+            :key="suggestion.id"
+            type="button"
+            class="chat-suggestion"
+            :title="suggestion.reason"
+            @click="fillSuggestion(suggestion)"
+          >
+            {{ suggestion.summary }}
+          </button>
+        </template>
+        <div
+          v-else-if="suggestionStatusText"
+          class="chat-suggestions__status"
+          role="status"
         >
-          {{ suggestion.summary }}
-        </button>
+          {{ suggestionStatusText }}
+        </div>
       </div>
+      <button
+        type="button"
+        class="chat-suggestions__refresh"
+        aria-label="刷新新对话建议"
+        :disabled="suggestionStatus === 'loading'"
+        @mousedown.prevent
+        @click="suggestionStatus !== 'loading' && emit('refresh-suggestions')"
+      >
+        <RefreshCcw class="chat-suggestions__refresh-icon" aria-hidden="true" />
+      </button>
     </div>
 
     <div

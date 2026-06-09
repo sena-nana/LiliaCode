@@ -41,6 +41,8 @@ const focusConversationKey = computed(() =>
 );
 const sharedAttachments = ref<ChatAttachment[]>([]);
 const suggestions = ref<SuggestionItem[]>([]);
+type SuggestionsStatus = "idle" | "loading" | "empty" | "error";
+const suggestionsStatus = ref<SuggestionsStatus>("idle");
 let suggestionsSeq = 0;
 
 const conversation = useTaskConversationContext(routeProps);
@@ -132,15 +134,23 @@ const shouldLoadSuggestions = computed(() =>
 async function loadSuggestions(forceRefresh = false) {
   if (!shouldLoadSuggestions.value) {
     suggestions.value = [];
+    suggestionsStatus.value = "idle";
     return;
   }
   const seq = ++suggestionsSeq;
+  suggestionsStatus.value = "loading";
   try {
     const next = await getConversationSuggestions(props.projectId ?? null, forceRefresh);
-    if (seq === suggestionsSeq) suggestions.value = next;
+    if (seq === suggestionsSeq) {
+      suggestions.value = next;
+      suggestionsStatus.value = next.length > 0 ? "idle" : "empty";
+    }
   } catch (err) {
     console.error("[conversation-suggestions] load failed", err);
-    if (seq === suggestionsSeq) suggestions.value = [];
+    if (seq === suggestionsSeq) {
+      suggestions.value = [];
+      suggestionsStatus.value = "error";
+    }
   }
 }
 
@@ -200,6 +210,7 @@ watch(
   async () => {
     suggestionsSeq += 1;
     suggestions.value = [];
+    suggestionsStatus.value = "idle";
     conversation.prepareForRouteChange();
     composerController.resetForRouteChange();
     timeline.resetTimeline();
@@ -224,6 +235,7 @@ watch(
     if (!ready) {
       suggestionsSeq += 1;
       suggestions.value = [];
+      suggestionsStatus.value = "idle";
       return;
     }
     void loadSuggestions(false);
@@ -309,6 +321,7 @@ watch(
     :tool-consent="nonInterruptMode ? null : pendingToolConsent"
     :viewing-image="viewingImage"
     :suggestions="suggestions"
+    :suggestions-status="suggestionsStatus"
     :suggestions-visible="shouldLoadSuggestions"
     @resolve-pending-agent-action="composerController.onResolvePendingAgentAction"
     @retry-event="composerController.onRetryTimelineEvent"
@@ -336,5 +349,6 @@ watch(
     @add-context-attachment="attachmentController.addContextAttachment"
     @resolve-ask-user="composerController.onResolveAskUser"
     @resolve-tool-consent="composerController.onResolveToolConsent"
+    @refresh-suggestions="loadSuggestions(true)"
   />
 </template>
