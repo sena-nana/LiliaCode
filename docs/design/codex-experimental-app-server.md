@@ -123,6 +123,24 @@ collaborationMode: {
 - `turn/plan/updated`、`item/plan/delta` 只作为 plan / todo 镜像；plan turn 自然完成后再等待用户确认。
 - 确认后执行轮显式回到 default mode，避免 sticky plan mode 泄漏到执行阶段。
 
+## Codex 全链路稳定化验收
+
+下一阶段接入收口的验收口径是：现有 Codex workflow 必须从用户入口进入统一 `ChatWorkflow`，经 Tauri `chat_send_message` 写入 runner stdin，由 Node runner 调用 Codex app-server，并把 timeline / pending interaction / done session 状态回到 UI。
+
+当前稳定化范围：
+
+- **用户入口到 runner**：普通输入、Plan、Review、Fix Suggestion、Batch Apply、Goal、Compact、Memory mode / reset、Thread fork、Config diagnostics、Background terminals clean 均以 `ChatWorkflow` 透传；空 prompt 只允许这些 Codex workflow 启动。
+- **runner 到用户交互**：Codex AskUser、Plan approval、command / file approval 统一走 `interaction_request`，前端用 `chat_respond_agent_interaction` 回写 runner stdin；等待 UI 期间由 runner 成对调用 `thread/increment_elicitation` / `thread/decrement_elicitation`。
+- **状态回流**：Codex turn、plan / todo、assistant message、command、file change、goal、diagnostic、error 映射到统一 timeline；Fork 成功后更新 session id；手动原生动作成功后发 `done`。
+- **命令编辑闭环**：Codex command approval 被用户编辑后，Lilia 执行修改版命令，取消原 approval，并通过 `turn/steer` 把执行结果回灌给 Codex。
+
+测试锚点：
+
+- `apps/desktop/tests/chatAskUserPrompt.test.ts` 覆盖 TaskDetail / composer / timeline / goal 用户入口到 `chat_send_message.workflow`，以及 pending AskUser / Plan / Tool Consent 回写。
+- `apps/desktop/tests/chatComposer.test.ts`、`timelineDisplay.test.ts`、`todoFloat.test.ts` 覆盖入口组件 emit 与 Batch Apply / Goal 交互。
+- `apps/desktop/src-tauri/src/chat/tests.rs` 覆盖 Rust `ChatWorkflow` 序列化、Codex-only gate、runner stdin payload 和 interaction response payload。
+- `apps/desktop/tests/agentRunner.test.ts` 覆盖 fake Codex app-server 下的 Plan、Review、Fix Suggestion、Batch Apply、Goal、原生动作、approval、elicitation、edited command 和 timeline 映射。
+
 ## 接入优先级
 
 1. **Codex Plan collaboration mode**：`collaborationMode/list` + `turn/start.collaborationMode`。这是与 Codex Desktop 最接近的计划模式入口。
