@@ -219,43 +219,30 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn empty_codex_review_does_not_persist_user_message() {
-        let workflow = Some(ChatWorkflow::CodexReview {
-            target: CodexReviewTarget::UncommittedChanges,
-            instructions: None,
-            delivery: Some("inline".to_string()),
-        });
+    fn empty_codex_workflows_do_not_persist_user_message() {
+        let workflows = vec![
+            ChatWorkflow::CodexReview {
+                target: CodexReviewTarget::UncommittedChanges,
+                instructions: None,
+                delivery: Some("inline".to_string()),
+            },
+            ChatWorkflow::CodexGoal {
+                action: "set".to_string(),
+                objective: Some("完成 Thread Goal 接入".to_string()),
+                status: Some("active".to_string()),
+                token_budget: None,
+            },
+            ChatWorkflow::CodexCompact,
+            ChatWorkflow::CodexBackgroundTerminalsClean,
+        ];
 
-        assert!(!should_persist_user_message("", &workflow));
-        assert!(!should_persist_user_message("  ", &workflow));
-        assert!(should_persist_user_message(
-            "重点看权限边界",
-            &workflow,
-        ));
+        for workflow in workflows {
+            let workflow = Some(workflow);
+            assert!(!should_persist_user_message("", &workflow));
+            assert!(!should_persist_user_message("  ", &workflow));
+            assert!(should_persist_user_message("补充说明", &workflow));
+        }
         assert!(should_persist_user_message("", &None));
-    }
-
-    #[test]
-    fn empty_codex_goal_does_not_persist_user_message() {
-        let workflow = Some(ChatWorkflow::CodexGoal {
-            action: "set".to_string(),
-            objective: Some("完成 Thread Goal 接入".to_string()),
-            status: Some("active".to_string()),
-            token_budget: None,
-        });
-
-        assert!(!should_persist_user_message("", &workflow));
-        assert!(!should_persist_user_message("  ", &workflow));
-        assert!(should_persist_user_message("补充说明", &workflow));
-    }
-
-    #[test]
-    fn empty_codex_compact_does_not_persist_user_message() {
-        let workflow = Some(ChatWorkflow::CodexCompact);
-
-        assert!(!should_persist_user_message("", &workflow));
-        assert!(!should_persist_user_message("  ", &workflow));
-        assert!(should_persist_user_message("补充说明", &workflow));
     }
 
     #[test]

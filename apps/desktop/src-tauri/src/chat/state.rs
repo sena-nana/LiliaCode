@@ -189,6 +189,7 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
         Some(ChatWorkflow::CodexReview { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
+            | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
     ) && content.trim().is_empty())
 }
 

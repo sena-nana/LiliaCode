@@ -39,6 +39,7 @@ pub fn chat_send_message(
         Some(ChatWorkflow::CodexReview { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
+            | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
     )
         && composer.backend != BACKEND_CODEX
     {

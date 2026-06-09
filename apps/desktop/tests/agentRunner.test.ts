@@ -198,6 +198,31 @@ describe("runner core", () => {
     });
   });
 
+  it("Codex background terminals clean workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: { type: "codex_background_terminals_clean" },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-clean", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-clean",
+      workflow: { type: "codex_background_terminals_clean" },
+    });
+  });
+
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
     const { protocol } = captureProtocol();
     let seen: any = null;
@@ -1759,6 +1784,95 @@ describe("Codex app-server mapping", () => {
       line.event.kind === "diagnostic" &&
       line.event.status === "error" &&
       line.event.title === "Codex compact failed"
+    )).toBe(true);
+  });
+
+  it("starts Codex background terminals clean workflow through thread/backgroundTerminals/clean", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      planMode: false,
+      workflow: { type: "codex_background_terminals_clean" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "thread/backgroundTerminals/clean")).toMatchObject({
+      params: { threadId: "thread-1" },
+    });
+    expect(calls.findIndex((call) => call.method === "thread/settings/update"))
+      .toBeLessThan(calls.findIndex((call) => call.method === "thread/backgroundTerminals/clean"));
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "started" &&
+      line.event.payload.method === "thread/backgroundTerminals/clean" &&
+      line.event.payload.threadId === "thread-1"
+    )).toBe(true);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.method === "thread/backgroundTerminals/clean" &&
+      line.event.payload.threadId === "thread-1"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("emits an error timeline when Codex background terminals clean fails", async () => {
+    const { protocol, json } = captureProtocol();
+    const server = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/backgroundTerminals/clean") throw new Error("clean unavailable");
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_background_terminals_clean" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("clean unavailable");
+
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "error" &&
+      line.event.title === "Codex background terminals clean failed"
     )).toBe(true);
   });
 

@@ -78,6 +78,10 @@ export interface CodexCompactWorkflow {
   type: "codex_compact";
 }
 
+export interface CodexBackgroundTerminalsCleanWorkflow {
+  type: "codex_background_terminals_clean";
+}
+
 export interface CodexThreadGoal {
   threadId: string;
   objective: string;
@@ -89,7 +93,11 @@ export interface CodexThreadGoal {
   updatedAt: number;
 }
 
-export type ChatWorkflow = CodexReviewWorkflow | CodexGoalWorkflow | CodexCompactWorkflow;
+export type ChatWorkflow =
+  | CodexReviewWorkflow
+  | CodexGoalWorkflow
+  | CodexCompactWorkflow
+  | CodexBackgroundTerminalsCleanWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

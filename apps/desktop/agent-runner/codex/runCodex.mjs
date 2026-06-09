@@ -397,6 +397,46 @@ function readCodexCompactWorkflow(cmd) {
   return workflow?.type === "codex_compact";
 }
 
+function readCodexBackgroundTerminalsCleanWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  return workflow?.type === "codex_background_terminals_clean";
+}
+
+function emitCodexWorkflowTimeline(ctx, config, threadId, status, error = null) {
+  const failed = status === "error";
+  const completed = status === "success";
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status,
+    title: failed
+      ? config.errorTitle
+      : completed
+        ? config.successTitle
+        : config.startedTitle,
+    summary: failed
+      ? error?.message || String(error)
+      : completed
+        ? config.successSummary
+        : config.startedSummary,
+    payload: {
+      backend: "codex",
+      subkind: config.subkind,
+      method: config.method,
+      threadId,
+      ...(failed ? { error: error?.message || String(error) } : {}),
+    },
+    sourceId: `${config.sourcePrefix}:${failed ? "error" : completed ? "completed" : "start"}:${threadId}`,
+  });
+}
+
+function emitCodexWorkflowDone(ctx, threadId) {
+  ctx.protocol.emit({
+    type: "done",
+    sessionId: threadId,
+    subtype: "success",
+  });
+}
+
 function codexReviewTargetSummary(target) {
   if (target.type === "baseBranch") return `baseBranch:${target.branch}`;
   if (target.type === "commit") return `commit:${target.sha}`;
@@ -631,37 +671,32 @@ async function runCodexGoalWorkflow(server, threadId, cmd, ctx) {
   return true;
 }
 
-function emitCodexCompactTimeline(ctx, threadId, status, error = null) {
-  const failed = status === "error";
-  const completed = status === "success";
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
-    status,
-    title: failed
-      ? "Codex compact failed"
-      : completed
-        ? "Codex compact completed"
-        : "Codex compact started",
-    summary: failed
-      ? error?.message || String(error)
-      : completed
-        ? "Codex thread 上下文已压缩"
-        : "正在压缩 Codex thread 上下文",
-    payload: {
-      backend: "codex",
-      subkind: "compact",
-      method: "thread/compact/start",
-      threadId,
-      ...(failed ? { error: error?.message || String(error) } : {}),
-    },
-    sourceId: `codex:compact:${failed ? "error" : completed ? "completed" : "start"}:${threadId}`,
-  });
-}
+const CODEX_COMPACT_TIMELINE = {
+  subkind: "compact",
+  method: "thread/compact/start",
+  sourcePrefix: "codex:compact",
+  startedTitle: "Codex compact started",
+  successTitle: "Codex compact completed",
+  errorTitle: "Codex compact failed",
+  startedSummary: "正在压缩 Codex thread 上下文",
+  successSummary: "Codex thread 上下文已压缩",
+};
+
+const CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE = {
+  subkind: "background_terminals_clean",
+  method: "thread/backgroundTerminals/clean",
+  sourcePrefix: "codex:background-terminals:clean",
+  startedTitle: "Codex background terminals clean started",
+  successTitle: "Codex background terminals cleaned",
+  errorTitle: "Codex background terminals clean failed",
+  startedSummary: "正在清理 Codex thread 后台终端",
+  successSummary: "Codex thread 后台终端已清理",
+};
 
 async function runCodexCompactWorkflow(server, threadId, cmd, ctx) {
   if (!readCodexCompactWorkflow(cmd)) return false;
   await flushCodexRuntimeSettings(ctx);
-  emitCodexCompactTimeline(ctx, threadId, "started");
+  emitCodexWorkflowTimeline(ctx, CODEX_COMPACT_TIMELINE, threadId, "started");
   try {
     await server.request("thread/compact/start", { threadId });
     await drainCodexCompactNotifications(
@@ -671,15 +706,42 @@ async function runCodexCompactWorkflow(server, threadId, cmd, ctx) {
       "Codex compact timed out",
     );
   } catch (err) {
-    emitCodexCompactTimeline(ctx, threadId, "error", err);
+    emitCodexWorkflowTimeline(ctx, CODEX_COMPACT_TIMELINE, threadId, "error", err);
     throw err;
   }
-  emitCodexCompactTimeline(ctx, threadId, "success");
-  ctx.protocol.emit({
-    type: "done",
-    sessionId: threadId,
-    subtype: "success",
-  });
+  emitCodexWorkflowTimeline(ctx, CODEX_COMPACT_TIMELINE, threadId, "success");
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
+async function runCodexBackgroundTerminalsCleanWorkflow(server, threadId, cmd, ctx) {
+  if (!readCodexBackgroundTerminalsCleanWorkflow(cmd)) return false;
+  await flushCodexRuntimeSettings(ctx);
+  emitCodexWorkflowTimeline(
+    ctx,
+    CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
+    threadId,
+    "started",
+  );
+  try {
+    await server.request("thread/backgroundTerminals/clean", { threadId });
+  } catch (err) {
+    emitCodexWorkflowTimeline(
+      ctx,
+      CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
+      threadId,
+      "error",
+      err,
+    );
+    throw err;
+  }
+  emitCodexWorkflowTimeline(
+    ctx,
+    CODEX_BACKGROUND_TERMINALS_CLEAN_TIMELINE,
+    threadId,
+    "success",
+  );
+  emitCodexWorkflowDone(ctx, threadId);
   return true;
 }
 
@@ -763,6 +825,9 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
       return;
     }
     if (await runCodexCompactWorkflow(server, threadId, cmd, ctx)) {
+      return;
+    }
+    if (await runCodexBackgroundTerminalsCleanWorkflow(server, threadId, cmd, ctx)) {
       return;
     }
     if (await runCodexReviewWorkflow(server, threadId, cmd, ctx)) {

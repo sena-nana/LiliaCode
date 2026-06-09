@@ -4,6 +4,7 @@ import {
   ArrowUp,
   CodeXml,
   Combine,
+  TerminalSquare,
   GitBranch,
   GitCommit,
   ListChecks,
@@ -32,6 +33,7 @@ const props = defineProps<{
   actionsBlocked: boolean;
   reviewDisabled: boolean;
   compactDisabled: boolean;
+  backgroundTerminalsCleanDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -43,6 +45,7 @@ const emit = defineEmits<{
   updateCodexSettings: [patch: CodexComposerSettings];
   startCodexReview: [target: CodexReviewTarget];
   startCodexCompact: [];
+  cleanCodexBackgroundTerminals: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -262,6 +265,18 @@ onBeforeUnmount(() => {
           @click="emit('startCodexCompact')"
         >
           <Combine :size="14" aria-hidden="true" />
+        </button>
+        <button
+          v-if="state.backend === 'codex'"
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :class="{ 'is-disabled': backgroundTerminalsCleanDisabled }"
+          :disabled="backgroundTerminalsCleanDisabled || actionsBlocked"
+          title="清理 Codex 后台终端"
+          aria-label="清理 Codex 后台终端"
+          @click="emit('cleanCodexBackgroundTerminals')"
+        >
+          <TerminalSquare :size="14" aria-hidden="true" />
         </button>
       </div>
 
