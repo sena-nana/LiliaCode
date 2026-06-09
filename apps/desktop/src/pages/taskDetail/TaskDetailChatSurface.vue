@@ -49,6 +49,7 @@ defineProps<{
   insertDraftTextKey: number;
   insertDraftTextContent: string;
   pendingAgentActions: PendingAgentAction[];
+  hasBlockingPendingAction: boolean;
   currentCodexGoal: CodexThreadGoal | null;
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
@@ -78,6 +79,7 @@ const emit = defineEmits<{
     attachments: ChatAttachment[],
     target: CodexReviewTarget,
   ];
+  "start-codex-compact": [];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -160,6 +162,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :append-attachments-to-end-key="appendAttachmentsToEndKey"
                   :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
+                  :compact-disabled="hasBlockingPendingAction"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"
@@ -170,6 +173,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
+                  @start-codex-compact="emit('start-codex-compact')"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"

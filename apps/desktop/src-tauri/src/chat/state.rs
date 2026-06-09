@@ -186,7 +186,9 @@ pub(crate) fn queue_pending_turn(
 pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatWorkflow>) -> bool {
     !(matches!(
         workflow,
-        Some(ChatWorkflow::CodexReview { .. }) | Some(ChatWorkflow::CodexGoal { .. })
+        Some(ChatWorkflow::CodexReview { .. })
+            | Some(ChatWorkflow::CodexGoal { .. })
+            | Some(ChatWorkflow::CodexCompact)
     ) && content.trim().is_empty())
 }
 

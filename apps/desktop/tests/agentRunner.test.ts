@@ -173,6 +173,31 @@ describe("runner core", () => {
     });
   });
 
+  it("Codex compact workflow 允许空 prompt 进入 Codex 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      prompt: "",
+      workflow: { type: "codex_compact" },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "thread-compact", workflow: cmd.workflow });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "thread-compact",
+      workflow: { type: "codex_compact" },
+    });
+  });
+
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
     const { protocol } = captureProtocol();
     let seen: any = null;
@@ -1562,10 +1587,10 @@ describe("Codex app-server mapping", () => {
       params: {
         threadId: "thread-1",
         target: { type: "baseBranch", branch: "main" },
-        prompt: "重点看权限边界",
         delivery: "inline",
       },
     });
+    expect(calls.find((call) => call.method === "review/start").params).not.toHaveProperty("prompt");
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.kind === "diagnostic" &&
@@ -1573,6 +1598,95 @@ describe("Codex app-server mapping", () => {
       line.event.payload.hasInstructions === true
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("starts Codex compact workflow through thread/compact/start", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    let drainCount = 0;
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        drainCount += 1;
+        calls.push({ method: "drain", count: drainCount });
+        if (drainCount < 2) return [];
+        return [{ method: "thread/compacted", params: { threadId: "thread-1", turnId: "compact-turn-1" } }];
+      },
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      planMode: false,
+      workflow: { type: "codex_compact" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "thread/compact/start")).toMatchObject({
+      params: { threadId: "thread-1" },
+    });
+    expect(calls.findIndex((call) => call.method === "thread/settings/update"))
+      .toBeLessThan(calls.findIndex((call) => call.method === "thread/compact/start"));
+    expect(calls.findIndex((call) => call.method === "drain" && call.count === 2))
+      .toBeGreaterThan(calls.findIndex((call) => call.method === "thread/compact/start"));
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.method === "thread/compact/start"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("emits an error timeline when Codex compact fails", async () => {
+    const { protocol, json } = captureProtocol();
+    const server = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/compact/start") throw new Error("compact unavailable");
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "codex_compact" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("compact unavailable");
+
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "error" &&
+      line.event.title === "Codex compact failed"
+    )).toBe(true);
   });
 
   it("normalizes Codex review commit target for app-server schema", async () => {

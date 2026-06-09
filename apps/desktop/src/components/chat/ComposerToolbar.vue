@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
   CodeXml,
+  Combine,
   GitBranch,
   GitCommit,
   ListChecks,
@@ -27,6 +28,7 @@ const props = defineProps<{
   canSubmitEntry: boolean;
   actionsBlocked: boolean;
   reviewDisabled: boolean;
+  compactDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
   startCodexReview: [target: CodexReviewTarget];
+  startCodexCompact: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -197,6 +200,18 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <button
+          v-if="state.backend === 'codex'"
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :class="{ 'is-disabled': compactDisabled }"
+          :disabled="compactDisabled || actionsBlocked"
+          title="压缩 Codex 上下文"
+          aria-label="压缩 Codex 上下文"
+          @click="emit('startCodexCompact')"
+        >
+          <Combine :size="14" aria-hidden="true" />
+        </button>
       </div>
 
       <button

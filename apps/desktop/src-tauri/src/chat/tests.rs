@@ -250,6 +250,15 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn empty_codex_compact_does_not_persist_user_message() {
+        let workflow = Some(ChatWorkflow::CodexCompact);
+
+        assert!(!should_persist_user_message("", &workflow));
+        assert!(!should_persist_user_message("  ", &workflow));
+        assert!(should_persist_user_message("补充说明", &workflow));
+    }
+
+    #[test]
     fn chat_message_ids_do_not_reset_to_counter_values() {
         let first = new_chat_message_id();
         let second = new_chat_message_id();

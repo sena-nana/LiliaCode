@@ -36,7 +36,9 @@ pub fn chat_send_message(
     let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
     if matches!(
         workflow,
-        Some(ChatWorkflow::CodexReview { .. }) | Some(ChatWorkflow::CodexGoal { .. })
+        Some(ChatWorkflow::CodexReview { .. })
+            | Some(ChatWorkflow::CodexGoal { .. })
+            | Some(ChatWorkflow::CodexCompact)
     )
         && composer.backend != BACKEND_CODEX
     {
