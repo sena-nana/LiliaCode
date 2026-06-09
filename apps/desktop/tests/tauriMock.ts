@@ -224,14 +224,32 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
-    codexProfile: {
-      profile: "default",
-      model: null,
-      reasoningEffort: null,
-      runtimeWorkspaceRoots: [] as string[],
-      permissions: { profile: "default" },
-    },
-  };
+      codexProfile: {
+        profile: "default",
+        model: null,
+        reasoningEffort: null,
+        runtimeWorkspaceRoots: [] as string[],
+        permissions: { profile: "default" },
+        responsesApiClientMetadata: null as Record<string, unknown> | null,
+        additionalContext: null as string | null,
+        persistExtendedHistory: null as boolean | null,
+        initialTurnsPage: null as Record<string, unknown> | null,
+        excludeTurns: [] as string[],
+        commandExecPermissionProfile: null as string | null,
+      },
+    };
+}
+
+function normalizeMockJsonObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : null;
+}
+
+function normalizeMockStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? Array.from(new Set(value.map(String).map((item) => item.trim()).filter(Boolean)))
+    : [];
 }
 
 let agentInteractionSettings = defaultAgentInteractionSettings();
@@ -1575,6 +1593,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           reasoningEffort?: unknown;
           runtimeWorkspaceRoots?: unknown;
           permissions?: { profile?: unknown };
+          responsesApiClientMetadata?: unknown;
+          additionalContext?: unknown;
+          persistExtendedHistory?: unknown;
+          initialTurnsPage?: unknown;
+          excludeTurns?: unknown;
+          commandExecPermissionProfile?: unknown;
         };
       } | undefined;
       const codexProfile = settings?.codexProfile;
@@ -1597,6 +1621,18 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
               ? codexProfile.permissions.profile
               : "default",
           },
+          responsesApiClientMetadata: normalizeMockJsonObject(codexProfile?.responsesApiClientMetadata),
+          additionalContext: typeof codexProfile?.additionalContext === "string" && codexProfile.additionalContext.trim()
+            ? codexProfile.additionalContext.trim()
+            : null,
+          persistExtendedHistory: typeof codexProfile?.persistExtendedHistory === "boolean"
+            ? codexProfile.persistExtendedHistory
+            : null,
+          initialTurnsPage: normalizeMockJsonObject(codexProfile?.initialTurnsPage),
+          excludeTurns: normalizeMockStringList(codexProfile?.excludeTurns),
+          commandExecPermissionProfile: typeof codexProfile?.commandExecPermissionProfile === "string"
+            ? codexProfile.commandExecPermissionProfile
+            : null,
         },
       };
       return undefined;

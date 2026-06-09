@@ -14,6 +14,12 @@ const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
     reasoningEffort: null,
     runtimeWorkspaceRoots: [],
     permissions: { profile: "default" },
+    responsesApiClientMetadata: null,
+    additionalContext: null,
+    persistExtendedHistory: null,
+    initialTurnsPage: null,
+    excludeTurns: [],
+    commandExecPermissionProfile: null,
   },
 };
 
@@ -40,8 +46,28 @@ function normalizeAgentInteractionSettings(
       permissions: {
         profile: normalizePermissionProfile(codexProfile?.permissions?.profile),
       },
+      responsesApiClientMetadata: normalizeJsonObject(codexProfile?.responsesApiClientMetadata),
+      additionalContext: normalizeNullableText(codexProfile?.additionalContext),
+      persistExtendedHistory: normalizeNullableBoolean(codexProfile?.persistExtendedHistory),
+      initialTurnsPage: normalizeJsonObject(codexProfile?.initialTurnsPage),
+      excludeTurns: Array.isArray(codexProfile?.excludeTurns)
+        ? Array.from(new Set(codexProfile.excludeTurns.map((turn) => turn.trim()).filter(Boolean)))
+        : [],
+      commandExecPermissionProfile: normalizeOptionalPermissionProfile(
+        codexProfile?.commandExecPermissionProfile,
+      ),
     },
   };
+}
+
+function normalizeJsonObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : null;
+}
+
+function normalizeNullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 function normalizeNullableText(value: unknown): string | null {
@@ -64,6 +90,14 @@ function normalizePermissionProfile(
   return value === "readOnly" || value === "workspaceWrite" || value === "dangerFullAccess"
     ? value
     : "default";
+}
+
+function normalizeOptionalPermissionProfile(
+  value: unknown,
+): AgentInteractionSettings["codexProfile"]["commandExecPermissionProfile"] {
+  return value === "default" || value === "readOnly" || value === "workspaceWrite" || value === "dangerFullAccess"
+    ? value
+    : null;
 }
 
 function sameCodexProfile(

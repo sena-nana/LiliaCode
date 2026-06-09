@@ -3,11 +3,13 @@ import { computed, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Sparkles } from "lucide-vue-next";
 import type {
   AgentInteractionSettings,
+  CodexComposerSettings,
   CodexPermissionProfile,
   CodexProfileSettings,
   CodexReasoningEffort,
   CodexSettingsProfile,
 } from "@lilia/contracts";
+import CodexAdvancedSettingsPanel from "../../components/chat/CodexAdvancedSettingsPanel.vue";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 
 const agentInteractionStore = useAgentInteractionSettings();
@@ -40,6 +42,12 @@ const codexPermissionOptions: Array<{ value: CodexPermissionProfile; label: stri
 ];
 
 const codexProfile = computed(() => agentInteraction.value.codexProfile);
+const codexProfileForEditor = computed<CodexComposerSettings>(() => ({
+  ...codexProfile.value,
+  runtimeWorkspaceRoots: [...codexProfile.value.runtimeWorkspaceRoots],
+  permissions: { ...codexProfile.value.permissions },
+  excludeTurns: [...codexProfile.value.excludeTurns],
+}));
 
 function sameStringArray(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((item, index) => item === b[index]);
@@ -82,11 +90,25 @@ async function setCodexProfile(patch: Partial<CodexProfileSettings>) {
       runtimeWorkspaceRoots: [
         ...(patch.runtimeWorkspaceRoots ?? codexProfile.value.runtimeWorkspaceRoots),
       ],
+      excludeTurns: [
+        ...(patch.excludeTurns ?? codexProfile.value.excludeTurns),
+      ],
       permissions: {
         ...codexProfile.value.permissions,
         ...(patch.permissions ?? {}),
       },
     },
+  });
+}
+
+async function setCodexAdvancedSettings(patch: CodexComposerSettings) {
+  await setCodexProfile({
+    responsesApiClientMetadata: patch.responsesApiClientMetadata ?? null,
+    additionalContext: patch.additionalContext ?? null,
+    persistExtendedHistory: patch.persistExtendedHistory ?? null,
+    initialTurnsPage: patch.initialTurnsPage ?? null,
+    excludeTurns: [...(patch.excludeTurns ?? [])],
+    commandExecPermissionProfile: patch.commandExecPermissionProfile ?? null,
   });
 }
 
@@ -242,6 +264,15 @@ onMounted(loadAgentInteraction);
         </button>
       </div>
     </div>
+
+    <details class="settings-disclosure">
+      <summary>Codex 高级字段</summary>
+      <CodexAdvancedSettingsPanel
+        :value="codexProfileForEditor"
+        :disabled="savingAgentInteraction"
+        @update="setCodexAdvancedSettings"
+      />
+    </details>
 
     <div class="settings-row">
       <div class="settings-row__label">Debug 面板</div>

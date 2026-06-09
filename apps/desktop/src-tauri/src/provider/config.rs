@@ -1,4 +1,5 @@
 use tauri::AppHandle;
+use serde_json::Value as JsonValue;
 
 use crate::chat::state::normalize_backend;
 use crate::settings_store::load_store_value;
@@ -111,6 +112,23 @@ pub(crate) fn normalize_codex_profile_settings(
                 _ => "default".to_string(),
             },
         },
+        responses_api_client_metadata: normalize_json_object(
+            settings.responses_api_client_metadata,
+        ),
+        additional_context: normalize_optional_string(settings.additional_context),
+        persist_extended_history: settings.persist_extended_history,
+        initial_turns_page: normalize_json_object(settings.initial_turns_page),
+        exclude_turns: normalize_string_list(settings.exclude_turns),
+        command_exec_permission_profile: normalize_optional_permission_profile(
+            settings.command_exec_permission_profile,
+        ),
+    }
+}
+
+pub(crate) fn normalize_json_object(value: Option<JsonValue>) -> Option<JsonValue> {
+    match value {
+        Some(JsonValue::Object(map)) if !map.is_empty() => Some(JsonValue::Object(map)),
+        _ => None,
     }
 }
 
@@ -134,15 +152,27 @@ pub(crate) fn normalize_reasoning_effort(value: Option<String>) -> Option<String
 }
 
 pub(crate) fn normalize_runtime_workspace_roots(roots: Vec<String>) -> Vec<String> {
+    normalize_string_list(roots)
+}
+
+pub(crate) fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
-    for root in roots {
-        let trimmed = root.trim();
+    for value in values {
+        let trimmed = value.trim();
         if trimmed.is_empty() || normalized.iter().any(|seen| seen == trimmed) {
             continue;
         }
         normalized.push(trimmed.to_string());
     }
     normalized
+}
+
+pub(crate) fn normalize_optional_permission_profile(value: Option<String>) -> Option<String> {
+    let value = normalize_optional_string(value)?;
+    match value.as_str() {
+        "default" | "readOnly" | "workspaceWrite" | "dangerFullAccess" => Some(value),
+        _ => None,
+    }
 }
 
 pub(crate) fn load_router_mode(app: &AppHandle, backend: &str) -> String {
@@ -171,6 +201,12 @@ mod tests {
             permissions: CodexControlledPermissions {
                 profile: "{\"fileSystem\":true}".to_string(),
             },
+            responses_api_client_metadata: Some(serde_json::json!({ "surface": "lilia" })),
+            additional_context: Some("  extra context  ".to_string()),
+            persist_extended_history: Some(true),
+            initial_turns_page: Some(serde_json::json!([])),
+            exclude_turns: vec![" turn-1 ".to_string(), "turn-1".to_string(), "".to_string()],
+            command_exec_permission_profile: Some("workspaceWrite".to_string()),
         });
 
         assert_eq!(normalized.profile, "default");
@@ -181,5 +217,17 @@ mod tests {
             vec!["C:/repo", "D:/shared"]
         );
         assert_eq!(normalized.permissions.profile, "default");
+        assert_eq!(
+            normalized.responses_api_client_metadata,
+            Some(serde_json::json!({ "surface": "lilia" }))
+        );
+        assert_eq!(normalized.additional_context.as_deref(), Some("extra context"));
+        assert_eq!(normalized.persist_extended_history, Some(true));
+        assert_eq!(normalized.initial_turns_page, None);
+        assert_eq!(normalized.exclude_turns, vec!["turn-1"]);
+        assert_eq!(
+            normalized.command_exec_permission_profile.as_deref(),
+            Some("workspaceWrite")
+        );
     }
 }

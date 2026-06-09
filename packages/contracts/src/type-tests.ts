@@ -159,6 +159,12 @@ export type CodexProfileSettingsShapeTypeTest = Assert<
       reasoningEffort: "high";
       runtimeWorkspaceRoots: ["C:/repo", "D:/shared"];
       permissions: { profile: "workspaceWrite" };
+      responsesApiClientMetadata: { surface: "lilia" };
+      additionalContext: "本轮额外上下文";
+      persistExtendedHistory: true;
+      initialTurnsPage: { limit: 20 };
+      excludeTurns: ["turn-old"];
+      commandExecPermissionProfile: "workspaceWrite";
     },
     CodexProfileSettings
   >

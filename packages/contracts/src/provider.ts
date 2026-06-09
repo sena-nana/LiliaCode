@@ -16,12 +16,20 @@ export interface CodexControlledPermissions {
   profile: CodexPermissionProfile;
 }
 
+export type CodexJsonObject = Record<string, unknown>;
+
 export interface CodexProfileSettings {
   profile: CodexSettingsProfile;
   model: string | null;
   reasoningEffort: CodexReasoningEffort | null;
   runtimeWorkspaceRoots: string[];
   permissions: CodexControlledPermissions;
+  responsesApiClientMetadata: CodexJsonObject | null;
+  additionalContext: string | null;
+  persistExtendedHistory: boolean | null;
+  initialTurnsPage: CodexJsonObject | null;
+  excludeTurns: string[];
+  commandExecPermissionProfile: CodexPermissionProfile | null;
 }
 
 export interface CodexComposerSettings {
@@ -30,6 +38,12 @@ export interface CodexComposerSettings {
   reasoningEffort?: CodexReasoningEffort | null;
   runtimeWorkspaceRoots?: string[] | null;
   permissions?: CodexControlledPermissions | null;
+  responsesApiClientMetadata?: CodexJsonObject | null;
+  additionalContext?: string | null;
+  persistExtendedHistory?: boolean | null;
+  initialTurnsPage?: CodexJsonObject | null;
+  excludeTurns?: string[] | null;
+  commandExecPermissionProfile?: CodexPermissionProfile | null;
 }
 
 export interface ProviderConfig {

@@ -466,6 +466,29 @@ fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState)
             })
             .or_else(|| Some(global.permissions.profile.clone())),
     );
+    let responses_api_client_metadata = normalize_json_object(local.responses_api_client_metadata.clone())
+        .or_else(|| normalize_json_object(project.responses_api_client_metadata.clone()))
+        .or_else(|| normalize_json_object(global.responses_api_client_metadata.clone()));
+    let additional_context = normalize_optional_string(local.additional_context.clone())
+        .or_else(|| normalize_optional_string(project.additional_context.clone()))
+        .or_else(|| normalize_optional_string(global.additional_context.clone()));
+    let persist_extended_history = local
+        .persist_extended_history
+        .or(project.persist_extended_history)
+        .or(global.persist_extended_history);
+    let initial_turns_page = normalize_json_object(local.initial_turns_page.clone())
+        .or_else(|| normalize_json_object(project.initial_turns_page.clone()))
+        .or_else(|| normalize_json_object(global.initial_turns_page.clone()));
+    let exclude_turns = effective_string_list(
+        local.exclude_turns.clone(),
+        &project.exclude_turns,
+        &global.exclude_turns,
+    );
+    let command_exec_permission_profile = normalize_optional_permission_profile(
+        local.command_exec_permission_profile.clone(),
+    )
+    .or_else(|| normalize_optional_permission_profile(project.command_exec_permission_profile.clone()))
+    .or_else(|| normalize_optional_permission_profile(global.command_exec_permission_profile.clone()));
     let profile = normalize_codex_settings_profile(local.profile.clone())
         .or_else(|| {
             let project_profile = normalize_codex_settings_profile(Some(project.profile));
@@ -481,6 +504,12 @@ fn build_effective_codex_settings(app: &AppHandle, composer: &ChatComposerState)
         "permissions": {
             "profile": permissions_profile,
         },
+        "responsesApiClientMetadata": responses_api_client_metadata,
+        "additionalContext": additional_context,
+        "persistExtendedHistory": persist_extended_history,
+        "initialTurnsPage": initial_turns_page,
+        "excludeTurns": exclude_turns,
+        "commandExecPermissionProfile": command_exec_permission_profile,
     })
 }
 
@@ -495,6 +524,27 @@ fn effective_runtime_workspace_roots(
             normalize_runtime_workspace_roots(project.runtime_workspace_roots.clone())
         }
         None => normalize_runtime_workspace_roots(global.runtime_workspace_roots.clone()),
+    }
+}
+
+fn effective_string_list(
+    local: Option<Vec<String>>,
+    project: &[String],
+    global: &[String],
+) -> Vec<String> {
+    match local {
+        Some(values) => normalize_string_list(values),
+        None if !project.is_empty() => normalize_string_list(project.to_vec()),
+        None => normalize_string_list(global.to_vec()),
+    }
+}
+
+fn normalize_json_object(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
+    match value {
+        Some(serde_json::Value::Object(map)) if !map.is_empty() => {
+            Some(serde_json::Value::Object(map))
+        }
+        _ => None,
     }
 }
 
@@ -518,9 +568,13 @@ fn normalize_reasoning_effort(value: Option<String>) -> Option<String> {
 }
 
 fn normalize_runtime_workspace_roots(roots: Vec<String>) -> Vec<String> {
+    normalize_string_list(roots)
+}
+
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
-    for root in roots {
-        let trimmed = root.trim();
+    for value in values {
+        let trimmed = value.trim();
         if trimmed.is_empty() || normalized.iter().any(|seen| seen == trimmed) {
             continue;
         }
@@ -535,6 +589,16 @@ fn normalize_permission_profile(value: Option<String>) -> String {
         Some("workspaceWrite") => "workspaceWrite".to_string(),
         Some("dangerFullAccess") => "dangerFullAccess".to_string(),
         _ => "default".to_string(),
+    }
+}
+
+fn normalize_optional_permission_profile(value: Option<String>) -> Option<String> {
+    match normalize_optional_string(value).as_deref() {
+        Some("default") => Some("default".to_string()),
+        Some("readOnly") => Some("readOnly".to_string()),
+        Some("workspaceWrite") => Some("workspaceWrite".to_string()),
+        Some("dangerFullAccess") => Some("dangerFullAccess".to_string()),
+        _ => None,
     }
 }
 
