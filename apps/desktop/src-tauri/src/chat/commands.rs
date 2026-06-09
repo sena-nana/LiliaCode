@@ -37,6 +37,7 @@ pub fn chat_send_message(
     if matches!(
         workflow,
         Some(ChatWorkflow::CodexReview { .. })
+            | Some(ChatWorkflow::CodexFixSuggestion { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
             | Some(ChatWorkflow::CodexCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)

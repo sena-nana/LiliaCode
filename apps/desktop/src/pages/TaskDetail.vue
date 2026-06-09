@@ -321,6 +321,7 @@ watch(
     @insert-draft-text="composerController.onInsertDraftText"
     @send="composerController.onSend"
     @start-codex-review="composerController.onStartCodexReview"
+    @start-codex-fix-suggestion="composerController.onStartCodexFixSuggestion"
     @start-codex-compact="composerController.onStartCodexCompact"
     @clean-codex-background-terminals="composerController.onCleanCodexBackgroundTerminals"
     @set-codex-memory-mode="composerController.onSetCodexMemoryMode"

@@ -38,6 +38,7 @@ import { buildPlanApprovalSpec } from "../planApproval.mjs";
 
 export const EMPTY_PROMPT_CODEX_WORKFLOWS = new Set([
   "codex_review",
+  "codex_fix_suggestion",
   "codex_goal",
   "codex_compact",
   "codex_background_terminals_clean",
@@ -375,6 +376,33 @@ function readCodexReviewWorkflow(cmd) {
   return { target, instructions, delivery };
 }
 
+function readCodexFixSuggestionWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "codex_fix_suggestion") return null;
+  const target = normalizeCodexReviewTarget(workflow.target);
+  if (!target) throw new Error("Codex fix suggestion workflow missing a valid target");
+  const mode = workflow.mode === "apply" ? "apply" : "suggest";
+  const instructions = stringOrNull(workflow.instructions)?.trim() || "";
+  return { target, instructions, mode };
+}
+
+function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
+  if (workflow.mode !== "suggest") return cmd;
+  const codexSettings = isRecord(cmd?.codexSettings) ? { ...cmd.codexSettings } : {};
+  const permissions = isRecord(codexSettings.permissions)
+    ? { ...codexSettings.permissions }
+    : {};
+  permissions.profile = "readOnly";
+  return {
+    ...cmd,
+    permission: "readonly",
+    codexSettings: {
+      ...codexSettings,
+      permissions,
+    },
+  };
+}
+
 function normalizeCodexGoalStatus(status) {
   const value = stringOrNull(status);
   return CODEX_GOAL_STATUSES.has(value) ? value : null;
@@ -512,6 +540,45 @@ function codexReviewTargetSummary(target) {
   if (target.type === "baseBranch") return `baseBranch:${target.branch}`;
   if (target.type === "commit") return `commit:${target.sha}`;
   return "uncommittedChanges";
+}
+
+function codexReviewTargetDescription(target) {
+  if (target.type === "baseBranch") {
+    return `Compare the current workspace against base branch: ${target.branch}`;
+  }
+  if (target.type === "commit") {
+    return `Inspect the specified commit: ${target.sha}`;
+  }
+  return "Inspect the current uncommitted workspace changes.";
+}
+
+export function buildCodexFixSuggestionPrompt(workflow, cmd) {
+  const prompt = stringOrNull(cmd?.prompt)?.trim() || "";
+  const instructions = workflow.instructions || "";
+  const extraContext = prompt && prompt !== instructions ? prompt : "";
+  const applying = workflow.mode === "apply";
+  return [
+    "Lilia Codex fix suggestion workflow.",
+    "",
+    `Target: ${codexReviewTargetSummary(workflow.target)}`,
+    `Target details: ${codexReviewTargetDescription(workflow.target)}`,
+    `Workspace cwd: ${stringOrNull(cmd?.cwd) || ""}`,
+    `Mode: ${workflow.mode}`,
+    "",
+    applying
+      ? "Goal: identify the concrete fixes needed for the target and apply them when safe."
+      : "Goal: identify the concrete fixes needed for the target and provide actionable suggestions only.",
+    applying
+      ? "You may edit files and run commands as needed, subject to Lilia/Codex approval prompts."
+      : "Do not edit files or run modifying commands. Read, inspect, and propose the patch intent or exact changes for the user to review.",
+    "Use existing Lilia approval and AskUser flows whenever user confirmation is needed.",
+    "",
+    "User instructions:",
+    instructions || "(none)",
+    "",
+    "Additional composer context:",
+    extraContext || "(none)",
+  ].join("\n");
 }
 
 function readCollaborationModes(result) {
@@ -708,6 +775,83 @@ async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
     sourceId: `codex:review:start:${ctx.currentTurnId || codexReviewTargetSummary(review.target)}`,
   });
   await drainCodexTurnNotifications(server, ctx, "Codex review timed out");
+  return true;
+}
+
+async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const workflow = readCodexFixSuggestionWorkflow(cmd);
+  if (!workflow) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const prompt = buildCodexFixSuggestionPrompt(workflow, {
+    ...cmd,
+    cwd: cmd.cwd || cwdFn(),
+  });
+  const turnCmd = codexFixSuggestionEffectiveTurnCmd(cmd, workflow);
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "started",
+    title: "Codex fix suggestion started",
+    summary: codexReviewTargetSummary(workflow.target),
+    payload: {
+      backend: "codex",
+      subkind: "fix_suggestion",
+      method: "turn/start",
+      threadId,
+      target: workflow.target,
+      mode: workflow.mode,
+      hasInstructions: Boolean(workflow.instructions),
+      effectivePermission: turnCmd.permission,
+    },
+    sourceId: `codex:fix-suggestion:start:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+  });
+  try {
+    const startedTurn = await startCodexAppServerTurn(
+      server,
+      threadId,
+      prompt,
+      turnCmd,
+      cwdFn,
+      { collaborationMode: buildCodexCollaborationMode("default", normalizeCodexSettings(turnCmd).model, null) },
+    );
+    ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
+    await drainCodexTurnNotifications(server, ctx, "Codex fix suggestion timed out");
+    if (ctx.turnFailedSeen) {
+      throw new Error("Codex fix suggestion turn failed");
+    }
+  } catch (err) {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex fix suggestion failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "fix_suggestion",
+        method: "turn/start",
+        threadId,
+        target: workflow.target,
+        mode: workflow.mode,
+        error: err?.message || String(err),
+      },
+      sourceId: `codex:fix-suggestion:error:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+    });
+    throw err;
+  }
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "success",
+    title: "Codex fix suggestion completed",
+    summary: codexReviewTargetSummary(workflow.target),
+    payload: {
+      backend: "codex",
+      subkind: "fix_suggestion",
+      method: "turn/start",
+      threadId,
+      target: workflow.target,
+      mode: workflow.mode,
+    },
+    sourceId: `codex:fix-suggestion:completed:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+  });
   return true;
 }
 
@@ -969,6 +1113,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexMemoryResetWorkflow },
   { run: runCodexThreadForkWorkflow, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
+  { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },
 ];
 

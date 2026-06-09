@@ -91,7 +91,8 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex MCP management: the UI can view, create, edit, delete, and enable user-level stdio MCP servers in `~/.codex/config.toml`; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support global and project-level profiles, reasoning effort, runtime workspace roots, controlled permissions, and sticky `thread/settings/update`.
 - [x] Codex history: search, preview, import, and continue existing Codex app-server threads from the left sidebar import entry.
-- [ ] Codex workflows: built-in code review, fix suggestion, and batch-change flows are not yet available.
+- [x] Codex workflows: built-in code review and fix suggestion flows.
+- [ ] Codex batch-change workflows are not yet available.
 - [ ] Built-in browser interaction: IAB-based user interaction or browser debugging is not yet available.
 
 ### LiliaCode-Specific Features

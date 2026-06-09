@@ -114,7 +114,7 @@ collaborationMode: {
 - 能把 Codex plan 事件映射到 Lilia 时间线与 `plan_approval` 展示。
 - 能处理 Codex command / file change approval 的通用确认请求、增强审批字段和 Lilia 编辑后执行流程。
 - 能在 Codex 等待 Lilia UI 交互时回写 `thread/increment_elicitation` / `thread/decrement_elicitation`。
-- 已有 `review/start` 代码审查 workflow 的 runner / UI 基础接入；修复建议、批量改动等专项工作流仍需后续单独设计。
+- 已有 `review/start` 代码审查 workflow 的 runner / UI 基础接入；修复建议已通过 Lilia workflow + `turn/start` 打通用户交互到 runner 全链路；批量改动等专项工作流仍需后续单独设计。
 
 当前已接入：
 

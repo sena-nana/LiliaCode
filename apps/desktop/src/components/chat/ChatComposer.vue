@@ -69,6 +69,11 @@ const emit = defineEmits<{
     attachments: ChatAttachment[],
     target: CodexReviewTarget,
   ];
+  "start-codex-fix-suggestion": [
+    content: string,
+    attachments: ChatAttachment[],
+    target: CodexReviewTarget,
+  ];
   "start-codex-compact": [];
   "clean-codex-background-terminals": [];
   "set-codex-memory-mode": [mode: "enabled" | "disabled"];
@@ -413,6 +418,14 @@ function startCodexReview(target: CodexReviewTarget) {
   if (hasPending.value) return;
   const value = richInput.serializedText.value.trim();
   emit("start-codex-review", value, attachmentsForView.value, target);
+  richInput.resetInput();
+  clearComposerContextState();
+}
+
+function startCodexFixSuggestion(target: CodexReviewTarget) {
+  if (hasPending.value) return;
+  const value = richInput.serializedText.value.trim();
+  emit("start-codex-fix-suggestion", value, attachmentsForView.value, target);
   richInput.resetInput();
   clearComposerContextState();
 }
@@ -770,6 +783,7 @@ defineExpose({ focusInput });
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
         :review-disabled="state.backend !== 'codex' || sending === true || hasPending"
+        :fix-suggestion-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :background-terminals-clean-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
         :codex-workflow-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
@@ -780,6 +794,7 @@ defineExpose({ focusInput });
         @toggle-plan-mode="togglePlanMode"
         @update-codex-settings="updateCodexSettings"
         @start-codex-review="startCodexReview"
+        @start-codex-fix-suggestion="startCodexFixSuggestion"
         @start-codex-compact="emit('start-codex-compact')"
         @clean-codex-background-terminals="emit('clean-codex-background-terminals')"
         @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"

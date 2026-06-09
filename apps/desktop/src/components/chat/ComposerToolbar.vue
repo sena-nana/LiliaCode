@@ -5,6 +5,7 @@ import {
   Brain,
   CodeXml,
   Combine,
+  FileQuestion,
   FileCog,
   TerminalSquare,
   GitBranch,
@@ -36,6 +37,7 @@ const props = defineProps<{
   canSubmitEntry: boolean;
   actionsBlocked: boolean;
   reviewDisabled: boolean;
+  fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
   backgroundTerminalsCleanDisabled: boolean;
   codexWorkflowDisabled: boolean;
@@ -49,6 +51,7 @@ const emit = defineEmits<{
   togglePlanMode: [];
   updateCodexSettings: [patch: CodexComposerSettings];
   startCodexReview: [target: CodexReviewTarget];
+  startCodexFixSuggestion: [target: CodexReviewTarget];
   startCodexCompact: [];
   cleanCodexBackgroundTerminals: [];
   setCodexMemoryMode: [mode: "enabled" | "disabled"];
@@ -61,6 +64,8 @@ const emit = defineEmits<{
 
 const reviewOpen = ref(false);
 const reviewRoot = ref<HTMLElement | null>(null);
+const fixSuggestionOpen = ref(false);
+const fixSuggestionRoot = ref<HTMLElement | null>(null);
 const codexWorkflowOpen = ref(false);
 const codexWorkflowRoot = ref<HTMLElement | null>(null);
 const codexSettingsOpen = ref(false);
@@ -70,6 +75,10 @@ function closeReviewMenu() {
   reviewOpen.value = false;
 }
 
+function closeFixSuggestionMenu() {
+  fixSuggestionOpen.value = false;
+}
+
 function closeCodexWorkflowMenu() {
   codexWorkflowOpen.value = false;
 }
@@ -77,6 +86,11 @@ function closeCodexWorkflowMenu() {
 function toggleReviewMenu() {
   if (props.reviewDisabled || props.actionsBlocked) return;
   reviewOpen.value = !reviewOpen.value;
+}
+
+function toggleFixSuggestionMenu() {
+  if (props.fixSuggestionDisabled || props.actionsBlocked) return;
+  fixSuggestionOpen.value = !fixSuggestionOpen.value;
 }
 
 function toggleCodexWorkflowMenu() {
@@ -95,6 +109,12 @@ function toggleCodexSettings() {
 
 function onDocPointer(e: PointerEvent) {
   if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
+  if (
+    fixSuggestionRoot.value &&
+    !fixSuggestionRoot.value.contains(e.target as Node)
+  ) {
+    closeFixSuggestionMenu();
+  }
   if (codexWorkflowRoot.value && !codexWorkflowRoot.value.contains(e.target as Node)) {
     closeCodexWorkflowMenu();
   }
@@ -106,6 +126,10 @@ function onDocPointer(e: PointerEvent) {
 function onKey(e: KeyboardEvent) {
   if (e.key === "Escape" && reviewOpen.value) {
     closeReviewMenu();
+    e.stopPropagation();
+  }
+  if (e.key === "Escape" && fixSuggestionOpen.value) {
+    closeFixSuggestionMenu();
     e.stopPropagation();
   }
   if (e.key === "Escape" && codexWorkflowOpen.value) {
@@ -123,6 +147,11 @@ function startReview(target: CodexReviewTarget) {
   emit("startCodexReview", target);
 }
 
+function startFixSuggestion(target: CodexReviewTarget) {
+  closeFixSuggestionMenu();
+  emit("startCodexFixSuggestion", target);
+}
+
 function startBranchReview() {
   const branch = window.prompt("对比分支")?.trim();
   if (branch) startReview({ type: "baseBranch", branch });
@@ -133,6 +162,18 @@ function startCommitReview() {
   const sha = window.prompt("指定提交")?.trim();
   if (sha) startReview({ type: "commit", sha });
   else closeReviewMenu();
+}
+
+function startBranchFixSuggestion() {
+  const branch = window.prompt("对比分支")?.trim();
+  if (branch) startFixSuggestion({ type: "baseBranch", branch });
+  else closeFixSuggestionMenu();
+}
+
+function startCommitFixSuggestion() {
+  const sha = window.prompt("指定提交")?.trim();
+  if (sha) startFixSuggestion({ type: "commit", sha });
+  else closeFixSuggestionMenu();
 }
 
 function setMemoryMode(mode: "enabled" | "disabled") {
@@ -166,9 +207,12 @@ function syncDocumentListeners(open: boolean) {
   }
 }
 
-watch([reviewOpen, codexWorkflowOpen, codexSettingsOpen], ([review, workflow, settings]) => {
-  syncDocumentListeners(review || workflow || settings);
-});
+watch(
+  [reviewOpen, fixSuggestionOpen, codexWorkflowOpen, codexSettingsOpen],
+  ([review, fixSuggestion, workflow, settings]) => {
+    syncDocumentListeners(review || fixSuggestion || workflow || settings);
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", onDocPointer, true);
@@ -270,6 +314,54 @@ onBeforeUnmount(() => {
               class="dd__item"
               role="menuitem"
               @click="startCommitReview"
+            >
+              <GitCommit :size="14" aria-hidden="true" />
+              <span class="dd__item-label">指定提交...</span>
+            </button>
+          </div>
+        </div>
+        <div v-if="state.backend === 'codex'" ref="fixSuggestionRoot" class="chat-review-menu">
+          <button
+            type="button"
+            class="chat-chip chat-chip--icon"
+            :class="{ 'is-open': fixSuggestionOpen, 'is-disabled': fixSuggestionDisabled }"
+            :disabled="fixSuggestionDisabled || actionsBlocked"
+            title="修复建议"
+            aria-label="修复建议"
+            :aria-haspopup="true"
+            :aria-expanded="fixSuggestionOpen"
+            @click="toggleFixSuggestionMenu"
+          >
+            <FileQuestion :size="14" aria-hidden="true" />
+          </button>
+          <div
+            v-if="fixSuggestionOpen"
+            class="dd__menu dd__menu--top chat-review-menu__menu"
+            role="menu"
+          >
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="startFixSuggestion({ type: 'uncommittedChanges' })"
+            >
+              <GitBranch :size="14" aria-hidden="true" />
+              <span class="dd__item-label">未提交改动</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="startBranchFixSuggestion"
+            >
+              <GitBranch :size="14" aria-hidden="true" />
+              <span class="dd__item-label">对比分支...</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item"
+              role="menuitem"
+              @click="startCommitFixSuggestion"
             >
               <GitCommit :size="14" aria-hidden="true" />
               <span class="dd__item-label">指定提交...</span>
