@@ -21,6 +21,7 @@ import {
   installConversationActivityBridge,
   resetConversationActivity,
 } from "../src/composables/useConversationActivity";
+import { installAgentInteractionBridge } from "../src/composables/useAgentInteractionBridge";
 
 function seedTreeExpansionState(state: unknown) {
   localStorage.setItem("lilia.projectTree.expansion", JSON.stringify(state));
@@ -208,17 +209,21 @@ describe("SecondaryPanel project tree expansion", () => {
 
 describe("SecondaryPanel project chat navigation", () => {
   let unlistenConversationActivity: (() => void) | null = null;
+  let unlistenAgentInteraction: (() => void) | null = null;
 
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
+    unlistenAgentInteraction = await installAgentInteractionBridge();
     unlistenConversationActivity = await installConversationActivityBridge();
   });
 
   afterEach(() => {
+    unlistenAgentInteraction?.();
     unlistenConversationActivity?.();
+    unlistenAgentInteraction = null;
     unlistenConversationActivity = null;
   });
 

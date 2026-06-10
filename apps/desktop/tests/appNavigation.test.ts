@@ -22,7 +22,12 @@ async function renderApp(windowLabel: string, initialRoute = "/") {
   });
 
   await waitFor(() => {
-    expect(mockListenerCount("chat:agent-interaction-request")).toBe(2);
+    expect(mockListenerCount("chat:agent-interaction-request")).toBe(1);
+  });
+  await waitFor(() => {
+    expect(mockListenerCount(
+      windowLabel === "main" ? "lilia:main:navigate" : "lilia:popup:navigate",
+    )).toBe(1);
   });
   await Promise.resolve();
 
