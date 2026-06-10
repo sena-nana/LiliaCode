@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { Moon, Sun } from "lucide-vue-next";
+import { List, Moon, PanelsTopLeft, Sun } from "lucide-vue-next";
 import { useTheme } from "../../composables/useTheme";
+import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
 
 const { theme, setTheme } = useTheme();
+const { sidebarDisplayMode, setSidebarDisplayMode } = useSidebarDisplayMode();
 </script>
 
 <template>
@@ -36,6 +38,31 @@ const { theme, setTheme } = useTheme();
     <div class="settings-row">
       <div class="settings-row__label">语言</div>
       <span class="muted">简体中文</span>
+    </div>
+    <div class="settings-row">
+      <div class="settings-row__label">侧边栏样式</div>
+      <div class="ui-segmented" role="radiogroup" aria-label="侧边栏样式">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="sidebarDisplayMode === 'grouped'"
+          :class="{ 'is-active': sidebarDisplayMode === 'grouped' }"
+          @click="setSidebarDisplayMode('grouped')"
+        >
+          <PanelsTopLeft :size="14" aria-hidden="true" />
+          按项目分组
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="sidebarDisplayMode === 'unified'"
+          :class="{ 'is-active': sidebarDisplayMode === 'unified' }"
+          @click="setSidebarDisplayMode('unified')"
+        >
+          <List :size="14" aria-hidden="true" />
+          统一列表
+        </button>
+      </div>
     </div>
   </div>
 </template>

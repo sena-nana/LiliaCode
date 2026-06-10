@@ -666,6 +666,11 @@
   color: var(--text-muted);
 }
 
+.sb-tree__row--unified {
+  padding-left: 8px;
+  color: var(--text-muted);
+}
+
 .sb-tree__row--project {
   padding-left: var(--sb-project-row-padding-x);
   cursor: pointer;
@@ -698,6 +703,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sb-tree__project-label {
+  flex: 0 1 auto;
+  max-width: 86px;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity 0.12s ease, max-width 0.12s ease, margin-left 0.12s ease;
 }
 
 .sb-tree__pin-icon {
@@ -747,8 +766,19 @@
 .sb-tree__row--child.is-active .sb-tree__hover-tools,
 .sb-tree__row--orphan:hover .sb-tree__hover-tools,
 .sb-tree__row--orphan:focus-within .sb-tree__hover-tools,
-.sb-tree__row--orphan.is-active .sb-tree__hover-tools {
+.sb-tree__row--orphan.is-active .sb-tree__hover-tools,
+.sb-tree__row--unified:hover .sb-tree__hover-tools,
+.sb-tree__row--unified:focus-within .sb-tree__hover-tools,
+.sb-tree__row--unified.is-active .sb-tree__hover-tools {
   opacity: 1;
+}
+
+.sb-tree__row--unified:hover .sb-tree__project-label,
+.sb-tree__row--unified:focus-within .sb-tree__project-label,
+.sb-tree__row--unified.is-active .sb-tree__project-label {
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
 }
 
 .sb-icon-btn.is-confirming {

@@ -50,6 +50,8 @@ beforeEach(async () => {
     import("../src/data/projects"),
     import("../src/data/tasks"),
   ]);
+  const { useSidebarDisplayMode } = await import("../src/composables/useSidebarDisplayMode");
+  useSidebarDisplayMode().setSidebarDisplayMode("grouped");
   const { clearGitHubRepoCache } = await import("../src/services/projects");
   clearGitHubRepoCache();
   const { ORPHAN_LIST, TASKS, installTasksChangedListener } = tasksModule;

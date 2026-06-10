@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { MessageSquarePlus } from "lucide-vue-next";
+import { AlertTriangle, MessageSquarePlus, X } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import { listProjects } from "../services/projectsStore";
 import {
   createDraftOrphan,
   createDraftTask,
+  ensureAllProjectTasksLoaded,
+  ensureOrphansLoaded,
+  listProjectConversations,
   listOrphanConversations,
 } from "../services/tasksStore";
+import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
 import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
@@ -17,6 +21,8 @@ import SidebarProjectsSection from "../components/sidebar/SidebarProjectsSection
 import SidebarInboxSection from "../components/sidebar/SidebarInboxSection.vue";
 import SidebarConnectionFooter from "../components/sidebar/SidebarConnectionFooter.vue";
 import SidebarProjectAddMenu from "../components/sidebar/SidebarProjectAddMenu.vue";
+import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.vue";
+import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
 
 const router = useRouter();
 
@@ -24,6 +30,9 @@ const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
 const projectError = ref<string | null>(null);
 const searchActive = ref(false);
+const unifiedLoaded = ref(false);
+const { sidebarDisplayMode } = useSidebarDisplayMode();
+const isUnifiedMode = computed(() => sidebarDisplayMode.value === "unified");
 
 function reportProjectError(message: string) {
   projectError.value = message;
@@ -61,11 +70,62 @@ const {
   openAddMenu,
 } = useSidebarAddMenu();
 
-onMounted(() => {
-  void loadInitialSidebarData().catch((err) => {
-    reportProjectError(`加载首屏数据失败：${String(err)}`);
-  });
+async function loadUnifiedSidebarData() {
+  unifiedLoaded.value = false;
+  try {
+    await Promise.all([
+      ensureAllProjectTasksLoaded(),
+      ensureOrphansLoaded(),
+    ]);
+  } catch (err) {
+    reportProjectError(`加载会话列表失败：${String(err)}`);
+  } finally {
+    unifiedLoaded.value = true;
+  }
+}
+
+const unifiedConversations = computed<UnifiedSidebarConversation[]>(() => {
+  const rows: Array<UnifiedSidebarConversation & { createdAt: number; pinned: boolean }> = [];
+  for (const project of projects.value) {
+    for (const task of listProjectConversations(project.id)) {
+      rows.push({
+        task,
+        projectId: project.id,
+        projectName: project.name,
+        route: `/projects/${project.id}/tasks/${task.id}`,
+        createdAt: task.createdAt,
+        pinned: task.pinned,
+      });
+    }
+  }
+  for (const orphan of orphans.value) {
+    rows.push({
+      task: orphan,
+      projectId: null,
+      projectName: null,
+      route: `/chats/${orphan.id}`,
+      createdAt: orphan.createdAt,
+      pinned: orphan.pinned,
+    });
+  }
+  return rows
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt)
+    .map(({ createdAt: _createdAt, pinned: _pinned, ...row }) => row);
 });
+
+watch(
+  isUnifiedMode,
+  (enabled) => {
+    if (enabled) {
+      void loadUnifiedSidebarData();
+      return;
+    }
+    void loadInitialSidebarData().catch((err) => {
+      reportProjectError(`加载首屏数据失败：${String(err)}`);
+    });
+  },
+  { immediate: true },
+);
 
 function newChat() {
   const draft = createDraftOrphan();
@@ -108,9 +168,9 @@ function onProjectCreated(project: Project) {
 <template>
   <aside
     class="secondary-panel"
-    :class="{ 'is-tree-dragging': treeDrag?.active }"
-    @pointerdown="onTreePointerDown"
-    @click.capture="onTreeClickCapture"
+    :class="{ 'is-tree-dragging': !isUnifiedMode && treeDrag?.active }"
+    @pointerdown="!isUnifiedMode && onTreePointerDown($event)"
+    @click.capture="!isUnifiedMode && onTreeClickCapture($event)"
   >
     <div class="sb-section sb-section--actions">
       <button
@@ -127,34 +187,52 @@ function onProjectCreated(project: Project) {
       <SidebarSearch v-model="searchActive" @select="onSearchSelect" />
     </div>
 
-    <SidebarProjectsSection
-      :add-menu-open="addMenuOpen"
-      :all-expanded="allExpanded"
-      :drag-source="treeDrag"
-      :drop-target="treeDropTarget"
-      :is-project-expanded="isProjectExpanded"
-      :project-error="projectError"
-      :projects="projects"
-      @archived="onProjectArchived"
-      @deleted="onProjectDeleted"
-      @dismiss-error="dismissError"
-      @error="reportProjectError"
-      @new-chat="newProjectChat"
-      @open-add-menu="openAddMenu"
-      @open-overview="openProjectsOverview"
-      @toggle="toggle"
-      @toggle-all="toggleAll"
-    />
+    <div v-if="isUnifiedMode && projectError" class="sb-banner sb-banner--err">
+      <AlertTriangle :size="12" aria-hidden="true" />
+      <span class="sb-banner__msg">{{ projectError }}</span>
+      <button type="button" class="sb-icon-btn" @click="dismissError" aria-label="忽略错误">
+        <X :size="12" aria-hidden="true" />
+      </button>
+    </div>
 
-    <SidebarInboxSection
-      :orphans="orphans"
-      :orphans-expanded="orphansExpanded"
-      :orphan-drop-zone-class="orphanDropZoneClass"
+    <SidebarUnifiedSection
+      v-if="isUnifiedMode"
+      :conversations="unifiedConversations"
+      :loaded="unifiedLoaded"
       :tree-row-state-class="treeRowStateClass"
       @error="reportProjectError"
-      @new-chat="newChat"
-      @toggle-orphans="toggleOrphans"
     />
+
+    <template v-else>
+      <SidebarProjectsSection
+        :add-menu-open="addMenuOpen"
+        :all-expanded="allExpanded"
+        :drag-source="treeDrag"
+        :drop-target="treeDropTarget"
+        :is-project-expanded="isProjectExpanded"
+        :project-error="projectError"
+        :projects="projects"
+        @archived="onProjectArchived"
+        @deleted="onProjectDeleted"
+        @dismiss-error="dismissError"
+        @error="reportProjectError"
+        @new-chat="newProjectChat"
+        @open-add-menu="openAddMenu"
+        @open-overview="openProjectsOverview"
+        @toggle="toggle"
+        @toggle-all="toggleAll"
+      />
+
+      <SidebarInboxSection
+        :orphans="orphans"
+        :orphans-expanded="orphansExpanded"
+        :orphan-drop-zone-class="orphanDropZoneClass"
+        :tree-row-state-class="treeRowStateClass"
+        @error="reportProjectError"
+        @new-chat="newChat"
+        @toggle-orphans="toggleOrphans"
+      />
+    </template>
 
     <SidebarConnectionFooter />
 

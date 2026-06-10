@@ -1,7 +1,9 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
+import { defineComponent } from "vue";
 import { describe, expect, it } from "vitest";
 import TaskDetail from "../src/pages/TaskDetail.vue";
+import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady } from "../src/data/tasks";
@@ -41,6 +43,23 @@ async function renderOrphanDraftTaskDetail(taskId: string) {
       plugins: [router],
     },
   });
+}
+
+async function renderRouterView(initialRoute: string) {
+  const router = createLiliaRouter(createMemoryHistory());
+  await router.push(initialRoute);
+  await router.isReady();
+
+  const Wrapper = defineComponent({
+    template: "<RouterView />",
+  });
+
+  const view = render(Wrapper, {
+    global: {
+      plugins: [router],
+    },
+  });
+  return { ...view, router };
 }
 
 function expectComposerFocused(view: ReturnType<typeof render>) {
@@ -188,6 +207,28 @@ describe("TaskDetail conversation suggestions", () => {
 
     await waitFor(() => {
       expectComposerFocused(view);
+    });
+  });
+
+  it("统一侧栏模式下收集箱草稿可在输入框下方切换到项目草稿并保留输入", async () => {
+    await Promise.all([projectsReady, allTasksReady]);
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const draft = createDraftOrphan();
+    const view = await renderRouterView(`/chats/${draft.id}`);
+
+    const input = await view.findByRole("textbox");
+    await fireEvent.input(input, { target: { textContent: "把这个想法放进项目" } });
+    await fireEvent.change(view.getByLabelText("选择项目"), {
+      target: { value: "lilia" },
+    });
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toMatch(
+        /^\/projects\/lilia\/tasks\/t-draft-/,
+      );
+    });
+    await waitFor(() => {
+      expect(view.getByRole("textbox")).toHaveTextContent("把这个想法放进项目");
     });
   });
 });
