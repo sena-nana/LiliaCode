@@ -2001,6 +2001,57 @@
   height: 14px;
 }
 
+.composer-project-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.composer-project-picker__select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 0 28px 0 9px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+
+.composer-project-picker__select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.composer-project-picker__new {
+  flex: 0 0 auto;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.composer-project-picker__new:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
 .chat-composer__input {
   /* 覆盖全局 input/button 默认的 height:32px */
   width: 100%;

@@ -7,10 +7,11 @@ import "../styles/chat.css";
 
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
+import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
 import { useTaskAttachments } from "./taskDetail/useTaskAttachments";
 import { useTaskComposerController } from "./taskDetail/useTaskComposerController";
 import {
@@ -18,6 +19,8 @@ import {
   type TaskDetailRouteProps,
 } from "./taskDetail/useTaskConversationContext";
 import { useTaskTimeline } from "./taskDetail/useTaskTimeline";
+import { createDraftTask } from "../services/tasksStore";
+import { listProjects } from "../services/projectsStore";
 import { getConversationSuggestions } from "../services/chat";
 
 const props = withDefaults(defineProps<{
@@ -30,6 +33,7 @@ const props = withDefaults(defineProps<{
 
 const routeProps = props as TaskDetailRouteProps;
 const route = useRoute();
+const router = useRouter();
 const chatSurfaceRef = ref<InstanceType<typeof TaskDetailChatSurface> | null>(null);
 const chatPageRef = computed<HTMLElement | null>(() =>
   chatSurfaceRef.value?.chatPageRef ?? null,
@@ -41,6 +45,7 @@ const focusConversationKey = computed(() =>
 );
 const sharedAttachments = ref<ChatAttachment[]>([]);
 const suggestions = ref<SuggestionItem[]>([]);
+const { sidebarDisplayMode } = useSidebarDisplayMode();
 type SuggestionsStatus = "idle" | "loading" | "empty" | "error";
 const suggestionsStatus = ref<SuggestionsStatus>("idle");
 let suggestionsSeq = 0;
@@ -120,8 +125,7 @@ function decodeDraftTextParam(value: string | null): string {
   }
 }
 
-const shouldLoadSuggestions = computed(() =>
-  !!props.projectId &&
+const isIdleEmptyDraft = computed(() =>
   shouldRenderChat.value &&
   conversationRouteState.value.isLiveDraft &&
   timelineEvents.value.length === 0 &&
@@ -129,6 +133,16 @@ const shouldLoadSuggestions = computed(() =>
   blockingPendingAgentActions.value.length === 0 &&
   !pendingAskUser.value &&
   !pendingToolConsent.value,
+);
+const shouldLoadSuggestions = computed(() =>
+  !!props.projectId &&
+  isIdleEmptyDraft.value,
+);
+const draftProjectPickerProjects = computed(() => listProjects());
+const shouldShowDraftProjectPicker = computed(() =>
+  sidebarDisplayMode.value === "unified" &&
+  !props.projectId &&
+  isIdleEmptyDraft.value,
 );
 
 async function loadSuggestions(forceRefresh = false) {
@@ -152,6 +166,22 @@ async function loadSuggestions(forceRefresh = false) {
       suggestionsStatus.value = "error";
     }
   }
+}
+
+async function moveCurrentDraftToProject(projectId: string) {
+  const draft = createDraftTask(projectId);
+  const snapshot = chatSurfaceRef.value?.getComposerDraftSnapshot() ?? { content: "" };
+  const nextAttachments = [...sharedAttachments.value];
+  await router.push(`/projects/${projectId}/tasks/${draft.id}`);
+  await nextTick();
+  sharedAttachments.value = nextAttachments;
+  if (snapshot.content.trim()) {
+    composerController.onInsertDraftText(snapshot.content);
+  }
+}
+
+function onDraftProjectPickerError(message: string) {
+  timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
 }
 
 const unlisteners: UnlistenFn[] = [];
@@ -323,6 +353,8 @@ watch(
     :suggestions="suggestions"
     :suggestions-status="suggestionsStatus"
     :suggestions-visible="shouldLoadSuggestions"
+    :show-draft-project-picker="shouldShowDraftProjectPicker"
+    :draft-project-picker-projects="draftProjectPickerProjects"
     @resolve-pending-agent-action="composerController.onResolvePendingAgentAction"
     @retry-event="composerController.onRetryTimelineEvent"
     @open-image="viewingImage = $event"
@@ -349,5 +381,8 @@ watch(
     @resolve-ask-user="composerController.onResolveAskUser"
     @resolve-tool-consent="composerController.onResolveToolConsent"
     @refresh-suggestions="loadSuggestions(true)"
+    @select-draft-project="moveCurrentDraftToProject"
+    @created-draft-project="(project) => moveCurrentDraftToProject(project.id)"
+    @draft-project-picker-error="onDraftProjectPickerError"
   />
 </template>

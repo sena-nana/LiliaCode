@@ -8,10 +8,12 @@ import type {
   ChatComposerState,
   CodexThreadGoal,
   CodexReviewTarget,
+  Project,
   SuggestionItem,
 } from "@lilia/contracts";
 import ChatTranscript from "../../components/chat/ChatTranscript.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ComposerProjectPicker from "../../components/chat/ComposerProjectPicker.vue";
 import ChatSidebarHost from "../../components/chat/ChatSidebarHost.vue";
 import ImageViewer from "../../components/chat/ImageViewer.vue";
 import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
@@ -63,6 +65,8 @@ defineProps<{
   suggestions: SuggestionItem[];
   suggestionsStatus: "idle" | "loading" | "empty" | "error";
   suggestionsVisible: boolean;
+  showDraftProjectPicker?: boolean;
+  draftProjectPickerProjects?: Project[];
 }>();
 
 const emit = defineEmits<{
@@ -104,6 +108,9 @@ const emit = defineEmits<{
     updatedInput?: ToolConsentUpdatedInput,
   ];
   "refresh-suggestions": [];
+  "select-draft-project": [projectId: string];
+  "created-draft-project": [project: Project];
+  "draft-project-picker-error": [message: string];
 }>();
 
 const chatPageRef = ref<HTMLElement | null>(null);
@@ -113,7 +120,11 @@ function focusComposer() {
   composerRef.value?.focusInput();
 }
 
-defineExpose({ chatPageRef, focusComposer });
+function getComposerDraftSnapshot() {
+  return composerRef.value?.getDraftSnapshot() ?? { content: "" };
+}
+
+defineExpose({ chatPageRef, focusComposer, getComposerDraftSnapshot });
 
 function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
   emit("send", content, outgoingAttachments);
@@ -205,6 +216,13 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"
                   @refresh-suggestions="emit('refresh-suggestions')"
+                />
+                <ComposerProjectPicker
+                  v-if="showDraftProjectPicker"
+                  :projects="draftProjectPickerProjects ?? []"
+                  @select-project="emit('select-draft-project', $event)"
+                  @created-project="emit('created-draft-project', $event)"
+                  @error="emit('draft-project-picker-error', $event)"
                 />
               </div>
             </template>

@@ -42,6 +42,23 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Codex 会话管理")).not.toBeInTheDocument();
   });
 
+  it("外观页可以切换侧边栏样式并写入本地偏好", async () => {
+    const view = await renderSettings("/settings?tab=appearance");
+
+    expect(view.getByRole("radio", { name: "按项目分组" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    await fireEvent.click(view.getByRole("radio", { name: "统一列表" }));
+
+    expect(view.getByRole("radio", { name: "统一列表" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(localStorage.getItem("lilia.sidebarDisplayMode")).toBe("unified");
+  });
+
   it("点击 Codex 会写入全局 active provider", async () => {
     const view = await renderSettings("/settings?tab=providers");
 

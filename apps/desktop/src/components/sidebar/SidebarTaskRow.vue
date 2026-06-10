@@ -14,8 +14,9 @@ type SidebarTask = Pick<Task, "id" | "title" | "pinned">;
 const props = defineProps<{
   active: boolean;
   archive?: (taskId: string) => Promise<boolean>;
+  projectLabel?: string | null;
   projectId: string | null;
-  rowKind: "child" | "orphan";
+  rowKind: "child" | "orphan" | "unified";
   task: SidebarTask;
   to?: string;
   treeRowStateClass: (
@@ -155,6 +156,7 @@ function onClick() {
     @mouseleave="onRowLeave"
   >
     <span class="sb-tree__name">{{ task.title }}</span>
+    <span v-if="projectLabel" class="sb-tree__project-label">{{ projectLabel }}</span>
     <div class="sb-tree__hover-tools" @click.stop>
       <button
         type="button"

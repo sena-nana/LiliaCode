@@ -41,6 +41,12 @@ export function useComposerRichInput(options: {
   let observedAppendToEndKey = options.appendAttachmentsToEndKey.value;
 
   const serializedText = computed(() => serializeComposerParts(composerParts.value));
+  const plainText = computed(() =>
+    composerParts.value
+      .filter((part): part is Extract<ComposerPart, { type: "text" }> => part.type === "text")
+      .map((part) => part.text)
+      .join("")
+  );
   const searchText = computed(() => composerPartsSearchText(composerParts.value));
   const isEmpty = computed(() => serializedText.value.length === 0);
 
@@ -406,6 +412,7 @@ export function useComposerRichInput(options: {
   return {
     inputSelection,
     serializedText,
+    plainText,
     searchText,
     isEmpty,
     setEditor,

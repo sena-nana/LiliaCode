@@ -6,6 +6,7 @@ import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
+import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady, TASKS } from "../src/data/tasks";
@@ -278,6 +279,41 @@ describe("SecondaryPanel project chat navigation", () => {
     expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
       projectId: null,
       taskId: "o-001",
+    }, undefined);
+  });
+
+  it("统一列表模式隐藏项目分组和收集箱，并在项目会话右侧显示项目名", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+
+    expect(view.getByText("会话")).toBeInTheDocument();
+    expect(view.queryByText("收集箱")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "添加项目" })).not.toBeInTheDocument();
+
+    const projectRow = await view.findByText("打通 tsconfig paths 搜索");
+    const projectConversation = projectRow.closest(".sb-tree__row--unified");
+    expect(projectConversation).toBeInstanceOf(HTMLElement);
+    expect(within(projectConversation as HTMLElement).getByText("Lilia")).toHaveClass(
+      "sb-tree__project-label",
+    );
+
+    const orphan = getConversationRow(view, "随手问问 Claude：tsconfig paths");
+    expect(within(orphan).queryByText("Lilia")).not.toBeInTheDocument();
+  });
+
+  it("统一列表项目会话仍能把项目归属传给弹出窗口", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await fireEvent(
+      row,
+      new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+    );
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+      projectId: "tools",
+      taskId: "t-003",
     }, undefined);
   });
 });

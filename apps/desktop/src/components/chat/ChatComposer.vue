@@ -478,6 +478,12 @@ function startCodexFixSuggestion(target: CodexReviewTarget) {
   clearComposerContextState();
 }
 
+function getDraftSnapshot() {
+  return {
+    content: hasPending.value ? inputValue.value : richInput.plainText.value,
+  };
+}
+
 function focusInput() {
   if (hasPending.value) {
     const el = textarea.value;
@@ -663,7 +669,7 @@ onBeforeUnmount(() => {
   }
 });
 
-defineExpose({ focusInput });
+defineExpose({ focusInput, getDraftSnapshot });
 </script>
 
 <template>
