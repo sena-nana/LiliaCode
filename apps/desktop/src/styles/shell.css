@@ -719,6 +719,42 @@
   transition: opacity 0.12s ease, max-width 0.12s ease, margin-left 0.12s ease;
 }
 
+.sb-tree__activity {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 22px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.sb-tree__activity--running {
+  color: var(--accent);
+}
+
+.sb-tree__activity--requires_action {
+  color: var(--warn);
+}
+
+.sb-tree__activity--completed {
+  color: var(--text-muted);
+}
+
+.sb-tree__activity--error {
+  color: var(--danger);
+}
+
+.sb-tree__activity-icon {
+  flex: 0 0 auto;
+}
+
+.sb-tree__activity-icon--spin {
+  animation: lilia-spin 0.9s linear infinite;
+}
+
 .sb-tree__pin-icon {
   flex-shrink: 0;
   color: var(--accent);
@@ -778,6 +814,11 @@
 .sb-tree__row--unified.is-active .sb-tree__project-label {
   max-width: 0;
   margin-left: 0;
+  opacity: 0;
+}
+
+.sb-tree__row:hover .sb-tree__activity,
+.sb-tree__row:focus-within .sb-tree__activity {
   opacity: 0;
 }
 

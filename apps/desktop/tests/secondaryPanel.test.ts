@@ -1,7 +1,7 @@
 import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, beforeEach, vi } from "vitest";
-import { defineComponent, nextTick } from "vue";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { defineComponent } from "vue";
 import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
@@ -11,11 +11,16 @@ import { createLiliaRouter } from "../src/router";
 import { projectsReady } from "../src/data/projects";
 import { allTasksReady, TASKS } from "../src/data/tasks";
 import {
+  emitMockTimelineEvent,
+  emitTauriEvent,
   mockInvoke,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
-  setMockProjectPinned,
 } from "./tauriMock";
+import {
+  installConversationActivityBridge,
+  resetConversationActivity,
+} from "../src/composables/useConversationActivity";
 
 function seedTreeExpansionState(state: unknown) {
   localStorage.setItem("lilia.projectTree.expansion", JSON.stringify(state));
@@ -118,6 +123,8 @@ describe("SecondaryPanel project tree expansion", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
+    useSidebarDisplayMode().setSidebarDisplayMode("grouped");
+    resetConversationActivity();
   });
 
   it("左下角连接徽章显示全局 active provider", async () => {
@@ -200,9 +207,19 @@ describe("SecondaryPanel project tree expansion", () => {
 });
 
 describe("SecondaryPanel project chat navigation", () => {
+  let unlistenConversationActivity: (() => void) | null = null;
+
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
+    useSidebarDisplayMode().setSidebarDisplayMode("grouped");
+    resetConversationActivity();
+    unlistenConversationActivity = await installConversationActivityBridge();
+  });
+
+  afterEach(() => {
+    unlistenConversationActivity?.();
+    unlistenConversationActivity = null;
   });
 
 
@@ -316,12 +333,117 @@ describe("SecondaryPanel project chat navigation", () => {
       taskId: "t-003",
     }, undefined);
   });
+
+  it("非选中统一列表对话会在行尾显示运行中、等待交互和完成状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话中")).toHaveClass(
+        "sb-tree__activity--running",
+      );
+    });
+
+    emitTauriEvent("chat:agent-interaction-request", {
+      taskId: "t-003",
+      turnId: "turn-1",
+      backend: "codex",
+      requestId: "ask-1",
+      kind: "ask_user",
+      payload: {
+        title: "需要确认",
+        intent: "ask_user",
+        questions: [{ id: "q1", question: "继续？", mode: "confirm" }],
+      },
+    });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("等待交互")).toHaveClass(
+        "sb-tree__activity--requires_action",
+      );
+    });
+
+    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话完成")).toHaveClass(
+        "sb-tree__activity--completed",
+      );
+    });
+  });
+
+  it("发生错误时显示错误图标，并且结束事件不会覆盖错误状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    emitMockTimelineEvent("t-003", {
+      id: "tl-error-activity",
+      kind: "error",
+      status: "error",
+      title: "错误",
+      summary: "Agent 发生错误",
+      turnId: "turn-1",
+    });
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("发生错误")).toHaveClass(
+        "sb-tree__activity--error",
+      );
+    });
+
+    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("发生错误")).toBeInTheDocument();
+      expect(within(row).queryByLabelText("对话完成")).toBeNull();
+    });
+  });
+
+  it("完成图标会保留到用户进入该对话，选中对话隐藏状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话完成")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(row);
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/projects/tools/tasks/t-003");
+      expect(within(row).queryByLabelText("对话完成")).toBeNull();
+    });
+
+    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    await waitFor(() => {
+      expect(within(row).queryByLabelText("对话中")).toBeNull();
+    });
+  });
+
+  it("切换侧边栏对话不会调用打断接口", async () => {
+    const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
+    const row = getConversationRow(view, "打通 tsconfig paths 搜索");
+    mockInvoke.mockClear();
+
+    await fireEvent.click(row);
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toBe("/projects/lilia/tasks/t-002");
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_interrupt_turn"))
+      .toBe(false);
+  });
 });
 
 describe("SecondaryPanel project tree drag", () => {
   beforeEach(async () => {
     await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
+    useSidebarDisplayMode().setSidebarDisplayMode("grouped");
+    resetConversationActivity();
   });
 
 

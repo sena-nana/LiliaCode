@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { AlertTriangle, MessageSquarePlus, X } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
 import { listProjects } from "../services/projectsStore";
@@ -13,6 +13,10 @@ import {
   listOrphanConversations,
 } from "../services/tasksStore";
 import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
+import {
+  clearConversationActivityNotice,
+  conversationActivityForTask,
+} from "../composables/useConversationActivity";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
 import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
 import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
@@ -25,6 +29,7 @@ import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.v
 import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
 
 const router = useRouter();
+const route = useRoute();
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
@@ -127,6 +132,14 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => route.params.taskId,
+  (taskId) => {
+    if (typeof taskId === "string") clearConversationActivityNotice(taskId);
+  },
+  { immediate: true },
+);
+
 function newChat() {
   const draft = createDraftOrphan();
   router.push(`/chats/${draft.id}`);
@@ -199,6 +212,7 @@ function onProjectCreated(project: Project) {
       v-if="isUnifiedMode"
       :conversations="unifiedConversations"
       :loaded="unifiedLoaded"
+      :activity-for-task="conversationActivityForTask"
       :tree-row-state-class="treeRowStateClass"
       @error="reportProjectError"
     />
@@ -209,6 +223,7 @@ function onProjectCreated(project: Project) {
         :all-expanded="allExpanded"
         :drag-source="treeDrag"
         :drop-target="treeDropTarget"
+        :activity-for-task="conversationActivityForTask"
         :is-project-expanded="isProjectExpanded"
         :project-error="projectError"
         :projects="projects"
@@ -227,6 +242,7 @@ function onProjectCreated(project: Project) {
         :orphans="orphans"
         :orphans-expanded="orphansExpanded"
         :orphan-drop-zone-class="orphanDropZoneClass"
+        :activity-for-task="conversationActivityForTask"
         :tree-row-state-class="treeRowStateClass"
         @error="reportProjectError"
         @new-chat="newChat"

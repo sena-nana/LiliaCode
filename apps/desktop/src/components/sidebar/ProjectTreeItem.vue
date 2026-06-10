@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import type { Project, Task } from "@lilia/contracts";
+import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { vContextMenu } from "../../directives/contextMenu";
 import {
   openContextMenuAt,
@@ -41,6 +42,7 @@ import { openPopupNewChat } from "../../services/popupWindows";
 import SidebarTaskRow from "./SidebarTaskRow.vue";
 
 const props = defineProps<{
+  activityForTask: (taskId: string) => ConversationActivity | null;
   project: Project;
   isExpanded: boolean;
   dragSource?: TreeDragSource | null;
@@ -424,6 +426,7 @@ function onMoreClick(e: MouseEvent) {
           :key="c.id"
           :task="c"
           :project-id="project.id"
+          :activity="activityForTask(c.id)"
           row-kind="child"
           :active="isActiveTask(c.id)"
           :archive="archiveProjectTask"

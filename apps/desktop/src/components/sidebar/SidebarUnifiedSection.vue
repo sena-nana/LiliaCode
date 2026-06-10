@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { useRoute } from "vue-router";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
+import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type { UnifiedSidebarConversation } from "./sidebarTypes";
 import SidebarTaskRow from "./SidebarTaskRow.vue";
 
 defineProps<{
+  activityForTask: (taskId: string) => ConversationActivity | null;
   conversations: UnifiedSidebarConversation[];
   loaded: boolean;
   treeRowStateClass: (
@@ -38,6 +40,7 @@ function isActiveConversation(item: UnifiedSidebarConversation): boolean {
         :task="item.task"
         :project-id="item.projectId"
         :project-label="item.projectName"
+        :activity="activityForTask(item.task.id)"
         :to="item.route"
         row-kind="unified"
         :active="isActiveConversation(item)"

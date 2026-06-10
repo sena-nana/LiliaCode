@@ -5,8 +5,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ContextMenuHost from "./components/ContextMenuHost.vue";
 import { installAgentInteractionBridge } from "./composables/useAgentInteractionBridge";
+import { installConversationActivityBridge } from "./composables/useConversationActivity";
 
 let unlistenInteraction: (() => void) | null = null;
+let unlistenConversationActivity: (() => void) | null = null;
 let unlistenMainNavigate: (() => void) | null = null;
 let unlistenPopupNavigate: (() => void) | null = null;
 
@@ -17,6 +19,7 @@ const isPopupWindow = appWindow.label.startsWith("popup-");
 
 onMounted(async () => {
   unlistenInteraction = await installAgentInteractionBridge();
+  unlistenConversationActivity = await installConversationActivityBridge();
 
   if (isMainWindow) {
     unlistenMainNavigate = await listen<{ route: string }>("lilia:main:navigate", (event) => {
@@ -39,9 +42,11 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unlistenInteraction?.();
+  unlistenConversationActivity?.();
   unlistenMainNavigate?.();
   unlistenPopupNavigate?.();
   unlistenInteraction = null;
+  unlistenConversationActivity = null;
   unlistenMainNavigate = null;
   unlistenPopupNavigate = null;
 });
