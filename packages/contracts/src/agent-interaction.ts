@@ -6,7 +6,12 @@ import type {
   ToolConsentUpdatedInput,
 } from "./chat";
 
-export type AgentInteractionKind = "plan_approval" | "tool_consent" | "ask_user";
+export type AgentInteractionKind =
+  | "plan_approval"
+  | "tool_consent"
+  | "ask_user"
+  | "mcp_elicitation"
+  | "permission_approval";
 
 export interface ToolConsentInteractionPayload {
   toolName: string;
@@ -29,27 +34,70 @@ export interface ToolConsentInteractionPayload {
   commandActions?: unknown;
 }
 
+export type CodexMcpElicitationAction = "accept" | "decline" | "cancel";
+
+export interface CodexMcpElicitationPayload {
+  threadId: string;
+  turnId: string | null;
+  serverName: string;
+  mode: "form" | "url";
+  message: string;
+  requestedSchema?: unknown;
+  url?: string;
+  elicitationId?: string;
+  _meta?: unknown;
+}
+
+export interface CodexMcpElicitationResult {
+  action: CodexMcpElicitationAction;
+  content?: Record<string, unknown>;
+}
+
+export interface CodexPermissionApprovalPayload {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  startedAtMs: number;
+  cwd: string;
+  reason: string | null;
+  permissions: unknown;
+}
+
+export interface CodexPermissionApprovalResult {
+  permissions: unknown;
+  scope: unknown;
+  strictAutoReview?: boolean;
+}
+
 export type AgentInteractionPayloadByKind = {
   plan_approval: AskUserSpec;
   ask_user: AskUserSpec;
   tool_consent: ToolConsentInteractionPayload;
+  mcp_elicitation: CodexMcpElicitationPayload;
+  permission_approval: CodexPermissionApprovalPayload;
 };
 
 export type AgentInteractionResultByKind = {
   plan_approval: AskUserResult;
   ask_user: AskUserResult;
   tool_consent: ToolConsentResponsePayload;
+  mcp_elicitation: CodexMcpElicitationResult;
+  permission_approval: CodexPermissionApprovalResult;
 };
 
 export type AgentInteractionRequest =
   | AgentInteractionRequestOf<"plan_approval">
   | AgentInteractionRequestOf<"tool_consent">
-  | AgentInteractionRequestOf<"ask_user">;
+  | AgentInteractionRequestOf<"ask_user">
+  | AgentInteractionRequestOf<"mcp_elicitation">
+  | AgentInteractionRequestOf<"permission_approval">;
 
 export type AgentInteractionResponse =
   | AgentInteractionResponseOf<"plan_approval">
   | AgentInteractionResponseOf<"tool_consent">
-  | AgentInteractionResponseOf<"ask_user">;
+  | AgentInteractionResponseOf<"ask_user">
+  | AgentInteractionResponseOf<"mcp_elicitation">
+  | AgentInteractionResponseOf<"permission_approval">;
 
 export interface AgentInteractionRequestOf<K extends AgentInteractionKind> {
   taskId: string;

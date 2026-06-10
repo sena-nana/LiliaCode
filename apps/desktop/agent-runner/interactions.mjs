@@ -13,6 +13,50 @@ export function normalizeToolConsentResult(value) {
   };
 }
 
+function normalizeMcpElicitationResult(value) {
+  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const action = row.action === "accept" || row.action === "decline" ? row.action : "cancel";
+  const content = row.content && typeof row.content === "object" && !Array.isArray(row.content)
+    ? row.content
+    : null;
+  return {
+    action,
+    content,
+    _meta: row._meta ?? null,
+  };
+}
+
+function normalizePermissionApprovalResult(value) {
+  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    permissions: row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
+      ? row.permissions
+      : {},
+    scope: row.scope || "turn",
+    ...(typeof row.strictAutoReview === "boolean"
+      ? { strictAutoReview: row.strictAutoReview }
+      : {}),
+  };
+}
+
+const INTERACTION_RESPONSE_KINDS = new Set([
+  "tool_consent",
+  "plan_approval",
+  "ask_user",
+  "mcp_elicitation",
+  "permission_approval",
+]);
+
+function isCodexInteractionKind(kind) {
+  return kind === "mcp_elicitation" || kind === "permission_approval";
+}
+
+function normalizeCodexInteractionResult(kind, result) {
+  return kind === "mcp_elicitation"
+    ? normalizeMcpElicitationResult(result)
+    : normalizePermissionApprovalResult(result);
+}
+
 export function createInteractionBroker({
   protocol,
   emitToolConsentTimeline,
@@ -22,6 +66,8 @@ export function createInteractionBroker({
   let consentSeq = 1;
   const askUserPending = new Map();
   let askUserSeq = 1;
+  const codexPending = new Map();
+  let codexSeq = 1;
   let settingsUpdateHandler = null;
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
@@ -74,6 +120,72 @@ export function createInteractionBroker({
     });
   }
 
+  function emitCodexInteractionTimeline(id, kind, payload, status, result = null) {
+    const isMcp = kind === "mcp_elicitation";
+    const accepted = result?.action === "accept";
+    protocol.emitTimeline({
+      kind: isMcp ? "mcp" : "diagnostic",
+      status,
+      title: isMcp
+        ? "Codex MCP elicitation"
+        : "Codex permission approval",
+      summary: isMcp
+        ? oneLineSummary(payload?.message || payload?.serverName || "MCP 请求用户输入")
+        : oneLineSummary(payload?.reason || "Codex 请求额外权限"),
+      payload: {
+        backend: "codex",
+        interaction: kind,
+        requestId: id,
+        ...(isMcp
+          ? {
+              subkind: "mcp_elicitation",
+              serverName: stringOrNull(payload?.serverName),
+              mode: stringOrNull(payload?.mode),
+              message: stringOrNull(payload?.message),
+              url: stringOrNull(payload?.url),
+              requestedSchema: payload?.requestedSchema ?? null,
+            }
+          : {
+              subkind: "permission_approval",
+              threadId: stringOrNull(payload?.threadId),
+              turnId: stringOrNull(payload?.turnId),
+              itemId: stringOrNull(payload?.itemId),
+              cwd: stringOrNull(payload?.cwd),
+              reason: stringOrNull(payload?.reason),
+              permissions: payload?.permissions ?? null,
+            }),
+        ...(result
+          ? {
+              result,
+              accepted: isMcp ? accepted : status === "success",
+            }
+          : {}),
+      },
+      sourceId: id,
+    });
+  }
+
+  function requestCodexInteraction(kind, payload) {
+    const id = `codex-${codexSeq++}`;
+    emitCodexInteractionTimeline(id, kind, payload, "requires_action");
+    emitInteractionRequest(id, kind, payload, "codex");
+    return new Promise((resolve) => {
+      codexPending.set(id, {
+        kind,
+        resolve: (result) => {
+          emitCodexInteractionTimeline(
+            id,
+            kind,
+            payload,
+            codexInteractionCompletedStatus(kind, result),
+            result,
+          );
+          resolve(result);
+        },
+      });
+    });
+  }
+
   function handleControlLine(line) {
     let msg;
     try {
@@ -85,12 +197,19 @@ export function createInteractionBroker({
     if (msg.type === "interaction_response") {
       if (typeof msg.id !== "string") return;
       const kind = msg.kind;
-      if (kind !== "tool_consent" && kind !== "plan_approval" && kind !== "ask_user") return;
+      if (!INTERACTION_RESPONSE_KINDS.has(kind)) return;
       if (kind === "tool_consent") {
         const pending = consentPending.get(msg.id);
         if (!pending || pending.kind !== kind) return;
         consentPending.delete(msg.id);
         pending.resolve(normalizeToolConsentResult(msg.result));
+        return;
+      }
+      if (isCodexInteractionKind(kind)) {
+        const pending = codexPending.get(msg.id);
+        if (!pending || pending.kind !== kind) return;
+        codexPending.delete(msg.id);
+        pending.resolve(normalizeCodexInteractionResult(kind, msg.result));
         return;
       }
       const pending = askUserPending.get(msg.id);
@@ -107,6 +226,7 @@ export function createInteractionBroker({
   return {
     requestUserConsent,
     requestAskUser,
+    requestCodexInteraction,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
@@ -114,8 +234,22 @@ export function createInteractionBroker({
     pendingCounts: () => ({
       consent: consentPending.size,
       askUser: askUserPending.size,
+      codex: codexPending.size,
     }),
   };
+}
+
+function codexInteractionCompletedStatus(kind, result) {
+  if (kind === "mcp_elicitation") {
+    return result?.action === "accept" ? "success" : "cancelled";
+  }
+  if (kind === "permission_approval") {
+    return result?.strictAutoReview === true &&
+      Object.keys(result?.permissions || {}).length === 0
+      ? "cancelled"
+      : "success";
+  }
+  return "success";
 }
 
 export function askUserTimelineSummary(spec) {

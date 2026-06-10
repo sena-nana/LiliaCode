@@ -111,6 +111,7 @@ describe("pending agent actions", () => {
     const actions = usePendingAgentActionsForTask(
       computed(() => []),
       computed(() => []),
+      computed(() => []),
       ref([event]),
     );
 
@@ -123,5 +124,59 @@ describe("pending agent actions", () => {
     });
     expect(timelineEventRequiresAgentAction(event)).toBe(true);
     expect(pendingActionForTimelineEvent(event, actions.value)).toBe(actions.value[0]);
+  });
+
+  it("attaches Codex MCP and permission actions to matching timeline events", () => {
+    const actions = usePendingAgentActionsForTask(
+      computed(() => []),
+      computed(() => []),
+      ref([
+        {
+          kind: "mcp_elicitation",
+          taskId: "task-1",
+          turnId: "turn-1",
+          requestId: "mcp-1",
+          payload: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            serverName: "linear",
+            mode: "form",
+            message: "选择项目",
+          },
+        },
+        {
+          kind: "permission_approval",
+          taskId: "task-1",
+          turnId: "turn-1",
+          requestId: "permission-1",
+          payload: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            itemId: "item-1",
+            startedAtMs: 1,
+            cwd: "C:/repo",
+            reason: "need network",
+            permissions: { network: { domains: [{ domain: "example.com" }] } },
+          },
+        },
+      ]),
+      ref([]),
+    );
+    const mcpEvent = timelineEvent({
+      kind: "mcp",
+      status: "requires_action",
+      payload: { interaction: "mcp_elicitation", requestId: "mcp-1" },
+    });
+    const permissionEvent = timelineEvent({
+      kind: "diagnostic",
+      status: "requires_action",
+      payload: { interaction: "permission_approval", requestId: "permission-1" },
+    });
+
+    expect(actions.value).toHaveLength(2);
+    expect(timelineEventRequiresAgentAction(mcpEvent)).toBe(true);
+    expect(timelineEventRequiresAgentAction(permissionEvent)).toBe(true);
+    expect(pendingActionForTimelineEvent(mcpEvent, actions.value)).toBe(actions.value[0]);
+    expect(pendingActionForTimelineEvent(permissionEvent, actions.value)).toBe(actions.value[1]);
   });
 });

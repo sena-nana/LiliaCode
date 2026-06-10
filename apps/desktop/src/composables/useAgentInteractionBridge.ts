@@ -5,6 +5,7 @@ import type {
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
+import { handleCodexPendingInteractionRequest } from "./useCodexPendingInteractions";
 import { handleToolConsentRequest } from "./useToolConsentBridge";
 
 let installed = false;
@@ -59,11 +60,14 @@ function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRe
 }
 
 function handleInteraction(req: AgentInteractionRequest) {
+  if (handleCodexPendingInteractionRequest(req)) return;
   if (req.kind === "tool_consent") {
     handleToolConsentRequest(toolRequestFromInteraction(req));
     return;
   }
-  void handleAgentAskUserRequest(askRequestFromInteraction(req), req.kind);
+  if (req.kind === "ask_user" || req.kind === "plan_approval") {
+    void handleAgentAskUserRequest(askRequestFromInteraction(req), req.kind);
+  }
 }
 
 export async function installAgentInteractionBridge(): Promise<() => void> {

@@ -1156,6 +1156,193 @@ describe("Codex app-server mapping", () => {
     });
   });
 
+  it("Codex MCP elicitation 通过统一 interaction_request/response 往返", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    const calls: any[] = [];
+    const elicitationCalls: any[] = [];
+
+    const handled = maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "mcp-elicit-1",
+        method: "mcpServer/elicitation/request",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          serverName: "linear",
+          mode: "form",
+          message: "选择项目",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              project: {
+                type: "string",
+                title: "项目",
+                enum: ["A", "B"],
+              },
+            },
+            required: ["project"],
+          },
+          _meta: { source: "test" },
+        },
+      },
+      {
+        protocol,
+        interactions: broker,
+        withCodexElicitation: trackedElicitation(elicitationCalls),
+      } as any,
+    );
+
+    await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "mcp",
+        status: "requires_action",
+        payload: expect.objectContaining({
+          interaction: "mcp_elicitation",
+          requestId: "codex-1",
+          serverName: "linear",
+          mode: "form",
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "interaction_request",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      backend: "codex",
+      payload: expect.objectContaining({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        serverName: "linear",
+        mode: "form",
+        message: "选择项目",
+      }),
+    }));
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      result: {
+        action: "accept",
+        content: { project: "B" },
+      },
+    }));
+
+    await expect(handled).resolves.toBe(true);
+    expect(elicitationCalls).toEqual([
+      ["increment", "mcp_elicitation"],
+      ["decrement", "mcp_elicitation"],
+    ]);
+    expect(calls).toEqual([
+      ["respond", "mcp-elicit-1", {
+        action: "accept",
+        content: { project: "B" },
+        _meta: null,
+      }],
+    ]);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "mcp",
+        status: "success",
+        payload: expect.objectContaining({
+          interaction: "mcp_elicitation",
+          requestId: "codex-1",
+          result: expect.objectContaining({ action: "accept" }),
+        }),
+      }),
+    }));
+  });
+
+  it("Codex permission approval 通过统一 interaction_request/response 往返", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    const calls: any[] = [];
+    const elicitationCalls: any[] = [];
+
+    const handled = maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "permissions-1",
+        method: "item/permissions/requestApproval",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "item-1",
+          startedAtMs: 123,
+          cwd: "C:/repo",
+          reason: "need network",
+          permissions: {
+            network: { domains: [{ domain: "example.com" }] },
+            fileSystem: null,
+          },
+        },
+      },
+      {
+        protocol,
+        interactions: broker,
+        withCodexElicitation: trackedElicitation(elicitationCalls),
+      } as any,
+    );
+
+    await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "interaction_request",
+      id: "codex-1",
+      kind: "permission_approval",
+      backend: "codex",
+      payload: expect.objectContaining({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        cwd: "C:/repo",
+        reason: "need network",
+      }),
+    }));
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "codex-1",
+      kind: "permission_approval",
+      result: {
+        permissions: {
+          network: { domains: [{ domain: "example.com" }] },
+        },
+        scope: "session",
+      },
+    }));
+
+    await expect(handled).resolves.toBe(true);
+    expect(elicitationCalls).toEqual([
+      ["increment", "permission_approval"],
+      ["decrement", "permission_approval"],
+    ]);
+    expect(calls).toEqual([
+      ["respond", "permissions-1", {
+        permissions: {
+          network: { domains: [{ domain: "example.com" }] },
+        },
+        scope: "session",
+      }],
+    ]);
+  });
+
   it("Codex 工具确认通过统一 interaction_request/response 往返", async () => {
     const { protocol, json } = captureProtocol();
     const broker = createInteractionBroker({
