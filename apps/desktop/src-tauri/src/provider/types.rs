@@ -10,8 +10,14 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) non_interrupt_mode: bool,
     #[serde(default)]
     pub(crate) debug: bool,
+    #[serde(default = "default_agent_runtime_channel")]
+    pub(crate) agent_runtime_channel: String,
     #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
+}
+
+fn default_agent_runtime_channel() -> String {
+    crate::RUNTIME_CHANNEL_BUILTIN.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

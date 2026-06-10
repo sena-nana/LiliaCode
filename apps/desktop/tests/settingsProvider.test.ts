@@ -210,6 +210,40 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("命令执行权限")).not.toBeInTheDocument();
   });
 
+  it("Agent 设置页可以切换运行时通道", async () => {
+    const view = await renderSettings("/settings?tab=agent");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(view.getByRole("radio", { name: "内置" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+
+    await fireEvent.click(view.getByRole("radio", { name: "NanoBot Rust Core" }));
+
+    await waitFor(() => {
+      expect(view.getByRole("radio", { name: "NanoBot Rust Core" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "agent_interaction_set_settings" &&
+          typeof args === "object" &&
+          args !== null &&
+          "settings" in args &&
+          JSON.stringify(args.settings).includes("\"agentRuntimeChannel\":\"nanobot\"")
+        ),
+      ).toBe(true);
+    });
+  });
+
   it("项目设置页不再显示 Codex 项目默认高级字段", async () => {
     const view = await renderSettings("/settings?tab=project");
 

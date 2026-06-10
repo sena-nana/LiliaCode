@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { AlertTriangle, Sparkles } from "lucide-vue-next";
 import type {
   AgentInteractionSettings,
+  AgentRuntimeChannel,
   CodexPermissionProfile,
   CodexProfileSettings,
   CodexReasoningEffort,
@@ -39,6 +40,11 @@ const codexPermissionOptions: Array<{ value: CodexPermissionProfile; label: stri
   { value: "dangerFullAccess", label: "完全访问" },
 ];
 
+const runtimeChannelOptions: Array<{ value: AgentRuntimeChannel; label: string }> = [
+  { value: "builtin", label: "内置" },
+  { value: "nanobot", label: "NanoBot Rust Core" },
+];
+
 const codexProfile = computed(() => agentInteraction.value.codexProfile);
 
 function sameStringArray(a: readonly string[], b: readonly string[]) {
@@ -72,6 +78,10 @@ async function setNonInterruptMode(nonInterruptMode: boolean) {
 
 async function setDebugMode(debug: boolean) {
   await setAgentInteraction({ debug });
+}
+
+async function setRuntimeChannel(agentRuntimeChannel: AgentRuntimeChannel) {
+  await setAgentInteraction({ agentRuntimeChannel });
 }
 
 async function setCodexProfile(patch: Partial<CodexProfileSettings>) {
@@ -115,6 +125,7 @@ async function setAgentInteraction(patch: Partial<AgentInteractionSettings>) {
   if (
     next.nonInterruptMode === agentInteraction.value.nonInterruptMode &&
     next.debug === agentInteraction.value.debug &&
+    next.agentRuntimeChannel === agentInteraction.value.agentRuntimeChannel &&
     sameCodexProfile(next.codexProfile, agentInteraction.value.codexProfile)
   ) {
     return;
@@ -164,6 +175,24 @@ onMounted(loadAgentInteraction);
           @click="setNonInterruptMode(true)"
         >
           开启
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">运行时通道</div>
+      <div class="ui-segmented" role="radiogroup" aria-label="运行时通道">
+        <button
+          v-for="option in runtimeChannelOptions"
+          :key="option.value"
+          type="button"
+          role="radio"
+          :aria-checked="agentInteraction.agentRuntimeChannel === option.value"
+          :class="{ 'is-active': agentInteraction.agentRuntimeChannel === option.value }"
+          :disabled="savingAgentInteraction"
+          @click="setRuntimeChannel(option.value)"
+        >
+          {{ option.label }}
         </button>
       </div>
     </div>

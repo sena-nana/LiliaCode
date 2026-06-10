@@ -275,20 +275,21 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
-      codexProfile: {
-        profile: "default",
-        model: null,
-        reasoningEffort: null,
-        runtimeWorkspaceRoots: [] as string[],
-        permissions: { profile: "default" },
-        responsesApiClientMetadata: null as Record<string, unknown> | null,
-        additionalContext: null as string | null,
-        persistExtendedHistory: null as boolean | null,
-        initialTurnsPage: null as Record<string, unknown> | null,
-        excludeTurns: [] as string[],
-        commandExecPermissionProfile: null as string | null,
-      },
-    };
+    agentRuntimeChannel: "builtin" as "builtin" | "nanobot",
+    codexProfile: {
+      profile: "default",
+      model: null,
+      reasoningEffort: null,
+      runtimeWorkspaceRoots: [] as string[],
+      permissions: { profile: "default" },
+      responsesApiClientMetadata: null as Record<string, unknown> | null,
+      additionalContext: null as string | null,
+      persistExtendedHistory: null as boolean | null,
+      initialTurnsPage: null as Record<string, unknown> | null,
+      excludeTurns: [] as string[],
+      commandExecPermissionProfile: null as string | null,
+    },
+  };
 }
 
 function normalizeMockJsonObject(value: unknown): Record<string, unknown> | null {
@@ -1716,6 +1717,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const settings = args.settings as {
         nonInterruptMode?: unknown;
         debug?: unknown;
+        agentRuntimeChannel?: unknown;
         codexProfile?: {
           profile?: unknown;
           model?: unknown;
@@ -1734,6 +1736,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
+        agentRuntimeChannel: settings?.agentRuntimeChannel === "nanobot" ? "nanobot" : "builtin",
         codexProfile: {
           profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
           model: typeof codexProfile?.model === "string" && codexProfile.model.trim()

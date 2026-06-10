@@ -152,6 +152,8 @@ export type PermissionMode = "full" | "ask" | "readonly";
 
 export type ChatBackendKind = "claude" | "codex";
 
+export type AgentRuntimeChannel = "builtin" | "nanobot";
+
 export interface ChatComposerState {
   taskId: string;
   backend: ChatBackendKind;
@@ -206,5 +208,6 @@ export interface ToolConsentResponsePayload {
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
+  agentRuntimeChannel: AgentRuntimeChannel;
   codexProfile: CodexProfileSettings;
 }

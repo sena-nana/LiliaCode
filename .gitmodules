@@ -1,0 +1,3 @@
+[submodule "vendor/NanoBot"]
+	path = vendor/NanoBot
+	url = https://github.com/sena-nana/MutsukiCore.git

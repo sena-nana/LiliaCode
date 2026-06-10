@@ -34,6 +34,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_agent_sessions",
         apply: migrate_task_agent_sessions,
     },
+    SchemaMigration {
+        version: 9,
+        name: "task_agent_sessions_runtime_channel",
+        apply: migrate_task_agent_sessions_runtime_channel,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -111,16 +116,44 @@ fn migrate_task_agent_sessions(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         CREATE TABLE task_agent_sessions (
-          task_id    TEXT NOT NULL,
-          backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          session_id TEXT NOT NULL,
-          updated_at INTEGER NOT NULL,
-          PRIMARY KEY (task_id, backend),
+          task_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','nanobot')),
+          session_id      TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend, runtime_channel),
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_agent_sessions 失败：{e}"))
+}
+
+fn migrate_task_agent_sessions_runtime_channel(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_agent_sessions_next (
+          task_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','nanobot')),
+          session_id      TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend, runtime_channel),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO task_agent_sessions_next
+          (task_id, backend, runtime_channel, session_id, updated_at)
+        SELECT task_id, backend, 'builtin', session_id, updated_at
+        FROM task_agent_sessions;
+
+        DROP TABLE task_agent_sessions;
+        ALTER TABLE task_agent_sessions_next RENAME TO task_agent_sessions;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_agent_sessions runtime_channel 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

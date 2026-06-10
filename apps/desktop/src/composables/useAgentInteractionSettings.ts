@@ -8,6 +8,7 @@ import {
 const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
   nonInterruptMode: false,
   debug: false,
+  agentRuntimeChannel: "builtin",
   codexProfile: {
     profile: "default",
     model: null,
@@ -36,6 +37,7 @@ function normalizeAgentInteractionSettings(
   return {
     nonInterruptMode: input?.nonInterruptMode === true,
     debug: input?.debug === true,
+    agentRuntimeChannel: normalizeRuntimeChannel(input?.agentRuntimeChannel),
     codexProfile: {
       profile: normalizeProfile(codexProfile?.profile),
       model: normalizeNullableText(codexProfile?.model),
@@ -58,6 +60,10 @@ function normalizeAgentInteractionSettings(
       ),
     },
   };
+}
+
+function normalizeRuntimeChannel(value: unknown): AgentInteractionSettings["agentRuntimeChannel"] {
+  return value === "nanobot" ? "nanobot" : "builtin";
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> | null {
@@ -129,6 +135,7 @@ export async function updateAgentInteractionSettings(
   if (
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&
+    next.agentRuntimeChannel === previous.agentRuntimeChannel &&
     sameCodexProfile(next.codexProfile, previous.codexProfile)
   ) {
     return previous;
