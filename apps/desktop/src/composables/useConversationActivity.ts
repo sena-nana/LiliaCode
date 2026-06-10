@@ -1,7 +1,6 @@
 import { reactive } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
-  onAgentInteractionRequest,
   onAgentTimeline,
   onDone,
   onTurnStarted,
@@ -123,9 +122,6 @@ export async function installConversationActivityBridge(): Promise<() => void> {
         markConversationError(event.taskId);
       }
     }),
-    onAgentInteractionRequest((event) =>
-      markConversationRequiresAction(event.taskId, event.requestId)
-    ),
   ]);
   return () => {
     for (const unlisten of unlistenAll) unlisten();
