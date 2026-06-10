@@ -17,6 +17,10 @@ import {
   type ToolConsentRequest,
   type ToolConsentUpdatedInput,
 } from "../services/chat";
+import {
+  clearConversationRequiresAction,
+  markConversationRequiresAction,
+} from "./useConversationActivity";
 
 const pending = reactive<Record<string, ToolConsentRequest>>({});
 const localResolvers = new Map<
@@ -58,6 +62,7 @@ export function requestLocalToolConsent(
   updatedInput?: ToolConsentUpdatedInput;
 }> {
   pending[request.taskId] = request;
+  markConversationRequiresAction(request.taskId, request.requestId);
   return new Promise((resolve) => {
     localResolvers.set(request.requestId, (decision, message, updatedInput) => {
       resolve({ decision, message, updatedInput });
@@ -69,6 +74,7 @@ export function handleToolConsentRequest(
   request: ToolConsentRequest,
 ) {
   pending[request.taskId] = request;
+  markConversationRequiresAction(request.taskId, request.requestId);
   localResolvers.delete(request.requestId);
 }
 
@@ -86,6 +92,7 @@ export async function respondConsent(
   if (pending[taskId]?.requestId === requestId) {
     delete pending[taskId];
   }
+  clearConversationRequiresAction(taskId, requestId);
   const localResolve = localResolvers.get(requestId);
   if (localResolve) {
     localResolvers.delete(requestId);

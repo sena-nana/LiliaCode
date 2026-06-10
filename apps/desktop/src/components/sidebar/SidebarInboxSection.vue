@@ -6,10 +6,12 @@ import {
   Plus,
 } from "lucide-vue-next";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
+import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type { OrphanConversation } from "../../services/tasksStore";
 import SidebarTaskRow from "./SidebarTaskRow.vue";
 
 defineProps<{
+  activityForTask: (taskId: string) => ConversationActivity | null;
   orphans: OrphanConversation[];
   orphansExpanded: boolean;
   orphanDropZoneClass: Record<string, boolean>;
@@ -59,6 +61,7 @@ function isActiveOrphan(taskId: string) {
             :key="o.id"
             :task="o"
             :project-id="null"
+            :activity="activityForTask(o.id)"
             :to="`/chats/${o.id}`"
             row-kind="orphan"
             :active="isActiveOrphan(o.id)"

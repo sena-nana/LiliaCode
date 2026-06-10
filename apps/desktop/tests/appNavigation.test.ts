@@ -22,7 +22,7 @@ async function renderApp(windowLabel: string, initialRoute = "/") {
   });
 
   await waitFor(() => {
-    expect(mockListenerCount("chat:agent-interaction-request")).toBe(1);
+    expect(mockListenerCount("chat:agent-interaction-request")).toBe(2);
   });
   await Promise.resolve();
 

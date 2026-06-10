@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
+import type { ConversationActivity } from "../../composables/useConversationActivity";
 import type {
   TreeDragSource,
   TreeDropTarget,
@@ -15,6 +16,7 @@ import type {
 import ProjectTreeItem from "./ProjectTreeItem.vue";
 
 defineProps<{
+  activityForTask: (taskId: string) => ConversationActivity | null;
   addMenuOpen: boolean;
   allExpanded: boolean;
   dragSource: TreeDragSource | null;
@@ -79,6 +81,7 @@ const emit = defineEmits<{
         v-for="p in projects"
         :key="p.id"
         :project="p"
+        :activity-for-task="activityForTask"
         :is-expanded="isProjectExpanded(p.id)"
         :drag-source="dragSource"
         :drop-target="dropTarget"

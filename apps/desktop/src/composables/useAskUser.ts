@@ -1,5 +1,9 @@
 import { computed, reactive, type ComputedRef } from "vue";
 import type { AskUserResult, AskUserSpec } from "@lilia/contracts";
+import {
+  clearConversationRequiresAction,
+  markConversationRequiresAction,
+} from "./useConversationActivity";
 
 export interface PendingAsk {
   id: number;
@@ -46,6 +50,7 @@ export function askUserForTask(
   requestId: string | null = null,
 ): Promise<AskUserResult> {
   return new Promise((resolve) => {
+    if (taskId && requestId) markConversationRequiresAction(taskId, requestId);
     const ask = {
       id: askSeq++,
       requestId,
@@ -88,6 +93,7 @@ export function resolveAskUserById(id: number, result: AskUserResult): boolean {
   if (pendingIndex >= 0) {
     state.pending.splice(pendingIndex, 1);
   }
+  if (ask.taskId) clearConversationRequiresAction(ask.taskId, ask.requestId);
   ask.resolve(result);
   pumpNext();
   return true;

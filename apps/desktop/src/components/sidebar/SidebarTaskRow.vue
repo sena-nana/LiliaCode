@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { RouterLink } from "vue-router";
-import { Archive, ExternalLink, MessageSquarePlus, Pin } from "lucide-vue-next";
+import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
+import type { ConversationActivity } from "../../composables/useConversationActivity";
+import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
 import { vContextMenu } from "../../directives/contextMenu";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
@@ -14,6 +16,7 @@ type SidebarTask = Pick<Task, "id" | "title" | "pinned">;
 const props = defineProps<{
   active: boolean;
   archive?: (taskId: string) => Promise<boolean>;
+  activity?: ConversationActivity | null;
   projectLabel?: string | null;
   projectId: string | null;
   rowKind: "child" | "orphan" | "unified";
@@ -33,6 +36,13 @@ const emit = defineEmits<{
 }>();
 
 const confirming = ref(false);
+
+const activityLabel: Record<ConversationActivity, string> = {
+  running: "对话中",
+  requires_action: "等待交互",
+  completed: "对话完成",
+  error: "发生错误",
+};
 
 async function archiveCurrentTask() {
   try {
@@ -129,6 +139,7 @@ function buildMenu(): ContextMenuItem[] {
 }
 
 function onClick() {
+  clearConversationActivityNotice(props.task.id);
   if (props.to) return;
   emit("open", props.task.id);
 }
@@ -157,6 +168,38 @@ function onClick() {
   >
     <span class="sb-tree__name">{{ task.title }}</span>
     <span v-if="projectLabel" class="sb-tree__project-label">{{ projectLabel }}</span>
+    <span
+      v-if="activity && !active"
+      class="sb-tree__activity"
+      :class="`sb-tree__activity--${activity}`"
+      :aria-label="activityLabel[activity]"
+      :title="activityLabel[activity]"
+    >
+      <Loader2
+        v-if="activity === 'running'"
+        :size="13"
+        class="sb-tree__activity-icon sb-tree__activity-icon--spin"
+        aria-hidden="true"
+      />
+      <CircleHelp
+        v-else-if="activity === 'requires_action'"
+        :size="13"
+        class="sb-tree__activity-icon"
+        aria-hidden="true"
+      />
+      <AlertTriangle
+        v-else-if="activity === 'error'"
+        :size="13"
+        class="sb-tree__activity-icon"
+        aria-hidden="true"
+      />
+      <Check
+        v-else
+        :size="13"
+        class="sb-tree__activity-icon"
+        aria-hidden="true"
+      />
+    </span>
     <div class="sb-tree__hover-tools" @click.stop>
       <button
         type="button"
