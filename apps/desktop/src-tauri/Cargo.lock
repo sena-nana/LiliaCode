@@ -2997,6 +2997,9 @@ dependencies = [
  "ignore",
  "keyring",
  "keyring-core",
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-core",
+ "mutsuki-runtime-host",
  "r2d2",
  "r2d2_sqlite",
  "reqwest 0.12.28",
@@ -3273,6 +3276,33 @@ name = "murmurhash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2195bf6aa996a481483b29d62a7663eed3fe39600c460e323f8ff41e90bdd89b"
+
+[[package]]
+name = "mutsuki-runtime-contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mutsuki-runtime-core"
+version = "0.1.0"
+dependencies = [
+ "mutsuki-runtime-contracts",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mutsuki-runtime-host"
+version = "0.1.0"
+dependencies = [
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ndk"

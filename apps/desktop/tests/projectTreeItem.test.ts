@@ -60,6 +60,7 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
       <ProjectTreeItem
         :project="project"
         :is-expanded="isExpanded"
+        :activity-for-task="activityForTask"
         @toggle="$emit('toggle', $event)"
         @error="emitError"
         @archived="emitArchived"
@@ -75,6 +76,7 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
           sessionCount: 2,
           pinned: false,
         },
+        activityForTask: () => null,
       };
     },
     methods: {

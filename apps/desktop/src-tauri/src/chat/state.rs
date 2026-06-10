@@ -14,7 +14,10 @@ use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatWorkflow,
 };
 use crate::store::LiliaStore;
-use crate::{agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
+use crate::{
+    agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS,
+    RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
+};
 
 pub(crate) struct PendingChatTurn {
     pub(crate) content: String,
@@ -39,7 +42,7 @@ pub(crate) struct RunningTurn {
 #[derive(Default)]
 pub(crate) struct ChatStore {
     pub(crate) composers: Mutex<HashMap<String, ChatComposerState>>,
-    /// SDK session id：key = "{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
+    /// SDK session id：key = "{runtime_channel}:{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
     pub(crate) sdk_sessions: Mutex<HashMap<String, String>>,
     pub(crate) running_tasks: Mutex<HashMap<String, bool>>,
     pub(crate) pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
@@ -52,17 +55,33 @@ pub(crate) struct ChatStore {
     pub(crate) running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
 }
 
-pub(crate) fn session_key(backend: &str, task_id: &str) -> String {
-    format!("{backend}:{task_id}")
+pub(crate) fn normalize_runtime_channel(value: &str) -> &'static str {
+    match value {
+        RUNTIME_CHANNEL_NANOBOT => RUNTIME_CHANNEL_NANOBOT,
+        _ => RUNTIME_CHANNEL_BUILTIN,
+    }
+}
+
+pub(crate) fn session_key(runtime_channel: &str, backend: &str, task_id: &str) -> String {
+    format!(
+        "{}:{backend}:{task_id}",
+        normalize_runtime_channel(runtime_channel)
+    )
 }
 
 pub(crate) fn load_persisted_resume_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
+    runtime_channel: &str,
 ) -> Option<String> {
-    if let Ok(Some(session_id)) = load_task_agent_session_id(conn, task_id, backend) {
+    if let Ok(Some(session_id)) =
+        load_task_agent_session_id(conn, task_id, backend, runtime_channel)
+    {
         return Some(session_id);
+    }
+    if normalize_runtime_channel(runtime_channel) != RUNTIME_CHANNEL_BUILTIN {
+        return None;
     }
     agent_timeline::latest_session_id(conn, task_id, backend)
         .ok()
@@ -73,13 +92,15 @@ fn load_task_agent_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
+    runtime_channel: &str,
 ) -> Result<Option<String>, String> {
+    let runtime_channel = normalize_runtime_channel(runtime_channel);
     let session_id = conn
         .query_row(
             r#"SELECT session_id
                FROM task_agent_sessions
-               WHERE task_id = ?1 AND backend = ?2"#,
-            params![task_id, backend],
+               WHERE task_id = ?1 AND backend = ?2 AND runtime_channel = ?3"#,
+            params![task_id, backend, runtime_channel],
             |row| row.get::<_, String>(0),
         )
         .optional()
@@ -94,19 +115,28 @@ pub(crate) fn persist_agent_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
+    runtime_channel: &str,
     session_id: &str,
 ) -> Result<(), String> {
+    let runtime_channel = normalize_runtime_channel(runtime_channel);
     let trimmed = session_id.trim();
     if trimmed.is_empty() {
         return Ok(());
     }
     conn.execute(
-        r#"INSERT INTO task_agent_sessions (task_id, backend, session_id, updated_at)
-           VALUES (?1, ?2, ?3, ?4)
-           ON CONFLICT(task_id, backend) DO UPDATE SET
+        r#"INSERT INTO task_agent_sessions
+           (task_id, backend, runtime_channel, session_id, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5)
+           ON CONFLICT(task_id, backend, runtime_channel) DO UPDATE SET
              session_id = excluded.session_id,
              updated_at = excluded.updated_at"#,
-        params![task_id, backend, trimmed, now_millis() as i64],
+        params![
+            task_id,
+            backend,
+            runtime_channel,
+            trimmed,
+            now_millis() as i64
+        ],
     )
     .map(|_| ())
     .map_err(|e| format!("写入 agent session checkpoint 失败：{e}"))
@@ -117,15 +147,16 @@ pub(crate) fn remember_agent_session(
     chat_store: &ChatStore,
     task_id: &str,
     backend: &str,
+    runtime_channel: &str,
     session_id: &str,
     log_context: &str,
 ) {
-    chat_store
-        .sdk_sessions
-        .lock()
-        .unwrap()
-        .insert(session_key(backend, task_id), session_id.to_string());
-    if let Err(err) = persist_agent_session_id(conn, task_id, backend, session_id) {
+    chat_store.sdk_sessions.lock().unwrap().insert(
+        session_key(runtime_channel, backend, task_id),
+        session_id.to_string(),
+    );
+    if let Err(err) = persist_agent_session_id(conn, task_id, backend, runtime_channel, session_id)
+    {
         eprintln!("[agent-session] persist {log_context} checkpoint failed: {err}");
     }
 }

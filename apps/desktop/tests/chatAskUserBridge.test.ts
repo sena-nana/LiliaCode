@@ -134,6 +134,7 @@ describe("chat AskUser bridge service", () => {
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: false,
       debug: false,
+      agentRuntimeChannel: "builtin",
       codexProfile: {
         profile: "default",
         model: null,
@@ -143,11 +144,15 @@ describe("chat AskUser bridge service", () => {
       },
     });
 
-    await setAgentInteractionSettings({ nonInterruptMode: true });
+    await setAgentInteractionSettings({
+      nonInterruptMode: true,
+      agentRuntimeChannel: "nanobot",
+    });
 
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: true,
       debug: false,
+      agentRuntimeChannel: "nanobot",
       codexProfile: {
         profile: "default",
         model: null,

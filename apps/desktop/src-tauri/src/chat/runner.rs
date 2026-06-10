@@ -14,9 +14,10 @@ use crate::agent_events::{AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_extensions::TodoMirrorExtension;
 use crate::chat::state::{
     finish_running_turn_handles, is_turn_marked_reset, load_persisted_resume_session_id,
-    persist_agent_session_id, persist_and_emit_interrupted_timeline_event, session_key,
-    set_guide_status_for_app, should_emit_runner_exit_error, should_persist_user_message,
-    take_next_pending_turn, ChatStore, RunningTurn,
+    normalize_runtime_channel, persist_agent_session_id,
+    persist_and_emit_interrupted_timeline_event, session_key, set_guide_status_for_app,
+    should_emit_runner_exit_error, should_persist_user_message, take_next_pending_turn, ChatStore,
+    RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
@@ -33,7 +34,28 @@ use crate::provider::{
     CodexProfileSettings,
 };
 use crate::store::LiliaStore;
-use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_NANOBOT};
+
+pub(crate) struct RunnerInvocation {
+    pub(crate) task_id: String,
+    pub(crate) content: String,
+    pub(crate) composer: ChatComposerState,
+    pub(crate) project_cwd: String,
+    pub(crate) attachments: Vec<ChatAttachment>,
+    pub(crate) workflow: Option<ChatWorkflow>,
+    pub(crate) turn_id: String,
+    pub(crate) runtime_channel: String,
+    pub(crate) resume_session_id: Option<String>,
+    pub(crate) queued_count: usize,
+    pub(crate) script_path: PathBuf,
+}
+
+#[derive(Default)]
+pub(crate) struct RunnerOutput {
+    pub(crate) last_session_id: Option<String>,
+    pub(crate) interrupted: bool,
+    pub(crate) reset: bool,
+}
 
 // ---------- 子进程定位 ----------
 
@@ -80,6 +102,32 @@ pub(crate) fn spawn_agent_turn(
     workflow: Option<ChatWorkflow>,
     turn_id: String,
 ) {
+    let runtime_channel = load_agent_interaction_settings(&app).agent_runtime_channel;
+    let runtime_channel = normalize_runtime_channel(&runtime_channel).to_string();
+    spawn_agent_turn_with_channel(
+        app,
+        task_id,
+        content,
+        composer,
+        project_cwd,
+        attachments,
+        workflow,
+        turn_id,
+        runtime_channel,
+    );
+}
+
+fn spawn_agent_turn_with_channel(
+    app: AppHandle,
+    task_id: String,
+    content: String,
+    composer: ChatComposerState,
+    project_cwd: String,
+    attachments: Vec<ChatAttachment>,
+    workflow: Option<ChatWorkflow>,
+    turn_id: String,
+    runtime_channel: String,
+) {
     let backend = composer.backend.clone();
     let resume_session_id = {
         let store = app.state::<ChatStore>();
@@ -87,26 +135,33 @@ pub(crate) fn spawn_agent_turn(
             .sdk_sessions
             .lock()
             .unwrap()
-            .get(&session_key(&backend, &task_id))
+            .get(&session_key(&runtime_channel, &backend, &task_id))
             .cloned();
         session
     }
     .or_else(|| {
         let store = app.try_state::<LiliaStore>()?;
         let conn = store.conn().ok()?;
-        load_persisted_resume_session_id(&conn, &task_id, &backend)
+        load_persisted_resume_session_id(&conn, &task_id, &backend, &runtime_channel)
     });
 
     let script_path = locate_agent_runner(&app);
-    let connection = resolve_connection_for(&app, &backend);
     let app_handle = app.clone();
     let task_id_for_thread = task_id.clone();
-    let composer_for_thread = composer.clone();
-    let prompt_for_thread = content.clone();
-    let attachments_for_thread = attachments.clone();
-    let workflow_for_thread = workflow.clone();
     let backend_for_thread = backend.clone();
-    let turn_id_for_thread = turn_id;
+    let invocation = RunnerInvocation {
+        task_id,
+        content,
+        composer,
+        project_cwd,
+        attachments,
+        workflow,
+        turn_id,
+        runtime_channel,
+        resume_session_id,
+        queued_count: 0,
+        script_path,
+    };
 
     thread::spawn(move || {
         let queued_count = {
@@ -120,309 +175,358 @@ pub(crate) fn spawn_agent_turn(
                 .unwrap_or(0);
             count
         };
+        let mut invocation = invocation;
+        invocation.queued_count = queued_count;
 
-        let extensions = plugins::runtime_extensions(&app_handle, Some(&project_cwd));
-        let codex_settings = if backend_for_thread == BACKEND_CODEX {
-            Some(build_effective_codex_settings(
-                &app_handle,
-                &composer_for_thread,
-            ))
-        } else {
-            None
-        };
-        let mut stdin_payload = build_runner_stdin_payload(
-            &backend_for_thread,
-            &project_cwd,
-            &prompt_for_thread,
-            &attachments_for_thread,
-            workflow_for_thread.as_ref(),
-            &composer_for_thread,
-            resume_session_id.as_deref(),
-            &extensions,
-        );
-        if let Some(context) = build_runner_conversation_context(&app_handle, &task_id_for_thread) {
-            stdin_payload["conversationContext"] = context;
-        }
-        if let Some(settings) = codex_settings {
-            stdin_payload["codexSettings"] = settings;
-        }
-
-        let mut cmd = Command::new("node");
-        cmd.arg(&script_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        // 按 backend 选择要注入的 env 键名：claude→ANTHROPIC_*，codex→OPENAI_*。
-        let (base_key, key_key) = match backend_for_thread.as_str() {
-            BACKEND_CODEX => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
-            _ => ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"),
-        };
-        if let Some(url) = &connection.base_url {
-            cmd.env(base_key, url);
-        }
-        if let Some(key) = &connection.api_key {
-            cmd.env(key_key, key);
-        }
-        if backend_for_thread == BACKEND_CODEX {
-            let codex_app_server = build_codex_app_server_probe_status();
-            if let Some(path) = codex_app_server.path {
-                cmd.env("LILIA_CODEX_CLI_PATH", path);
-            }
-        }
-
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(err) => {
-                let msg =
-                    format!("无法启动 node 子进程（请确保已安装 Node 18+ 并在 PATH 中）：{err}");
+        if invocation.runtime_channel == RUNTIME_CHANNEL_NANOBOT {
+            if let Err(err) =
+                crate::chat::nanobot_runtime::supervise_turn(app_handle.clone(), invocation)
+            {
                 persist_and_emit_error_timeline_event(
                     &app_handle,
                     &task_id_for_thread,
                     &backend_for_thread,
-                    Some(&turn_id_for_thread),
-                    msg,
+                    None,
+                    format!("NanoBot runtime 初始化失败：{err}"),
                 );
                 finish_agent_turn(
                     app_handle,
                     task_id_for_thread,
                     backend_for_thread,
+                    RUNTIME_CHANNEL_NANOBOT.to_string(),
                     None,
                     true,
                 );
                 return;
             }
-        };
-
-        let child_stdout = child.stdout.take();
-        let child_stderr = child.stderr.take();
-        let child_handle = Arc::new(Mutex::new(child));
-        {
-            let store = app_handle.state::<ChatStore>();
-            store
-                .running_children
-                .lock()
-                .unwrap()
-                .insert(task_id_for_thread.clone(), child_handle.clone());
-            store.running_turns.lock().unwrap().insert(
-                task_id_for_thread.clone(),
-                RunningTurn {
-                    turn_id: turn_id_for_thread.clone(),
-                    backend: backend_for_thread.clone(),
-                },
-            );
+            return;
         }
 
-        let _ = app_handle.emit(
-            "chat:turn-started",
-            TurnStartedEvent {
-                task_id: task_id_for_thread.clone(),
-                queued_count,
-            },
-        );
-
-        // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 interaction_response
-        // 还要通过它写回 runner。stdin 存到 ChatStore，turn 结束时移除（Drop 关闭）。
-        let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child_handle
-            .lock()
-            .ok()
-            .and_then(|mut child| child.stdin.take())
-        {
-            Some(mut stdin) => {
-                let mut bytes = serde_json::to_vec(&stdin_payload).unwrap_or_default();
-                bytes.push(b'\n');
-                if stdin.write_all(&bytes).is_err() {
-                    // 子进程已经死了；让 stdout 循环正常退出兜底
-                    None
-                } else {
-                    let shared = Arc::new(Mutex::new(stdin));
-                    let store = app_handle.state::<ChatStore>();
-                    store
-                        .running_stdins
-                        .lock()
-                        .unwrap()
-                        .insert(task_id_for_thread.clone(), shared.clone());
-                    Some(shared)
-                }
-            }
-            None => None,
-        };
-
-        let mut last_session_id: Option<String> = None;
-        let event_ctx = AgentTurnContext {
-            task_id: task_id_for_thread.clone(),
-            backend: backend_for_thread.clone(),
-            turn_id: turn_id_for_thread.clone(),
-        };
-        let mut event_host = AgentEventHost::new();
-        event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
-        let mut timeline_throttle = TimelineThrottle::new();
-        let mut last_assistant_error_text: Option<String> = None;
-
-        if let Some(stdout) = child_stdout {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                let store = app_handle.state::<ChatStore>();
-                let line = match line {
-                    Ok(l) if !l.trim().is_empty() => l,
-                    _ => continue,
-                };
-                if is_turn_marked_reset(
-                    &store,
+        let turn_id_for_finish = invocation.turn_id.clone();
+        let runtime_channel_for_finish = invocation.runtime_channel.clone();
+        let result = run_node_agent_runner(&app_handle, invocation);
+        let output = match result {
+            Ok(output) => output,
+            Err(err) => {
+                persist_and_emit_error_timeline_event(
+                    &app_handle,
                     &task_id_for_thread,
-                    &turn_id_for_thread,
                     &backend_for_thread,
-                ) {
-                    break;
-                }
-                let value: JsonValue = match serde_json::from_str(&line) {
-                    Ok(v) => v,
-                    Err(_) => continue, // 忽略偶发非 JSON 输出（SDK 内部 log 等）
-                };
-                let Some(event) = AgentRuntimeEvent::from_runner_json(&value) else {
-                    continue;
-                };
-                log_agent_event_effect(event_host.dispatch(&event_ctx, &event));
-                match &event {
-                    AgentRuntimeEvent::ToolUse { .. } | AgentRuntimeEvent::TodoList { .. } => {}
-                    AgentRuntimeEvent::Timeline { .. } => {
-                        if let Some(input) = timeline_input_from_runtime_event(&event_ctx, &event) {
-                            if let Some(text) = assistant_error_text(&input) {
-                                last_assistant_error_text = Some(text);
-                            }
-                            timeline_throttle.submit(&app_handle, input);
-                        }
-                    }
-                    AgentRuntimeEvent::InteractionRequest {
-                        id,
-                        kind,
-                        backend,
-                        payload,
-                    } => {
-                        let _ = app_handle.emit(
-                            "chat:agent-interaction-request",
-                            AgentInteractionRequestEvent {
-                                task_id: task_id_for_thread.clone(),
-                                turn_id: turn_id_for_thread.clone(),
-                                backend: backend
-                                    .clone()
-                                    .unwrap_or_else(|| backend_for_thread.clone()),
-                                request_id: id.clone(),
-                                kind: kind.clone(),
-                                payload: payload.clone(),
-                            },
-                        );
-                    }
-                    AgentRuntimeEvent::Done { session_id, .. } => {
-                        if let Some(sid) = session_id {
-                            last_session_id = Some(sid.clone());
-                        }
-                    }
-                    AgentRuntimeEvent::PromptSuggestion { suggestion, uuid } => {
-                        if backend_for_thread == BACKEND_CLAUDE {
-                            if let Err(err) =
-                                crate::conversation_suggestions::save_claude_prompt_suggestion(
-                                    &app_handle,
-                                    &task_id_for_thread,
-                                    suggestion,
-                                    uuid.as_deref(),
-                                )
-                            {
-                                eprintln!("[conversation-suggestions] save Claude prompt suggestion failed: {err}");
-                            }
-                        }
-                    }
-                    AgentRuntimeEvent::Error { message } => {
-                        timeline_throttle.flush_all(&app_handle);
-                        if last_assistant_error_text
-                            .as_deref()
-                            .is_some_and(|text| normalize_timeline_text(message).contains(text))
-                        {
-                            continue;
-                        }
-                        persist_and_emit_error_timeline_event(
-                            &app_handle,
-                            &task_id_for_thread,
-                            &backend_for_thread,
-                            Some(&turn_id_for_thread),
-                            message.clone(),
-                        );
-                    }
-                }
+                    Some(&turn_id_for_finish),
+                    err,
+                );
+                RunnerOutput::default()
             }
-        }
-
-        // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
-        // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
-        drop(stdin_handle);
-        let finished = {
-            let store = app_handle.state::<ChatStore>();
-            finish_running_turn_handles(
-                &store,
-                &task_id_for_thread,
-                &turn_id_for_thread,
-                &backend_for_thread,
-            )
         };
-
-        // 流结束前确保 pending 的最后一帧落地；reset 后则丢弃旧 turn 缓冲，避免回写已清空的 timeline。
-        if finished.reset {
-            timeline_throttle.pending.clear();
-        } else {
-            timeline_throttle.flush_all(&app_handle);
-        }
-
-        // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
-        let exit_status = child_handle
-            .lock()
-            .map_err(|err| std::io::Error::new(ErrorKind::Other, err.to_string()))
-            .and_then(|mut child| child.wait());
-        let stderr_text = child_stderr
-            .and_then(|mut s| {
-                let mut buf = String::new();
-                use std::io::Read;
-                s.read_to_string(&mut buf).ok().map(|_| buf)
-            })
-            .unwrap_or_default();
-
-        if finished.interrupted && !finished.reset {
-            persist_and_emit_interrupted_timeline_event(
-                &app_handle,
-                &task_id_for_thread,
-                &backend_for_thread,
-                &turn_id_for_thread,
-            );
-        }
-
-        let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
-        if !finished.reset
-            && should_emit_runner_exit_error(finished.interrupted, nonzero, &stderr_text)
-        {
-            persist_and_emit_error_timeline_event(
-                &app_handle,
-                &task_id_for_thread,
-                &backend_for_thread,
-                Some(&turn_id_for_thread),
-                format!("agent 进程异常退出：{}", stderr_text.trim()),
-            );
-        }
-
-        if !finished.interrupted && !finished.reset {
-            spawn_title_update(
-                app_handle.clone(),
-                task_id_for_thread.clone(),
-                backend_for_thread.clone(),
-                Some(turn_id_for_thread.clone()),
-            );
-        }
-
         finish_agent_turn(
             app_handle,
             task_id_for_thread,
             backend_for_thread,
-            last_session_id,
-            !finished.interrupted && !finished.reset,
+            runtime_channel_for_finish,
+            output.last_session_id,
+            !output.interrupted && !output.reset,
         );
     });
+}
+
+pub(crate) fn run_node_agent_runner(
+    app_handle: &AppHandle,
+    invocation: RunnerInvocation,
+) -> Result<RunnerOutput, String> {
+    let task_id_for_thread = invocation.task_id;
+    let composer_for_thread = invocation.composer;
+    let prompt_for_thread = invocation.content;
+    let project_cwd = invocation.project_cwd;
+    let attachments_for_thread = invocation.attachments;
+    let workflow_for_thread = invocation.workflow;
+    let turn_id_for_thread = invocation.turn_id;
+    let resume_session_id = invocation.resume_session_id;
+    let queued_count = invocation.queued_count;
+    let script_path = invocation.script_path;
+    let backend_for_thread = composer_for_thread.backend.clone();
+    let connection = resolve_connection_for(app_handle, &backend_for_thread);
+    let extensions = plugins::runtime_extensions(app_handle, Some(&project_cwd));
+    let codex_settings = if backend_for_thread == BACKEND_CODEX {
+        Some(build_effective_codex_settings(
+            app_handle,
+            &composer_for_thread,
+        ))
+    } else {
+        None
+    };
+    let mut stdin_payload = build_runner_stdin_payload(
+        &backend_for_thread,
+        &project_cwd,
+        &prompt_for_thread,
+        &attachments_for_thread,
+        workflow_for_thread.as_ref(),
+        &composer_for_thread,
+        resume_session_id.as_deref(),
+        &extensions,
+    );
+    if let Some(context) = build_runner_conversation_context(app_handle, &task_id_for_thread) {
+        stdin_payload["conversationContext"] = context;
+    }
+    if let Some(settings) = codex_settings {
+        stdin_payload["codexSettings"] = settings;
+    }
+
+    let mut cmd = Command::new("node");
+    cmd.arg(&script_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let (base_key, key_key) = match backend_for_thread.as_str() {
+        BACKEND_CODEX => ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
+        _ => ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"),
+    };
+    if let Some(url) = &connection.base_url {
+        cmd.env(base_key, url);
+    }
+    if let Some(key) = &connection.api_key {
+        cmd.env(key_key, key);
+    }
+    if backend_for_thread == BACKEND_CODEX {
+        let codex_app_server = build_codex_app_server_probe_status();
+        if let Some(path) = codex_app_server.path {
+            cmd.env("LILIA_CODEX_CLI_PATH", path);
+        }
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(err) => {
+            let msg = format!("无法启动 node 子进程（请确保已安装 Node 18+ 并在 PATH 中）：{err}");
+            return Err(msg);
+        }
+    };
+
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+    let child_handle = Arc::new(Mutex::new(child));
+    {
+        let store = app_handle.state::<ChatStore>();
+        store
+            .running_children
+            .lock()
+            .unwrap()
+            .insert(task_id_for_thread.clone(), child_handle.clone());
+        store.running_turns.lock().unwrap().insert(
+            task_id_for_thread.clone(),
+            RunningTurn {
+                turn_id: turn_id_for_thread.clone(),
+                backend: backend_for_thread.clone(),
+            },
+        );
+    }
+
+    let _ = app_handle.emit(
+        "chat:turn-started",
+        TurnStartedEvent {
+            task_id: task_id_for_thread.clone(),
+            queued_count,
+        },
+    );
+
+    // 把命令 JSON 写一行（带尾换行），但保留 stdin —— 后续 interaction_response
+    // 还要通过它写回 runner。stdin 存到 ChatStore，turn 结束时移除（Drop 关闭）。
+    let stdin_handle: Option<Arc<Mutex<ChildStdin>>> = match child_handle
+        .lock()
+        .ok()
+        .and_then(|mut child| child.stdin.take())
+    {
+        Some(mut stdin) => {
+            let mut bytes = serde_json::to_vec(&stdin_payload).unwrap_or_default();
+            bytes.push(b'\n');
+            if stdin.write_all(&bytes).is_err() {
+                // 子进程已经死了；让 stdout 循环正常退出兜底
+                None
+            } else {
+                let shared = Arc::new(Mutex::new(stdin));
+                let store = app_handle.state::<ChatStore>();
+                store
+                    .running_stdins
+                    .lock()
+                    .unwrap()
+                    .insert(task_id_for_thread.clone(), shared.clone());
+                Some(shared)
+            }
+        }
+        None => None,
+    };
+
+    let mut last_session_id: Option<String> = None;
+    let event_ctx = AgentTurnContext {
+        task_id: task_id_for_thread.clone(),
+        backend: backend_for_thread.clone(),
+        turn_id: turn_id_for_thread.clone(),
+    };
+    let mut event_host = AgentEventHost::new();
+    event_host.register(Box::new(TodoMirrorExtension::new(app_handle.clone())));
+    let mut timeline_throttle = TimelineThrottle::new();
+    let mut last_assistant_error_text: Option<String> = None;
+
+    if let Some(stdout) = child_stdout {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let store = app_handle.state::<ChatStore>();
+            let line = match line {
+                Ok(l) if !l.trim().is_empty() => l,
+                _ => continue,
+            };
+            if is_turn_marked_reset(
+                &store,
+                &task_id_for_thread,
+                &turn_id_for_thread,
+                &backend_for_thread,
+            ) {
+                break;
+            }
+            let value: JsonValue = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue, // 忽略偶发非 JSON 输出（SDK 内部 log 等）
+            };
+            let Some(event) = AgentRuntimeEvent::from_runner_json(&value) else {
+                continue;
+            };
+            log_agent_event_effect(event_host.dispatch(&event_ctx, &event));
+            match &event {
+                AgentRuntimeEvent::ToolUse { .. } | AgentRuntimeEvent::TodoList { .. } => {}
+                AgentRuntimeEvent::Timeline { .. } => {
+                    if let Some(input) = timeline_input_from_runtime_event(&event_ctx, &event) {
+                        if let Some(text) = assistant_error_text(&input) {
+                            last_assistant_error_text = Some(text);
+                        }
+                        timeline_throttle.submit(&app_handle, input);
+                    }
+                }
+                AgentRuntimeEvent::InteractionRequest {
+                    id,
+                    kind,
+                    backend,
+                    payload,
+                } => {
+                    let _ = app_handle.emit(
+                        "chat:agent-interaction-request",
+                        AgentInteractionRequestEvent {
+                            task_id: task_id_for_thread.clone(),
+                            turn_id: turn_id_for_thread.clone(),
+                            backend: backend
+                                .clone()
+                                .unwrap_or_else(|| backend_for_thread.clone()),
+                            request_id: id.clone(),
+                            kind: kind.clone(),
+                            payload: payload.clone(),
+                        },
+                    );
+                }
+                AgentRuntimeEvent::Done { session_id, .. } => {
+                    if let Some(sid) = session_id {
+                        last_session_id = Some(sid.clone());
+                    }
+                }
+                AgentRuntimeEvent::PromptSuggestion { suggestion, uuid } => {
+                    if backend_for_thread == BACKEND_CLAUDE {
+                        if let Err(err) =
+                            crate::conversation_suggestions::save_claude_prompt_suggestion(
+                                &app_handle,
+                                &task_id_for_thread,
+                                suggestion,
+                                uuid.as_deref(),
+                            )
+                        {
+                            eprintln!("[conversation-suggestions] save Claude prompt suggestion failed: {err}");
+                        }
+                    }
+                }
+                AgentRuntimeEvent::Error { message } => {
+                    timeline_throttle.flush_all(&app_handle);
+                    if last_assistant_error_text
+                        .as_deref()
+                        .is_some_and(|text| normalize_timeline_text(message).contains(text))
+                    {
+                        continue;
+                    }
+                    persist_and_emit_error_timeline_event(
+                        &app_handle,
+                        &task_id_for_thread,
+                        &backend_for_thread,
+                        Some(&turn_id_for_thread),
+                        message.clone(),
+                    );
+                }
+            }
+        }
+    }
+
+    // 子进程的 stdout 读完即 turn 结束：把存的 stdin 移除，防止后续 consent
+    // 响应往一个死管道里写。Drop ChildStdin 也会向 runner 端发 EOF。
+    drop(stdin_handle);
+    let finished = {
+        let store = app_handle.state::<ChatStore>();
+        finish_running_turn_handles(
+            &store,
+            &task_id_for_thread,
+            &turn_id_for_thread,
+            &backend_for_thread,
+        )
+    };
+
+    // 流结束前确保 pending 的最后一帧落地；reset 后则丢弃旧 turn 缓冲，避免回写已清空的 timeline。
+    if finished.reset {
+        timeline_throttle.pending.clear();
+    } else {
+        timeline_throttle.flush_all(&app_handle);
+    }
+
+    // 等待子进程退出并收集 stderr 用于诊断（API key 缺失等）。
+    let exit_status = child_handle
+        .lock()
+        .map_err(|err| std::io::Error::new(ErrorKind::Other, err.to_string()))
+        .and_then(|mut child| child.wait());
+    let stderr_text = child_stderr
+        .and_then(|mut s| {
+            let mut buf = String::new();
+            use std::io::Read;
+            s.read_to_string(&mut buf).ok().map(|_| buf)
+        })
+        .unwrap_or_default();
+
+    if finished.interrupted && !finished.reset {
+        persist_and_emit_interrupted_timeline_event(
+            &app_handle,
+            &task_id_for_thread,
+            &backend_for_thread,
+            &turn_id_for_thread,
+        );
+    }
+
+    let nonzero = exit_status.as_ref().map(|s| !s.success()).unwrap_or(true);
+    if !finished.reset && should_emit_runner_exit_error(finished.interrupted, nonzero, &stderr_text)
+    {
+        persist_and_emit_error_timeline_event(
+            &app_handle,
+            &task_id_for_thread,
+            &backend_for_thread,
+            Some(&turn_id_for_thread),
+            format!("agent 进程异常退出：{}", stderr_text.trim()),
+        );
+    }
+
+    if !finished.interrupted && !finished.reset {
+        spawn_title_update(
+            app_handle.clone(),
+            task_id_for_thread.clone(),
+            backend_for_thread.clone(),
+            Some(turn_id_for_thread.clone()),
+        );
+    }
+
+    Ok(RunnerOutput {
+        last_session_id,
+        interrupted: finished.interrupted,
+        reset: finished.reset,
+    })
 }
 
 pub(crate) fn build_runner_stdin_payload<T: Serialize>(
@@ -645,22 +749,21 @@ pub(crate) fn finish_agent_turn(
     app_handle: AppHandle,
     task_id: String,
     backend: String,
+    runtime_channel: String,
     last_session_id: Option<String>,
     advance_queue: bool,
 ) {
     // 记下 session id 供下一轮 resume。
     if let Some(sid) = last_session_id.clone() {
         let store = app_handle.state::<ChatStore>();
-        store
-            .sdk_sessions
-            .lock()
-            .unwrap()
-            .insert(session_key(&backend, &task_id), sid.clone());
+        store.sdk_sessions.lock().unwrap().insert(
+            session_key(&runtime_channel, &backend, &task_id),
+            sid.clone(),
+        );
         if let Some(store) = app_handle.try_state::<LiliaStore>() {
-            match store
-                .conn()
-                .and_then(|conn| persist_agent_session_id(&conn, &task_id, &backend, &sid))
-            {
+            match store.conn().and_then(|conn| {
+                persist_agent_session_id(&conn, &task_id, &backend, &runtime_channel, &sid)
+            }) {
                 Ok(()) => {}
                 Err(err) => eprintln!("[agent-session] persist checkpoint failed: {err}"),
             }
@@ -693,7 +796,7 @@ pub(crate) fn finish_agent_turn(
                 false,
             );
         }
-        spawn_agent_turn(
+        spawn_agent_turn_with_channel(
             app_handle,
             task_id,
             turn.content,
@@ -702,6 +805,7 @@ pub(crate) fn finish_agent_turn(
             turn.attachments,
             turn.workflow,
             turn.turn_id,
+            runtime_channel,
         );
     }
 }

@@ -433,7 +433,10 @@ mod agent_event_sink_tests {
         assert_eq!(payload["workflow"]["type"], json!("codex_batch_apply"));
         assert_eq!(payload["workflow"]["sourceTurnId"], json!("turn-source"));
         assert_eq!(payload["workflow"]["sourceKind"], json!("fix_suggestion"));
-        assert_eq!(payload["workflow"]["sourceSummary"], json!("建议修复权限边界"));
+        assert_eq!(
+            payload["workflow"]["sourceSummary"],
+            json!("建议修复权限边界")
+        );
     }
 
     #[test]
@@ -835,11 +838,13 @@ mod agent_event_sink_tests {
               session_id TEXT NOT NULL
             );
             CREATE TABLE task_agent_sessions (
-              task_id    TEXT NOT NULL,
-              backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              session_id TEXT NOT NULL,
-              updated_at INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend)
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
             );
             CREATE TABLE agent_timeline_events (
               id                TEXT PRIMARY KEY,
@@ -889,13 +894,14 @@ mod agent_event_sink_tests {
         .unwrap();
     }
 
-    fn assert_resume_session(
-        conn: &Connection,
-        backend: &str,
-        expected: Option<&str>,
-    ) {
+    fn assert_resume_session(conn: &Connection, backend: &str, expected: Option<&str>) {
         assert_eq!(
-            load_persisted_resume_session_id(conn, "task-1", backend),
+            load_persisted_resume_session_id(
+                conn,
+                "task-1",
+                backend,
+                crate::RUNTIME_CHANNEL_BUILTIN
+            ),
             expected.map(|sid| sid.to_string())
         );
     }
@@ -928,11 +934,21 @@ mod agent_event_sink_tests {
         .unwrap();
 
         assert_eq!(
-            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CODEX),
+            load_persisted_resume_session_id(
+                &conn,
+                "task-1",
+                BACKEND_CODEX,
+                crate::RUNTIME_CHANNEL_BUILTIN,
+            ),
             Some("codex-thread".to_string())
         );
         assert_eq!(
-            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CLAUDE),
+            load_persisted_resume_session_id(
+                &conn,
+                "task-1",
+                BACKEND_CLAUDE,
+                crate::RUNTIME_CHANNEL_BUILTIN,
+            ),
             None
         );
     }
@@ -943,11 +959,78 @@ mod agent_event_sink_tests {
         create_resume_schema(&conn);
         insert_resume_task(&conn);
 
-        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
-        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CLAUDE,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "claude-session",
+        )
+        .unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CODEX,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "codex-thread",
+        )
+        .unwrap();
 
         assert_resume_session(&conn, BACKEND_CLAUDE, Some("claude-session"));
         assert_resume_session(&conn, BACKEND_CODEX, Some("codex-thread"));
+    }
+
+    #[test]
+    fn persisted_resume_session_id_isolated_by_runtime_channel() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        insert_codex_timeline_session(&conn, "codex-turn", "timeline-thread", 200);
+
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CODEX,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "builtin-thread",
+        )
+        .unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CODEX,
+            crate::RUNTIME_CHANNEL_NANOBOT,
+            "nanobot-thread",
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_persisted_resume_session_id(
+                &conn,
+                "task-1",
+                BACKEND_CODEX,
+                crate::RUNTIME_CHANNEL_BUILTIN,
+            ),
+            Some("builtin-thread".to_string())
+        );
+        assert_eq!(
+            load_persisted_resume_session_id(
+                &conn,
+                "task-1",
+                BACKEND_CODEX,
+                crate::RUNTIME_CHANNEL_NANOBOT,
+            ),
+            Some("nanobot-thread".to_string())
+        );
+        assert_eq!(
+            load_persisted_resume_session_id(
+                &conn,
+                "task-1",
+                BACKEND_CLAUDE,
+                crate::RUNTIME_CHANNEL_NANOBOT,
+            ),
+            None
+        );
     }
 
     #[test]
@@ -956,7 +1039,14 @@ mod agent_event_sink_tests {
         create_resume_schema(&conn);
         insert_resume_task(&conn);
         insert_codex_timeline_session(&conn, "codex-turn-old", "timeline-thread", 100);
-        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "checkpoint-thread").unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CODEX,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "checkpoint-thread",
+        )
+        .unwrap();
 
         assert_resume_session(&conn, BACKEND_CODEX, Some("checkpoint-thread"));
     }
@@ -976,8 +1066,22 @@ mod agent_event_sink_tests {
         let conn = Connection::open_in_memory().unwrap();
         create_resume_schema(&conn);
         insert_resume_task(&conn);
-        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
-        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CLAUDE,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "claude-session",
+        )
+        .unwrap();
+        persist_agent_session_id(
+            &conn,
+            "task-1",
+            BACKEND_CODEX,
+            crate::RUNTIME_CHANNEL_BUILTIN,
+            "codex-thread",
+        )
+        .unwrap();
 
         clear_agent_sessions_for_task(&conn, "task-1").unwrap();
 

@@ -4,6 +4,7 @@ use tauri::AppHandle;
 use crate::chat::state::normalize_backend;
 use crate::settings_store::load_store_value;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::{RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT};
 
 use super::types::{
     AgentInteractionSettings, AssistantAIConfig, CCSwitchConfig, CodexControlledPermissions,
@@ -89,7 +90,15 @@ pub(crate) fn normalize_agent_interaction_settings(
     AgentInteractionSettings {
         non_interrupt_mode: settings.non_interrupt_mode,
         debug: settings.debug,
+        agent_runtime_channel: normalize_agent_runtime_channel(settings.agent_runtime_channel),
         codex_profile: normalize_codex_profile_settings(settings.codex_profile),
+    }
+}
+
+pub(crate) fn normalize_agent_runtime_channel(channel: String) -> String {
+    match channel.as_str() {
+        RUNTIME_CHANNEL_NANOBOT => RUNTIME_CHANNEL_NANOBOT.to_string(),
+        _ => RUNTIME_CHANNEL_BUILTIN.to_string(),
     }
 }
 

@@ -112,11 +112,13 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
         );
 
         CREATE TABLE task_agent_sessions (
-          task_id    TEXT NOT NULL,
-          backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          session_id TEXT NOT NULL,
-          updated_at INTEGER NOT NULL,
-          PRIMARY KEY (task_id, backend),
+          task_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','nanobot')),
+          session_id      TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend, runtime_channel),
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
 
@@ -338,19 +340,27 @@ mod tests {
         ensure_current_schema(&mut conn).unwrap();
 
         conn.execute(
-            r#"INSERT INTO task_agent_sessions (task_id, backend, session_id, updated_at)
-               VALUES ('task-session', 'codex', 'codex-thread', 2)"#,
+            r#"INSERT INTO task_agent_sessions
+               (task_id, backend, runtime_channel, session_id, updated_at)
+               VALUES ('task-session', 'codex', 'builtin', 'codex-thread', 2)"#,
             [],
         )
         .unwrap();
-        let row: (String, String) = conn
+        let row: (String, String, String) = conn
             .query_row(
-                "SELECT s.session_id, t.title FROM task_agent_sessions s JOIN tasks t ON t.id = s.task_id WHERE s.task_id = 'task-session'",
+                "SELECT s.session_id, t.title, s.runtime_channel FROM task_agent_sessions s JOIN tasks t ON t.id = s.task_id WHERE s.task_id = 'task-session'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(row, ("codex-thread".to_string(), "会话任务".to_string()));
+        assert_eq!(
+            row,
+            (
+                "codex-thread".to_string(),
+                "会话任务".to_string(),
+                "builtin".to_string()
+            )
+        );
     }
 
     #[test]

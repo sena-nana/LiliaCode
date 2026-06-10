@@ -17,7 +17,9 @@ use crate::chat::types::{
 };
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
-use crate::{agent_timeline, BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::{
+    agent_timeline, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
+};
 
 #[tauri::command]
 pub fn chat_send_message(
@@ -290,8 +292,10 @@ pub fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatSt
 #[tauri::command]
 pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: AppHandle) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    sessions.remove(&session_key(BACKEND_CLAUDE, &task_id));
-    sessions.remove(&session_key(BACKEND_CODEX, &task_id));
+    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT] {
+        sessions.remove(&session_key(runtime_channel, BACKEND_CLAUDE, &task_id));
+        sessions.remove(&session_key(runtime_channel, BACKEND_CODEX, &task_id));
+    }
     drop(sessions);
     chat_store.running_tasks.lock().unwrap().remove(&task_id);
     let stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {

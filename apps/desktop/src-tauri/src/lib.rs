@@ -29,6 +29,8 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
+pub(crate) const RUNTIME_CHANNEL_BUILTIN: &str = "builtin";
+pub(crate) const RUNTIME_CHANNEL_NANOBOT: &str = "nanobot";
 pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
     ("gpt-5.5", "GPT-5.5"),
     ("gpt-5.4", "GPT-5.4"),

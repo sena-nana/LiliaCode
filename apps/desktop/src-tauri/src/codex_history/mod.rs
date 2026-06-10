@@ -19,7 +19,7 @@ use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::BACKEND_CODEX;
+use crate::{BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN};
 
 use self::bulk::persist_history_events_batch;
 use self::preview::preview_events_from_inputs;
@@ -73,12 +73,12 @@ fn query_codex_thread_runtime_states(
             r#"SELECT s.session_id, t.id, t.title, t.project_id
                FROM task_agent_sessions s
                JOIN tasks t ON t.id = s.task_id
-               WHERE s.backend = ?1 AND t.archived = 0
+               WHERE s.backend = ?1 AND s.runtime_channel = ?2 AND t.archived = 0
                ORDER BY s.updated_at DESC"#,
         )
         .map_err(|e| format!("Codex thread runtime states: prepare 失败：{e}"))?;
     let rows = stmt
-        .query_map(params![BACKEND_CODEX], |row| {
+        .query_map(params![BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -95,7 +95,10 @@ fn query_codex_thread_runtime_states(
     for row in rows {
         let (thread_id, task_id, task_title, project_id) =
             row.map_err(|e| format!("Codex thread runtime states: row 失败：{e}"))?;
-        let queued_count = pending_turns.get(&task_id).map(|queue| queue.len()).unwrap_or(0);
+        let queued_count = pending_turns
+            .get(&task_id)
+            .map(|queue| queue.len())
+            .unwrap_or(0);
         let is_running = running.get(&task_id).copied().unwrap_or(false)
             || running_turns
                 .get(&task_id)
@@ -285,6 +288,7 @@ fn remember_codex_thread_session(
         chat_store,
         task_id,
         BACKEND_CODEX,
+        RUNTIME_CHANNEL_BUILTIN,
         thread_id,
         "Codex attach",
     );
@@ -490,11 +494,13 @@ mod tests {
               archived     INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE task_agent_sessions (
-              task_id    TEXT NOT NULL,
-              backend    TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              session_id TEXT NOT NULL,
-              updated_at INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend)
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
             );
             "#,
         )
@@ -513,13 +519,13 @@ mod tests {
                 .sdk_sessions
                 .lock()
                 .unwrap()
-                .get(&session_key(backend, task_id))
+                .get(&session_key(RUNTIME_CHANNEL_BUILTIN, backend, task_id))
                 .cloned(),
             Some(expected.to_string())
         );
         let session_id: String = conn
             .query_row(
-                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2",
+                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2 AND runtime_channel = 'builtin'",
                 params![task_id, backend],
                 |row| row.get(0),
             )
@@ -611,12 +617,23 @@ mod tests {
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_agent_sessions
-               (task_id, backend, session_id, updated_at)
-               VALUES ('task-1', 'codex', 'thread-1', 2)"#,
+               (task_id, backend, runtime_channel, session_id, updated_at)
+               VALUES ('task-1', 'codex', 'builtin', 'thread-1', 2)"#,
             [],
         )
         .unwrap();
-        store.running_tasks.lock().unwrap().insert("task-1".to_string(), true);
+        conn.execute(
+            r#"INSERT INTO task_agent_sessions
+               (task_id, backend, runtime_channel, session_id, updated_at)
+               VALUES ('task-1', 'codex', 'nanobot', 'thread-nanobot', 3)"#,
+            [],
+        )
+        .unwrap();
+        store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .insert("task-1".to_string(), true);
         store.pending_turns.lock().unwrap().insert(
             "task-1".to_string(),
             std::collections::VecDeque::from([crate::chat::state::PendingChatTurn {
