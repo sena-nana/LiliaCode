@@ -47,6 +47,10 @@ import type {
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
+  CodexMcpElicitationPayload,
+  CodexMcpElicitationResult,
+  CodexPermissionApprovalPayload,
+  CodexPermissionApprovalResult,
 } from "@lilia/contracts";
 
 export type {
@@ -86,6 +90,10 @@ export type {
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
+  CodexMcpElicitationPayload,
+  CodexMcpElicitationResult,
+  CodexPermissionApprovalPayload,
+  CodexPermissionApprovalResult,
 };
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
@@ -332,6 +340,14 @@ export function onAgentTimelineBatch(
   return listen<AgentTimelineBatchEvent>("agent:timeline-batch", (event) => handler(event.payload));
 }
 
+const AGENT_INTERACTION_KINDS = new Set([
+  "plan_approval",
+  "tool_consent",
+  "ask_user",
+  "mcp_elicitation",
+  "permission_approval",
+]);
+
 function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {
   const row = value as unknown as Record<string, unknown>;
   const payload = row.payload;
@@ -342,7 +358,7 @@ function normalizeAgentInteractionRequest(value: AgentInteractionRequest): Agent
   const backend = stringField(row, "backend");
   const kind = stringField(row, "kind");
   if (!taskId || !requestId) return null;
-  if (kind !== "plan_approval" && kind !== "tool_consent" && kind !== "ask_user") return null;
+  if (!AGENT_INTERACTION_KINDS.has(kind)) return null;
   return {
     taskId,
     turnId,

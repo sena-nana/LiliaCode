@@ -20,6 +20,11 @@ import {
   type PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import {
+  respondCodexMcpElicitation,
+  respondCodexPermissionApproval,
+  usePendingCodexInteractionsForTask,
+} from "../../composables/useCodexPendingInteractions";
+import {
   respondConsent,
   usePendingToolConsentsForTask,
   useToolConsentForTask,
@@ -67,9 +72,11 @@ export function useTaskComposerController(options: {
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
   const pendingToolConsents = usePendingToolConsentsForTask(() => props.taskId);
+  const pendingCodexInteractions = usePendingCodexInteractionsForTask(() => props.taskId);
   const runtimePendingAgentActions = usePendingAgentActionsForTask(
     pendingAskUsers,
     pendingToolConsents,
+    pendingCodexInteractions,
     timeline.timelineEvents,
   );
   const agentInteractionSettings = useAgentInteractionSettings();
@@ -89,7 +96,10 @@ export function useTaskComposerController(options: {
   );
   const pendingAgentActions = computed(() =>
     runtimePendingAgentActions.value.filter((action) =>
-      nonInterruptMode.value || action.kind === "title_update"
+      nonInterruptMode.value ||
+      action.kind === "title_update" ||
+      action.kind === "mcp_elicitation" ||
+      action.kind === "permission_approval"
     ),
   );
   const blockingPendingAgentActions = computed(() =>
@@ -367,6 +377,46 @@ export function useTaskComposerController(options: {
         );
       } catch (err) {
         console.error("[tool-consent] respond failed", err);
+      }
+      return;
+    }
+    if (resolution.kind === "mcp_elicitation") {
+      try {
+        await respondCodexMcpElicitation(
+          props.taskId,
+          resolution.requestId,
+          {
+            action: resolution.action,
+            ...(resolution.content ? { content: resolution.content } : {}),
+          },
+        );
+      } catch (err) {
+        console.error("[codex-mcp-elicitation] respond failed", err);
+      }
+      return;
+    }
+    if (resolution.kind === "permission_approval") {
+      const request = pendingCodexInteractions.value.find(
+        (item) => item.kind === "permission_approval" && item.requestId === resolution.requestId,
+      );
+      if (!request || request.kind !== "permission_approval") return;
+      try {
+        await respondCodexPermissionApproval(
+          props.taskId,
+          resolution.requestId,
+          resolution.decision === "allow"
+            ? {
+                permissions: request.payload.permissions,
+                scope: "turn",
+              }
+            : {
+                permissions: {},
+                scope: "turn",
+                strictAutoReview: true,
+              },
+        );
+      } catch (err) {
+        console.error("[codex-permission-approval] respond failed", err);
       }
       return;
     }

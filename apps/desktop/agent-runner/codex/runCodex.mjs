@@ -1311,6 +1311,91 @@ async function runCodexRequestWorkflow(server, threadId, cmd, ctx, config) {
   return true;
 }
 
+function normalizeCodexMcpElicitationPayload(params) {
+  if (!isRecord(params)) return null;
+  const mode = stringOrNull(params.mode);
+  const threadId = stringOrNull(params.threadId);
+  const serverName = stringOrNull(params.serverName);
+  const message = stringOrNull(params.message) || "";
+  if (!threadId || !serverName || (mode !== "form" && mode !== "url")) return null;
+  const payload = {
+    threadId,
+    turnId: stringOrNull(params.turnId),
+    serverName,
+    mode,
+    message,
+    _meta: params._meta ?? null,
+  };
+  if (mode === "form") payload.requestedSchema = params.requestedSchema ?? null;
+  if (mode === "url") {
+    payload.url = stringOrNull(params.url) || "";
+    payload.elicitationId = stringOrNull(params.elicitationId) || "";
+  }
+  return payload;
+}
+
+function codexMcpElicitationResponse(result) {
+  const action = result?.action === "accept" || result?.action === "decline"
+    ? result.action
+    : "cancel";
+  const content = action === "accept" && isRecord(result?.content)
+    ? result.content
+    : null;
+  return {
+    action,
+    content,
+    _meta: isRecord(result?._meta) ? result._meta : null,
+  };
+}
+
+function normalizeCodexPermissionApprovalPayload(params) {
+  if (!isRecord(params)) return null;
+  const threadId = stringOrNull(params.threadId);
+  const turnId = stringOrNull(params.turnId);
+  const itemId = stringOrNull(params.itemId);
+  const cwd = stringOrNull(params.cwd);
+  if (!threadId || !turnId || !itemId || !cwd) return null;
+  return {
+    threadId,
+    turnId,
+    itemId,
+    startedAtMs: typeof params.startedAtMs === "number" && Number.isFinite(params.startedAtMs)
+      ? params.startedAtMs
+      : 0,
+    cwd,
+    reason: stringOrNull(params.reason),
+    permissions: isRecord(params.permissions) ? params.permissions : {},
+  };
+}
+
+function codexGrantedPermissions(value) {
+  const input = isRecord(value) ? value : {};
+  const permissions = {};
+  if (isRecord(input.network)) permissions.network = input.network;
+  if (isRecord(input.fileSystem)) permissions.fileSystem = input.fileSystem;
+  return permissions;
+}
+
+function codexPermissionApprovalResponse(result) {
+  return {
+    permissions: codexGrantedPermissions(result?.permissions),
+    scope: result?.scope === "session" ? "session" : "turn",
+    ...(typeof result?.strictAutoReview === "boolean"
+      ? { strictAutoReview: result.strictAutoReview }
+      : {}),
+  };
+}
+
+async function requestCodexRuntimeInteraction(ctx, kind, payload) {
+  if (!ctx?.interactions?.requestCodexInteraction) {
+    return kind === "mcp_elicitation"
+      ? { action: "cancel", content: null, _meta: null }
+      : { permissions: {}, scope: "turn", strictAutoReview: true };
+  }
+  return runCodexUiInteraction(ctx, kind, () =>
+    ctx.interactions.requestCodexInteraction(kind, payload));
+}
+
 const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexGoalWorkflow, finalize: true },
   { run: runCodexCompactWorkflow },
@@ -1370,6 +1455,36 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
     const result = await runCodexUiInteraction(ctx, "ask_user", () =>
       ctx.interactions.requestAskUser(spec, { backend: "codex" }));
     server.respond(msg.id, askUserResultToCodexRequestUserInputResponse(result, spec));
+    return true;
+  }
+  if (method === "mcpServer/elicitation/request") {
+    const payload = normalizeCodexMcpElicitationPayload(msg.params);
+    if (!payload) {
+      server.respond(msg.id, { action: "cancel", content: null, _meta: null });
+      return true;
+    }
+    const result = await requestCodexRuntimeInteraction(ctx, "mcp_elicitation", payload);
+    server.respond(
+      msg.id,
+      codexMcpElicitationResponse(result),
+    );
+    return true;
+  }
+  if (method === "item/permissions/requestApproval") {
+    const payload = normalizeCodexPermissionApprovalPayload(msg.params);
+    if (!payload) {
+      server.respond(msg.id, {
+        permissions: {},
+        scope: "turn",
+        strictAutoReview: true,
+      });
+      return true;
+    }
+    const result = await requestCodexRuntimeInteraction(ctx, "permission_approval", payload);
+    server.respond(
+      msg.id,
+      codexPermissionApprovalResponse(result),
+    );
     return true;
   }
   return maybeHandleCodexApprovalRequest(server, msg, ctx);

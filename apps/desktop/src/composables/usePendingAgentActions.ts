@@ -2,6 +2,11 @@ import { computed, type ComputedRef } from "vue";
 import type { AgentTimelineEvent, AskUserResult } from "@lilia/contracts";
 import type { PendingAsk } from "./useAskUser";
 import type {
+  PendingCodexInteraction,
+  PendingCodexMcpElicitation,
+  PendingCodexPermissionApproval,
+} from "./useCodexPendingInteractions";
+import type {
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
@@ -11,6 +16,8 @@ export type PendingAgentActionKind =
   | "tool_consent"
   | "ask_user"
   | "plan_approval"
+  | "mcp_elicitation"
+  | "permission_approval"
   | "title_update";
 
 export type PendingAgentAction =
@@ -28,6 +35,8 @@ export type PendingAgentAction =
       requestId: string | null;
       ask: PendingAsk;
     }
+  | PendingCodexMcpElicitation
+  | PendingCodexPermissionApproval
   | {
       kind: "title_update";
       taskId: string;
@@ -52,6 +61,17 @@ export type PendingAgentActionResolution =
       result: AskUserResult;
     }
   | {
+      kind: "mcp_elicitation";
+      requestId: string;
+      action: "accept" | "decline" | "cancel";
+      content?: Record<string, unknown>;
+    }
+  | {
+      kind: "permission_approval";
+      requestId: string;
+      decision: "allow" | "deny";
+    }
+  | {
       kind: "title_update";
       requestId: string;
       decision: "accept" | "decline";
@@ -60,7 +80,8 @@ export type PendingAgentActionResolution =
 export function usePendingAgentActionsForTask(
   asks: ComputedRef<PendingAsk[]>,
   toolConsents: ComputedRef<ToolConsentRequest[]>,
-  timelineEvents?: ComputedRef<AgentTimelineEvent[]>,
+  codexInteractions: ComputedRef<PendingCodexInteraction[]> = computed(() => []),
+  timelineEvents: ComputedRef<AgentTimelineEvent[]> = computed(() => []),
 ): ComputedRef<PendingAgentAction[]> {
   return computed(() => [
     ...asks.value.map((ask): PendingAgentAction => ({
@@ -77,7 +98,8 @@ export function usePendingAgentActionsForTask(
       requestId: request.requestId,
       request,
     })),
-    ...(timelineEvents?.value ?? []).flatMap(titleUpdateActionForEvent),
+    ...codexInteractions.value,
+    ...timelineEvents.value.flatMap(titleUpdateActionForEvent),
   ]);
 }
 
@@ -116,6 +138,14 @@ export function pendingActionForTimelineEvent(
     }
     if (action.kind === "tool_consent") {
       if (readPayloadString(event, "requestId") === action.requestId) return action;
+      continue;
+    }
+    if (action.kind === "mcp_elicitation" && event.kind === "mcp") {
+      if (readPayloadString(event, "requestId") === action.requestId) return action;
+      continue;
+    }
+    if (action.kind === "permission_approval" && event.kind === "diagnostic") {
+      if (readPayloadString(event, "requestId") === action.requestId) return action;
     }
   }
   return null;
@@ -126,6 +156,8 @@ export function timelineEventRequiresAgentAction(event: AgentTimelineEvent): boo
   if (event.kind === "title_update") return true;
   if (event.kind === "plan") return true;
   if (event.kind === "ask_user") return true;
+  if (readPayloadString(event, "interaction") === "mcp_elicitation") return true;
+  if (readPayloadString(event, "interaction") === "permission_approval") return true;
   return readPayloadString(event, "interaction") === "tool_consent";
 }
 
