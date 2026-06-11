@@ -20,7 +20,7 @@ LiliaCode 的路线图围绕一个目标展开：把代码工程中的 Agent 会
 
 - Roadmap / Milestone：展示跨周、跨版本的工程进展。
 - 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent。
-- MutsukiCore 接入：支持远程运行任务和手机端访问。
+- MutsukiCore 接入：实验性本地通道 `NanoBot Rust Core` 已可切换；继续补远程运行任务和手机端访问。
 
 ## 开发状态提醒
 

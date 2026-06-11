@@ -48,4 +48,4 @@
 - [ ] Memory：保存用户级和项目级记忆，并在合适时机辅助 Agent 使用。
 - [ ] Roadmap / Milestone：用路线图和里程碑展示跨周、跨版本的工程进展。
 - [ ] 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent。
-- [ ] 接入 MutsukiCore：支持远程运行任务和手机端访问。
+- [ ] 接入 MutsukiCore：已提供实验性本地通道 `NanoBot Rust Core`；远程运行任务和手机端访问仍未可用。

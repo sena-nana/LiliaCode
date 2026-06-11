@@ -20,7 +20,7 @@ LiliaCode's roadmap is organized around one goal: turning agent sessions in soft
 
 - Roadmap and milestones: show engineering progress across weeks and versions.
 - Helper agents: run lower-cost agents in a session to supervise and assist the main agent.
-- MutsukiCore integration: support remote task execution and mobile access.
+- MutsukiCore integration: the experimental local channel is switchable as `NanoBot Rust Core`; continue with remote task execution and mobile access.
 
 ## Development Status
 

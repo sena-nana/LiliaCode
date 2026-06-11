@@ -181,19 +181,24 @@ onMounted(loadAgentInteraction);
 
     <div class="settings-row">
       <div class="settings-row__label">运行时通道</div>
-      <div class="ui-segmented" role="radiogroup" aria-label="运行时通道">
-        <button
-          v-for="option in runtimeChannelOptions"
-          :key="option.value"
-          type="button"
-          role="radio"
-          :aria-checked="agentInteraction.agentRuntimeChannel === option.value"
-          :class="{ 'is-active': agentInteraction.agentRuntimeChannel === option.value }"
-          :disabled="savingAgentInteraction"
-          @click="setRuntimeChannel(option.value)"
-        >
-          {{ option.label }}
-        </button>
+      <div class="settings-row__control settings-row__control--loose runtime-channel-control">
+        <div class="ui-segmented" role="radiogroup" aria-label="运行时通道">
+          <button
+            v-for="option in runtimeChannelOptions"
+            :key="option.value"
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.agentRuntimeChannel === option.value"
+            :class="{ 'is-active': agentInteraction.agentRuntimeChannel === option.value }"
+            :disabled="savingAgentInteraction"
+            @click="setRuntimeChannel(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <span class="settings-row__status-text">
+          NanoBot Rust Core 是实验性本地 MutsukiCore 通道；当前不包含远程任务执行和移动端访问。
+        </span>
       </div>
     </div>
 
@@ -310,3 +315,14 @@ onMounted(loadAgentInteraction);
     </div>
   </div>
 </template>
+
+<style scoped>
+.runtime-channel-control {
+  max-width: min(520px, 100%);
+}
+
+.runtime-channel-control .settings-row__status-text {
+  white-space: normal;
+  text-align: right;
+}
+</style>

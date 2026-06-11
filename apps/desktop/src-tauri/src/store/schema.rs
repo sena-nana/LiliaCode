@@ -32,6 +32,10 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         PRAGMA foreign_keys = OFF;
 
         DROP TABLE IF EXISTS agent_timeline_events;
+        DROP TABLE IF EXISTS task_runtime_states;
+        DROP TABLE IF EXISTS task_runtime_control_events;
+        DROP TABLE IF EXISTS task_runtime_finalizations;
+        DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
         DROP TABLE IF EXISTS task_dependencies;
         DROP TABLE IF EXISTS tasks;
@@ -121,6 +125,65 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           PRIMARY KEY (task_id, backend, runtime_channel),
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE task_runtime_states (
+          task_id         TEXT PRIMARY KEY,
+          turn_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+          phase           TEXT NOT NULL CHECK (phase IN
+                            ('running','interrupted_pending_finish','reset_pending_finish')),
+          process_session_id TEXT,
+          runtime_epoch   TEXT NOT NULL,
+          context_json    TEXT,
+          updated_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_runtime_states_epoch_backend
+          ON task_runtime_states(runtime_epoch, backend, updated_at);
+
+        CREATE TABLE task_runtime_control_events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id         TEXT NOT NULL,
+          name            TEXT NOT NULL,
+          attributes_json TEXT NOT NULL DEFAULT '{}',
+          payload_json    TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_runtime_control_events_task_id
+          ON task_runtime_control_events(task_id, id);
+
+        CREATE TABLE task_runtime_finalizations (
+          task_id               TEXT PRIMARY KEY,
+          pending_reset_cleanup INTEGER NOT NULL DEFAULT 0
+                                CHECK (pending_reset_cleanup IN (0, 1)),
+          rollback_json         TEXT,
+          updated_at            INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE task_pending_turns (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id         TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          composer_json   TEXT NOT NULL,
+          project_cwd     TEXT NOT NULL,
+          attachments_json TEXT NOT NULL DEFAULT '[]',
+          workflow_json   TEXT,
+          message_json    TEXT NOT NULL,
+          turn_id         TEXT NOT NULL,
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','nanobot')),
+          guide_id        TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_pending_turns_task_id
+          ON task_pending_turns(task_id, id);
 
         CREATE TABLE agent_timeline_events (
           id                TEXT PRIMARY KEY,
@@ -361,6 +424,320 @@ mod tests {
                 "builtin".to_string()
             )
         );
+    }
+
+    #[test]
+    fn task_runtime_states_migration_creates_current_epoch_table() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            INSERT INTO tasks (id, session_id, title, status, created_at)
+              VALUES ('task-runtime', 'session-1', '运行态任务', 'running', 1);
+            PRAGMA user_version = 9;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-runtime', 'turn-1', 'codex', 'nanobot', 'running', 'proc-1', 'epoch-1', 2)"#,
+            [],
+        )
+        .unwrap();
+        let row: (String, String, String, Option<String>) = conn
+            .query_row(
+                "SELECT turn_id, runtime_channel, phase, process_session_id FROM task_runtime_states WHERE task_id = 'task-runtime'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "turn-1".to_string(),
+                "nanobot".to_string(),
+                "running".to_string(),
+                Some("proc-1".to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn runtime_control_events_migration_creates_durable_control_queue() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            INSERT INTO tasks (id, session_id, title, status, created_at)
+              VALUES ('task-runtime', 'session-1', '运行态任务', 'running', 1);
+            PRAGMA user_version = 11;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_control_events
+               (task_id, name, attributes_json, payload_json, created_at)
+               VALUES ('task-runtime', 'interaction_response', '{"requestId":"ask-1"}', '{"type":"interaction_response"}', 2)"#,
+            [],
+        )
+        .unwrap();
+        let row: (String, String, String) = conn
+            .query_row(
+                "SELECT task_id, name, attributes_json FROM task_runtime_control_events WHERE task_id = 'task-runtime'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "task-runtime".to_string(),
+                "interaction_response".to_string(),
+                "{\"requestId\":\"ask-1\"}".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn pending_turns_migration_creates_durable_execution_queue() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_runtime_control_events (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              name            TEXT NOT NULL,
+              attributes_json TEXT NOT NULL DEFAULT '{}',
+              payload_json    TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            INSERT INTO tasks (id, session_id, title, status, created_at)
+              VALUES ('task-pending', 'session-1', '排队任务', 'running', 1);
+            PRAGMA user_version = 12;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_pending_turns
+               (task_id, content, composer_json, project_cwd, attachments_json, workflow_json, message_json, turn_id, runtime_channel, guide_id, created_at)
+               VALUES ('task-pending', 'queued', '{}', 'C:/repo', '[]', NULL, '{}', 'turn-queued', 'nanobot', 'guide-1', 2)"#,
+            [],
+        )
+        .unwrap();
+        let row: (String, String, String, String) = conn
+            .query_row(
+                "SELECT task_id, content, turn_id, runtime_channel FROM task_pending_turns WHERE task_id = 'task-pending'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "task-pending".to_string(),
+                "queued".to_string(),
+                "turn-queued".to_string(),
+                "nanobot".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn runtime_finalizations_migration_creates_durable_finish_state() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_runtime_control_events (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              name            TEXT NOT NULL,
+              attributes_json TEXT NOT NULL DEFAULT '{}',
+              payload_json    TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_pending_turns (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              content         TEXT NOT NULL,
+              composer_json   TEXT NOT NULL,
+              project_cwd     TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
+              workflow_json   TEXT,
+              message_json    TEXT NOT NULL,
+              turn_id         TEXT NOT NULL,
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              guide_id        TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            INSERT INTO tasks (id, session_id, title, status, created_at)
+              VALUES ('task-finalize', 'session-1', '收尾任务', 'running', 1);
+            PRAGMA user_version = 14;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_finalizations
+               (task_id, pending_reset_cleanup, rollback_json, updated_at)
+               VALUES ('task-finalize', 1, '{"rolledBack":true}', 2)"#,
+            [],
+        )
+        .unwrap();
+        let row: (i64, String) = conn
+            .query_row(
+                "SELECT pending_reset_cleanup, rollback_json FROM task_runtime_finalizations WHERE task_id = 'task-finalize'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (1, "{\"rolledBack\":true}".to_string()));
     }
 
     #[test]
