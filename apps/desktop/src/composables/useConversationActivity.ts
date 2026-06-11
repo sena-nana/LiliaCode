@@ -21,6 +21,7 @@ interface ConversationActivityState {
 
 const states = reactive<Record<string, ConversationActivityState>>({});
 const hydratedTaskIds = new Set<string>();
+const timelineRequestIdsByEventId = new Map<string, string>();
 let installed = false;
 let unlistenAll: UnlistenFn[] = [];
 
@@ -109,6 +110,7 @@ export function resetConversationActivity() {
     delete states[taskId];
   }
   hydratedTaskIds.clear();
+  timelineRequestIdsByEventId.clear();
 }
 
 export function conversationActivityForTask(taskId: string): ConversationActivity | null {
@@ -144,25 +146,39 @@ function readTimelinePayloadString(event: AgentTimelineEvent, key: string): stri
   return typeof value === "string" ? value : null;
 }
 
-function timelineActivity(events: AgentTimelineEvent[]): ConversationActivity | null {
-  for (const event of events) {
-    if (event.kind === "error" || event.status === "error") return "error";
+function timelineRequiresActionRequestId(event: AgentTimelineEvent): string | null {
+  if (event.status !== "requires_action") return null;
+  if (event.kind === "title_update" || event.kind === "plan" || event.kind === "ask_user") {
+    return readTimelinePayloadString(event, "requestId") ?? `timeline:${event.id}`;
   }
-  for (const event of events) {
-    if (event.status !== "requires_action") continue;
-    if (event.kind === "title_update" || event.kind === "plan" || event.kind === "ask_user") {
-      return "requires_action";
-    }
-    const interaction = readTimelinePayloadString(event, "interaction");
-    if (
-      interaction === "tool_consent" ||
-      interaction === "mcp_elicitation" ||
-      interaction === "permission_approval"
-    ) {
-      return "requires_action";
-    }
+  const interaction = readTimelinePayloadString(event, "interaction");
+  if (
+    interaction === "tool_consent" ||
+    interaction === "mcp_elicitation" ||
+    interaction === "permission_approval"
+  ) {
+    return readTimelinePayloadString(event, "requestId") ?? `timeline:${event.id}`;
   }
   return null;
+}
+
+function timelineRequestId(event: AgentTimelineEvent): string {
+  return readTimelinePayloadString(event, "requestId") ??
+    timelineRequestIdsByEventId.get(event.id) ??
+    `timeline:${event.id}`;
+}
+
+function timelineHasError(events: AgentTimelineEvent[]): boolean {
+  return events.some((event) => event.kind === "error" || event.status === "error");
+}
+
+function timelineRequiresActionRequestIds(events: AgentTimelineEvent[]): string[] {
+  const requestIds = new Set<string>();
+  for (const event of events) {
+    const requestId = timelineRequiresActionRequestId(event);
+    if (requestId) requestIds.add(requestId);
+  }
+  return [...requestIds];
 }
 
 export async function hydrateConversationActivities(taskIds: string[]): Promise<void> {
@@ -189,20 +205,40 @@ export async function hydrateConversationActivities(taskIds: string[]): Promise<
     const { taskId, snapshot, timeline } = entry;
     hydratedTaskIds.add(taskId);
     if (states[taskId]) continue;
-    const activity = runtimePhaseToConversationActivity(snapshot.phase) ?? timelineActivity(timeline);
-    if (activity === "error") {
+    const runtimeActivity = runtimePhaseToConversationActivity(snapshot.phase);
+    if (runtimeActivity === "error") {
       markConversationError(taskId);
       continue;
     }
-    if (activity === "requires_action") {
-      const syntheticRequestId = `hydrated:${taskId}`;
-      markConversationRequiresAction(taskId, syntheticRequestId);
+    if (runtimeActivity === "running") {
+      markConversationRunning(taskId);
       continue;
     }
-    if (activity === "running") {
-      markConversationRunning(taskId);
+    if (timelineHasError(timeline)) {
+      markConversationError(taskId);
+      continue;
+    }
+    for (const requestId of timelineRequiresActionRequestIds(timeline)) {
+      markConversationRequiresAction(taskId, requestId);
     }
   }
+}
+
+function applyTimelineActivity(event: AgentTimelineEvent) {
+  if (event.kind === "error" || event.status === "error") {
+    markConversationError(event.taskId);
+    return;
+  }
+  const requiresActionRequestId = timelineRequiresActionRequestId(event);
+  if (requiresActionRequestId) {
+    timelineRequestIdsByEventId.set(event.id, requiresActionRequestId);
+    markConversationRequiresAction(event.taskId, requiresActionRequestId);
+    return;
+  }
+  if (event.status === "requires_action") return;
+  const requestId = timelineRequestId(event);
+  timelineRequestIdsByEventId.delete(event.id);
+  clearConversationRequiresAction(event.taskId, requestId);
 }
 
 export async function installConversationActivityBridge(): Promise<() => void> {
@@ -211,11 +247,7 @@ export async function installConversationActivityBridge(): Promise<() => void> {
   unlistenAll = await Promise.all([
     onTurnStarted((event) => markConversationRunning(event.taskId)),
     onDone((event) => markConversationCompleted(event.taskId)),
-    onAgentTimeline((event) => {
-      if (event.kind === "error" || event.status === "error") {
-        markConversationError(event.taskId);
-      }
-    }),
+    onAgentTimeline(applyTimelineActivity),
   ]);
   return () => {
     for (const unlisten of unlistenAll) unlisten();

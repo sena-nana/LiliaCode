@@ -152,9 +152,9 @@ watch(
 );
 
 watch(
-  sidebarTaskIds,
-  (taskIds) => {
-    void hydrateConversationActivities(taskIds);
+  () => sidebarTaskIds.value.join("\x1f"),
+  () => {
+    void hydrateConversationActivities(sidebarTaskIds.value);
   },
   { immediate: true },
 );
