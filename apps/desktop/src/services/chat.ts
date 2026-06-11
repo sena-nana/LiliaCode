@@ -21,6 +21,7 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatComposerState,
+  ChatRuntimeSnapshot,
   ChatWorkflow,
   ClaudeSessionAttachInput,
   ClaudeSessionAttachResult,
@@ -51,6 +52,7 @@ import type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
+  ChatRollbackResult,
 } from "@lilia/contracts";
 
 export type {
@@ -65,6 +67,7 @@ export type {
   ChatInterruptResult,
   ChatContextSearchResult,
   ChatWorkflow,
+  ChatRuntimeSnapshot,
   ClaudeSessionAttachInput,
   ClaudeSessionAttachResult,
   ClaudeSessionPreviewInput,
@@ -94,10 +97,16 @@ export type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
+  ChatRollbackResult,
 };
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
-export interface DoneEvent { taskId: string; sessionId: string | null; subtype: string | null; }
+export interface DoneEvent {
+  taskId: string;
+  sessionId: string | null;
+  subtype: string | null;
+  rollback?: ChatRollbackResult | null;
+}
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
@@ -220,6 +229,10 @@ export async function pickAttachmentFiles(): Promise<string[]> {
 
 export function getComposerState(taskId: string): Promise<ChatComposerState> {
   return invoke<ChatComposerState>("chat_get_composer_state", { taskId });
+}
+
+export function getRuntimeSnapshot(taskId: string): Promise<ChatRuntimeSnapshot> {
+  return invoke<ChatRuntimeSnapshot>("chat_get_runtime_snapshot", { taskId });
 }
 
 export function setComposerState(state: ChatComposerState): Promise<void> {

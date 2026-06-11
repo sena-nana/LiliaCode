@@ -11,6 +11,7 @@ import type {
   CodexReviewTarget,
 } from "@lilia/contracts";
 import {
+  clearAskUsersForTask,
   resolveAskUserById,
   useAskUserForTask,
   usePendingAsksForTask,
@@ -20,15 +21,21 @@ import {
   type PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import {
+  clearCodexPendingInteractionsForTask,
+  hydrateCodexPendingInteraction,
   respondCodexMcpElicitation,
   respondCodexPermissionApproval,
   usePendingCodexInteractionsForTask,
 } from "../../composables/useCodexPendingInteractions";
 import {
+  clearToolConsentForTask,
+  hydrateToolConsentRequest,
   respondConsent,
   usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../../composables/useToolConsentBridge";
+import { hydrateAgentAskUserRequest } from "../../composables/useAgentAskUserBridge";
+import { clearConversationRequiresAction } from "../../composables/useConversationActivity";
 import { useGuideDispatch } from "../../composables/useGuideDispatch";
 import {
   loadAgentInteractionSettings,
@@ -37,6 +44,7 @@ import {
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
   getComposerState,
+  getRuntimeSnapshot,
   interruptTurn,
   onAgentTimeline,
   onAgentTimelineBatch,
@@ -53,6 +61,12 @@ import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
+import type {
+  AskUserSpec,
+  ChatRuntimePhase,
+  AgentTimelineEvent,
+  ToolConsentRequest as ContractToolConsentRequest,
+} from "@lilia/contracts";
 
 export function useTaskComposerController(options: {
   props: TaskDetailRouteProps;
@@ -316,6 +330,7 @@ export function useTaskComposerController(options: {
     if (!context.hasContext.value || !isTurnRunning.value) return;
     try {
       const result = await interruptTurn(props.taskId);
+      if (agentInteractionSettings.agentRuntimeChannel === "nanobot") return;
       if (!result.rolledBack) return;
       isTurnRunning.value = false;
       for (const eventId of result.removedEventIds) {
@@ -480,6 +495,164 @@ export function useTaskComposerController(options: {
     return loaded;
   }
 
+  function runtimePhaseKeepsTurnRunning(phase: ChatRuntimePhase): boolean {
+    return phase === "running" ||
+      phase === "running_and_queued" ||
+      phase === "interrupted_pending_finish" ||
+      phase === "reset_pending_finish";
+  }
+
+  function runtimeAbandonedMessage(snapshot: Awaited<ReturnType<typeof getRuntimeSnapshot>>): string {
+    const backend = snapshot.backend ?? "agent";
+    const runtime = snapshot.runtimeChannel ?? "unknown";
+    const turn = snapshot.turnId ? `，turn=${snapshot.turnId}` : "";
+    return `上次 ${backend} 运行未正常结束，${runtime} runtime 已放弃旧执行态${turn}。你可以重新发送或重置会话。`;
+  }
+
+  function payloadRecord(event: AgentTimelineEvent): Record<string, unknown> | null {
+    return event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
+      ? event.payload as Record<string, unknown>
+      : null;
+  }
+
+  function payloadString(event: AgentTimelineEvent, key: string): string | null {
+    const payload = payloadRecord(event);
+    const value = payload?.[key];
+    return typeof value === "string" ? value : null;
+  }
+
+  function clearPendingInteractionsForTask(
+    taskId: string,
+    options: { turnId?: string | null; keepRequestIds?: Set<string> } = {},
+  ) {
+    clearAskUsersForTask(taskId, options);
+    clearToolConsentForTask(taskId, options);
+    clearCodexPendingInteractionsForTask(taskId, options);
+    if (!options.keepRequestIds && options.turnId === undefined) {
+      clearConversationRequiresAction(taskId);
+    }
+  }
+
+  function hydratePendingInteractions(events: AgentTimelineEvent[]): Set<string> {
+    const activeRequestIds = new Set<string>();
+    for (const event of events) {
+      if (event.taskId !== props.taskId) continue;
+      if (event.status !== "requires_action") continue;
+      const payload = payloadRecord(event);
+      if (event.kind === "ask_user") {
+        const requestId = payloadString(event, "requestId");
+        if (requestId) activeRequestIds.add(requestId);
+        const spec = ((payload?.spec as AskUserSpec | undefined) ?? null) ?? {
+          title: event.title,
+          questions: Array.isArray(payload?.questions) ? payload.questions as AskUserSpec["questions"] : [],
+        };
+        hydrateAgentAskUserRequest({
+          taskId: event.taskId,
+          turnId: event.turnId ?? "",
+          backend: event.backend,
+          requestId: requestId ?? "",
+          spec,
+        }, "ask_user");
+        continue;
+      }
+      if (event.kind === "plan") {
+        const requestId = payloadString(event, "requestId");
+        if (requestId) activeRequestIds.add(requestId);
+        const spec: AskUserSpec = {
+          title: event.title,
+          source: "Agent",
+          intent: "plan_approval",
+          dismissable: true,
+          questions: [
+            {
+              id: "approve-plan",
+              header: "计划确认",
+              question: "",
+              mode: "confirm",
+              confirmLabel: "按计划执行",
+              cancelLabel: "先不执行",
+            },
+          ],
+        };
+        hydrateAgentAskUserRequest({
+          taskId: event.taskId,
+          turnId: event.turnId ?? "",
+          backend: event.backend,
+          requestId: requestId ?? "",
+          spec,
+        }, "plan_approval");
+        continue;
+      }
+      if (event.kind === "title_update") continue;
+      const interaction = payloadString(event, "interaction");
+      const requestId = payloadString(event, "requestId");
+      if (!interaction || !requestId || !payload) continue;
+      activeRequestIds.add(requestId);
+      if (interaction === "tool_consent") {
+        const request: ContractToolConsentRequest = {
+          taskId: event.taskId,
+          turnId: event.turnId ?? "",
+          backend: event.backend,
+          requestId,
+          toolName: typeof payload.toolName === "string" ? payload.toolName : "tool",
+          input: payload.input && typeof payload.input === "object" && !Array.isArray(payload.input)
+            ? payload.input as Record<string, unknown>
+            : {},
+          title: typeof payload.title === "string" ? payload.title : null,
+          displayName: typeof payload.displayName === "string" ? payload.displayName : null,
+          description: typeof payload.description === "string" ? payload.description : null,
+          blockedPath: typeof payload.blockedPath === "string" ? payload.blockedPath : null,
+          decisionReason: typeof payload.decisionReason === "string" ? payload.decisionReason : null,
+          toolUseId: typeof payload.toolUseId === "string" ? payload.toolUseId : null,
+          cwd: typeof payload.cwd === "string" ? payload.cwd : null,
+          reason: typeof payload.reason === "string" ? payload.reason : null,
+          commandActions: payload.commandActions,
+        };
+        hydrateToolConsentRequest(request);
+        continue;
+      }
+      if (interaction === "mcp_elicitation") {
+        const requestedSchema = payload.requestedSchema;
+        hydrateCodexPendingInteraction({
+          kind: "mcp_elicitation",
+          taskId: event.taskId,
+          turnId: event.turnId,
+          requestId,
+          payload: {
+            threadId: typeof payload.threadId === "string" ? payload.threadId : "",
+            turnId: typeof payload.turnId === "string" ? payload.turnId : event.turnId,
+            serverName: typeof payload.serverName === "string" ? payload.serverName : "",
+            mode: payload.mode === "url" ? "url" : "form",
+            message: typeof payload.message === "string" ? payload.message : "",
+            requestedSchema,
+            url: typeof payload.url === "string" ? payload.url : undefined,
+            elicitationId: typeof payload.elicitationId === "string" ? payload.elicitationId : undefined,
+            _meta: payload._meta,
+          },
+        });
+        continue;
+      }
+      if (interaction === "permission_approval") {
+        hydrateCodexPendingInteraction({
+          kind: "permission_approval",
+          taskId: event.taskId,
+          turnId: event.turnId,
+          requestId,
+          payload: {
+            threadId: typeof payload.threadId === "string" ? payload.threadId : "",
+            turnId: typeof payload.turnId === "string" ? payload.turnId : "",
+            itemId: typeof payload.itemId === "string" ? payload.itemId : "",
+            startedAtMs: typeof payload.startedAtMs === "number" ? payload.startedAtMs : 0,
+            cwd: typeof payload.cwd === "string" ? payload.cwd : "",
+            reason: typeof payload.reason === "string" ? payload.reason : null,
+            permissions: payload.permissions,
+          },
+        });
+      }
+    }
+    return activeRequestIds;
+  }
+
   async function loadAll() {
     const seq = ++loadSeq;
     const taskId = props.taskId;
@@ -494,14 +667,30 @@ export function useTaskComposerController(options: {
         console.error("[chat] getComposerState failed", err);
         return null;
       });
+    const runtimeSnapshotLoad = getRuntimeSnapshot(taskId).catch((err) => {
+      console.error("[chat] getRuntimeSnapshot failed", err);
+      return null;
+    });
     if (!existingComposerLoad) composerLoad = nextComposerLoad;
     try {
-      const [events, comp] = await Promise.all([
+      const [events, comp, runtimeSnapshot] = await Promise.all([
         timeline.loadTimelineEvents(taskId),
         nextComposerLoad,
+        runtimeSnapshotLoad,
       ]);
       if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
       timeline.applyLoadedTimelineEvents(events);
+      const activeRequestIds = hydratePendingInteractions(events);
+      clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
+      isTurnRunning.value = runtimeSnapshot
+        ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
+        : false;
+      if (runtimeSnapshot?.phase === "abandoned") {
+        clearPendingInteractionsForTask(taskId);
+        timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
+          runtimeAbandonedMessage(runtimeSnapshot),
+        ));
+      }
       if (!comp) return;
     } finally {
       if (composerLoad === nextComposerLoad) composerLoad = null;
@@ -516,6 +705,7 @@ export function useTaskComposerController(options: {
       onAgentTimeline((e) => {
         if (e.taskId !== props.taskId) return;
         timeline.upsertTimelineEvent(e);
+        hydratePendingInteractions([e]);
         if (isAgentTimelineToolWindowKind(e.kind)) {
           void guideDispatch.scheduleGuideInsertion("tool");
         }
@@ -523,6 +713,7 @@ export function useTaskComposerController(options: {
       onAgentTimelineBatch((e) => {
         if (e.taskId !== props.taskId) return;
         timeline.queueTimelineEvents(e.events);
+        hydratePendingInteractions(e.events);
         if (e.events.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
           void guideDispatch.scheduleGuideInsertion("tool");
         }
@@ -535,6 +726,18 @@ export function useTaskComposerController(options: {
       onDone((e) => {
         if (e.taskId !== props.taskId) return;
         isTurnRunning.value = false;
+        clearPendingInteractionsForTask(e.taskId);
+        if (e.rollback?.rolledBack) {
+          for (const eventId of e.rollback.removedEventIds) {
+            timeline.removeTimelineEvent(eventId);
+          }
+          restoreDraftContent.value = stripRestoredAttachmentReferences(
+            e.rollback.restoredContent,
+            e.rollback.restoredAttachments,
+          );
+          restoreDraftKey.value += 1;
+          attachments.value = e.rollback.restoredAttachments;
+        }
         void guideDispatch.scheduleGuideInsertion("idle");
       }),
     ]);

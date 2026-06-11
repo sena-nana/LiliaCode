@@ -1,5 +1,5 @@
 use serde_json::Value as JsonValue;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use crate::chat::state::normalize_backend;
 use crate::settings_store::load_store_value;
@@ -61,25 +61,30 @@ pub(crate) fn backend_direct_url(backend: &str) -> &'static str {
     }
 }
 
-pub(crate) fn load_provider_config(app: &AppHandle, key: &str) -> Option<ProviderConfig> {
+pub(crate) fn load_provider_config<R: Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+) -> Option<ProviderConfig> {
     load_store_value(app, key)
 }
 
-pub(crate) fn load_active_backend(app: &AppHandle) -> String {
-    load_store_value::<String>(app, PROVIDER_ACTIVE_BACKEND_KEY)
+pub(crate) fn load_active_backend<R: Runtime>(app: &AppHandle<R>) -> String {
+    load_store_value::<String, _>(app, PROVIDER_ACTIVE_BACKEND_KEY)
         .map(|s| normalize_backend(&s).to_string())
         .unwrap_or_else(|| BACKEND_CLAUDE.to_string())
 }
 
-pub(crate) fn load_cc_switch_config(app: &AppHandle) -> CCSwitchConfig {
+pub(crate) fn load_cc_switch_config<R: Runtime>(app: &AppHandle<R>) -> CCSwitchConfig {
     load_store_value(app, CC_SWITCH_KEY).unwrap_or_default()
 }
 
-pub(crate) fn load_assistant_ai_config(app: &AppHandle) -> AssistantAIConfig {
+pub(crate) fn load_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> AssistantAIConfig {
     load_store_value(app, ASSISTANT_AI_KEY).unwrap_or_default()
 }
 
-pub(crate) fn load_agent_interaction_settings(app: &AppHandle) -> AgentInteractionSettings {
+pub(crate) fn load_agent_interaction_settings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> AgentInteractionSettings {
     normalize_agent_interaction_settings(load_store_value(app, AGENT_INTERACTION_KEY))
 }
 
@@ -184,9 +189,9 @@ pub(crate) fn normalize_optional_permission_profile(value: Option<String>) -> Op
     }
 }
 
-pub(crate) fn load_router_mode(app: &AppHandle, backend: &str) -> String {
+pub(crate) fn load_router_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> String {
     let key = router_key_for_backend(normalize_backend(backend)).unwrap_or(ROUTER_KEY_CLAUDE);
-    load_store_value::<String>(app, key)
+    load_store_value::<String, _>(app, key)
         .filter(|m| matches!(m.as_str(), ROUTER_CC_SWITCH | ROUTER_DIRECT))
         .unwrap_or_else(|| ROUTER_CC_SWITCH.to_string())
 }

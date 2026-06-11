@@ -1,4 +1,4 @@
-import { askUserForTask } from "./useAskUser";
+import { askUserForTask, hydrateAskUserForTask } from "./useAskUser";
 import { respondAgentInteraction } from "../services/chat";
 import type { AskUserResult, AskUserSpec, ChatBackendKind } from "@lilia/contracts";
 
@@ -30,4 +30,28 @@ export async function handleAgentAskUserRequest(
   } catch {
     // runner 可能已经随 turn 结束退出；此时回答无法再写回，忽略即可。
   }
+}
+
+export function hydrateAgentAskUserRequest(
+  req: AgentAskUserRequest,
+  kind: "ask_user" | "plan_approval" = req.spec.intent === "plan_approval" ? "plan_approval" : "ask_user",
+) {
+  hydrateAskUserForTask(
+    req.taskId,
+    req.spec,
+    req.turnId || null,
+    req.requestId,
+    async (result) => {
+      try {
+        await respondAgentInteraction({
+          taskId: req.taskId,
+          requestId: req.requestId,
+          kind,
+          result,
+        });
+      } catch {
+        // runner 可能已经随 turn 结束退出；此时回答无法再写回，忽略即可。
+      }
+    },
+  );
 }

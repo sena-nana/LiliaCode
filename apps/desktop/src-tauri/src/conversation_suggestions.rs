@@ -6,7 +6,7 @@ use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 use uuid::Uuid;
 
 use crate::provider::{
@@ -216,8 +216,8 @@ pub fn conversation_suggestions_get(
     }
 }
 
-pub(crate) fn save_claude_prompt_suggestion(
-    app: &AppHandle,
+pub(crate) fn save_claude_prompt_suggestion<R: Runtime>(
+    app: &AppHandle<R>,
     task_id: &str,
     suggestion: &str,
     uuid: Option<&str>,
@@ -288,14 +288,18 @@ fn cache_scope_key(project_id: Option<&str>, source: &SuggestionSource) -> Strin
     )
 }
 
-fn load_cache_hit(app: &AppHandle, scope: &str, cache_key: &str) -> Option<SuggestionCacheEntry> {
+fn load_cache_hit<R: Runtime>(
+    app: &AppHandle<R>,
+    scope: &str,
+    cache_key: &str,
+) -> Option<SuggestionCacheEntry> {
     let cache: SuggestionCache = load_store_value(app, CACHE_KEY).unwrap_or_default();
     let hit = cache.get(scope)?;
     cache_entry_is_valid(hit, cache_key, now_millis()).then(|| hit.clone())
 }
 
-fn load_claude_native_suggestions(
-    app: &AppHandle,
+fn load_claude_native_suggestions<R: Runtime>(
+    app: &AppHandle<R>,
     project_id: Option<&str>,
 ) -> Option<Vec<SuggestionItem>> {
     let project_id = project_id?;

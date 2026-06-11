@@ -360,8 +360,14 @@ export function useComposerRichInput(options: {
     renderFromParts();
   }
 
-  function replaceWithText(text: string) {
-    composerParts.value = [textPart(text)];
+  function replaceWithText(text: string, attachments: ChatAttachment[] = []) {
+    const nextParts: ComposerPart[] = [];
+    if (text) nextParts.push(textPart(text));
+    if (attachments.length) {
+      if (text && !/\s$/.test(text)) nextParts.push(textPart(" "));
+      nextParts.push(...attachments.map(attachmentPart));
+    }
+    composerParts.value = nextParts.length ? normalizeComposerParts(nextParts) : [textPart("")];
     inputSelection.value = text.length;
     renderFromParts();
     focusAt(inputSelection.value);

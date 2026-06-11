@@ -148,6 +148,34 @@ export interface ChatInterruptResult {
   removedEventIds: string[];
 }
 
+export interface ChatRollbackResult {
+  rolledBack: boolean;
+  restoredContent: string;
+  restoredAttachments: ChatAttachment[];
+  removedEventIds: string[];
+}
+
+export type ChatRuntimePhase =
+  | "idle"
+  | "running"
+  | "queued"
+  | "running_and_queued"
+  | "interrupted_pending_finish"
+  | "reset_pending_finish"
+  | "abandoned";
+
+export interface ChatRuntimeSnapshot {
+  taskId: string;
+  phase: ChatRuntimePhase;
+  runtimeChannel: AgentRuntimeChannel | null;
+  backend: ChatBackendKind | null;
+  turnId: string | null;
+  queuedCount: number;
+  pendingControlCount: number;
+  pendingRollback: boolean;
+  pendingResetCleanup: boolean;
+}
+
 export type PermissionMode = "full" | "ask" | "readonly";
 
 export type ChatBackendKind = "claude" | "codex";

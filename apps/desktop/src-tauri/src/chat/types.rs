@@ -154,6 +154,29 @@ pub(crate) struct ChatInterruptResult {
     pub(crate) removed_event_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatRollbackResult {
+    pub(crate) rolled_back: bool,
+    pub(crate) restored_content: String,
+    pub(crate) restored_attachments: Vec<ChatAttachment>,
+    pub(crate) removed_event_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatRuntimeSnapshot {
+    pub(crate) task_id: String,
+    pub(crate) phase: String,
+    pub(crate) runtime_channel: Option<String>,
+    pub(crate) backend: Option<String>,
+    pub(crate) turn_id: Option<String>,
+    pub(crate) queued_count: usize,
+    pub(crate) pending_control_count: usize,
+    pub(crate) pending_rollback: bool,
+    pub(crate) pending_reset_cleanup: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatComposerState {
@@ -223,6 +246,8 @@ pub(crate) struct DoneEvent {
     pub(crate) task_id: String,
     pub(crate) session_id: Option<String>,
     pub(crate) subtype: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollback: Option<ChatRollbackResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]

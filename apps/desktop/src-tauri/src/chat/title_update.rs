@@ -5,7 +5,7 @@ use std::time::Duration;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value as JsonValue};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::agent_timeline::{self, AgentTimelineEventInput};
@@ -41,8 +41,8 @@ struct ModelRequest {
     api_key: String,
 }
 
-pub(crate) fn spawn_title_update(
-    app: AppHandle,
+pub(crate) fn spawn_title_update<R: Runtime>(
+    app: AppHandle<R>,
     task_id: String,
     backend: String,
     turn_id: Option<String>,
@@ -54,8 +54,8 @@ pub(crate) fn spawn_title_update(
     });
 }
 
-fn run_title_update(
-    app: &AppHandle,
+fn run_title_update<R: Runtime>(
+    app: &AppHandle<R>,
     task_id: &str,
     backend: &str,
     turn_id: Option<&str>,
@@ -250,11 +250,11 @@ fn load_timeline_samples(conn: &Connection, task_id: &str) -> Result<Vec<String>
     Ok(out)
 }
 
-fn resolve_model_request(app: &AppHandle, backend: &str) -> Option<ModelRequest> {
+fn resolve_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Option<ModelRequest> {
     assistant_ai_model_request(app).or_else(|| provider_model_request(app, backend))
 }
 
-fn assistant_ai_model_request(app: &AppHandle) -> Option<ModelRequest> {
+fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Option<ModelRequest> {
     let cfg: AssistantAIConfig = load_assistant_ai_config(app);
     let base_url = cfg.base_url?.trim().trim_end_matches('/').to_string();
     let api_key = cfg.api_key?.trim().to_string();
@@ -270,7 +270,7 @@ fn assistant_ai_model_request(app: &AppHandle) -> Option<ModelRequest> {
     })
 }
 
-fn provider_model_request(app: &AppHandle, backend: &str) -> Option<ModelRequest> {
+fn provider_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Option<ModelRequest> {
     let backend = if backend == BACKEND_CODEX || backend == BACKEND_CLAUDE {
         backend.to_string()
     } else {
@@ -393,8 +393,8 @@ fn request_anthropic(
         .ok_or_else(|| "title response missing text".to_string())
 }
 
-fn persist_title_event(
-    app: &AppHandle,
+fn persist_title_event<R: Runtime>(
+    app: &AppHandle<R>,
     task: &TaskTitleState,
     backend: &str,
     turn_id: Option<&str>,

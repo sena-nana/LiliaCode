@@ -1,6 +1,10 @@
 import { reactive } from "vue";
+import type { ChatRuntimePhase } from "@lilia/contracts";
+import type { AgentTimelineEvent } from "@lilia/contracts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  getRuntimeSnapshot,
+  listAgentTimeline,
   onAgentTimeline,
   onDone,
   onTurnStarted,
@@ -16,6 +20,7 @@ interface ConversationActivityState {
 }
 
 const states = reactive<Record<string, ConversationActivityState>>({});
+const hydratedTaskIds = new Set<string>();
 let installed = false;
 let unlistenAll: UnlistenFn[] = [];
 
@@ -42,6 +47,7 @@ function compactState(taskId: string) {
 export function markConversationRunning(taskId: string) {
   if (!taskId) return;
   const state = ensureState(taskId);
+  hydratedTaskIds.add(taskId);
   state.running = true;
   state.completed = false;
   state.error = false;
@@ -51,6 +57,7 @@ export function markConversationRunning(taskId: string) {
 export function markConversationRequiresAction(taskId: string, requestId: string) {
   if (!taskId || !requestId) return;
   const state = ensureState(taskId);
+  hydratedTaskIds.add(taskId);
   if (!state.pendingRequests.includes(requestId)) {
     state.pendingRequests = [...state.pendingRequests, requestId];
   }
@@ -71,6 +78,7 @@ export function clearConversationRequiresAction(taskId: string, requestId?: stri
 export function markConversationCompleted(taskId: string) {
   if (!taskId) return;
   const state = ensureState(taskId);
+  hydratedTaskIds.add(taskId);
   state.running = false;
   state.pendingRequests = [];
   if (state.error) return;
@@ -80,6 +88,7 @@ export function markConversationCompleted(taskId: string) {
 export function markConversationError(taskId: string) {
   if (!taskId) return;
   const state = ensureState(taskId);
+  hydratedTaskIds.add(taskId);
   state.running = false;
   state.completed = false;
   state.pendingRequests = [];
@@ -99,6 +108,7 @@ export function resetConversationActivity() {
   for (const taskId of Object.keys(states)) {
     delete states[taskId];
   }
+  hydratedTaskIds.clear();
 }
 
 export function conversationActivityForTask(taskId: string): ConversationActivity | null {
@@ -109,6 +119,90 @@ export function conversationActivityForTask(taskId: string): ConversationActivit
   if (state.running) return "running";
   if (state.completed) return "completed";
   return null;
+}
+
+function runtimePhaseToConversationActivity(
+  phase: ChatRuntimePhase,
+): ConversationActivity | null {
+  if (
+    phase === "running" ||
+    phase === "running_and_queued" ||
+    phase === "queued" ||
+    phase === "interrupted_pending_finish" ||
+    phase === "reset_pending_finish"
+  ) {
+    return "running";
+  }
+  if (phase === "abandoned") return "error";
+  return null;
+}
+
+function readTimelinePayloadString(event: AgentTimelineEvent, key: string): string | null {
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : null;
+}
+
+function timelineActivity(events: AgentTimelineEvent[]): ConversationActivity | null {
+  for (const event of events) {
+    if (event.kind === "error" || event.status === "error") return "error";
+  }
+  for (const event of events) {
+    if (event.status !== "requires_action") continue;
+    if (event.kind === "title_update" || event.kind === "plan" || event.kind === "ask_user") {
+      return "requires_action";
+    }
+    const interaction = readTimelinePayloadString(event, "interaction");
+    if (
+      interaction === "tool_consent" ||
+      interaction === "mcp_elicitation" ||
+      interaction === "permission_approval"
+    ) {
+      return "requires_action";
+    }
+  }
+  return null;
+}
+
+export async function hydrateConversationActivities(taskIds: string[]): Promise<void> {
+  const pendingTaskIds = Array.from(new Set(taskIds.filter(Boolean))).filter((taskId) =>
+    !hydratedTaskIds.has(taskId) && !states[taskId]
+  );
+  if (pendingTaskIds.length === 0) return;
+
+  const entries = await Promise.all(pendingTaskIds.map(async (taskId) => {
+    try {
+      const [snapshot, timeline] = await Promise.all([
+        getRuntimeSnapshot(taskId),
+        listAgentTimeline(taskId),
+      ]);
+      return { taskId, snapshot, timeline };
+    } catch (err) {
+      console.error("[conversation-activity] hydrate failed", taskId, err);
+      return null;
+    }
+  }));
+
+  for (const entry of entries) {
+    if (!entry) continue;
+    const { taskId, snapshot, timeline } = entry;
+    hydratedTaskIds.add(taskId);
+    if (states[taskId]) continue;
+    const activity = runtimePhaseToConversationActivity(snapshot.phase) ?? timelineActivity(timeline);
+    if (activity === "error") {
+      markConversationError(taskId);
+      continue;
+    }
+    if (activity === "requires_action") {
+      const syntheticRequestId = `hydrated:${taskId}`;
+      markConversationRequiresAction(taskId, syntheticRequestId);
+      continue;
+    }
+    if (activity === "running") {
+      markConversationRunning(taskId);
+    }
+  }
 }
 
 export async function installConversationActivityBridge(): Promise<() => void> {

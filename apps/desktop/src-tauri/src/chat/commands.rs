@@ -1,25 +1,40 @@
-use std::io::Write;
-
 use serde_json::Value as JsonValue;
-use tauri::{AppHandle, Manager, State};
+use std::collections::BTreeMap;
+use tauri::{AppHandle, Manager, Runtime, State};
 
-use crate::chat::runner::spawn_agent_turn;
+use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
 use crate::chat::state::{
-    clear_agent_sessions_for_task, clear_pending_turns, clear_running_handles, default_composer,
-    model_options_for_backend, new_chat_message_id, normalize_composer_for_backend, now_millis,
-    queue_pending_turn, reset_cleared_guide_queue, session_key, set_guide_status_for_app,
-    should_persist_user_message, stop_running_turn, ChatStore,
+    clear_pending_turns, clear_pending_turns_for_app, clear_persisted_pending_turns_for_app,
+    clear_running_handles, clear_runtime_finalization_for_app, clear_task_runtime_state_for_reset,
+    default_composer, mark_pending_reset_cleanup_for_app, model_options_for_backend,
+    new_chat_message_id, normalize_composer_for_backend, now_millis,
+    persist_runtime_control_event_for_app, persist_runtime_state_for_app,
+    queue_pending_turn_for_app, reset_cleared_guide_queue, set_guide_status_for_app,
+    set_pending_rollback, set_pending_rollback_for_app, should_persist_user_message,
+    stop_running_turn, ChatStore, RunningTurn, RuntimeControlEvent,
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
-    ChatSendResult, ChatWorkflow,
+    ChatRollbackResult, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
 };
+use crate::provider::load_agent_interaction_settings;
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
-use crate::{
-    agent_timeline, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
-};
+use crate::{agent_timeline, BACKEND_CODEX, RUNTIME_CHANNEL_NANOBOT};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NanobotTurnStopKind {
+    Interrupt,
+    Reset,
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(crate) struct ResetSessionPlan {
+    pub(crate) cleared_guide_ids: Vec<String>,
+    pub(crate) stopped_running: bool,
+    pub(crate) immediate_cleanup: bool,
+}
 
 #[tauri::command]
 pub fn chat_send_message(
@@ -74,9 +89,22 @@ pub fn chat_send_message(
     {
         let mut running = store.running_tasks.lock().unwrap();
         if running.contains_key(&task_id) {
+            let runtime_channel = store
+                .running_turns
+                .lock()
+                .unwrap()
+                .get(&task_id)
+                .map(|turn| turn.runtime_channel.clone())
+                .unwrap_or_else(|| {
+                    crate::chat::state::normalize_runtime_channel(
+                        &load_agent_interaction_settings(&app).agent_runtime_channel,
+                    )
+                    .to_string()
+                });
             drop(running);
             set_guide_status_for_app(&app, guide_id.as_deref(), "queued")?;
-            let queued_count = queue_pending_turn(
+            let queued_count = queue_pending_turn_for_app(
+                &app,
                 &store,
                 &task_id,
                 content,
@@ -86,6 +114,7 @@ pub fn chat_send_message(
                 workflow,
                 user_msg.clone(),
                 turn_id.clone(),
+                runtime_channel,
                 guide_id.clone(),
             );
             if persist_user_message {
@@ -164,8 +193,50 @@ pub fn chat_interrupt_turn(
         })
         .is_some();
 
+    let is_nanobot = running_turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT;
+
     if can_rollback {
-        stop_running_turn(&app, &store, &task_id, false, true)?;
+        record_nanobot_control_event_for_app(
+            &app,
+            &store,
+            &task_id,
+            "reset_requested",
+            control_event_attributes([("mode", "interrupt_rollback".to_string())]),
+            None,
+        );
+        if is_nanobot {
+            let rollback = rollback_current_user_only_turn(&app, &task_id, &running_turn.turn_id)?
+                .map(|rollback| ChatRollbackResult {
+                    rolled_back: true,
+                    restored_content: rollback.content,
+                    restored_attachments: rollback.attachments,
+                    removed_event_ids: rollback.removed_event_ids,
+                });
+            if let Some(rollback) = rollback.clone() {
+                set_pending_rollback_for_app(&app, &store, &task_id, rollback);
+            }
+            let (mut cleared_guide_ids, result) = stage_nanobot_interrupt_turn(
+                &store,
+                &task_id,
+                &running_turn,
+                NanobotTurnStopKind::Reset,
+                None,
+            );
+            persist_runtime_state_for_app(
+                &app,
+                &store,
+                &task_id,
+                &running_turn,
+                "reset_pending_finish",
+                None,
+                None,
+            );
+            cleared_guide_ids.append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
+            reset_cleared_guide_queue(&app, cleared_guide_ids);
+            return Ok(result);
+        } else {
+            stop_running_turn(&app, &store, &task_id, false, true)?;
+        }
         if let Some(rollback) =
             rollback_current_user_only_turn(&app, &task_id, &running_turn.turn_id)?
         {
@@ -179,7 +250,37 @@ pub fn chat_interrupt_turn(
         return Ok(ChatInterruptResult::default());
     }
 
-    stop_running_turn(&app, &store, &task_id, true, false)?;
+    record_nanobot_control_event_for_app(
+        &app,
+        &store,
+        &task_id,
+        "interrupt_requested",
+        control_event_attributes([("mode", "user_interrupt".to_string())]),
+        None,
+    );
+    if is_nanobot {
+        let (mut cleared_guide_ids, result) = stage_nanobot_interrupt_turn(
+            &store,
+            &task_id,
+            &running_turn,
+            NanobotTurnStopKind::Interrupt,
+            None,
+        );
+        persist_runtime_state_for_app(
+            &app,
+            &store,
+            &task_id,
+            &running_turn,
+            "interrupted_pending_finish",
+            None,
+            None,
+        );
+        cleared_guide_ids.append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
+        reset_cleared_guide_queue(&app, cleared_guide_ids);
+        return Ok(result);
+    } else {
+        stop_running_turn(&app, &store, &task_id, true, false)?;
+    }
     Ok(ChatInterruptResult::default())
 }
 
@@ -195,23 +296,12 @@ fn rollback_current_user_only_turn(
     agent_timeline::rollback_user_only_turn(&conn, task_id, turn_id)
 }
 
-fn write_runner_stdin(store: &ChatStore, task_id: &str, payload: JsonValue) -> Result<(), String> {
-    let mut line = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    line.push('\n');
-
-    let handle = {
-        let map = store.running_stdins.lock().unwrap();
-        map.get(task_id).cloned()
-    };
-    let Some(handle) = handle else {
-        return Ok(()); // runner 已退出；忽略
-    };
-    let mut stdin = handle.lock().map_err(|e| e.to_string())?;
-    stdin
-        .write_all(line.as_bytes())
-        .map_err(|e| e.to_string())?;
-    stdin.flush().map_err(|e| e.to_string())?;
-    Ok(())
+fn write_runner_stdin(
+    store: &ChatStore,
+    task_id: &str,
+    payload: JsonValue,
+) -> Result<bool, String> {
+    write_runner_stdin_for_task(store, task_id, payload)
 }
 
 pub(crate) fn agent_interaction_response_payload(
@@ -243,6 +333,166 @@ pub(crate) fn composer_permission_update_payload(
     }
 }
 
+pub(crate) fn control_event_attributes(
+    pairs: impl IntoIterator<Item = (&'static str, String)>,
+) -> BTreeMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn record_nanobot_control_event(
+    store: &ChatStore,
+    task_id: &str,
+    name: &str,
+    mut attributes: BTreeMap<String, String>,
+    payload: Option<JsonValue>,
+) {
+    let running_turn: Option<RunningTurn> = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(task_id).cloned()
+    };
+    let Some(running_turn) = running_turn else {
+        return;
+    };
+    if running_turn.runtime_channel != RUNTIME_CHANNEL_NANOBOT {
+        return;
+    }
+    attributes
+        .entry("turnId".to_string())
+        .or_insert(running_turn.turn_id);
+    attributes
+        .entry("backend".to_string())
+        .or_insert(running_turn.backend);
+    crate::chat::state::record_runtime_control_event(store, task_id, name, attributes, payload);
+}
+
+pub(crate) fn record_nanobot_control_event_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+    name: &str,
+    mut attributes: BTreeMap<String, String>,
+    payload: Option<JsonValue>,
+) {
+    let running_turn: Option<RunningTurn> = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(task_id).cloned()
+    };
+    let Some(running_turn) = running_turn else {
+        return;
+    };
+    if running_turn.runtime_channel != RUNTIME_CHANNEL_NANOBOT {
+        return;
+    }
+    attributes
+        .entry("turnId".to_string())
+        .or_insert(running_turn.turn_id);
+    attributes
+        .entry("backend".to_string())
+        .or_insert(running_turn.backend);
+    let event = RuntimeControlEvent {
+        name: name.to_string(),
+        attributes,
+        payload,
+    };
+    if !persist_runtime_control_event_for_app(app, task_id, &event) {
+        crate::chat::state::record_runtime_control_event(
+            store,
+            task_id,
+            event.name,
+            event.attributes,
+            event.payload,
+        );
+    }
+}
+
+pub(crate) fn stage_nanobot_turn_stop(
+    store: &ChatStore,
+    task_id: &str,
+    running_turn: &RunningTurn,
+    kind: NanobotTurnStopKind,
+) -> Vec<String> {
+    let cleared_guide_ids = clear_pending_turns(store, task_id);
+    match kind {
+        NanobotTurnStopKind::Interrupt => {
+            store
+                .interrupted_turns
+                .lock()
+                .unwrap()
+                .insert(task_id.to_string(), running_turn.clone());
+        }
+        NanobotTurnStopKind::Reset => {
+            store
+                .reset_turns
+                .lock()
+                .unwrap()
+                .insert(task_id.to_string(), running_turn.clone());
+        }
+    }
+    cleared_guide_ids
+}
+
+pub(crate) fn stage_nanobot_interrupt_turn(
+    store: &ChatStore,
+    task_id: &str,
+    running_turn: &RunningTurn,
+    kind: NanobotTurnStopKind,
+    rollback: Option<ChatRollbackResult>,
+) -> (Vec<String>, ChatInterruptResult) {
+    let cleared_guide_ids = stage_nanobot_turn_stop(store, task_id, running_turn, kind);
+    if kind == NanobotTurnStopKind::Reset {
+        if let Some(rollback) = rollback {
+            set_pending_rollback(store, task_id, rollback);
+        }
+    }
+    (cleared_guide_ids, ChatInterruptResult::default())
+}
+
+pub(crate) fn plan_reset_session(
+    store: &ChatStore,
+    task_id: &str,
+    running_turn: Option<&RunningTurn>,
+) -> ResetSessionPlan {
+    match running_turn {
+        None => ResetSessionPlan {
+            cleared_guide_ids: clear_pending_turns(store, task_id),
+            stopped_running: false,
+            immediate_cleanup: true,
+        },
+        Some(running_turn) if running_turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT => {
+            ResetSessionPlan {
+                cleared_guide_ids: stage_nanobot_turn_stop(
+                    store,
+                    task_id,
+                    running_turn,
+                    NanobotTurnStopKind::Reset,
+                ),
+                stopped_running: true,
+                immediate_cleanup: false,
+            }
+        }
+        Some(_) => ResetSessionPlan::default(),
+    }
+}
+
+pub(crate) fn attach_stdin_delivery(
+    attributes: &mut BTreeMap<String, String>,
+    result: &Result<bool, String>,
+) {
+    match result {
+        Ok(forwarded) => {
+            attributes.insert("stdinForwarded".to_string(), forwarded.to_string());
+        }
+        Err(err) => {
+            attributes.insert("stdinForwarded".to_string(), "false".to_string());
+            attributes.insert("stdinError".to_string(), err.clone());
+        }
+    }
+}
+
 /// 把用户对统一 Agent interaction 的响应写回 runner 的 stdin。
 #[tauri::command]
 pub fn chat_respond_agent_interaction(
@@ -250,10 +500,34 @@ pub fn chat_respond_agent_interaction(
     request_id: String,
     kind: String,
     result: JsonValue,
+    app: AppHandle,
     store: State<'_, ChatStore>,
 ) -> Result<(), String> {
-    let payload = agent_interaction_response_payload(request_id, kind, result);
-    write_runner_stdin(&store, &task_id, payload)
+    let payload = agent_interaction_response_payload(request_id.clone(), kind.clone(), result);
+    let mut attributes = control_event_attributes([("requestId", request_id), ("kind", kind)]);
+    let running_turn = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(&task_id).cloned()
+    };
+    if running_turn
+        .as_ref()
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+    {
+        attributes.insert("stdinForwarded".to_string(), "runtime".to_string());
+        record_nanobot_control_event_for_app(
+            &app,
+            &store,
+            &task_id,
+            "interaction_response",
+            attributes,
+            Some(payload),
+        );
+        return Ok(());
+    }
+
+    let write_result = write_runner_stdin(&store, &task_id, payload);
+    attach_stdin_delivery(&mut attributes, &write_result);
+    write_result.map(|_| ())
 }
 
 #[tauri::command]
@@ -273,7 +547,23 @@ pub fn chat_get_composer_state(task_id: String, store: State<'_, ChatStore>) -> 
 }
 
 #[tauri::command]
-pub fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatStore>) {
+pub fn chat_get_runtime_snapshot(
+    task_id: String,
+    app: AppHandle,
+    store: State<'_, ChatStore>,
+) -> ChatRuntimeSnapshot {
+    let conn = app
+        .try_state::<LiliaStore>()
+        .and_then(|store| store.conn().ok());
+    crate::chat::state::chat_runtime_snapshot_with_persisted(conn.as_deref(), &store, &task_id)
+}
+
+#[tauri::command]
+pub fn chat_set_composer_state(
+    state: ChatComposerState,
+    app: AppHandle,
+    store: State<'_, ChatStore>,
+) {
     let payload = {
         let mut composers = store.composers.lock().unwrap();
         let previous = composers.get(&state.task_id);
@@ -284,43 +574,99 @@ pub fn chat_set_composer_state(state: ChatComposerState, store: State<'_, ChatSt
     let Some(payload) = payload else {
         return;
     };
-    if let Err(err) = write_runner_stdin(&store, &state.task_id, payload) {
+    let running_turn = {
+        let turns = store.running_turns.lock().unwrap();
+        turns.get(&state.task_id).cloned()
+    };
+    if running_turn
+        .as_ref()
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+    {
+        let mut attributes = control_event_attributes([("permission", state.permission.clone())]);
+        attributes.insert("stdinForwarded".to_string(), "runtime".to_string());
+        record_nanobot_control_event_for_app(
+            &app,
+            &store,
+            &state.task_id,
+            "permission_update",
+            attributes,
+            Some(payload),
+        );
+        return;
+    }
+    let write_result = write_runner_stdin(&store, &state.task_id, payload);
+    let mut attributes = control_event_attributes([("permission", state.permission.clone())]);
+    attach_stdin_delivery(&mut attributes, &write_result);
+    if let Err(err) = write_result {
         eprintln!("[chat] runtime permission update failed: {err}");
     }
 }
 
 #[tauri::command]
 pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: AppHandle) {
-    let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT] {
-        sessions.remove(&session_key(runtime_channel, BACKEND_CLAUDE, &task_id));
-        sessions.remove(&session_key(runtime_channel, BACKEND_CODEX, &task_id));
-    }
-    drop(sessions);
-    chat_store.running_tasks.lock().unwrap().remove(&task_id);
-    let stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {
-        Ok(stopped) => stopped,
-        Err(err) => {
-            eprintln!("[chat] reset running turn failed: {err}");
-            false
-        }
+    record_nanobot_control_event_for_app(
+        &app,
+        &chat_store,
+        &task_id,
+        "reset_requested",
+        control_event_attributes([("mode", "session_reset".to_string())]),
+        None,
+    );
+    mark_pending_reset_cleanup_for_app(&app, &chat_store, &task_id);
+    let running_turn = {
+        let turns = chat_store.running_turns.lock().unwrap();
+        turns.get(&task_id).cloned()
     };
-    reset_cleared_guide_queue(&app, clear_pending_turns(&chat_store, &task_id));
+    let mut plan = plan_reset_session(&chat_store, &task_id, running_turn.as_ref());
+    plan.cleared_guide_ids
+        .append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
+    if let Some(running_turn) = running_turn
+        .as_ref()
+        .filter(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+    {
+        persist_runtime_state_for_app(
+            &app,
+            &chat_store,
+            &task_id,
+            running_turn,
+            "reset_pending_finish",
+            None,
+            None,
+        );
+    }
+    if !running_turn
+        .as_ref()
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+    {
+        plan.stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {
+            Ok(stopped) => stopped,
+            Err(err) => {
+                eprintln!("[chat] reset running turn failed: {err}");
+                false
+            }
+        };
+    }
+    reset_cleared_guide_queue(&app, plan.cleared_guide_ids);
     chat_store
         .interrupted_turns
         .lock()
         .unwrap()
         .remove(&task_id);
-    if !stopped_running {
+    if !plan.stopped_running {
         chat_store.reset_turns.lock().unwrap().remove(&task_id);
-    }
-    clear_running_handles(&chat_store, &task_id);
-    if let Some(store) = app.try_state::<LiliaStore>() {
-        if let Err(err) = store.conn().and_then(|conn| {
-            clear_agent_sessions_for_task(&conn, &task_id)?;
-            agent_timeline::clear(&conn, &task_id).map(|_| ())
-        }) {
-            eprintln!("[agent-timeline] clear on reset failed: {err}");
+        chat_store
+            .pending_reset_cleanups
+            .lock()
+            .unwrap()
+            .remove(&task_id);
+        if let Err(err) = clear_runtime_finalization_for_app(&app, &task_id) {
+            eprintln!("[chat] clear pending reset finalization failed: {err}");
         }
+    }
+    if plan.immediate_cleanup {
+        chat_store.running_tasks.lock().unwrap().remove(&task_id);
+        clear_running_handles(&chat_store, &task_id);
+        let _ = clear_pending_turns_for_app(&app, &chat_store, &task_id);
+        clear_task_runtime_state_for_reset(&app, &chat_store, &task_id);
     }
 }

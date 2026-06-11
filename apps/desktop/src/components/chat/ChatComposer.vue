@@ -622,7 +622,7 @@ watch(
   () => props.restoreDraftKey ?? 0,
   (key, previousKey) => {
     if (key === previousKey || key <= 0 || hasPending.value) return;
-    richInput.replaceWithText(props.restoreDraftContent ?? "");
+    richInput.replaceWithText(props.restoreDraftContent ?? "", attachmentsForView.value);
     clearComposerContextState();
   },
 );

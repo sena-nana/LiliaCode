@@ -513,6 +513,48 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn nanobot_interaction_response_is_recorded_as_control_event() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-nanobot".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+        );
+        let payload = agent_interaction_response_payload(
+            "permission-1".to_string(),
+            "permission_approval".to_string(),
+            json!({ "permissions": {}, "scope": "turn" }),
+        );
+
+        record_nanobot_control_event(
+            &store,
+            "task-1",
+            "interaction_response",
+            control_event_attributes([
+                ("requestId", "permission-1".to_string()),
+                ("kind", "permission_approval".to_string()),
+            ]),
+            Some(payload.clone()),
+        );
+
+        let drained = take_runtime_control_events(&store, "task-1");
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].name, "interaction_response");
+        assert_eq!(
+            drained[0].attributes.get("requestId").map(String::as_str),
+            Some("permission-1")
+        );
+        assert_eq!(
+            drained[0].attributes.get("turnId").map(String::as_str),
+            Some("turn-nanobot")
+        );
+        assert_eq!(drained[0].payload, Some(payload));
+    }
+
+    #[test]
     fn empty_codex_workflows_do_not_persist_user_message() {
         let workflows = vec![
             ChatWorkflow::CodexReview {

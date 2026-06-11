@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
 use super::paths::{ensure_dir, home_dir, sanitize_extension_name};
@@ -14,7 +14,7 @@ const TRANSPORT_HTTP: &str = "http";
 const TRANSPORT_OAUTH: &str = "oauth";
 const TRANSPORT_UNKNOWN: &str = "unknown";
 
-pub fn codex_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn codex_config_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(home_dir(app)?.join(".codex").join("config.toml"))
 }
 
@@ -70,7 +70,7 @@ fn write_codex_doc_to_path(path: &Path, doc: &DocumentMut) -> Result<(), String>
     fs::write(path, doc.to_string()).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
 }
 
-fn read_codex_doc(app: &AppHandle) -> Result<(PathBuf, DocumentMut), String> {
+fn read_codex_doc<R: Runtime>(app: &AppHandle<R>) -> Result<(PathBuf, DocumentMut), String> {
     let path = codex_config_path(app)?;
     let doc = read_codex_doc_from_path(&path)?;
     Ok((path, doc))
@@ -226,7 +226,9 @@ fn list_codex_mcp_servers_from_doc(doc: &DocumentMut) -> (Vec<CodexMcpServer>, V
     (servers, warnings)
 }
 
-pub fn list_codex_mcp_servers(app: &AppHandle) -> (Vec<CodexMcpServer>, Vec<String>) {
+pub fn list_codex_mcp_servers<R: Runtime>(
+    app: &AppHandle<R>,
+) -> (Vec<CodexMcpServer>, Vec<String>) {
     let path = match codex_config_path(app) {
         Ok(p) => p,
         Err(e) => return (Vec::new(), vec![e]),

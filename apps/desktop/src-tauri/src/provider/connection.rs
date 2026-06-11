@@ -2,7 +2,7 @@ use std::env;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
@@ -49,7 +49,9 @@ pub(crate) fn parse_host_port(url: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn try_cc_switch_for_backend(app: &AppHandle) -> Option<BackendConnectionPlan> {
+pub(crate) fn try_cc_switch_for_backend<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<BackendConnectionPlan> {
     let cfg = load_cc_switch_config(app);
     let url = cfg.base_url.filter(|s| !s.is_empty())?;
     if !url_reachable(Some(&url)) {
@@ -62,8 +64,8 @@ pub(crate) fn try_cc_switch_for_backend(app: &AppHandle) -> Option<BackendConnec
     })
 }
 
-pub(crate) fn try_direct_for_backend(
-    app: &AppHandle,
+pub(crate) fn try_direct_for_backend<R: Runtime>(
+    app: &AppHandle<R>,
     backend: &'static str,
 ) -> BackendConnectionPlan {
     let cfg = load_provider_config(app, provider_key_for_backend(backend)).unwrap_or_default();
@@ -92,7 +94,10 @@ pub(crate) fn try_direct_for_backend(
     }
 }
 
-pub(crate) fn resolve_connection_for(app: &AppHandle, backend_str: &str) -> BackendConnectionPlan {
+pub(crate) fn resolve_connection_for<R: Runtime>(
+    app: &AppHandle<R>,
+    backend_str: &str,
+) -> BackendConnectionPlan {
     let backend: &'static str = if backend_str == BACKEND_CODEX {
         BACKEND_CODEX
     } else {
@@ -109,7 +114,10 @@ pub(crate) fn resolve_connection_for(app: &AppHandle, backend_str: &str) -> Back
     }
 }
 
-pub(crate) fn build_backend_env_status(app: &AppHandle, backend: &str) -> BackendEnvStatus {
+pub(crate) fn build_backend_env_status<R: Runtime>(
+    app: &AppHandle<R>,
+    backend: &str,
+) -> BackendEnvStatus {
     let plan = resolve_connection_for(app, backend);
     let key_env = backend_api_key_env(backend);
     let has_api_key = plan
@@ -137,7 +145,7 @@ pub(crate) fn build_backend_env_status(app: &AppHandle, backend: &str) -> Backen
     }
 }
 
-pub(crate) fn build_cc_switch_status(app: &AppHandle) -> CCSwitchStatus {
+pub(crate) fn build_cc_switch_status<R: Runtime>(app: &AppHandle<R>) -> CCSwitchStatus {
     let cfg = load_cc_switch_config(app);
     let url = cfg.base_url.filter(|s| !s.is_empty());
     CCSwitchStatus {
