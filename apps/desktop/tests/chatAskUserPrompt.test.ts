@@ -93,7 +93,8 @@ async function enableNonInterruptMode() {
   mockInvoke.mockClear();
 }
 
-async function renderCodexTaskDetail(taskId = "t-002") {
+async function renderCodexTaskDetail(taskId = "t-002", options: { clearMockCalls?: boolean } = {}) {
+  const clearMockCalls = options.clearMockCalls ?? true;
   setMockActiveBackend("codex");
   await useConnectionStatus({ probe: false }).setActiveBackend("codex");
   setMockComposerStateHandler((id) => ({
@@ -107,7 +108,7 @@ async function renderCodexTaskDetail(taskId = "t-002") {
   await waitFor(() => {
     expect(view.getByRole("button", { name: "代码审查" })).not.toBeDisabled();
   });
-  mockInvoke.mockClear();
+  if (clearMockCalls) mockInvoke.mockClear();
   return view;
 }
 
@@ -978,5 +979,50 @@ describe("chat AskUser prompt", () => {
     });
     expect(view.container.querySelector(".chat-bubble.is-queued")).toBeNull();
     expect(view.getByText("需要后端确认的消息")).toBeInTheDocument();
+  });
+
+  describe("cold-start rollback recovery", () => {
+    it("持久化 rollback 草稿在冷启动时恢复出草稿内容并 ack", async () => {
+      setMockRuntimeSnapshot("t-002", {
+        phase: "idle",
+        runtimeChannel: null,
+        backend: null,
+        turnId: null,
+        pendingRollback: true,
+        rollback: {
+          rolledBack: true,
+          restoredContent: "恢复的草稿内容",
+          restoredAttachments: [],
+          removedEventIds: ["evt-original"],
+        },
+      });
+      replaceMockTimelineEvents("t-002", []);
+
+      const view = await renderCodexTaskDetail("t-002", { clearMockCalls: false });
+      await waitFor(() => {
+        expect(view.getByText("恢复的草稿内容")).toBeInTheDocument();
+      });
+      const ackCalls = mockInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "chat_ack_restored_rollback"
+      );
+      expect(ackCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("无 rollback 的冷启动不清除预期 composer 内容", async () => {
+      setMockRuntimeSnapshot("t-002", {
+        phase: "idle",
+        rollback: null,
+      });
+      replaceMockTimelineEvents("t-002", []);
+
+      const view = await renderCodexTaskDetail("t-002", { clearMockCalls: false });
+      await waitFor(() => {
+        expect(view.getByRole("textbox")).toBeInTheDocument();
+      });
+      const ackCalls = mockInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "chat_ack_restored_rollback"
+      );
+      expect(ackCalls.length).toBe(0);
+    });
   });
 });

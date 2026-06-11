@@ -1290,6 +1290,63 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn peek_persisted_rollback_does_not_consume() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        let rollback = ChatRollbackResult {
+            rolled_back: true,
+            restored_content: "peek content".to_string(),
+            restored_attachments: Vec::new(),
+            removed_event_ids: vec!["e-1".to_string()],
+        };
+
+        persist_pending_rollback(&conn, "task-1", &rollback).unwrap();
+
+        let first = peek_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .expect("first peek");
+        assert_eq!(first.restored_content, "peek content");
+
+        let second = peek_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .expect("second peek still returns content");
+        assert_eq!(second.restored_content, "peek content");
+
+        let take = take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .expect("take after peek");
+        assert_eq!(take.restored_content, "peek content");
+
+        assert!(take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn clear_persisted_rollback_removes_before_consume() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        let rollback = ChatRollbackResult {
+            rolled_back: true,
+            restored_content: "clear test".to_string(),
+            restored_attachments: Vec::new(),
+            removed_event_ids: vec!["e-2".to_string()],
+        };
+
+        persist_pending_rollback(&conn, "task-1", &rollback).unwrap();
+        clear_persisted_pending_rollback(&conn, "task-1").unwrap();
+
+        assert!(peek_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .is_none());
+        assert!(take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn nanobot_turn_stop_stages_interrupt_and_returns_guide_ids() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {

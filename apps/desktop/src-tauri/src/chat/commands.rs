@@ -4,14 +4,14 @@ use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
 use crate::chat::state::{
-    clear_pending_turns, clear_pending_turns_for_app, clear_persisted_pending_turns_for_app,
-    clear_running_handles, clear_runtime_finalization_for_app, clear_task_runtime_state_for_reset,
-    default_composer, mark_pending_reset_cleanup_for_app, model_options_for_backend,
-    new_chat_message_id, normalize_composer_for_backend, now_millis,
-    persist_runtime_control_event_for_app, persist_runtime_state_for_app,
-    queue_pending_turn_for_app, reset_cleared_guide_queue, set_guide_status_for_app,
-    set_pending_rollback, set_pending_rollback_for_app, should_persist_user_message,
-    stop_running_turn, ChatStore, RunningTurn, RuntimeControlEvent,
+    clear_pending_turns, clear_pending_turns_for_app, clear_persisted_pending_rollback,
+    clear_persisted_pending_turns_for_app, clear_running_handles,
+    clear_runtime_finalization_for_app, clear_task_runtime_state_for_reset, default_composer,
+    mark_pending_reset_cleanup_for_app, model_options_for_backend, new_chat_message_id,
+    normalize_composer_for_backend, now_millis, persist_runtime_control_event_for_app,
+    persist_runtime_state_for_app, queue_pending_turn_for_app, reset_cleared_guide_queue,
+    set_guide_status_for_app, set_pending_rollback, set_pending_rollback_for_app,
+    should_persist_user_message, stop_running_turn, ChatStore, RunningTurn, RuntimeControlEvent,
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
@@ -556,6 +556,15 @@ pub fn chat_get_runtime_snapshot(
         .try_state::<LiliaStore>()
         .and_then(|store| store.conn().ok());
     crate::chat::state::chat_runtime_snapshot_with_persisted(conn.as_deref(), &store, &task_id)
+}
+
+#[tauri::command]
+pub fn chat_ack_restored_rollback(task_id: String, app: AppHandle) -> Result<(), String> {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = store.conn()?;
+    clear_persisted_pending_rollback(&conn, &task_id)
 }
 
 #[tauri::command]

@@ -254,6 +254,10 @@ export function resetSession(taskId: string): Promise<void> {
   return invoke<void>("chat_reset_session", { taskId });
 }
 
+export function ackRestoredRollback(taskId: string): Promise<void> {
+  return invoke<void>("chat_ack_restored_rollback", { taskId });
+}
+
 /** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式。 */
 export function checkEnv(options: { forceRefresh?: boolean } = {}): Promise<EnvStatusReport> {
   return invoke<EnvStatusReport>("chat_check_env", {

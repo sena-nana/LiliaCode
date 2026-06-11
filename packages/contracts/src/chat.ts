@@ -174,6 +174,7 @@ export interface ChatRuntimeSnapshot {
   pendingControlCount: number;
   pendingRollback: boolean;
   pendingResetCleanup: boolean;
+  rollback?: ChatRollbackResult | null;
 }
 
 export type PermissionMode = "full" | "ask" | "readonly";
