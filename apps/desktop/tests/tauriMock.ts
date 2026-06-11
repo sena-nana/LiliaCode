@@ -1562,6 +1562,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         pendingControlCount: 0,
         pendingRollback: false,
         pendingResetCleanup: false,
+        rollback: null,
         ...(runtimeSnapshotOverrides[taskId] ?? {}),
       };
     }
@@ -1836,6 +1837,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         nextAgentInteractionResponseError = null;
         throw new Error(message);
       }
+      return undefined;
+    case "chat_ack_restored_rollback":
       return undefined;
 
     case "chat_respond_title_update": {

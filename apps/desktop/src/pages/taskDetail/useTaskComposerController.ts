@@ -45,6 +45,7 @@ import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
   getComposerState,
   getRuntimeSnapshot,
+  ackRestoredRollback,
   interruptTurn,
   onAgentTimeline,
   onAgentTimelineBatch,
@@ -533,6 +534,15 @@ export function useTaskComposerController(options: {
     }
   }
 
+  function restoreDraftFromRollback(rollback: { restoredContent: string; restoredAttachments: ChatAttachment[] }) {
+    restoreDraftContent.value = stripRestoredAttachmentReferences(
+      rollback.restoredContent,
+      rollback.restoredAttachments,
+    );
+    restoreDraftKey.value += 1;
+    attachments.value = rollback.restoredAttachments;
+  }
+
   function hydratePendingInteractions(events: AgentTimelineEvent[]): Set<string> {
     const activeRequestIds = new Set<string>();
     for (const event of events) {
@@ -691,6 +701,10 @@ export function useTaskComposerController(options: {
           runtimeAbandonedMessage(runtimeSnapshot),
         ));
       }
+      if (runtimeSnapshot?.rollback?.rolledBack) {
+        restoreDraftFromRollback(runtimeSnapshot.rollback);
+        void ackRestoredRollback(taskId);
+      }
       if (!comp) return;
     } finally {
       if (composerLoad === nextComposerLoad) composerLoad = null;
@@ -731,12 +745,7 @@ export function useTaskComposerController(options: {
           for (const eventId of e.rollback.removedEventIds) {
             timeline.removeTimelineEvent(eventId);
           }
-          restoreDraftContent.value = stripRestoredAttachmentReferences(
-            e.rollback.restoredContent,
-            e.rollback.restoredAttachments,
-          );
-          restoreDraftKey.value += 1;
-          attachments.value = e.rollback.restoredAttachments;
+          restoreDraftFromRollback(e.rollback);
         }
         void guideDispatch.scheduleGuideInsertion("idle");
       }),

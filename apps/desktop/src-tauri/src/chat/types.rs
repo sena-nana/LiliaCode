@@ -175,6 +175,8 @@ pub(crate) struct ChatRuntimeSnapshot {
     pub(crate) pending_control_count: usize,
     pub(crate) pending_rollback: bool,
     pub(crate) pending_reset_cleanup: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rollback: Option<ChatRollbackResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

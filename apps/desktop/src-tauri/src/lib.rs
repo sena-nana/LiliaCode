@@ -195,6 +195,7 @@ pub fn run() {
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,
             chat::commands::chat_get_runtime_snapshot,
+            chat::commands::chat_ack_restored_rollback,
             chat::commands::chat_set_composer_state,
             chat::commands::chat_reset_session,
             claude_history::claude_session_search,

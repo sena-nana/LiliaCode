@@ -1201,30 +1201,53 @@ pub(crate) fn take_persisted_pending_rollback(
     conn: &Connection,
     task_id: &str,
 ) -> Result<Option<ChatRollbackResult>, String> {
+    let rollback = read_persisted_pending_rollback(conn, task_id)?;
+    clear_persisted_pending_rollback(conn, task_id)?;
+    Ok(rollback)
+}
+
+fn read_persisted_pending_rollback(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<ChatRollbackResult>, String> {
     let rollback_json: Option<String> = conn
         .query_row(
             r#"SELECT rollback_json
-               FROM task_runtime_finalizations
-               WHERE task_id = ?1"#,
+           FROM task_runtime_finalizations
+           WHERE task_id = ?1"#,
             params![task_id],
             |row| row.get(0),
         )
         .optional()
         .map_err(|e| format!("读取 runtime rollback 失败：{e}"))?
         .flatten();
-    conn.execute(
-        r#"UPDATE task_runtime_finalizations
-           SET rollback_json = NULL, updated_at = ?2
-           WHERE task_id = ?1"#,
-        params![task_id, now_millis() as i64],
-    )
-    .map_err(|e| format!("清理 runtime rollback 失败：{e}"))?;
     rollback_json
         .map(|text| {
             serde_json::from_str::<ChatRollbackResult>(&text)
                 .map_err(|e| format!("runtime rollback 解析失败：{e}"))
         })
         .transpose()
+}
+
+pub(crate) fn peek_persisted_pending_rollback(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<ChatRollbackResult>, String> {
+    read_persisted_pending_rollback(conn, task_id)
+}
+
+pub(crate) fn clear_persisted_pending_rollback(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        r#"UPDATE task_runtime_finalizations
+           SET rollback_json = NULL, updated_at = ?2
+           WHERE task_id = ?1"#,
+        params![task_id, now_millis() as i64],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("清理 runtime rollback 失败：{e}"))
 }
 
 pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
@@ -1381,6 +1404,7 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
         pending_control_count,
         pending_rollback,
         pending_reset_cleanup,
+        rollback: None,
     }
 }
 
@@ -1396,6 +1420,12 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
         }
         if let Ok(count) = count_pending_turns(conn, task_id) {
             snapshot.queued_count += count;
+        }
+        if !snapshot.pending_rollback {
+            if let Ok(rollback) = peek_persisted_pending_rollback(conn, task_id) {
+                snapshot.pending_rollback = rollback.is_some();
+                snapshot.rollback = rollback;
+            }
         }
     }
     snapshot.phase = match snapshot.phase.as_str() {
