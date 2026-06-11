@@ -95,6 +95,45 @@ function projectConversation(id: string, title: string, index: number): Task {
   };
 }
 
+function pendingAskTimelineEvent(taskId: string, requestId: string) {
+  return {
+    id: `tl-pending-${requestId}`,
+    taskId,
+    turnId: "turn-ask",
+    backend: "codex" as const,
+    kind: "ask_user",
+    status: "requires_action",
+    title: "需要确认",
+    summary: "继续？",
+    payload: { requestId },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    turnSeq: 1,
+    intraTurnOrder: 0,
+  };
+}
+
+function pendingToolTimelineEvent(taskId: string, requestId: string) {
+  return {
+    id: `tl-pending-${requestId}`,
+    taskId,
+    turnId: "turn-tool",
+    backend: "codex" as const,
+    kind: "command",
+    status: "requires_action",
+    title: "需要授权",
+    summary: "运行命令？",
+    payload: {
+      interaction: "tool_consent",
+      requestId,
+    },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    turnSeq: 1,
+    intraTurnOrder: 0,
+  };
+}
+
 function seedSecondaryPanelOverflowConversations() {
   TASKS.value = {
     ...TASKS.value,
@@ -395,6 +434,26 @@ describe("SecondaryPanel project chat navigation", () => {
     });
   });
 
+  it("统一列表冷启动时会把 reset_pending_finish runtime snapshot 显示为运行中", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    setMockRuntimeSnapshot("t-003", {
+      phase: "reset_pending_finish",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-reset",
+      pendingResetCleanup: true,
+    });
+
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话中")).toHaveClass(
+        "sb-tree__activity--running",
+      );
+    });
+  });
+
   it("统一列表冷启动时会把 abandoned runtime snapshot 显示为错误状态", async () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
@@ -414,25 +473,30 @@ describe("SecondaryPanel project chat navigation", () => {
     });
   });
 
+  it("统一列表冷启动时 abandoned runtime snapshot 会覆盖持久化等待交互", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    setMockRuntimeSnapshot("t-003", {
+      phase: "abandoned",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-old",
+    });
+    replaceMockTimelineEvents("t-003", [pendingAskTimelineEvent("t-003", "ask-overridden")]);
+
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("发生错误")).toHaveClass(
+        "sb-tree__activity--error",
+      );
+      expect(within(row).queryByLabelText("等待交互")).toBeNull();
+    });
+  });
+
   it("统一列表冷启动时会从持久化 timeline 恢复等待交互状态", async () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
-    replaceMockTimelineEvents("t-003", [{
-      id: "tl-pending-ask",
-      taskId: "t-003",
-      turnId: "turn-ask",
-      backend: "codex",
-      kind: "ask_user",
-      status: "requires_action",
-      title: "需要确认",
-      summary: "继续？",
-      payload: {
-        requestId: "ask-1",
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      turnSeq: 1,
-      intraTurnOrder: 0,
-    }]);
+    replaceMockTimelineEvents("t-003", [pendingAskTimelineEvent("t-003", "ask-1")]);
 
     const askView = await renderSecondaryPanel();
     const askRow = getConversationRow(askView, "整理窗口快捷键");
@@ -468,6 +532,68 @@ describe("SecondaryPanel project chat navigation", () => {
       expect(within(errorRow).getByLabelText("发生错误")).toHaveClass(
         "sb-tree__activity--error",
       );
+    });
+  });
+
+  it("项目列表冷启动时会从 runtime snapshot 恢复项目会话运行中状态", async () => {
+    seedTreeExpansionState({
+      projects: {
+        lilia: false,
+        tools: true,
+      },
+      orphansExpanded: true,
+    });
+    setMockRuntimeSnapshot("t-003", {
+      phase: "running",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-project",
+    });
+
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话中")).toHaveClass(
+        "sb-tree__activity--running",
+      );
+    });
+  });
+
+  it("项目列表冷启动时会从持久化 timeline 恢复收集箱等待交互状态", async () => {
+    replaceMockTimelineEvents("o-001", [pendingToolTimelineEvent("o-001", "tool-orphan")]);
+
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "随手问问 Claude：tsconfig paths");
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("等待交互")).toHaveClass(
+        "sb-tree__activity--requires_action",
+      );
+    });
+  });
+
+  it("结束事件会清理等待交互并显示完成状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    emitMockTimelineEvent("t-003", {
+      ...pendingToolTimelineEvent("t-003", "tool-live"),
+      id: "tl-live-pending-tool",
+    });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("等待交互")).toHaveClass(
+        "sb-tree__activity--requires_action",
+      );
+    });
+
+    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    await waitFor(() => {
+      expect(within(row).getByLabelText("对话完成")).toHaveClass(
+        "sb-tree__activity--completed",
+      );
+      expect(within(row).queryByLabelText("等待交互")).toBeNull();
     });
   });
 
