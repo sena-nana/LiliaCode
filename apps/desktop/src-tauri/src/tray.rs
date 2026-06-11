@@ -15,6 +15,7 @@ use crate::store::LiliaStore;
 
 const TRAY_ID: &str = "lilia-main-tray";
 const MENU_OPEN_MAIN: &str = "tray:open-main";
+const MENU_TOGGLE_CONVERSATION_STATUS: &str = "tray:toggle-conversation-status";
 const MENU_QUIT: &str = "tray:quit";
 const MENU_EMPTY_RECENT: &str = "tray:recent-empty";
 const RECENT_MENU_PREFIX: &str = "tray:recent:";
@@ -78,12 +79,21 @@ fn build_tray_menu(app: &AppHandle) -> Result<TrayMenuState, String> {
 fn build_root_menu(app: &AppHandle, recent_menu: &Submenu<Wry>) -> Result<Menu<Wry>, String> {
     let open_main = MenuItem::with_id(app, MENU_OPEN_MAIN, "打开主窗口", true, None::<&str>)
         .map_err(|e| format!("创建打开主窗口菜单失败：{e}"))?;
+    let conversation_status = MenuItem::with_id(
+        app,
+        MENU_TOGGLE_CONVERSATION_STATUS,
+        "对话悬浮窗",
+        true,
+        None::<&str>,
+    )
+    .map_err(|e| format!("创建对话悬浮窗菜单失败：{e}"))?;
     let separator =
         PredefinedMenuItem::separator(app).map_err(|e| format!("创建托盘菜单分隔线失败：{e}"))?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出应用", true, None::<&str>)
         .map_err(|e| format!("创建退出菜单失败：{e}"))?;
     MenuBuilder::new(app)
         .item(&open_main)
+        .item(&conversation_status)
         .item(recent_menu)
         .item(&separator)
         .item(&quit)
@@ -279,6 +289,14 @@ fn handle_menu_event(app: &AppHandle, click_seq: &Arc<AtomicU64>, id: &str) {
             if let Err(err) = open_main_window(app) {
                 eprintln!("[tray] open main failed: {err}");
             }
+        }
+        MENU_TOGGLE_CONVERSATION_STATUS => {
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(err) = popup_windows::toggle_conversation_status_window(&app) {
+                    eprintln!("[tray] toggle conversation status failed: {err}");
+                }
+            });
         }
         MENU_QUIT => app.exit(0),
         MENU_EMPTY_RECENT => {}

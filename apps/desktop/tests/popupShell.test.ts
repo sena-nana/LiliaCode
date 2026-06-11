@@ -11,9 +11,10 @@ import {
   mockCurrentWindow,
   mockInvoke,
   setMockAgentTimelineDelay,
+  setMockTasks,
   setMockTaskArchived,
 } from "./tauriMock";
-import { TASKS } from "../src/data/tasks";
+import { ORPHAN_LIST, TASKS } from "../src/data/tasks";
 
 async function renderPopup(initialRoute = "/popup/projects/lilia/tasks/t-001") {
   const router = createLiliaRouter(createMemoryHistory());
@@ -95,6 +96,79 @@ describe("Popup shell", () => {
     expect(view.getByRole("button", { name: "关闭弹出窗口" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "新对话" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "回到主窗口" })).toBeInTheDocument();
+  });
+
+  it("对话状态悬浮窗路由只渲染状态列表", async () => {
+    const view = await renderPopup("/popup/status");
+
+    expect(view.container.querySelector(".conversation-status-float")).toBeInTheDocument();
+    expect(view.container.querySelector(".popup-titlebar")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".secondary-panel")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".chat-sidebar")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".chat-page")).not.toBeInTheDocument();
+    expect(view.getByText("对话状态")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /接入 Claude Code 会话发现/ }))
+        .toBeInTheDocument();
+      expect(view.getAllByText("Lilia").length).toBeGreaterThan(0);
+      expect(view.getByRole("button", { name: /随手问问 Claude/ })).toBeInTheDocument();
+      expect(view.getByText("收集箱")).toBeInTheDocument();
+    });
+  });
+
+  it("对话状态悬浮窗点击对话会打开对话弹出窗口", async () => {
+    const view = await renderPopup("/popup/status");
+
+    await fireEvent.click(await view.findByRole("button", {
+      name: /接入 Claude Code 会话发现/,
+    }));
+
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+      projectId: "lilia",
+      taskId: "t-001",
+    }, undefined);
+  });
+
+  it("对话状态悬浮窗空列表显示空状态", async () => {
+    setMockTasks([]);
+    TASKS.value = {
+      lilia: [],
+      tools: [],
+    };
+    ORPHAN_LIST.value = [];
+
+    const view = await renderPopup("/popup/status");
+
+    await waitFor(() => {
+      expect(view.getByText("还没有会话")).toBeInTheDocument();
+    });
+  });
+
+  it("对话状态悬浮窗顶部控件支持置顶、透明度、新对话和关闭", async () => {
+    localStorage.removeItem("lilia.conversationStatus.alwaysOnTop");
+    localStorage.removeItem("lilia.conversationStatus.opacity");
+    const view = await renderPopup("/popup/status");
+
+    await waitFor(() => {
+      expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenCalledWith(false);
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "置顶" }));
+    expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenLastCalledWith(true);
+    expect(localStorage.getItem("lilia.conversationStatus.alwaysOnTop")).toBe("1");
+
+    await fireEvent.click(view.getByRole("button", { name: "92" }));
+    expect(localStorage.getItem("lilia.conversationStatus.opacity")).toBe("0.92");
+
+    await fireEvent.click(view.getByRole("button", { name: "新对话" }));
+    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+      projectId: null,
+      initialDraftContent: null,
+    }, undefined);
+
+    await fireEvent.click(view.getByRole("button", { name: "关闭对话悬浮窗" }));
+    expect(mockCurrentWindow.close).toHaveBeenCalledTimes(1);
   });
 
   it("弹窗打开已有对话时可用单条查询补齐当前上下文", async () => {
