@@ -9,7 +9,12 @@ import type {
   CodexReasoningEffort,
   CodexSettingsProfile,
 } from "@lilia/contracts";
-import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
+import {
+  sameCodexProfile,
+  sameOrderedStrings,
+  uniqueTrimmedLines,
+  useAgentInteractionSettings,
+} from "../../composables/useAgentInteractionSettings";
 
 const agentInteractionStore = useAgentInteractionSettings();
 const agentInteraction = agentInteractionStore.settings;
@@ -46,14 +51,6 @@ const runtimeChannelOptions: Array<{ value: AgentRuntimeChannel; label: string }
 ];
 
 const codexProfile = computed(() => agentInteraction.value.codexProfile);
-
-function sameStringArray(a: readonly string[], b: readonly string[]) {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
-}
-
-function sameCodexProfile(a: unknown, b: unknown) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
 
 watch(
   codexProfile,
@@ -110,13 +107,8 @@ async function saveCodexModel() {
 }
 
 async function saveCodexRoots() {
-  const roots = Array.from(new Set(
-    codexRootsDraft.value
-      .split(/\r?\n/)
-      .map((root) => root.trim())
-      .filter(Boolean),
-  ));
-  if (sameStringArray(roots, codexProfile.value.runtimeWorkspaceRoots)) return;
+  const roots = uniqueTrimmedLines(codexRootsDraft.value);
+  if (sameOrderedStrings(roots, codexProfile.value.runtimeWorkspaceRoots)) return;
   await setCodexProfile({ runtimeWorkspaceRoots: roots });
 }
 

@@ -884,6 +884,27 @@ function codexBatchApplyTimelinePayload(threadId, workflow, extra = {}) {
   };
 }
 
+function emitCodexDiagnostic(ctx, {
+  status,
+  title,
+  summary,
+  payload,
+  sourceId,
+  error = null,
+}) {
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status,
+    title,
+    summary: error ? error?.message || String(error) : summary,
+    payload: {
+      ...payload,
+      ...(error ? { error: error?.message || String(error) } : {}),
+    },
+    sourceId,
+  });
+}
+
 async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
   const review = readCodexReviewWorkflow(cmd);
   if (!review) return false;
@@ -895,8 +916,7 @@ async function runCodexReviewWorkflow(server, threadId, cmd, ctx) {
     codexTurnId: ctx.currentTurnId,
     target: review.target,
   };
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
+  emitCodexDiagnostic(ctx, {
     status: "started",
     title: "Codex review started",
     summary: codexReviewTargetSummary(review.target),
@@ -923,22 +943,25 @@ async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn =
     cwd: cmd.cwd || cwdFn(),
   });
   const turnCmd = codexFixSuggestionEffectiveTurnCmd(cmd, workflow);
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
+  const targetSummary = codexReviewTargetSummary(workflow.target);
+  const timelinePayload = {
+    backend: "codex",
+    subkind: "fix_suggestion",
+    method: "turn/start",
+    threadId,
+    target: workflow.target,
+    mode: workflow.mode,
+  };
+  emitCodexDiagnostic(ctx, {
     status: "started",
     title: "Codex fix suggestion started",
-    summary: codexReviewTargetSummary(workflow.target),
+    summary: targetSummary,
     payload: {
-      backend: "codex",
-      subkind: "fix_suggestion",
-      method: "turn/start",
-      threadId,
-      target: workflow.target,
-      mode: workflow.mode,
+      ...timelinePayload,
       hasInstructions: Boolean(workflow.instructions),
       effectivePermission: turnCmd.permission,
     },
-    sourceId: `codex:fix-suggestion:start:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+    sourceId: `codex:fix-suggestion:start:${threadId}:${targetSummary}`,
   });
   try {
     const startedTurn = await startCodexAppServerTurn(
@@ -961,38 +984,21 @@ async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn =
       throw new Error("Codex fix suggestion turn failed");
     }
   } catch (err) {
-    ctx.protocol.emitTimeline({
-      kind: "diagnostic",
+    emitCodexDiagnostic(ctx, {
       status: "error",
       title: "Codex fix suggestion failed",
-      summary: err?.message || String(err),
-      payload: {
-        backend: "codex",
-        subkind: "fix_suggestion",
-        method: "turn/start",
-        threadId,
-        target: workflow.target,
-        mode: workflow.mode,
-        error: err?.message || String(err),
-      },
-      sourceId: `codex:fix-suggestion:error:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+      payload: timelinePayload,
+      sourceId: `codex:fix-suggestion:error:${threadId}:${targetSummary}`,
+      error: err,
     });
     throw err;
   }
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
+  emitCodexDiagnostic(ctx, {
     status: "success",
     title: "Codex fix suggestion completed",
-    summary: codexReviewTargetSummary(workflow.target),
-    payload: {
-      backend: "codex",
-      subkind: "fix_suggestion",
-      method: "turn/start",
-      threadId,
-      target: workflow.target,
-      mode: workflow.mode,
-    },
-    sourceId: `codex:fix-suggestion:completed:${threadId}:${codexReviewTargetSummary(workflow.target)}`,
+    summary: targetSummary,
+    payload: timelinePayload,
+    sourceId: `codex:fix-suggestion:completed:${threadId}:${targetSummary}`,
   });
   return true;
 }
@@ -1007,8 +1013,7 @@ async function runCodexBatchApplyWorkflow(server, threadId, cmd, ctx, cwdFn = pr
   });
   const selectedModel = normalizeCodexSettings(cmd).model || ctx.selectedModel || null;
   const planPreset = await readCodexPlanModePreset(server);
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
+  emitCodexDiagnostic(ctx, {
     status: "started",
     title: "Codex batch apply started",
     summary: workflow.sourceKind,
@@ -1037,20 +1042,16 @@ async function runCodexBatchApplyWorkflow(server, threadId, cmd, ctx, cwdFn = pr
       throw new Error("Codex batch apply turn failed");
     }
   } catch (err) {
-    ctx.protocol.emitTimeline({
-      kind: "diagnostic",
+    emitCodexDiagnostic(ctx, {
       status: "error",
       title: "Codex batch apply failed",
-      summary: err?.message || String(err),
-      payload: codexBatchApplyTimelinePayload(threadId, workflow, {
-        error: err?.message || String(err),
-      }),
+      payload: codexBatchApplyTimelinePayload(threadId, workflow),
       sourceId: `codex:batch-apply:error:${threadId}:${workflow.sourceTurnId}`,
+      error: err,
     });
     throw err;
   }
-  ctx.protocol.emitTimeline({
-    kind: "diagnostic",
+  emitCodexDiagnostic(ctx, {
     status: "success",
     title: "Codex batch apply completed",
     summary: workflow.sourceKind,
