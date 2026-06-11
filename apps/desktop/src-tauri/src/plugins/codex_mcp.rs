@@ -321,6 +321,25 @@ fn stdio_table_from_input(input: CodexMcpServerInput) -> Result<Table, String> {
     Ok(table)
 }
 
+fn read_public_server(doc: &DocumentMut, name: &str, action: &str) -> Result<CodexMcpServer, String> {
+    let (servers, _) = list_codex_mcp_servers_from_doc(doc);
+    servers
+        .into_iter()
+        .find(|server| server.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("{action} Codex MCP server 后读取失败：{name}"))
+}
+
+fn update_stdio_table(
+    table: &mut dyn TableLike,
+    command: String,
+    args: Vec<String>,
+    env: Option<BTreeMap<String, String>>,
+    remove_env_keys: Vec<String>,
+) -> Result<(), String> {
+    set_stdio_fields(table, command, args);
+    apply_env_update(table, env, remove_env_keys)
+}
+
 fn ensure_editable_stdio(table: &Table, key: &str) -> Result<(), String> {
     let item = table
         .get(key)
@@ -350,11 +369,7 @@ pub fn create_codex_mcp_server(
     let server_table = stdio_table_from_input(input)?;
     table.insert(&name, Item::Table(server_table));
     write_codex_doc_to_path(&path, &doc)?;
-    let (servers, _) = list_codex_mcp_servers_from_doc(&doc);
-    servers
-        .into_iter()
-        .find(|server| server.name.eq_ignore_ascii_case(&name))
-        .ok_or_else(|| format!("创建 Codex MCP server 后读取失败：{name}"))
+    read_public_server(&doc, &name, "创建")
 }
 
 pub fn update_codex_mcp_server(
@@ -383,8 +398,7 @@ pub fn update_codex_mcp_server(
         let server_table = item
             .as_table_like_mut()
             .ok_or_else(|| format!("Codex MCP server {current_key} 不是 table"))?;
-        set_stdio_fields(server_table, command, args);
-        apply_env_update(server_table, input.env, input.remove_env_keys)?;
+        update_stdio_table(server_table, command, args, input.env, input.remove_env_keys)?;
     } else {
         let mut item = table
             .remove(&current_key)
@@ -392,16 +406,11 @@ pub fn update_codex_mcp_server(
         let Some(server_table) = item.as_table_like_mut() else {
             return Err(format!("Codex MCP server {current_key} 不是 table"));
         };
-        set_stdio_fields(server_table, command, args);
-        apply_env_update(server_table, input.env, input.remove_env_keys)?;
+        update_stdio_table(server_table, command, args, input.env, input.remove_env_keys)?;
         table.insert(&next_name, item);
     }
     write_codex_doc_to_path(&path, &doc)?;
-    let (servers, _) = list_codex_mcp_servers_from_doc(&doc);
-    servers
-        .into_iter()
-        .find(|server| server.name.eq_ignore_ascii_case(&next_name))
-        .ok_or_else(|| format!("更新 Codex MCP server 后读取失败：{next_name}"))
+    read_public_server(&doc, &next_name, "更新")
 }
 
 pub fn delete_codex_mcp_server(app: &AppHandle, name: &str) -> Result<(), String> {

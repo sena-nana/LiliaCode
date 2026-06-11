@@ -30,7 +30,26 @@ const settings = ref<AgentInteractionSettings>({
 
 let loadPromise: Promise<AgentInteractionSettings> | null = null;
 
-function normalizeAgentInteractionSettings(
+export function uniqueTrimmedStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? Array.from(new Set(
+        value
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ))
+    : [];
+}
+
+export function uniqueTrimmedLines(value: string): string[] {
+  return uniqueTrimmedStrings(value.split(/\r?\n/));
+}
+
+export function sameOrderedStrings(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+export function normalizeAgentInteractionSettings(
   input: Partial<AgentInteractionSettings> | null | undefined,
 ): AgentInteractionSettings {
   const codexProfile = input?.codexProfile;
@@ -42,9 +61,7 @@ function normalizeAgentInteractionSettings(
       profile: normalizeProfile(codexProfile?.profile),
       model: normalizeNullableText(codexProfile?.model),
       reasoningEffort: normalizeReasoningEffort(codexProfile?.reasoningEffort),
-      runtimeWorkspaceRoots: Array.isArray(codexProfile?.runtimeWorkspaceRoots)
-        ? Array.from(new Set(codexProfile.runtimeWorkspaceRoots.map((root) => root.trim()).filter(Boolean)))
-        : [],
+      runtimeWorkspaceRoots: uniqueTrimmedStrings(codexProfile?.runtimeWorkspaceRoots),
       permissions: {
         profile: normalizePermissionProfile(codexProfile?.permissions?.profile),
       },
@@ -52,9 +69,7 @@ function normalizeAgentInteractionSettings(
       additionalContext: normalizeNullableText(codexProfile?.additionalContext),
       persistExtendedHistory: normalizeNullableBoolean(codexProfile?.persistExtendedHistory),
       initialTurnsPage: normalizeJsonObject(codexProfile?.initialTurnsPage),
-      excludeTurns: Array.isArray(codexProfile?.excludeTurns)
-        ? Array.from(new Set(codexProfile.excludeTurns.map((turn) => turn.trim()).filter(Boolean)))
-        : [],
+      excludeTurns: uniqueTrimmedStrings(codexProfile?.excludeTurns),
       commandExecPermissionProfile: normalizeOptionalPermissionProfile(
         codexProfile?.commandExecPermissionProfile,
       ),
@@ -106,9 +121,9 @@ function normalizeOptionalPermissionProfile(
     : null;
 }
 
-function sameCodexProfile(
-  a: AgentInteractionSettings["codexProfile"],
-  b: AgentInteractionSettings["codexProfile"],
+export function sameCodexProfile(
+  a: unknown,
+  b: unknown,
 ): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }

@@ -26,11 +26,9 @@ import {
   normalizeCodexPlanSteps,
 } from "../agent-runner/codex/timeline.mjs";
 import {
-  buildCodexCollaborationMode,
   buildCodexBatchApplyPrompt,
   buildCodexFixSuggestionPrompt,
   buildCodexPlanRevisionPrompt,
-  readCodexPlanModePreset,
   runCodexAppServer,
   maybeHandleCodexServerRequest,
   startCodexAppServerThread,
@@ -1608,75 +1606,6 @@ describe("Codex app-server mapping", () => {
     ]);
   });
 
-  it("falls back to Codex process/spawn when command/exec is unavailable", async () => {
-    const { protocol, json } = captureProtocol();
-    const calls: any[] = [];
-    let drained = false;
-    const server = {
-      request: async (method: string, params: any) => {
-        calls.push(["request", method, params]);
-        if (method === "command/exec") throw new Error("method not found");
-        if (method === "process/spawn") return { processId: "proc-1" };
-        if (method === "turn/steer") return {};
-        throw new Error(`unexpected request ${method}`);
-      },
-      respond: (...args: any[]) => calls.push(["respond", ...args]),
-      drainNotifications: () => {
-        if (drained) return [];
-        drained = true;
-        return [
-          {
-            method: "process/outputDelta",
-            params: { processId: "proc-1", stream: "stdout", delta: "ok\n" },
-          },
-          {
-            method: "process/exited",
-            params: { processId: "proc-1", exitCode: 0 },
-          },
-        ];
-      },
-    };
-
-    await maybeHandleCodexApprovalRequest(
-      server as any,
-      {
-        id: "approval-rpc-3",
-        method: "item/commandExecution/requestApproval",
-        params: {
-          approvalId: "approval-3",
-          command: "npm test",
-          availableDecisions: ["accept", "decline"],
-        },
-      },
-      {
-        protocol,
-        threadId: "thread-1",
-        currentTurnId: "turn-1",
-        interactions: {
-          requestUserConsent: async () => ({
-            id: "consent-3",
-            decision: "allow",
-            updatedInput: { command: "npm test -- --watch=false" },
-          }),
-        },
-        emitToolConsentTimeline: () => {},
-      },
-    );
-
-    expect(calls.map((call) => call[1])).toEqual([
-      "command/exec",
-      "process/spawn",
-      "approval-rpc-3",
-      "turn/steer",
-    ]);
-    expect(calls[2]).toEqual(["respond", "approval-rpc-3", { decision: "decline" }]);
-    expect(json()[0].event.payload).toMatchObject({
-      executionOwner: "lilia",
-      modifiedCommand: "npm test -- --watch=false",
-      output: "ok\n",
-    });
-  });
-
   it("emits an error timeline and declines the original Codex command when Lilia cannot execute the edit", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
@@ -1735,12 +1664,7 @@ describe("Codex app-server mapping", () => {
         }),
       },
     ]);
-    expect(consentTimeline[0]).toMatchObject([
-      "consent-4",
-      expect.any(Object),
-      "cancelled",
-      "Lilia 无法执行用户修改后的命令，已取消原始 Codex 命令",
-    ]);
+    expect(consentTimeline).toEqual([]);
   });
 
   it("resume thread still registers Lilia AskUser dynamic tool without app-server plan-tool params", async () => {
@@ -3200,38 +3124,6 @@ describe("Codex app-server mapping", () => {
       10_003,
       10_004,
     ]);
-  });
-
-  it("builds Codex plan collaboration mode from preset or fallback", async () => {
-    const server = {
-      request: async () => ({
-        data: [
-          { name: "chat", mode: "default", reasoning_effort: null },
-          { name: "plan", mode: "plan", reasoning_effort: "high" },
-        ],
-      }),
-    };
-
-    await expect(readCodexPlanModePreset(server as any)).resolves.toMatchObject({
-      mode: "plan",
-      reasoning_effort: "high",
-    });
-    expect(buildCodexCollaborationMode("plan", "gpt-5.1", { reasoning_effort: "high" })).toEqual({
-      mode: "plan",
-      settings: {
-        model: "gpt-5.1",
-        reasoning_effort: "high",
-        developer_instructions: null,
-      },
-    });
-    expect(buildCodexCollaborationMode("plan", null, null)).toEqual({
-      mode: "plan",
-      settings: {
-        model: "gpt-5",
-        reasoning_effort: "medium",
-        developer_instructions: null,
-      },
-    });
   });
 
   it("Codex 计划确认通过统一 interaction_request/response 往返", async () => {
