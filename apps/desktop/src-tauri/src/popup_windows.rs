@@ -14,10 +14,15 @@ const POPUP_WINDOW_SETTINGS_KEY: &str = "popup-window.config";
 const POPUP_LAST_PROJECT_KEY: &str = "popup-window.lastProjectId";
 const POPUP_WINDOW_PREFIX: &str = "popup-";
 const POPUP_EXISTING_TASK_PREFIX: &str = "popup-task-";
+pub(crate) const CONVERSATION_STATUS_WINDOW_LABEL: &str = "conversation-status";
 const POPUP_WIDTH: f64 = 430.0;
 const POPUP_HEIGHT: f64 = 760.0;
 const POPUP_MIN_WIDTH: f64 = 360.0;
 const POPUP_MIN_HEIGHT: f64 = 520.0;
+const STATUS_WINDOW_WIDTH: f64 = 360.0;
+const STATUS_WINDOW_HEIGHT: f64 = 520.0;
+const STATUS_WINDOW_MIN_WIDTH: f64 = 320.0;
+const STATUS_WINDOW_MIN_HEIGHT: f64 = 420.0;
 static POPUP_WINDOW_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -159,6 +164,40 @@ pub(crate) fn build_popup_window(
         .map_err(|e| format!("创建弹出窗口失败：{e}"))?;
     focus_window(&window);
     Ok(())
+}
+
+pub(crate) fn open_conversation_status_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(CONVERSATION_STATUS_WINDOW_LABEL) {
+        focus_window(&existing);
+        return Ok(());
+    }
+    let window = WebviewWindowBuilder::new(
+        app,
+        CONVERSATION_STATUS_WINDOW_LABEL,
+        WebviewUrl::App("index.html".into()),
+    )
+    .initialization_script(popup_route_bootstrap_script("/popup/status"))
+    .title("对话状态")
+    .inner_size(STATUS_WINDOW_WIDTH, STATUS_WINDOW_HEIGHT)
+    .min_inner_size(STATUS_WINDOW_MIN_WIDTH, STATUS_WINDOW_MIN_HEIGHT)
+    .center()
+    .decorations(false)
+    .resizable(true)
+    .background_color(BG)
+    .build()
+    .map_err(|e| format!("创建对话状态悬浮窗失败：{e}"))?;
+    focus_window(&window);
+    Ok(())
+}
+
+pub(crate) fn toggle_conversation_status_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(CONVERSATION_STATUS_WINDOW_LABEL) {
+        existing
+            .close()
+            .map_err(|e| format!("关闭对话状态悬浮窗失败：{e}"))?;
+        return Ok(());
+    }
+    open_conversation_status_window(app)
 }
 
 fn route_with_initial_draft(route: String, initial_draft_content: Option<String>) -> String {
@@ -343,6 +382,20 @@ pub async fn popup_open_child_question(
     })
     .await
     .map_err(|err| format!("弹出窗口任务执行失败：{err}"))?
+}
+
+#[tauri::command]
+pub async fn popup_open_conversation_status(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || open_conversation_status_window(&app))
+        .await
+        .map_err(|err| format!("悬浮窗任务执行失败：{err}"))?
+}
+
+#[tauri::command]
+pub async fn popup_toggle_conversation_status(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || toggle_conversation_status_window(&app))
+        .await
+        .map_err(|err| format!("悬浮窗任务执行失败：{err}"))?
 }
 
 #[tauri::command]

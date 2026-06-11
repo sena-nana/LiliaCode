@@ -223,6 +223,8 @@ pub fn run() {
             popup_windows::popup_open_new_chat,
             popup_windows::popup_open_task,
             popup_windows::popup_open_child_question,
+            popup_windows::popup_open_conversation_status,
+            popup_windows::popup_toggle_conversation_status,
             popup_windows::popup_focus_main,
             provider::router_get_mode,
             provider::router_set_mode,

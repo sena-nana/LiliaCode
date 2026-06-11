@@ -19,6 +19,7 @@ const props = defineProps<{
   activity?: ConversationActivity | null;
   projectLabel?: string | null;
   projectId: string | null;
+  readonly?: boolean;
   rowKind: "child" | "orphan" | "unified";
   task: SidebarTask;
   to?: string;
@@ -140,6 +141,10 @@ function buildMenu(): ContextMenuItem[] {
 
 function onClick() {
   clearConversationActivityNotice(props.task.id);
+  if (props.readonly) {
+    emit("open", props.task.id);
+    return;
+  }
   if (props.to) return;
   emit("open", props.task.id);
 }
@@ -147,8 +152,9 @@ function onClick() {
 
 <template>
   <component
-    :is="to ? RouterLink : 'div'"
+    :is="to ? RouterLink : 'button'"
     :to="to"
+    type="button"
     class="sb-tree__row"
     :class="[
       `sb-tree__row--${rowKind}`,
@@ -160,7 +166,7 @@ function onClick() {
     :data-task-id="task.id"
     :data-project-id="projectId ?? ''"
     :data-pinned="task.pinned ? 'true' : 'false'"
-    v-context-menu="() => buildMenu()"
+    v-context-menu="readonly ? null : () => buildMenu()"
     @click="onClick"
     @dragstart.prevent
     @auxclick="onAuxClick"
@@ -200,7 +206,7 @@ function onClick() {
         aria-hidden="true"
       />
     </span>
-    <div class="sb-tree__hover-tools" @click.stop>
+    <div v-if="!readonly" class="sb-tree__hover-tools" @click.stop>
       <button
         type="button"
         class="sb-icon-btn"

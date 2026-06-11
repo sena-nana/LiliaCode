@@ -8,6 +8,7 @@ import { defineAsyncComponent, defineComponent, h } from "vue";
 import AppShell from "./layouts/AppShell.vue";
 
 const PopupShell = () => import("./layouts/PopupShell.vue");
+const ConversationStatusFloat = () => import("./pages/ConversationStatusFloat.vue");
 const TaskDetail = () => import("./pages/TaskDetail.vue");
 const MainTaskDetail = defineAsyncComponent(() => import("./pages/TaskDetail.vue"));
 const PopupDraftBoot = () => import("./pages/PopupDraftBoot.vue");
@@ -54,6 +55,10 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
         path: "/popup",
         component: PopupShell,
         children: [
+          {
+            path: "status",
+            component: ConversationStatusFloat,
+          },
           {
             path: "projects/:projectId/new",
             component: PopupDraftBoot,

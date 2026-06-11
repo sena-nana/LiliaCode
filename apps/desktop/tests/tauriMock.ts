@@ -580,6 +580,7 @@ export function resetTauriMockData() {
   mockCurrentWindow.onResized.mockClear();
   mockCurrentWindow.minimize.mockClear();
   mockCurrentWindow.toggleMaximize.mockClear();
+  mockCurrentWindow.setAlwaysOnTop.mockClear();
   mockCurrentWindow.close.mockClear();
   mockCurrentWindow.scaleFactor.mockClear();
   refreshSessionCounts();
@@ -714,6 +715,11 @@ export function mockOrphansForStore() {
     }));
 }
 
+export function setMockTasks(nextTasks: TaskRow[]) {
+  tasks = nextTasks.map(cloneTask);
+  refreshSessionCounts();
+}
+
 export const mockGetCurrentWebview = vi.fn(() => ({
   onDragDropEvent: vi.fn(async (handler: (event: { payload: unknown }) => void) => {
     webviewDragDropHandlers = [...webviewDragDropHandlers, handler];
@@ -729,6 +735,7 @@ export const mockCurrentWindow = {
   onResized: vi.fn(async () => vi.fn()),
   minimize: vi.fn(async () => undefined),
   toggleMaximize: vi.fn(async () => undefined),
+  setAlwaysOnTop: vi.fn(async () => undefined),
   close: vi.fn(async () => undefined),
   scaleFactor: vi.fn(async () => windowScaleFactor),
 };

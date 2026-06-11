@@ -155,6 +155,7 @@ export function useAgentInteractionSettings() {
     settings: readonly(settings),
     nonInterruptMode: computed(() => settings.value.nonInterruptMode),
     debug: computed(() => settings.value.debug),
+    agentRuntimeChannel: computed(() => settings.value.agentRuntimeChannel),
     load: loadAgentInteractionSettings,
     update: updateAgentInteractionSettings,
   };

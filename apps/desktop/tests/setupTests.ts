@@ -54,11 +54,19 @@ beforeEach(async () => {
   useSidebarDisplayMode().setSidebarDisplayMode("grouped");
   const { clearGitHubRepoCache } = await import("../src/services/projects");
   clearGitHubRepoCache();
-  const { ORPHAN_LIST, TASKS, installTasksChangedListener } = tasksModule;
+  const {
+    ORPHAN_LIST,
+    ORPHANS_LOADED,
+    PROJECT_TASKS_LOADED,
+    TASKS,
+    installTasksChangedListener,
+  } = tasksModule;
   installTasksChangedListener();
   PROJECTS.value = mockProjectsForStore();
   TASKS.value = mockTasksByProjectForStore();
   ORPHAN_LIST.value = mockOrphansForStore();
+  PROJECT_TASKS_LOADED.value = {};
+  ORPHANS_LOADED.value = false;
   bindMockProjectPinUpdater((projectId, pinned) => {
     PROJECTS.value = PROJECTS.value.map((project) =>
       project.id === projectId ? { ...project, pinned } : project
