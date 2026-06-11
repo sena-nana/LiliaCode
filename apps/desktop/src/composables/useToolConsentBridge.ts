@@ -38,6 +38,11 @@ function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
 }
 
+export interface ClearToolConsentForTaskOptions {
+  turnId?: string | null;
+  keepRequestIds?: Set<string>;
+}
+
 /** 给某个 task 订阅当前待决策项（没有就是 null）。 */
 export function useToolConsentForTask(
   taskId: TaskIdSource,
@@ -78,6 +83,25 @@ export function handleToolConsentRequest(
   localResolvers.delete(request.requestId);
 }
 
+export function hydrateToolConsentRequest(request: ToolConsentRequest) {
+  pending[request.taskId] = request;
+  markConversationRequiresAction(request.taskId, request.requestId);
+  localResolvers.delete(request.requestId);
+}
+
+export function clearToolConsentForTask(
+  taskId: string,
+  options: ClearToolConsentForTaskOptions = {},
+) {
+  const request = pending[taskId];
+  if (!request) return;
+  if (options.turnId !== undefined && request.turnId !== options.turnId) return;
+  if (options.keepRequestIds?.has(request.requestId)) return;
+  delete pending[taskId];
+  localResolvers.delete(request.requestId);
+  clearConversationRequiresAction(taskId, request.requestId);
+}
+
 /** 提交决策：写回 runner 后立即从 pending 移除，让 inline 卡片淡出。 */
 export async function respondConsent(
   taskId: string,
@@ -87,14 +111,12 @@ export async function respondConsent(
   updatedInput?: ToolConsentUpdatedInput,
   codexDecision?: string,
 ): Promise<void> {
-  // 先乐观移除——用户已经做了选择，UI 不应再"卡"在原卡片上。
-  // 即便 invoke 失败，也只是 runner 没收到决策，下次会用同 id 再发一次。
-  if (pending[taskId]?.requestId === requestId) {
-    delete pending[taskId];
-  }
-  clearConversationRequiresAction(taskId, requestId);
   const localResolve = localResolvers.get(requestId);
   if (localResolve) {
+    if (pending[taskId]?.requestId === requestId) {
+      delete pending[taskId];
+    }
+    clearConversationRequiresAction(taskId, requestId);
     localResolvers.delete(requestId);
     localResolve(decision, message, updatedInput);
     return;
@@ -112,4 +134,8 @@ export async function respondConsent(
       ...(codexDecision ? { codexDecision } : {}),
     },
   });
+  if (pending[taskId]?.requestId === requestId) {
+    delete pending[taskId];
+  }
+  clearConversationRequiresAction(taskId, requestId);
 }

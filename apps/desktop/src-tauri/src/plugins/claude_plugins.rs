@@ -1,6 +1,6 @@
 use std::fs;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use super::paths::{
     claude_root_for, list_subdirs, sanitize_extension_name, PLUGINS_SUBDIR, PLUGIN_MANIFEST,
@@ -36,7 +36,10 @@ fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
     Some(m)
 }
 
-pub fn list_claude_plugins(app: &AppHandle, scope: &str) -> (Vec<ClaudePlugin>, Vec<String>) {
+pub fn list_claude_plugins<R: Runtime>(
+    app: &AppHandle<R>,
+    scope: &str,
+) -> (Vec<ClaudePlugin>, Vec<String>) {
     let mut warnings = Vec::new();
     // 一期 plugin 只看 user scope。
     if scope != SCOPE_USER {
@@ -78,8 +81,8 @@ pub fn list_claude_plugins(app: &AppHandle, scope: &str) -> (Vec<ClaudePlugin>, 
     (out, warnings)
 }
 
-pub fn set_claude_plugin_enabled(
-    app: &AppHandle,
+pub fn set_claude_plugin_enabled<R: Runtime>(
+    app: &AppHandle<R>,
     scope: &str,
     name: &str,
     enabled: bool,

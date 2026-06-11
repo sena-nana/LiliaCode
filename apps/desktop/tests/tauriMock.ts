@@ -207,7 +207,9 @@ let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let runtimeSnapshotOverrides: Record<string, Record<string, unknown>> = {};
 let nextChatSendError: string | null = null;
+let nextAgentInteractionResponseError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let clipboardTextSeq = 0;
@@ -518,7 +520,9 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  runtimeSnapshotOverrides = {};
   nextChatSendError = null;
+  nextAgentInteractionResponseError = null;
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
   clipboardTextSeq = 0;
@@ -599,8 +603,19 @@ export function setMockChatRunning(taskId: string, running: boolean) {
   chatRunning[taskId] = running;
 }
 
+export function setMockRuntimeSnapshot(
+  taskId: string,
+  snapshot: Record<string, unknown>,
+) {
+  runtimeSnapshotOverrides[taskId] = snapshot;
+}
+
 export function failNextMockChatSend(message: string) {
   nextChatSendError = message;
+}
+
+export function failNextMockAgentInteractionResponse(message: string) {
+  nextAgentInteractionResponseError = message;
 }
 
 export function emitWebviewDragDropEvent(payload: unknown) {
@@ -1520,6 +1535,30 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
+    case "chat_get_runtime_snapshot": {
+      const taskId = String(args.taskId);
+      const queuedCount = chatQueued[taskId]?.length ?? 0;
+      const running = chatRunning[taskId] === true;
+      return {
+        taskId,
+        phase: running && queuedCount > 0
+          ? "running_and_queued"
+          : running
+            ? "running"
+            : queuedCount > 0
+              ? "queued"
+              : "idle",
+        runtimeChannel: running ? agentInteractionSettings.agentRuntimeChannel : null,
+        backend: running ? activeBackend : null,
+        turnId: running ? currentChatTurnId(taskId) : null,
+        queuedCount,
+        pendingControlCount: 0,
+        pendingRollback: false,
+        pendingResetCleanup: false,
+        ...(runtimeSnapshotOverrides[taskId] ?? {}),
+      };
+    }
+
     case "plugins_overview":
       return {
         claudeUserSkills: [
@@ -1785,6 +1824,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     }
 
     case "chat_respond_agent_interaction":
+      if (nextAgentInteractionResponseError) {
+        const message = nextAgentInteractionResponseError;
+        nextAgentInteractionResponseError = null;
+        throw new Error(message);
+      }
       return undefined;
 
     case "chat_respond_title_update": {
@@ -2159,13 +2203,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
               taskId,
               sessionId: null,
               subtype: null,
+              rollback: {
+                rolledBack: true,
+                restoredContent: typeof payload.content === "string" ? payload.content : "",
+                restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+                removedEventIds: [onlyEvent.id],
+              },
             });
           });
           return {
-            rolledBack: true,
-            restoredContent: typeof payload.content === "string" ? payload.content : "",
-            restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
-            removedEventIds: [onlyEvent.id],
+            rolledBack: false,
+            restoredContent: "",
+            restoredAttachments: [],
+            removedEventIds: [],
           };
         }
         emitMockTimelineEvent(taskId, {
@@ -2188,6 +2238,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             taskId,
             sessionId: null,
             subtype: null,
+            rollback: null,
           });
         });
       }

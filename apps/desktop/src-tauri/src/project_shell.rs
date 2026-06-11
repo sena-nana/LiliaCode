@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::provider::CodexProfileSettings;
@@ -33,11 +33,11 @@ pub(crate) struct ProjectSettings {
 
 // ---------- Project / Git ----------
 
-pub(crate) fn load_project_settings(app: &AppHandle) -> ProjectSettings {
+pub(crate) fn load_project_settings<R: Runtime>(app: &AppHandle<R>) -> ProjectSettings {
     load_store_value(app, PROJECT_SETTINGS_KEY)
         // 兼容历史可能存的纯字符串。
         .or_else(|| {
-            load_store_value::<String>(app, PROJECT_SETTINGS_KEY).map(|clone_parent_dir| {
+            load_store_value::<String, _>(app, PROJECT_SETTINGS_KEY).map(|clone_parent_dir| {
                 ProjectSettings {
                     clone_parent_dir: Some(clone_parent_dir),
                     codex_defaults: None,
@@ -48,8 +48,8 @@ pub(crate) fn load_project_settings(app: &AppHandle) -> ProjectSettings {
         .unwrap_or_default()
 }
 
-pub(crate) fn save_project_settings(
-    app: &AppHandle,
+pub(crate) fn save_project_settings<R: Runtime>(
+    app: &AppHandle<R>,
     settings: &ProjectSettings,
 ) -> Result<(), String> {
     save_store_value(app, PROJECT_SETTINGS_KEY, settings)

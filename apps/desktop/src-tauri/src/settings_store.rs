@@ -1,17 +1,20 @@
 use serde::{de::DeserializeOwned, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
 pub(crate) const PROVIDER_STORE_FILE: &str = "provider-config.json";
 
-pub(crate) fn load_store_value<T: DeserializeOwned>(app: &AppHandle, key: &str) -> Option<T> {
+pub(crate) fn load_store_value<T: DeserializeOwned, R: Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+) -> Option<T> {
     let store = app.store(PROVIDER_STORE_FILE).ok()?;
     let value = store.get(key)?;
     serde_json::from_value::<T>(value).ok()
 }
 
-pub(crate) fn save_store_value<T: Serialize>(
-    app: &AppHandle,
+pub(crate) fn save_store_value<T: Serialize, R: Runtime>(
+    app: &AppHandle<R>,
     key: &str,
     value: &T,
 ) -> Result<(), String> {

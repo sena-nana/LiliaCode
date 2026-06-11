@@ -16,6 +16,7 @@ import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
 import {
   clearConversationActivityNotice,
   conversationActivityForTask,
+  hydrateConversationActivities,
 } from "../composables/useConversationActivity";
 import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
 import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
@@ -118,6 +119,16 @@ const unifiedConversations = computed<UnifiedSidebarConversation[]>(() => {
     .map(({ createdAt: _createdAt, pinned: _pinned, ...row }) => row);
 });
 
+const sidebarTaskIds = computed(() => {
+  if (isUnifiedMode.value) {
+    return unifiedConversations.value.map((item) => item.task.id);
+  }
+  return [
+    ...projects.value.flatMap((project) => listProjectConversations(project.id).map((task) => task.id)),
+    ...orphans.value.map((task) => task.id),
+  ];
+});
+
 watch(
   isUnifiedMode,
   (enabled) => {
@@ -136,6 +147,14 @@ watch(
   () => route.params.taskId,
   (taskId) => {
     if (typeof taskId === "string") clearConversationActivityNotice(taskId);
+  },
+  { immediate: true },
+);
+
+watch(
+  sidebarTaskIds,
+  (taskIds) => {
+    void hydrateConversationActivities(taskIds);
   },
   { immediate: true },
 );

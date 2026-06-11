@@ -1,4 +1,4 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use super::claude_mcp::{
     claude_mcp_config_path, list_claude_mcp_servers, runtime_claude_mcp_servers,
@@ -12,8 +12,8 @@ use super::types::{
     CodexRuntimeExtensions, PluginsOverview,
 };
 
-fn list_scoped_claude_skills(
-    app: &AppHandle,
+fn list_scoped_claude_skills<R: Runtime>(
+    app: &AppHandle<R>,
     project_cwd: Option<&str>,
 ) -> (Vec<ClaudeSkill>, Vec<ClaudeSkill>, Vec<String>) {
     let mut warnings = Vec::new();
@@ -28,7 +28,7 @@ fn list_scoped_claude_skills(
     (user_skills, project_skills, warnings)
 }
 
-pub fn overview(app: &AppHandle, project_cwd: Option<&str>) -> PluginsOverview {
+pub fn overview<R: Runtime>(app: &AppHandle<R>, project_cwd: Option<&str>) -> PluginsOverview {
     let (user_skills, project_skills, mut warnings) = list_scoped_claude_skills(app, project_cwd);
     let (user_plugins, w3) = list_claude_plugins(app, SCOPE_USER);
     warnings.extend(w3);
@@ -52,7 +52,10 @@ pub fn overview(app: &AppHandle, project_cwd: Option<&str>) -> PluginsOverview {
     }
 }
 
-pub fn runtime_extensions(app: &AppHandle, project_cwd: Option<&str>) -> AgentRuntimeExtensions {
+pub fn runtime_extensions<R: Runtime>(
+    app: &AppHandle<R>,
+    project_cwd: Option<&str>,
+) -> AgentRuntimeExtensions {
     let (user_skills, project_skills, mut claude_warnings) =
         list_scoped_claude_skills(app, project_cwd);
     let skills = user_skills

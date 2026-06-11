@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::agent_events::{AgentEventEffect, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_timeline;
@@ -87,7 +87,10 @@ pub(crate) fn normalize_timeline_text(text: &str) -> String {
 /// 直接落库 + emit 一条 timeline 输入，不做节流。
 /// 任何调用方（throttle、用户消息、错误事件）都共用同一条物理路径，
 /// 保证「emit 的 payload = DB 写入的快照」始终成立。
-pub(crate) fn persist_and_emit_input(app_handle: &AppHandle, input: AgentTimelineEventInput) {
+pub(crate) fn persist_and_emit_input<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    input: AgentTimelineEventInput,
+) {
     let store = app_handle.state::<LiliaStore>();
     match store
         .conn()
@@ -146,7 +149,11 @@ impl TimelineThrottle {
         }
     }
 
-    pub(crate) fn submit(&mut self, app_handle: &AppHandle, input: AgentTimelineEventInput) {
+    pub(crate) fn submit<R: Runtime>(
+        &mut self,
+        app_handle: &AppHandle<R>,
+        input: AgentTimelineEventInput,
+    ) {
         let now = Instant::now();
         // 机会式 flush：burst 结束后没有同 id 后续 submit 时，思考末尾帧靠这里
         // 跟着下一条 timeline 事件（典型是 tool_use）被带出去。
@@ -174,7 +181,7 @@ impl TimelineThrottle {
     }
 
     /// 把所有 `last_emit_at + interval <= now` 的 pending 项立即 emit。
-    fn flush_due_pending(&mut self, app_handle: &AppHandle, now: Instant) {
+    fn flush_due_pending<R: Runtime>(&mut self, app_handle: &AppHandle<R>, now: Instant) {
         let interval = self.interval;
         let due_ids: Vec<String> = self
             .pending
@@ -194,7 +201,7 @@ impl TimelineThrottle {
         }
     }
 
-    pub(crate) fn flush_all(&mut self, app_handle: &AppHandle) {
+    pub(crate) fn flush_all<R: Runtime>(&mut self, app_handle: &AppHandle<R>) {
         let drained: Vec<_> = self.pending.drain().collect();
         for (_id, input) in drained {
             persist_and_emit_input(app_handle, input);
@@ -202,8 +209,8 @@ impl TimelineThrottle {
     }
 }
 
-pub(crate) fn persist_and_emit_message_timeline_event(
-    app_handle: &AppHandle,
+pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
+    app_handle: &AppHandle<R>,
     message: &ChatMessage,
     backend: &str,
     turn_id: &str,
@@ -233,8 +240,8 @@ pub(crate) fn persist_and_emit_message_timeline_event(
     persist_and_emit_input(app_handle, input);
 }
 
-pub(crate) fn persist_and_emit_error_timeline_event(
-    app_handle: &AppHandle,
+pub(crate) fn persist_and_emit_error_timeline_event<R: Runtime>(
+    app_handle: &AppHandle<R>,
     task_id: &str,
     backend: &str,
     turn_id: Option<&str>,

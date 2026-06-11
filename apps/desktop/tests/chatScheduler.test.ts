@@ -17,7 +17,9 @@ import {
   replaceMockTimelineEvents,
   seedMockChatMessages,
   setMockActiveBackend,
+  setMockChatRunning,
   setMockComposerStateHandler,
+  setMockRuntimeSnapshot,
 } from "./tauriMock";
 import { createDraftTask } from "../src/services/tasksStore";
 import { createTodo, updateTodo } from "../src/services/todos";
@@ -387,10 +389,38 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       const input = view.getByRole("textbox") as HTMLElement;
       expect(input.textContent).toContain("先别发出去");
-      expect(input.textContent?.match(/README\.md/g)).toHaveLength(1);
+      expect(view.getByText("README.md")).toBeInTheDocument();
       expect(view.queryByText("Agent 已打断")).toBeNull();
     });
     expect(view.container.querySelectorAll(".chat-bubble")).toHaveLength(0);
+  });
+
+  it("重新进入任务页时会从 runtime snapshot 恢复运行态", async () => {
+    setMockChatRunning("t-002", true);
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_get_runtime_snapshot"))
+        .toBe(true);
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+    });
+  });
+
+  it("重新进入任务页时会把 abandoned runtime snapshot 显示为异常而不是运行态", async () => {
+    setMockRuntimeSnapshot("t-002", {
+      phase: "abandoned",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-old",
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.getByText(/上次 codex 运行未正常结束/)).toBeInTheDocument();
+      expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
+    });
   });
 
 

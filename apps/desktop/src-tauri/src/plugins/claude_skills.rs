@@ -1,6 +1,6 @@
 use std::fs;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use super::paths::{
     claude_root_for, ensure_dir, list_subdirs, sanitize_extension_name, SKILLS_SUBDIR, SKILL_FILE,
@@ -41,8 +41,8 @@ struct SkillFrontmatter {
     disabled: bool,
 }
 
-pub fn list_claude_skills(
-    app: &AppHandle,
+pub fn list_claude_skills<R: Runtime>(
+    app: &AppHandle<R>,
     scope: &str,
     project_cwd: Option<&str>,
 ) -> (Vec<ClaudeSkill>, Vec<String>) {
@@ -88,8 +88,8 @@ fn sanitize_skill_name(raw: &str) -> Result<String, String> {
     sanitize_extension_name(raw, "skill")
 }
 
-pub fn create_claude_skill(
-    app: &AppHandle,
+pub fn create_claude_skill<R: Runtime>(
+    app: &AppHandle<R>,
     scope: &str,
     project_cwd: Option<&str>,
     name: &str,
@@ -120,8 +120,8 @@ pub fn create_claude_skill(
     })
 }
 
-pub fn delete_claude_skill(
-    app: &AppHandle,
+pub fn delete_claude_skill<R: Runtime>(
+    app: &AppHandle<R>,
     scope: &str,
     project_cwd: Option<&str>,
     name: &str,
@@ -137,8 +137,8 @@ pub fn delete_claude_skill(
 }
 
 /// 切 `disabled` 字段：保留原有 frontmatter 其它键 + body 原样。
-pub fn set_claude_skill_enabled(
-    app: &AppHandle,
+pub fn set_claude_skill_enabled<R: Runtime>(
+    app: &AppHandle<R>,
     scope: &str,
     project_cwd: Option<&str>,
     name: &str,

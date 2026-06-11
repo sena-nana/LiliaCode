@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 pub(super) const CLAUDE_DIR: &str = ".claude";
 pub(super) const SKILLS_SUBDIR: &str = "skills";
@@ -15,7 +15,7 @@ pub(super) const BUILTIN_CLAUDE_MCP_SERVER: &str = "lilia";
 pub(super) const SCOPE_USER: &str = "user";
 pub(super) const SCOPE_PROJECT: &str = "project";
 
-pub(super) fn home_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(super) fn home_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     app.path()
         .home_dir()
         .map_err(|e| format!("无法获取用户主目录：{e}"))
@@ -23,7 +23,7 @@ pub(super) fn home_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// 给定 scope + 可选 project_cwd，算出 .claude/<sub> 的根目录。
 pub(super) fn claude_root_for(
-    app: &AppHandle,
+    app: &AppHandle<impl Runtime>,
     scope: &str,
     project_cwd: Option<&str>,
     sub: &str,

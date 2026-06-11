@@ -14,8 +14,11 @@ import {
   emitMockTimelineEvent,
   emitTauriEvent,
   mockInvoke,
+  replaceMockTimelineEvents,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
+  setMockChatRunning,
+  setMockRuntimeSnapshot,
 } from "./tauriMock";
 import {
   installConversationActivityBridge,
@@ -373,6 +376,97 @@ describe("SecondaryPanel project chat navigation", () => {
     await waitFor(() => {
       expect(within(row).getByLabelText("对话完成")).toHaveClass(
         "sb-tree__activity--completed",
+      );
+    });
+  });
+
+  it("统一列表冷启动时会从 runtime snapshot 恢复运行中状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    setMockChatRunning("t-003", true);
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_get_runtime_snapshot"))
+        .toBe(true);
+      expect(within(row).getByLabelText("对话中")).toHaveClass(
+        "sb-tree__activity--running",
+      );
+    });
+  });
+
+  it("统一列表冷启动时会把 abandoned runtime snapshot 显示为错误状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    setMockRuntimeSnapshot("t-003", {
+      phase: "abandoned",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-old",
+    });
+
+    const view = await renderSecondaryPanel();
+    const row = getConversationRow(view, "整理窗口快捷键");
+
+    await waitFor(() => {
+      expect(within(row).getByLabelText("发生错误")).toHaveClass(
+        "sb-tree__activity--error",
+      );
+    });
+  });
+
+  it("统一列表冷启动时会从持久化 timeline 恢复等待交互状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    replaceMockTimelineEvents("t-003", [{
+      id: "tl-pending-ask",
+      taskId: "t-003",
+      turnId: "turn-ask",
+      backend: "codex",
+      kind: "ask_user",
+      status: "requires_action",
+      title: "需要确认",
+      summary: "继续？",
+      payload: {
+        requestId: "ask-1",
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    }]);
+
+    const askView = await renderSecondaryPanel();
+    const askRow = getConversationRow(askView, "整理窗口快捷键");
+    await waitFor(() => {
+      expect(within(askRow).getByLabelText("等待交互")).toHaveClass(
+        "sb-tree__activity--requires_action",
+      );
+    });
+  });
+
+  it("统一列表冷启动时会从持久化 timeline 恢复错误状态", async () => {
+    useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    resetConversationActivity();
+    replaceMockTimelineEvents("t-003", [{
+      id: "tl-error-hydrated",
+      taskId: "t-003",
+      turnId: "turn-error",
+      backend: "codex",
+      kind: "error",
+      status: "error",
+      title: "错误",
+      summary: "Agent 发生错误",
+      payload: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    }]);
+
+    const errorView = await renderSecondaryPanel();
+    const errorRow = getConversationRow(errorView, "整理窗口快捷键");
+    await waitFor(() => {
+      expect(within(errorRow).getByLabelText("发生错误")).toHaveClass(
+        "sb-tree__activity--error",
       );
     });
   });

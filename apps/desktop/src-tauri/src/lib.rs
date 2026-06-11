@@ -1,4 +1,4 @@
-use tauri::{utils::config::Color, Manager, WindowEvent};
+use tauri::{utils::config::Color, Manager, Runtime, WindowEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 pub mod agent_events;
@@ -43,6 +43,89 @@ fn ping() -> &'static str {
     "pong"
 }
 
+fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(chat_store) = app.try_state::<chat::state::ChatStore>() {
+        if let Some(lilia_store) = app.try_state::<store::LiliaStore>() {
+            if let Ok(conn) = lilia_store.conn() {
+                let restored = chat::state::restore_active_runtime_sessions(&conn, &chat_store);
+                for persisted in restored {
+                    let app_handle = app.clone();
+                    std::thread::spawn(move || match persisted.turn.runtime_channel.as_str() {
+                        RUNTIME_CHANNEL_NANOBOT => {
+                            if let Err(err) = chat::nanobot_runtime::resume_supervised_turn(
+                                app_handle.clone(),
+                                persisted.clone(),
+                            ) {
+                                let store = app_handle.state::<chat::state::ChatStore>();
+                                store
+                                    .running_tasks
+                                    .lock()
+                                    .unwrap()
+                                    .remove(&persisted.task_id);
+                                chat::state::clear_running_handles(&store, &persisted.task_id);
+                                chat::state::clear_runtime_state_for_app(
+                                    &app_handle,
+                                    &persisted.task_id,
+                                );
+                                chat::timeline_sink::persist_and_emit_error_timeline_event(
+                                    &app_handle,
+                                    &persisted.task_id,
+                                    &persisted.turn.backend,
+                                    Some(&persisted.turn.turn_id),
+                                    format!("恢复 NanoBot runtime 失败：{err}"),
+                                );
+                            }
+                        }
+                        _ => {
+                            if let Err(err) = chat::runner::resume_persisted_node_agent_runner(
+                                app_handle.clone(),
+                                persisted.clone(),
+                            ) {
+                                let store = app_handle.state::<chat::state::ChatStore>();
+                                store
+                                    .running_tasks
+                                    .lock()
+                                    .unwrap()
+                                    .remove(&persisted.task_id);
+                                chat::state::clear_running_handles(&store, &persisted.task_id);
+                                chat::state::clear_runtime_state_for_app(
+                                    &app_handle,
+                                    &persisted.task_id,
+                                );
+                                chat::timeline_sink::persist_and_emit_error_timeline_event(
+                                    &app_handle,
+                                    &persisted.task_id,
+                                    &persisted.turn.backend,
+                                    Some(&persisted.turn.turn_id),
+                                    format!("恢复 builtin runtime 失败：{err}"),
+                                );
+                            }
+                        }
+                    });
+                }
+                if let Ok(task_ids) = chat::state::list_pending_turn_task_ids(&conn) {
+                    for task_id in task_ids {
+                        let app_handle = app.clone();
+                        std::thread::spawn(move || {
+                            if let Err(err) =
+                                chat::runner::resume_or_dispatch_persisted_pending_turn(
+                                    app_handle.clone(),
+                                    task_id.clone(),
+                                )
+                            {
+                                eprintln!(
+                                    "[chat-runtime] restore persisted queued turn failed for {}: {}",
+                                    task_id, err
+                                );
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -73,6 +156,7 @@ pub fn run() {
             match store::LiliaStore::new(&home) {
                 Ok(s) => {
                     app.manage(s);
+                    restore_runtime_sessions_on_startup(app.handle());
                 }
                 Err(err) => {
                     eprintln!("[lilia-store] init failed at {}: {err}", home.display());
@@ -110,6 +194,7 @@ pub fn run() {
             chat::title_update::chat_respond_title_update,
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,
+            chat::commands::chat_get_runtime_snapshot,
             chat::commands::chat_set_composer_state,
             chat::commands::chat_reset_session,
             claude_history::claude_session_search,

@@ -13,11 +13,13 @@ import { setAgentInteractionSettings } from "../src/services/chat";
 import {
   emitTauriEvent,
   emitMockTimelineEvent,
+  failNextMockAgentInteractionResponse,
   mockInvoke,
   replaceMockTimelineEvents,
   setMockActiveBackend,
   setMockChatRunning,
   setMockComposerStateHandler,
+  setMockRuntimeSnapshot,
 } from "./tauriMock";
 
 const askUserSpec: AskUserSpec = {
@@ -234,6 +236,29 @@ function emitToolConsentRequest(taskId: string) {
       toolUseId: null,
     },
   });
+}
+
+function persistedToolConsentEvent() {
+  return {
+    id: "tool-card-t-002",
+    taskId: "t-002",
+    turnId: "turn-tool",
+    backend: "claude",
+    kind: "file_change",
+    status: "requires_action",
+    title: "Write",
+    summary: "src/main.ts",
+    payload: {
+      interaction: "tool_consent",
+      requestId: "tool-t-002",
+      toolName: "Write",
+      input: { file_path: "src/main.ts" },
+    },
+    createdAt: 10_000,
+    updatedAt: 10_000,
+    turnSeq: 1,
+    intraTurnOrder: 0,
+  } as const;
 }
 
 function emitUnifiedToolConsentRequest(taskId: string) {
@@ -502,6 +527,218 @@ describe("chat AskUser prompt", () => {
       }, undefined);
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+  });
+
+  it("重进任务页后会从持久化 timeline 恢复 ask_user 卡片", async () => {
+    replaceMockTimelineEvents("t-002", [{
+      id: "ask-card-t-002",
+      taskId: "t-002",
+      turnId: "turn-ask",
+      backend: "claude",
+      kind: "ask_user",
+      status: "requires_action",
+      title: "Claude 想确认一下",
+      summary: askUserSpec.questions[0]?.question ?? "",
+      payload: {
+        backend: "claude",
+        interaction: "ask_user",
+        requestId: "ask-t-002",
+        questions: askUserSpec.questions,
+        spec: askUserSpec,
+      },
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    }]);
+
+    const view = await renderTaskDetail();
+
+    const prompt = await view.findByRole("region", { name: "Claude 想确认一下" });
+    expect(prompt).toHaveClass("composer-inline");
+
+    await fireEvent.click(view.getByRole("radio", { name: "B" }));
+    await fireEvent.click(view.getByRole("button", { name: "完成" }));
+
+    await expectAskUserResponse("t-002");
+  });
+
+  it("重进任务页后会从持久化 timeline 恢复工具授权卡片", async () => {
+    replaceMockTimelineEvents("t-002", [persistedToolConsentEvent()]);
+
+    const view = await renderTaskDetail();
+
+    await view.findByRole("alert");
+    expect(view.container.querySelector(".chat-composer .composer-inline--tool"))
+      .toBeInTheDocument();
+
+    const input = await view.findByPlaceholderText("输入拒绝理由，Enter 拒绝此次调用");
+    await fireEvent.update(input, "先不要写这个文件");
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+        taskId: "t-002",
+        requestId: "tool-t-002",
+        kind: "tool_consent",
+        result: {
+          taskId: "t-002",
+          requestId: "tool-t-002",
+          decision: "deny",
+          message: "先不要写这个文件",
+        },
+      }, undefined);
+    });
+  });
+
+  it("恢复出的工具授权响应失败后保留卡片可再次操作", async () => {
+    replaceMockTimelineEvents("t-002", [persistedToolConsentEvent()]);
+    failNextMockAgentInteractionResponse("runtime unavailable");
+
+    const view = await renderTaskDetail();
+
+    await view.findByRole("alert");
+    const input = await view.findByPlaceholderText("输入拒绝理由，Enter 拒绝此次调用");
+    await fireEvent.update(input, "先不要写这个文件");
+    await fireEvent.click(view.getByRole("button", { name: "修改" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", expect.objectContaining({
+        taskId: "t-002",
+        requestId: "tool-t-002",
+        kind: "tool_consent",
+      }), undefined);
+    });
+    expect(view.container.querySelector(".chat-composer .composer-inline--tool"))
+      .toBeInTheDocument();
+  });
+
+  it("重进任务页后会从持久化 timeline 恢复 Codex MCP 确认卡片", async () => {
+    replaceMockTimelineEvents("t-002", [{
+      id: "mcp-card-t-002",
+      taskId: "t-002",
+      turnId: "turn-mcp",
+      backend: "codex",
+      kind: "mcp",
+      status: "requires_action",
+      title: "Linear MCP",
+      summary: "选择项目",
+      payload: {
+        interaction: "mcp_elicitation",
+        requestId: "mcp-t-002",
+        threadId: "thread-1",
+        turnId: "turn-mcp",
+        serverName: "linear",
+        mode: "form",
+        message: "选择项目",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            project: {
+              type: "string",
+              title: "项目",
+              enum: ["A", "B"],
+            },
+          },
+          required: ["project"],
+        },
+      },
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    }]);
+
+    const view = await renderCodexTaskDetail();
+
+    const prompt = await view.findByRole("region", { name: "MCP 确认" });
+    const promptView = within(prompt);
+    await fireEvent.update(promptView.getByRole("combobox"), "B");
+    await fireEvent.click(promptView.getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+        taskId: "t-002",
+        requestId: "mcp-t-002",
+        kind: "mcp_elicitation",
+        result: {
+          action: "accept",
+          content: { project: "B" },
+        },
+      }, undefined);
+    });
+  });
+
+  it("重进任务页后会从持久化 timeline 恢复 Codex 权限确认卡片", async () => {
+    replaceMockTimelineEvents("t-002", [{
+      id: "permission-card-t-002",
+      taskId: "t-002",
+      turnId: "turn-permission",
+      backend: "codex",
+      kind: "diagnostic",
+      status: "requires_action",
+      title: "权限确认",
+      summary: "need network",
+      payload: {
+        interaction: "permission_approval",
+        requestId: "permission-t-002",
+        threadId: "thread-1",
+        turnId: "turn-permission",
+        itemId: "item-1",
+        startedAtMs: 123,
+        cwd: "C:/repo",
+        reason: "need network",
+        permissions: {
+          network: { domains: [{ domain: "example.com" }] },
+        },
+      },
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    }]);
+
+    const view = await renderCodexTaskDetail();
+
+    const prompt = await view.findByRole("region", { name: "权限确认" });
+    await fireEvent.click(within(prompt).getByRole("button", { name: "同意" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+        taskId: "t-002",
+        requestId: "permission-t-002",
+        kind: "permission_approval",
+        result: {
+          permissions: {
+            network: { domains: [{ domain: "example.com" }] },
+          },
+          scope: "turn",
+        },
+      }, undefined);
+    });
+  });
+
+  it("runtime abandoned 时清理恢复出的 pending 交互并允许重新发送", async () => {
+    replaceMockTimelineEvents("t-002", [persistedToolConsentEvent()]);
+    setMockRuntimeSnapshot("t-002", {
+      phase: "abandoned",
+      runtimeChannel: "nanobot",
+      backend: "codex",
+      turnId: "turn-tool",
+    });
+
+    const view = await renderTaskDetail();
+
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer .composer-inline--tool"))
+        .not.toBeInTheDocument();
+    });
+    await setComposerText(view, "继续");
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
+    });
   });
 
   it("统一 Codex 命令确认可编辑命令并回写 updatedInput", async () => {

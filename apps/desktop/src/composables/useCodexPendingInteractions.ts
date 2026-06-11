@@ -41,6 +41,11 @@ function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
 }
 
+export interface ClearCodexPendingInteractionsForTaskOptions {
+  turnId?: string | null;
+  keepRequestIds?: Set<string>;
+}
+
 function taskBucket(taskId: string): Record<string, PendingCodexInteraction> {
   if (!pending[taskId]) pending[taskId] = {};
   return pending[taskId];
@@ -110,6 +115,26 @@ export function handleCodexPendingInteractionRequest(req: AgentInteractionReques
   return true;
 }
 
+export function hydrateCodexPendingInteraction(interaction: PendingCodexInteraction) {
+  taskBucket(interaction.taskId)[interaction.requestId] = interaction;
+  markConversationRequiresAction(interaction.taskId, interaction.requestId);
+}
+
+export function clearCodexPendingInteractionsForTask(
+  taskId: string,
+  options: ClearCodexPendingInteractionsForTaskOptions = {},
+) {
+  const bucket = pending[taskId];
+  if (!bucket) return;
+  for (const [requestId, interaction] of Object.entries(bucket)) {
+    if (options.turnId !== undefined && interaction.turnId !== options.turnId) continue;
+    if (options.keepRequestIds?.has(requestId)) continue;
+    delete bucket[requestId];
+    clearConversationRequiresAction(taskId, requestId);
+  }
+  if (Object.keys(bucket).length === 0) delete pending[taskId];
+}
+
 export function usePendingCodexInteractionsForTask(
   taskId: TaskIdSource,
 ): ComputedRef<PendingCodexInteraction[]> {
@@ -124,13 +149,13 @@ export async function respondCodexMcpElicitation(
   requestId: string,
   result: CodexMcpElicitationResult,
 ): Promise<void> {
-  clearPending(taskId, requestId);
   await respondAgentInteraction({
     taskId,
     requestId,
     kind: "mcp_elicitation",
     result,
   } satisfies AgentInteractionResponse);
+  clearPending(taskId, requestId);
 }
 
 export async function respondCodexPermissionApproval(
@@ -138,11 +163,11 @@ export async function respondCodexPermissionApproval(
   requestId: string,
   result: CodexPermissionApprovalResult,
 ): Promise<void> {
-  clearPending(taskId, requestId);
   await respondAgentInteraction({
     taskId,
     requestId,
     kind: "permission_approval",
     result,
   } satisfies AgentInteractionResponse);
+  clearPending(taskId, requestId);
 }
