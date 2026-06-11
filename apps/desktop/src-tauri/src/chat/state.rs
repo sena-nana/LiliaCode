@@ -1,17 +1,17 @@
-use std::collections::{HashMap, VecDeque};
-use std::io::ErrorKind;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use tauri::{AppHandle, Manager};
+use serde_json::Value as JsonValue;
+use tauri::{AppHandle, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatWorkflow,
+    ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatRollbackResult,
+    ChatRuntimeSnapshot, ChatWorkflow,
 };
 use crate::store::LiliaStore;
 use crate::{
@@ -19,6 +19,7 @@ use crate::{
     RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
 };
 
+#[derive(Debug, Clone)]
 pub(crate) struct PendingChatTurn {
     pub(crate) content: String,
     pub(crate) composer: ChatComposerState,
@@ -29,14 +30,30 @@ pub(crate) struct PendingChatTurn {
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
     pub(crate) turn_id: String,
+    pub(crate) runtime_channel: String,
     pub(crate) guide_id: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct RunningTurn {
     pub(crate) turn_id: String,
     pub(crate) backend: String,
+    pub(crate) runtime_channel: String,
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeControlEvent {
+    pub(crate) name: String,
+    pub(crate) attributes: BTreeMap<String, String>,
+    pub(crate) payload: Option<JsonValue>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeControlDelivery {
+    pub(crate) persisted_id: Option<i64>,
+    pub(crate) event: RuntimeControlEvent,
+}
+
 // ---------- 进程内状态 ----------
 
 #[derive(Default)]
@@ -47,12 +64,13 @@ pub(crate) struct ChatStore {
     pub(crate) running_tasks: Mutex<HashMap<String, bool>>,
     pub(crate) pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
     pub(crate) running_turns: Mutex<HashMap<String, RunningTurn>>,
-    pub(crate) running_children: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
+    pub(crate) running_process_sessions: Mutex<HashMap<String, String>>,
     pub(crate) interrupted_turns: Mutex<HashMap<String, RunningTurn>>,
     pub(crate) reset_turns: Mutex<HashMap<String, RunningTurn>>,
-    /// 仍在运行的 runner 子进程 stdin。key = task_id，turn 结束时移除（Drop 即关 stdin）。
-    /// 让统一 interaction response 命令能把决策写回给 runner。
-    pub(crate) running_stdins: Mutex<HashMap<String, Arc<Mutex<ChildStdin>>>>,
+    pub(crate) runtime_control_events: Mutex<HashMap<String, Vec<RuntimeControlEvent>>>,
+    pub(crate) pending_rollbacks: Mutex<HashMap<String, ChatRollbackResult>>,
+    pub(crate) pending_reset_cleanups: Mutex<HashSet<String>>,
+    pub(crate) runtime_epoch: Mutex<Option<String>>,
 }
 
 pub(crate) fn normalize_runtime_channel(value: &str) -> &'static str {
@@ -67,6 +85,310 @@ pub(crate) fn session_key(runtime_channel: &str, backend: &str, task_id: &str) -
         "{}:{backend}:{task_id}",
         normalize_runtime_channel(runtime_channel)
     )
+}
+
+pub(crate) fn runtime_epoch(store: &ChatStore) -> String {
+    let mut epoch = store.runtime_epoch.lock().unwrap();
+    if let Some(epoch) = epoch.as_ref() {
+        return epoch.clone();
+    }
+    let next = Uuid::new_v4().to_string();
+    *epoch = Some(next.clone());
+    next
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct PersistedRuntimeState {
+    pub(crate) task_id: String,
+    pub(crate) turn: RunningTurn,
+    pub(crate) phase: String,
+    pub(crate) process_session_id: Option<String>,
+    pub(crate) runtime_epoch: String,
+    pub(crate) context_json: Option<String>,
+}
+
+pub(crate) fn persist_runtime_state(
+    conn: &Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+    turn: &RunningTurn,
+    phase: &str,
+    process_session_id: Option<&str>,
+    context_json: Option<&str>,
+) -> Result<(), String> {
+    let phase = match phase {
+        "running" | "interrupted_pending_finish" | "reset_pending_finish" => phase,
+        _ => return Err(format!("未知 runtime phase: {phase}")),
+    };
+    conn.execute(
+        r#"INSERT INTO task_runtime_states
+           (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, context_json, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+           ON CONFLICT(task_id) DO UPDATE SET
+             turn_id = excluded.turn_id,
+             backend = excluded.backend,
+             runtime_channel = excluded.runtime_channel,
+             phase = excluded.phase,
+             process_session_id = COALESCE(excluded.process_session_id, task_runtime_states.process_session_id),
+             runtime_epoch = excluded.runtime_epoch,
+             context_json = COALESCE(excluded.context_json, task_runtime_states.context_json),
+             updated_at = excluded.updated_at"#,
+        params![
+            task_id,
+            turn.turn_id,
+            normalize_backend(&turn.backend),
+            normalize_runtime_channel(&turn.runtime_channel),
+            phase,
+            process_session_id.map(str::trim).filter(|value| !value.is_empty()),
+            runtime_epoch(chat_store),
+            context_json.map(str::trim).filter(|value| !value.is_empty()),
+            now_millis() as i64
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 runtime state 失败：{e}"))
+}
+
+pub(crate) fn clear_runtime_state(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM task_runtime_control_events WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map_err(|e| format!("清理 runtime control events 失败：{e}"))?;
+    conn.execute(
+        "DELETE FROM task_runtime_states WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("清理 runtime state 失败：{e}"))
+}
+
+pub(crate) fn clear_runtime_finalization(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM task_runtime_finalizations WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("清理 runtime finalization 失败：{e}"))
+}
+
+pub(crate) fn clear_runtime_finalization_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+) -> Result<(), String> {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = store.conn()?;
+    clear_runtime_finalization(&conn, task_id)
+}
+
+pub(crate) fn load_runtime_state(
+    conn: &Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+) -> Result<Option<PersistedRuntimeState>, String> {
+    let epoch = runtime_epoch(chat_store);
+    conn.query_row(
+        r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+                  , context_json
+           FROM task_runtime_states
+           WHERE task_id = ?1 AND runtime_epoch = ?2"#,
+        params![task_id, epoch],
+        |row| {
+            Ok(PersistedRuntimeState {
+                task_id: row.get(0)?,
+                turn: RunningTurn {
+                    turn_id: row.get(1)?,
+                    backend: row.get(2)?,
+                    runtime_channel: row.get(3)?,
+                },
+                phase: row.get(4)?,
+                process_session_id: row.get(5)?,
+                runtime_epoch: row.get(6)?,
+                context_json: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("读取 runtime state 失败：{e}"))
+}
+
+pub(crate) fn load_any_runtime_state(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<PersistedRuntimeState>, String> {
+    conn.query_row(
+        r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+                  , context_json
+           FROM task_runtime_states
+           WHERE task_id = ?1
+           ORDER BY updated_at DESC
+           LIMIT 1"#,
+        params![task_id],
+        |row| {
+            Ok(PersistedRuntimeState {
+                task_id: row.get(0)?,
+                turn: RunningTurn {
+                    turn_id: row.get(1)?,
+                    backend: row.get(2)?,
+                    runtime_channel: row.get(3)?,
+                },
+                phase: row.get(4)?,
+                process_session_id: row.get(5)?,
+                runtime_epoch: row.get(6)?,
+                context_json: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("读取 runtime state 失败：{e}"))
+}
+
+pub(crate) fn list_runtime_states(conn: &Connection) -> Result<Vec<PersistedRuntimeState>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+                      , context_json
+               FROM task_runtime_states
+               ORDER BY updated_at DESC"#,
+        )
+        .map_err(|e| format!("读取 runtime states 失败：{e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PersistedRuntimeState {
+                task_id: row.get(0)?,
+                turn: RunningTurn {
+                    turn_id: row.get(1)?,
+                    backend: row.get(2)?,
+                    runtime_channel: row.get(3)?,
+                },
+                phase: row.get(4)?,
+                process_session_id: row.get(5)?,
+                runtime_epoch: row.get(6)?,
+                context_json: row.get(7)?,
+            })
+        })
+        .map_err(|e| format!("读取 runtime states 失败：{e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("读取 runtime states 失败：{e}"))
+}
+
+pub(crate) fn persist_runtime_state_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    chat_store: &ChatStore,
+    task_id: &str,
+    turn: &RunningTurn,
+    phase: &str,
+    process_session_id: Option<&str>,
+    context_json: Option<&str>,
+) {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return;
+    };
+    if let Err(err) = store.conn().and_then(|conn| {
+        persist_runtime_state(
+            &conn,
+            chat_store,
+            task_id,
+            turn,
+            phase,
+            process_session_id,
+            context_json,
+        )
+    }) {
+        eprintln!("[chat-runtime] persist runtime state failed: {err}");
+    }
+}
+
+pub(crate) fn clear_runtime_state_for_app<R: Runtime>(app: &AppHandle<R>, task_id: &str) {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return;
+    };
+    if let Err(err) = store
+        .conn()
+        .and_then(|conn| clear_runtime_state(&conn, task_id))
+    {
+        eprintln!("[chat-runtime] clear runtime state failed: {err}");
+    }
+}
+
+pub(crate) fn persisted_runtime_state_is_active(
+    persisted: &PersistedRuntimeState,
+    store: &ChatStore,
+) -> bool {
+    if let Some(process_session_id) = persisted.process_session_id.as_deref() {
+        return super::runner::process_session_is_active(process_session_id);
+    }
+    load_runtime_state_shares_current_epoch(persisted, store)
+}
+
+fn load_runtime_state_shares_current_epoch(
+    persisted: &PersistedRuntimeState,
+    store: &ChatStore,
+) -> bool {
+    persisted.runtime_epoch == runtime_epoch(store)
+}
+
+pub(crate) fn restore_active_runtime_sessions(
+    conn: &Connection,
+    store: &ChatStore,
+) -> Vec<PersistedRuntimeState> {
+    let Ok(states) = list_runtime_states(conn) else {
+        return Vec::new();
+    };
+    let mut restored = Vec::new();
+    for persisted in states {
+        if !persisted_runtime_state_is_active(&persisted, store) {
+            continue;
+        }
+        let Some(process_session_id) = persisted.process_session_id.clone() else {
+            continue;
+        };
+        store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .insert(persisted.task_id.clone(), true);
+        store
+            .running_turns
+            .lock()
+            .unwrap()
+            .insert(persisted.task_id.clone(), persisted.turn.clone());
+        store
+            .running_process_sessions
+            .lock()
+            .unwrap()
+            .insert(persisted.task_id.clone(), process_session_id);
+        restored.push(persisted);
+    }
+    restored
+}
+
+pub(crate) fn prepare_pending_turn_recovery(
+    conn: &Connection,
+    store: &ChatStore,
+    task_id: &str,
+) -> Result<bool, String> {
+    let Some(persisted) = load_any_runtime_state(conn, task_id)? else {
+        return Ok(true);
+    };
+    if persisted_runtime_state_is_active(&persisted, store) {
+        return Ok(false);
+    }
+    clear_runtime_state(conn, task_id)?;
+    Ok(true)
+}
+
+pub(crate) fn take_next_recoverable_pending_turn(
+    conn: &Connection,
+    store: &ChatStore,
+    task_id: &str,
+) -> Result<Option<PendingChatTurn>, String> {
+    if !prepare_pending_turn_recovery(conn, store, task_id)? {
+        return Ok(None);
+    }
+    take_next_persisted_pending_turn(conn, task_id)
 }
 
 pub(crate) fn load_persisted_resume_session_id(
@@ -173,6 +495,30 @@ pub(crate) fn clear_agent_sessions_for_task(
     .map_err(|e| format!("清理 agent session checkpoint 失败：{e}"))
 }
 
+pub(crate) fn clear_task_runtime_state_for_reset<R: Runtime>(
+    app: &AppHandle<R>,
+    chat_store: &ChatStore,
+    task_id: &str,
+) {
+    let mut sessions = chat_store.sdk_sessions.lock().unwrap();
+    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT] {
+        sessions.remove(&session_key(runtime_channel, BACKEND_CLAUDE, task_id));
+        sessions.remove(&session_key(runtime_channel, BACKEND_CODEX, task_id));
+    }
+    drop(sessions);
+
+    if let Some(store) = app.try_state::<LiliaStore>() {
+        if let Err(err) = store.conn().and_then(|conn| {
+            clear_agent_sessions_for_task(&conn, task_id)?;
+            clear_runtime_state(&conn, task_id)?;
+            clear_runtime_finalization(&conn, task_id)?;
+            agent_timeline::clear(&conn, task_id).map(|_| ())
+        }) {
+            eprintln!("[agent-timeline] clear on reset failed: {err}");
+        }
+    }
+}
+
 pub(crate) fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -263,7 +609,175 @@ pub(crate) fn default_composer(task_id: &str) -> ChatComposerState {
     }
 }
 
-pub(crate) fn queue_pending_turn(
+fn serialize_pending_turn_field<T: serde::Serialize>(
+    value: &T,
+    field: &str,
+) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| format!("pending turn {field} 序列化失败：{e}"))
+}
+
+fn deserialize_pending_turn_field<T: serde::de::DeserializeOwned>(
+    text: &str,
+    field: &str,
+) -> Result<T, String> {
+    serde_json::from_str(text).map_err(|e| format!("pending turn {field} 解析失败：{e}"))
+}
+
+pub(crate) fn persist_pending_turn(
+    conn: &Connection,
+    task_id: &str,
+    turn: &PendingChatTurn,
+) -> Result<(), String> {
+    let composer_json = serialize_pending_turn_field(&turn.composer, "composer")?;
+    let attachments_json = serialize_pending_turn_field(&turn.attachments, "attachments")?;
+    let workflow_json = turn
+        .workflow
+        .as_ref()
+        .map(|workflow| serialize_pending_turn_field(workflow, "workflow"))
+        .transpose()?;
+    let message_json = serialize_pending_turn_field(&turn.message, "message")?;
+    conn.execute(
+        r#"INSERT INTO task_pending_turns
+           (task_id, content, composer_json, project_cwd, attachments_json, workflow_json,
+            message_json, turn_id, runtime_channel, guide_id, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+        params![
+            task_id,
+            turn.content,
+            composer_json,
+            turn.project_cwd,
+            attachments_json,
+            workflow_json,
+            message_json,
+            turn.turn_id,
+            normalize_runtime_channel(&turn.runtime_channel),
+            turn.guide_id,
+            now_millis() as i64
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 pending turn 失败：{e}"))
+}
+
+pub(crate) fn count_pending_turns(conn: &Connection, task_id: &str) -> Result<usize, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM task_pending_turns WHERE task_id = ?1",
+        params![task_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count.max(0) as usize)
+    .map_err(|e| format!("统计 pending turns 失败：{e}"))
+}
+
+fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn), String> {
+    let id: i64 = row
+        .get(0)
+        .map_err(|e| format!("读取 pending turn id 失败：{e}"))?;
+    let content: String = row
+        .get(1)
+        .map_err(|e| format!("读取 pending turn content 失败：{e}"))?;
+    let composer_json: String = row
+        .get(2)
+        .map_err(|e| format!("读取 pending turn composer 失败：{e}"))?;
+    let project_cwd: String = row
+        .get(3)
+        .map_err(|e| format!("读取 pending turn cwd 失败：{e}"))?;
+    let attachments_json: String = row
+        .get(4)
+        .map_err(|e| format!("读取 pending turn attachments 失败：{e}"))?;
+    let workflow_json: Option<String> = row
+        .get(5)
+        .map_err(|e| format!("读取 pending turn workflow 失败：{e}"))?;
+    let message_json: String = row
+        .get(6)
+        .map_err(|e| format!("读取 pending turn message 失败：{e}"))?;
+    let turn_id: String = row
+        .get(7)
+        .map_err(|e| format!("读取 pending turn turn_id 失败：{e}"))?;
+    let runtime_channel: String = row
+        .get(8)
+        .map_err(|e| format!("读取 pending turn runtime_channel 失败：{e}"))?;
+    let guide_id: Option<String> = row
+        .get(9)
+        .map_err(|e| format!("读取 pending turn guide_id 失败：{e}"))?;
+    Ok((
+        id,
+        PendingChatTurn {
+            content,
+            composer: deserialize_pending_turn_field(&composer_json, "composer")?,
+            project_cwd,
+            attachments: deserialize_pending_turn_field(&attachments_json, "attachments")?,
+            workflow: workflow_json
+                .as_deref()
+                .map(|text| deserialize_pending_turn_field(text, "workflow"))
+                .transpose()?,
+            message: deserialize_pending_turn_field(&message_json, "message")?,
+            turn_id,
+            runtime_channel,
+            guide_id,
+        },
+    ))
+}
+
+pub(crate) fn take_next_persisted_pending_turn(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<PendingChatTurn>, String> {
+    let row = conn
+        .query_row(
+            r#"SELECT id, content, composer_json, project_cwd, attachments_json, workflow_json,
+                      message_json, turn_id, runtime_channel, guide_id
+               FROM task_pending_turns
+               WHERE task_id = ?1
+               ORDER BY id ASC
+               LIMIT 1"#,
+            params![task_id],
+            |row| {
+                row_to_pending_turn(row).map_err(|err| rusqlite::Error::InvalidParameterName(err))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("读取 pending turn 失败：{e}"))?;
+    let Some((id, turn)) = row else {
+        return Ok(None);
+    };
+    conn.execute("DELETE FROM task_pending_turns WHERE id = ?1", params![id])
+        .map_err(|e| format!("删除 pending turn 失败：{e}"))?;
+    Ok(Some(turn))
+}
+
+pub(crate) fn clear_persisted_pending_turns(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT guide_id
+               FROM task_pending_turns
+               WHERE task_id = ?1
+               ORDER BY id ASC"#,
+        )
+        .map_err(|e| format!("prepare pending turn guide ids 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| format!("query pending turn guide ids 失败：{e}"))?;
+    let mut guide_ids = Vec::new();
+    for row in rows {
+        if let Some(guide_id) = row.map_err(|e| format!("读取 pending turn guide_id 失败：{e}"))?
+        {
+            guide_ids.push(guide_id);
+        }
+    }
+    conn.execute(
+        "DELETE FROM task_pending_turns WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map_err(|e| format!("清理 pending turns 失败：{e}"))?;
+    Ok(guide_ids)
+}
+
+pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
+    app: &AppHandle<R>,
     store: &ChatStore,
     task_id: &str,
     content: String,
@@ -273,11 +787,10 @@ pub(crate) fn queue_pending_turn(
     workflow: Option<ChatWorkflow>,
     message: ChatMessage,
     turn_id: String,
+    runtime_channel: String,
     guide_id: Option<String>,
 ) -> usize {
-    let mut pending = store.pending_turns.lock().unwrap();
-    let queue = pending.entry(task_id.to_string()).or_default();
-    queue.push_back(PendingChatTurn {
+    let turn = PendingChatTurn {
         content,
         composer,
         project_cwd,
@@ -285,8 +798,22 @@ pub(crate) fn queue_pending_turn(
         workflow,
         message,
         turn_id,
+        runtime_channel,
         guide_id,
-    });
+    };
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            match persist_pending_turn(&conn, task_id, &turn)
+                .and_then(|_| count_pending_turns(&conn, task_id))
+            {
+                Ok(count) => return count,
+                Err(err) => eprintln!("[chat-runtime] persist pending turn failed: {err}"),
+            }
+        }
+    }
+    let mut pending = store.pending_turns.lock().unwrap();
+    let queue = pending.entry(task_id.to_string()).or_default();
+    queue.push_back(turn);
     queue.len()
 }
 
@@ -316,8 +843,59 @@ pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<Strin
         .unwrap_or_default()
 }
 
-pub(crate) fn set_guide_status_for_app(
-    app: &AppHandle,
+pub(crate) fn clear_pending_turns_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+) -> Vec<String> {
+    let mut guide_ids = clear_pending_turns(store, task_id);
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            match clear_persisted_pending_turns(&conn, task_id) {
+                Ok(mut persisted) => guide_ids.append(&mut persisted),
+                Err(err) => eprintln!("[chat-runtime] clear persisted pending turns failed: {err}"),
+            }
+        }
+    }
+    guide_ids
+}
+
+pub(crate) fn clear_persisted_pending_turns_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+) -> Vec<String> {
+    let Some(lilia_store) = app.try_state::<LiliaStore>() else {
+        return Vec::new();
+    };
+    let Ok(conn) = lilia_store.conn() else {
+        return Vec::new();
+    };
+    match clear_persisted_pending_turns(&conn, task_id) {
+        Ok(guide_ids) => guide_ids,
+        Err(err) => {
+            eprintln!("[chat-runtime] clear persisted pending turns failed: {err}");
+            Vec::new()
+        }
+    }
+}
+
+pub(crate) fn list_pending_turn_task_ids(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT DISTINCT task_id
+               FROM task_pending_turns
+               ORDER BY task_id ASC"#,
+        )
+        .map_err(|e| format!("prepare pending turn task ids 失败：{e}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query pending turn task ids 失败：{e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("读取 pending turn task ids 失败：{e}"))
+}
+
+pub(crate) fn set_guide_status_for_app<R: Runtime>(
+    app: &AppHandle<R>,
     guide_id: Option<&str>,
     status: &str,
 ) -> Result<(), String> {
@@ -330,7 +908,7 @@ pub(crate) fn set_guide_status_for_app(
     todos::set_lilia_guide_status(app, &store, guide_id, status)
 }
 
-pub(crate) fn reset_cleared_guide_queue(app: &AppHandle, guide_ids: Vec<String>) {
+pub(crate) fn reset_cleared_guide_queue<R: Runtime>(app: &AppHandle<R>, guide_ids: Vec<String>) {
     for guide_id in guide_ids {
         if let Err(err) = set_guide_status_for_app(app, Some(&guide_id), "pending") {
             eprintln!("[todo-guides] reset queued guide failed: {err}");
@@ -339,7 +917,7 @@ pub(crate) fn reset_cleared_guide_queue(app: &AppHandle, guide_ids: Vec<String>)
 }
 
 pub(crate) struct PreparedTurnStop {
-    pub(crate) child_handle: Option<Arc<Mutex<Child>>>,
+    pub(crate) running_turn: RunningTurn,
     pub(crate) guide_ids: Vec<String>,
 }
 
@@ -349,9 +927,515 @@ pub(crate) struct FinishedRunningTurn {
 }
 
 pub(crate) fn clear_running_handles(store: &ChatStore, task_id: &str) -> Option<RunningTurn> {
-    store.running_stdins.lock().unwrap().remove(task_id);
-    store.running_children.lock().unwrap().remove(task_id);
+    store
+        .running_process_sessions
+        .lock()
+        .unwrap()
+        .remove(task_id);
     store.running_turns.lock().unwrap().remove(task_id)
+}
+
+pub(crate) fn record_runtime_control_event(
+    store: &ChatStore,
+    task_id: &str,
+    name: impl Into<String>,
+    attributes: BTreeMap<String, String>,
+    payload: Option<JsonValue>,
+) {
+    store
+        .runtime_control_events
+        .lock()
+        .unwrap()
+        .entry(task_id.to_string())
+        .or_default()
+        .push(RuntimeControlEvent {
+            name: name.into(),
+            attributes,
+            payload,
+        });
+}
+
+pub(crate) fn persist_runtime_control_event(
+    conn: &Connection,
+    task_id: &str,
+    event: &RuntimeControlEvent,
+) -> Result<(), String> {
+    let attributes_json = serde_json::to_string(&event.attributes)
+        .map_err(|e| format!("runtime control attributes 序列化失败：{e}"))?;
+    let payload_json = event
+        .payload
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| format!("runtime control payload 序列化失败：{e}"))?;
+    conn.execute(
+        r#"INSERT INTO task_runtime_control_events
+           (task_id, name, attributes_json, payload_json, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5)"#,
+        params![
+            task_id,
+            event.name,
+            attributes_json,
+            payload_json,
+            now_millis() as i64
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 runtime control event 失败：{e}"))
+}
+
+pub(crate) fn persist_runtime_control_event_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+    event: &RuntimeControlEvent,
+) -> bool {
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return false;
+    };
+    match store
+        .conn()
+        .and_then(|conn| persist_runtime_control_event(&conn, task_id, event))
+    {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("[chat-runtime] persist runtime control event failed: {err}");
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn list_runtime_control_events(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Vec<RuntimeControlEvent>, String> {
+    list_persisted_runtime_control_events(conn, task_id).map(|events| {
+        events
+            .into_iter()
+            .map(|delivery| delivery.event)
+            .collect::<Vec<_>>()
+    })
+}
+
+pub(crate) fn list_persisted_runtime_control_events(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Vec<RuntimeControlDelivery>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT id, name, attributes_json, payload_json
+               FROM task_runtime_control_events
+               WHERE task_id = ?1
+               ORDER BY id ASC"#,
+        )
+        .map_err(|e| format!("prepare runtime control events 失败：{e}"))?;
+    let rows = stmt
+        .query_map(params![task_id], |row| {
+            let attributes_text: String = row.get(2)?;
+            let payload_text: Option<String> = row.get(3)?;
+            let attributes = serde_json::from_str::<BTreeMap<String, String>>(&attributes_text)
+                .unwrap_or_default();
+            let payload =
+                payload_text.and_then(|text| serde_json::from_str::<JsonValue>(&text).ok());
+            Ok(RuntimeControlDelivery {
+                persisted_id: Some(row.get(0)?),
+                event: RuntimeControlEvent {
+                    name: row.get(1)?,
+                    attributes,
+                    payload,
+                },
+            })
+        })
+        .map_err(|e| format!("query runtime control events 失败：{e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("读取 runtime control events 失败：{e}"))
+}
+
+pub(crate) fn clear_runtime_control_event_ids(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<(), String> {
+    for id in ids {
+        conn.execute(
+            "DELETE FROM task_runtime_control_events WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("清理 runtime control event 失败：{e}"))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn clear_runtime_control_event_ids_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: &[i64],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = store.conn()?;
+    clear_runtime_control_event_ids(&conn, ids)
+}
+
+#[cfg(test)]
+pub(crate) fn clear_runtime_control_events(conn: &Connection, task_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM task_runtime_control_events WHERE task_id = ?1",
+        params![task_id],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("清理 runtime control events 失败：{e}"))
+}
+
+pub(crate) fn count_runtime_control_events(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<usize, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM task_runtime_control_events WHERE task_id = ?1",
+        params![task_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|count| count.max(0) as usize)
+    .map_err(|e| format!("统计 runtime control events 失败：{e}"))
+}
+
+pub(crate) fn take_runtime_control_events(
+    store: &ChatStore,
+    task_id: &str,
+) -> Vec<RuntimeControlEvent> {
+    store
+        .runtime_control_events
+        .lock()
+        .unwrap()
+        .remove(task_id)
+        .unwrap_or_default()
+}
+
+pub(crate) fn take_runtime_control_deliveries_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+    skip_persisted_ids: &HashSet<i64>,
+) -> Vec<RuntimeControlDelivery> {
+    let mut events = take_runtime_control_events(store, task_id)
+        .into_iter()
+        .map(|event| RuntimeControlDelivery {
+            persisted_id: None,
+            event,
+        })
+        .collect::<Vec<_>>();
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            match list_persisted_runtime_control_events(&conn, task_id) {
+                Ok(persisted) => {
+                    events.extend(persisted.into_iter().filter(|delivery| {
+                        !delivery
+                            .persisted_id
+                            .is_some_and(|id| skip_persisted_ids.contains(&id))
+                    }));
+                }
+                Err(err) => {
+                    eprintln!("[chat-runtime] load persisted runtime control events failed: {err}");
+                }
+            }
+        }
+    }
+    events
+}
+
+pub(crate) fn set_pending_rollback(store: &ChatStore, task_id: &str, rollback: ChatRollbackResult) {
+    store
+        .pending_rollbacks
+        .lock()
+        .unwrap()
+        .insert(task_id.to_string(), rollback);
+}
+
+pub(crate) fn persist_pending_rollback(
+    conn: &Connection,
+    task_id: &str,
+    rollback: &ChatRollbackResult,
+) -> Result<(), String> {
+    let rollback_json =
+        serde_json::to_string(rollback).map_err(|e| format!("runtime rollback 序列化失败：{e}"))?;
+    conn.execute(
+        r#"INSERT INTO task_runtime_finalizations
+           (task_id, pending_reset_cleanup, rollback_json, updated_at)
+           VALUES (?1, 0, ?2, ?3)
+           ON CONFLICT(task_id) DO UPDATE SET
+             rollback_json = excluded.rollback_json,
+             updated_at = excluded.updated_at"#,
+        params![task_id, rollback_json, now_millis() as i64],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 runtime rollback 失败：{e}"))
+}
+
+pub(crate) fn set_pending_rollback_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+    rollback: ChatRollbackResult,
+) {
+    set_pending_rollback(store, task_id, rollback.clone());
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            if let Err(err) = persist_pending_rollback(&conn, task_id, &rollback) {
+                eprintln!("[chat-runtime] persist pending rollback failed: {err}");
+            }
+        }
+    }
+}
+
+pub(crate) fn take_pending_rollback(
+    store: &ChatStore,
+    task_id: &str,
+) -> Option<ChatRollbackResult> {
+    store.pending_rollbacks.lock().unwrap().remove(task_id)
+}
+
+pub(crate) fn take_persisted_pending_rollback(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<ChatRollbackResult>, String> {
+    let rollback_json: Option<String> = conn
+        .query_row(
+            r#"SELECT rollback_json
+               FROM task_runtime_finalizations
+               WHERE task_id = ?1"#,
+            params![task_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("读取 runtime rollback 失败：{e}"))?
+        .flatten();
+    conn.execute(
+        r#"UPDATE task_runtime_finalizations
+           SET rollback_json = NULL, updated_at = ?2
+           WHERE task_id = ?1"#,
+        params![task_id, now_millis() as i64],
+    )
+    .map_err(|e| format!("清理 runtime rollback 失败：{e}"))?;
+    rollback_json
+        .map(|text| {
+            serde_json::from_str::<ChatRollbackResult>(&text)
+                .map_err(|e| format!("runtime rollback 解析失败：{e}"))
+        })
+        .transpose()
+}
+
+pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
+    store
+        .pending_reset_cleanups
+        .lock()
+        .unwrap()
+        .insert(task_id.to_string());
+}
+
+pub(crate) fn persist_pending_reset_cleanup(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        r#"INSERT INTO task_runtime_finalizations
+           (task_id, pending_reset_cleanup, rollback_json, updated_at)
+           VALUES (?1, 1, NULL, ?2)
+           ON CONFLICT(task_id) DO UPDATE SET
+             pending_reset_cleanup = 1,
+             updated_at = excluded.updated_at"#,
+        params![task_id, now_millis() as i64],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("写入 runtime reset cleanup 失败：{e}"))
+}
+
+pub(crate) fn mark_pending_reset_cleanup_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+) {
+    mark_pending_reset_cleanup(store, task_id);
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            if let Err(err) = persist_pending_reset_cleanup(&conn, task_id) {
+                eprintln!("[chat-runtime] persist pending reset cleanup failed: {err}");
+            }
+        }
+    }
+}
+
+pub(crate) fn take_pending_reset_cleanup(store: &ChatStore, task_id: &str) -> bool {
+    store.pending_reset_cleanups.lock().unwrap().remove(task_id)
+}
+
+pub(crate) fn take_persisted_pending_reset_cleanup(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<bool, String> {
+    let pending: Option<i64> = conn
+        .query_row(
+            r#"SELECT pending_reset_cleanup
+               FROM task_runtime_finalizations
+               WHERE task_id = ?1"#,
+            params![task_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("读取 runtime reset cleanup 失败：{e}"))?;
+    conn.execute(
+        r#"UPDATE task_runtime_finalizations
+           SET pending_reset_cleanup = 0, updated_at = ?2
+           WHERE task_id = ?1"#,
+        params![task_id, now_millis() as i64],
+    )
+    .map_err(|e| format!("清理 runtime reset cleanup 失败：{e}"))?;
+    Ok(pending.unwrap_or(0) != 0)
+}
+
+pub(crate) fn take_pending_finalization_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+) -> (Option<ChatRollbackResult>, bool) {
+    let mut rollback = take_pending_rollback(store, task_id);
+    let mut reset_cleanup = take_pending_reset_cleanup(store, task_id);
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            match take_persisted_pending_rollback(&conn, task_id) {
+                Ok(persisted) => {
+                    if rollback.is_none() {
+                        rollback = persisted;
+                    }
+                }
+                Err(err) => eprintln!("[chat-runtime] take persisted rollback failed: {err}"),
+            }
+            match take_persisted_pending_reset_cleanup(&conn, task_id) {
+                Ok(persisted) => reset_cleanup = reset_cleanup || persisted,
+                Err(err) => {
+                    eprintln!("[chat-runtime] take persisted reset cleanup failed: {err}")
+                }
+            }
+        }
+    }
+    (rollback, reset_cleanup)
+}
+
+pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRuntimeSnapshot {
+    let running_turn = store.running_turns.lock().unwrap().get(task_id).cloned();
+    let queued_count = store
+        .pending_turns
+        .lock()
+        .unwrap()
+        .get(task_id)
+        .map(|queue| queue.len())
+        .unwrap_or(0);
+    let pending_control_count = store
+        .runtime_control_events
+        .lock()
+        .unwrap()
+        .get(task_id)
+        .map(|events| events.len())
+        .unwrap_or(0);
+    let pending_rollback = store
+        .pending_rollbacks
+        .lock()
+        .unwrap()
+        .contains_key(task_id);
+    let pending_reset_cleanup = store
+        .pending_reset_cleanups
+        .lock()
+        .unwrap()
+        .contains(task_id);
+    let interrupted_pending_finish = store
+        .interrupted_turns
+        .lock()
+        .unwrap()
+        .contains_key(task_id);
+    let reset_pending_finish = store.reset_turns.lock().unwrap().contains_key(task_id);
+    let phase = if reset_pending_finish {
+        "reset_pending_finish"
+    } else if interrupted_pending_finish {
+        "interrupted_pending_finish"
+    } else if running_turn.is_some() && queued_count > 0 {
+        "running_and_queued"
+    } else if running_turn.is_some() {
+        "running"
+    } else if queued_count > 0 {
+        "queued"
+    } else {
+        "idle"
+    };
+
+    ChatRuntimeSnapshot {
+        task_id: task_id.to_string(),
+        phase: phase.to_string(),
+        runtime_channel: running_turn
+            .as_ref()
+            .map(|turn| turn.runtime_channel.clone()),
+        backend: running_turn.as_ref().map(|turn| turn.backend.clone()),
+        turn_id: running_turn.map(|turn| turn.turn_id),
+        queued_count,
+        pending_control_count,
+        pending_rollback,
+        pending_reset_cleanup,
+    }
+}
+
+pub(crate) fn chat_runtime_snapshot_with_persisted(
+    conn: Option<&Connection>,
+    store: &ChatStore,
+    task_id: &str,
+) -> ChatRuntimeSnapshot {
+    let mut snapshot = chat_runtime_snapshot(store, task_id);
+    if let Some(conn) = conn {
+        if let Ok(count) = count_runtime_control_events(conn, task_id) {
+            snapshot.pending_control_count += count;
+        }
+        if let Ok(count) = count_pending_turns(conn, task_id) {
+            snapshot.queued_count += count;
+        }
+    }
+    snapshot.phase = match snapshot.phase.as_str() {
+        "running" if snapshot.queued_count > 0 => "running_and_queued".to_string(),
+        "idle" if snapshot.queued_count > 0 => "queued".to_string(),
+        _ => snapshot.phase.clone(),
+    };
+    if snapshot.phase != "idle" && snapshot.phase != "queued" {
+        return snapshot;
+    }
+    let Some(conn) = conn else {
+        return snapshot;
+    };
+    let Ok(Some(persisted)) = load_runtime_state(conn, store, task_id) else {
+        if let Ok(Some(abandoned)) = load_any_runtime_state(conn, task_id) {
+            if persisted_runtime_state_is_active(&abandoned, store) {
+                snapshot.phase = if abandoned.phase == "running" && snapshot.queued_count > 0 {
+                    "running_and_queued".to_string()
+                } else {
+                    abandoned.phase.clone()
+                };
+            } else {
+                snapshot.phase = "abandoned".to_string();
+            }
+            snapshot.runtime_channel = Some(abandoned.turn.runtime_channel);
+            snapshot.backend = Some(abandoned.turn.backend);
+            snapshot.turn_id = Some(abandoned.turn.turn_id);
+        }
+        return snapshot;
+    };
+    let queued_count = snapshot.queued_count;
+    snapshot.phase = if persisted.phase == "running" && queued_count > 0 {
+        "running_and_queued".to_string()
+    } else {
+        persisted.phase
+    };
+    snapshot.runtime_channel = Some(persisted.turn.runtime_channel);
+    snapshot.backend = Some(persisted.turn.backend);
+    snapshot.turn_id = Some(persisted.turn.turn_id);
+    snapshot
 }
 
 pub(crate) fn prepare_running_turn_stop(
@@ -378,15 +1462,11 @@ pub(crate) fn prepare_running_turn_stop(
             .reset_turns
             .lock()
             .unwrap()
-            .insert(task_id.to_string(), running_turn);
+            .insert(task_id.to_string(), running_turn.clone());
     }
 
-    let child_handle = {
-        let children = store.running_children.lock().unwrap();
-        children.get(task_id).cloned()
-    };
     Some(PreparedTurnStop {
-        child_handle,
+        running_turn,
         guide_ids,
     })
 }
@@ -437,8 +1517,8 @@ pub(crate) fn finish_running_turn_handles(
     FinishedRunningTurn { interrupted, reset }
 }
 
-pub(crate) fn stop_running_turn(
-    app: &AppHandle,
+pub(crate) fn stop_running_turn<R: Runtime>(
+    app: &AppHandle<R>,
     store: &ChatStore,
     task_id: &str,
     mark_interrupted: bool,
@@ -448,11 +1528,28 @@ pub(crate) fn stop_running_turn(
     else {
         return Ok(false);
     };
-    reset_cleared_guide_queue(app, prepared.guide_ids);
-    if let Some(child_handle) = prepared.child_handle {
-        let mut child = child_handle.lock().map_err(|err| err.to_string())?;
-        terminate_agent_child(&mut child)?;
+    let phase = if mark_reset {
+        Some("reset_pending_finish")
+    } else if mark_interrupted {
+        Some("interrupted_pending_finish")
+    } else {
+        None
+    };
+    if let Some(phase) = phase {
+        persist_runtime_state_for_app(
+            app,
+            store,
+            task_id,
+            &prepared.running_turn,
+            phase,
+            None,
+            None,
+        );
     }
+    let mut guide_ids = prepared.guide_ids;
+    guide_ids.append(&mut clear_persisted_pending_turns_for_app(app, task_id));
+    reset_cleared_guide_queue(app, guide_ids);
+    super::runner::terminate_runner_process_session(store, task_id)?;
     clear_running_handles(store, task_id);
     Ok(true)
 }
@@ -486,6 +1583,29 @@ pub(crate) fn take_next_pending_turn(
     next
 }
 
+pub(crate) fn take_next_pending_turn_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    store: &ChatStore,
+    task_id: &str,
+    advance_queue: bool,
+) -> Option<PendingChatTurn> {
+    if !advance_queue {
+        return take_next_pending_turn(store, task_id, false);
+    }
+
+    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
+        if let Ok(conn) = lilia_store.conn() {
+            match take_next_persisted_pending_turn(&conn, task_id) {
+                Ok(Some(turn)) => return Some(turn),
+                Ok(None) => {}
+                Err(err) => eprintln!("[chat-runtime] take persisted pending turn failed: {err}"),
+            }
+        }
+    }
+
+    take_next_pending_turn(store, task_id, true)
+}
+
 pub(crate) fn should_emit_runner_exit_error(
     interrupted: bool,
     nonzero: bool,
@@ -494,8 +1614,8 @@ pub(crate) fn should_emit_runner_exit_error(
     !interrupted && nonzero && !stderr_text.trim().is_empty()
 }
 
-pub(crate) fn persist_and_emit_interrupted_timeline_event(
-    app_handle: &AppHandle,
+pub(crate) fn persist_and_emit_interrupted_timeline_event<R: Runtime>(
+    app_handle: &AppHandle<R>,
     task_id: &str,
     backend: &str,
     turn_id: &str,
@@ -522,37 +1642,4 @@ pub(crate) fn persist_and_emit_interrupted_timeline_event(
             updated_at: Some(now),
         },
     );
-}
-
-fn kill_child(child: &mut Child) -> Result<(), String> {
-    match child.kill() {
-        Ok(()) => Ok(()),
-        Err(err) if matches!(err.kind(), ErrorKind::InvalidInput | ErrorKind::NotFound) => Ok(()),
-        Err(err) => Err(format!("终止 agent 进程失败：{err}")),
-    }
-}
-
-#[cfg(windows)]
-fn terminate_agent_child(child: &mut Child) -> Result<(), String> {
-    let pid = child.id().to_string();
-    let taskkill = Command::new("taskkill")
-        .args(["/PID", pid.as_str(), "/T", "/F"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match taskkill {
-        Ok(status) if status.success() => Ok(()),
-        _ => kill_child(child),
-    }
-}
-
-#[cfg(not(windows))]
-fn terminate_agent_child(child: &mut Child) -> Result<(), String> {
-    let pid = child.id().to_string();
-    let _ = Command::new("pkill")
-        .args(["-TERM", "-P", pid.as_str()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    kill_child(child)
 }

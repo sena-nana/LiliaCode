@@ -39,6 +39,41 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_agent_sessions_runtime_channel",
         apply: migrate_task_agent_sessions_runtime_channel,
     },
+    SchemaMigration {
+        version: 10,
+        name: "task_runtime_states",
+        apply: migrate_task_runtime_states,
+    },
+    SchemaMigration {
+        version: 11,
+        name: "task_runtime_states_process_session",
+        apply: migrate_task_runtime_states_process_session,
+    },
+    SchemaMigration {
+        version: 12,
+        name: "task_runtime_control_events",
+        apply: migrate_task_runtime_control_events,
+    },
+    SchemaMigration {
+        version: 13,
+        name: "task_pending_turns",
+        apply: migrate_task_pending_turns,
+    },
+    SchemaMigration {
+        version: 14,
+        name: "task_pending_turns_runtime_channel",
+        apply: migrate_task_pending_turns_runtime_channel,
+    },
+    SchemaMigration {
+        version: 15,
+        name: "task_runtime_finalizations",
+        apply: migrate_task_runtime_finalizations,
+    },
+    SchemaMigration {
+        version: 16,
+        name: "task_runtime_states_context_json",
+        apply: migrate_task_runtime_states_context_json,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -154,6 +189,177 @@ fn migrate_task_agent_sessions_runtime_channel(conn: &Connection) -> Result<(), 
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_agent_sessions runtime_channel 失败：{e}"))
+}
+
+fn migrate_task_runtime_states(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_runtime_states (
+          task_id         TEXT PRIMARY KEY,
+          turn_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+          phase           TEXT NOT NULL CHECK (phase IN
+                            ('running','interrupted_pending_finish','reset_pending_finish')),
+          process_session_id TEXT,
+          runtime_epoch   TEXT NOT NULL,
+          context_json    TEXT,
+          updated_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_runtime_states_epoch_backend
+          ON task_runtime_states(runtime_epoch, backend, updated_at);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_runtime_states 失败：{e}"))
+}
+
+fn migrate_task_runtime_states_process_session(conn: &Connection) -> Result<(), String> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(task_runtime_states)")
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut has = false;
+            for row in rows {
+                if row? == "process_session_id" {
+                    has = true;
+                    break;
+                }
+            }
+            Ok(has)
+        })
+        .map_err(|e| {
+            format!("lilia-store: 检查 task_runtime_states process_session_id 失败：{e}")
+        })?;
+    if has_column {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_runtime_states
+          ADD COLUMN process_session_id TEXT;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_runtime_states process_session_id 失败：{e}"))
+}
+
+fn migrate_task_runtime_control_events(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_runtime_control_events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id         TEXT NOT NULL,
+          name            TEXT NOT NULL,
+          attributes_json TEXT NOT NULL DEFAULT '{}',
+          payload_json    TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_runtime_control_events_task_id
+          ON task_runtime_control_events(task_id, id);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_runtime_control_events 失败：{e}"))
+}
+
+fn migrate_task_pending_turns(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_pending_turns (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id         TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          composer_json   TEXT NOT NULL,
+          project_cwd     TEXT NOT NULL,
+          attachments_json TEXT NOT NULL DEFAULT '[]',
+          workflow_json   TEXT,
+          message_json    TEXT NOT NULL,
+          turn_id         TEXT NOT NULL,
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','nanobot')),
+          guide_id        TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_pending_turns_task_id
+          ON task_pending_turns(task_id, id);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_pending_turns 失败：{e}"))
+}
+
+fn migrate_task_pending_turns_runtime_channel(conn: &Connection) -> Result<(), String> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(task_pending_turns)")
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut has = false;
+            for row in rows {
+                if row? == "runtime_channel" {
+                    has = true;
+                    break;
+                }
+            }
+            Ok(has)
+        })
+        .map_err(|e| format!("lilia-store: 检查 task_pending_turns runtime_channel 失败：{e}"))?;
+    if has_column {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_pending_turns
+          ADD COLUMN runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                      CHECK (runtime_channel IN ('builtin','nanobot'));
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_pending_turns runtime_channel 失败：{e}"))
+}
+
+fn migrate_task_runtime_finalizations(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_runtime_finalizations (
+          task_id               TEXT PRIMARY KEY,
+          pending_reset_cleanup INTEGER NOT NULL DEFAULT 0
+                                CHECK (pending_reset_cleanup IN (0, 1)),
+          rollback_json         TEXT,
+          updated_at            INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_runtime_finalizations 失败：{e}"))
+}
+
+fn migrate_task_runtime_states_context_json(conn: &Connection) -> Result<(), String> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(task_runtime_states)")
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut has = false;
+            for row in rows {
+                if row? == "context_json" {
+                    has = true;
+                    break;
+                }
+            }
+            Ok(has)
+        })
+        .map_err(|e| format!("lilia-store: 检查 task_runtime_states context_json 失败：{e}"))?;
+    if has_column {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_runtime_states
+          ADD COLUMN context_json TEXT;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_runtime_states context_json 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

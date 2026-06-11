@@ -13,7 +13,10 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
-use crate::chat::state::{default_composer, remember_agent_session, ChatStore};
+use crate::chat::state::{
+    count_pending_turns, default_composer, load_runtime_state, persisted_runtime_state_is_active,
+    remember_agent_session, ChatStore,
+};
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
@@ -73,12 +76,18 @@ fn query_codex_thread_runtime_states(
             r#"SELECT s.session_id, t.id, t.title, t.project_id
                FROM task_agent_sessions s
                JOIN tasks t ON t.id = s.task_id
-               WHERE s.backend = ?1 AND s.runtime_channel = ?2 AND t.archived = 0
+               JOIN (
+                 SELECT task_id, MAX(updated_at) AS max_updated_at
+                 FROM task_agent_sessions
+                 WHERE backend = ?1
+                 GROUP BY task_id
+               ) latest ON latest.task_id = s.task_id AND latest.max_updated_at = s.updated_at
+               WHERE s.backend = ?1 AND t.archived = 0
                ORDER BY s.updated_at DESC"#,
         )
         .map_err(|e| format!("Codex thread runtime states: prepare 失败：{e}"))?;
     let rows = stmt
-        .query_map(params![BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN], |row| {
+        .query_map(params![BACKEND_CODEX], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -95,14 +104,24 @@ fn query_codex_thread_runtime_states(
     for row in rows {
         let (thread_id, task_id, task_title, project_id) =
             row.map_err(|e| format!("Codex thread runtime states: row 失败：{e}"))?;
-        let queued_count = pending_turns
+        let in_memory_queued_count = pending_turns
             .get(&task_id)
             .map(|queue| queue.len())
             .unwrap_or(0);
+        let persisted_queued_count = count_pending_turns(conn, &task_id).unwrap_or(0);
+        let queued_count = in_memory_queued_count + persisted_queued_count;
+        let persisted_running = load_runtime_state(conn, chat_store, &task_id)
+            .ok()
+            .flatten()
+            .is_some_and(|state| {
+                state.turn.backend == BACKEND_CODEX
+                    && persisted_runtime_state_is_active(&state, chat_store)
+            });
         let is_running = running.get(&task_id).copied().unwrap_or(false)
             || running_turns
                 .get(&task_id)
-                .is_some_and(|turn| turn.backend == BACKEND_CODEX);
+                .is_some_and(|turn| turn.backend == BACKEND_CODEX)
+            || persisted_running;
         out.push(CodexThreadRuntimeState {
             thread_id,
             task_id,
@@ -479,7 +498,8 @@ fn codex_thread_attach_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::state::session_key;
+    use crate::chat::state::{persist_runtime_state, session_key, RunningTurn};
+    use crate::RUNTIME_CHANNEL_NANOBOT;
 
     fn create_task_agent_sessions_schema(conn: &rusqlite::Connection) {
         conn.execute_batch(
@@ -501,6 +521,41 @@ mod tests {
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_runtime_control_events (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              name            TEXT NOT NULL,
+              attributes_json TEXT NOT NULL DEFAULT '{}',
+              payload_json    TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_pending_turns (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              content         TEXT NOT NULL,
+              composer_json   TEXT NOT NULL,
+              project_cwd     TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
+              workflow_json   TEXT,
+              message_json    TEXT NOT NULL,
+              turn_id         TEXT NOT NULL,
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              guide_id        TEXT,
+              created_at      INTEGER NOT NULL
             );
             "#,
         )
@@ -629,11 +684,20 @@ mod tests {
             [],
         )
         .unwrap();
-        store
-            .running_tasks
-            .lock()
-            .unwrap()
-            .insert("task-1".to_string(), true);
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &RunningTurn {
+                turn_id: "turn-nanobot".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+            "running",
+            None,
+            None,
+        )
+        .unwrap();
         store.pending_turns.lock().unwrap().insert(
             "task-1".to_string(),
             std::collections::VecDeque::from([crate::chat::state::PendingChatTurn {
@@ -651,6 +715,7 @@ mod tests {
                     created_at: 1,
                 },
                 turn_id: "turn-1".to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
                 guide_id: None,
             }]),
         );
@@ -658,7 +723,7 @@ mod tests {
         let states = query_codex_thread_runtime_states(&conn, &store).unwrap();
 
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].thread_id, "thread-1");
+        assert_eq!(states[0].thread_id, "thread-nanobot");
         assert_eq!(states[0].task_title, "Codex task");
         assert!(states[0].running);
         assert!(states[0].queued);

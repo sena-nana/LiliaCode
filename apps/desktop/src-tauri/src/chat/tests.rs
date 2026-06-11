@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod agent_event_sink_tests {
+    use std::collections::BTreeMap;
+
     use rusqlite::Connection;
     use serde_json::{json, Value as JsonValue};
 
@@ -7,14 +9,17 @@ mod agent_event_sink_tests {
     use crate::agent_timeline;
     use crate::agent_timeline::AgentTimelineEventInput;
     use crate::chat::commands::{
-        agent_interaction_response_payload, composer_permission_update_payload,
+        agent_interaction_response_payload, attach_stdin_delivery,
+        composer_permission_update_payload, control_event_attributes, plan_reset_session,
+        record_nanobot_control_event, stage_nanobot_interrupt_turn, stage_nanobot_turn_stop,
+        NanobotTurnStopKind, ResetSessionPlan,
     };
     use crate::chat::runner::build_runner_stdin_payload;
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
     use crate::provider::*;
-    use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+    use crate::{BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT};
 
     fn turn_context() -> AgentTurnContext {
         AgentTurnContext {
@@ -222,6 +227,288 @@ mod agent_event_sink_tests {
         assert_eq!(
             composer_permission_update_payload(Some(&previous), &next),
             None
+        );
+    }
+
+    #[test]
+    fn runtime_control_event_queue_is_drained() {
+        let store = ChatStore::default();
+        record_runtime_control_event(
+            &store,
+            "task-1",
+            "interaction_response",
+            control_event_attributes([("requestId", "ask-1".to_string())]),
+            None,
+        );
+
+        let drained = take_runtime_control_events(&store, "task-1");
+
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].name, "interaction_response");
+        assert_eq!(
+            drained[0].attributes.get("requestId").map(String::as_str),
+            Some("ask-1")
+        );
+        assert!(take_runtime_control_events(&store, "task-1").is_empty());
+    }
+
+    #[test]
+    fn runtime_control_events_roundtrip_through_persistent_queue() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let event = RuntimeControlEvent {
+            name: "interaction_response".to_string(),
+            attributes: control_event_attributes([
+                ("requestId", "ask-1".to_string()),
+                ("kind", "ask_user".to_string()),
+            ]),
+            payload: Some(json!({
+                "type": "interaction_response",
+                "id": "ask-1",
+                "kind": "ask_user",
+                "result": { "cancelled": false, "answers": {} },
+            })),
+        };
+
+        persist_runtime_control_event(&conn, "task-1", &event).unwrap();
+        let restored = list_runtime_control_events(&conn, "task-1").unwrap();
+
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].name, "interaction_response");
+        assert_eq!(
+            restored[0].attributes.get("requestId").map(String::as_str),
+            Some("ask-1")
+        );
+        assert_eq!(restored[0].payload, event.payload);
+
+        clear_runtime_control_events(&conn, "task-1").unwrap();
+        assert!(list_runtime_control_events(&conn, "task-1")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn runtime_control_event_ids_clear_only_acked_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let first = RuntimeControlEvent {
+            name: "interaction_response".to_string(),
+            attributes: control_event_attributes([("requestId", "ask-1".to_string())]),
+            payload: Some(json!({ "type": "interaction_response", "id": "ask-1" })),
+        };
+        let second = RuntimeControlEvent {
+            name: "permission_update".to_string(),
+            attributes: control_event_attributes([("permission", "readonly".to_string())]),
+            payload: Some(json!({ "type": "settings_update", "permission": "readonly" })),
+        };
+
+        persist_runtime_control_event(&conn, "task-1", &first).unwrap();
+        persist_runtime_control_event(&conn, "task-1", &second).unwrap();
+        let deliveries = list_persisted_runtime_control_events(&conn, "task-1").unwrap();
+
+        assert_eq!(deliveries.len(), 2);
+        clear_runtime_control_event_ids(&conn, &[deliveries[0].persisted_id.unwrap()]).unwrap();
+        let remaining = list_persisted_runtime_control_events(&conn, "task-1").unwrap();
+
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].event.name, "permission_update");
+    }
+
+    #[test]
+    fn clearing_runtime_state_also_clears_persisted_control_events() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let running_turn = RunningTurn {
+            turn_id: "turn-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &running_turn,
+            "running",
+            None,
+            None,
+        )
+        .unwrap();
+        persist_runtime_control_event(
+            &conn,
+            "task-1",
+            &RuntimeControlEvent {
+                name: "reset_requested".to_string(),
+                attributes: control_event_attributes([("mode", "session_reset".to_string())]),
+                payload: None,
+            },
+        )
+        .unwrap();
+
+        clear_runtime_state(&conn, "task-1").unwrap();
+
+        assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
+        assert!(list_runtime_control_events(&conn, "task-1")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn pending_turns_roundtrip_through_persistent_queue() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let turn = PendingChatTurn {
+            guide_id: Some("guide-1".to_string()),
+            ..pending_turn("queued")
+        };
+
+        persist_pending_turn(&conn, "task-1", &turn).unwrap();
+
+        assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 1);
+        let restored = take_next_persisted_pending_turn(&conn, "task-1")
+            .unwrap()
+            .expect("persisted pending turn");
+        assert_eq!(restored.content, "content queued");
+        assert_eq!(restored.turn_id, turn.turn_id);
+        assert_eq!(restored.runtime_channel, RUNTIME_CHANNEL_BUILTIN);
+        assert_eq!(restored.guide_id.as_deref(), Some("guide-1"));
+        assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
+    }
+
+    #[test]
+    fn clear_persisted_pending_turns_returns_guide_ids() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        persist_pending_turn(
+            &conn,
+            "task-1",
+            &PendingChatTurn {
+                guide_id: Some("guide-1".to_string()),
+                ..pending_turn("queued-1")
+            },
+        )
+        .unwrap();
+        persist_pending_turn(
+            &conn,
+            "task-1",
+            &PendingChatTurn {
+                guide_id: None,
+                ..pending_turn("queued-2")
+            },
+        )
+        .unwrap();
+
+        let guide_ids = clear_persisted_pending_turns(&conn, "task-1").unwrap();
+
+        assert_eq!(guide_ids, vec!["guide-1".to_string()]);
+        assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
+    }
+
+    #[test]
+    fn stdin_delivery_attributes_capture_forwarded_and_error_states() {
+        let mut forwarded = BTreeMap::new();
+        attach_stdin_delivery(&mut forwarded, &Ok(true));
+        assert_eq!(
+            forwarded.get("stdinForwarded").map(String::as_str),
+            Some("true")
+        );
+        assert!(forwarded.get("stdinError").is_none());
+
+        let mut missing = BTreeMap::new();
+        attach_stdin_delivery(&mut missing, &Ok(false));
+        assert_eq!(
+            missing.get("stdinForwarded").map(String::as_str),
+            Some("false")
+        );
+        assert!(missing.get("stdinError").is_none());
+
+        let mut failed = BTreeMap::new();
+        attach_stdin_delivery(&mut failed, &Err("broken pipe".to_string()));
+        assert_eq!(
+            failed.get("stdinForwarded").map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            failed.get("stdinError").map(String::as_str),
+            Some("broken pipe")
+        );
+    }
+
+    #[test]
+    fn record_nanobot_control_event_only_records_nanobot_running_turn() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "builtin-task".to_string(),
+            RunningTurn {
+                turn_id: "turn-builtin".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
+            },
+        );
+        store.running_turns.lock().unwrap().insert(
+            "nanobot-task".to_string(),
+            RunningTurn {
+                turn_id: "turn-nanobot".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+        );
+
+        record_nanobot_control_event(
+            &store,
+            "builtin-task",
+            "permission_update",
+            control_event_attributes([("permission", "full".to_string())]),
+            None,
+        );
+        record_nanobot_control_event(
+            &store,
+            "nanobot-task",
+            "permission_update",
+            control_event_attributes([("permission", "full".to_string())]),
+            Some(json!({ "type": "settings_update", "permission": "full" })),
+        );
+
+        assert!(take_runtime_control_events(&store, "builtin-task").is_empty());
+        let drained = take_runtime_control_events(&store, "nanobot-task");
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].name, "permission_update");
+        assert_eq!(
+            drained[0].attributes.get("turnId").map(String::as_str),
+            Some("turn-nanobot")
+        );
+        assert_eq!(
+            drained[0].attributes.get("backend").map(String::as_str),
+            Some(BACKEND_CODEX)
+        );
+        assert_eq!(
+            drained[0].payload,
+            Some(json!({ "type": "settings_update", "permission": "full" }))
         );
     }
 
@@ -592,6 +879,7 @@ mod agent_event_sink_tests {
                 created_at: 100,
             },
             turn_id: format!("turn-{id}"),
+            runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             guide_id: None,
         }
     }
@@ -625,6 +913,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-running".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store
@@ -641,7 +930,6 @@ mod agent_event_sink_tests {
         let prepared = prepare_running_turn_stop(&store, "task-1", true, false).unwrap();
 
         assert_eq!(prepared.guide_ids, vec!["guide-queued".to_string()]);
-        assert!(prepared.child_handle.is_none());
         assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
         assert_eq!(
             store
@@ -663,6 +951,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -694,6 +983,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -715,11 +1005,17 @@ mod agent_event_sink_tests {
     #[test]
     fn finish_running_turn_handles_clears_handles_and_consumes_matching_marks() {
         let store = ChatStore::default();
+        store
+            .running_process_sessions
+            .lock()
+            .unwrap()
+            .insert("task-1".to_string(), "proc-1".to_string());
         store.running_turns.lock().unwrap().insert(
             "task-1".to_string(),
             RunningTurn {
                 turn_id: "turn-stop".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store.interrupted_turns.lock().unwrap().insert(
@@ -727,6 +1023,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-stop".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -734,6 +1031,12 @@ mod agent_event_sink_tests {
 
         assert!(finished.interrupted);
         assert!(!finished.reset);
+        assert!(store
+            .running_process_sessions
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .is_none());
         assert!(store.running_turns.lock().unwrap().get("task-1").is_none());
         assert!(store
             .interrupted_turns
@@ -756,6 +1059,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store
@@ -780,6 +1084,1130 @@ mod agent_event_sink_tests {
             Some(1)
         );
         assert!(store.running_tasks.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn interrupted_finish_does_not_advance_pending_queue() {
+        let store = ChatStore::default();
+        store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .insert("task-1".to_string(), true);
+        store.interrupted_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-interrupt".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+        );
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(pending_turn("queued"));
+
+        let finished =
+            finish_running_turn_handles(&store, "task-1", "turn-interrupt", BACKEND_CODEX);
+        assert!(finished.interrupted);
+        assert!(!finished.reset);
+        assert!(
+            take_next_pending_turn(&store, "task-1", !finished.interrupted && !finished.reset)
+                .is_none()
+        );
+
+        assert_eq!(
+            store
+                .pending_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|queue| queue.len()),
+            Some(1)
+        );
+        assert!(store.running_tasks.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn pending_reset_cleanup_is_consumed_once() {
+        let store = ChatStore::default();
+
+        mark_pending_reset_cleanup(&store, "task-1");
+
+        assert!(take_pending_reset_cleanup(&store, "task-1"));
+        assert!(!take_pending_reset_cleanup(&store, "task-1"));
+    }
+
+    #[test]
+    fn runtime_finalization_persists_and_consumes_rollback_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        let rollback = ChatRollbackResult {
+            rolled_back: true,
+            restored_content: "restore".to_string(),
+            restored_attachments: vec![ChatAttachment {
+                id: "att-1".to_string(),
+                kind: "file".to_string(),
+                path: "C:\\Files\\workspace\\Lilia\\README.md".to_string(),
+                name: "README.md".to_string(),
+                size: Some(12),
+                exists: true,
+                mime: Some("text/markdown".to_string()),
+                directory: None,
+            }],
+            removed_event_ids: vec!["evt-1".to_string()],
+        };
+
+        persist_pending_rollback(&conn, "task-1", &rollback).unwrap();
+        let stored = take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .expect("pending rollback");
+
+        assert_eq!(stored.restored_content, rollback.restored_content);
+        assert_eq!(stored.restored_attachments.len(), 1);
+        assert_eq!(stored.restored_attachments[0].id, "att-1");
+        assert_eq!(
+            stored.restored_attachments[0].path,
+            rollback.restored_attachments[0].path
+        );
+        assert_eq!(
+            stored.restored_attachments[0].mime.as_deref(),
+            Some("text/markdown")
+        );
+        assert_eq!(stored.removed_event_ids, rollback.removed_event_ids);
+        assert!(take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn runtime_finalization_persists_and_consumes_reset_cleanup_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+
+        persist_pending_reset_cleanup(&conn, "task-1").unwrap();
+
+        assert!(take_persisted_pending_reset_cleanup(&conn, "task-1").unwrap());
+        assert!(!take_persisted_pending_reset_cleanup(&conn, "task-1").unwrap());
+    }
+
+    #[test]
+    fn runtime_state_clear_keeps_pending_finalization_until_explicit_cleanup() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        let running_turn = RunningTurn {
+            turn_id: "turn-reset".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        let rollback = ChatRollbackResult {
+            rolled_back: true,
+            restored_content: "restore after restart".to_string(),
+            restored_attachments: Vec::new(),
+            removed_event_ids: vec!["evt-1".to_string()],
+        };
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &running_turn,
+            "reset_pending_finish",
+            Some("process-1"),
+            None,
+        )
+        .unwrap();
+        persist_pending_rollback(&conn, "task-1", &rollback).unwrap();
+        persist_pending_reset_cleanup(&conn, "task-1").unwrap();
+
+        clear_runtime_state(&conn, "task-1").unwrap();
+
+        assert!(load_runtime_state(&conn, &store, "task-1")
+            .unwrap()
+            .is_none());
+        let stored = take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .expect("pending rollback");
+        assert_eq!(stored.restored_content, rollback.restored_content);
+        assert!(take_persisted_pending_reset_cleanup(&conn, "task-1").unwrap());
+
+        persist_pending_rollback(&conn, "task-1", &rollback).unwrap();
+        persist_pending_reset_cleanup(&conn, "task-1").unwrap();
+        clear_runtime_finalization(&conn, "task-1").unwrap();
+
+        assert!(take_persisted_pending_rollback(&conn, "task-1")
+            .unwrap()
+            .is_none());
+        assert!(!take_persisted_pending_reset_cleanup(&conn, "task-1").unwrap());
+    }
+
+    #[test]
+    fn nanobot_turn_stop_stages_interrupt_and_returns_guide_ids() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        store
+            .running_turns
+            .lock()
+            .unwrap()
+            .insert("task-1".to_string(), running_turn.clone());
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-1".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let cleared = stage_nanobot_turn_stop(
+            &store,
+            "task-1",
+            &running_turn,
+            NanobotTurnStopKind::Interrupt,
+        );
+
+        assert_eq!(cleared, vec!["guide-1".to_string()]);
+        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
+        assert_eq!(
+            store
+                .interrupted_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-1")
+        );
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn nanobot_turn_stop_stages_reset_without_interrupt_mark() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-reset".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-reset".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let cleared =
+            stage_nanobot_turn_stop(&store, "task-1", &running_turn, NanobotTurnStopKind::Reset);
+
+        assert_eq!(cleared, vec!["guide-reset".to_string()]);
+        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
+        assert!(store
+            .interrupted_turns
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .is_none());
+        assert_eq!(
+            store
+                .reset_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-reset")
+        );
+    }
+
+    #[test]
+    fn nanobot_interrupt_turn_reset_stashes_pending_rollback() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-reset".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        let rollback = ChatRollbackResult {
+            rolled_back: true,
+            restored_content: "restore".to_string(),
+            restored_attachments: Vec::new(),
+            removed_event_ids: vec!["evt-1".to_string()],
+        };
+
+        let (_cleared, result) = stage_nanobot_interrupt_turn(
+            &store,
+            "task-1",
+            &running_turn,
+            NanobotTurnStopKind::Reset,
+            Some(rollback.clone()),
+        );
+
+        assert!(!result.rolled_back);
+        assert!(result.restored_content.is_empty());
+        assert!(result.restored_attachments.is_empty());
+        assert!(result.removed_event_ids.is_empty());
+        let stored = take_pending_rollback(&store, "task-1").expect("pending rollback");
+        assert!(stored.rolled_back);
+        assert_eq!(stored.restored_content, rollback.restored_content);
+        assert_eq!(
+            stored.restored_attachments.len(),
+            rollback.restored_attachments.len()
+        );
+        assert_eq!(stored.removed_event_ids, rollback.removed_event_ids);
+    }
+
+    #[test]
+    fn nanobot_interrupt_turn_interrupt_does_not_stash_rollback() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-interrupt".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+
+        let (_cleared, result) = stage_nanobot_interrupt_turn(
+            &store,
+            "task-1",
+            &running_turn,
+            NanobotTurnStopKind::Interrupt,
+            Some(ChatRollbackResult {
+                rolled_back: true,
+                restored_content: "ignored".to_string(),
+                restored_attachments: Vec::new(),
+                removed_event_ids: vec!["evt-ignored".to_string()],
+            }),
+        );
+
+        assert!(!result.rolled_back);
+        assert!(result.restored_content.is_empty());
+        assert!(result.restored_attachments.is_empty());
+        assert!(result.removed_event_ids.is_empty());
+        assert!(take_pending_rollback(&store, "task-1").is_none());
+    }
+
+    #[test]
+    fn reset_session_plan_without_running_turn_clears_queue_and_requests_immediate_cleanup() {
+        let store = ChatStore::default();
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-free".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let plan = plan_reset_session(&store, "task-1", None);
+
+        assert_eq!(
+            plan,
+            ResetSessionPlan {
+                cleared_guide_ids: vec!["guide-free".to_string()],
+                stopped_running: false,
+                immediate_cleanup: true,
+            }
+        );
+        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn reset_session_plan_for_nanobot_running_turn_stages_reset() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-reset".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-nanobot".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let plan = plan_reset_session(&store, "task-1", Some(&running_turn));
+
+        assert_eq!(
+            plan,
+            ResetSessionPlan {
+                cleared_guide_ids: vec!["guide-nanobot".to_string()],
+                stopped_running: true,
+                immediate_cleanup: false,
+            }
+        );
+        assert_eq!(
+            store
+                .reset_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-reset")
+        );
+    }
+
+    #[test]
+    fn reset_session_plan_for_builtin_running_turn_defers_to_stop_running_turn() {
+        let store = ChatStore::default();
+        let running_turn = RunningTurn {
+            turn_id: "turn-builtin".to_string(),
+            backend: BACKEND_CLAUDE.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
+        };
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-builtin".to_string()),
+                ..pending_turn("queued")
+            });
+
+        let plan = plan_reset_session(&store, "task-1", Some(&running_turn));
+
+        assert_eq!(plan, ResetSessionPlan::default());
+        assert_eq!(
+            store
+                .pending_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|queue| queue.len()),
+            Some(1)
+        );
+        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
+    }
+
+    #[test]
+    fn runtime_snapshot_reports_idle_state() {
+        let store = ChatStore::default();
+
+        let snapshot = chat_runtime_snapshot(&store, "task-1");
+
+        assert_eq!(snapshot.task_id, "task-1");
+        assert_eq!(snapshot.phase, "idle");
+        assert!(snapshot.runtime_channel.is_none());
+        assert!(snapshot.backend.is_none());
+        assert!(snapshot.turn_id.is_none());
+        assert_eq!(snapshot.queued_count, 0);
+        assert_eq!(snapshot.pending_control_count, 0);
+        assert!(!snapshot.pending_rollback);
+        assert!(!snapshot.pending_reset_cleanup);
+    }
+
+    #[test]
+    fn runtime_snapshot_reports_running_and_queued_state() {
+        let store = ChatStore::default();
+        store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-1".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+        );
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(PendingChatTurn {
+                guide_id: Some("guide-1".to_string()),
+                ..pending_turn("queued")
+            });
+        record_runtime_control_event(
+            &store,
+            "task-1",
+            "interrupt_requested",
+            control_event_attributes([("mode", "user_interrupt".to_string())]),
+            None,
+        );
+
+        let snapshot = chat_runtime_snapshot(&store, "task-1");
+
+        assert_eq!(snapshot.phase, "running_and_queued");
+        assert_eq!(
+            snapshot.runtime_channel.as_deref(),
+            Some(RUNTIME_CHANNEL_NANOBOT)
+        );
+        assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(snapshot.queued_count, 1);
+        assert_eq!(snapshot.pending_control_count, 1);
+    }
+
+    #[test]
+    fn runtime_snapshot_prefers_reset_pending_finish_phase() {
+        let store = ChatStore::default();
+        store.reset_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-reset".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+        );
+        mark_pending_reset_cleanup(&store, "task-1");
+        set_pending_rollback(
+            &store,
+            "task-1",
+            ChatRollbackResult {
+                rolled_back: true,
+                restored_content: "restore".to_string(),
+                restored_attachments: Vec::new(),
+                removed_event_ids: vec!["evt-1".to_string()],
+            },
+        );
+
+        let snapshot = chat_runtime_snapshot(&store, "task-1");
+
+        assert_eq!(snapshot.phase, "reset_pending_finish");
+        assert!(snapshot.pending_rollback);
+        assert!(snapshot.pending_reset_cleanup);
+    }
+
+    #[test]
+    fn runtime_snapshot_falls_back_to_current_epoch_persisted_state() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let running_turn = RunningTurn {
+            turn_id: "turn-persisted".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &running_turn,
+            "running",
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .pending_turns
+            .lock()
+            .unwrap()
+            .entry("task-1".to_string())
+            .or_default()
+            .push_back(pending_turn("queued"));
+        let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
+
+        assert_eq!(snapshot.phase, "running_and_queued");
+        assert_eq!(
+            snapshot.runtime_channel.as_deref(),
+            Some(RUNTIME_CHANNEL_NANOBOT)
+        );
+        assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-persisted"));
+    }
+
+    #[test]
+    fn runtime_snapshot_counts_persisted_control_events() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        persist_runtime_control_event(
+            &conn,
+            "task-1",
+            &RuntimeControlEvent {
+                name: "permission_update".to_string(),
+                attributes: control_event_attributes([("permission", "readonly".to_string())]),
+                payload: Some(json!({ "type": "settings_update", "permission": "readonly" })),
+            },
+        )
+        .unwrap();
+        record_runtime_control_event(
+            &store,
+            "task-1",
+            "interrupt_requested",
+            control_event_attributes([("mode", "user_interrupt".to_string())]),
+            None,
+        );
+
+        let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
+
+        assert_eq!(snapshot.pending_control_count, 2);
+    }
+
+    #[test]
+    fn persisted_runtime_state_reports_stale_epoch_as_abandoned() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+            [],
+        )
+        .unwrap();
+
+        let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
+
+        assert_eq!(snapshot.phase, "abandoned");
+        assert_eq!(
+            snapshot.runtime_channel.as_deref(),
+            Some(RUNTIME_CHANNEL_NANOBOT)
+        );
+        assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-old"));
+    }
+
+    #[test]
+    fn pending_turn_recovery_clears_abandoned_runtime_state() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+            [],
+        )
+        .unwrap();
+
+        assert!(prepare_pending_turn_recovery(&conn, &store, "task-1").unwrap());
+        assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn recoverable_pending_turn_drains_queue_after_clearing_abandoned_runtime_state() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+            [],
+        )
+        .unwrap();
+        persist_pending_turn(
+            &conn,
+            "task-1",
+            &PendingChatTurn {
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                ..pending_turn("recover")
+            },
+        )
+        .unwrap();
+
+        let turn = take_next_recoverable_pending_turn(&conn, &store, "task-1")
+            .unwrap()
+            .expect("recoverable turn");
+
+        assert_eq!(turn.turn_id, "turn-recover");
+        assert_eq!(turn.runtime_channel, RUNTIME_CHANNEL_NANOBOT);
+        assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
+        assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
+    }
+
+    #[test]
+    fn pending_turn_recovery_keeps_live_runtime_state_blocking() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &RunningTurn {
+                turn_id: "turn-live".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            },
+            "running",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(!prepare_pending_turn_recovery(&conn, &store, "task-1").unwrap());
+        assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_some());
+    }
+
+    #[test]
+    fn runtime_state_phase_update_preserves_live_process_session() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        insert_resume_task(&conn);
+        let running_turn = RunningTurn {
+            turn_id: "turn-live".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+        };
+
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &running_turn,
+            "running",
+            Some("process-live"),
+            None,
+        )
+        .unwrap();
+        persist_runtime_state(
+            &conn,
+            &store,
+            "task-1",
+            &running_turn,
+            "reset_pending_finish",
+            None,
+            None,
+        )
+        .unwrap();
+
+        let persisted = load_runtime_state(&conn, &store, "task-1")
+            .unwrap()
+            .expect("runtime state");
+        assert_eq!(persisted.phase, "reset_pending_finish");
+        assert_eq!(
+            persisted.process_session_id.as_deref(),
+            Some("process-live")
+        );
+    }
+
+    #[test]
+    fn queued_user_message_recovery_updates_existing_timeline_row() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        let message = ChatMessage {
+            id: "msg-recover".to_string(),
+            task_id: "task-1".to_string(),
+            role: "user".to_string(),
+            content: "resume queued".to_string(),
+            attachments: Vec::new(),
+            created_at: 100,
+        };
+        let queued_input = AgentTimelineEventInput {
+            id: Some(message.id.clone()),
+            task_id: message.task_id.clone(),
+            turn_id: Some("turn-recover".to_string()),
+            backend: BACKEND_CODEX.to_string(),
+            kind: "message".to_string(),
+            status: "pending".to_string(),
+            title: "用户输入".to_string(),
+            summary: Some(message.content.clone()),
+            payload: json!({
+                "role": message.role,
+                "content": message.content,
+                "attachments": message.attachments,
+                "queued": true,
+            }),
+            created_at: Some(message.created_at as i64),
+            updated_at: Some(101),
+        };
+        agent_timeline::insert(&conn, queued_input).unwrap();
+        let recovered_input = AgentTimelineEventInput {
+            id: Some(message.id.clone()),
+            task_id: message.task_id.clone(),
+            turn_id: Some("turn-recover".to_string()),
+            backend: BACKEND_CODEX.to_string(),
+            kind: "message".to_string(),
+            status: "success".to_string(),
+            title: "用户输入".to_string(),
+            summary: Some(message.content.clone()),
+            payload: json!({
+                "role": message.role,
+                "content": message.content,
+                "attachments": message.attachments,
+                "queued": false,
+            }),
+            created_at: Some(message.created_at as i64),
+            updated_at: Some(102),
+        };
+
+        let recovered = agent_timeline::insert(&conn, recovered_input).unwrap();
+
+        assert_eq!(recovered.id, "msg-recover");
+        assert_eq!(recovered.status, "success");
+        assert_eq!(recovered.payload["queued"], json!(false));
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM agent_timeline_events WHERE task_id = 'task-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn persisted_runtime_state_with_live_process_session_survives_epoch_change() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
+        let child = match std::process::Command::new(python)
+            .args([
+                "-c",
+                "import sys,time; print('{\"kind\":\"timeline\"}'); sys.stdout.flush(); time.sleep(0.2)",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("skip live process session snapshot test: {err}");
+                return;
+            }
+        };
+        let process_session_id =
+            crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            rusqlite::params![
+                "task-1",
+                "turn-live",
+                "codex",
+                "nanobot",
+                "running",
+                process_session_id.clone(),
+                "stale-epoch",
+                1_i64
+            ],
+        )
+        .unwrap();
+
+        let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
+
+        assert_eq!(snapshot.phase, "running");
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-live"));
+        crate::chat::runner::remove_test_process_session(&process_session_id);
+    }
+
+    #[test]
+    fn restore_active_runtime_sessions_rehydrates_running_turns_from_live_process_session() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
+        let child = match std::process::Command::new(python)
+            .args(["-c", "import time; time.sleep(0.2)"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("skip runtime restore test: {err}");
+                return;
+            }
+        };
+        let process_session_id =
+            crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            rusqlite::params![
+                "task-1",
+                "turn-restore",
+                "codex",
+                "nanobot",
+                "running",
+                process_session_id.clone(),
+                "stale-epoch",
+                1_i64
+            ],
+        )
+        .unwrap();
+
+        restore_active_runtime_sessions(&conn, &store);
+
+        assert!(store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .copied()
+            .unwrap_or(false));
+        assert_eq!(
+            store
+                .running_turns
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(|turn| turn.turn_id.as_str()),
+            Some("turn-restore")
+        );
+        assert_eq!(
+            store
+                .running_process_sessions
+                .lock()
+                .unwrap()
+                .get("task-1")
+                .map(String::as_str),
+            Some(process_session_id.as_str())
+        );
+        crate::chat::runner::remove_test_process_session(&process_session_id);
+    }
+
+    #[test]
+    fn restore_active_runtime_sessions_skips_dead_process_session() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
+        let child = match std::process::Command::new(python)
+            .args(["-c", "pass"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("skip dead runtime restore test: {err}");
+                return;
+            }
+        };
+        let process_session_id =
+            crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
+        for _ in 0..100 {
+            if !crate::chat::runner::process_session_is_active(&process_session_id) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+            rusqlite::params![
+                "task-1",
+                "turn-dead",
+                "codex",
+                "nanobot",
+                "running",
+                process_session_id.clone(),
+                "stale-epoch",
+                1_i64
+            ],
+        )
+        .unwrap();
+
+        restore_active_runtime_sessions(&conn, &store);
+
+        assert!(!store
+            .running_tasks
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .copied()
+            .unwrap_or(false));
+        assert!(store.running_turns.lock().unwrap().get("task-1").is_none());
+        assert!(store
+            .running_process_sessions
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .is_none());
+        crate::chat::runner::remove_test_process_session(&process_session_id);
+    }
+
+    #[test]
+    fn restore_active_runtime_sessions_preserves_runtime_channel_for_resume_dispatch() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-2', 'session-2')"#,
+            [],
+        )
+        .unwrap();
+
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
+        let child_1 = std::process::Command::new(&python)
+            .args(["-c", "import time; time.sleep(0.2)"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let child_2 = std::process::Command::new(&python)
+            .args(["-c", "import time; time.sleep(0.2)"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let proc_builtin =
+            crate::chat::runner::start_test_process_session(child_1, &json!({"boot": true}))
+                .unwrap();
+        let proc_nanobot =
+            crate::chat::runner::start_test_process_session(child_2, &json!({"boot": true}))
+                .unwrap();
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-builtin', 'claude', 'builtin', 'running', ?1, 'stale-1', 1)"#,
+            rusqlite::params![proc_builtin.clone()],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-2', 'turn-nanobot', 'codex', 'nanobot', 'running', ?1, 'stale-2', 2)"#,
+            rusqlite::params![proc_nanobot.clone()],
+        )
+        .unwrap();
+
+        let restored = restore_active_runtime_sessions(&conn, &store);
+
+        assert_eq!(restored.len(), 2);
+        assert!(restored.iter().any(|state| state.task_id == "task-1"
+            && state.turn.runtime_channel == RUNTIME_CHANNEL_BUILTIN));
+        assert!(restored.iter().any(|state| state.task_id == "task-2"
+            && state.turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT));
+
+        crate::chat::runner::remove_test_process_session(&proc_builtin);
+        crate::chat::runner::remove_test_process_session(&proc_nanobot);
+    }
+
+    #[test]
+    fn restore_active_runtime_sessions_only_returns_still_reattachable_sessions() {
+        let store = ChatStore::default();
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn.execute(
+            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
+            [],
+        )
+        .unwrap();
+
+        let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
+        let child = std::process::Command::new(python)
+            .args(["-c", "pass"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let process_session_id =
+            crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
+        for _ in 0..100 {
+            if !crate::chat::runner::process_session_is_active(&process_session_id) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        conn.execute(
+            r#"INSERT INTO task_runtime_states
+               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-finished', 'claude', 'builtin', 'running', ?1, 'stale-x', 1)"#,
+            rusqlite::params![process_session_id.clone()],
+        )
+        .unwrap();
+
+        let restored = restore_active_runtime_sessions(&conn, &store);
+
+        assert!(restored.is_empty());
+        assert!(store.running_turns.lock().unwrap().get("task-1").is_none());
+        assert!(store
+            .running_process_sessions
+            .lock()
+            .unwrap()
+            .get("task-1")
+            .is_none());
+        crate::chat::runner::remove_test_process_session(&process_session_id);
     }
 
     #[test]
@@ -845,6 +2273,48 @@ mod agent_event_sink_tests {
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_runtime_control_events (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              name            TEXT NOT NULL,
+              attributes_json TEXT NOT NULL DEFAULT '{}',
+              payload_json    TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_runtime_finalizations (
+              task_id               TEXT PRIMARY KEY,
+              pending_reset_cleanup INTEGER NOT NULL DEFAULT 0
+                                    CHECK (pending_reset_cleanup IN (0, 1)),
+              rollback_json         TEXT,
+              updated_at            INTEGER NOT NULL
+            );
+            CREATE TABLE task_pending_turns (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              content         TEXT NOT NULL,
+              composer_json   TEXT NOT NULL,
+              project_cwd     TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
+              workflow_json   TEXT,
+              message_json    TEXT NOT NULL,
+              turn_id         TEXT NOT NULL,
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','nanobot')),
+              guide_id        TEXT,
+              created_at      INTEGER NOT NULL
             );
             CREATE TABLE agent_timeline_events (
               id                TEXT PRIMARY KEY,
