@@ -38,3 +38,30 @@ pub(super) struct NewTask<'a> {
     pub sort_order: i64,
     pub depends_on: &'a [String],
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneRow {
+    pub id: String,
+    pub project_id: String,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub due_date: Option<i64>,
+    pub order: i64,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMilestoneLinkRow {
+    pub task_id: String,
+    pub milestone_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRoadmapRow {
+    pub milestones: Vec<MilestoneRow>,
+    pub links: Vec<TaskMilestoneLinkRow>,
+}

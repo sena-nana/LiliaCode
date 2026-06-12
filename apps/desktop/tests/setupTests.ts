@@ -46,9 +46,10 @@ beforeEach(async () => {
       writeText: vi.fn(async () => undefined),
     },
   });
-  const [{ PROJECTS }, tasksModule] = await Promise.all([
+  const [{ PROJECTS }, tasksModule, milestonesModule] = await Promise.all([
     import("../src/data/projects"),
     import("../src/data/tasks"),
+    import("../src/data/milestones"),
   ]);
   const { useSidebarDisplayMode } = await import("../src/composables/useSidebarDisplayMode");
   useSidebarDisplayMode().setSidebarDisplayMode("grouped");
@@ -67,6 +68,9 @@ beforeEach(async () => {
   ORPHAN_LIST.value = mockOrphansForStore();
   PROJECT_TASKS_LOADED.value = {};
   ORPHANS_LOADED.value = false;
+  milestonesModule.MILESTONES.value = {};
+  milestonesModule.MILESTONE_LINKS.value = {};
+  milestonesModule.PROJECT_ROADMAP_LOADED.value = {};
   bindMockProjectPinUpdater((projectId, pinned) => {
     PROJECTS.value = PROJECTS.value.map((project) =>
       project.id === projectId ? { ...project, pinned } : project

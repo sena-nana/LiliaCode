@@ -15,6 +15,7 @@ import type {
   CodexIabSubmitResult,
   CodexReviewTarget,
   CodexProfileSettings,
+  ProjectRoadmap,
   SuggestionItem,
   TaskTodo,
   TimelineDisplayInput,
@@ -312,6 +313,25 @@ export type TaskTodoAllowsGuideAttachmentsTypeTest = Assert<
       updatedAt: 1;
     },
     TaskTodo
+  >
+>;
+
+export type ProjectRoadmapSnapshotTypeTest = Assert<
+  Extends<
+    {
+      milestones: [{
+        id: "m-1";
+        projectId: "p-1";
+        title: "M1";
+        description: "";
+        status: "upcoming";
+        dueDate: null;
+        order: 0;
+        createdAt: 1;
+      }];
+      links: [{ taskId: "t-1"; milestoneId: "m-1" }];
+    },
+    ProjectRoadmap
   >
 >;
 
