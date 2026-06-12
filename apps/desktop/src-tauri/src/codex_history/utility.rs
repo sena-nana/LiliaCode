@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use serde_json::Value as JsonValue;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use crate::chat::runner::locate_agent_runner;
 use crate::provider::{
@@ -12,7 +12,7 @@ use crate::BACKEND_CODEX;
 
 use super::types::CodexHistoryUtilityOutput;
 
-fn locate_codex_history_utility(app: &AppHandle) -> std::path::PathBuf {
+fn locate_codex_history_utility<R: Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     let runner = locate_agent_runner(app);
     runner
         .parent()
@@ -21,7 +21,7 @@ fn locate_codex_history_utility(app: &AppHandle) -> std::path::PathBuf {
 }
 
 pub(super) fn run_codex_history_utility(
-    app: &AppHandle,
+    app: &AppHandle<impl Runtime>,
     payload: JsonValue,
 ) -> Result<CodexHistoryUtilityOutput, String> {
     validate_backend_ready_for_send(BACKEND_CODEX)?;

@@ -242,6 +242,28 @@ export async function cleanCodexThreadBackgroundTerminals(
   }
 }
 
+export async function renameCodexThread(
+  threadId,
+  name,
+  { createServer = createCodexAppServer } = {},
+) {
+  const trimmedThreadId = stringOrNull(threadId)?.trim();
+  const trimmedName = stringOrNull(name)?.trim();
+  if (!trimmedThreadId) throw new Error("Codex threadId is required");
+  if (!trimmedName) throw new Error("Codex thread name is required");
+  const server = createServer();
+  try {
+    await initializeCodexAppServer(server);
+    await server.request("thread/name/set", {
+      threadId: trimmedThreadId,
+      name: trimmedName,
+    });
+    return { threadId: trimmedThreadId, name: trimmedName, renamed: true };
+  } finally {
+    server.close();
+  }
+}
+
 export async function previewCodexThread(threadId, { createServer = createCodexAppServer } = {}) {
   const server = createServer();
   try {
