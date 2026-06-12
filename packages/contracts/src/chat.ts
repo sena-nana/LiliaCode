@@ -29,6 +29,29 @@ export interface ChatContextSearchResult {
   matchedBy: "name" | "path";
 }
 
+export type ChatSlashCommandSource = "native" | "project";
+
+export interface ChatSlashCommandParameter {
+  name: string;
+  label: string;
+  required: boolean;
+  hint?: string | null;
+}
+
+export interface ChatSlashCommand {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  source: ChatSlashCommandSource;
+  parameters: ChatSlashCommandParameter[];
+}
+
+export interface ChatSlashCommandSearchResult {
+  command: ChatSlashCommand;
+  matchedBy: "name" | "title" | "description";
+}
+
 export interface ChatMessage {
   id: string;
   taskId: string;
@@ -124,6 +147,13 @@ export interface AutomationRunWorkflow {
   automationRunId: string;
 }
 
+export interface ChatSlashCommandWorkflow {
+  type: "slash_command";
+  commandId: string;
+  source: ChatSlashCommandSource;
+  arguments: Record<string, string>;
+}
+
 export interface CodexThreadGoal {
   threadId: string;
   objective: string;
@@ -146,7 +176,8 @@ export type ChatWorkflow =
   | CodexMemoryResetWorkflow
   | CodexThreadForkWorkflow
   | CodexConfigDiagnosticsWorkflow
-  | AutomationRunWorkflow;
+  | AutomationRunWorkflow
+  | ChatSlashCommandWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

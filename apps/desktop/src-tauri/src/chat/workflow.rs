@@ -13,6 +13,7 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<&'static 
         ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
         ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
         ChatWorkflow::Automation { .. } => Some("automation"),
+        ChatWorkflow::SlashCommand { .. } => Some("slash_command"),
     }
 }
 
@@ -36,6 +37,7 @@ pub(crate) fn parse_workflow_kind(value: &str) -> Option<&'static str> {
         "codex_thread_fork" => Some("codex_thread_fork"),
         "codex_config_diagnostics" => Some("codex_config_diagnostics"),
         "automation" => Some("automation"),
+        "slash_command" => Some("slash_command"),
         _ => None,
     }
 }

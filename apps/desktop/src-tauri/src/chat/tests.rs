@@ -15,6 +15,7 @@ mod agent_event_sink_tests {
         stage_mutsuki_core_turn_stop, MutsukiCoreTurnStopKind, ResetSessionPlan,
     };
     use crate::chat::runner::build_runner_stdin_payload;
+    use crate::chat::slash_commands::{execute_slash_command, list_slash_commands};
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
@@ -594,6 +595,11 @@ mod agent_event_sink_tests {
             ChatWorkflow::CodexConfigDiagnostics {
                 include_layers: Some(true),
             },
+            ChatWorkflow::SlashCommand {
+                command_id: "native:help".to_string(),
+                source: "native".to_string(),
+                arguments: BTreeMap::new(),
+            },
         ];
 
         for workflow in workflows {
@@ -690,6 +696,86 @@ mod agent_event_sink_tests {
         let diagnostics_json = serde_json::to_value(&diagnostics).unwrap();
         assert_eq!(diagnostics_json["includeLayers"], json!(false));
         assert!(diagnostics_json.get("include_layers").is_none());
+
+        let slash = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "slash_command",
+            "commandId": "native:help",
+            "source": "native",
+            "arguments": {},
+        }))
+        .unwrap();
+        let ChatWorkflow::SlashCommand {
+            command_id,
+            source,
+            arguments,
+        } = &slash
+        else {
+            panic!("unexpected workflow: {slash:?}");
+        };
+        assert_eq!(command_id, "native:help");
+        assert_eq!(source, "native");
+        assert!(arguments.is_empty());
+        let slash_json = serde_json::to_value(&slash).unwrap();
+        assert_eq!(slash_json["commandId"], json!("native:help"));
+        assert!(slash_json.get("command_id").is_none());
+    }
+
+    #[test]
+    fn slash_commands_discover_native_and_project_commands() {
+        let temp = std::env::temp_dir().join(format!(
+            "lilia-slash-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let command_dir = temp.join(".lilia").join("commands");
+        std::fs::create_dir_all(&command_dir).unwrap();
+        std::fs::write(
+            command_dir.join("release.md"),
+            "# 生成发布检查\n\n请完成发布前检查并整理风险项。",
+        )
+        .unwrap();
+        let cwd = temp.to_string_lossy().to_string();
+
+        let help = list_slash_commands(&cwd, "help", 12);
+        assert_eq!(help[0].command.id, "native:help");
+        assert_eq!(help[0].matched_by, "name");
+
+        let project = list_slash_commands(&cwd, "release", 12);
+        assert_eq!(project[0].command.id, "project:release");
+        assert_eq!(project[0].command.title, "生成发布检查");
+        assert_eq!(project[0].command.source, ChatSlashCommandSource::Project);
+        let _ = std::fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn slash_command_execution_returns_timeline_ready_output() {
+        let temp = std::env::temp_dir().join(format!(
+            "lilia-slash-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let command_dir = temp.join(".lilia").join("commands");
+        std::fs::create_dir_all(&command_dir).unwrap();
+        std::fs::write(
+            command_dir.join("release.md"),
+            "# 生成发布检查\n\n请完成发布前检查并整理风险项。",
+        )
+        .unwrap();
+        let cwd = temp.to_string_lossy().to_string();
+
+        let native = execute_slash_command("native:status", &cwd, BACKEND_CODEX).unwrap();
+        assert_eq!(native.name, "status");
+        assert!(native.result.contains("当前后端：codex"));
+
+        let project = execute_slash_command("project:release", &cwd, BACKEND_CODEX).unwrap();
+        assert_eq!(project.name, "release");
+        assert!(project.result.contains("请完成发布前检查"));
+        assert!(project.result.contains("release.md"));
+        let _ = std::fs::remove_dir_all(temp);
     }
 
     #[test]

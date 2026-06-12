@@ -20,6 +20,7 @@ import type {
   ChatBackendKind,
   ChatAttachment,
   ChatContextSearchResult,
+  ChatSlashCommandSearchResult,
   ChatComposerState,
   ChatRuntimeSnapshot,
   ChatWorkflow,
@@ -66,6 +67,7 @@ export type {
   ChatAttachment,
   ChatInterruptResult,
   ChatContextSearchResult,
+  ChatSlashCommandSearchResult,
   ChatWorkflow,
   ChatRuntimeSnapshot,
   ClaudeSessionAttachInput,
@@ -193,6 +195,18 @@ export function searchContextAttachments(
   limit = 12,
 ): Promise<ChatContextSearchResult[]> {
   return invoke<ChatContextSearchResult[]>("chat_search_context_attachments", {
+    projectCwd,
+    query,
+    limit,
+  });
+}
+
+export function searchSlashCommands(
+  projectCwd: string,
+  query: string,
+  limit = 12,
+): Promise<ChatSlashCommandSearchResult[]> {
+  return invoke<ChatSlashCommandSearchResult[]>("chat_search_slash_commands", {
     projectCwd,
     query,
     limit,

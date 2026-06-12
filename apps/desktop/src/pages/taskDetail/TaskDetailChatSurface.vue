@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatSlashCommandWorkflow,
   CodexThreadGoal,
   CodexReviewTarget,
   Project,
@@ -95,6 +96,7 @@ const emit = defineEmits<{
   "reset-codex-memory": [];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
+  "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-codex-batch-apply": [input: CodexBatchApplyInput];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
@@ -207,6 +209,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @set-codex-goal="emit('set-codex-goal', $event)"
                   @fork-codex-thread="emit('fork-codex-thread')"
                   @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
+                  @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"

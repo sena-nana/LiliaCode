@@ -62,6 +62,15 @@ interface AgentTimelineEvent {
   intraTurnOrder: number;
 }
 
+interface MockSlashCommand {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  source: "native" | "project";
+  parameters: unknown[];
+}
+
 interface TodoRow {
   id: string;
   taskId: string;
@@ -677,6 +686,43 @@ function normalizeComposer(input: unknown, taskId: string) {
     backend,
     model,
   };
+}
+
+const mockSlashCommands: MockSlashCommand[] = [
+  {
+    id: "native:help",
+    name: "help",
+    title: "显示可用斜杠命令",
+    description: "列出当前可执行的内置命令和项目命令。",
+    source: "native",
+    parameters: [],
+  },
+  {
+    id: "native:status",
+    name: "status",
+    title: "显示当前会话状态",
+    description: "写入当前后端和工作目录状态。",
+    source: "native",
+    parameters: [],
+  },
+  {
+    id: "project:release",
+    name: "release",
+    title: "生成发布检查",
+    description: "按项目命令模板生成发布前检查清单。",
+    source: "project",
+    parameters: [],
+  },
+];
+
+function mockSlashCommandOutput(command: MockSlashCommand, projectCwd: string, backend: string) {
+  if (command.id === "native:help") {
+    return `内置命令：/help、/status\n项目命令：1 个\n项目命令文件目录：${projectCwd}\\.lilia\\commands`;
+  }
+  if (command.id === "native:status") {
+    return `当前后端：${backend}\n工作目录：${projectCwd}`;
+  }
+  return "请完成发布前检查并整理风险项。\n\n来源：D:\\PROJECT\\workspace\\Lilia\\.lilia\\commands\\release.md";
 }
 
 export function resetTauriMockData() {
@@ -2553,6 +2599,23 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         });
     }
 
+    case "chat_search_slash_commands": {
+      const query = String(args.query ?? "").trim().toLowerCase();
+      const limit = typeof args.limit === "number" ? args.limit : 12;
+      return mockSlashCommands
+        .filter((command) =>
+          !query ||
+          command.name.includes(query) ||
+          command.title.toLowerCase().includes(query) ||
+          command.description.toLowerCase().includes(query)
+        )
+        .slice(0, limit)
+        .map((command) => ({
+          command: { ...command, parameters: [...command.parameters] },
+          matchedBy: !query || command.name.includes(query) ? "name" : "title",
+        }));
+    }
+
     case "todo_list": {
       const taskId = String(args.taskId);
       return listMockTodos(taskId);
@@ -2651,6 +2714,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const composer = normalizeComposer(args.composer, taskId);
       args.composer = composer;
       const attachments = Array.isArray(args.attachments) ? args.attachments : [];
+      const workflow = args.workflow && typeof args.workflow === "object" && !Array.isArray(args.workflow)
+        ? args.workflow as Record<string, unknown>
+        : null;
       const queued = chatRunning[taskId] === true;
       const message = {
         id: `u-${(timelineEvents[taskId]?.filter((event) => event.kind === "message").length ?? 0) + 1}`,
@@ -2663,6 +2729,47 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const turnId = queued
         ? `turn-queued-${message.id}`
         : `turn-${message.id}`;
+      if (workflow?.type === "slash_command" && typeof workflow.commandId === "string") {
+        const command = mockSlashCommands.find((item) => item.id === workflow.commandId);
+        if (!command) throw new Error(`未知斜杠命令：${workflow.commandId}`);
+        const projectCwd = String(args.projectCwd ?? "D:\\PROJECT\\workspace\\Lilia");
+        const output = mockSlashCommandOutput(command, projectCwd, composer.backend);
+        emitMockTimelineEvent(taskId, {
+          id: `${taskId}:${turnId}:slash-command`,
+          turnId,
+          kind: "command",
+          backend: composer.backend,
+          status: "success",
+          title: `/${command.name}`,
+          summary: output,
+          payload: {
+            command: `/${command.name}`,
+            source: command.source,
+            title: command.title,
+            output,
+            exitCode: 0,
+            subkind: "slash_command",
+          },
+          createdAt: message.createdAt,
+          updatedAt: message.createdAt,
+          turnSeq: 0,
+          intraTurnOrder: 0,
+        });
+        queueMicrotask(() => {
+          emitTauriEvent("chat:done", {
+            taskId,
+            sessionId: null,
+            subtype: "slash_command",
+            rollback: null,
+          });
+        });
+        return {
+          message,
+          dispatch: "started",
+          queuedCount: 0,
+          turnId,
+        };
+      }
       emitMockTimelineEvent(taskId, {
         id: message.id,
         turnId,

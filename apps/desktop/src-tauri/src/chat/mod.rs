@@ -2,6 +2,7 @@ pub(crate) mod attachments;
 pub(crate) mod commands;
 pub(crate) mod mutsuki_core_runtime;
 pub(crate) mod runner;
+pub(crate) mod slash_commands;
 pub(crate) mod state;
 pub(crate) mod timeline_sink;
 pub(crate) mod title_update;
