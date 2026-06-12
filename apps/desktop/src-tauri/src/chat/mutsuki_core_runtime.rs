@@ -32,7 +32,7 @@ use crate::chat::state::{
     RuntimeControlEvent,
 };
 use crate::chat::state::{session_key, PersistedRuntimeState};
-use crate::chat::types::ChatWorkflow;
+use crate::chat::workflow::{automation_run_id, parse_workflow_kind, workflow_kind};
 use crate::util::now_millis;
 use crate::RUNTIME_CHANNEL_MUTSUKI_CORE;
 
@@ -245,8 +245,8 @@ impl RuntimeTurnContext {
             project_cwd: invocation.project_cwd.clone(),
             prompt_length: invocation.content.chars().count(),
             attachment_count: invocation.attachments.len(),
-            workflow_type: invocation.workflow.as_ref().and_then(workflow_type),
-            automation_run_id: automation_run_id_from_workflow(invocation.workflow.as_ref()),
+            workflow_type: workflow_kind(invocation.workflow.as_ref()),
+            automation_run_id: automation_run_id(invocation.workflow.as_ref()),
             source_id: format!("lilia:{backend}"),
             agent_id: format!("lilia-{backend}-agent"),
             resume_session_id: invocation.resume_session_id.clone(),
@@ -277,7 +277,7 @@ impl RuntimeTurnContext {
             workflow_type: context
                 .workflow_type
                 .as_deref()
-                .and_then(parse_workflow_type),
+                .and_then(parse_workflow_kind),
             automation_run_id: context.automation_run_id,
             source_id: format!("lilia:{backend}"),
             agent_id: format!("lilia-{backend}-agent"),
@@ -1502,46 +1502,6 @@ fn operation_not_found_failure(op_id: &str) -> RuntimeFailure {
         PLUGIN_ID,
         format!("{STRATEGY_ID}.{op_id}"),
     ))
-}
-
-fn workflow_type(workflow: &ChatWorkflow) -> Option<&'static str> {
-    match workflow {
-        ChatWorkflow::CodexReview { .. } => Some("codex_review"),
-        ChatWorkflow::CodexFixSuggestion { .. } => Some("codex_fix_suggestion"),
-        ChatWorkflow::CodexBatchApply { .. } => Some("codex_batch_apply"),
-        ChatWorkflow::CodexGoal { .. } => Some("codex_goal"),
-        ChatWorkflow::CodexCompact => Some("codex_compact"),
-        ChatWorkflow::CodexBackgroundTerminalsClean => Some("codex_background_terminals_clean"),
-        ChatWorkflow::CodexMemoryMode { .. } => Some("codex_memory_mode"),
-        ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
-        ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
-        ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
-        ChatWorkflow::Automation { .. } => Some("automation"),
-    }
-}
-
-fn automation_run_id_from_workflow(workflow: Option<&ChatWorkflow>) -> Option<String> {
-    match workflow {
-        Some(ChatWorkflow::Automation { automation_run_id }) => Some(automation_run_id.clone()),
-        _ => None,
-    }
-}
-
-fn parse_workflow_type(value: &str) -> Option<&'static str> {
-    match value {
-        "codex_review" => Some("codex_review"),
-        "codex_fix_suggestion" => Some("codex_fix_suggestion"),
-        "codex_batch_apply" => Some("codex_batch_apply"),
-        "codex_goal" => Some("codex_goal"),
-        "codex_compact" => Some("codex_compact"),
-        "codex_background_terminals_clean" => Some("codex_background_terminals_clean"),
-        "codex_memory_mode" => Some("codex_memory_mode"),
-        "codex_memory_reset" => Some("codex_memory_reset"),
-        "codex_thread_fork" => Some("codex_thread_fork"),
-        "codex_config_diagnostics" => Some("codex_config_diagnostics"),
-        "automation" => Some("automation"),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
