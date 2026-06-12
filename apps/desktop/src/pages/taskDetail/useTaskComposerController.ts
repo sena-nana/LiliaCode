@@ -33,12 +33,14 @@ import {
   getRuntimeSnapshot,
   ackRestoredRollback,
   interruptTurn,
+  openCodexIab,
   onAgentTimeline,
   onAgentTimelineBatch,
   onDone,
   onTurnStarted,
   sendMessage,
   setComposerState,
+  submitCodexIab,
 } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
 import type { TaskTodo } from "../../services/todos";
@@ -195,6 +197,57 @@ export function useTaskComposerController(options: {
       await sendAgentMessage("", [], undefined, workflow, `/${commandName}`);
     } catch {
       // sendAgentMessage 已写入本地错误 timeline。
+    }
+  }
+
+  async function onOpenCodexIab() {
+    if (!context.hasContext.value) return;
+    if (composerForView.value.backend !== "codex") {
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("IAB 仅支持 Codex 会话。"));
+      return;
+    }
+    const raw = window.prompt("IAB URL", "about:blank");
+    if (raw === null) return;
+    const url = raw.trim() || "about:blank";
+    try {
+      await openCodexIab(props.taskId, url);
+    } catch (err) {
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打开 IAB 失败：${String(err)}`));
+    }
+  }
+
+  function codexIabMessage(snapshot: Awaited<ReturnType<typeof submitCodexIab>>["snapshot"]): string {
+    const lines = [
+      "Codex IAB 页面交互结果",
+      `URL: ${snapshot.url}`,
+      snapshot.title ? `标题: ${snapshot.title}` : null,
+      snapshot.note ? `备注: ${snapshot.note}` : null,
+      `截图状态: ${snapshot.status}`,
+      snapshot.screenshotPath ? `截图: ${snapshot.screenshotPath}` : null,
+      snapshot.warning ? `截图警告: ${snapshot.warning}` : null,
+    ].filter((line): line is string => Boolean(line));
+    return lines.join("\n");
+  }
+
+  async function onSubmitCodexIab() {
+    if (!context.hasContext.value) return;
+    if (composerForView.value.backend !== "codex") {
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("IAB 结果只能回送到 Codex 会话。"));
+      return;
+    }
+    const note = window.prompt("IAB 备注")?.trim() ?? "";
+    try {
+      const result = await submitCodexIab(props.taskId, note);
+      if (result.delivery === "runner" && result.stdinForwarded) return;
+      await sendAgentMessage(
+        codexIabMessage(result.snapshot),
+        result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
+        undefined,
+        undefined,
+        result.snapshot.note || result.snapshot.title || result.snapshot.url,
+      );
+    } catch (err) {
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`回送 IAB 结果失败：${String(err)}`));
     }
   }
 
@@ -465,6 +518,8 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onExecuteSlashCommand,
+    onOpenCodexIab,
+    onSubmitCodexIab,
     ...codexWorkflowActions,
     onInsertGuide,
     onInsertDraftText,

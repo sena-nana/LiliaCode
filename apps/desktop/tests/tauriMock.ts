@@ -357,6 +357,8 @@ let nextAgentInteractionResponseError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let clipboardTextSeq = 0;
+let codexIabSeq = 0;
+let nextCodexIabDelivery: "runner" | "message" = "message";
 let activeBackend: "claude" | "codex" = "claude";
 type MockProviderBackend = "claude" | "codex";
 type MockRouterMode = "cc-switch" | "direct";
@@ -376,6 +378,32 @@ let routerModes: Record<MockProviderBackend, MockRouterMode> = {
 let ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
 let ccSwitchReachable = true;
 let nodeAvailable = true;
+
+function createMockCodexIabSnapshot(args: Record<string, unknown>) {
+  const taskId = String(args.taskId);
+  codexIabSeq += 1;
+  const path = `C:\\Users\\mock\\.lilia\\cache\\iab-snapshots\\iab-${codexIabSeq}.png`;
+  return {
+    taskId,
+    url: "https://example.com/debug",
+    title: "Debug Page",
+    note: typeof args.note === "string" && args.note.trim() ? args.note.trim() : null,
+    capturedAt: Date.now(),
+    screenshotPath: path,
+    screenshotAttachment: {
+      id: `att-iab-${codexIabSeq}`,
+      name: "IAB 截图.png",
+      path,
+      kind: "file",
+      size: 128,
+      exists: true,
+      mime: "image/png",
+      directory: null,
+    },
+    status: "captured",
+    warning: null,
+  };
+}
 let codexAppServerStatus = {
   version: "codex-cli 0.128.0",
   available: true,
@@ -801,6 +829,8 @@ export function resetTauriMockData() {
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
   clipboardTextSeq = 0;
+  codexIabSeq = 0;
+  nextCodexIabDelivery = "message";
   activeBackend = "claude";
   providerConfigs = {
     claude: { backend: "claude", baseUrl: null, hasApiKey: false },
@@ -925,6 +955,10 @@ export function failNextMockChatSend(message: string) {
 
 export function failNextMockAgentInteractionResponse(message: string) {
   nextAgentInteractionResponseError = message;
+}
+
+export function setNextMockCodexIabDelivery(delivery: "runner" | "message") {
+  nextCodexIabDelivery = delivery;
 }
 
 export function emitWebviewDragDropEvent(payload: unknown) {
@@ -2812,6 +2846,24 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         dispatch: "started",
         queuedCount: 0,
         turnId,
+      };
+    }
+
+    case "codex_iab_open":
+    case "codex_iab_navigate":
+      return undefined;
+
+    case "codex_iab_capture":
+      return createMockCodexIabSnapshot(args);
+
+    case "codex_iab_submit": {
+      const snapshot = createMockCodexIabSnapshot(args);
+      const delivery = nextCodexIabDelivery;
+      nextCodexIabDelivery = "message";
+      return {
+        snapshot,
+        delivery,
+        stdinForwarded: delivery === "runner",
       };
     }
 

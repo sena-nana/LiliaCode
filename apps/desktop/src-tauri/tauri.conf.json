@@ -28,7 +28,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/.lilia/cache/clipboard-images/**"
+          "$HOME/.lilia/cache/clipboard-images/**",
+          "$HOME/.lilia/cache/iab-snapshots/**"
         ]
       }
     }

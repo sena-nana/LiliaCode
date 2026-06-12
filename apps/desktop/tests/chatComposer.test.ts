@@ -900,6 +900,47 @@ describe("ChatComposer", () => {
     expect(view.emitted("start-codex-compact")?.length).toBe(1);
   });
 
+  it("Codex 后端可从工具栏打开和回送 IAB", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+      },
+    });
+
+    const openButton = view.getByRole("button", { name: "打开 Codex IAB" });
+    const submitButton = view.getByRole("button", { name: "回送 IAB 截图" });
+    expect(openButton).not.toBeDisabled();
+    expect(submitButton).not.toBeDisabled();
+
+    await fireEvent.click(openButton);
+    await fireEvent.click(submitButton);
+
+    expect(view.emitted("open-codex-iab")?.length).toBe(1);
+    expect(view.emitted("submit-codex-iab")?.length).toBe(1);
+  });
+
+  it("非 Codex 隐藏 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "打开 Codex IAB" })).toBeNull();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+      sending: true,
+    });
+
+    expect(view.getByRole("button", { name: "打开 Codex IAB" })).not.toBeDisabled();
+    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
+  });
+
   it("非 Codex 时隐藏 compact 入口，运行中或阻塞 pending 时禁用", async () => {
     const view = render(ChatComposer, {
       props: {

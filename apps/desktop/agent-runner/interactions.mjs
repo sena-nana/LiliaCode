@@ -69,6 +69,7 @@ export function createInteractionBroker({
   const codexPending = new Map();
   let codexSeq = 1;
   let settingsUpdateHandler = null;
+  let codexIabResultHandler = null;
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
     protocol.emit({
@@ -220,6 +221,10 @@ export function createInteractionBroker({
     }
     if (msg.type === "settings_update") {
       settingsUpdateHandler?.(msg);
+      return;
+    }
+    if (msg.type === "codex_iab_result") {
+      codexIabResultHandler?.(msg.snapshot);
     }
   }
 
@@ -230,6 +235,9 @@ export function createInteractionBroker({
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
+    },
+    handleCodexIabResult: (handler) => {
+      codexIabResultHandler = typeof handler === "function" ? handler : null;
     },
     pendingCounts: () => ({
       consent: consentPending.size,

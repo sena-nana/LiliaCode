@@ -84,6 +84,8 @@ const emit = defineEmits<{
   "set-codex-goal": [objective: string];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
+  "open-codex-iab": [];
+  "submit-codex-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -910,6 +912,8 @@ defineExpose({ focusInput, getDraftSnapshot });
         @set-codex-goal="emit('set-codex-goal', $event)"
         @fork-codex-thread="emit('fork-codex-thread')"
         @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
+        @open-codex-iab="emit('open-codex-iab')"
+        @submit-codex-iab="emit('submit-codex-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

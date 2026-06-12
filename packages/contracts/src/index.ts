@@ -2,6 +2,7 @@ export * from "./project";
 export * from "./task";
 export * from "./todo";
 export * from "./chat";
+export * from "./codex-iab";
 export * from "./provider";
 export * from "./plugins";
 export * from "./codex-history";

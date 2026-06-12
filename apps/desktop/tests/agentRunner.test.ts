@@ -36,6 +36,7 @@ import {
   updateCodexThreadSettings,
   applyCodexRuntimePermission,
   flushCodexRuntimeSettings,
+  handleCodexIabResult,
   startCodexAppServerTurn,
   withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
@@ -1665,6 +1666,67 @@ describe("Codex app-server mapping", () => {
       },
     ]);
     expect(consentTimeline).toEqual([]);
+  });
+
+  it("steers Codex IAB snapshots back into the active turn", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "turn/steer") return {};
+        throw new Error(`unexpected request ${method}`);
+      },
+    };
+    const ctx: any = {
+      protocol,
+      server,
+      threadId: "thread-1",
+      currentTurnId: "turn-1",
+    };
+
+    await handleCodexIabResult(ctx, {
+      taskId: "task-1",
+      url: "https://example.com/debug",
+      title: "Debug Page",
+      note: "button broken",
+      capturedAt: 1,
+      screenshotPath: "C:/shot.png",
+      status: "captured",
+    });
+
+    expect(json()).toEqual([
+      {
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "tool",
+          status: "success",
+          title: "Codex IAB snapshot",
+          payload: expect.objectContaining({
+            backend: "codex",
+            subkind: "codex_iab",
+            url: "https://example.com/debug",
+            title: "Debug Page",
+            note: "button broken",
+            screenshotPath: "C:/shot.png",
+            status: "captured",
+          }),
+        }),
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        method: "turn/steer",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          additionalContext: expect.stringContaining("https://example.com/debug"),
+        },
+      },
+    ]);
+    expect(calls[0].params.additionalContext).toContain("Debug Page");
+    expect(calls[0].params.additionalContext).toContain("button broken");
+    expect(calls[0].params.additionalContext).toContain("C:/shot.png");
   });
 
   it("resume thread still registers Lilia AskUser dynamic tool without app-server plan-tool params", async () => {

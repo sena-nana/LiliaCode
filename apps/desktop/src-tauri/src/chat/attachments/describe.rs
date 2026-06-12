@@ -78,7 +78,7 @@ fn scan_directory_meta(path: &Path) -> ChatAttachmentDirectoryMeta {
     meta
 }
 
-pub(super) fn describe_attachment_path(path: String) -> ChatAttachment {
+pub(crate) fn describe_attachment_path(path: String) -> ChatAttachment {
     let raw_path = PathBuf::from(path.trim());
     let normalized_path = if raw_path.is_absolute() {
         raw_path

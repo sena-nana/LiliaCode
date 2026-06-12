@@ -39,3 +39,12 @@ keyring-core = "1.0.0"
 mutsuki-runtime-contracts = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-contracts" }
 mutsuki-runtime-core = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-core" }
 mutsuki-runtime-host = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-host" }
+
+[target.'cfg(windows)'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+raw-window-handle = "0.6"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+] }

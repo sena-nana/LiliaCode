@@ -372,6 +372,8 @@ watch(
     @reset-codex-memory="composerController.onResetCodexMemory"
     @fork-codex-thread="composerController.onForkCodexThread"
     @read-codex-config-diagnostics="composerController.onReadCodexConfigDiagnostics"
+    @open-codex-iab="composerController.onOpenCodexIab"
+    @submit-codex-iab="composerController.onSubmitCodexIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"
     @start-codex-batch-apply="composerController.onStartCodexBatchApply"
     @interrupt="composerController.onInterrupt"

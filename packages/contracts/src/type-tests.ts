@@ -11,6 +11,8 @@ import type {
   ChatMessage,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
+  CodexIabSnapshot,
+  CodexIabSubmitResult,
   CodexReviewTarget,
   CodexProfileSettings,
   SuggestionItem,
@@ -73,6 +75,34 @@ export type ChatAttachmentSchemaTypeTest = Assert<
       directory: null;
     },
     ChatAttachment
+  >
+>;
+
+export type CodexIabSnapshotTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      url: "https://example.com/";
+      title: "Example";
+      note: "按钮没有响应";
+      capturedAt: 1;
+      screenshotPath: "C:/Users/me/.lilia/cache/iab-snapshots/iab.png";
+      screenshotAttachment: ChatAttachment;
+      status: "captured";
+      warning: null;
+    },
+    CodexIabSnapshot
+  >
+>;
+
+export type CodexIabSubmitResultTypeTest = Assert<
+  Extends<
+    {
+      snapshot: CodexIabSnapshot;
+      delivery: "runner";
+      stdinForwarded: true;
+    },
+    CodexIabSubmitResult
   >
 >;
 

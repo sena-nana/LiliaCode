@@ -16,7 +16,7 @@ import {
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
-import { isRecord, stringOrNull } from "../utils.mjs";
+import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
 import { codexPermissionProfileId } from "./settings.mjs";
 import {
@@ -1397,6 +1397,69 @@ async function requestCodexRuntimeInteraction(ctx, kind, payload) {
     ctx.interactions.requestCodexInteraction(kind, payload));
 }
 
+function normalizeCodexIabSnapshot(value) {
+  if (!isRecord(value)) return null;
+  const taskId = stringOrNull(value.taskId);
+  const url = stringOrNull(value.url) || "about:blank";
+  const capturedAt = typeof value.capturedAt === "number" && Number.isFinite(value.capturedAt)
+    ? value.capturedAt
+    : Date.now();
+  return {
+    taskId,
+    url,
+    title: stringOrNull(value.title),
+    note: stringOrNull(value.note),
+    capturedAt,
+    screenshotPath: stringOrNull(value.screenshotPath),
+    status: value.status === "captured" ? "captured" : "metadata_only",
+    warning: stringOrNull(value.warning),
+  };
+}
+
+function codexIabAdditionalContext(snapshot) {
+  const lines = [
+    "Lilia Codex IAB interaction result:",
+    `- URL: ${snapshot.url}`,
+    snapshot.title ? `- Title: ${snapshot.title}` : null,
+    snapshot.note ? `- User note: ${snapshot.note}` : null,
+    `- Captured at: ${new Date(snapshot.capturedAt).toISOString()}`,
+    `- Screenshot status: ${snapshot.status}`,
+    snapshot.screenshotPath ? `- Screenshot path: ${snapshot.screenshotPath}` : null,
+    snapshot.warning ? `- Warning: ${snapshot.warning}` : null,
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+export async function handleCodexIabResult(ctx, snapshotValue) {
+  const snapshot = normalizeCodexIabSnapshot(snapshotValue);
+  if (!snapshot) return;
+  ctx.protocol.emitTimeline({
+    kind: "tool",
+    status: snapshot.status === "captured" ? "success" : "info",
+    title: "Codex IAB snapshot",
+    summary: oneLineSummary(snapshot.note || snapshot.title || snapshot.url),
+    payload: {
+      backend: "codex",
+      subkind: "codex_iab",
+      taskId: snapshot.taskId,
+      url: snapshot.url,
+      title: snapshot.title,
+      note: snapshot.note,
+      capturedAt: snapshot.capturedAt,
+      screenshotPath: snapshot.screenshotPath,
+      status: snapshot.status,
+      warning: snapshot.warning,
+    },
+    sourceId: `codex:iab:${snapshot.capturedAt}`,
+  });
+  if (!ctx.threadId || !ctx.currentTurnId) return;
+  await ctx.server.request("turn/steer", {
+    threadId: ctx.threadId,
+    turnId: ctx.currentTurnId,
+    additionalContext: codexIabAdditionalContext(snapshot),
+  });
+}
+
 const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexGoalWorkflow, finalize: true },
   { run: runCodexCompactWorkflow },
@@ -1514,6 +1577,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ctx.cmd = cmd;
     ctx.selectedModel = selectedModel;
     ctx.interactions = context.interactions;
+    ctx.server = server;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
     ctx.settingsUpdatePromises = [];
     ctx.withCodexElicitation = (kind, fn) =>
@@ -1526,6 +1590,23 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         ctx,
         update?.permission,
         context.protocol,
+      );
+    });
+    context.interactions?.handleCodexIabResult?.((snapshot) => {
+      ctx.settingsUpdatePromises.push(
+        handleCodexIabResult(ctx, snapshot).catch((err) => {
+          context.protocol.emitTimeline({
+            kind: "error",
+            status: "error",
+            title: "Codex IAB result failed",
+            summary: err?.message || String(err),
+            payload: {
+              backend: "codex",
+              subkind: "codex_iab_result",
+            },
+            sourceId: `codex:iab:error:${Date.now()}`,
+          });
+        }),
       );
     });
     if (await runCodexWorkflowIfPresent(
