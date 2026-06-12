@@ -382,6 +382,9 @@ mod agent_event_sink_tests {
         )
         .unwrap();
         let turn = PendingChatTurn {
+            workflow: Some(ChatWorkflow::Automation {
+                automation_run_id: "run-1".to_string(),
+            }),
             guide_id: Some("guide-1".to_string()),
             ..pending_turn("queued")
         };
@@ -396,6 +399,10 @@ mod agent_event_sink_tests {
         assert_eq!(restored.turn_id, turn.turn_id);
         assert_eq!(restored.runtime_channel, RUNTIME_CHANNEL_BUILTIN);
         assert_eq!(restored.guide_id.as_deref(), Some("guide-1"));
+        let Some(ChatWorkflow::Automation { automation_run_id }) = restored.workflow else {
+            panic!("unexpected workflow");
+        };
+        assert_eq!(automation_run_id, "run-1");
         assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
     }
 
