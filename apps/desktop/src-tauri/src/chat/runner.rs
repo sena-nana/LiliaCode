@@ -434,7 +434,7 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
             &turn.composer.backend,
             &turn.turn_id,
             false,
-            None,
+            automation_run_id(turn.workflow.as_ref()).as_deref(),
         );
     }
     spawn_agent_turn_with_channel(

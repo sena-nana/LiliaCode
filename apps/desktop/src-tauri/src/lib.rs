@@ -45,6 +45,29 @@ fn ping() -> &'static str {
     "pong"
 }
 
+fn handle_runtime_restore_failure<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    persisted: &chat::state::PersistedRuntimeState,
+    runtime_name: &str,
+    err: String,
+) {
+    let store = app.state::<chat::state::ChatStore>();
+    store
+        .running_tasks
+        .lock()
+        .unwrap()
+        .remove(&persisted.task_id);
+    chat::state::clear_running_handles(&store, &persisted.task_id);
+    chat::state::clear_runtime_state_for_app(app, &persisted.task_id);
+    chat::timeline_sink::persist_and_emit_error_timeline_event(
+        app,
+        &persisted.task_id,
+        &persisted.turn.backend,
+        Some(&persisted.turn.turn_id),
+        format!("恢复 {runtime_name} runtime 失败：{err}"),
+    );
+}
+
 fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(chat_store) = app.try_state::<chat::state::ChatStore>() {
         if let Some(lilia_store) = app.try_state::<store::LiliaStore>() {
@@ -58,23 +81,11 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                                 app_handle.clone(),
                                 persisted.clone(),
                             ) {
-                                let store = app_handle.state::<chat::state::ChatStore>();
-                                store
-                                    .running_tasks
-                                    .lock()
-                                    .unwrap()
-                                    .remove(&persisted.task_id);
-                                chat::state::clear_running_handles(&store, &persisted.task_id);
-                                chat::state::clear_runtime_state_for_app(
+                                handle_runtime_restore_failure(
                                     &app_handle,
-                                    &persisted.task_id,
-                                );
-                                chat::timeline_sink::persist_and_emit_error_timeline_event(
-                                    &app_handle,
-                                    &persisted.task_id,
-                                    &persisted.turn.backend,
-                                    Some(&persisted.turn.turn_id),
-                                    format!("恢复 MutsukiCore runtime 失败：{err}"),
+                                    &persisted,
+                                    "MutsukiCore",
+                                    err,
                                 );
                             }
                         }
@@ -83,27 +94,18 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                                 app_handle.clone(),
                                 persisted.clone(),
                             ) {
-                                let store = app_handle.state::<chat::state::ChatStore>();
-                                store
-                                    .running_tasks
-                                    .lock()
-                                    .unwrap()
-                                    .remove(&persisted.task_id);
-                                chat::state::clear_running_handles(&store, &persisted.task_id);
-                                chat::state::clear_runtime_state_for_app(
+                                handle_runtime_restore_failure(
                                     &app_handle,
-                                    &persisted.task_id,
-                                );
-                                chat::timeline_sink::persist_and_emit_error_timeline_event(
-                                    &app_handle,
-                                    &persisted.task_id,
-                                    &persisted.turn.backend,
-                                    Some(&persisted.turn.turn_id),
-                                    format!("恢复 builtin runtime 失败：{err}"),
+                                    &persisted,
+                                    "builtin",
+                                    err,
                                 );
                             }
                         }
                     });
+                }
+                if let Err(err) = automation::recover_abandoned_agent_runs(app, &chat_store) {
+                    eprintln!("[automation] recover abandoned agent runs failed: {err}");
                 }
                 if let Ok(task_ids) = chat::state::list_pending_turn_task_ids(&conn) {
                     for task_id in task_ids {

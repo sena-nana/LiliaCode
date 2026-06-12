@@ -11,22 +11,20 @@ use crate::util::now_millis;
 
 pub(crate) mod commands;
 mod node_handlers;
-mod types;
 mod repository;
 mod signals;
+mod types;
 
+use node_handlers::execute_node;
+use repository::{json_text, node_states_for_run, run_by_id, version_by_id, workflow_by_id};
 pub use signals::{
     emit_interaction_signal, emit_task_changed_signal, emit_timeline_signal, emit_todo_signal,
 };
+use types::{AutomationChangedEvent, AutomationRunEvent, GraphExecution};
 pub use types::{
     AutomationDraft, AutomationEdge, AutomationNode, AutomationRun, AutomationRunNodeState,
     AutomationRunStatus, AutomationSignalEnvelope, AutomationWorkflow, AutomationWorkflowVersion,
 };
-use repository::{
-    json_text, node_states_for_run, run_by_id, version_by_id, workflow_by_id,
-};
-use node_handlers::execute_node;
-use types::{AutomationChangedEvent, AutomationRunEvent, GraphExecution};
 
 fn merge_json_objects(base: JsonValue, patch: JsonValue) -> JsonValue {
     let mut out = base.as_object().cloned().unwrap_or_default();
@@ -44,6 +42,164 @@ fn emit_changed<R: Runtime>(app: &AppHandle<R>, workflow_id: Option<String>) {
 
 fn emit_run<R: Runtime>(app: &AppHandle<R>, event: &str, run: AutomationRun) {
     let _ = app.emit(event, AutomationRunEvent { run });
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AbandonedAgentTurn {
+    run_id: String,
+    node_id: String,
+    task_id: String,
+    turn_id: String,
+}
+
+pub(crate) fn recover_abandoned_agent_runs<R: Runtime>(
+    app: &AppHandle<R>,
+    chat_store: &ChatStore,
+) -> Result<Vec<AutomationRun>, String> {
+    let conn = app.state::<LiliaStore>().conn()?;
+    let abandoned = abandoned_agent_turns(&conn, chat_store)?;
+    let mut recovered = Vec::new();
+    for turn in abandoned {
+        let Some(run) = run_by_id(&conn, &turn.run_id)? else {
+            continue;
+        };
+        if run.status != AutomationRunStatus::Running {
+            continue;
+        }
+        let node_states = node_states_for_run(&conn, &run.id)?;
+        let Some(agent_state) = node_states.into_iter().find(|state| {
+            state.node_id == turn.node_id && state.status == AutomationRunStatus::Running
+        }) else {
+            continue;
+        };
+        let error = format!(
+            "Agent 节点运行恢复失败：运行进程已丢失（task={}, turn={}）",
+            turn.task_id, turn.turn_id
+        );
+        let prior_output = agent_state
+            .output
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let node_output = merge_json_objects(
+            prior_output,
+            serde_json::json!({
+                "waitingAgent": false,
+                "completed": false,
+                "selectedHandle": "error",
+                "recovered": false,
+            }),
+        );
+        update_node_state(
+            &conn,
+            &run.id,
+            &agent_state.node_id,
+            AutomationRunStatus::Failed,
+            agent_state.input,
+            Some(node_output),
+            Some(error.clone()),
+        )?;
+        recovered.push(finish_run(
+            &conn,
+            app,
+            &run.id,
+            AutomationRunStatus::Failed,
+            Some(error),
+        )?);
+        if let Err(err) = crate::chat::state::clear_runtime_state(&conn, &turn.task_id) {
+            eprintln!(
+                "[automation] clear abandoned agent runtime state failed for task {}: {err}",
+                turn.task_id
+            );
+        }
+    }
+    Ok(recovered)
+}
+
+fn abandoned_agent_turns(
+    conn: &Connection,
+    chat_store: &ChatStore,
+) -> Result<Vec<AbandonedAgentTurn>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT r.id, n.node_id, n.output_json
+               FROM automation_runs r
+               JOIN automation_run_nodes n ON n.run_id = r.id
+               WHERE r.status = 'running'
+                 AND n.status = 'running'
+                 AND n.output_json IS NOT NULL
+               ORDER BY r.started_at ASC"#,
+        )
+        .map_err(|e| format!("automation_recover_agent_runs: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("automation_recover_agent_runs: query 失败：{e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let Ok((run_id, node_id, output_json)) = row else {
+            continue;
+        };
+        let Ok(output) = serde_json::from_str::<JsonValue>(&output_json) else {
+            continue;
+        };
+        if !output
+            .get("waitingAgent")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(task_id) = output
+            .get("taskId")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+        else {
+            continue;
+        };
+        let Some(turn_id) = output
+            .get("turnId")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+        else {
+            continue;
+        };
+        if agent_turn_is_still_recoverable(conn, chat_store, task_id)? {
+            continue;
+        }
+        out.push(AbandonedAgentTurn {
+            run_id,
+            node_id,
+            task_id: task_id.to_string(),
+            turn_id: turn_id.to_string(),
+        });
+    }
+    Ok(out)
+}
+
+fn agent_turn_is_still_recoverable(
+    conn: &Connection,
+    chat_store: &ChatStore,
+    task_id: &str,
+) -> Result<bool, String> {
+    if chat_store.running_turns.lock().unwrap().contains_key(task_id) {
+        return Ok(true);
+    }
+    if chat_store.pending_turns.lock().unwrap().contains_key(task_id) {
+        return Ok(true);
+    }
+    let pending_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM task_pending_turns WHERE task_id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("automation_recover_agent_runs: pending turn 查询失败：{e}"))?;
+    Ok(pending_count > 0)
 }
 
 pub fn automation_complete_agent_turn<R: Runtime>(
@@ -783,6 +939,8 @@ fn topological_order(
 mod tests {
     use super::*;
     use crate::automation::types::{AutomationNodePosition, AutomationScopeFilter};
+    use crate::chat::state::{ChatStore, RunningTurn};
+    use crate::{BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN};
     use rusqlite::Connection;
 
     fn node(id: &str, kind: &str) -> AutomationNode {
@@ -847,6 +1005,69 @@ mod tests {
                 error TEXT
             );
             "#,
+        )
+        .unwrap();
+    }
+
+    fn create_run_recovery_tables(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE automation_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                workflow_id TEXT NOT NULL,
+                workflow_version_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                trigger_json TEXT NOT NULL,
+                scope_json TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                error TEXT
+            );
+            CREATE TABLE automation_run_nodes (
+                id TEXT PRIMARY KEY NOT NULL,
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_json TEXT NOT NULL,
+                output_json TEXT,
+                error TEXT,
+                started_at INTEGER,
+                finished_at INTEGER
+            );
+            CREATE TABLE task_pending_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn insert_waiting_agent_run(conn: &Connection) {
+        conn.execute(
+            r#"INSERT INTO automation_runs
+               (id, workflow_id, workflow_version_id, status, trigger_json, scope_json, started_at, finished_at, error)
+               VALUES ('run-1', 'wf-1', 'ver-1', 'running', ?1, ?2, 1, NULL, NULL)"#,
+            params![
+                json_text(&signals::manual_signal(None), "trigger").unwrap(),
+                json_text(&AutomationScopeFilter::default(), "scope").unwrap(),
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO automation_run_nodes
+               (id, run_id, node_id, status, input_json, output_json, error, started_at, finished_at)
+               VALUES ('run-1:agent-1', 'run-1', 'agent-1', 'running', '{}', ?1, NULL, 1, NULL)"#,
+            params![json_text(
+                &serde_json::json!({
+                    "waitingAgent": true,
+                    "taskId": "task-1",
+                    "turnId": "turn-1",
+                }),
+                "output",
+            )
+            .unwrap()],
         )
         .unwrap();
     }
@@ -921,6 +1142,57 @@ mod tests {
 
         let fallback = signals::task_changed_signal(None, None, None, " ", None);
         assert_eq!(fallback.event_kind.as_deref(), Some("task_changed"));
+    }
+
+    #[test]
+    fn abandoned_agent_turns_reports_lost_running_agent_node() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_run_recovery_tables(&conn);
+        insert_waiting_agent_run(&conn);
+        let chat_store = ChatStore::default();
+
+        let abandoned = abandoned_agent_turns(&conn, &chat_store).unwrap();
+
+        assert_eq!(
+            abandoned,
+            vec![AbandonedAgentTurn {
+                run_id: "run-1".to_string(),
+                node_id: "agent-1".to_string(),
+                task_id: "task-1".to_string(),
+                turn_id: "turn-1".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn abandoned_agent_turns_keeps_live_or_pending_agent_node_recoverable() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_run_recovery_tables(&conn);
+        insert_waiting_agent_run(&conn);
+        let chat_store = ChatStore::default();
+        chat_store.running_turns.lock().unwrap().insert(
+            "task-1".to_string(),
+            RunningTurn {
+                turn_id: "turn-1".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
+            },
+        );
+
+        assert!(abandoned_agent_turns(&conn, &chat_store)
+            .unwrap()
+            .is_empty());
+
+        chat_store.running_turns.lock().unwrap().clear();
+        conn.execute(
+            "INSERT INTO task_pending_turns (task_id, turn_id) VALUES ('task-1', 'turn-1')",
+            [],
+        )
+        .unwrap();
+
+        assert!(abandoned_agent_turns(&conn, &chat_store)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -1269,7 +1541,10 @@ mod tests {
         });
 
         assert_eq!(
-            node_handlers::render_template("任务 ${trigger.taskId}: ${nodes.a.output.summary}", &value),
+            node_handlers::render_template(
+                "任务 ${trigger.taskId}: ${nodes.a.output.summary}",
+                &value
+            ),
             "任务 task-1: done"
         );
     }
