@@ -138,6 +138,16 @@ export type CodexBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
+export type AutomationRunWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "automation";
+      automationRunId: "run-1";
+    },
+    ChatWorkflow
+  >
+>;
+
 export type CodexFixSuggestionTargetTypeTest = Assert<
   Extends<{ type: "commit"; sha: "abc123" }, CodexReviewTarget>
 >;

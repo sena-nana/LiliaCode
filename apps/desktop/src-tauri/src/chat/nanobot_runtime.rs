@@ -190,13 +190,25 @@ fn supervise_runtime<R: Runtime>(
         &output,
     );
     let advance_queue = should_advance_queue_after_runtime(&output, fatal_error.as_deref());
+    let agent_success = advance_queue;
+    let automation_run_id = context.automation_run_id.clone();
+    {
+        let store = app.state::<ChatStore>();
+        crate::automation::automation_complete_agent_turn(
+            &app,
+            &store,
+            automation_run_id,
+            &context.turn_id,
+            agent_success,
+        );
+    }
     finish_agent_turn(
         app,
         context.task_id,
         context.backend,
         RUNTIME_CHANNEL_NANOBOT.to_string(),
         output.last_session_id,
-        advance_queue,
+        agent_success,
         None,
     );
     if let Some(err) = fatal_error {
@@ -214,6 +226,7 @@ struct RuntimeTurnContext {
     prompt_length: usize,
     attachment_count: usize,
     workflow_type: Option<&'static str>,
+    automation_run_id: Option<String>,
     source_id: String,
     agent_id: String,
     resume_session_id: Option<String>,
@@ -232,6 +245,7 @@ impl RuntimeTurnContext {
             prompt_length: invocation.content.chars().count(),
             attachment_count: invocation.attachments.len(),
             workflow_type: invocation.workflow.as_ref().and_then(workflow_type),
+            automation_run_id: automation_run_id_from_workflow(invocation.workflow.as_ref()),
             source_id: format!("lilia:{backend}"),
             agent_id: format!("lilia-{backend}-agent"),
             resume_session_id: invocation.resume_session_id.clone(),
@@ -263,6 +277,7 @@ impl RuntimeTurnContext {
                 .workflow_type
                 .as_deref()
                 .and_then(parse_workflow_type),
+            automation_run_id: context.automation_run_id,
             source_id: format!("lilia:{backend}"),
             agent_id: format!("lilia-{backend}-agent"),
             resume_session_id: context.resume_session_id,
@@ -292,6 +307,8 @@ struct RuntimeStateContext {
     attachment_count: usize,
     #[serde(default)]
     workflow_type: Option<String>,
+    #[serde(default)]
+    automation_run_id: Option<String>,
     #[serde(default)]
     resume_session_id: Option<String>,
     #[serde(default)]
@@ -1084,7 +1101,7 @@ fn publish_runtime_control_delivery(
     if let Err(err) = runtime.publish(build_control_delivery_envelope(context, delivery)) {
         runtime.record_backend_event(
             Some(&context.agent_id),
-            format!("runner.control.{}.publish_error", event.name),
+            &format!("runner.control.{}.publish_error", event.name),
             BTreeMap::new(),
             Some(err.error().clone()),
         );
@@ -1379,9 +1396,10 @@ fn drive_runtime_control_events<B: OperationBackend>(
     for event in control_events {
         let Some(op_id) = control_event_operation(&event.name) else {
             ok = false;
+            let event_name = format!("runner.control.{}.unhandled", event.name);
             runtime.record_backend_event(
                 Some(&context.agent_id),
-                format!("runner.control.{}.unhandled", event.name),
+                &event_name,
                 event
                     .attributes
                     .iter()
@@ -1404,9 +1422,10 @@ fn drive_runtime_control_events<B: OperationBackend>(
             backend,
         ) {
             ok = false;
+            let event_name = format!("runner.control.{}.invoke_error", event.name);
             runtime.record_backend_event(
                 Some(&context.agent_id),
-                format!("runner.control.{}.invoke_error", event.name),
+                &event_name,
                 BTreeMap::from([(
                     "operation".to_string(),
                     ScalarValue::String(op_id.to_string()),
@@ -1496,6 +1515,14 @@ fn workflow_type(workflow: &ChatWorkflow) -> Option<&'static str> {
         ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
         ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
         ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
+        ChatWorkflow::Automation { .. } => Some("automation"),
+    }
+}
+
+fn automation_run_id_from_workflow(workflow: Option<&ChatWorkflow>) -> Option<String> {
+    match workflow {
+        Some(ChatWorkflow::Automation { automation_run_id }) => Some(automation_run_id.clone()),
+        _ => None,
     }
 }
 
@@ -1511,6 +1538,7 @@ fn parse_workflow_type(value: &str) -> Option<&'static str> {
         "codex_memory_reset" => Some("codex_memory_reset"),
         "codex_thread_fork" => Some("codex_thread_fork"),
         "codex_config_diagnostics" => Some("codex_config_diagnostics"),
+        "automation" => Some("automation"),
         _ => None,
     }
 }
@@ -1528,6 +1556,7 @@ mod tests {
             prompt_length: 12,
             attachment_count: 2,
             workflow_type: Some("codex_goal"),
+            automation_run_id: None,
             source_id: "lilia:codex".to_string(),
             agent_id: "lilia-codex-agent".to_string(),
             resume_session_id: Some("thread-1".to_string()),

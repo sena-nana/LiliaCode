@@ -74,6 +74,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_runtime_states_context_json",
         apply: migrate_task_runtime_states_context_json,
     },
+    SchemaMigration {
+        version: 17,
+        name: "global_automations",
+        apply: migrate_global_automations,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -360,6 +365,73 @@ fn migrate_task_runtime_states_context_json(conn: &Connection) -> Result<(), Str
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_runtime_states context_json 失败：{e}"))
+}
+
+fn migrate_global_automations(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE automation_workflows (
+          id                   TEXT PRIMARY KEY,
+          name                 TEXT NOT NULL,
+          enabled              INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+          scope_json           TEXT NOT NULL DEFAULT '{}',
+          draft_json           TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[],"scope":{}}',
+          published_version_id TEXT,
+          created_at           INTEGER NOT NULL,
+          updated_at           INTEGER NOT NULL
+        );
+
+        CREATE TABLE automation_workflow_versions (
+          id            TEXT PRIMARY KEY,
+          workflow_id   TEXT NOT NULL,
+          version       INTEGER NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          created_at    INTEGER NOT NULL,
+          FOREIGN KEY (workflow_id) REFERENCES automation_workflows(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX idx_automation_workflow_versions_workflow_version
+          ON automation_workflow_versions(workflow_id, version);
+
+        CREATE TABLE automation_runs (
+          id                  TEXT PRIMARY KEY,
+          workflow_id         TEXT NOT NULL,
+          workflow_version_id TEXT NOT NULL,
+          status              TEXT NOT NULL CHECK (status IN
+                                ('pending','running','succeeded','failed','skipped','waiting_user')),
+          trigger_json        TEXT NOT NULL,
+          scope_json          TEXT NOT NULL,
+          started_at          INTEGER NOT NULL,
+          finished_at         INTEGER,
+          error               TEXT,
+          FOREIGN KEY (workflow_id) REFERENCES automation_workflows(id) ON DELETE CASCADE,
+          FOREIGN KEY (workflow_version_id) REFERENCES automation_workflow_versions(id)
+        );
+
+        CREATE INDEX idx_automation_runs_workflow_started
+          ON automation_runs(workflow_id, started_at DESC);
+        CREATE INDEX idx_automation_runs_status
+          ON automation_runs(status);
+
+        CREATE TABLE automation_run_nodes (
+          id          TEXT PRIMARY KEY,
+          run_id      TEXT NOT NULL,
+          node_id     TEXT NOT NULL,
+          status      TEXT NOT NULL CHECK (status IN
+                        ('pending','running','succeeded','failed','skipped','waiting_user')),
+          input_json  TEXT NOT NULL DEFAULT '{}',
+          output_json TEXT,
+          error       TEXT,
+          started_at  INTEGER,
+          finished_at INTEGER,
+          FOREIGN KEY (run_id) REFERENCES automation_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_automation_run_nodes_run
+          ON automation_run_nodes(run_id);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 global_automations 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

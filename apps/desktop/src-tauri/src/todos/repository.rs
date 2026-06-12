@@ -72,7 +72,9 @@ pub(super) fn emit_todo_changed<R: Runtime>(
             "taskId": task_id,
         }),
     )
-    .map_err(|err| format!("todo-changed emit failed: {err}"))
+    .map_err(|err| format!("todo-changed emit failed: {err}"))?;
+    crate::automation::emit_todo_signal(app, task_id.to_string(), None);
+    Ok(())
 }
 
 pub(crate) fn set_lilia_guide_status<R: Runtime>(

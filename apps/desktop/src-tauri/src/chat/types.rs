@@ -71,6 +71,7 @@ pub(crate) struct ChatSendResult {
     /// "started" | "queued"
     pub(crate) dispatch: String,
     pub(crate) queued_count: usize,
+    pub(crate) turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +133,8 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         include_layers: Option<bool>,
     },
+    #[serde(rename = "automation")]
+    Automation { automation_run_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

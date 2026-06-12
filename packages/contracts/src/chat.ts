@@ -44,6 +44,7 @@ export interface ChatSendResult {
   message: ChatMessage;
   dispatch: ChatSendDispatch;
   queuedCount: number;
+  turnId: string;
 }
 
 export type CodexReviewTarget =
@@ -118,6 +119,11 @@ export interface CodexConfigDiagnosticsWorkflow {
   includeLayers?: boolean;
 }
 
+export interface AutomationRunWorkflow {
+  type: "automation";
+  automationRunId: string;
+}
+
 export interface CodexThreadGoal {
   threadId: string;
   objective: string;
@@ -139,7 +145,8 @@ export type ChatWorkflow =
   | CodexMemoryModeWorkflow
   | CodexMemoryResetWorkflow
   | CodexThreadForkWorkflow
-  | CodexConfigDiagnosticsWorkflow;
+  | CodexConfigDiagnosticsWorkflow
+  | AutomationRunWorkflow;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;
