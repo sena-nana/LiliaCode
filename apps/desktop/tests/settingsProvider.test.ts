@@ -273,6 +273,65 @@ describe("Settings provider switch", () => {
     });
   });
 
+  it("辅助模型密钥不回显，空值保存保留已有密钥", async () => {
+    const view = await renderSettings("/settings?tab=assistant");
+
+    const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
+    expect(apiKeyInput.value).toBe("");
+    expect(view.getByText("密钥已保存")).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "assistant_ai_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"apiKey\":null") &&
+          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
+        ),
+      ).toBe(true);
+    });
+    expect(view.getByText("密钥已保存")).toBeInTheDocument();
+  });
+
+  it("辅助模型可保存新密钥并显式清除", async () => {
+    const view = await renderSettings("/settings?tab=assistant");
+    const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
+
+    await fireEvent.update(apiKeyInput, "sk-new");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "assistant_ai_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
+        ),
+      ).toBe(true);
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "清除" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "assistant_ai_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"clearApiKey\":true")
+        ),
+      ).toBe(true);
+      expect(view.getByText("未保存密钥")).toBeInTheDocument();
+    });
+  });
+
   it("项目设置页 GitHub 绑定流程冒烟", async () => {
     vi.useFakeTimers();
     const writeText = vi.fn(async () => undefined);

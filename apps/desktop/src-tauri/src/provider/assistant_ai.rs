@@ -2,9 +2,14 @@ use std::time::Duration;
 
 use serde_json::Value as JsonValue;
 
+use super::config::assistant_ai_secret;
+use super::credentials::normalize_secret;
 use super::types::{AssistantAIConfig, AssistantAITestResult};
 
-pub(crate) fn test_connection(config: AssistantAIConfig) -> AssistantAITestResult {
+pub(crate) fn test_connection(mut config: AssistantAIConfig) -> AssistantAITestResult {
+    if config.api_key.as_deref().and_then(normalize_secret).is_none() {
+        config.api_key = assistant_ai_secret().ok().flatten();
+    }
     let base = config
         .base_url
         .as_deref()
@@ -81,6 +86,8 @@ mod tests {
             base_url: Some("https://example.com/v1".to_string()),
             api_key: None,
             model: Some("model".to_string()),
+            has_api_key: false,
+            clear_api_key: false,
         });
 
         assert!(!result.ok);

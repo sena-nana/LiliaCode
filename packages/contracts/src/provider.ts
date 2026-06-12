@@ -50,6 +50,8 @@ export interface ProviderConfig {
   backend: ChatBackendKind;
   baseUrl: string | null;
   apiKey: string | null;
+  hasApiKey: boolean;
+  clearApiKey?: boolean;
 }
 
 export interface CCSwitchConfig {
@@ -60,6 +62,8 @@ export interface AssistantAIConfig {
   baseUrl: string | null;
   apiKey: string | null;
   model: string | null;
+  hasApiKey: boolean;
+  clearApiKey?: boolean;
 }
 
 export interface AssistantAITestResult {

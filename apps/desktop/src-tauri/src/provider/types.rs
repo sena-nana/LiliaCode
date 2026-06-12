@@ -89,6 +89,10 @@ pub(crate) struct ProviderConfig {
     pub(crate) backend: String,
     pub(crate) base_url: Option<String>,
     pub(crate) api_key: Option<String>,
+    #[serde(default)]
+    pub(crate) has_api_key: bool,
+    #[serde(default)]
+    pub(crate) clear_api_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +115,10 @@ pub(crate) struct AssistantAIConfig {
     pub(crate) base_url: Option<String>,
     pub(crate) api_key: Option<String>,
     pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) has_api_key: bool,
+    #[serde(default)]
+    pub(crate) clear_api_key: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

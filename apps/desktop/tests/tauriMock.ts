@@ -442,6 +442,12 @@ function normalizeMockStringList(value: unknown): string[] {
 }
 
 let agentInteractionSettings = defaultAgentInteractionSettings();
+let assistantAIConfig = {
+  baseUrl: null as string | null,
+  apiKey: null as string | null,
+  model: null as string | null,
+  hasApiKey: true,
+};
 let conversationSuggestionSettings = {
   enabled: true,
   source: "assistant-ai" as "assistant-ai" | "provider",
@@ -723,6 +729,12 @@ export function resetTauriMockData() {
     envKeys: [...server.envKeys],
   }));
   agentInteractionSettings = defaultAgentInteractionSettings();
+  assistantAIConfig = {
+    baseUrl: null,
+    apiKey: null,
+    model: null,
+    hasApiKey: true,
+  };
   conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
   conversationSuggestionsOverride = null;
   nextConversationSuggestionsError = null;
@@ -1772,17 +1784,31 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "provider_get_config": {
       const backend = normalizeBackend(args.backend);
-      return { backend, baseUrl: null, apiKey: null };
+      return { backend, baseUrl: null, apiKey: null, hasApiKey: false };
     }
 
     case "provider_set_config":
       return undefined;
 
     case "assistant_ai_get_config":
-      return { baseUrl: null, apiKey: null, model: null };
+      return { ...assistantAIConfig, apiKey: null };
 
-    case "assistant_ai_set_config":
+    case "assistant_ai_set_config": {
+      const config = args.config && typeof args.config === "object" && !Array.isArray(args.config)
+        ? args.config as Record<string, unknown>
+        : {};
+      assistantAIConfig = {
+        baseUrl: typeof config.baseUrl === "string" && config.baseUrl.trim() ? config.baseUrl.trim() : null,
+        apiKey: null,
+        model: typeof config.model === "string" && config.model.trim() ? config.model.trim() : null,
+        hasApiKey: config.clearApiKey === true
+          ? false
+          : typeof config.apiKey === "string" && config.apiKey.trim()
+            ? true
+            : assistantAIConfig.hasApiKey,
+      };
       return undefined;
+    }
 
     case "assistant_ai_test_connection":
       return { ok: false, error: "baseUrl / apiKey / model 必须全部填写", models: null, modelMatched: null };

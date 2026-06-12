@@ -8,7 +8,8 @@ use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 use super::config::{
     backend_api_key_env, backend_direct_url, load_cc_switch_config, load_provider_config,
-    load_router_mode, provider_key_for_backend, CC_SWITCH_PLACEHOLDER_KEY, ROUTER_DIRECT,
+    load_router_mode, provider_api_key, provider_has_api_key, provider_key_for_backend,
+    CC_SWITCH_PLACEHOLDER_KEY, ROUTER_DIRECT,
 };
 use super::types::{BackendConnectionPlan, BackendEnvStatus, CCSwitchStatus, ConnectionMode};
 
@@ -69,7 +70,8 @@ pub(crate) fn try_direct_for_backend<R: Runtime>(
     backend: &'static str,
 ) -> BackendConnectionPlan {
     let cfg = load_provider_config(app, provider_key_for_backend(backend)).unwrap_or_default();
-    let has_key = cfg.api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
+    let api_key = provider_api_key(backend).ok().flatten();
+    let has_key = api_key.as_ref().map(|k| !k.is_empty()).unwrap_or(false);
     let has_url = cfg
         .base_url
         .as_ref()
@@ -90,7 +92,7 @@ pub(crate) fn try_direct_for_backend<R: Runtime>(
     BackendConnectionPlan {
         mode,
         base_url: cfg.base_url.filter(|s| !s.is_empty()),
-        api_key: cfg.api_key.filter(|s| !s.is_empty()),
+        api_key: api_key.filter(|s| !s.is_empty()),
     }
 }
 
@@ -126,9 +128,7 @@ pub(crate) fn build_backend_env_status<R: Runtime>(
         .map(|k| !k.is_empty())
         .unwrap_or(false)
         || env::var(key_env).map(|v| !v.is_empty()).unwrap_or(false)
-        || load_provider_config(app, provider_key_for_backend(backend))
-            .and_then(|c| c.api_key.filter(|s| !s.is_empty()))
-            .is_some();
+        || provider_has_api_key(backend).unwrap_or(false);
 
     let effective_url = match plan.mode {
         ConnectionMode::CcSwitch => plan.base_url.clone(),

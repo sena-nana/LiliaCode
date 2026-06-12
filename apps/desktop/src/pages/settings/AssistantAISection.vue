@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { AlertTriangle, MessageSquarePlus, Plug, Save, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, KeyRound, MessageSquarePlus, Plug, Save, Sparkles, Trash2 } from "lucide-vue-next";
 import type {
   AssistantAIConfig,
   AssistantAITestResult,
@@ -15,7 +15,12 @@ import {
   testAssistantAIConnection,
 } from "../../services/chat";
 
-const assistantAIForm = ref<AssistantAIConfig>({ baseUrl: null, apiKey: null, model: null });
+const assistantAIForm = ref<AssistantAIConfig>({
+  baseUrl: null,
+  apiKey: null,
+  model: null,
+  hasApiKey: false,
+});
 const suggestionSettings = ref<SuggestionSettings>({ enabled: true, source: "assistant-ai" });
 const savingAssistantAI = ref(false);
 const savingSuggestions = ref(false);
@@ -45,11 +50,15 @@ function normalizedAssistantAI(): AssistantAIConfig {
     baseUrl: assistantAIForm.value.baseUrl?.trim() || null,
     apiKey: assistantAIForm.value.apiKey?.trim() || null,
     model: assistantAIForm.value.model?.trim() || null,
+    hasApiKey: assistantAIForm.value.hasApiKey,
   };
 }
 
 async function loadAssistantAI() {
-  try { assistantAIForm.value = await getAssistantAIConfig(); }
+  try {
+    const config = await getAssistantAIConfig();
+    assistantAIForm.value = { ...config, apiKey: null };
+  }
   catch (err) { console.error("[settings] load assistant ai config failed", err); }
 }
 
@@ -62,7 +71,18 @@ async function saveAssistantAI() {
   savingAssistantAI.value = true;
   try {
     await setAssistantAIConfig(normalizedAssistantAI());
+    await loadAssistantAI();
   } catch (err) { console.error("[settings] saveAssistantAI failed", err); }
+  finally { savingAssistantAI.value = false; }
+}
+
+async function clearAssistantAIKey() {
+  savingAssistantAI.value = true;
+  try {
+    await setAssistantAIConfig({ ...normalizedAssistantAI(), apiKey: null, clearApiKey: true });
+    assistantAIForm.value.apiKey = null;
+    await loadAssistantAI();
+  } catch (err) { console.error("[settings] clearAssistantAIKey failed", err); }
   finally { savingAssistantAI.value = false; }
 }
 
@@ -120,13 +140,25 @@ onMounted(() => {
     </div>
     <div class="settings-row">
       <div class="settings-row__label">API 密钥</div>
-      <input
-        type="password"
-        class="ui-input"
-        placeholder="sk-..."
-        :value="assistantAIForm.apiKey ?? ''"
-        @input="(e) => (assistantAIForm.apiKey = (e.target as HTMLInputElement).value)"
-      />
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input
+          type="password"
+          class="ui-input"
+          :placeholder="assistantAIForm.hasApiKey ? '已保存，留空保留现有值' : 'sk-...'"
+          :value="assistantAIForm.apiKey ?? ''"
+          @input="(e) => (assistantAIForm.apiKey = (e.target as HTMLInputElement).value)"
+        />
+        <button
+          type="button"
+          class="ui-button ui-button--ghost"
+          :disabled="savingAssistantAI || !assistantAIForm.hasApiKey"
+          title="清除已保存的 API 密钥"
+          @click="clearAssistantAIKey"
+        >
+          <Trash2 :size="12" aria-hidden="true" />
+          清除
+        </button>
+      </div>
     </div>
     <div class="settings-row">
       <div class="settings-row__label">模型</div>
@@ -142,6 +174,10 @@ onMounted(() => {
     <div class="settings-row">
       <div class="settings-row__label">连通性</div>
       <div style="display: flex; gap: 8px; align-items: center;">
+        <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
+          <KeyRound :size="12" aria-hidden="true" />
+          {{ assistantAIForm.hasApiKey ? "密钥已保存" : "未保存密钥" }}
+        </span>
         <button
           type="button"
           class="ui-button ui-button--ghost"
