@@ -1,41 +1,21 @@
 import { computed, nextTick, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
-import type {
-  AskUserResult,
-  ChatAttachment,
-  ChatComposerState,
-  ChatWorkflow,
-  CodexMemoryMode,
-  CodexThreadGoal,
-  CodexReviewTarget,
-} from "@lilia/contracts";
+import type { ChatAttachment, ChatComposerState, ChatWorkflow, CodexThreadGoal } from "@lilia/contracts";
 import {
-  clearAskUsersForTask,
-  resolveAskUserById,
   useAskUserForTask,
   usePendingAsksForTask,
 } from "../../composables/useAskUser";
 import {
   usePendingAgentActionsForTask,
-  type PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import {
-  clearCodexPendingInteractionsForTask,
-  hydrateCodexPendingInteraction,
-  respondCodexMcpElicitation,
-  respondCodexPermissionApproval,
   usePendingCodexInteractionsForTask,
 } from "../../composables/useCodexPendingInteractions";
 import {
-  clearToolConsentForTask,
-  hydrateToolConsentRequest,
-  respondConsent,
   usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../../composables/useToolConsentBridge";
-import { hydrateAgentAskUserRequest } from "../../composables/useAgentAskUserBridge";
-import { clearConversationRequiresAction } from "../../composables/useConversationActivity";
 import { useGuideDispatch } from "../../composables/useGuideDispatch";
 import {
   loadAgentInteractionSettings,
@@ -51,23 +31,20 @@ import {
   onAgentTimelineBatch,
   onDone,
   onTurnStarted,
-  respondTitleUpdate,
   sendMessage,
   setComposerState,
-  type ToolConsentDecision,
-  type ToolConsentUpdatedInput,
 } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
-import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
-import type {
-  AskUserSpec,
-  ChatRuntimePhase,
-  AgentTimelineEvent,
-  ToolConsentRequest as ContractToolConsentRequest,
-} from "@lilia/contracts";
+import { useCodexWorkflowActions } from "./useCodexWorkflowActions";
+import {
+  clearPendingInteractionsForTask,
+  hydratePendingInteractions,
+  usePendingInteractionActions,
+} from "./usePendingInteractionActions";
+import type { ChatRuntimePhase } from "@lilia/contracts";
 
 export function useTaskComposerController(options: {
   props: TaskDetailRouteProps;
@@ -200,122 +177,13 @@ export function useTaskComposerController(options: {
     }
   }
 
-  async function onStartCodexReview(
-    content: string,
-    outgoingAttachments: ChatAttachment[],
-    target: CodexReviewTarget,
-  ) {
-    if (!context.hasContext.value) return;
-    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
-    const workflow: ChatWorkflow = {
-      type: "codex_review",
-      target,
-      delivery: "inline",
-    };
-    const instructions = content.trim();
-    if (instructions) workflow.instructions = instructions;
-    try {
-      await sendAgentMessage(instructions, outgoingAttachments, undefined, workflow);
-      attachments.value = [];
-    } catch {
-      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-    }
-  }
-
-  async function onStartCodexFixSuggestion(
-    content: string,
-    outgoingAttachments: ChatAttachment[],
-    target: CodexReviewTarget,
-  ) {
-    if (!context.hasContext.value) return;
-    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
-    const workflow: ChatWorkflow = {
-      type: "codex_fix_suggestion",
-      target,
-      mode: "suggest",
-    };
-    const instructions = content.trim();
-    if (instructions) workflow.instructions = instructions;
-    try {
-      await sendAgentMessage(instructions, outgoingAttachments, undefined, workflow);
-      attachments.value = [];
-    } catch {
-      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-    }
-  }
-
-  async function sendCodexWorkflow(workflow: ChatWorkflow) {
-    if (!context.hasContext.value) return;
-    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) return;
-    try {
-      await sendAgentMessage("", [], undefined, workflow);
-    } catch {
-      // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
-    }
-  }
-
-  async function onStartCodexCompact() {
-    await sendCodexWorkflow({ type: "codex_compact" });
-  }
-
-  async function onSetCodexMemoryMode(mode: CodexMemoryMode) {
-    await sendCodexWorkflow({ type: "codex_memory_mode", mode });
-  }
-
-  async function onResetCodexMemory() {
-    await sendCodexWorkflow({ type: "codex_memory_reset" });
-  }
-
-  async function onForkCodexThread() {
-    await sendCodexWorkflow({
-      type: "codex_thread_fork",
-      excludeTurns: true,
-    });
-  }
-
-  async function onReadCodexConfigDiagnostics() {
-    await sendCodexWorkflow({
-      type: "codex_config_diagnostics",
-      includeLayers: true,
-    });
-  }
-
-  async function onStartCodexBatchApply(input: CodexBatchApplyInput) {
-    const sourceSummary = input.sourceSummary.trim();
-    if (!sourceSummary) return;
-    await sendCodexWorkflow({
-      type: "codex_batch_apply",
-      sourceTurnId: input.sourceTurnId,
-      sourceKind: input.sourceKind,
-      sourceSummary,
-    });
-  }
-
-  async function onSetCodexGoal(objective: string) {
-    const trimmed = objective.trim();
-    if (!trimmed) return;
-    await sendCodexWorkflow({
-      type: "codex_goal",
-      action: "set",
-      objective: trimmed,
-      status: "active",
-      tokenBudget: null,
-    });
-  }
-
-  async function onRefreshCodexGoal() {
-    await sendCodexWorkflow({
-      type: "codex_goal",
-      action: "refresh",
-    });
-  }
-
-  async function onClearCodexGoal() {
-    await sendCodexWorkflow({
-      type: "codex_goal",
-      action: "clear",
-    });
-  }
+  const codexWorkflowActions = useCodexWorkflowActions({
+    hasContext: context.hasContext,
+    isTurnRunning,
+    blockingPendingAgentActions,
+    attachments,
+    sendAgentMessage,
+  });
 
   function onInsertGuide(todo: TaskTodo) {
     void guideDispatch.dispatchGuide(todo);
@@ -349,95 +217,13 @@ export function useTaskComposerController(options: {
     }
   }
 
-  function onResolveAskUser(result: AskUserResult) {
-    const ask = pendingAskUser.value;
-    if (!ask) return;
-    resolveAskUserById(ask.id, result);
-  }
-
-  async function onResolveToolConsent(
-    decision: ToolConsentDecision,
-    message?: string,
-    updatedInput?: ToolConsentUpdatedInput,
-  ) {
-    const request = pendingToolConsent.value;
-    if (!request) return;
-    try {
-      await respondConsent(request.taskId, request.requestId, decision, message, updatedInput);
-    } catch (err) {
-      console.error("[tool-consent] respond failed", err);
-    }
-  }
-
-  async function onResolvePendingAgentAction(resolution: PendingAgentActionResolution) {
-    if (resolution.kind === "title_update") {
-      try {
-        await respondTitleUpdate(props.taskId, resolution.requestId, resolution.decision);
-      } catch (err) {
-        console.error("[title-update] respond failed", err);
-      }
-      return;
-    }
-    if (resolution.kind === "tool_consent") {
-      const request = pendingToolConsents.value.find(
-        (item) => item.requestId === resolution.requestId,
-      );
-      if (!request) return;
-      try {
-        await respondConsent(
-          request.taskId,
-          request.requestId,
-          resolution.decision,
-          resolution.message,
-          resolution.updatedInput,
-        );
-      } catch (err) {
-        console.error("[tool-consent] respond failed", err);
-      }
-      return;
-    }
-    if (resolution.kind === "mcp_elicitation") {
-      try {
-        await respondCodexMcpElicitation(
-          props.taskId,
-          resolution.requestId,
-          {
-            action: resolution.action,
-            ...(resolution.content ? { content: resolution.content } : {}),
-          },
-        );
-      } catch (err) {
-        console.error("[codex-mcp-elicitation] respond failed", err);
-      }
-      return;
-    }
-    if (resolution.kind === "permission_approval") {
-      const request = pendingCodexInteractions.value.find(
-        (item) => item.kind === "permission_approval" && item.requestId === resolution.requestId,
-      );
-      if (!request || request.kind !== "permission_approval") return;
-      try {
-        await respondCodexPermissionApproval(
-          props.taskId,
-          resolution.requestId,
-          resolution.decision === "allow"
-            ? {
-                permissions: request.payload.permissions,
-                scope: "turn",
-              }
-            : {
-                permissions: {},
-                scope: "turn",
-                strictAutoReview: true,
-              },
-        );
-      } catch (err) {
-        console.error("[codex-permission-approval] respond failed", err);
-      }
-      return;
-    }
-    resolveAskUserById(resolution.askId, resolution.result);
-  }
+  const pendingInteractionActions = usePendingInteractionActions({
+    taskId: () => props.taskId,
+    pendingAskUser,
+    pendingToolConsent,
+    pendingToolConsents,
+    pendingCodexInteractions,
+  });
 
   async function onComposerUpdate(next: ChatComposerState) {
     const normalized = withActiveBackend(next);
@@ -510,30 +296,6 @@ export function useTaskComposerController(options: {
     return `上次 ${backend} 运行未正常结束，${runtime} runtime 已放弃旧执行态${turn}。你可以重新发送或重置会话。`;
   }
 
-  function payloadRecord(event: AgentTimelineEvent): Record<string, unknown> | null {
-    return event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
-      ? event.payload as Record<string, unknown>
-      : null;
-  }
-
-  function payloadString(event: AgentTimelineEvent, key: string): string | null {
-    const payload = payloadRecord(event);
-    const value = payload?.[key];
-    return typeof value === "string" ? value : null;
-  }
-
-  function clearPendingInteractionsForTask(
-    taskId: string,
-    options: { turnId?: string | null; keepRequestIds?: Set<string> } = {},
-  ) {
-    clearAskUsersForTask(taskId, options);
-    clearToolConsentForTask(taskId, options);
-    clearCodexPendingInteractionsForTask(taskId, options);
-    if (!options.keepRequestIds && options.turnId === undefined) {
-      clearConversationRequiresAction(taskId);
-    }
-  }
-
   function restoreDraftFromRollback(rollback: { restoredContent: string; restoredAttachments: ChatAttachment[] }) {
     restoreDraftContent.value = stripRestoredAttachmentReferences(
       rollback.restoredContent,
@@ -541,126 +303,6 @@ export function useTaskComposerController(options: {
     );
     restoreDraftKey.value += 1;
     attachments.value = rollback.restoredAttachments;
-  }
-
-  function hydratePendingInteractions(events: AgentTimelineEvent[]): Set<string> {
-    const activeRequestIds = new Set<string>();
-    for (const event of events) {
-      if (event.taskId !== props.taskId) continue;
-      if (event.status !== "requires_action") continue;
-      const payload = payloadRecord(event);
-      if (event.kind === "ask_user") {
-        const requestId = payloadString(event, "requestId");
-        if (requestId) activeRequestIds.add(requestId);
-        const spec = ((payload?.spec as AskUserSpec | undefined) ?? null) ?? {
-          title: event.title,
-          questions: Array.isArray(payload?.questions) ? payload.questions as AskUserSpec["questions"] : [],
-        };
-        hydrateAgentAskUserRequest({
-          taskId: event.taskId,
-          turnId: event.turnId ?? "",
-          backend: event.backend,
-          requestId: requestId ?? "",
-          spec,
-        }, "ask_user");
-        continue;
-      }
-      if (event.kind === "plan") {
-        const requestId = payloadString(event, "requestId");
-        if (requestId) activeRequestIds.add(requestId);
-        const spec: AskUserSpec = {
-          title: event.title,
-          source: "Agent",
-          intent: "plan_approval",
-          dismissable: true,
-          questions: [
-            {
-              id: "approve-plan",
-              header: "计划确认",
-              question: "",
-              mode: "confirm",
-              confirmLabel: "按计划执行",
-              cancelLabel: "先不执行",
-            },
-          ],
-        };
-        hydrateAgentAskUserRequest({
-          taskId: event.taskId,
-          turnId: event.turnId ?? "",
-          backend: event.backend,
-          requestId: requestId ?? "",
-          spec,
-        }, "plan_approval");
-        continue;
-      }
-      if (event.kind === "title_update") continue;
-      const interaction = payloadString(event, "interaction");
-      const requestId = payloadString(event, "requestId");
-      if (!interaction || !requestId || !payload) continue;
-      activeRequestIds.add(requestId);
-      if (interaction === "tool_consent") {
-        const request: ContractToolConsentRequest = {
-          taskId: event.taskId,
-          turnId: event.turnId ?? "",
-          backend: event.backend,
-          requestId,
-          toolName: typeof payload.toolName === "string" ? payload.toolName : "tool",
-          input: payload.input && typeof payload.input === "object" && !Array.isArray(payload.input)
-            ? payload.input as Record<string, unknown>
-            : {},
-          title: typeof payload.title === "string" ? payload.title : null,
-          displayName: typeof payload.displayName === "string" ? payload.displayName : null,
-          description: typeof payload.description === "string" ? payload.description : null,
-          blockedPath: typeof payload.blockedPath === "string" ? payload.blockedPath : null,
-          decisionReason: typeof payload.decisionReason === "string" ? payload.decisionReason : null,
-          toolUseId: typeof payload.toolUseId === "string" ? payload.toolUseId : null,
-          cwd: typeof payload.cwd === "string" ? payload.cwd : null,
-          reason: typeof payload.reason === "string" ? payload.reason : null,
-          commandActions: payload.commandActions,
-        };
-        hydrateToolConsentRequest(request);
-        continue;
-      }
-      if (interaction === "mcp_elicitation") {
-        const requestedSchema = payload.requestedSchema;
-        hydrateCodexPendingInteraction({
-          kind: "mcp_elicitation",
-          taskId: event.taskId,
-          turnId: event.turnId,
-          requestId,
-          payload: {
-            threadId: typeof payload.threadId === "string" ? payload.threadId : "",
-            turnId: typeof payload.turnId === "string" ? payload.turnId : event.turnId,
-            serverName: typeof payload.serverName === "string" ? payload.serverName : "",
-            mode: payload.mode === "url" ? "url" : "form",
-            message: typeof payload.message === "string" ? payload.message : "",
-            requestedSchema,
-            url: typeof payload.url === "string" ? payload.url : undefined,
-            elicitationId: typeof payload.elicitationId === "string" ? payload.elicitationId : undefined,
-            _meta: payload._meta,
-          },
-        });
-        continue;
-      }
-      if (interaction === "permission_approval") {
-        hydrateCodexPendingInteraction({
-          kind: "permission_approval",
-          taskId: event.taskId,
-          turnId: event.turnId,
-          requestId,
-          payload: {
-            threadId: typeof payload.threadId === "string" ? payload.threadId : "",
-            turnId: typeof payload.turnId === "string" ? payload.turnId : "",
-            itemId: typeof payload.itemId === "string" ? payload.itemId : "",
-            startedAtMs: typeof payload.startedAtMs === "number" ? payload.startedAtMs : 0,
-            cwd: typeof payload.cwd === "string" ? payload.cwd : "",
-            reason: typeof payload.reason === "string" ? payload.reason : null,
-            permissions: payload.permissions,
-          },
-        });
-      }
-    }
-    return activeRequestIds;
   }
 
   async function loadAll() {
@@ -690,7 +332,7 @@ export function useTaskComposerController(options: {
       ]);
       if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
       timeline.applyLoadedTimelineEvents(events);
-      const activeRequestIds = hydratePendingInteractions(events);
+      const activeRequestIds = hydratePendingInteractions(events, props.taskId);
       clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
       isTurnRunning.value = runtimeSnapshot
         ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
@@ -719,7 +361,7 @@ export function useTaskComposerController(options: {
       onAgentTimeline((e) => {
         if (e.taskId !== props.taskId) return;
         timeline.upsertTimelineEvent(e);
-        hydratePendingInteractions([e]);
+        hydratePendingInteractions([e], props.taskId);
         if (isAgentTimelineToolWindowKind(e.kind)) {
           void guideDispatch.scheduleGuideInsertion("tool");
         }
@@ -727,7 +369,7 @@ export function useTaskComposerController(options: {
       onAgentTimelineBatch((e) => {
         if (e.taskId !== props.taskId) return;
         timeline.queueTimelineEvents(e.events);
-        hydratePendingInteractions(e.events);
+        hydratePendingInteractions(e.events, props.taskId);
         if (e.events.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
           void guideDispatch.scheduleGuideInsertion("tool");
         }
@@ -801,23 +443,11 @@ export function useTaskComposerController(options: {
     activeBackend,
     sendAgentMessage,
     onSend,
-    onStartCodexReview,
-    onStartCodexFixSuggestion,
-    onStartCodexCompact,
-    onSetCodexMemoryMode,
-    onResetCodexMemory,
-    onForkCodexThread,
-    onReadCodexConfigDiagnostics,
-    onStartCodexBatchApply,
-    onSetCodexGoal,
-    onRefreshCodexGoal,
-    onClearCodexGoal,
+    ...codexWorkflowActions,
     onInsertGuide,
     onInsertDraftText,
     onInterrupt,
-    onResolveAskUser,
-    onResolveToolConsent,
-    onResolvePendingAgentAction,
+    ...pendingInteractionActions,
     onComposerUpdate,
     onRetryTimelineEvent,
     loadAll,

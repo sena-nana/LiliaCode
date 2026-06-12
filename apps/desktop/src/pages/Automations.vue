@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import "../styles/pages/automations.css";
 import "@vue-flow/core/dist/style.css";
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Handle, Position, VueFlow, useVueFlow } from "@vue-flow/core";
 import {
   Bot,
@@ -21,46 +21,25 @@ import {
   Zap,
 } from "lucide-vue-next";
 import type {
-  AutomationEdge,
   AutomationNode,
   AutomationNodeKind,
   AutomationRun,
   AutomationRunNodeState,
-  AutomationScopeFilter,
   AutomationWorkflow,
-  ChatBackendKind,
   Project,
 } from "@lilia/contracts";
-import {
-  getAutomationRun,
-  listAutomationRuns,
-  listAutomations,
-  onAutomationChanged,
-  onAutomationRunUpdated,
-  publishAutomation,
-  resumeAutomationRun,
-  runAutomationOnce,
-  saveAutomationDraft,
-  setAutomationEnabled,
-  type AutomationRunDetail,
-} from "../services/automations";
+import { onAutomationChanged, onAutomationRunUpdated } from "../services/automations";
 import { ensureProjectsLoaded, listProjects } from "../services/projectsStore";
-
-const DEFAULT_SCOPE: AutomationScopeFilter = {
-  projectIds: [],
-  includeInbox: true,
-  taskStatuses: [],
-  backends: [],
-  eventKinds: [],
-};
-
-const NODE_KIND_LABELS: Record<AutomationNodeKind, string> = {
-  trigger: "事件触发",
-  agent: "Agent 调用",
-  logic: "逻辑",
-  tool: "工具",
-  human: "人工确认",
-};
+import AutomationNodeInspector from "./automations/AutomationNodeInspector.vue";
+import {
+  BACKEND_OPTIONS,
+  NODE_KIND_LABELS,
+  TASK_STATUS_OPTIONS,
+  TRIGGER_EVENT_KIND_OPTIONS,
+} from "./automations/constants";
+import { useAutomationGraph } from "./automations/useAutomationGraph";
+import { useAutomationRuns } from "./automations/useAutomationRuns";
+import { useAutomationWorkspace } from "./automations/useAutomationWorkspace";
 
 const NODE_ICONS: Record<AutomationNodeKind, unknown> = {
   trigger: Zap,
@@ -70,514 +49,101 @@ const NODE_ICONS: Record<AutomationNodeKind, unknown> = {
   human: CircleHelp,
 };
 
-interface FlowNode {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: {
-    node: AutomationNode;
-    selected: boolean;
-    status: string | null;
-  };
-}
-
-interface FlowEdge {
-  id: string;
-  source: string;
-  target: string;
-  sourceHandle?: string;
-  targetHandle?: string;
-  animated?: boolean;
-}
-
-interface FlowConnection {
-  source: string | null;
-  target: string | null;
-  sourceHandle?: string | null;
-  targetHandle?: string | null;
-}
-
-const workflowRows = ref<AutomationWorkflow[]>([]);
 const projectRows = ref<Project[]>([]);
 const selectedWorkflowId = ref<string | null>(null);
-const selectedNodeId = ref<string | null>(null);
-const nodes = shallowRef<FlowNode[]>([]);
-const edges = shallowRef<FlowEdge[]>([]);
-const workflowName = ref("新自动化");
-const scope = ref<AutomationScopeFilter>({ ...DEFAULT_SCOPE });
-const manualRunPayloadText = ref("");
-const loading = ref(false);
-const saving = ref(false);
-const publishing = ref(false);
-const running = ref(false);
-const resuming = ref(false);
 const errorText = ref<string | null>(null);
-const runs = ref<AutomationRun[]>([]);
-const selectedRunId = ref<string | null>(null);
-const selectedRunDetail = ref<AutomationRunDetail | null>(null);
-const selectedRunNodeId = ref<string | null>(null);
 const unlisteners = ref<Array<() => void>>([]);
-
 const { fitView, zoomIn, zoomOut } = useVueFlow();
 
-const selectedWorkflow = computed(() =>
-  workflowRows.value.find((workflow) => workflow.id === selectedWorkflowId.value) ?? null,
-);
+function setError(message: string) {
+  errorText.value = message || null;
+}
 
-const selectedNode = computed(() =>
-  nodes.value.find((node) => node.id === selectedNodeId.value) ?? null,
-);
-
-const selectedRunNodeStates = computed<AutomationRunNodeState[]>(() =>
-  selectedRunDetail.value?.nodes ?? [],
-);
-
-const selectedRunNodeState = computed<AutomationRunNodeState | null>(() =>
-  selectedRunNodeStates.value.find((state) => state.nodeId === selectedRunNodeId.value) ?? null,
-);
-
-const selectedToolAction = computed(() => configString("action") || "record_timeline");
-const selectedToolUsesTaskId = computed(() => selectedToolAction.value !== "create_task");
-const selectedToolUsesProjectId = computed(() => selectedToolAction.value === "create_task");
-const selectedToolUsesTimelineFields = computed(() => selectedToolAction.value === "record_timeline");
-const selectedToolUsesGuidePriority = computed(() => selectedToolAction.value === "send_guide");
-
-const hasTriggerNode = computed(() =>
-  nodes.value.some((node) => node.data.node.kind === "trigger"),
-);
-
-const minimapNodes = computed(() => {
-  if (!nodes.value.length) return [];
-  const xs = nodes.value.map((node) => node.position.x);
-  const ys = nodes.value.map((node) => node.position.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  const maxX = Math.max(...xs) + 184;
-  const maxY = Math.max(...ys) + 78;
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  return nodes.value.map((node) => ({
-    id: node.id,
-    left: `${((node.position.x - minX) / width) * 100}%`,
-    top: `${((node.position.y - minY) / height) * 100}%`,
-    width: `${Math.max(8, (184 / width) * 100)}%`,
-    height: `${Math.max(8, (78 / height) * 100)}%`,
-    selected: node.id === selectedNodeId.value,
-    status: nodeStatus(node.id),
-  }));
+const runsController = useAutomationRuns({
+  selectedWorkflowId,
+  setError,
+});
+const graph = useAutomationGraph({
+  runNodeStates: runsController.selectedRunNodeStates,
 });
 
-const TASK_STATUS_OPTIONS = ["waiting", "running", "done", "blocked"] as const;
-const BACKEND_OPTIONS = ["claude", "codex"] as const satisfies readonly ChatBackendKind[];
-const TRIGGER_EVENT_KIND_OPTIONS = [
-  "task_created",
-  "task_status_changed",
-  "task_updated",
-  "timeline_event",
-  "todo_changed",
-  "interaction_request",
-] as const;
-const PRIORITY_OPTIONS = ["low", "normal", "high"] as const;
-const TOOL_ACTIONS_WITH_TITLE = new Set(["record_timeline", "create_task"]);
-const TOOL_ACTIONS_WITH_TEXT = new Set(["add_todo", "send_guide"]);
-const TOOL_ACTIONS_WITH_STATUS = new Set([
-  "record_timeline",
-  "create_task",
-  "update_task_status",
-]);
-const selectedToolUsesTitle = computed(() => TOOL_ACTIONS_WITH_TITLE.has(selectedToolAction.value));
-const selectedToolUsesText = computed(() => TOOL_ACTIONS_WITH_TEXT.has(selectedToolAction.value));
-const selectedToolUsesStatus = computed(() => TOOL_ACTIONS_WITH_STATUS.has(selectedToolAction.value));
-
-function defaultWorkflowDraft() {
-  const trigger = createAutomationNode("trigger", 80, 100);
-  const agent = createAutomationNode("agent", 360, 100);
-  return {
-    nodes: [trigger, agent],
-    edges: [{
-      id: `${trigger.id}-${agent.id}`,
-      source: trigger.id,
-      target: agent.id,
-    }],
-    scope: { ...DEFAULT_SCOPE },
-  };
-}
-
-function createAutomationNode(kind: AutomationNodeKind, x = 160, y = 160): AutomationNode {
-  const id = `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-  const config: Record<string, unknown> = {};
-  if (kind === "trigger") config.triggerKind = "manual";
-  if (kind === "agent") {
-    config.backend = "claude";
-    config.model = "claude-sonnet-4-6";
-    config.permission = "ask";
-    config.prompt = "请根据当前上下文继续推进。";
-  }
-  if (kind === "tool") config.action = "record_timeline";
-  if (kind === "logic") {
-    config.logic = "condition";
-    config.path = "trigger.kind";
-  }
-  if (kind === "human") config.prompt = "确认后继续执行自动化。";
-  return {
-    id,
-    kind,
-    title: NODE_KIND_LABELS[kind],
-    position: { x, y },
-    config,
-  };
-}
-
-function nodeToFlowNode(node: AutomationNode): FlowNode {
-  return {
-    id: node.id,
-    type: "automation",
-    position: node.position,
-    data: {
-      node,
-      selected: node.id === selectedNodeId.value,
-      status: nodeStatus(node.id),
-    },
-  };
-}
-
-function edgeToFlowEdge(edge: AutomationEdge): FlowEdge {
-  return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourceHandle ?? undefined,
-    targetHandle: edge.targetHandle ?? undefined,
-    animated: false,
-  };
-}
-
-function sourceHandlesForNode(node: AutomationNode): Array<{ id: string; label: string; top: string }> {
-  if (node.kind !== "logic") return [{ id: "success", label: "out", top: "50%" }];
-  const logic = typeof node.config.logic === "string" ? node.config.logic : "condition";
-  if (logic === "condition") {
-    return [
-      { id: "true", label: "true", top: "38%" },
-      { id: "false", label: "false", top: "66%" },
-    ];
-  }
-  if (logic === "switch") {
-    const cases = typeof node.config.cases === "string"
-      ? node.config.cases.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 3)
-      : [];
-    const handles = cases.map((item, index) => ({
-      id: normalizeHandle(item),
-      label: item,
-      top: `${32 + index * 18}%`,
-    }));
-    return [...handles, { id: "default", label: "else", top: `${32 + handles.length * 18}%` }];
-  }
-  return [{ id: "success", label: "out", top: "50%" }];
-}
-
-function normalizeHandle(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function flowNodeToAutomation(node: FlowNode): AutomationNode {
-  const existing = node.data?.node as AutomationNode | undefined;
-  return {
-    ...(existing ?? createAutomationNode("tool")),
-    id: node.id,
-    position: {
-      x: node.position.x,
-      y: node.position.y,
-    },
-  };
-}
-
-function flowEdgeToAutomation(edge: FlowEdge): AutomationEdge {
-  return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    sourceHandle: edge.sourceHandle ?? null,
-    targetHandle: edge.targetHandle ?? null,
-  };
-}
-
-function applyWorkflow(workflow: AutomationWorkflow | null) {
-  if (!workflow) {
-    workflowName.value = "新自动化";
-    const draft = defaultWorkflowDraft();
-    scope.value = { ...draft.scope };
-    nodes.value = draft.nodes.map(nodeToFlowNode);
-    edges.value = draft.edges.map(edgeToFlowEdge);
-    selectedNodeId.value = draft.nodes[0]?.id ?? null;
-    return;
-  }
-  workflowName.value = workflow.name;
-  scope.value = { ...DEFAULT_SCOPE, ...workflow.scope };
-  nodes.value = workflow.draft.nodes.map(nodeToFlowNode);
-  edges.value = workflow.draft.edges.map(edgeToFlowEdge);
-  selectedNodeId.value = workflow.draft.nodes[0]?.id ?? null;
-}
-
-async function refreshWorkflows() {
-  loading.value = true;
-  errorText.value = null;
-  try {
-    workflowRows.value = await listAutomations();
-    if (!selectedWorkflowId.value && workflowRows.value.length) {
-      selectedWorkflowId.value = workflowRows.value[0].id;
-    }
-    applyWorkflow(selectedWorkflow.value);
-    await refreshRuns();
-  } catch (err) {
-    errorText.value = String(err);
-  } finally {
-    loading.value = false;
-  }
-}
-
 async function refreshRuns() {
-  runs.value = await listAutomationRuns(selectedWorkflowId.value);
-  if (!selectedRunId.value || !runs.value.some((run) => run.id === selectedRunId.value)) {
-    selectedRunId.value = runs.value[0]?.id ?? null;
-  }
-  await refreshSelectedRun();
-}
-
-async function refreshSelectedRun() {
-  selectedRunDetail.value = selectedRunId.value
-    ? await getAutomationRun(selectedRunId.value)
-    : null;
-  if (!selectedRunNodeId.value || !selectedRunNodeStates.value.some((state) => state.nodeId === selectedRunNodeId.value)) {
-    selectedRunNodeId.value = selectedRunNodeStates.value[0]?.nodeId ?? null;
-  }
-  nodes.value = nodes.value.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      selected: node.id === selectedNodeId.value,
-      status: nodeStatus(node.id),
-    },
-  }));
+  await runsController.refreshRuns();
+  graph.refreshNodeStatuses();
 }
 
 async function refreshAfterRunEvent(run: AutomationRun) {
-  await refreshRuns();
-  if (selectedRunId.value === run.id) {
-    await refreshSelectedRun();
-  }
+  await runsController.refreshAfterRunEvent(run);
+  graph.refreshNodeStatuses();
 }
 
-function selectWorkflow(workflow: AutomationWorkflow) {
-  selectedWorkflowId.value = workflow.id;
-  selectedRunId.value = null;
-  applyWorkflow(workflow);
-  void refreshRuns().catch((err) => {
-    errorText.value = String(err);
-  });
+const workspace = useAutomationWorkspace({
+  selectedWorkflowId,
+  applyWorkflow: graph.applyWorkflow,
+  automationNodes: graph.automationNodes,
+  automationEdges: graph.automationEdges,
+  refreshRuns,
+  resetRunSelection: runsController.resetRunSelection,
+  setError,
+});
+
+const {
+  workflowRows,
+  workflowName,
+  scope,
+  loading,
+  saving,
+  publishing,
+  selectedWorkflow,
+  refreshWorkflows,
+  newWorkflow,
+  saveDraft,
+  publishCurrent,
+  toggleEnabled,
+  toggleScopeList,
+  toggleScopeBackend,
+} = workspace;
+
+const {
+  manualRunPayloadText,
+  running,
+  resuming,
+  runs,
+  selectedRunId,
+  selectedRunNodeId,
+  selectedRunNodeStates,
+  selectedRunNodeState,
+  refreshSelectedRun,
+  runCurrent,
+  resumeSelectedRun,
+} = runsController;
+
+const {
+  selectedNodeId,
+  nodes,
+  edges,
+  selectedNode,
+  hasTriggerNode,
+  minimapNodes,
+  addNode,
+  updateSelectedConfig,
+  updateSelectedTitle,
+  onNodeClick,
+  onConnect,
+  configString,
+  configBoolean,
+  sourceHandlesForNode,
+} = graph;
+
+function selectWorkflow(workflow: Parameters<typeof workspace.selectWorkflow>[0]) {
+  workspace.selectWorkflow(workflow);
   window.setTimeout(() => {
     void fitView({ padding: 0.2 });
   }, 0);
 }
 
-function newWorkflow() {
-  selectedWorkflowId.value = null;
-  selectedRunId.value = null;
-  selectedRunDetail.value = null;
-  selectedRunNodeId.value = null;
-  applyWorkflow(null);
-}
-
-async function saveDraft() {
-  saving.value = true;
-  errorText.value = null;
-  try {
-    const saved = await saveAutomationDraft({
-      id: selectedWorkflowId.value,
-      name: workflowName.value,
-      scope: scope.value,
-      nodes: nodes.value.map(flowNodeToAutomation),
-      edges: edges.value.map(flowEdgeToAutomation),
-    });
-    selectedWorkflowId.value = saved.id;
-    await refreshWorkflows();
-  } catch (err) {
-    errorText.value = String(err);
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function publishCurrent() {
-  if (!selectedWorkflowId.value) await saveDraft();
-  if (!selectedWorkflowId.value) return;
-  publishing.value = true;
-  errorText.value = null;
-  try {
-    await publishAutomation(selectedWorkflowId.value);
-    await refreshWorkflows();
-  } catch (err) {
-    errorText.value = String(err);
-  } finally {
-    publishing.value = false;
-  }
-}
-
-async function toggleEnabled() {
-  const workflow = selectedWorkflow.value;
-  if (!workflow) return;
-  errorText.value = null;
-  try {
-    await setAutomationEnabled(workflow.id, !workflow.enabled);
-    await refreshWorkflows();
-  } catch (err) {
-    errorText.value = String(err);
-  }
-}
-
-async function runCurrent() {
-  if (!selectedWorkflowId.value) return;
-  running.value = true;
-  errorText.value = null;
-  try {
-    const payload = parseManualRunPayload();
-    const run = await runAutomationOnce(selectedWorkflowId.value, payload ? { payload } : {});
-    selectedRunId.value = run.id;
-    await refreshRuns();
-  } catch (err) {
-    errorText.value = String(err);
-  } finally {
-    running.value = false;
-  }
-}
-
-async function resumeSelectedRun() {
-  const runId = selectedRunId.value;
-  const nodeId = selectedRunNodeState.value?.nodeId;
-  if (!runId || !nodeId) return;
-  resuming.value = true;
-  errorText.value = null;
-  try {
-    const run = await resumeAutomationRun(runId, {
-      nodeId,
-      payload: { confirmed: true },
-    });
-    selectedRunId.value = run.id;
-    await refreshRuns();
-  } catch (err) {
-    errorText.value = String(err);
-  } finally {
-    resuming.value = false;
-  }
-}
-
-function addNode(kind: AutomationNodeKind) {
-  if (kind === "trigger" && hasTriggerNode.value) return;
-  const node = createAutomationNode(kind, 180 + nodes.value.length * 24, 160 + nodes.value.length * 18);
-  nodes.value = [...nodes.value, nodeToFlowNode(node)];
-  selectedNodeId.value = node.id;
-}
-
-function updateSelectedConfig(key: string, value: unknown) {
-  const node = selectedNode.value;
-  if (!node) return;
-  const nextAutomationNode = {
-    ...(node.data.node as AutomationNode),
-    config: {
-      ...((node.data.node as AutomationNode).config ?? {}),
-      [key]: value,
-    },
-  };
-  nodes.value = nodes.value.map((item) =>
-    item.id === node.id
-      ? { ...item, data: { ...item.data, node: nextAutomationNode } }
-      : item,
-  );
-}
-
-function toggleScopeList(key: "projectIds" | "taskStatuses" | "eventKinds", value: string) {
-  const current = scope.value[key];
-  scope.value = {
-    ...scope.value,
-    [key]: current.includes(value)
-      ? current.filter((item) => item !== value)
-      : [...current, value],
-  };
-}
-
-function toggleScopeBackend(value: ChatBackendKind) {
-  scope.value = {
-    ...scope.value,
-    backends: scope.value.backends.includes(value)
-      ? scope.value.backends.filter((item) => item !== value)
-      : [...scope.value.backends, value],
-  };
-}
-
-function configBoolean(key: string): boolean {
-  const value = (selectedNode.value?.data.node as AutomationNode | undefined)?.config?.[key];
-  return value === true;
-}
-
-function parseManualRunPayload(): Record<string, unknown> | undefined {
-  const payloadText = manualRunPayloadText.value.trim();
-  if (!payloadText) return undefined;
-  const payload = JSON.parse(payloadText) as unknown;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("手动 Payload 必须是 JSON object");
-  }
-  return payload as Record<string, unknown>;
-}
-
-function updateSelectedTitle(value: string) {
-  const node = selectedNode.value;
-  if (!node) return;
-  const nextAutomationNode = {
-    ...(node.data.node as AutomationNode),
-    title: value,
-  };
-  nodes.value = nodes.value.map((item) =>
-    item.id === node.id
-      ? { ...item, data: { ...item.data, node: nextAutomationNode } }
-      : item,
-  );
-}
-
-function onNodeClick(event: { node: FlowNode }) {
-  selectedNodeId.value = event.node.id;
-}
-
-function onConnect(connection: FlowConnection) {
-  if (!connection.source || !connection.target) return;
-  const sourceHandle = connection.sourceHandle ?? "success";
-  const id = `${connection.source}-${sourceHandle}-${connection.target}`;
-  if (edges.value.some((edge) => edge.id === id)) return;
-  edges.value = [
-    ...edges.value,
-    {
-      id,
-      source: connection.source,
-      target: connection.target,
-      sourceHandle,
-      targetHandle: connection.targetHandle ?? undefined,
-    },
-  ];
-}
-
-function configString(key: string): string {
-  const value = (selectedNode.value?.data.node as AutomationNode | undefined)?.config?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-function nodeStatus(nodeId: string): string | null {
-  return selectedRunNodeStates.value.find((state) => state.nodeId === nodeId)?.status ?? null;
-}
-
-function selectRunNodeState(state: AutomationRunNodeState) {
-  selectedRunNodeId.value = state.nodeId;
+function selectRunNodeState(state: Parameters<typeof runsController.selectRunNodeState>[0]) {
+  runsController.selectRunNodeState(state);
   selectedNodeId.value = state.nodeId;
 }
 
@@ -646,20 +212,9 @@ function workflowMeta(workflow: AutomationWorkflow) {
   return `${status} · ${published}`;
 }
 
-watch(selectedNodeId, () => {
-  nodes.value = nodes.value.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      selected: node.id === selectedNodeId.value,
-      status: nodeStatus(node.id),
-    },
-  }));
-});
-
 watch(selectedRunId, () => {
-  void refreshSelectedRun().catch((err) => {
-    errorText.value = String(err);
+  void refreshSelectedRun().then(graph.refreshNodeStatuses).catch((err) => {
+    setError(String(err));
   });
 });
 
@@ -673,7 +228,7 @@ onMounted(async () => {
   const runListeners = await onAutomationRunUpdated((event) => {
     if (!selectedWorkflowId.value || event.run.workflowId === selectedWorkflowId.value) {
       void refreshAfterRunEvent(event.run).catch((err) => {
-        errorText.value = String(err);
+        setError(String(err));
       });
     }
   });
@@ -924,275 +479,13 @@ onBeforeUnmount(() => {
 
         <section class="automations-page__section">
           <h3 class="automations-page__section-title">节点</h3>
-          <template v-if="selectedNode">
-            <div class="automations-page__field">
-              <label>标题</label>
-              <input
-                :value="(selectedNode.data.node as AutomationNode).title"
-                @input="updateSelectedTitle(($event.target as HTMLInputElement).value)"
-              />
-            </div>
-            <template v-if="(selectedNode.data.node as AutomationNode).kind === 'trigger'">
-              <div class="automations-page__field">
-                <label>触发类型</label>
-                <select
-                  :value="configString('triggerKind') || 'manual'"
-                  @change="updateSelectedConfig('triggerKind', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="manual">手动触发</option>
-                  <option value="task_changed">任务变化</option>
-                  <option value="timeline_event">时间线事件</option>
-                  <option value="todo_changed">Todo 变化</option>
-                  <option value="interaction_request">Agent 交互请求</option>
-                </select>
-              </div>
-            </template>
-            <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'agent'">
-              <label class="ui-switch">
-                <input
-                  :checked="configBoolean('createTask')"
-                  type="checkbox"
-                  @change="updateSelectedConfig('createTask', ($event.target as HTMLInputElement).checked)"
-                />
-                <span>新建任务</span>
-              </label>
-              <div class="automations-page__field">
-                <label>Task ID</label>
-                <input
-                  :value="configString('taskId')"
-                  placeholder="${trigger.taskId}"
-                  @input="updateSelectedConfig('taskId', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>项目 ID</label>
-                <input
-                  :value="configString('projectId')"
-                  placeholder="${trigger.projectId}"
-                  @input="updateSelectedConfig('projectId', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>任务标题</label>
-                <input
-                  :value="configString('title')"
-                  placeholder="自动化 Agent 任务"
-                  @input="updateSelectedConfig('title', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>后端</label>
-                <select
-                  :value="configString('backend') || 'claude'"
-                  @change="updateSelectedConfig('backend', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="claude">Claude</option>
-                  <option value="codex">Codex</option>
-                </select>
-              </div>
-              <div class="automations-page__field">
-                <label for="automation-agent-model">模型</label>
-                <input
-                  id="automation-agent-model"
-                  :value="configString('model')"
-                  placeholder="claude-sonnet-4-6 / gpt-5.5"
-                  @input="updateSelectedConfig('model', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label for="automation-agent-project-cwd">工作目录</label>
-                <input
-                  id="automation-agent-project-cwd"
-                  :value="configString('projectCwd')"
-                  placeholder="${trigger.projectCwd}"
-                  @input="updateSelectedConfig('projectCwd', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>Prompt</label>
-                <textarea
-                  class="ui-input ui-textarea"
-                  :value="configString('prompt')"
-                  @input="updateSelectedConfig('prompt', ($event.target as HTMLTextAreaElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>权限</label>
-                <select
-                  :value="configString('permission') || 'ask'"
-                  @change="updateSelectedConfig('permission', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="ask">ask</option>
-                  <option value="readonly">readonly</option>
-                  <option value="full">full</option>
-                </select>
-              </div>
-            </template>
-            <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'logic'">
-              <div class="automations-page__field">
-                <label>逻辑</label>
-                <select
-                  :value="configString('logic') || 'condition'"
-                  @change="updateSelectedConfig('logic', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="condition">条件</option>
-                  <option value="switch">Switch</option>
-                  <option value="stop">停止运行</option>
-                </select>
-              </div>
-              <div class="automations-page__field">
-                <label>路径</label>
-                <input
-                  :value="configString('path')"
-                  placeholder="trigger.kind"
-                  @input="updateSelectedConfig('path', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div class="automations-page__field">
-                <label>等于</label>
-                <input
-                  :value="configString('equals')"
-                  placeholder="task_changed"
-                  @input="updateSelectedConfig('equals', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div
-                v-if="configString('logic') === 'switch'"
-                class="automations-page__field"
-              >
-                <label>分支值</label>
-                <input
-                  :value="configString('cases')"
-                  placeholder="done, blocked"
-                  @input="updateSelectedConfig('cases', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-            </template>
-            <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'tool'">
-              <div class="automations-page__field">
-                <label for="automation-tool-action">动作</label>
-                <select
-                  id="automation-tool-action"
-                  :value="configString('action') || 'record_timeline'"
-                  @change="updateSelectedConfig('action', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="record_timeline">记录运行</option>
-                  <option value="create_task">创建任务</option>
-                  <option value="update_task_status">更新任务状态</option>
-                  <option value="add_todo">添加 Todo</option>
-                  <option value="send_guide">发送引导</option>
-                </select>
-              </div>
-              <div
-                v-if="selectedToolUsesTaskId"
-                class="automations-page__field"
-              >
-                <label>Task ID</label>
-                <input
-                  :value="configString('taskId')"
-                  placeholder="${trigger.taskId}"
-                  @input="updateSelectedConfig('taskId', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesProjectId"
-                class="automations-page__field"
-              >
-                <label>项目 ID</label>
-                <input
-                  :value="configString('projectId')"
-                  placeholder="${trigger.projectId}"
-                  @input="updateSelectedConfig('projectId', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesTitle"
-                class="automations-page__field"
-              >
-                <label>标题</label>
-                <input
-                  :value="configString('title')"
-                  placeholder="自动化任务"
-                  @input="updateSelectedConfig('title', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesText"
-                class="automations-page__field"
-              >
-                <label for="automation-tool-text">{{ selectedToolUsesGuidePriority ? '引导内容' : 'Todo 内容' }}</label>
-                <textarea
-                  id="automation-tool-text"
-                  class="ui-input ui-textarea"
-                  :value="configString('text')"
-                  placeholder="自动化 Todo"
-                  @input="updateSelectedConfig('text', ($event.target as HTMLTextAreaElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesTimelineFields"
-                class="automations-page__field"
-              >
-                <label>摘要</label>
-                <textarea
-                  class="ui-input ui-textarea"
-                  :value="configString('summary')"
-                  placeholder="写入时间线的摘要"
-                  @input="updateSelectedConfig('summary', ($event.target as HTMLTextAreaElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesStatus"
-                class="automations-page__field"
-              >
-                <label>状态</label>
-                <input
-                  :value="configString('status')"
-                  placeholder="waiting"
-                  @input="updateSelectedConfig('status', ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <div
-                v-if="selectedToolUsesTimelineFields"
-                class="automations-page__field"
-              >
-                <label>记录后端</label>
-                <select
-                  :value="configString('backend') || 'claude'"
-                  @change="updateSelectedConfig('backend', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="claude">Claude</option>
-                  <option value="codex">Codex</option>
-                </select>
-              </div>
-              <div
-                v-if="selectedToolUsesGuidePriority"
-                class="automations-page__field"
-              >
-                <label for="automation-tool-priority">优先级</label>
-                <select
-                  id="automation-tool-priority"
-                  :value="configString('priority') || 'normal'"
-                  @change="updateSelectedConfig('priority', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="priority in PRIORITY_OPTIONS" :key="priority" :value="priority">
-                    {{ priority }}
-                  </option>
-                </select>
-              </div>
-            </template>
-            <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'human'">
-              <div class="automations-page__field">
-                <label>提示</label>
-                <textarea
-                  class="ui-input ui-textarea"
-                  :value="configString('prompt')"
-                  @input="updateSelectedConfig('prompt', ($event.target as HTMLTextAreaElement).value)"
-                />
-              </div>
-            </template>
-          </template>
-          <div v-else class="automations-page__notice">选择一个节点</div>
+          <AutomationNodeInspector
+            :selected-node="selectedNode"
+            :config-string="configString"
+            :config-boolean="configBoolean"
+            @update-title="updateSelectedTitle"
+            @update-config="updateSelectedConfig"
+          />
         </section>
 
         <section class="automations-page__section">

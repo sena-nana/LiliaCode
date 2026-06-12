@@ -35,6 +35,7 @@ use crate::chat::types::{
     AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatRollbackResult,
     ChatWorkflow, CodexComposerSettings, DoneEvent, TurnStartedEvent,
 };
+use crate::chat::workflow::{automation_run_id, workflow_kind};
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
     CodexProfileSettings,
@@ -363,8 +364,7 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
 
         let turn_id_for_finish = invocation.turn_id.clone();
         let runtime_channel_for_finish = invocation.runtime_channel.clone();
-        let automation_run_id_for_finish =
-            automation_run_id_from_workflow(invocation.workflow.as_ref());
+        let automation_run_id_for_finish = automation_run_id(invocation.workflow.as_ref());
         let result = run_node_agent_runner(&app_handle, invocation);
         let mut runner_ok = true;
         let output = match result {
@@ -470,8 +470,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let project_cwd = invocation.project_cwd;
     let attachments_for_thread = invocation.attachments;
     let workflow_for_thread = invocation.workflow;
-    let automation_run_id_for_thread =
-        automation_run_id_from_workflow(workflow_for_thread.as_ref());
+    let automation_run_id_for_thread = automation_run_id(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
     let runtime_channel_for_thread = invocation.runtime_channel;
     let resume_session_id = invocation.resume_session_id;
@@ -513,7 +512,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
             "resumeSessionId": resume_session_id,
             "queuedCount": queued_count,
             "attachmentCount": attachments_for_thread.len(),
-            "workflowType": workflow_kind_for_lifecycle(workflow_for_thread.as_ref()),
+            "workflowType": workflow_kind(workflow_for_thread.as_ref()),
             "hasCodexSettings": stdin_payload.get("codexSettings").is_some(),
             "codexRuntimeWorkspaceRootCount": stdin_payload
                 .get("codexSettings")
@@ -1028,29 +1027,6 @@ pub(crate) fn resume_persisted_node_agent_runner<R: Runtime>(
     Ok(())
 }
 
-fn workflow_kind_for_lifecycle(workflow: Option<&ChatWorkflow>) -> Option<&'static str> {
-    match workflow? {
-        ChatWorkflow::CodexReview { .. } => Some("codex_review"),
-        ChatWorkflow::CodexFixSuggestion { .. } => Some("codex_fix_suggestion"),
-        ChatWorkflow::CodexBatchApply { .. } => Some("codex_batch_apply"),
-        ChatWorkflow::CodexGoal { .. } => Some("codex_goal"),
-        ChatWorkflow::CodexCompact => Some("codex_compact"),
-        ChatWorkflow::CodexBackgroundTerminalsClean => Some("codex_background_terminals_clean"),
-        ChatWorkflow::CodexMemoryMode { .. } => Some("codex_memory_mode"),
-        ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
-        ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
-        ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
-        ChatWorkflow::Automation { .. } => Some("automation"),
-    }
-}
-
-fn automation_run_id_from_workflow(workflow: Option<&ChatWorkflow>) -> Option<String> {
-    match workflow {
-        Some(ChatWorkflow::Automation { automation_run_id }) => Some(automation_run_id.clone()),
-        _ => None,
-    }
-}
-
 fn runner_event_kind(event: &AgentRuntimeEvent) -> &'static str {
     match event {
         AgentRuntimeEvent::ToolUse { .. } => "tool_use",
@@ -1099,8 +1075,8 @@ fn runtime_state_context_json(
         "projectCwd": project_cwd,
         "promptLength": prompt.chars().count(),
         "attachmentCount": attachments.len(),
-        "workflowType": workflow_kind_for_lifecycle(workflow),
-        "automationRunId": automation_run_id_from_workflow(workflow),
+        "workflowType": workflow_kind(workflow),
+        "automationRunId": automation_run_id(workflow),
         "resumeSessionId": resume_session_id,
         "permission": composer.permission,
         "composerRuntimeWorkspaceRoots": composer
@@ -1701,10 +1677,10 @@ mod tests {
     fn runner_lifecycle_classifies_workflow_and_runtime_events() {
         let workflow = ChatWorkflow::CodexMemoryReset;
         assert_eq!(
-            workflow_kind_for_lifecycle(Some(&workflow)),
+            workflow_kind(Some(&workflow)),
             Some("codex_memory_reset")
         );
-        assert_eq!(workflow_kind_for_lifecycle(None), None);
+        assert_eq!(workflow_kind(None), None);
 
         assert_eq!(
             runner_event_kind(&AgentRuntimeEvent::InteractionRequest {
