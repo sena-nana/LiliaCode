@@ -9,6 +9,9 @@ import {
   setMockGitHubPollSequence,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
+  setMockCCSwitchReachable,
+  setMockProviderConfig,
+  setMockRouterMode,
 } from "./tauriMock";
 
 async function renderSettings(initialRoute = "/settings") {
@@ -25,6 +28,7 @@ async function renderSettings(initialRoute = "/settings") {
 
 describe("Settings provider switch", () => {
   afterEach(() => {
+    localStorage.removeItem("lilia.providerSetupChecklist.dismissed");
     vi.useRealTimers();
   });
 
@@ -83,6 +87,132 @@ describe("Settings provider switch", () => {
     });
   });
 
+  it("首次进入连接页显示清单，收起后再次进入不显示", async () => {
+    const view = await renderSettings("/settings?tab=providers");
+
+    expect(await view.findByText("首次启动清单")).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "收起首次启动清单" }));
+
+    expect(localStorage.getItem("lilia.providerSetupChecklist.dismissed")).toBe("1");
+
+    view.unmount();
+    const next = await renderSettings("/settings?tab=providers");
+    expect(next.queryByText("首次启动清单")).not.toBeInTheDocument();
+    expect(next.getByRole("button", { name: "显示首次启动清单" })).toBeInTheDocument();
+  });
+
+  it("连接页不会把已有直连模式强制覆盖成 CC-Switch", async () => {
+    setMockRouterMode("claude", "direct");
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByRole("radio", { name: "直连" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    expect(
+      mockInvoke.mock.calls.some(([cmd, args]) =>
+        cmd === "router_set_mode" &&
+        typeof args === "object" &&
+        args !== null &&
+        "backend" in args &&
+        args.backend === "claude" &&
+        "mode" in args &&
+        args.mode === "cc-switch"
+      ),
+    ).toBe(false);
+  });
+
+  it("直连模式可以保存 Base URL 和 API key，空 key 保存保留已有密钥", async () => {
+    setMockRouterMode("claude", "direct");
+    setMockProviderConfig("claude", { baseUrl: "https://api.anthropic.com", hasApiKey: true });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    const baseUrlInput = await view.findByPlaceholderText("https://api.anthropic.com") as HTMLInputElement;
+    const apiKeyInput = await view.findByPlaceholderText("已保存，留空保留现有值") as HTMLInputElement;
+
+    await fireEvent.update(baseUrlInput, "https://anthropic.example/v1");
+    await fireEvent.update(apiKeyInput, "");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "provider_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"baseUrl\":\"https://anthropic.example/v1\"") &&
+          JSON.stringify(args.config).includes("\"apiKey\":null") &&
+          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "保存" })).toBeEnabled();
+    });
+    expect(view.getByText("密钥已保存")).toBeInTheDocument();
+
+    await fireEvent.update(apiKeyInput, "sk-new");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "provider_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("直连模式可以显式清除已保存的 API key", async () => {
+    setMockRouterMode("codex", "direct");
+    setMockActiveBackend("codex");
+    setMockProviderConfig("codex", { hasApiKey: true });
+
+    const view = await renderSettings("/settings?tab=providers");
+    await fireEvent.click(await view.findByRole("button", { name: "清除" }));
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd, args]) =>
+          cmd === "provider_set_config" &&
+          typeof args === "object" &&
+          args !== null &&
+          "config" in args &&
+          JSON.stringify(args.config).includes("\"clearApiKey\":true")
+        ),
+      ).toBe(true);
+      expect(view.getByText("未保存密钥")).toBeInTheDocument();
+    });
+  });
+
+  it("Codex CLI 缺失时显示安装和刷新 PATH 建议", async () => {
+    setMockActiveBackend("codex");
+    setMockCodexAppServerStatus({
+      available: false,
+      supportsRequiredProtocol: false,
+      failureKind: "missingCli",
+      issues: ["未找到 codex CLI。"],
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByText("Codex CLI 缺失")).toBeInTheDocument();
+      expect(view.getAllByText(/npm i -g @openai\/codex/).length).toBeGreaterThan(0);
+      expect(view.getAllByText(/刷新 PATH/).length).toBeGreaterThan(0);
+    });
+  });
+
   it("Codex CLI 版本过低时设置页连接 banner 不显示 provider 兼容提示", async () => {
     setMockActiveBackend("codex");
     setMockCodexAppServerStatus({
@@ -94,10 +224,10 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("Codex 运行环境不满足")).toBeInTheDocument();
-      expect(view.getByText(/当前 codex CLI 版本过低/)).toBeInTheDocument();
+      expect(view.getByText("Codex app-server 不可用")).toBeInTheDocument();
+      expect(view.getAllByText(/当前 codex CLI 版本过低/).length).toBeGreaterThan(0);
       expect(view.queryByText(/未找到 codex CLI/)).not.toBeInTheDocument();
-      expect(view.queryByText(/OpenAI Responses API/)).not.toBeInTheDocument();
+      expect(view.queryByText(/模型白名单/)).not.toBeInTheDocument();
     });
   });
 
@@ -112,9 +242,21 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("Codex 运行环境不满足")).toBeInTheDocument();
-      expect(view.getByText(/OpenAI Responses API/)).toBeInTheDocument();
-      expect(view.getByText(/模型白名单/)).toBeInTheDocument();
+      expect(view.getByText("Codex app-server 不可用")).toBeInTheDocument();
+      expect(view.getAllByText(/OpenAI Responses API/).length).toBeGreaterThan(0);
+      expect(view.getAllByText(/模型白名单/).length).toBeGreaterThan(0);
+    });
+  });
+
+  it("CC-Switch 不可达时提示启动代理或切直连", async () => {
+    setMockCCSwitchReachable(false);
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByText("CC-Switch 不可达")).toBeInTheDocument();
+      expect(view.getAllByText(/请启动 CC-Switch/).length).toBeGreaterThan(0);
+      expect(view.getAllByText(/切到直连/).length).toBeGreaterThan(0);
     });
   });
 

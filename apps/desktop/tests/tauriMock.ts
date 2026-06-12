@@ -349,6 +349,24 @@ let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let clipboardTextSeq = 0;
 let activeBackend: "claude" | "codex" = "claude";
+type MockProviderBackend = "claude" | "codex";
+type MockRouterMode = "cc-switch" | "direct";
+type MockProviderConfig = {
+  backend: MockProviderBackend;
+  baseUrl: string | null;
+  hasApiKey: boolean;
+};
+let providerConfigs: Record<MockProviderBackend, MockProviderConfig> = {
+  claude: { backend: "claude", baseUrl: null, hasApiKey: false },
+  codex: { backend: "codex", baseUrl: null, hasApiKey: false },
+};
+let routerModes: Record<MockProviderBackend, MockRouterMode> = {
+  claude: "cc-switch",
+  codex: "cc-switch",
+};
+let ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
+let ccSwitchReachable = true;
+let nodeAvailable = true;
 let codexAppServerStatus = {
   version: "codex-cli 0.128.0",
   available: true,
@@ -609,6 +627,35 @@ function normalizeBackend(value: unknown): "claude" | "codex" {
   return value === "codex" ? "codex" : "claude";
 }
 
+function directDefaultUrl(backend: MockProviderBackend) {
+  return backend === "codex" ? "https://api.openai.com/v1" : "https://api.anthropic.com";
+}
+
+function cloneProviderConfig(backend: MockProviderBackend) {
+  return { ...providerConfigs[backend], apiKey: null };
+}
+
+function mockBackendEnvStatus(backend: MockProviderBackend) {
+  const mode = routerModes[backend];
+  const config = providerConfigs[backend];
+  if (mode === "cc-switch") {
+    return {
+      backend,
+      hasApiKey: ccSwitchReachable,
+      connectionMode: ccSwitchReachable ? "cc-switch" : "unconfigured",
+      effectiveUrl: ccSwitchReachable ? ccSwitchConfig.baseUrl : null,
+    };
+  }
+  const hasUrl = typeof config.baseUrl === "string" && config.baseUrl.trim().length > 0;
+  const hasKey = config.hasApiKey;
+  return {
+    backend,
+    hasApiKey: hasKey,
+    connectionMode: hasKey || hasUrl ? (hasUrl ? "custom" : "direct") : "unconfigured",
+    effectiveUrl: hasUrl ? config.baseUrl : hasKey ? directDefaultUrl(backend) : null,
+  };
+}
+
 function modelBelongsToBackend(model: string, backend: "claude" | "codex") {
   if (backend === "codex") {
     return CODEX_MODEL_OPTIONS.some((option) => option.id === model);
@@ -709,6 +756,17 @@ export function resetTauriMockData() {
   clipboardImageSeq = 0;
   clipboardTextSeq = 0;
   activeBackend = "claude";
+  providerConfigs = {
+    claude: { backend: "claude", baseUrl: null, hasApiKey: false },
+    codex: { backend: "codex", baseUrl: null, hasApiKey: false },
+  };
+  routerModes = {
+    claude: "cc-switch",
+    codex: "cc-switch",
+  };
+  ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
+  ccSwitchReachable = true;
+  nodeAvailable = true;
   codexAppServerStatus = {
     version: "codex-cli 0.128.0",
     available: true,
@@ -1119,6 +1177,29 @@ export function setMockClipboardFilePaths(paths: string[]) {
 
 export function setMockActiveBackend(backend: "claude" | "codex") {
   activeBackend = backend;
+}
+
+export function setMockRouterMode(backend: "claude" | "codex", mode: "cc-switch" | "direct") {
+  routerModes[backend] = mode;
+}
+
+export function setMockProviderConfig(
+  backend: "claude" | "codex",
+  config: Partial<MockProviderConfig>,
+) {
+  providerConfigs[backend] = {
+    ...providerConfigs[backend],
+    ...config,
+    backend,
+  };
+}
+
+export function setMockCCSwitchReachable(reachable: boolean) {
+  ccSwitchReachable = reachable;
+}
+
+export function setMockNodeAvailable(available: boolean) {
+  nodeAvailable = available;
 }
 
 export function setMockCodexAppServerStatus(status: Partial<typeof codexAppServerStatus>) {
@@ -1745,33 +1826,22 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "chat_check_env":
       return {
-        nodeAvailable: true,
-        codexCliAvailable: true,
+        nodeAvailable,
+        codexCliAvailable: codexAppServerStatus.failureKind !== "missingCli",
         codexAppServer: {
           ...codexAppServerStatus,
           issues: [...codexAppServerStatus.issues],
         },
         ccSwitch: {
-          reachable: true,
-          baseUrl: "http://127.0.0.1:15721",
+          reachable: ccSwitchReachable,
+          baseUrl: ccSwitchConfig.baseUrl,
         },
         routerModes: {
-          claude: "cc-switch",
-          codex: "cc-switch",
+          ...routerModes,
         },
         backends: {
-          claude: {
-            backend: "claude",
-            hasApiKey: true,
-            connectionMode: "cc-switch",
-            effectiveUrl: "http://127.0.0.1:15721",
-          },
-          codex: {
-            backend: "codex",
-            hasApiKey: true,
-            connectionMode: "cc-switch",
-            effectiveUrl: "http://127.0.0.1:15721",
-          },
+          claude: mockBackendEnvStatus("claude"),
+          codex: mockBackendEnvStatus("codex"),
         },
       };
 
@@ -1784,11 +1854,28 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "provider_get_config": {
       const backend = normalizeBackend(args.backend);
-      return { backend, baseUrl: null, apiKey: null, hasApiKey: false };
+      return cloneProviderConfig(backend);
     }
 
-    case "provider_set_config":
+    case "provider_set_config": {
+      const input = args.config && typeof args.config === "object" && !Array.isArray(args.config)
+        ? args.config as Record<string, unknown>
+        : {};
+      const backend = normalizeBackend(input.backend);
+      providerConfigs[backend] = {
+        backend,
+        baseUrl: typeof input.baseUrl === "string" && input.baseUrl.trim()
+          ? input.baseUrl.trim()
+          : null,
+        apiKey: null,
+        hasApiKey: input.clearApiKey === true
+          ? false
+          : typeof input.apiKey === "string" && input.apiKey.trim()
+            ? true
+            : providerConfigs[backend].hasApiKey,
+      };
       return undefined;
+    }
 
     case "assistant_ai_get_config":
       return { ...assistantAIConfig, apiKey: null };
@@ -1926,13 +2013,26 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     }
 
     case "cc_switch_get_config":
-      return { baseUrl: "http://127.0.0.1:15721" };
+      return { ...ccSwitchConfig };
 
     case "cc_switch_set_config":
+      ccSwitchConfig = {
+        baseUrl: typeof args.config?.baseUrl === "string" && args.config.baseUrl.trim()
+          ? args.config.baseUrl.trim()
+          : null,
+      };
       return undefined;
 
-    case "router_set_mode":
+    case "router_get_mode": {
+      const backend = normalizeBackend(args.backend);
+      return routerModes[backend];
+    }
+
+    case "router_set_mode": {
+      const backend = normalizeBackend(args.backend);
+      routerModes[backend] = args.mode === "direct" ? "direct" : "cc-switch";
       return undefined;
+    }
 
     case "agent_timeline_list": {
       if (agentTimelineDelayMs > 0) {
