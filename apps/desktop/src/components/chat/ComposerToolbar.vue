@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
   Brain,
+  Camera,
   CodeXml,
   Combine,
   FileQuestion,
@@ -11,6 +12,7 @@ import {
   GitBranch,
   GitCommit,
   GitFork,
+  Globe,
   ListChecks,
   Paperclip,
   RotateCcw,
@@ -53,6 +55,8 @@ const emit = defineEmits<{
   setCodexGoal: [objective: string];
   forkCodexThread: [];
   readCodexConfigDiagnostics: [];
+  openCodexIab: [];
+  submitCodexIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -427,6 +431,28 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <button
+          v-if="state.backend === 'codex'"
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :disabled="actionsBlocked"
+          title="打开 Codex IAB"
+          aria-label="打开 Codex IAB"
+          @click="emit('openCodexIab')"
+        >
+          <Globe :size="14" aria-hidden="true" />
+        </button>
+        <button
+          v-if="state.backend === 'codex'"
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :disabled="actionsBlocked"
+          title="回送 IAB 截图"
+          aria-label="回送 IAB 截图"
+          @click="emit('submitCodexIab')"
+        >
+          <Camera :size="14" aria-hidden="true" />
+        </button>
         <button
           v-if="state.backend === 'codex'"
           type="button"

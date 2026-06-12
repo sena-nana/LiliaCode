@@ -53,6 +53,8 @@ import type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
+  CodexIabSnapshot,
+  CodexIabSubmitResult,
   ChatRollbackResult,
 } from "@lilia/contracts";
 
@@ -99,6 +101,8 @@ export type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
+  CodexIabSnapshot,
+  CodexIabSubmitResult,
   ChatRollbackResult,
 };
 
@@ -227,6 +231,17 @@ export function saveClipboardImage(input: {
 
 export function saveClipboardText(input: { text: string }): Promise<ChatAttachment> {
   return invoke<ChatAttachment>("chat_save_clipboard_text", { input });
+}
+
+export function openCodexIab(taskId: string, url?: string | null): Promise<void> {
+  return invoke<void>("codex_iab_open", { taskId, url: url ?? null });
+}
+
+export function submitCodexIab(
+  taskId: string,
+  note?: string | null,
+): Promise<CodexIabSubmitResult> {
+  return invoke<CodexIabSubmitResult>("codex_iab_submit", { taskId, note: note ?? null });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {

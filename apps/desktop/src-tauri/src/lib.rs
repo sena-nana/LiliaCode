@@ -8,6 +8,7 @@ mod automation;
 mod chat;
 mod claude_history;
 mod codex_history;
+mod codex_iab;
 mod conversation_suggestions;
 mod github;
 mod plugins;
@@ -208,6 +209,10 @@ pub fn run() {
             codex_history::codex_thread_attach,
             codex_history::codex_thread_runtime_states,
             codex_history::codex_thread_clean_background_terminals,
+            codex_iab::codex_iab_open,
+            codex_iab::codex_iab_navigate,
+            codex_iab::codex_iab_capture,
+            codex_iab::codex_iab_submit,
             provider::chat_check_env,
             provider::provider_get_config,
             provider::provider_set_config,

@@ -2995,6 +2995,7 @@ dependencies = [
  "clipboard-win",
  "dirs 5.0.1",
  "ignore",
+ "image",
  "keyring",
  "keyring-core",
  "mutsuki-runtime-contracts",
@@ -3002,6 +3003,7 @@ dependencies = [
  "mutsuki-runtime-host",
  "r2d2",
  "r2d2_sqlite",
+ "raw-window-handle",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -3014,6 +3016,7 @@ dependencies = [
  "tauri-plugin-store",
  "toml_edit 0.25.11+spec-1.1.0",
  "uuid",
+ "windows",
 ]
 
 [[package]]

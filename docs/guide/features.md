@@ -36,7 +36,7 @@
 - [x] Codex 配置档案：支持 profiles、reasoning effort、runtime workspace roots、受控 permissions 和项目级默认。
 - [x] Codex 专项工作流：支持代码审查和修复建议。
 - [x] Codex 批量改动工作流：可从审查 / 修复建议进入强制 Plan 确认后的应用流程。
-- [ ] 内置浏览器交互：通过 IAB 与用户互动或调试代码。
+- [x] 内置浏览器交互：通过 IAB 与用户互动或调试代码。
 
 ## LiliaCode 特色功能
 

@@ -19,6 +19,7 @@ import {
   setMockActiveBackend,
   setMockChatRunning,
   setMockComposerStateHandler,
+  setNextMockCodexIabDelivery,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
 import { createDraftTask } from "../src/services/tasksStore";
@@ -27,6 +28,7 @@ import {
   respondConsent,
   useToolConsentForTask,
 } from "../src/composables/useToolConsentBridge";
+import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
@@ -132,6 +134,7 @@ describe("chat scheduler", () => {
     if (pendingConsent) {
       await respondConsent("t-002", pendingConsent.requestId, "deny", "测试清理");
     }
+    await useConnectionStatus({ probe: false }).setActiveBackend("claude");
     unlistenToolConsent?.();
     unlistenToolConsent = null;
   });
@@ -197,6 +200,64 @@ describe("chat scheduler", () => {
         model: "gpt-5.5",
       }),
     });
+  });
+
+  it("Codex IAB 运行中回送时只注入 runner，不降级发送消息", async () => {
+    setMockActiveBackend("codex");
+    await useConnectionStatus({ probe: false }).setActiveBackend("codex");
+    setMockChatRunning("t-002", true);
+    setNextMockCodexIabDelivery("runner");
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "修复建议" })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "回送 IAB 截图" })).toBeInTheDocument();
+    });
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "回送 IAB 截图" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "codex_iab_submit")).toBe(true);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(promptSpy).toHaveBeenCalledWith("IAB 备注");
+    promptSpy.mockRestore();
+  });
+
+  it("Codex IAB 空闲回送降级为带截图附件的用户消息", async () => {
+    setMockActiveBackend("codex");
+    await useConnectionStatus({ probe: false }).setActiveBackend("codex");
+    setNextMockCodexIabDelivery("message");
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "修复建议" })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "回送 IAB 截图" })).toBeInTheDocument();
+    });
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "回送 IAB 截图" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      content: expect.stringContaining("Codex IAB 页面交互结果"),
+      attachments: [expect.objectContaining({
+        name: "IAB 截图.png",
+        path: expect.stringContaining("iab-snapshots"),
+      })],
+      composer: expect.objectContaining({
+        backend: "codex",
+      }),
+    });
+    expect(send?.[1].content).toContain("https://example.com/debug");
+    expect(send?.[1].content).toContain("Debug Page");
+    expect(send?.[1].content).toContain("按钮点击后卡住");
+    promptSpy.mockRestore();
   });
 
   it("斜杠项目命令通过 workflow 执行并写入时间线", async () => {

@@ -1,6 +1,6 @@
 mod clipboard;
 mod commands;
 mod context_search;
-mod describe;
+pub(crate) mod describe;
 
 pub use commands::*;

@@ -96,6 +96,8 @@ const emit = defineEmits<{
   "reset-codex-memory": [];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
+  "open-codex-iab": [];
+  "submit-codex-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-codex-batch-apply": [input: CodexBatchApplyInput];
   interrupt: [];
@@ -209,6 +211,8 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @set-codex-goal="emit('set-codex-goal', $event)"
                   @fork-codex-thread="emit('fork-codex-thread')"
                   @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
+                  @open-codex-iab="emit('open-codex-iab')"
+                  @submit-codex-iab="emit('submit-codex-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

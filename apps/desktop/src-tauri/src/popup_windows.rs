@@ -3,7 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::settings_store::{load_store_value, normalize_optional_string, save_store_value};
@@ -128,7 +130,7 @@ pub(crate) fn popup_route_bootstrap_script(route: &str) -> String {
     format!("window.location.hash = \"#\" + {route};")
 }
 
-pub(crate) fn focus_window(window: &WebviewWindow) {
+pub(crate) fn focus_window<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
