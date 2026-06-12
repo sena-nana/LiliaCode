@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import {
   AlertTriangle,
+  GitBranch,
   Import,
   Puzzle,
   Settings,
@@ -86,6 +87,10 @@ onMounted(() => {
 
     <RouterLink to="/plugins" class="sb-footer__btn" active-class="is-active" title="插件 / 技能" aria-label="插件 / 技能">
       <Puzzle :size="14" aria-hidden="true" />
+    </RouterLink>
+
+    <RouterLink to="/automations" class="sb-footer__btn" active-class="is-active" title="自动化" aria-label="自动化">
+      <GitBranch :size="14" aria-hidden="true" />
     </RouterLink>
 
     <RouterLink

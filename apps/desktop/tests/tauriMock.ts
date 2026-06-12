@@ -76,6 +76,79 @@ interface TodoRow {
   updatedAt: number;
 }
 
+interface AutomationNodeRow {
+  id: string;
+  kind: "trigger" | "agent" | "logic" | "tool" | "human";
+  title: string;
+  position: { x: number; y: number };
+  config: Record<string, unknown>;
+}
+
+interface AutomationEdgeRow {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+interface AutomationScopeRow {
+  projectIds: string[];
+  includeInbox: boolean;
+  taskStatuses: string[];
+  backends: Array<"claude" | "codex">;
+  eventKinds: string[];
+}
+
+interface AutomationWorkflowRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  scope: AutomationScopeRow;
+  draft: {
+    nodes: AutomationNodeRow[];
+    edges: AutomationEdgeRow[];
+    scope: AutomationScopeRow;
+  };
+  publishedVersionId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface AutomationRunRow {
+  id: string;
+  workflowId: string;
+  workflowVersionId: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | "waiting_user";
+  trigger: {
+    id: string;
+    kind: string;
+    projectId?: string | null;
+    taskId?: string | null;
+    backend?: "claude" | "codex" | null;
+    eventKind?: string | null;
+    automationRunId?: string | null;
+    payload: Record<string, unknown>;
+    createdAt: number;
+  };
+  scope: AutomationScopeRow;
+  startedAt: number;
+  finishedAt: number | null;
+  error: string | null;
+}
+
+interface AutomationRunNodeStateRow {
+  id: string;
+  runId: string;
+  nodeId: string;
+  status: AutomationRunRow["status"];
+  input: Record<string, unknown>;
+  output: Record<string, unknown> | null;
+  error: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
 interface AgentTodoInput {
   content?: unknown;
   text?: unknown;
@@ -205,6 +278,68 @@ let cleanedCodexThreads: string[] = [];
 let timelineEvents: Record<string, AgentTimelineEvent[]> = {};
 let todosByTaskId: Record<string, TodoRow[]> = {};
 let todoSeq = 0;
+let automations: AutomationWorkflowRow[] = [];
+let automationRuns: AutomationRunRow[] = [];
+let automationRunNodes: Record<string, AutomationRunNodeStateRow[]> = {};
+let automationVersionSeq = 0;
+let automationRunSeq = 0;
+
+function defaultAutomationScope(): AutomationScopeRow {
+  return {
+    projectIds: [],
+    includeInbox: true,
+    taskStatuses: [],
+    backends: [],
+    eventKinds: [],
+  };
+}
+
+function cloneAutomationWorkflow(row: AutomationWorkflowRow): AutomationWorkflowRow {
+  return {
+    ...row,
+    scope: { ...row.scope, projectIds: [...row.scope.projectIds], taskStatuses: [...row.scope.taskStatuses], backends: [...row.scope.backends], eventKinds: [...row.scope.eventKinds] },
+    draft: {
+      nodes: row.draft.nodes.map((node) => ({
+        ...node,
+        position: { ...node.position },
+        config: { ...node.config },
+      })),
+      edges: row.draft.edges.map((edge) => ({ ...edge })),
+      scope: {
+        ...row.draft.scope,
+        projectIds: [...row.draft.scope.projectIds],
+        taskStatuses: [...row.draft.scope.taskStatuses],
+        backends: [...row.draft.scope.backends],
+        eventKinds: [...row.draft.scope.eventKinds],
+      },
+    },
+  };
+}
+
+function cloneAutomationRun(row: AutomationRunRow): AutomationRunRow {
+  return {
+    ...row,
+    trigger: {
+      ...row.trigger,
+      payload: { ...row.trigger.payload },
+    },
+    scope: {
+      ...row.scope,
+      projectIds: [...row.scope.projectIds],
+      taskStatuses: [...row.scope.taskStatuses],
+      backends: [...row.scope.backends],
+      eventKinds: [...row.scope.eventKinds],
+    },
+  };
+}
+
+function cloneAutomationRunNode(row: AutomationRunNodeStateRow): AutomationRunNodeStateRow {
+  return {
+    ...row,
+    input: { ...row.input },
+    output: row.output ? { ...row.output } : null,
+  };
+}
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let runtimeSnapshotOverrides: Record<string, Record<string, unknown>> = {};
@@ -499,6 +634,47 @@ export function resetTauriMockData() {
   cleanedCodexThreads = [];
   todosByTaskId = {};
   todoSeq = 0;
+  automationVersionSeq = 0;
+  automationRunSeq = 0;
+  const scope = defaultAutomationScope();
+  automations = [
+    {
+      id: "auto-1",
+      name: "任务完成后复盘",
+      enabled: false,
+      scope,
+      draft: {
+        nodes: [
+          {
+            id: "trigger-1",
+            kind: "trigger",
+            title: "任务变化",
+            position: { x: 80, y: 120 },
+            config: { triggerKind: "manual" },
+          },
+          {
+            id: "agent-1",
+            kind: "agent",
+            title: "复盘 Agent",
+            position: { x: 360, y: 120 },
+            config: {
+              taskId: "t-002",
+              backend: "claude",
+              prompt: "请复盘当前任务。",
+              permission: "ask",
+            },
+          },
+        ],
+        edges: [{ id: "trigger-1-agent-1", source: "trigger-1", target: "agent-1" }],
+        scope,
+      },
+      publishedVersionId: "auto-1-v1",
+      createdAt: 1000,
+      updatedAt: 1000,
+    },
+  ];
+  automationRuns = [];
+  automationRunNodes = {};
   timelineEvents = {
     "t-002": [
       {
@@ -594,6 +770,22 @@ export function emitTauriEvent(event: string, payload: unknown) {
   for (const handler of eventHandlers[event] ?? []) {
     handler({ payload });
   }
+}
+
+export function finishMockAutomationRun(runId: string) {
+  const run = automationRuns.find((item) => item.id === runId);
+  if (!run) return;
+  const now = Date.now();
+  run.status = "succeeded";
+  run.finishedAt = now;
+  run.error = null;
+  automationRunNodes[runId] = (automationRunNodes[runId] ?? []).map((node) => ({
+    ...node,
+    status: "succeeded",
+    output: { ...(node.output ?? {}), completedByEvent: true },
+    finishedAt: node.finishedAt ?? now,
+  }));
+  emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
 }
 
 export function mockListenerCount(event: string): number {
@@ -1336,6 +1528,207 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       tasks = tasks.filter((task) => task.projectId !== projectId);
       refreshSessionCounts();
       return count;
+    }
+
+    case "automation_list_workflows":
+      return automations.map(cloneAutomationWorkflow);
+
+    case "automation_get_workflow": {
+      const id = String(args.id);
+      const workflow = automations.find((item) => item.id === id);
+      return workflow ? cloneAutomationWorkflow(workflow) : null;
+    }
+
+    case "automation_save_draft": {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const id = typeof input.id === "string" && input.id ? input.id : `auto-${automations.length + 1}`;
+      const now = Date.now();
+      const scopeInput = input.scope && typeof input.scope === "object" && !Array.isArray(input.scope)
+        ? input.scope as Partial<AutomationScopeRow>
+        : {};
+      const nextScope: AutomationScopeRow = {
+        ...defaultAutomationScope(),
+        projectIds: Array.isArray(scopeInput.projectIds) ? scopeInput.projectIds.map(String) : [],
+        includeInbox: scopeInput.includeInbox !== false,
+        taskStatuses: Array.isArray(scopeInput.taskStatuses) ? scopeInput.taskStatuses.map(String) : [],
+        backends: Array.isArray(scopeInput.backends)
+          ? scopeInput.backends.filter((item): item is "claude" | "codex" => item === "claude" || item === "codex")
+          : [],
+        eventKinds: Array.isArray(scopeInput.eventKinds) ? scopeInput.eventKinds.map(String) : [],
+      };
+      const nodes = Array.isArray(input.nodes)
+        ? input.nodes.map((node, index) => {
+          const row = node && typeof node === "object" && !Array.isArray(node)
+            ? node as Record<string, unknown>
+            : {};
+          return {
+            id: typeof row.id === "string" ? row.id : `node-${index}`,
+            kind: row.kind === "trigger" || row.kind === "agent" || row.kind === "logic" || row.kind === "tool" || row.kind === "human"
+              ? row.kind
+              : "tool",
+            title: typeof row.title === "string" ? row.title : "节点",
+            position: row.position && typeof row.position === "object" && !Array.isArray(row.position)
+              ? {
+                x: Number((row.position as Record<string, unknown>).x ?? 0),
+                y: Number((row.position as Record<string, unknown>).y ?? 0),
+              }
+              : { x: 0, y: 0 },
+            config: row.config && typeof row.config === "object" && !Array.isArray(row.config)
+              ? { ...row.config as Record<string, unknown> }
+              : {},
+          } satisfies AutomationNodeRow;
+        })
+        : [];
+      const edges = Array.isArray(input.edges)
+        ? input.edges.map((edge, index) => {
+          const row = edge && typeof edge === "object" && !Array.isArray(edge)
+            ? edge as Record<string, unknown>
+            : {};
+          return {
+            id: typeof row.id === "string" ? row.id : `edge-${index}`,
+            source: String(row.source ?? ""),
+            target: String(row.target ?? ""),
+            sourceHandle: typeof row.sourceHandle === "string" ? row.sourceHandle : null,
+            targetHandle: typeof row.targetHandle === "string" ? row.targetHandle : null,
+          } satisfies AutomationEdgeRow;
+        })
+        : [];
+      const existing = automations.find((item) => item.id === id);
+      const workflow: AutomationWorkflowRow = {
+        id,
+        name: String(input.name ?? "新自动化"),
+        enabled: existing?.enabled ?? false,
+        scope: nextScope,
+        draft: { nodes, edges, scope: nextScope },
+        publishedVersionId: existing?.publishedVersionId ?? null,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      automations = [workflow, ...automations.filter((item) => item.id !== id)];
+      emitTauriEvent("automation:changed", { workflowId: id });
+      return cloneAutomationWorkflow(workflow);
+    }
+
+    case "automation_publish": {
+      const id = String(args.id);
+      const workflow = automations.find((item) => item.id === id);
+      if (!workflow) throw new Error("自动化不存在");
+      automationVersionSeq += 1;
+      const versionId = `${id}-v${automationVersionSeq + 1}`;
+      workflow.publishedVersionId = versionId;
+      workflow.updatedAt = Date.now();
+      emitTauriEvent("automation:changed", { workflowId: id });
+      return {
+        id: versionId,
+        workflowId: id,
+        version: automationVersionSeq + 1,
+        snapshot: workflow.draft,
+        createdAt: Date.now(),
+      };
+    }
+
+    case "automation_set_enabled": {
+      const id = String(args.id);
+      const enabled = args.enabled === true;
+      automations = automations.map((workflow) =>
+        workflow.id === id ? { ...workflow, enabled, updatedAt: Date.now() } : workflow
+      );
+      emitTauriEvent("automation:changed", { workflowId: id });
+      return undefined;
+    }
+
+    case "automation_run_once": {
+      const id = String(args.id);
+      const workflow = automations.find((item) => item.id === id);
+      if (!workflow?.publishedVersionId) throw new Error("运行前需要先发布");
+      automationRunSeq += 1;
+      const now = Date.now();
+      const waitingNode = workflow.draft.nodes.find((node) => node.kind === "human");
+      const waitingAgent = waitingNode ? null : workflow.draft.nodes.find((node) => node.kind === "agent");
+      const run: AutomationRunRow = {
+        id: `run-${automationRunSeq}`,
+        workflowId: id,
+        workflowVersionId: workflow.publishedVersionId,
+        status: waitingNode ? "waiting_user" : waitingAgent ? "running" : "succeeded",
+        trigger: {
+          id: `signal-${automationRunSeq}`,
+          kind: "manual",
+          projectId: workflow.scope.projectIds[0] ?? null,
+          taskId: "t-002",
+          backend: workflow.scope.backends[0] ?? "claude",
+          eventKind: "manual",
+          automationRunId: null,
+          payload: {},
+          createdAt: now,
+        },
+        scope: workflow.scope,
+        startedAt: now,
+        finishedAt: waitingNode || waitingAgent ? null : now,
+        error: null,
+      };
+      automationRuns = [run, ...automationRuns];
+      automationRunNodes[run.id] = workflow.draft.nodes.map((node) => ({
+        id: `${run.id}:${node.id}`,
+        runId: run.id,
+        nodeId: node.id,
+        status: node.id === waitingNode?.id
+          ? "waiting_user"
+          : node.id === waitingAgent?.id
+            ? "running"
+            : "succeeded",
+        input: { trigger: run.trigger },
+        output: node.id === waitingNode?.id
+          ? { waitingUser: true, prompt: String(node.config.prompt ?? "确认后继续执行自动化。") }
+          : node.id === waitingAgent?.id
+            ? { waitingAgent: true, taskId: "t-002", turnId: `turn-${run.id}` }
+          : { ok: true },
+        error: null,
+        startedAt: now,
+        finishedAt: node.id === waitingNode?.id || node.id === waitingAgent?.id ? null : now,
+      }));
+      emitTauriEvent("automation:run-started", { run: cloneAutomationRun(run) });
+      emitTauriEvent(waitingNode || waitingAgent ? "automation:run-updated" : "automation:run-finished", { run: cloneAutomationRun(run) });
+      return cloneAutomationRun(run);
+    }
+
+    case "automation_resume_run": {
+      const runId = String(args.runId);
+      const run = automationRuns.find((item) => item.id === runId);
+      if (!run) throw new Error("运行不存在");
+      const now = Date.now();
+      run.status = "succeeded";
+      run.finishedAt = now;
+      automationRunNodes[runId] = (automationRunNodes[runId] ?? []).map((node) =>
+        node.status === "waiting_user"
+          ? {
+            ...node,
+            status: "succeeded",
+            output: { waitingUser: false, confirmed: true },
+            finishedAt: now,
+          }
+          : node,
+      );
+      emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
+      return cloneAutomationRun(run);
+    }
+
+    case "automation_list_runs": {
+      const workflowId = typeof args.workflowId === "string" ? args.workflowId : null;
+      return automationRuns
+        .filter((run) => !workflowId || run.workflowId === workflowId)
+        .map(cloneAutomationRun);
+    }
+
+    case "automation_get_run": {
+      const runId = String(args.runId);
+      const run = automationRuns.find((item) => item.id === runId);
+      if (!run) return null;
+      return {
+        run: cloneAutomationRun(run),
+        nodes: (automationRunNodes[runId] ?? []).map(cloneAutomationRunNode),
+      };
     }
 
     case "chat_check_env":
@@ -2170,6 +2563,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           message,
           dispatch: "queued",
           queuedCount: chatQueued[taskId].length,
+          turnId,
         };
       }
       setMockGuideStatus(args.guideId, "sent");
@@ -2184,6 +2578,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         message,
         dispatch: "started",
         queuedCount: 0,
+        turnId,
       };
     }
 

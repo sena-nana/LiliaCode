@@ -7,6 +7,8 @@ pub struct AgentTurnContext {
     pub task_id: String,
     pub backend: String,
     pub turn_id: String,
+    #[serde(default)]
+    pub automation_run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,6 +290,7 @@ mod tests {
             task_id: "task-1".to_string(),
             backend: "claude".to_string(),
             turn_id: "turn-1".to_string(),
+            automation_run_id: None,
         }
     }
 

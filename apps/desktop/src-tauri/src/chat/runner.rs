@@ -136,6 +136,7 @@ pub(crate) fn reattach_runner_session<R: Runtime>(
             task_id,
             backend,
             turn_id,
+            automation_run_id: None,
         },
         event_host,
         timeline_throttle: TimelineThrottle::new(),
@@ -252,8 +253,8 @@ pub(crate) fn locate_agent_runner<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("agent-runner.mjs"))
 }
 
-pub(crate) fn spawn_agent_turn(
-    app: AppHandle,
+pub(crate) fn spawn_agent_turn<R: Runtime>(
+    app: AppHandle<R>,
     task_id: String,
     content: String,
     composer: ChatComposerState,
@@ -362,10 +363,14 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
 
         let turn_id_for_finish = invocation.turn_id.clone();
         let runtime_channel_for_finish = invocation.runtime_channel.clone();
+        let automation_run_id_for_finish =
+            automation_run_id_from_workflow(invocation.workflow.as_ref());
         let result = run_node_agent_runner(&app_handle, invocation);
+        let mut runner_ok = true;
         let output = match result {
             Ok(output) => output,
             Err(err) => {
+                runner_ok = false;
                 persist_and_emit_error_timeline_event(
                     &app_handle,
                     &task_id_for_thread,
@@ -376,13 +381,24 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
                 RunnerOutput::default()
             }
         };
+        let agent_success = runner_ok && !output.interrupted && !output.reset;
+        {
+            let store = app_handle.state::<ChatStore>();
+            crate::automation::automation_complete_agent_turn(
+                &app_handle,
+                &store,
+                automation_run_id_for_finish,
+                &turn_id_for_finish,
+                agent_success,
+            );
+        }
         finish_agent_turn(
             app_handle,
             task_id_for_thread,
             backend_for_thread,
             runtime_channel_for_finish,
             output.last_session_id,
-            !output.interrupted && !output.reset,
+            agent_success,
             None,
         );
     });
@@ -418,6 +434,7 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
             &turn.composer.backend,
             &turn.turn_id,
             false,
+            None,
         );
     }
     spawn_agent_turn_with_channel(
@@ -453,6 +470,8 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let project_cwd = invocation.project_cwd;
     let attachments_for_thread = invocation.attachments;
     let workflow_for_thread = invocation.workflow;
+    let automation_run_id_for_thread =
+        automation_run_id_from_workflow(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
     let runtime_channel_for_thread = invocation.runtime_channel;
     let resume_session_id = invocation.resume_session_id;
@@ -650,6 +669,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
             task_id: task_id_for_thread,
             backend: backend_for_thread,
             turn_id: turn_id_for_thread,
+            automation_run_id: automation_run_id_for_thread,
         },
         event_host,
         timeline_throttle: TimelineThrottle::new(),
@@ -772,6 +792,16 @@ fn handle_runner_runtime_event<R: Runtime>(
                     kind: kind.clone(),
                     payload: payload.clone(),
                 },
+            );
+            crate::automation::emit_interaction_signal(
+                app_handle,
+                session.task_id.clone(),
+                session.turn_id.clone(),
+                backend.clone().unwrap_or_else(|| session.backend.clone()),
+                id.clone(),
+                kind.clone(),
+                payload.clone(),
+                session.event_ctx.automation_run_id.clone(),
             );
         }
         AgentRuntimeEvent::Done { session_id, .. } => {
@@ -1010,6 +1040,14 @@ fn workflow_kind_for_lifecycle(workflow: Option<&ChatWorkflow>) -> Option<&'stat
         ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
         ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
         ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
+        ChatWorkflow::Automation { .. } => Some("automation"),
+    }
+}
+
+fn automation_run_id_from_workflow(workflow: Option<&ChatWorkflow>) -> Option<String> {
+    match workflow {
+        Some(ChatWorkflow::Automation { automation_run_id }) => Some(automation_run_id.clone()),
+        _ => None,
     }
 }
 
@@ -1062,6 +1100,7 @@ fn runtime_state_context_json(
         "promptLength": prompt.chars().count(),
         "attachmentCount": attachments.len(),
         "workflowType": workflow_kind_for_lifecycle(workflow),
+        "automationRunId": automation_run_id_from_workflow(workflow),
         "resumeSessionId": resume_session_id,
         "permission": composer.permission,
         "composerRuntimeWorkspaceRoots": composer
@@ -1330,6 +1369,7 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
                 &turn.composer.backend,
                 &turn.turn_id,
                 false,
+                None,
             );
         }
         spawn_agent_turn_with_channel(

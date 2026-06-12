@@ -4,6 +4,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 pub mod agent_events;
 mod agent_extensions;
 pub mod agent_timeline;
+mod automation;
 mod chat;
 mod claude_history;
 mod codex_history;
@@ -287,6 +288,15 @@ pub fn run() {
             projects_tasks::task_reparent,
             agent_timeline::agent_timeline_list,
             agent_timeline::agent_timeline_clear_task,
+            automation::automation_list_workflows,
+            automation::automation_get_workflow,
+            automation::automation_save_draft,
+            automation::automation_publish,
+            automation::automation_set_enabled,
+            automation::automation_run_once,
+            automation::automation_resume_run,
+            automation::automation_list_runs,
+            automation::automation_get_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

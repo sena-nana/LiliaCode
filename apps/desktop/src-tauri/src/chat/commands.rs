@@ -124,12 +124,14 @@ pub fn chat_send_message(
                     &composer.backend,
                     &turn_id,
                     true,
+                    None,
                 );
             }
             return Ok(ChatSendResult {
                 message: user_msg,
                 dispatch: "queued".to_string(),
                 queued_count,
+                turn_id,
             });
         }
         running.insert(task_id.clone(), true);
@@ -143,6 +145,7 @@ pub fn chat_send_message(
             &composer.backend,
             &turn_id,
             false,
+            None,
         );
     }
 
@@ -154,13 +157,14 @@ pub fn chat_send_message(
         project_cwd,
         attachments,
         workflow,
-        turn_id,
+        turn_id.clone(),
     );
 
     Ok(ChatSendResult {
         message: user_msg,
         dispatch: "started".to_string(),
         queued_count: 0,
+        turn_id,
     })
 }
 

@@ -42,7 +42,15 @@ pub(crate) fn timeline_input_from_runtime_event(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty());
-    let payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
+    let mut payload = obj.get("payload").cloned().unwrap_or(JsonValue::Null);
+    if let Some(automation_run_id) = &ctx.automation_run_id {
+        let mut payload_obj = payload.as_object().cloned().unwrap_or_default();
+        payload_obj.insert(
+            "automationRunId".to_string(),
+            JsonValue::String(automation_run_id.clone()),
+        );
+        payload = JsonValue::Object(payload_obj);
+    }
     let source_id = obj.get("sourceId").and_then(|v| v.as_str());
     let turn_id = obj
         .get("turnIdOverride")
@@ -97,7 +105,8 @@ pub(crate) fn persist_and_emit_input<R: Runtime>(
         .and_then(|conn| agent_timeline::insert(&conn, input))
     {
         Ok(saved) => {
-            let _ = app_handle.emit("agent:timeline", saved);
+            let _ = app_handle.emit("agent:timeline", &saved);
+            crate::automation::emit_timeline_signal(app_handle, &saved);
         }
         Err(err) => {
             eprintln!("[agent-timeline] persist failed: {err}");
@@ -215,7 +224,17 @@ pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
     backend: &str,
     turn_id: &str,
     queued: bool,
+    automation_run_id: Option<&str>,
 ) {
+    let mut payload = serde_json::json!({
+        "role": message.role,
+        "content": message.content,
+        "attachments": message.attachments,
+        "queued": queued,
+    });
+    if let Some(automation_run_id) = automation_run_id {
+        payload["automationRunId"] = JsonValue::String(automation_run_id.to_string());
+    }
     let input = AgentTimelineEventInput {
         id: Some(message.id.clone()),
         task_id: message.task_id.clone(),
@@ -227,12 +246,7 @@ pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
         status: if queued { "pending" } else { "success" }.to_string(),
         title: "用户输入".to_string(),
         summary: Some(message.content.clone()),
-        payload: serde_json::json!({
-            "role": message.role,
-            "content": message.content,
-            "attachments": message.attachments,
-            "queued": queued,
-        }),
+        payload,
         created_at: Some(message.created_at as i64),
         updated_at: Some(now_millis() as i64),
     };

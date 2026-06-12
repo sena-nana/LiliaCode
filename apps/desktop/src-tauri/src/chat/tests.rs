@@ -26,6 +26,7 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CLAUDE.to_string(),
             turn_id: "turn-1".to_string(),
+            automation_run_id: None,
         }
     }
 

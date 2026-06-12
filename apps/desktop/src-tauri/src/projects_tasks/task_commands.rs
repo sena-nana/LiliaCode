@@ -114,6 +114,14 @@ pub fn task_create(
         pinned: false,
     };
     emit_tasks_changed(&app, project_id);
+    crate::automation::emit_task_changed_signal(
+        &app,
+        row.project_id.clone(),
+        Some(row.id.clone()),
+        Some(row.status.clone()),
+        "task_created",
+        None,
+    );
     Ok(row)
 }
 
@@ -129,15 +137,17 @@ pub fn task_update(
         return Ok(());
     }
     let conn = store.conn()?;
-    let project_id = conn
+    let (project_id, previous_status) = conn
         .query_row(
-            "SELECT project_id FROM tasks WHERE id = ?1 AND archived = 0",
+            "SELECT project_id, status FROM tasks WHERE id = ?1 AND archived = 0",
             params![id.as_str()],
-            |row| row.get::<_, Option<String>>(0),
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()
         .map_err(|e| format!("task_update: 查询任务失败：{e}"))?
-        .flatten();
+        .unwrap_or((None, String::new()));
+    let mut next_status = previous_status;
+    let status_changed = status.is_some();
     if let Some(t) = title {
         conn.execute(
             "UPDATE tasks SET title = ?1, title_source = 'manual' WHERE id = ?2",
@@ -151,8 +161,21 @@ pub fn task_update(
             params![s, id.as_str()],
         )
         .map_err(|e| format!("task_update(status): {e}"))?;
+        next_status = s;
     }
-    emit_tasks_changed(&app, project_id);
+    emit_tasks_changed(&app, project_id.clone());
+    crate::automation::emit_task_changed_signal(
+        &app,
+        project_id,
+        Some(id),
+        Some(next_status),
+        if status_changed {
+            "task_status_changed"
+        } else {
+            "task_updated"
+        },
+        None,
+    );
     Ok(())
 }
 
@@ -206,6 +229,14 @@ pub fn task_promote(
         pinned: false,
     };
     emit_tasks_changed(&app, project_id);
+    crate::automation::emit_task_changed_signal(
+        &app,
+        row.project_id.clone(),
+        Some(row.id.clone()),
+        Some(row.status.clone()),
+        "task_created",
+        None,
+    );
     Ok(row)
 }
 
