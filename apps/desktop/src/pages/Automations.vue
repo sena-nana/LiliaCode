@@ -105,6 +105,7 @@ const nodes = shallowRef<FlowNode[]>([]);
 const edges = shallowRef<FlowEdge[]>([]);
 const workflowName = ref("新自动化");
 const scope = ref<AutomationScopeFilter>({ ...DEFAULT_SCOPE });
+const manualRunPayloadText = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const publishing = ref(false);
@@ -134,6 +135,12 @@ const selectedRunNodeStates = computed<AutomationRunNodeState[]>(() =>
 const selectedRunNodeState = computed<AutomationRunNodeState | null>(() =>
   selectedRunNodeStates.value.find((state) => state.nodeId === selectedRunNodeId.value) ?? null,
 );
+
+const selectedToolAction = computed(() => configString("action") || "record_timeline");
+const selectedToolUsesTaskId = computed(() => selectedToolAction.value !== "create_task");
+const selectedToolUsesProjectId = computed(() => selectedToolAction.value === "create_task");
+const selectedToolUsesTimelineFields = computed(() => selectedToolAction.value === "record_timeline");
+const selectedToolUsesGuidePriority = computed(() => selectedToolAction.value === "send_guide");
 
 const hasTriggerNode = computed(() =>
   nodes.value.some((node) => node.data.node.kind === "trigger"),
@@ -170,6 +177,17 @@ const TRIGGER_EVENT_KIND_OPTIONS = [
   "todo_changed",
   "interaction_request",
 ] as const;
+const PRIORITY_OPTIONS = ["low", "normal", "high"] as const;
+const TOOL_ACTIONS_WITH_TITLE = new Set(["record_timeline", "create_task"]);
+const TOOL_ACTIONS_WITH_TEXT = new Set(["add_todo", "send_guide"]);
+const TOOL_ACTIONS_WITH_STATUS = new Set([
+  "record_timeline",
+  "create_task",
+  "update_task_status",
+]);
+const selectedToolUsesTitle = computed(() => TOOL_ACTIONS_WITH_TITLE.has(selectedToolAction.value));
+const selectedToolUsesText = computed(() => TOOL_ACTIONS_WITH_TEXT.has(selectedToolAction.value));
+const selectedToolUsesStatus = computed(() => TOOL_ACTIONS_WITH_STATUS.has(selectedToolAction.value));
 
 function defaultWorkflowDraft() {
   const trigger = createAutomationNode("trigger", 80, 100);
@@ -425,7 +443,8 @@ async function runCurrent() {
   running.value = true;
   errorText.value = null;
   try {
-    const run = await runAutomationOnce(selectedWorkflowId.value);
+    const payload = parseManualRunPayload();
+    const run = await runAutomationOnce(selectedWorkflowId.value, payload ? { payload } : {});
     selectedRunId.value = run.id;
     await refreshRuns();
   } catch (err) {
@@ -501,6 +520,16 @@ function toggleScopeBackend(value: ChatBackendKind) {
 function configBoolean(key: string): boolean {
   const value = (selectedNode.value?.data.node as AutomationNode | undefined)?.config?.[key];
   return value === true;
+}
+
+function parseManualRunPayload(): Record<string, unknown> | undefined {
+  const payloadText = manualRunPayloadText.value.trim();
+  if (!payloadText) return undefined;
+  const payload = JSON.parse(payloadText) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("手动 Payload 必须是 JSON object");
+  }
+  return payload as Record<string, unknown>;
 }
 
 function updateSelectedTitle(value: string) {
@@ -723,6 +752,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </header>
+
+      <div class="automations-page__run-config">
+        <label for="automation-manual-payload">手动 Payload</label>
+        <textarea
+          id="automation-manual-payload"
+          v-model="manualRunPayloadText"
+          class="ui-input ui-textarea"
+          placeholder='{"source":"manual"}'
+          spellcheck="false"
+        />
+      </div>
 
       <div v-if="errorText" class="conn-banner conn-banner--err">
         <Braces :size="16" aria-hidden="true" />
@@ -951,6 +991,24 @@ onBeforeUnmount(() => {
                 </select>
               </div>
               <div class="automations-page__field">
+                <label for="automation-agent-model">模型</label>
+                <input
+                  id="automation-agent-model"
+                  :value="configString('model')"
+                  placeholder="claude-sonnet-4-6 / gpt-5.5"
+                  @input="updateSelectedConfig('model', ($event.target as HTMLInputElement).value)"
+                />
+              </div>
+              <div class="automations-page__field">
+                <label for="automation-agent-project-cwd">工作目录</label>
+                <input
+                  id="automation-agent-project-cwd"
+                  :value="configString('projectCwd')"
+                  placeholder="${trigger.projectCwd}"
+                  @input="updateSelectedConfig('projectCwd', ($event.target as HTMLInputElement).value)"
+                />
+              </div>
+              <div class="automations-page__field">
                 <label>Prompt</label>
                 <textarea
                   class="ui-input ui-textarea"
@@ -1012,8 +1070,9 @@ onBeforeUnmount(() => {
             </template>
             <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'tool'">
               <div class="automations-page__field">
-                <label>动作</label>
+                <label for="automation-tool-action">动作</label>
                 <select
+                  id="automation-tool-action"
                   :value="configString('action') || 'record_timeline'"
                   @change="updateSelectedConfig('action', ($event.target as HTMLSelectElement).value)"
                 >
@@ -1024,7 +1083,10 @@ onBeforeUnmount(() => {
                   <option value="send_guide">发送引导</option>
                 </select>
               </div>
-              <div class="automations-page__field">
+              <div
+                v-if="selectedToolUsesTaskId"
+                class="automations-page__field"
+              >
                 <label>Task ID</label>
                 <input
                   :value="configString('taskId')"
@@ -1032,7 +1094,10 @@ onBeforeUnmount(() => {
                   @input="updateSelectedConfig('taskId', ($event.target as HTMLInputElement).value)"
                 />
               </div>
-              <div class="automations-page__field">
+              <div
+                v-if="selectedToolUsesProjectId"
+                class="automations-page__field"
+              >
                 <label>项目 ID</label>
                 <input
                   :value="configString('projectId')"
@@ -1040,21 +1105,80 @@ onBeforeUnmount(() => {
                   @input="updateSelectedConfig('projectId', ($event.target as HTMLInputElement).value)"
                 />
               </div>
-              <div class="automations-page__field">
-                <label>标题 / Todo / 引导</label>
+              <div
+                v-if="selectedToolUsesTitle"
+                class="automations-page__field"
+              >
+                <label>标题</label>
                 <input
-                  :value="configString('title') || configString('text')"
+                  :value="configString('title')"
                   placeholder="自动化任务"
-                  @input="updateSelectedConfig(configString('action') === 'add_todo' ? 'text' : 'title', ($event.target as HTMLInputElement).value)"
+                  @input="updateSelectedConfig('title', ($event.target as HTMLInputElement).value)"
                 />
               </div>
-              <div class="automations-page__field">
+              <div
+                v-if="selectedToolUsesText"
+                class="automations-page__field"
+              >
+                <label for="automation-tool-text">{{ selectedToolUsesGuidePriority ? '引导内容' : 'Todo 内容' }}</label>
+                <textarea
+                  id="automation-tool-text"
+                  class="ui-input ui-textarea"
+                  :value="configString('text')"
+                  placeholder="自动化 Todo"
+                  @input="updateSelectedConfig('text', ($event.target as HTMLTextAreaElement).value)"
+                />
+              </div>
+              <div
+                v-if="selectedToolUsesTimelineFields"
+                class="automations-page__field"
+              >
+                <label>摘要</label>
+                <textarea
+                  class="ui-input ui-textarea"
+                  :value="configString('summary')"
+                  placeholder="写入时间线的摘要"
+                  @input="updateSelectedConfig('summary', ($event.target as HTMLTextAreaElement).value)"
+                />
+              </div>
+              <div
+                v-if="selectedToolUsesStatus"
+                class="automations-page__field"
+              >
                 <label>状态</label>
                 <input
                   :value="configString('status')"
                   placeholder="waiting"
                   @input="updateSelectedConfig('status', ($event.target as HTMLInputElement).value)"
                 />
+              </div>
+              <div
+                v-if="selectedToolUsesTimelineFields"
+                class="automations-page__field"
+              >
+                <label>记录后端</label>
+                <select
+                  :value="configString('backend') || 'claude'"
+                  @change="updateSelectedConfig('backend', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </div>
+              <div
+                v-if="selectedToolUsesGuidePriority"
+                class="automations-page__field"
+              >
+                <label for="automation-tool-priority">优先级</label>
+                <select
+                  id="automation-tool-priority"
+                  :value="configString('priority') || 'normal'"
+                  @change="updateSelectedConfig('priority', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="priority in PRIORITY_OPTIONS" :key="priority" :value="priority">
+                    {{ priority }}
+                  </option>
+                </select>
               </div>
             </template>
             <template v-else-if="(selectedNode.data.node as AutomationNode).kind === 'human'">
