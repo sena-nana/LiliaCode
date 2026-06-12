@@ -189,6 +189,7 @@ pub fn run() {
             chat::attachments::chat_save_clipboard_image,
             chat::attachments::chat_save_clipboard_text,
             chat::attachments::chat_search_context_attachments,
+            chat::slash_commands::chat_search_slash_commands,
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_agent_interaction,

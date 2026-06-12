@@ -1,7 +1,13 @@
 import { computed, nextTick, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
-import type { ChatAttachment, ChatComposerState, ChatWorkflow, CodexThreadGoal } from "@lilia/contracts";
+import type {
+  ChatAttachment,
+  ChatComposerState,
+  ChatSlashCommandWorkflow,
+  ChatWorkflow,
+  CodexThreadGoal,
+} from "@lilia/contracts";
 import {
   useAskUserForTask,
   usePendingAsksForTask,
@@ -123,6 +129,7 @@ export function useTaskComposerController(options: {
     outgoingAttachments: ChatAttachment[] = [],
     guideId?: string,
     workflow?: ChatWorkflow | null,
+    titleContent?: string,
   ) {
     if (!context.hasContext.value) return;
     if (!content.trim() && outgoingAttachments.length === 0 && !workflow) return;
@@ -131,7 +138,7 @@ export function useTaskComposerController(options: {
     try {
       await ensureComposerLoaded();
       const currentComposer = composerForView.value;
-      await context.ensureTaskReadyForMessage(content, outgoingAttachments);
+      await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
       const cwd = context.project.value?.cwd ?? (await context.ensureOrphanCwd());
 
       const optimistic = timeline.createOptimisticMessageEvent({
@@ -174,6 +181,20 @@ export function useTaskComposerController(options: {
       attachments.value = [];
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
+    }
+  }
+
+  async function onExecuteSlashCommand(workflow: ChatSlashCommandWorkflow) {
+    if (!context.hasContext.value) return;
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前 Agent 正在运行，暂不能执行斜杠命令。"));
+      return;
+    }
+    try {
+      const commandName = workflow.commandId.split(":").at(1) ?? workflow.commandId;
+      await sendAgentMessage("", [], undefined, workflow, `/${commandName}`);
+    } catch {
+      // sendAgentMessage 已写入本地错误 timeline。
     }
   }
 
@@ -443,6 +464,7 @@ export function useTaskComposerController(options: {
     activeBackend,
     sendAgentMessage,
     onSend,
+    onExecuteSlashCommand,
     ...codexWorkflowActions,
     onInsertGuide,
     onInsertDraftText,

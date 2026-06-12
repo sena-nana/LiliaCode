@@ -199,6 +199,57 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("斜杠项目命令通过 workflow 执行并写入时间线", async () => {
+    const view = await renderTaskDetail();
+    await setComposerText(view, "/release");
+    await waitFor(() => {
+      expect(view.getAllByRole("option").length).toBeGreaterThan(0);
+    });
+
+    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      content: "",
+      attachments: [],
+      workflow: {
+        type: "slash_command",
+        commandId: "project:release",
+        source: "project",
+        arguments: {},
+      },
+    });
+    await waitFor(() => {
+      expect(view.getByText(/请完成发布前检查并整理风险项/)).toBeInTheDocument();
+    });
+  });
+
+  it("项目草稿首条斜杠命令用命令名提升标题", async () => {
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+    await setComposerText(view, "/release");
+    await waitFor(() => {
+      expect(view.getAllByRole("option").length).toBeGreaterThan(0);
+    });
+
+    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
+    expect(promote?.[1]).toMatchObject({
+      id: draft.id,
+      projectId: "lilia",
+      title: "/release",
+    });
+  });
+
   it("Codex 项目草稿首条消息会先提升草稿再发送", async () => {
     setMockActiveBackend("codex");
     const draft = createDraftTask("lilia");

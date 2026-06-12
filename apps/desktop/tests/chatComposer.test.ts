@@ -400,6 +400,54 @@ describe("ChatComposer", () => {
     expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
   });
 
+  it("输入 / 时展示斜杠命令并可选择执行", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "/he");
+    await flushContextSearch();
+
+    expect(view.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
+    expect(view.getByText("/help")).toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("execute-slash-command")?.[0]?.[0]).toEqual({
+      type: "slash_command",
+      commandId: "native:help",
+      source: "native",
+      arguments: {},
+    });
+    expect(view.emitted("send")).toBeUndefined();
+    expect(composerText(input)).toBe("");
+  });
+
+  it("斜杠命令不会影响 @ 文件上下文选择", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+    const input = view.getByRole("textbox") as HTMLElement;
+
+    await setComposerText(view, "参考 @read");
+    await flushContextSearch();
+    await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(view.emitted("add-context-attachment")?.[0]?.[0]).toMatchObject({
+      name: "README.md",
+    });
+    expect(view.emitted("execute-slash-command")).toBeUndefined();
+  });
+
   it("文本粘贴会转成纯文本并去除富文本样式", async () => {
     const view = render(ChatComposer, {
       props: {

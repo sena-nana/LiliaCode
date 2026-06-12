@@ -15,6 +15,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatSlashCommandWorkflow,
   CodexReviewTarget,
   PermissionMode,
   SuggestionItem,
@@ -29,12 +30,14 @@ import ComposerContextPanel from "./ComposerContextPanel.vue";
 import ComposerPendingEntryActions from "./ComposerPendingEntryActions.vue";
 import ComposerPendingPanel from "./ComposerPendingPanel.vue";
 import ComposerRichInput from "./ComposerRichInput.vue";
+import ComposerSlashCommandPanel from "./ComposerSlashCommandPanel.vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 import { textPart } from "./composerParts";
 import {
   contextInlinePath,
   useComposerContextSearch,
 } from "./useComposerContextSearch";
+import { useComposerSlashCommands } from "./useComposerSlashCommands";
 import { useComposerPaste } from "./useComposerPaste";
 import { useComposerRichInput } from "./useComposerRichInput";
 import {
@@ -81,6 +84,7 @@ const emit = defineEmits<{
   "set-codex-goal": [objective: string];
   "fork-codex-thread": [];
   "read-codex-config-diagnostics": [];
+  "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
@@ -205,9 +209,21 @@ const contextSearch = useComposerContextSearch({
   addContextAttachment: (attachment) => emit("add-context-attachment", attachment),
 });
 
+const slashCommands = useComposerSlashCommands({
+  richInput,
+  projectCwd: computed(() => props.projectCwd),
+  hasPending,
+  executeCommand: (workflow) => {
+    emit("execute-slash-command", workflow);
+    richInput.resetInput();
+    clearComposerContextState();
+  },
+});
+
 clearComposerContextState = () => {
   contextSearch.clear();
   contextSearch.resetSuppression();
+  slashCommands.clear();
 };
 
 const paste = useComposerPaste({
@@ -288,6 +304,7 @@ function onSelectionEvent() {
 function onRichInput() {
   richInput.onInput();
   contextSearch.noteInputChanged();
+  slashCommands.noteInputChanged();
 }
 
 function onRichSelectionEvent() {
@@ -500,6 +517,7 @@ function onKeydown(e: KeyboardEvent) {
   updateInputSelection();
   if (e.isComposing) return;
   if (contextSearch.handleKeydown(e)) return;
+  if (slashCommands.handleKeydown(e)) return;
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     send();
@@ -510,6 +528,7 @@ function onRichKeydown(e: KeyboardEvent) {
   richInput.inputSelection.value = richInput.captureSelectionOffset();
   if (e.isComposing) return;
   if (contextSearch.handleKeydown(e)) return;
+  if (slashCommands.handleKeydown(e)) return;
   if (e.key === "Enter" && e.shiftKey) {
     e.preventDefault();
     richInput.replaceRange(
@@ -850,6 +869,18 @@ defineExpose({ focusInput, getDraftSnapshot });
         :context-attachment-icon="contextAttachmentIcon"
         @activate="contextSearch.activateResult"
         @select="contextSearch.selectResult"
+      />
+    </Transition>
+
+    <Transition name="chat-composer-stack">
+      <ComposerSlashCommandPanel
+        v-if="slashCommands.panelOpen.value"
+        :results="slashCommands.results.value"
+        :active-index="slashCommands.activeIndex.value"
+        :loading="slashCommands.loading.value"
+        :error="slashCommands.error.value"
+        @activate="slashCommands.activateResult"
+        @select="slashCommands.selectResult"
       />
     </Transition>
 

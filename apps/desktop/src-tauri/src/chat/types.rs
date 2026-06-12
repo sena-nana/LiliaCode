@@ -50,6 +50,43 @@ pub(crate) struct ChatContextSearchResult {
     pub(crate) matched_by: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ChatSlashCommandSource {
+    #[serde(rename = "native")]
+    Native,
+    #[serde(rename = "project")]
+    Project,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatSlashCommandParameter {
+    pub(crate) name: String,
+    pub(crate) label: String,
+    pub(crate) required: bool,
+    #[serde(default)]
+    pub(crate) hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatSlashCommand {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+    pub(crate) source: ChatSlashCommandSource,
+    pub(crate) parameters: Vec<ChatSlashCommandParameter>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatSlashCommandSearchResult {
+    pub(crate) command: ChatSlashCommand,
+    pub(crate) matched_by: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClipboardImageInput {
@@ -135,6 +172,13 @@ pub(crate) enum ChatWorkflow {
     },
     #[serde(rename = "automation")]
     Automation { automation_run_id: String },
+    #[serde(rename = "slash_command")]
+    SlashCommand {
+        command_id: String,
+        source: String,
+        #[serde(default)]
+        arguments: std::collections::BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

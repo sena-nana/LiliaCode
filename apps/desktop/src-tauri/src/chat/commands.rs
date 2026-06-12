@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
+use crate::chat::slash_commands::{
+    emit_slash_command_done, execute_slash_command, persist_and_emit_slash_command_result,
+};
 use crate::chat::state::{
     clear_pending_turns, clear_pending_turns_for_app, clear_persisted_pending_rollback,
     clear_persisted_pending_turns_for_app, clear_running_handles,
@@ -67,6 +70,10 @@ pub fn chat_send_message(
     {
         return Err("Codex workflow 只能在 Codex 后端中启动".to_string());
     }
+    let slash_command_id = match &workflow {
+        Some(ChatWorkflow::SlashCommand { command_id, .. }) => Some(command_id.clone()),
+        _ => None,
+    };
     // 1) 写入 user 消息并立即返回，给前端一个乐观渲染的锚点。
     let user_msg = ChatMessage {
         id: new_chat_message_id(),
@@ -85,6 +92,24 @@ pub fn chat_send_message(
         .lock()
         .unwrap()
         .insert(task_id.clone(), composer.clone());
+
+    if let Some(command_id) = slash_command_id {
+        let execution = execute_slash_command(&command_id, &project_cwd, &composer.backend)?;
+        persist_and_emit_slash_command_result(
+            &app,
+            &task_id,
+            &turn_id,
+            &composer.backend,
+            &execution,
+        );
+        emit_slash_command_done(&app, task_id.clone());
+        return Ok(ChatSendResult {
+            message: user_msg,
+            dispatch: "started".to_string(),
+            queued_count: 0,
+            turn_id,
+        });
+    }
 
     {
         let mut running = store.running_tasks.lock().unwrap();

@@ -9,6 +9,7 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatMessage,
+  ChatSlashCommandSearchResult,
   ChatWorkflow,
   CodexReviewTarget,
   CodexProfileSettings,
@@ -143,6 +144,35 @@ export type AutomationRunWorkflowTypeTest = Assert<
     {
       type: "automation";
       automationRunId: "run-1";
+    },
+    ChatWorkflow
+  >
+>;
+
+export type SlashCommandSearchResultTypeTest = Assert<
+  Extends<
+    {
+      command: {
+        id: "project:release";
+        name: "release";
+        title: "生成发布检查";
+        description: "按项目模板生成发布检查。";
+        source: "project";
+        parameters: [];
+      };
+      matchedBy: "name";
+    },
+    ChatSlashCommandSearchResult
+  >
+>;
+
+export type SlashCommandWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "slash_command";
+      commandId: "native:help";
+      source: "native";
+      arguments: {};
     },
     ChatWorkflow
   >
@@ -387,4 +417,3 @@ export type AgentInteractionToolResponseTypeTest = Assert<
     AgentInteractionResponse
   >
 >;
-
