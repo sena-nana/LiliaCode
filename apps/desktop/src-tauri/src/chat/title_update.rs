@@ -13,8 +13,8 @@ use crate::chat::state::default_model_for_backend;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::provider::{
-    backend_api_key_env, backend_direct_url, load_active_backend, load_assistant_ai_config,
-    resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
+    assistant_ai_secret, backend_api_key_env, backend_direct_url, load_active_backend,
+    load_assistant_ai_config, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
 };
 use crate::store::LiliaStore;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -257,7 +257,7 @@ fn resolve_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Optio
 fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Option<ModelRequest> {
     let cfg: AssistantAIConfig = load_assistant_ai_config(app);
     let base_url = cfg.base_url?.trim().trim_end_matches('/').to_string();
-    let api_key = cfg.api_key?.trim().to_string();
+    let api_key = assistant_ai_secret().ok().flatten()?;
     let model = cfg.model?.trim().to_string();
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
         return None;

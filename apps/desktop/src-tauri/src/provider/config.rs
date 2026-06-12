@@ -1,11 +1,15 @@
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime};
 
 use crate::chat::state::normalize_backend;
-use crate::settings_store::load_store_value;
+use crate::settings_store::{load_store_value, save_store_value};
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 use crate::{RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE};
 
+use super::credentials::{
+    assistant_ai_account, has_secret, normalize_secret, provider_account, read_secret, write_secret,
+};
 use super::types::{
     AgentInteractionSettings, AssistantAIConfig, CCSwitchConfig, CodexControlledPermissions,
     CodexProfileSettings, ProviderConfig,
@@ -23,6 +27,20 @@ pub(crate) const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
 pub(crate) const AGENT_INTERACTION_KEY: &str = "agent-interaction.config";
 pub(crate) const ROUTER_CC_SWITCH: &str = "cc-switch";
 pub(crate) const ROUTER_DIRECT: &str = "direct";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderConfigMetadata {
+    backend: String,
+    base_url: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssistantAIConfigMetadata {
+    base_url: Option<String>,
+    model: Option<String>,
+}
 
 pub(crate) fn provider_key_for_backend(backend: &str) -> &'static str {
     match backend {
@@ -65,7 +83,71 @@ pub(crate) fn load_provider_config<R: Runtime>(
     app: &AppHandle<R>,
     key: &str,
 ) -> Option<ProviderConfig> {
+    if let Err(err) = migrate_provider_config(app, key) {
+        eprintln!("[provider] migrate provider config secret failed for {key}: {err}");
+    }
     load_store_value(app, key)
+}
+
+pub(crate) fn save_provider_config_metadata<R: Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+    backend: String,
+    base_url: Option<String>,
+) -> Result<(), String> {
+    save_store_value(app, key, &ProviderConfigMetadata { backend, base_url })
+}
+
+pub(crate) fn public_provider_config<R: Runtime>(
+    app: &AppHandle<R>,
+    backend: &str,
+) -> ProviderConfig {
+    let mut config =
+        load_provider_config(app, provider_key_for_backend(backend)).unwrap_or_else(|| {
+            ProviderConfig {
+                backend: backend.to_string(),
+                base_url: None,
+                api_key: None,
+                has_api_key: false,
+                clear_api_key: false,
+            }
+        });
+    config.backend = normalize_backend(backend).to_string();
+    config.has_api_key = provider_has_api_key(backend).unwrap_or(false);
+    config.api_key = None;
+    config.clear_api_key = false;
+    config
+}
+
+pub(crate) fn public_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> AssistantAIConfig {
+    let mut config = load_assistant_ai_config(app);
+    config.has_api_key = assistant_ai_has_api_key().unwrap_or(false);
+    config.api_key = None;
+    config.clear_api_key = false;
+    config
+}
+
+pub(crate) fn provider_api_key(backend: &str) -> Result<Option<String>, String> {
+    read_secret(&provider_account(normalize_backend(backend))?)
+}
+
+pub(crate) fn assistant_ai_api_key() -> Result<Option<String>, String> {
+    read_secret(assistant_ai_account())
+}
+
+pub(crate) fn assistant_ai_secret() -> Result<Option<String>, String> {
+    Ok(assistant_ai_api_key()?
+        .as_deref()
+        .and_then(normalize_secret)
+        .map(str::to_string))
+}
+
+pub(crate) fn provider_has_api_key(backend: &str) -> Result<bool, String> {
+    has_secret(&provider_account(normalize_backend(backend))?)
+}
+
+pub(crate) fn assistant_ai_has_api_key() -> Result<bool, String> {
+    has_secret(assistant_ai_account())
 }
 
 pub(crate) fn load_active_backend<R: Runtime>(app: &AppHandle<R>) -> String {
@@ -79,7 +161,54 @@ pub(crate) fn load_cc_switch_config<R: Runtime>(app: &AppHandle<R>) -> CCSwitchC
 }
 
 pub(crate) fn load_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> AssistantAIConfig {
+    if let Err(err) = migrate_assistant_ai_config(app) {
+        eprintln!("[provider] migrate assistant-ai config secret failed: {err}");
+    }
     load_store_value(app, ASSISTANT_AI_KEY).unwrap_or_default()
+}
+
+pub(crate) fn save_assistant_ai_config_metadata<R: Runtime>(
+    app: &AppHandle<R>,
+    base_url: Option<String>,
+    model: Option<String>,
+) -> Result<(), String> {
+    save_store_value(
+        app,
+        ASSISTANT_AI_KEY,
+        &AssistantAIConfigMetadata { base_url, model },
+    )
+}
+
+fn migrate_provider_config<R: Runtime>(app: &AppHandle<R>, key: &str) -> Result<(), String> {
+    let backend = match key {
+        PROVIDER_KEY_CODEX => BACKEND_CODEX,
+        PROVIDER_KEY_CLAUDE => BACKEND_CLAUDE,
+        _ => return Ok(()),
+    };
+    let Some(config) = load_store_value::<ProviderConfig, _>(app, key) else {
+        return Ok(());
+    };
+    let Some(api_key) = config.api_key.as_deref().and_then(normalize_secret) else {
+        return Ok(());
+    };
+    let account = provider_account(backend)?;
+    if !has_secret(&account)? {
+        write_secret(&account, api_key)?;
+    }
+    save_provider_config_metadata(app, key, config.backend, config.base_url)
+}
+
+fn migrate_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let Some(config) = load_store_value::<AssistantAIConfig, _>(app, ASSISTANT_AI_KEY) else {
+        return Ok(());
+    };
+    let Some(api_key) = config.api_key.as_deref().and_then(normalize_secret) else {
+        return Ok(());
+    };
+    if !has_secret(assistant_ai_account())? {
+        write_secret(assistant_ai_account(), api_key)?;
+    }
+    save_assistant_ai_config_metadata(app, config.base_url, config.model)
 }
 
 pub(crate) fn load_agent_interaction_settings<R: Runtime>(
@@ -246,5 +375,44 @@ mod tests {
             normalized.command_exec_permission_profile.as_deref(),
             Some("workspaceWrite")
         );
+    }
+
+    #[test]
+    fn provider_metadata_serialization_excludes_secret_fields() {
+        let value = serde_json::to_value(ProviderConfigMetadata {
+            backend: BACKEND_CODEX.to_string(),
+            base_url: Some("https://api.example.com/v1".to_string()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value.get("backend").and_then(JsonValue::as_str),
+            Some(BACKEND_CODEX)
+        );
+        assert_eq!(
+            value.get("baseUrl").and_then(JsonValue::as_str),
+            Some("https://api.example.com/v1")
+        );
+        assert!(value.get("apiKey").is_none());
+        assert!(value.get("hasApiKey").is_none());
+        assert!(value.get("clearApiKey").is_none());
+    }
+
+    #[test]
+    fn assistant_ai_metadata_serialization_excludes_secret_fields() {
+        let value = serde_json::to_value(AssistantAIConfigMetadata {
+            base_url: Some("https://api.example.com/v1".to_string()),
+            model: Some("mini".to_string()),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value.get("baseUrl").and_then(JsonValue::as_str),
+            Some("https://api.example.com/v1")
+        );
+        assert_eq!(value.get("model").and_then(JsonValue::as_str), Some("mini"));
+        assert!(value.get("apiKey").is_none());
+        assert!(value.get("hasApiKey").is_none());
+        assert!(value.get("clearApiKey").is_none());
     }
 }

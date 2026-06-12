@@ -10,12 +10,13 @@ use super::assistant_ai;
 use super::codex_probe::{build_codex_app_server_probe_status_cached, cli_available};
 use super::config::{
     known_provider_key_for_backend, load_active_backend, load_agent_interaction_settings,
-    load_assistant_ai_config, load_cc_switch_config, load_provider_config, load_router_mode,
-    normalize_agent_interaction_settings, provider_key_for_backend, router_key_for_backend,
-    AGENT_INTERACTION_KEY, ASSISTANT_AI_KEY, CC_SWITCH_KEY, PROVIDER_ACTIVE_BACKEND_KEY,
-    ROUTER_CC_SWITCH, ROUTER_DIRECT,
+    load_cc_switch_config, load_router_mode, normalize_agent_interaction_settings,
+    public_assistant_ai_config, public_provider_config, router_key_for_backend,
+    save_assistant_ai_config_metadata, save_provider_config_metadata, AGENT_INTERACTION_KEY,
+    CC_SWITCH_KEY, PROVIDER_ACTIVE_BACKEND_KEY, ROUTER_CC_SWITCH, ROUTER_DIRECT,
 };
 use super::connection::{build_backend_env_status, build_cc_switch_status};
+use super::credentials::{apply_secret_update, assistant_ai_account, provider_account};
 use super::types::{
     AgentInteractionSettings, AssistantAIConfig, AssistantAITestResult, CCSwitchConfig,
     EnvStatusReport, ProviderConfig,
@@ -60,19 +61,15 @@ pub fn chat_check_env(app: AppHandle, force_refresh: Option<bool>) -> EnvStatusR
 
 #[tauri::command]
 pub fn provider_get_config(app: AppHandle, backend: String) -> ProviderConfig {
-    load_provider_config(&app, provider_key_for_backend(&backend)).unwrap_or_else(|| {
-        ProviderConfig {
-            backend: backend.clone(),
-            base_url: None,
-            api_key: None,
-        }
-    })
+    public_provider_config(&app, &backend)
 }
 
 #[tauri::command]
 pub fn provider_set_config(app: AppHandle, config: ProviderConfig) -> Result<(), String> {
     let key = known_provider_key_for_backend(&config.backend)?;
-    save_store_value(&app, key, &config)
+    let account = provider_account(&config.backend)?;
+    apply_secret_update(&account, config.api_key.as_deref(), config.clear_api_key)?;
+    save_provider_config_metadata(&app, key, config.backend, config.base_url)
 }
 
 #[tauri::command]
@@ -102,12 +99,17 @@ pub fn cc_switch_set_config(app: AppHandle, config: CCSwitchConfig) -> Result<()
 
 #[tauri::command]
 pub fn assistant_ai_get_config(app: AppHandle) -> AssistantAIConfig {
-    load_assistant_ai_config(&app)
+    public_assistant_ai_config(&app)
 }
 
 #[tauri::command]
 pub fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Result<(), String> {
-    save_store_value(&app, ASSISTANT_AI_KEY, &config)
+    apply_secret_update(
+        assistant_ai_account(),
+        config.api_key.as_deref(),
+        config.clear_api_key,
+    )?;
+    save_assistant_ai_config_metadata(&app, config.base_url, config.model)
 }
 
 #[tauri::command]

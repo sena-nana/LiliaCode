@@ -10,8 +10,8 @@ use tauri::{AppHandle, Manager, Runtime, State};
 use uuid::Uuid;
 
 use crate::provider::{
-    backend_api_key_env, load_active_backend, load_assistant_ai_config, resolve_connection_for,
-    AssistantAIConfig, BackendConnectionPlan,
+    assistant_ai_secret, backend_api_key_env, load_active_backend, load_assistant_ai_config,
+    resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
 };
 use crate::settings_store::{load_store_value, save_store_value};
 use crate::store::LiliaStore;
@@ -1089,7 +1089,7 @@ fn resolve_model_request(app: &AppHandle, settings: &SuggestionSettings) -> Opti
 fn assistant_ai_model_request(app: &AppHandle) -> Option<ModelRequest> {
     let cfg: AssistantAIConfig = load_assistant_ai_config(app);
     let base_url = cfg.base_url?.trim().trim_end_matches('/').to_string();
-    let api_key = cfg.api_key?.trim().to_string();
+    let api_key = assistant_ai_secret().ok().flatten()?;
     let model = cfg.model?.trim().to_string();
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
         return None;
