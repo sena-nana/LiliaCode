@@ -59,3 +59,8 @@ export interface TaskMilestoneLink {
   taskId: string;
   milestoneId: string;
 }
+
+export interface ProjectRoadmap {
+  milestones: Milestone[];
+  links: TaskMilestoneLink[];
+}

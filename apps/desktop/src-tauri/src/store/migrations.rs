@@ -84,6 +84,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "mutsuki_core_runtime_channel",
         apply: migrate_mutsuki_core_runtime_channel,
     },
+    SchemaMigration {
+        version: 19,
+        name: "project_milestones",
+        apply: migrate_project_milestones,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -540,6 +545,40 @@ fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String>
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 MutsukiCore runtime_channel 失败：{e}"))
+}
+
+fn migrate_project_milestones(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE milestones (
+          id          TEXT PRIMARY KEY,
+          project_id  TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status      TEXT NOT NULL DEFAULT 'upcoming'
+                      CHECK (status IN ('upcoming','in-progress','done','abandoned')),
+          due_date    INTEGER,
+          sort_order  INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_milestones_project_order
+          ON milestones(project_id, sort_order ASC, created_at ASC);
+
+        CREATE TABLE task_milestone_links (
+          task_id      TEXT NOT NULL,
+          milestone_id TEXT NOT NULL,
+          PRIMARY KEY (task_id, milestone_id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (milestone_id) REFERENCES milestones(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_milestone_links_milestone
+          ON task_milestone_links(milestone_id);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 project_milestones 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

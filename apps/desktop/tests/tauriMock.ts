@@ -5,6 +5,8 @@ const CODEX_MODEL_OPTIONS = [
   { id: "gpt-5.4", label: "GPT-5.4" },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
 ] as const;
+const MILESTONE_STATUSES = ["upcoming", "in-progress", "done", "abandoned"] as const;
+type MockMilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 
 interface ProjectRow {
   id: string;
@@ -28,6 +30,27 @@ interface TaskRow {
   sortOrder: number;
   pinned: boolean;
   archived?: boolean;
+}
+
+interface MilestoneRow {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  status: MockMilestoneStatus;
+  dueDate: number | null;
+  order: number;
+  createdAt: number;
+}
+
+interface TaskMilestoneLinkRow {
+  taskId: string;
+  milestoneId: string;
+}
+
+interface ProjectRoadmapRow {
+  milestones: MilestoneRow[];
+  links: TaskMilestoneLinkRow[];
 }
 
 interface CodexThreadRow {
@@ -243,6 +266,24 @@ const baseTasks: TaskRow[] = [
   },
 ];
 
+const baseMilestones: MilestoneRow[] = [
+  {
+    id: "m-001",
+    projectId: "lilia",
+    title: "首发可用路线图",
+    description: "",
+    status: "in-progress",
+    dueDate: null,
+    order: 0,
+    createdAt: 5000,
+  },
+];
+
+const baseTaskMilestoneLinks: TaskMilestoneLinkRow[] = [
+  { taskId: "t-001", milestoneId: "m-001" },
+  { taskId: "t-002", milestoneId: "m-001" },
+];
+
 const baseCodexThreads: CodexThreadRow[] = [
   {
     id: "thread-1",
@@ -281,6 +322,8 @@ const baseCodexThreads: CodexThreadRow[] = [
 
 let projects: ProjectRow[] = [];
 let tasks: TaskRow[] = [];
+let milestones: MilestoneRow[] = [];
+let taskMilestoneLinks: TaskMilestoneLinkRow[] = [];
 let codexThreads: CodexThreadRow[] = [];
 let codexTaskSessions: Record<string, string> = {};
 let cleanedCodexThreads: string[] = [];
@@ -550,6 +593,38 @@ function cloneTask(row: TaskRow): TaskRow {
   return { ...row, dependsOn: [...row.dependsOn] };
 }
 
+function cloneMilestone(row: MilestoneRow): MilestoneRow {
+  return { ...row };
+}
+
+function cloneTaskMilestoneLink(row: TaskMilestoneLinkRow): TaskMilestoneLinkRow {
+  return { ...row };
+}
+
+function getProjectRoadmap(projectId: string): ProjectRoadmapRow {
+  const projectMilestones = milestones
+    .filter((milestone) => milestone.projectId === projectId)
+    .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
+    .map(cloneMilestone);
+  const projectLinks = taskMilestoneLinks
+    .filter((link) => {
+      const milestone = milestones.find((item) => item.id === link.milestoneId);
+      const task = tasks.find((item) => item.id === link.taskId);
+      return milestone?.projectId === projectId && task?.projectId === projectId && !task.archived;
+    })
+    .sort((a, b) => {
+      const milestoneA = milestones.find((item) => item.id === a.milestoneId);
+      const milestoneB = milestones.find((item) => item.id === b.milestoneId);
+      const taskA = tasks.find((item) => item.id === a.taskId);
+      const taskB = tasks.find((item) => item.id === b.taskId);
+      return (milestoneA?.order ?? 0) - (milestoneB?.order ?? 0) ||
+        (taskA?.sortOrder ?? 0) - (taskB?.sortOrder ?? 0) ||
+        (taskA?.createdAt ?? 0) - (taskB?.createdAt ?? 0);
+    })
+    .map(cloneTaskMilestoneLink);
+  return { milestones: projectMilestones, links: projectLinks };
+}
+
 function cloneTodo(row: TodoRow): TodoRow {
   return { ...row, attachments: [...row.attachments] };
 }
@@ -756,6 +831,8 @@ function mockSlashCommandOutput(command: MockSlashCommand, projectCwd: string, b
 export function resetTauriMockData() {
   projects = baseProjects.map(cloneProject);
   tasks = baseTasks.map(cloneTask);
+  milestones = baseMilestones.map(cloneMilestone);
+  taskMilestoneLinks = baseTaskMilestoneLinks.map(cloneTaskMilestoneLink);
   codexThreads = baseCodexThreads.map((thread) => ({ ...thread }));
   codexTaskSessions = { "t-002": "thread-1" };
   cleanedCodexThreads = [];
@@ -1060,6 +1137,14 @@ export function mockOrphansForStore() {
 export function setMockTasks(nextTasks: TaskRow[]) {
   tasks = nextTasks.map(cloneTask);
   refreshSessionCounts();
+}
+
+export function setMockRoadmap(
+  nextMilestones: MilestoneRow[],
+  nextLinks: TaskMilestoneLinkRow[] = [],
+) {
+  milestones = nextMilestones.map(cloneMilestone);
+  taskMilestoneLinks = nextLinks.map(cloneTaskMilestoneLink);
 }
 
 export const mockGetCurrentWebview = vi.fn(() => ({
@@ -1502,6 +1587,15 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       tasks = tasks.map((task) =>
         task.projectId === id ? { ...task, projectId: null } : task
       );
+      const removedMilestoneIds = new Set(
+        milestones
+          .filter((milestone) => milestone.projectId === id)
+          .map((milestone) => milestone.id),
+      );
+      milestones = milestones.filter((milestone) => milestone.projectId !== id);
+      taskMilestoneLinks = taskMilestoneLinks.filter((link) =>
+        !removedMilestoneIds.has(link.milestoneId)
+      );
       refreshSessionCounts();
       return projects.length !== before;
     }
@@ -1513,6 +1607,71 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         return index >= 0 ? { ...project, sortOrder: index } : project;
       });
       return undefined;
+    }
+
+    case "milestone_list": {
+      return getProjectRoadmap(String(args.projectId));
+    }
+
+    case "milestone_create": {
+      const projectId = String(args.projectId);
+      const title = String(args.title ?? "").trim();
+      if (!title) throw new Error("milestone_create: 标题不能为空");
+      if (!projects.some((project) => project.id === projectId)) {
+        throw new Error("milestone_create: 项目不存在");
+      }
+      const row: MilestoneRow = {
+        id: `m-${milestones.length + 1}`,
+        projectId,
+        title,
+        description: "",
+        status: "upcoming",
+        dueDate: null,
+        order: milestones.filter((milestone) => milestone.projectId === projectId).length,
+        createdAt: Date.now(),
+      };
+      milestones = [...milestones, row];
+      return cloneMilestone(row);
+    }
+
+    case "milestone_update": {
+      const id = String(args.id);
+      const title = typeof args.title === "string" ? args.title.trim() : null;
+      const status = typeof args.status === "string" ? args.status : null;
+      if (title !== null && !title) throw new Error("milestone_update: 标题不能为空");
+      if (status !== null && !MILESTONE_STATUSES.includes(status as MockMilestoneStatus)) {
+        throw new Error(`milestone_update: 无效状态：${status}`);
+      }
+      let changed = false;
+      milestones = milestones.map((milestone) => {
+        if (milestone.id !== id) return milestone;
+        changed = true;
+        return {
+          ...milestone,
+          title: title ?? milestone.title,
+          status: (status ?? milestone.status) as MockMilestoneStatus,
+        };
+      });
+      if (!changed) throw new Error("milestone_update: milestone 不存在");
+      return undefined;
+    }
+
+    case "milestone_set_tasks": {
+      const milestoneId = String(args.milestoneId);
+      const taskIds = Array.isArray(args.taskIds) ? Array.from(new Set(args.taskIds.map(String))) : [];
+      const milestone = milestones.find((item) => item.id === milestoneId);
+      if (!milestone) throw new Error("milestone_set_tasks: milestone 不存在");
+      for (const taskId of taskIds) {
+        const task = tasks.find((item) => item.id === taskId);
+        if (!task || task.archived || task.projectId !== milestone.projectId) {
+          throw new Error(`milestone_set_tasks: 任务不属于当前项目：${taskId}`);
+        }
+      }
+      taskMilestoneLinks = [
+        ...taskMilestoneLinks.filter((link) => link.milestoneId !== milestoneId),
+        ...taskIds.map((taskId) => ({ taskId, milestoneId })),
+      ];
+      return taskIds.map((taskId) => ({ taskId, milestoneId }));
     }
 
     case "popup_get_window_settings":

@@ -37,6 +37,8 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS task_runtime_finalizations;
         DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
+        DROP TABLE IF EXISTS task_milestone_links;
+        DROP TABLE IF EXISTS milestones;
         DROP TABLE IF EXISTS task_dependencies;
         DROP TABLE IF EXISTS tasks;
         DROP TABLE IF EXISTS projects;
@@ -118,6 +120,33 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
           FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE milestones (
+          id          TEXT PRIMARY KEY,
+          project_id  TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status      TEXT NOT NULL DEFAULT 'upcoming'
+                      CHECK (status IN ('upcoming','in-progress','done','abandoned')),
+          due_date    INTEGER,
+          sort_order  INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_milestones_project_order
+          ON milestones(project_id, sort_order ASC, created_at ASC);
+
+        CREATE TABLE task_milestone_links (
+          task_id      TEXT NOT NULL,
+          milestone_id TEXT NOT NULL,
+          PRIMARY KEY (task_id, milestone_id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (milestone_id) REFERENCES milestones(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_milestone_links_milestone
+          ON task_milestone_links(milestone_id);
 
         CREATE TABLE task_agent_sessions (
           task_id         TEXT NOT NULL,
@@ -883,6 +912,118 @@ mod tests {
             )
             .unwrap();
         assert_eq!(index_count, 1);
+    }
+
+    #[test]
+    fn project_milestones_migration_creates_roadmap_tables() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE projects (
+              id         TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              cwd        TEXT,
+              created_at INTEGER NOT NULL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              pinned     INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto'
+                            CHECK (title_source IN ('auto','manual')),
+              status      TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN
+                              ('draft','waiting','running','blocked','done','cancelled')),
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend, runtime_channel)
+            );
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE TABLE task_pending_turns (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              task_id         TEXT NOT NULL,
+              content         TEXT NOT NULL,
+              composer_json   TEXT NOT NULL,
+              project_cwd     TEXT NOT NULL,
+              attachments_json TEXT NOT NULL DEFAULT '[]',
+              workflow_json   TEXT,
+              message_json    TEXT NOT NULL,
+              turn_id         TEXT NOT NULL,
+              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+              guide_id        TEXT,
+              created_at      INTEGER NOT NULL
+            );
+            PRAGMA user_version = 18;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO projects (id, name, cwd, created_at, sort_order, pinned) VALUES ('project-1', '项目', NULL, 1, 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, project_id, session_id, title, status, created_at) VALUES ('task-1', 'project-1', 'task-1', '任务', 'waiting', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO milestones (id, project_id, title, created_at) VALUES ('mile-1', 'project-1', 'M1', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_milestone_links (task_id, milestone_id) VALUES ('task-1', 'mile-1')",
+            [],
+        )
+        .unwrap();
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM milestones WHERE id = 'mile-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "upcoming");
+
+        let link_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_milestone_links WHERE milestone_id = 'mile-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link_count, 1);
     }
 
     #[test]

@@ -222,6 +222,23 @@
   font-variant-numeric: tabular-nums;
 }
 
+.roadmap-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.roadmap-create__input {
+  min-width: 0;
+}
+
+.roadmap-view__error {
+  margin: -4px 0 0;
+  color: var(--err);
+  font-size: 12px;
+}
+
 .roadmap-view__metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -312,6 +329,11 @@
   box-shadow: 0 0 0 3px var(--bg-subtle);
 }
 
+.roadmap-milestone--abandoned .roadmap-milestone__rail::after {
+  background: var(--err);
+  box-shadow: 0 0 0 3px var(--err-soft);
+}
+
 .roadmap-milestone__body {
   min-width: 0;
   border: 1px solid var(--border);
@@ -381,6 +403,23 @@
   color: var(--text-muted);
 }
 
+.roadmap-milestone__status-select {
+  flex: 0 0 auto;
+  max-width: 132px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.roadmap-milestone__status-select:disabled {
+  opacity: 0.6;
+}
+
 .roadmap-milestone__progress {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -438,13 +477,15 @@
 
 .roadmap-task-list,
 .roadmap-checks,
-.roadmap-recent__list {
+.roadmap-recent__list,
+.roadmap-task-picker {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.roadmap-task-list {
+.roadmap-task-list,
+.roadmap-task-picker {
   display: grid;
   gap: 4px;
 }
@@ -496,6 +537,34 @@
 
 .roadmap-task__status--blocked {
   color: var(--err);
+}
+
+.roadmap-task-choice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.roadmap-task-choice:hover {
+  background: var(--bg-hover);
+}
+
+.roadmap-task-choice input {
+  margin: 0;
+}
+
+.roadmap-task-choice__title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roadmap-checks {
@@ -587,6 +656,10 @@
 
   .roadmap-view__metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .roadmap-create {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .roadmap-milestone__columns {
