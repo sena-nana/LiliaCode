@@ -71,13 +71,23 @@ GitHub Pages deployment is handled by the repository Actions workflow. After pus
 
 GitHub Actions runs CI for pull requests to `main`, pushes to `main`, and manual workflow dispatches. CI runs `yarn verify` and builds the documentation site separately, covering desktop tests, frontend build, Tauri Rust check, contracts type check, and docs build.
 
-After pushing to `main`, the Pages workflow continues to publish the documentation site automatically. To publish a Windows desktop installer, push a `v*` tag:
+After pushing to `main`, the Pages workflow continues to publish the documentation site automatically. Before publishing a Windows desktop installer, sync and check the four version sources: root `package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json`. They must match the release tag without the leading `v`.
+
+```bash
+yarn release:check --tag vX.Y.Z
+```
+
+After the check passes, push a `v*` tag:
 
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-The release workflow runs `yarn verify` first, then builds the Windows Tauri bundle and uploads it to a draft GitHub Release. Current release artifacts do not include code signing, macOS notarization, Linux/macOS installers, or auto-update support.
+The release workflow runs `yarn verify` and `yarn release:check --tag <tag>` first, then builds the Windows Tauri bundle and uploads it to a draft GitHub Release. Installer asset names are checked against `LiliaCode_<version>_x64-setup.*`; the draft release includes a first-release checklist and generated release notes.
+
+Before publishing the release, download the installer from the draft Release on Windows and verify install, main-window launch, and uninstall. Current release artifacts are not code signed, so Windows SmartScreen or security software warnings are expected. They also do not include macOS notarization, Linux/macOS installers, or Tauri updater auto-update support. During the first-release phase, users upgrade manually by downloading and installing the newer Windows installer.
+
+Use `docs/github/release-template.md` as the source template when preparing the GitHub Release body.
 
 ## Icons
 

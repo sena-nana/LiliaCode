@@ -81,6 +81,9 @@ jobs:
       - name: Verify workspace
         run: corepack yarn verify
 
+      - name: Verify release metadata
+        run: corepack yarn release:check --tag ${{ steps.release_ref.outputs.tag }}
+
   publish-windows:
     name: Publish Windows bundle
     needs: verify
@@ -152,3 +155,15 @@ jobs:
           releaseName: LiliaCode ${{ steps.release_ref.outputs.tag }}
           releaseDraft: true
           generateReleaseNotes: true
+          releaseAssetNamePattern: LiliaCode_[version]_[arch][setup][ext]
+          releaseBody: |
+            ## 首发发布检查清单
+
+            - [ ] 已确认本 Release 仍是 draft，完成检查前不要正式发布。
+            - [ ] 已确认 tag、根 package、desktop package、Cargo 和 Tauri 配置版本一致。
+            - [ ] 已确认 Windows 安装包文件名符合 `LiliaCode_<version>_x64-setup.*`。
+            - [ ] 已在干净 Windows 环境下载并运行安装包。
+            - [ ] 已确认安装后可以启动 LiliaCode，并能打开主窗口。
+            - [ ] 已确认卸载流程可完成。
+            - [ ] 已在 Release 说明中保留未签名提示：当前安装包没有代码签名，Windows SmartScreen 警告属于预期风险。
+            - [ ] 已在 Release 说明中保留升级提示：当前没有应用内自动更新，升级需要手动下载并安装新版安装包。
