@@ -31,7 +31,7 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
 pub(crate) const RUNTIME_CHANNEL_BUILTIN: &str = "builtin";
-pub(crate) const RUNTIME_CHANNEL_NANOBOT: &str = "nanobot";
+pub(crate) const RUNTIME_CHANNEL_MUTSUKI_CORE: &str = "mutsuki_core";
 pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
     ("gpt-5.5", "GPT-5.5"),
     ("gpt-5.4", "GPT-5.4"),
@@ -52,8 +52,8 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                 for persisted in restored {
                     let app_handle = app.clone();
                     std::thread::spawn(move || match persisted.turn.runtime_channel.as_str() {
-                        RUNTIME_CHANNEL_NANOBOT => {
-                            if let Err(err) = chat::nanobot_runtime::resume_supervised_turn(
+                        RUNTIME_CHANNEL_MUTSUKI_CORE => {
+                            if let Err(err) = chat::mutsuki_core_runtime::resume_supervised_turn(
                                 app_handle.clone(),
                                 persisted.clone(),
                             ) {
@@ -73,7 +73,7 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                                     &persisted.task_id,
                                     &persisted.turn.backend,
                                     Some(&persisted.turn.turn_id),
-                                    format!("恢复 NanoBot runtime 失败：{err}"),
+                                    format!("恢复 MutsukiCore runtime 失败：{err}"),
                                 );
                             }
                         }

@@ -16,7 +16,7 @@ use crate::chat::types::{
 use crate::store::LiliaStore;
 use crate::{
     agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS,
-    RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
+    RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
 };
 
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ pub(crate) struct ChatStore {
 
 pub(crate) fn normalize_runtime_channel(value: &str) -> &'static str {
     match value {
-        RUNTIME_CHANNEL_NANOBOT => RUNTIME_CHANNEL_NANOBOT,
+        RUNTIME_CHANNEL_MUTSUKI_CORE => RUNTIME_CHANNEL_MUTSUKI_CORE,
         _ => RUNTIME_CHANNEL_BUILTIN,
     }
 }
@@ -501,7 +501,7 @@ pub(crate) fn clear_task_runtime_state_for_reset<R: Runtime>(
     task_id: &str,
 ) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT] {
+    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE] {
         sessions.remove(&session_key(runtime_channel, BACKEND_CLAUDE, task_id));
         sessions.remove(&session_key(runtime_channel, BACKEND_CODEX, task_id));
     }

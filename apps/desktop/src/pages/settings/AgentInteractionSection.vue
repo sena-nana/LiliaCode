@@ -47,7 +47,7 @@ const codexPermissionOptions: Array<{ value: CodexPermissionProfile; label: stri
 
 const runtimeChannelOptions: Array<{ value: AgentRuntimeChannel; label: string }> = [
   { value: "builtin", label: "内置" },
-  { value: "nanobot", label: "NanoBot Rust Core" },
+  { value: "mutsuki_core", label: "MutsukiCore" },
 ];
 
 const codexProfile = computed(() => agentInteraction.value.codexProfile);
@@ -189,7 +189,7 @@ onMounted(loadAgentInteraction);
           </button>
         </div>
         <span class="settings-row__status-text">
-          NanoBot Rust Core 是实验性本地 MutsukiCore 通道；当前不包含远程任务执行和移动端访问。
+          MutsukiCore 是实验性本地运行时通道；当前不包含远程任务执行和移动端访问。
         </span>
       </div>
     </div>

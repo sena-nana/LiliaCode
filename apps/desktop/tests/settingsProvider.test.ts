@@ -225,10 +225,10 @@ describe("Settings provider switch", () => {
       );
     });
 
-    await fireEvent.click(view.getByRole("radio", { name: "NanoBot Rust Core" }));
+    await fireEvent.click(view.getByRole("radio", { name: "MutsukiCore" }));
 
     await waitFor(() => {
-      expect(view.getByRole("radio", { name: "NanoBot Rust Core" })).toHaveAttribute(
+      expect(view.getByRole("radio", { name: "MutsukiCore" })).toHaveAttribute(
         "aria-checked",
         "true",
       );
@@ -238,7 +238,7 @@ describe("Settings provider switch", () => {
           typeof args === "object" &&
           args !== null &&
           "settings" in args &&
-          JSON.stringify(args.settings).includes("\"agentRuntimeChannel\":\"nanobot\"")
+          JSON.stringify(args.settings).includes("\"agentRuntimeChannel\":\"mutsuki_core\"")
         ),
       ).toBe(true);
     });

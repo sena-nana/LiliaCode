@@ -499,7 +499,7 @@ fn codex_thread_attach_blocking(
 mod tests {
     use super::*;
     use crate::chat::state::{persist_runtime_state, session_key, RunningTurn};
-    use crate::RUNTIME_CHANNEL_NANOBOT;
+    use crate::RUNTIME_CHANNEL_MUTSUKI_CORE;
 
     fn create_task_agent_sessions_schema(conn: &rusqlite::Connection) {
         conn.execute_batch(
@@ -517,7 +517,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -526,7 +526,7 @@ mod tests {
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
@@ -553,7 +553,7 @@ mod tests {
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );
@@ -680,7 +680,7 @@ mod tests {
         conn.execute(
             r#"INSERT INTO task_agent_sessions
                (task_id, backend, runtime_channel, session_id, updated_at)
-               VALUES ('task-1', 'codex', 'nanobot', 'thread-nanobot', 3)"#,
+               VALUES ('task-1', 'codex', 'mutsuki_core', 'thread-mutsuki-core', 3)"#,
             [],
         )
         .unwrap();
@@ -689,9 +689,9 @@ mod tests {
             &store,
             "task-1",
             &RunningTurn {
-                turn_id: "turn-nanobot".to_string(),
+                turn_id: "turn-mutsuki-core".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             "running",
             None,
@@ -715,7 +715,7 @@ mod tests {
                     created_at: 1,
                 },
                 turn_id: "turn-1".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
                 guide_id: None,
             }]),
         );
@@ -723,7 +723,7 @@ mod tests {
         let states = query_codex_thread_runtime_states(&conn, &store).unwrap();
 
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].thread_id, "thread-nanobot");
+        assert_eq!(states[0].thread_id, "thread-mutsuki-core");
         assert_eq!(states[0].task_title, "Codex task");
         assert!(states[0].running);
         assert!(states[0].queued);

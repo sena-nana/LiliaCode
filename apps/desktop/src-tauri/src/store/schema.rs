@@ -123,7 +123,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           task_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','nanobot')),
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           session_id      TEXT NOT NULL,
           updated_at      INTEGER NOT NULL,
           PRIMARY KEY (task_id, backend, runtime_channel),
@@ -134,7 +134,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           task_id         TEXT PRIMARY KEY,
           turn_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           phase           TEXT NOT NULL CHECK (phase IN
                             ('running','interrupted_pending_finish','reset_pending_finish')),
           process_session_id TEXT,
@@ -180,7 +180,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','nanobot')),
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           guide_id        TEXT,
           created_at      INTEGER NOT NULL,
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -515,7 +515,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -532,7 +532,7 @@ mod tests {
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-runtime', 'turn-1', 'codex', 'nanobot', 'running', 'proc-1', 'epoch-1', 2)"#,
+               VALUES ('task-runtime', 'turn-1', 'codex', 'mutsuki_core', 'running', 'proc-1', 'epoch-1', 2)"#,
             [],
         )
         .unwrap();
@@ -547,7 +547,7 @@ mod tests {
             row,
             (
                 "turn-1".to_string(),
-                "nanobot".to_string(),
+                "mutsuki_core".to_string(),
                 "running".to_string(),
                 Some("proc-1".to_string()),
             )
@@ -579,7 +579,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -588,7 +588,7 @@ mod tests {
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
@@ -654,7 +654,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -663,7 +663,7 @@ mod tests {
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
@@ -691,7 +691,7 @@ mod tests {
         conn.execute(
             r#"INSERT INTO task_pending_turns
                (task_id, content, composer_json, project_cwd, attachments_json, workflow_json, message_json, turn_id, runtime_channel, guide_id, created_at)
-               VALUES ('task-pending', 'queued', '{}', 'C:/repo', '[]', NULL, '{}', 'turn-queued', 'nanobot', 'guide-1', 2)"#,
+               VALUES ('task-pending', 'queued', '{}', 'C:/repo', '[]', NULL, '{}', 'turn-queued', 'mutsuki_core', 'guide-1', 2)"#,
             [],
         )
         .unwrap();
@@ -708,7 +708,7 @@ mod tests {
                 "task-pending".to_string(),
                 "queued".to_string(),
                 "turn-queued".to_string(),
-                "nanobot".to_string(),
+                "mutsuki_core".to_string(),
             )
         );
     }
@@ -738,7 +738,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -747,7 +747,7 @@ mod tests {
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
@@ -774,7 +774,7 @@ mod tests {
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );

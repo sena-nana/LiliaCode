@@ -105,7 +105,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [ ] Roadmap and milestones (partial): the project Roadmap tab and documentation template exist; cross-week and cross-version progress data views are not yet integrated.
 - [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
 - [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
-- [ ] MutsukiCore integration: the experimental local channel is available as `NanoBot Rust Core`; remote task execution and mobile access are not yet available.
+- [ ] MutsukiCore integration: the experimental local channel is available as `MutsukiCore`; remote task execution and mobile access are not yet available.
 
 ## Project Structure
 

@@ -48,4 +48,4 @@ The list below describes the intended product capabilities. Checked items are cu
 - [ ] Memory: save user-level and project-level memory, and help agents use it at the right time.
 - [ ] Roadmap and milestones: show engineering progress across weeks and versions.
 - [ ] Helper agents: run lower-cost agents in a session to supervise and assist the main agent.
-- [ ] MutsukiCore integration: the experimental local channel is available as `NanoBot Rust Core`; remote task execution and mobile access are still unavailable.
+- [ ] MutsukiCore integration: the experimental local channel is available as `MutsukiCore`; remote task execution and mobile access are still unavailable.

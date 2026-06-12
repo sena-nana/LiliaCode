@@ -331,7 +331,7 @@ export function useTaskComposerController(options: {
     if (!context.hasContext.value || !isTurnRunning.value) return;
     try {
       const result = await interruptTurn(props.taskId);
-      if (agentInteractionSettings.agentRuntimeChannel.value === "nanobot") return;
+      if (agentInteractionSettings.agentRuntimeChannel.value === "mutsuki_core") return;
       if (!result.rolledBack) return;
       isTurnRunning.value = false;
       for (const eventId of result.removedEventIds) {

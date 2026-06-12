@@ -188,7 +188,7 @@ export type PermissionMode = "full" | "ask" | "readonly";
 
 export type ChatBackendKind = "claude" | "codex";
 
-export type AgentRuntimeChannel = "builtin" | "nanobot";
+export type AgentRuntimeChannel = "builtin" | "mutsuki_core";
 
 export interface ChatComposerState {
   taskId: string;

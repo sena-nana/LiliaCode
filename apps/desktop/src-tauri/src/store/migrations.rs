@@ -79,6 +79,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "global_automations",
         apply: migrate_global_automations,
     },
+    SchemaMigration {
+        version: 18,
+        name: "mutsuki_core_runtime_channel",
+        apply: migrate_mutsuki_core_runtime_channel,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -159,7 +164,7 @@ fn migrate_task_agent_sessions(conn: &Connection) -> Result<(), String> {
           task_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','nanobot')),
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           session_id      TEXT NOT NULL,
           updated_at      INTEGER NOT NULL,
           PRIMARY KEY (task_id, backend, runtime_channel),
@@ -177,7 +182,7 @@ fn migrate_task_agent_sessions_runtime_channel(conn: &Connection) -> Result<(), 
           task_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','nanobot')),
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           session_id      TEXT NOT NULL,
           updated_at      INTEGER NOT NULL,
           PRIMARY KEY (task_id, backend, runtime_channel),
@@ -203,7 +208,7 @@ fn migrate_task_runtime_states(conn: &Connection) -> Result<(), String> {
           task_id         TEXT PRIMARY KEY,
           turn_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           phase           TEXT NOT NULL CHECK (phase IN
                             ('running','interrupted_pending_finish','reset_pending_finish')),
           process_session_id TEXT,
@@ -283,7 +288,7 @@ fn migrate_task_pending_turns(conn: &Connection) -> Result<(), String> {
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','nanobot')),
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           guide_id        TEXT,
           created_at      INTEGER NOT NULL,
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -318,7 +323,7 @@ fn migrate_task_pending_turns_runtime_channel(conn: &Connection) -> Result<(), S
         r#"
         ALTER TABLE task_pending_turns
           ADD COLUMN runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                      CHECK (runtime_channel IN ('builtin','nanobot'));
+                      CHECK (runtime_channel IN ('builtin','mutsuki_core'));
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 task_pending_turns runtime_channel 失败：{e}"))
@@ -432,6 +437,109 @@ fn migrate_global_automations(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 global_automations 失败：{e}"))
+}
+
+fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE task_agent_sessions_next (
+          task_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+          session_id      TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          PRIMARY KEY (task_id, backend, runtime_channel),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO task_agent_sessions_next
+          (task_id, backend, runtime_channel, session_id, updated_at)
+        SELECT
+          task_id,
+          backend,
+          CASE runtime_channel WHEN 'nanobot' THEN 'mutsuki_core' ELSE runtime_channel END,
+          session_id,
+          updated_at
+        FROM task_agent_sessions;
+
+        DROP TABLE task_agent_sessions;
+        ALTER TABLE task_agent_sessions_next RENAME TO task_agent_sessions;
+
+        CREATE TABLE task_runtime_states_next (
+          task_id         TEXT PRIMARY KEY,
+          turn_id         TEXT NOT NULL,
+          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+          phase           TEXT NOT NULL CHECK (phase IN
+                            ('running','interrupted_pending_finish','reset_pending_finish')),
+          process_session_id TEXT,
+          runtime_epoch   TEXT NOT NULL,
+          context_json    TEXT,
+          updated_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO task_runtime_states_next
+          (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, context_json, updated_at)
+        SELECT
+          task_id,
+          turn_id,
+          backend,
+          CASE runtime_channel WHEN 'nanobot' THEN 'mutsuki_core' ELSE runtime_channel END,
+          phase,
+          process_session_id,
+          runtime_epoch,
+          context_json,
+          updated_at
+        FROM task_runtime_states;
+
+        DROP TABLE task_runtime_states;
+        ALTER TABLE task_runtime_states_next RENAME TO task_runtime_states;
+        CREATE INDEX idx_task_runtime_states_epoch_backend
+          ON task_runtime_states(runtime_epoch, backend, updated_at);
+
+        CREATE TABLE task_pending_turns_next (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id         TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          composer_json   TEXT NOT NULL,
+          project_cwd     TEXT NOT NULL,
+          attachments_json TEXT NOT NULL DEFAULT '[]',
+          workflow_json   TEXT,
+          message_json    TEXT NOT NULL,
+          turn_id         TEXT NOT NULL,
+          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
+                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
+          guide_id        TEXT,
+          created_at      INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO task_pending_turns_next
+          (id, task_id, content, composer_json, project_cwd, attachments_json, workflow_json, message_json, turn_id, runtime_channel, guide_id, created_at)
+        SELECT
+          id,
+          task_id,
+          content,
+          composer_json,
+          project_cwd,
+          attachments_json,
+          workflow_json,
+          message_json,
+          turn_id,
+          CASE runtime_channel WHEN 'nanobot' THEN 'mutsuki_core' ELSE runtime_channel END,
+          guide_id,
+          created_at
+        FROM task_pending_turns;
+
+        DROP TABLE task_pending_turns;
+        ALTER TABLE task_pending_turns_next RENAME TO task_pending_turns;
+        CREATE INDEX idx_task_pending_turns_task_id
+          ON task_pending_turns(task_id, id);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 MutsukiCore runtime_channel 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

@@ -78,7 +78,7 @@ export function normalizeAgentInteractionSettings(
 }
 
 function normalizeRuntimeChannel(value: unknown): AgentInteractionSettings["agentRuntimeChannel"] {
-  return value === "nanobot" ? "nanobot" : "builtin";
+  return value === "mutsuki_core" ? "mutsuki_core" : "builtin";
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> | null {

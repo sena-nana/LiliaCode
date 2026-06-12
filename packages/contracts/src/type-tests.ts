@@ -229,7 +229,7 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
     {
       nonInterruptMode: false;
       debug: true;
-      agentRuntimeChannel: "nanobot";
+      agentRuntimeChannel: "mutsuki_core";
       codexProfile: CodexProfileSettings;
     },
     AgentInteractionSettings
