@@ -14,7 +14,7 @@
 - [x] 统一交互协议：跨后端统一计划确认、工具确认和 Agent 提问。
 - [ ] 智能模型选择：根据请求类型自动选择模型级别和思考强度。
 - [x] 文件上下文：支持通过 `@` 提及文件、目录和图片等上下文。
-- [ ] 斜杠命令：支持后端原生命令和项目自定义命令。
+- [x] 斜杠命令：支持在输入框通过 `/` 打开命令面板，执行内置命令和 `.lilia/commands` 项目命令，并把执行结果回写到任务 timeline；还不承诺完整代理后端原生命令。
 
 ## Claude Code 接入
 
@@ -36,7 +36,7 @@
 - [x] Codex 配置档案：支持 profiles、reasoning effort、runtime workspace roots、受控 permissions 和项目级默认。
 - [x] Codex 专项工作流：支持代码审查和修复建议。
 - [x] Codex 批量改动工作流：可从审查 / 修复建议进入强制 Plan 确认后的应用流程。
-- [x] 内置浏览器交互：通过 IAB 与用户互动或调试代码。
+- [x] 内置浏览器交互：Codex 可打开和导航 IAB 窗口，采集页面标题 / URL / 截图元数据，并把结果送回运行中的 turn 或作为消息附件；截图采集目前以 Windows 为主。
 
 ## LiliaCode 特色功能
 
@@ -46,6 +46,6 @@
 - [ ] 自动编排：根据任务状态、依赖关系和用户策略调度多个 Agent。
 - [ ] 插件系统：将会改变 Agent 行为的能力做成可选择开启的插件。
 - [ ] Memory：保存用户级和项目级记忆，并在合适时机辅助 Agent 使用。
-- [ ] Roadmap / Milestone：用路线图和里程碑展示跨周、跨版本的工程进展。
+- [ ] Roadmap / Milestone：项目路线图页可按当前项目 Task 状态聚合首发 milestone、进度、状态分布、当前重点和最近完成；持久化 Milestone / TaskMilestoneLink 数据源尚未接入。
 - [ ] 辅助 Agent：在会话中运行低成本 Agent，实时监督和辅助主 Agent。
 - [ ] 接入 MutsukiCore：已提供实验性本地通道 `MutsukiCore`；远程运行任务和手机端访问仍未可用。
