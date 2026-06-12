@@ -335,6 +335,10 @@ describe("ConversationImport", () => {
       .not.toBeInTheDocument();
     expect(within(sidebar as HTMLElement).queryByText("讨论设置页中的会话维护入口。"))
       .not.toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByRole("button", { name: "归档" }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar as HTMLElement).queryByRole("button", { name: "取消归档" }))
+      .not.toBeInTheDocument();
 
     await fireEvent.click(within(sidebar as HTMLElement).getByRole("button", {
       name: "清理后台终端",

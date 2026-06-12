@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import {
+  archiveCodexThread,
   cleanCodexThreadBackgroundTerminals,
   previewCodexThread,
   previewCodexThreadLite,
@@ -50,6 +51,10 @@ async function main() {
   }
   if (action === "cleanBackgroundTerminals") {
     writeJson(await cleanCodexThreadBackgroundTerminals(String(input.threadId || "")));
+    return;
+  }
+  if (action === "archiveThread") {
+    writeJson(await archiveCodexThread(String(input.threadId || "")));
     return;
   }
   if (action === "renameThread") {

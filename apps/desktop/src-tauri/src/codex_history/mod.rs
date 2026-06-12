@@ -147,6 +147,17 @@ fn clean_background_terminals_payload(thread_id: &str) -> Result<serde_json::Val
     }))
 }
 
+pub(crate) fn archive_thread_payload(thread_id: &str) -> Result<serde_json::Value, String> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return Err("Codex threadId 不能为空".to_string());
+    }
+    Ok(serde_json::json!({
+        "action": "archiveThread",
+        "threadId": thread_id,
+    }))
+}
+
 fn rename_thread_payload(thread_id: &str, name: &str) -> Result<serde_json::Value, String> {
     let thread_id = thread_id.trim();
     let name = name.trim();
@@ -201,6 +212,52 @@ pub async fn codex_thread_clean_background_terminals(
     })
     .await
     .map_err(|err| format!("Codex thread clean 任务执行失败：{err}"))?
+}
+
+pub(crate) fn sync_thread_archive_blocking<R: Runtime>(
+    app: &AppHandle<R>,
+    thread_id: &str,
+) -> Result<(), String> {
+    let payload = archive_thread_payload(thread_id)?;
+    run_codex_history_utility(app, payload).map(|_| ())
+}
+
+pub(crate) fn spawn_codex_thread_archive_sync<R: Runtime>(
+    app: AppHandle<R>,
+    thread_ids: Vec<String>,
+) {
+    let thread_ids = normalize_thread_ids(thread_ids);
+    if thread_ids.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        run_codex_thread_archive_sync(thread_ids, |thread_id| {
+            sync_thread_archive_blocking(&app, thread_id)
+        });
+    });
+}
+
+fn normalize_thread_ids(thread_ids: Vec<String>) -> Vec<String> {
+    thread_ids
+        .into_iter()
+        .map(|thread_id| thread_id.trim().to_string())
+        .filter(|thread_id| !thread_id.is_empty())
+        .collect()
+}
+
+fn run_codex_thread_archive_sync<F>(thread_ids: Vec<String>, run: F)
+where
+    F: FnMut(&str) -> Result<(), String>,
+{
+    let mut run = run;
+    for thread_id in thread_ids {
+        if let Err(err) = run(&thread_id) {
+            eprintln!(
+                "[codex-history] best-effort thread archive sync failed for {}: {}",
+                thread_id, err
+            );
+        }
+    }
 }
 
 #[tauri::command]
@@ -820,6 +877,46 @@ mod tests {
         assert_eq!(payload["action"], "cleanBackgroundTerminals");
         assert_eq!(payload["threadId"], "thread-1");
         assert!(clean_background_terminals_payload("  ").is_err());
+    }
+
+    #[test]
+    fn archive_thread_payload_trims_and_selects_action() {
+        let archive = archive_thread_payload(" thread-1 ").unwrap();
+
+        assert_eq!(archive["action"], "archiveThread");
+        assert_eq!(archive["threadId"], "thread-1");
+        assert!(archive_thread_payload("  ").is_err());
+    }
+
+    #[test]
+    fn archive_sync_normalizes_thread_ids() {
+        assert_eq!(
+            normalize_thread_ids(vec![
+                " thread-1 ".to_string(),
+                " ".to_string(),
+                "thread-2".to_string(),
+            ]),
+            vec!["thread-1", "thread-2"]
+        );
+    }
+
+    #[test]
+    fn archive_sync_runner_errors_are_best_effort() {
+        let mut called = Vec::new();
+
+        run_codex_thread_archive_sync(
+            vec!["thread-1".to_string(), "thread-2".to_string()],
+            |thread_id| {
+                called.push(thread_id.to_string());
+                if thread_id == "thread-1" {
+                    Err("Codex app-server unavailable".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+
+        assert_eq!(called, vec!["thread-1", "thread-2"]);
     }
 
     #[test]
