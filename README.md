@@ -62,7 +62,7 @@ After installing and opening LiliaCode, go to Settings -> Connection and follow 
 
 ## Feature Status
 
-The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-04.
+The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-12.
 
 ### Shared Agent Capabilities
 
@@ -76,7 +76,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
 - [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
 - [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
-- [ ] Slash commands: backend-native commands and project-defined commands are not yet supported.
+- [x] Slash commands: open the composer `/` panel, run built-in commands and project commands from `.lilia/commands`, and write command execution results back to the task timeline; full backend-native command proxying is not yet supported.
 
 ### Claude Code Integration
 
@@ -103,7 +103,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex history: search, preview, import, and continue existing Codex app-server threads from the left sidebar import entry.
 - [x] Codex workflows: built-in code review and fix suggestion flows.
 - [x] Codex batch-change workflows: apply review / fix suggestions through a forced Plan approval flow.
-- [ ] Built-in browser interaction: IAB-based user interaction or browser debugging is not yet available.
+- [x] Built-in browser interaction: Codex can open and navigate an IAB window, collect page title / URL / screenshot metadata, and send the result back to the running turn or as a message attachment; screenshot capture is currently Windows-first.
 
 ### LiliaCode-Specific Features
 
@@ -112,7 +112,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [ ] Task tree (partial): the data layer has `parent_id` and `depends_on`, but full parent-child tree, dependency view, and blocker management UI are not yet available.
 - [ ] Plugin system (partial): Claude Skills / Plugins / MCP and Codex MCP management can feed runtime extensions; a generic plugin system with selectable behavior plugins is not yet complete.
 - [ ] Memory (partial): the project Memory tab and extension-host context candidate path exist; user-level / project-level memory storage, retrieval, and automatic injection are not yet user-facing.
-- [ ] Roadmap and milestones (partial): the project Roadmap tab and documentation template exist; cross-week and cross-version progress data views are not yet integrated.
+- [ ] Roadmap and milestones (partial): the project Roadmap page can aggregate the current project's task state into a first-release milestone, progress, status distribution, current focus, and recently completed tasks; persisted Milestone / TaskMilestoneLink data sources are not yet integrated.
 - [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
 - [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
 - [ ] MutsukiCore integration: the experimental local channel is available as `MutsukiCore`; remote task execution and mobile access are not yet available.
@@ -171,6 +171,16 @@ yarn docs:preview
 ```
 
 If `yarn --version` still reports `1.x` after enabling Corepack, run commands through Corepack explicitly, for example `corepack yarn install` and `corepack yarn dev`. Repository scripts and workspace scripts enforce the same package-manager check so contributors hit one Corepack-managed Yarn path.
+
+## First Release Packaging
+
+Windows first-release packaging is driven by the release workflow. Before tagging a release, sync the root `package.json`, `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml`, and `apps/desktop/src-tauri/tauri.conf.json` versions, then run:
+
+```bash
+yarn release:check --tag vX.Y.Z
+```
+
+Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, and uploads a draft GitHub Release. Keep the release as a draft until the Windows installer has been downloaded and manually verified for install, launch, basic window operation, and uninstall. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
 
 The Tauri icon source is [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg), which is an embedded PNG inside an SVG container. To regenerate the full PNG / ICO set, run `yarn icons:generate`. For macOS `.icns` or a full size set, run `yarn icons:tauri`.
 
