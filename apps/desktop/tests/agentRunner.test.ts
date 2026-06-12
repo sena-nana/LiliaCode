@@ -44,6 +44,7 @@ import {
   createCodexAppServer,
 } from "../agent-runner/codex/appServer.mjs";
 import {
+  archiveCodexThread,
   cleanCodexThreadBackgroundTerminals,
   codexHistoryTimelineInputs,
   previewCodexThread,
@@ -3702,6 +3703,50 @@ describe("Codex history utility", () => {
       },
       { method: "close", params: null },
     ]);
+  });
+
+  it("archives Codex threads through history utility", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (requestMethod: string, params: any) => {
+        calls.push({ method: requestMethod, params });
+        return {};
+      },
+      notify: () => {},
+      close: () => calls.push({ method: "close", params: null }),
+    };
+
+    await expect(archiveCodexThread(" thread-1 ", {
+      createServer: () => server as any,
+    })).resolves.toEqual({
+      threadId: "thread-1",
+      archived: true,
+    });
+
+    expect(calls).toEqual([
+      {
+        method: "initialize",
+        params: {
+          clientInfo: {
+            name: "lilia",
+            title: "LiliaCode",
+            version: "0.1.0",
+          },
+          capabilities: { experimentalApi: true },
+        },
+      },
+      {
+        method: "thread/archive",
+        params: { threadId: "thread-1" },
+      },
+      { method: "close", params: null },
+    ]);
+
+    await expect(archiveCodexThread("  ", {
+      createServer: () => {
+        throw new Error("server should not start");
+      },
+    })).rejects.toThrow("Codex threadId is required");
   });
 
   it("renames Codex thread through history utility", async () => {

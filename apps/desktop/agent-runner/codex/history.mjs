@@ -242,6 +242,22 @@ export async function cleanCodexThreadBackgroundTerminals(
   }
 }
 
+export async function archiveCodexThread(
+  threadId,
+  { createServer = createCodexAppServer } = {},
+) {
+  const trimmed = stringOrNull(threadId)?.trim();
+  if (!trimmed) throw new Error("Codex threadId is required");
+  const server = createServer();
+  try {
+    await initializeCodexAppServer(server);
+    await server.request("thread/archive", { threadId: trimmed });
+    return { threadId: trimmed, archived: true };
+  } finally {
+    server.close();
+  }
+}
+
 export async function renameCodexThread(
   threadId,
   name,
