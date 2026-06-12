@@ -9,13 +9,13 @@ pub use types::{
 };
 
 use rusqlite::{params, OptionalExtension};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::state::{
-    count_pending_turns, default_composer, load_runtime_state, persisted_runtime_state_is_active,
-    remember_agent_session, ChatStore,
+    count_pending_turns, default_composer, load_persisted_resume_session_id, load_runtime_state,
+    persisted_runtime_state_is_active, remember_agent_session, ChatStore,
 };
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::projects_tasks::events::emit_tasks_changed;
@@ -145,6 +145,49 @@ fn clean_background_terminals_payload(thread_id: &str) -> Result<serde_json::Val
         "action": "cleanBackgroundTerminals",
         "threadId": thread_id,
     }))
+}
+
+fn rename_thread_payload(thread_id: &str, name: &str) -> Result<serde_json::Value, String> {
+    let thread_id = thread_id.trim();
+    let name = name.trim();
+    if thread_id.is_empty() {
+        return Err("Codex threadId 不能为空".to_string());
+    }
+    if name.is_empty() {
+        return Err("Codex thread 名称不能为空".to_string());
+    }
+    Ok(serde_json::json!({
+        "action": "renameThread",
+        "threadId": thread_id,
+        "name": name,
+    }))
+}
+
+pub(crate) fn sync_thread_title_blocking<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+    title: &str,
+) -> Result<(), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Ok(());
+    }
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = store.conn()?;
+    let Some(thread_id) =
+        load_persisted_resume_session_id(&conn, task_id, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN)
+    else {
+        return Ok(());
+    };
+    let payload = rename_thread_payload(&thread_id, title)?;
+    let result = run_codex_history_utility(app, payload).map(|_| ());
+    persist_and_emit_input(
+        app,
+        thread_rename_diagnostic_input(task_id, &thread_id, title, result.as_ref().err().cloned()),
+    );
+    result
 }
 
 #[tauri::command]
@@ -375,6 +418,46 @@ fn history_sync_success_input(
             "eventCount": event_count,
             "pageCount": page_count,
         }),
+        created_at: Some(now),
+        updated_at: Some(now),
+    }
+}
+
+fn thread_rename_diagnostic_input(
+    task_id: &str,
+    thread_id: &str,
+    name: &str,
+    error: Option<String>,
+) -> AgentTimelineEventInput {
+    let now = now_millis() as i64;
+    let (status, summary, error_message) = match error.as_deref() {
+        Some(error) => (
+            "error",
+            "Codex thread 名称同步失败，Lilia 本地标题已保留。",
+            Some(error),
+        ),
+        None => ("success", "已同步 Codex thread 名称", None),
+    };
+    let mut payload = serde_json::json!({
+        "backend": "codex",
+        "subkind": "thread_rename",
+        "method": "thread/name/set",
+        "threadId": thread_id,
+        "name": name,
+    });
+    if let Some(error) = error_message {
+        payload["error"] = serde_json::json!(error);
+    }
+    AgentTimelineEventInput {
+        id: Some(format!("{task_id}:codex-thread-rename:{thread_id}")),
+        task_id: task_id.to_string(),
+        turn_id: Some(format!("codex-thread-rename:{thread_id}")),
+        backend: BACKEND_CODEX.to_string(),
+        kind: "diagnostic".to_string(),
+        status: status.to_string(),
+        title: "Codex thread renamed".to_string(),
+        summary: Some(summary.to_string()),
+        payload,
         created_at: Some(now),
         updated_at: Some(now),
     }
@@ -737,6 +820,56 @@ mod tests {
         assert_eq!(payload["action"], "cleanBackgroundTerminals");
         assert_eq!(payload["threadId"], "thread-1");
         assert!(clean_background_terminals_payload("  ").is_err());
+    }
+
+    #[test]
+    fn rename_thread_payload_trims_and_validates_inputs() {
+        let payload = rename_thread_payload(" thread-1 ", " 新标题 ").unwrap();
+
+        assert_eq!(payload["action"], "renameThread");
+        assert_eq!(payload["threadId"], "thread-1");
+        assert_eq!(payload["name"], "新标题");
+        assert!(rename_thread_payload("  ", "新标题").is_err());
+        assert!(rename_thread_payload("thread-1", "  ").is_err());
+    }
+
+    #[test]
+    fn thread_rename_diagnostic_records_method_and_error() {
+        let success = thread_rename_diagnostic_input("task-1", "thread-1", "新标题", None);
+
+        assert_eq!(success.kind, "diagnostic");
+        assert_eq!(success.status, "success");
+        assert_eq!(
+            success
+                .payload
+                .get("subkind")
+                .and_then(|value| value.as_str()),
+            Some("thread_rename")
+        );
+        assert_eq!(
+            success
+                .payload
+                .get("method")
+                .and_then(|value| value.as_str()),
+            Some("thread/name/set")
+        );
+        assert_eq!(
+            success.payload.get("name").and_then(|value| value.as_str()),
+            Some("新标题")
+        );
+
+        let error = thread_rename_diagnostic_input(
+            "task-1",
+            "thread-1",
+            "新标题",
+            Some("network failed".to_string()),
+        );
+
+        assert_eq!(error.status, "error");
+        assert_eq!(
+            error.payload.get("error").and_then(|value| value.as_str()),
+            Some("network failed")
+        );
     }
 
     #[test]

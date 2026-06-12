@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::agent_timeline::{self, AgentTimelineEventInput};
 use crate::chat::state::default_model_for_backend;
 use crate::chat::timeline_sink::persist_and_emit_input;
+use crate::codex_history;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, backend_direct_url, load_active_backend,
@@ -94,6 +95,12 @@ fn run_title_update<R: Runtime>(
         )
         .map_err(|e| format!("update auto title failed: {e}"))?;
         emit_tasks_changed(app, task.project_id.clone());
+        spawn_codex_thread_title_sync(
+            app.clone(),
+            task.id.clone(),
+            backend.to_string(),
+            proposed.clone(),
+        );
         persist_title_event(app, &task, backend, turn_id, "success", &proposed, false)?;
     }
     Ok(())
@@ -131,6 +138,12 @@ pub fn chat_respond_title_update(
         )
         .map_err(|e| format!("accept title update failed: {e}"))?;
         emit_tasks_changed(&app, task.project_id.clone());
+        spawn_codex_thread_title_sync(
+            app.clone(),
+            task_id.clone(),
+            event.backend.clone(),
+            proposed.clone(),
+        );
     }
 
     let status = if accepted { "success" } else { "skipped" };
@@ -154,6 +167,22 @@ pub fn chat_respond_title_update(
         },
     );
     Ok(())
+}
+
+fn spawn_codex_thread_title_sync<R: Runtime>(
+    app: AppHandle<R>,
+    task_id: String,
+    backend: String,
+    title: String,
+) {
+    if backend != BACKEND_CODEX {
+        return;
+    }
+    thread::spawn(move || {
+        if let Err(err) = codex_history::sync_thread_title_blocking(&app, &task_id, &title) {
+            eprintln!("[title-update] Codex thread title sync skipped: {err}");
+        }
+    });
 }
 
 fn load_task_title_state(

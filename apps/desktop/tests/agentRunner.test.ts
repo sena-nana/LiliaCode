@@ -49,6 +49,7 @@ import {
   previewCodexThread,
   previewCodexThreadLite,
   readCodexThreadTurns,
+  renameCodexThread,
   searchCodexThreads,
   syncCodexThreadHistoryForTask,
 } from "../agent-runner/codex/history.mjs";
@@ -3698,6 +3699,45 @@ describe("Codex history utility", () => {
       {
         method: "thread/backgroundTerminals/clean",
         params: { threadId: "thread-1" },
+      },
+      { method: "close", params: null },
+    ]);
+  });
+
+  it("renames Codex thread through history utility", async () => {
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        return {};
+      },
+      notify: () => {},
+      close: () => calls.push({ method: "close", params: null }),
+    };
+
+    await expect(renameCodexThread(" thread-1 ", " 新标题 ", {
+      createServer: () => server as any,
+    })).resolves.toEqual({
+      threadId: "thread-1",
+      name: "新标题",
+      renamed: true,
+    });
+
+    expect(calls).toEqual([
+      {
+        method: "initialize",
+        params: {
+          clientInfo: {
+            name: "lilia",
+            title: "LiliaCode",
+            version: "0.1.0",
+          },
+          capabilities: { experimentalApi: true },
+        },
+      },
+      {
+        method: "thread/name/set",
+        params: { threadId: "thread-1", name: "新标题" },
       },
       { method: "close", params: null },
     ]);

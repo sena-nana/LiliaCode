@@ -3,6 +3,7 @@ import {
   cleanCodexThreadBackgroundTerminals,
   previewCodexThread,
   previewCodexThreadLite,
+  renameCodexThread,
   searchCodexThreads,
   syncCodexThreadHistoryForTask,
 } from "./agent-runner/codex/history.mjs";
@@ -49,6 +50,13 @@ async function main() {
   }
   if (action === "cleanBackgroundTerminals") {
     writeJson(await cleanCodexThreadBackgroundTerminals(String(input.threadId || "")));
+    return;
+  }
+  if (action === "renameThread") {
+    writeJson(await renameCodexThread(
+      String(input.threadId || ""),
+      String(input.name || ""),
+    ));
     return;
   }
   throw new Error(`unknown codex history action: ${action || ""}`);
