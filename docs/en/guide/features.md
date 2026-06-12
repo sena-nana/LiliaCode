@@ -41,7 +41,7 @@ The list below describes the intended product capabilities. Checked items are cu
 ## LiliaCode-Specific Features
 
 - [ ] Project management: manage local projects and GitHub-cloned projects, and view project-level progress, data, and cost.
-- [ ] Task-based conversations: manage conversations as tasks for project-level scheduling.
+- [x] Task-based conversations: conversations are persisted as tasks, with draft promotion, project / orphan sessions, archiving, pinning, and ordering.
 - [ ] Task tree: manage parent-child tasks, dependencies, and blockers.
 - [ ] Automatic orchestration: schedule multiple agents based on task state, dependencies, and user strategy.
 - [ ] Plugin system: expose capabilities that change agent behavior as selectable plugins.
