@@ -21,10 +21,10 @@ use crate::chat::types::{
 use crate::provider::load_agent_interaction_settings;
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
-use crate::{agent_timeline, BACKEND_CODEX, RUNTIME_CHANNEL_NANOBOT};
+use crate::{agent_timeline, BACKEND_CODEX, RUNTIME_CHANNEL_MUTSUKI_CORE};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum NanobotTurnStopKind {
+pub(crate) enum MutsukiCoreTurnStopKind {
     Interrupt,
     Reset,
 }
@@ -197,18 +197,18 @@ pub fn chat_interrupt_turn(
         })
         .is_some();
 
-    let is_nanobot = running_turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT;
+    let is_mutsuki_core = running_turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE;
 
     if can_rollback {
-        record_nanobot_control_event_for_app(
-            &app,
-            &store,
-            &task_id,
-            "reset_requested",
-            control_event_attributes([("mode", "interrupt_rollback".to_string())]),
-            None,
-        );
-        if is_nanobot {
+        if is_mutsuki_core {
+            record_mutsuki_core_control_event_for_app(
+                &app,
+                &store,
+                &task_id,
+                "reset_requested",
+                control_event_attributes([("mode", "interrupt_rollback".to_string())]),
+                None,
+            );
             let rollback = rollback_current_user_only_turn(&app, &task_id, &running_turn.turn_id)?
                 .map(|rollback| ChatRollbackResult {
                     rolled_back: true,
@@ -219,11 +219,11 @@ pub fn chat_interrupt_turn(
             if let Some(rollback) = rollback.clone() {
                 set_pending_rollback_for_app(&app, &store, &task_id, rollback);
             }
-            let (mut cleared_guide_ids, result) = stage_nanobot_interrupt_turn(
+            let (mut cleared_guide_ids, result) = stage_mutsuki_core_interrupt_turn(
                 &store,
                 &task_id,
                 &running_turn,
-                NanobotTurnStopKind::Reset,
+                MutsukiCoreTurnStopKind::Reset,
                 None,
             );
             persist_runtime_state_for_app(
@@ -254,20 +254,20 @@ pub fn chat_interrupt_turn(
         return Ok(ChatInterruptResult::default());
     }
 
-    record_nanobot_control_event_for_app(
-        &app,
-        &store,
-        &task_id,
-        "interrupt_requested",
-        control_event_attributes([("mode", "user_interrupt".to_string())]),
-        None,
-    );
-    if is_nanobot {
-        let (mut cleared_guide_ids, result) = stage_nanobot_interrupt_turn(
+    if is_mutsuki_core {
+        record_mutsuki_core_control_event_for_app(
+            &app,
+            &store,
+            &task_id,
+            "interrupt_requested",
+            control_event_attributes([("mode", "user_interrupt".to_string())]),
+            None,
+        );
+        let (mut cleared_guide_ids, result) = stage_mutsuki_core_interrupt_turn(
             &store,
             &task_id,
             &running_turn,
-            NanobotTurnStopKind::Interrupt,
+            MutsukiCoreTurnStopKind::Interrupt,
             None,
         );
         persist_runtime_state_for_app(
@@ -347,7 +347,7 @@ pub(crate) fn control_event_attributes(
 }
 
 #[cfg(test)]
-pub(crate) fn record_nanobot_control_event(
+pub(crate) fn record_mutsuki_core_control_event(
     store: &ChatStore,
     task_id: &str,
     name: &str,
@@ -361,7 +361,7 @@ pub(crate) fn record_nanobot_control_event(
     let Some(running_turn) = running_turn else {
         return;
     };
-    if running_turn.runtime_channel != RUNTIME_CHANNEL_NANOBOT {
+    if running_turn.runtime_channel != RUNTIME_CHANNEL_MUTSUKI_CORE {
         return;
     }
     attributes
@@ -373,7 +373,7 @@ pub(crate) fn record_nanobot_control_event(
     crate::chat::state::record_runtime_control_event(store, task_id, name, attributes, payload);
 }
 
-pub(crate) fn record_nanobot_control_event_for_app<R: Runtime>(
+pub(crate) fn record_mutsuki_core_control_event_for_app<R: Runtime>(
     app: &AppHandle<R>,
     store: &ChatStore,
     task_id: &str,
@@ -388,7 +388,7 @@ pub(crate) fn record_nanobot_control_event_for_app<R: Runtime>(
     let Some(running_turn) = running_turn else {
         return;
     };
-    if running_turn.runtime_channel != RUNTIME_CHANNEL_NANOBOT {
+    if running_turn.runtime_channel != RUNTIME_CHANNEL_MUTSUKI_CORE {
         return;
     }
     attributes
@@ -413,22 +413,22 @@ pub(crate) fn record_nanobot_control_event_for_app<R: Runtime>(
     }
 }
 
-pub(crate) fn stage_nanobot_turn_stop(
+pub(crate) fn stage_mutsuki_core_turn_stop(
     store: &ChatStore,
     task_id: &str,
     running_turn: &RunningTurn,
-    kind: NanobotTurnStopKind,
+    kind: MutsukiCoreTurnStopKind,
 ) -> Vec<String> {
     let cleared_guide_ids = clear_pending_turns(store, task_id);
     match kind {
-        NanobotTurnStopKind::Interrupt => {
+        MutsukiCoreTurnStopKind::Interrupt => {
             store
                 .interrupted_turns
                 .lock()
                 .unwrap()
                 .insert(task_id.to_string(), running_turn.clone());
         }
-        NanobotTurnStopKind::Reset => {
+        MutsukiCoreTurnStopKind::Reset => {
             store
                 .reset_turns
                 .lock()
@@ -439,15 +439,15 @@ pub(crate) fn stage_nanobot_turn_stop(
     cleared_guide_ids
 }
 
-pub(crate) fn stage_nanobot_interrupt_turn(
+pub(crate) fn stage_mutsuki_core_interrupt_turn(
     store: &ChatStore,
     task_id: &str,
     running_turn: &RunningTurn,
-    kind: NanobotTurnStopKind,
+    kind: MutsukiCoreTurnStopKind,
     rollback: Option<ChatRollbackResult>,
 ) -> (Vec<String>, ChatInterruptResult) {
-    let cleared_guide_ids = stage_nanobot_turn_stop(store, task_id, running_turn, kind);
-    if kind == NanobotTurnStopKind::Reset {
+    let cleared_guide_ids = stage_mutsuki_core_turn_stop(store, task_id, running_turn, kind);
+    if kind == MutsukiCoreTurnStopKind::Reset {
         if let Some(rollback) = rollback {
             set_pending_rollback(store, task_id, rollback);
         }
@@ -466,13 +466,13 @@ pub(crate) fn plan_reset_session(
             stopped_running: false,
             immediate_cleanup: true,
         },
-        Some(running_turn) if running_turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT => {
+        Some(running_turn) if running_turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE => {
             ResetSessionPlan {
-                cleared_guide_ids: stage_nanobot_turn_stop(
+                cleared_guide_ids: stage_mutsuki_core_turn_stop(
                     store,
                     task_id,
                     running_turn,
-                    NanobotTurnStopKind::Reset,
+                    MutsukiCoreTurnStopKind::Reset,
                 ),
                 stopped_running: true,
                 immediate_cleanup: false,
@@ -515,10 +515,10 @@ pub fn chat_respond_agent_interaction(
     };
     if running_turn
         .as_ref()
-        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE)
     {
         attributes.insert("stdinForwarded".to_string(), "runtime".to_string());
-        record_nanobot_control_event_for_app(
+        record_mutsuki_core_control_event_for_app(
             &app,
             &store,
             &task_id,
@@ -593,11 +593,11 @@ pub fn chat_set_composer_state(
     };
     if running_turn
         .as_ref()
-        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE)
     {
         let mut attributes = control_event_attributes([("permission", state.permission.clone())]);
         attributes.insert("stdinForwarded".to_string(), "runtime".to_string());
-        record_nanobot_control_event_for_app(
+        record_mutsuki_core_control_event_for_app(
             &app,
             &store,
             &state.task_id,
@@ -617,25 +617,30 @@ pub fn chat_set_composer_state(
 
 #[tauri::command]
 pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: AppHandle) {
-    record_nanobot_control_event_for_app(
-        &app,
-        &chat_store,
-        &task_id,
-        "reset_requested",
-        control_event_attributes([("mode", "session_reset".to_string())]),
-        None,
-    );
     mark_pending_reset_cleanup_for_app(&app, &chat_store, &task_id);
     let running_turn = {
         let turns = chat_store.running_turns.lock().unwrap();
         turns.get(&task_id).cloned()
     };
+    let is_mutsuki_core = running_turn
+        .as_ref()
+        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE);
+    if is_mutsuki_core {
+        record_mutsuki_core_control_event_for_app(
+            &app,
+            &chat_store,
+            &task_id,
+            "reset_requested",
+            control_event_attributes([("mode", "session_reset".to_string())]),
+            None,
+        );
+    }
     let mut plan = plan_reset_session(&chat_store, &task_id, running_turn.as_ref());
     plan.cleared_guide_ids
         .append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
     if let Some(running_turn) = running_turn
         .as_ref()
-        .filter(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
+        .filter(|turn| turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE)
     {
         persist_runtime_state_for_app(
             &app,
@@ -647,10 +652,7 @@ pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app
             None,
         );
     }
-    if !running_turn
-        .as_ref()
-        .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT)
-    {
+    if !is_mutsuki_core {
         plan.stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {
             Ok(stopped) => stopped,
             Err(err) => {

@@ -41,7 +41,7 @@ use crate::provider::{
 };
 use crate::store::LiliaStore;
 use crate::{
-    plugins, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT,
+    plugins, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
 };
 
 pub(crate) struct RunnerInvocation {
@@ -346,16 +346,16 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
         let mut invocation = invocation;
         invocation.queued_count = queued_count;
 
-        if invocation.runtime_channel == RUNTIME_CHANNEL_NANOBOT {
+        if invocation.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE {
             if let Err(err) =
-                crate::chat::nanobot_runtime::supervise_turn(app_handle.clone(), invocation)
+                crate::chat::mutsuki_core_runtime::supervise_turn(app_handle.clone(), invocation)
             {
                 persist_and_emit_error_timeline_event(
                     &app_handle,
                     &task_id_for_thread,
                     &backend_for_thread,
                     None,
-                    format!("NanoBot runtime 初始化失败：{err}"),
+                    format!("MutsukiCore runtime 初始化失败：{err}"),
                 );
             }
             return;

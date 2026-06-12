@@ -723,7 +723,7 @@ describe("chat AskUser prompt", () => {
     replaceMockTimelineEvents("t-002", [persistedToolConsentEvent()]);
     setMockRuntimeSnapshot("t-002", {
       phase: "abandoned",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-tool",
     });

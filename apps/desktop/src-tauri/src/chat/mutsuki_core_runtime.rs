@@ -34,7 +34,7 @@ use crate::chat::state::{
 use crate::chat::state::{session_key, PersistedRuntimeState};
 use crate::chat::types::ChatWorkflow;
 use crate::util::now_millis;
-use crate::RUNTIME_CHANNEL_NANOBOT;
+use crate::RUNTIME_CHANNEL_MUTSUKI_CORE;
 
 #[cfg(test)]
 use diagnostic::{diagnostic_payload, diagnostic_status, record_runner_lifecycle_events};
@@ -133,14 +133,15 @@ fn supervise_runtime<R: Runtime>(
                         SchedulerStopReason::Halted | SchedulerStopReason::Completed => {}
                         SchedulerStopReason::MaxTicks => {
                             fatal_error =
-                                Some("NanoBot runtime scheduler reached max ticks".to_string());
+                                Some("MutsukiCore runtime scheduler reached max ticks".to_string());
                         }
                         SchedulerStopReason::Failed => {
-                            fatal_error = Some("NanoBot runtime strategy failed".to_string());
+                            fatal_error = Some("MutsukiCore runtime strategy failed".to_string());
                         }
                         SchedulerStopReason::WaitInput => {
-                            fatal_error =
-                                Some("NanoBot runtime stopped while waiting for input".to_string());
+                            fatal_error = Some(
+                                "MutsukiCore runtime stopped while waiting for input".to_string(),
+                            );
                         }
                     },
                     Err(err) => {
@@ -206,7 +207,7 @@ fn supervise_runtime<R: Runtime>(
         app,
         context.task_id,
         context.backend,
-        RUNTIME_CHANNEL_NANOBOT.to_string(),
+        RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         output.last_session_id,
         agent_success,
         None,
@@ -679,7 +680,7 @@ impl<R: Runtime> LiliaRuntimeBackend<R> {
         let runtime_channel = payload
             .get("runtimeChannel")
             .and_then(|value| value.as_str())
-            .unwrap_or(RUNTIME_CHANNEL_NANOBOT);
+            .unwrap_or(RUNTIME_CHANNEL_MUTSUKI_CORE);
         let store = self.app.state::<ChatStore>();
         if let Some(lilia_store) = self.app.try_state::<crate::store::LiliaStore>() {
             let conn = lilia_store.conn()?;
@@ -839,7 +840,7 @@ fn completion_checkpoint_decision(
             "agentId": agent_id,
             "operation": OP_SESSION_CHECKPOINT,
             "payload": {
-                "runtimeChannel": RUNTIME_CHANNEL_NANOBOT,
+                "runtimeChannel": RUNTIME_CHANNEL_MUTSUKI_CORE,
                 "backend": context.backend.clone(),
                 "sessionId": session_id,
             },
@@ -992,7 +993,7 @@ fn build_turn_envelope(context: &RuntimeTurnContext) -> Envelope {
             "promptLength": context.prompt_length,
             "attachmentCount": context.attachment_count,
             "workflowType": context.workflow_type,
-            "runtimeChannel": RUNTIME_CHANNEL_NANOBOT,
+            "runtimeChannel": RUNTIME_CHANNEL_MUTSUKI_CORE,
             "resumeSessionId": context.resume_session_id,
             "permission": context.permission,
             "composerRuntimeWorkspaceRoots": context.composer_runtime_workspace_roots,
@@ -1467,7 +1468,7 @@ fn drive_runtime_completion_operations<B: OperationBackend>(
             &context.agent_id,
             OP_SESSION_CHECKPOINT,
             json!({
-                "runtimeChannel": RUNTIME_CHANNEL_NANOBOT,
+                "runtimeChannel": RUNTIME_CHANNEL_MUTSUKI_CORE,
                 "backend": context.backend.clone(),
                 "sessionId": session_id,
             }),
@@ -1638,7 +1639,7 @@ mod tests {
             turn: crate::chat::state::RunningTurn {
                 turn_id: "turn-restore".to_string(),
                 backend: "codex".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             phase: "running".to_string(),
             process_session_id: Some("process-1".to_string()),
@@ -1680,7 +1681,7 @@ mod tests {
             turn: crate::chat::state::RunningTurn {
                 turn_id: "turn-restore".to_string(),
                 backend: "codex".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             phase: "running".to_string(),
             process_session_id: Some("process-1".to_string()),
@@ -2311,7 +2312,7 @@ mod tests {
         assert_eq!(checkpoint["operation"], OP_SESSION_CHECKPOINT);
         assert_eq!(
             checkpoint["payload"]["runtimeChannel"],
-            RUNTIME_CHANNEL_NANOBOT
+            RUNTIME_CHANNEL_MUTSUKI_CORE
         );
         assert_eq!(checkpoint["payload"]["backend"], "codex");
         assert_eq!(checkpoint["payload"]["sessionId"], "thread-2");
@@ -2327,7 +2328,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -2341,7 +2342,7 @@ mod tests {
             Some(&conn),
             "task-1",
             "codex",
-            RUNTIME_CHANNEL_NANOBOT,
+            RUNTIME_CHANNEL_MUTSUKI_CORE,
             "thread-2",
         )
         .unwrap());
@@ -2351,7 +2352,11 @@ mod tests {
                 .sdk_sessions
                 .lock()
                 .unwrap()
-                .get(&session_key(RUNTIME_CHANNEL_NANOBOT, "codex", "task-1"))
+                .get(&session_key(
+                    RUNTIME_CHANNEL_MUTSUKI_CORE,
+                    "codex",
+                    "task-1"
+                ))
                 .map(String::as_str),
             Some("thread-2")
         );
@@ -2360,7 +2365,7 @@ mod tests {
                 &conn,
                 "task-1",
                 "codex",
-                RUNTIME_CHANNEL_NANOBOT,
+                RUNTIME_CHANNEL_MUTSUKI_CORE,
             ),
             Some("thread-2".to_string())
         );
@@ -2410,7 +2415,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_payload_contains_stable_nanobot_fields() {
+    fn diagnostic_payload_contains_stable_mutsuki_core_fields() {
         let context = context();
         let output = RunnerOutput {
             last_session_id: Some("thread-2".to_string()),
@@ -2423,7 +2428,7 @@ mod tests {
         }];
         let payload = diagnostic_payload(&context, 5, 2, 3, &[], &[], &lifecycle_events, &output);
 
-        assert_eq!(payload["runtimeChannel"], RUNTIME_CHANNEL_NANOBOT);
+        assert_eq!(payload["runtimeChannel"], RUNTIME_CHANNEL_MUTSUKI_CORE);
         assert_eq!(payload["agentId"], "lilia-codex-agent");
         assert_eq!(payload["operationCount"], 5);
         assert_eq!(payload["sourceCount"], 2);
@@ -2495,7 +2500,10 @@ mod tests {
         let envelope = build_turn_envelope(&context());
 
         assert_eq!(envelope.source.source_id, "lilia:codex");
-        assert_eq!(envelope.payload["runtimeChannel"], RUNTIME_CHANNEL_NANOBOT);
+        assert_eq!(
+            envelope.payload["runtimeChannel"],
+            RUNTIME_CHANNEL_MUTSUKI_CORE
+        );
         assert_eq!(envelope.payload["resumeSessionId"], "thread-1");
         assert_eq!(envelope.payload["permission"], "ask");
         assert_eq!(

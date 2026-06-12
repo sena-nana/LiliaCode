@@ -410,7 +410,7 @@ describe("chat scheduler", () => {
   it("重新进入任务页时会把 abandoned runtime snapshot 显示为异常而不是运行态", async () => {
     setMockRuntimeSnapshot("t-002", {
       phase: "abandoned",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-old",
     });

@@ -11,15 +11,17 @@ mod agent_event_sink_tests {
     use crate::chat::commands::{
         agent_interaction_response_payload, attach_stdin_delivery,
         composer_permission_update_payload, control_event_attributes, plan_reset_session,
-        record_nanobot_control_event, stage_nanobot_interrupt_turn, stage_nanobot_turn_stop,
-        NanobotTurnStopKind, ResetSessionPlan,
+        record_mutsuki_core_control_event, stage_mutsuki_core_interrupt_turn,
+        stage_mutsuki_core_turn_stop, MutsukiCoreTurnStopKind, ResetSessionPlan,
     };
     use crate::chat::runner::build_runner_stdin_payload;
     use crate::chat::state::*;
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
     use crate::provider::*;
-    use crate::{BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_NANOBOT};
+    use crate::{
+        BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
+    };
 
     fn turn_context() -> AgentTurnContext {
         AgentTurnContext {
@@ -338,7 +340,7 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         persist_runtime_state(
             &conn,
@@ -461,7 +463,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn record_nanobot_control_event_only_records_nanobot_running_turn() {
+    fn record_mutsuki_core_control_event_only_records_mutsuki_core_running_turn() {
         let store = ChatStore::default();
         store.running_turns.lock().unwrap().insert(
             "builtin-task".to_string(),
@@ -472,36 +474,36 @@ mod agent_event_sink_tests {
             },
         );
         store.running_turns.lock().unwrap().insert(
-            "nanobot-task".to_string(),
+            "mutsuki-core-task".to_string(),
             RunningTurn {
-                turn_id: "turn-nanobot".to_string(),
+                turn_id: "turn-mutsuki-core".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
 
-        record_nanobot_control_event(
+        record_mutsuki_core_control_event(
             &store,
             "builtin-task",
             "permission_update",
             control_event_attributes([("permission", "full".to_string())]),
             None,
         );
-        record_nanobot_control_event(
+        record_mutsuki_core_control_event(
             &store,
-            "nanobot-task",
+            "mutsuki-core-task",
             "permission_update",
             control_event_attributes([("permission", "full".to_string())]),
             Some(json!({ "type": "settings_update", "permission": "full" })),
         );
 
         assert!(take_runtime_control_events(&store, "builtin-task").is_empty());
-        let drained = take_runtime_control_events(&store, "nanobot-task");
+        let drained = take_runtime_control_events(&store, "mutsuki-core-task");
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].name, "permission_update");
         assert_eq!(
             drained[0].attributes.get("turnId").map(String::as_str),
-            Some("turn-nanobot")
+            Some("turn-mutsuki-core")
         );
         assert_eq!(
             drained[0].attributes.get("backend").map(String::as_str),
@@ -514,14 +516,14 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn nanobot_interaction_response_is_recorded_as_control_event() {
+    fn mutsuki_core_interaction_response_is_recorded_as_control_event() {
         let store = ChatStore::default();
         store.running_turns.lock().unwrap().insert(
             "task-1".to_string(),
             RunningTurn {
-                turn_id: "turn-nanobot".to_string(),
+                turn_id: "turn-mutsuki-core".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         let payload = agent_interaction_response_payload(
@@ -530,7 +532,7 @@ mod agent_event_sink_tests {
             json!({ "permissions": {}, "scope": "turn" }),
         );
 
-        record_nanobot_control_event(
+        record_mutsuki_core_control_event(
             &store,
             "task-1",
             "interaction_response",
@@ -550,7 +552,7 @@ mod agent_event_sink_tests {
         );
         assert_eq!(
             drained[0].attributes.get("turnId").map(String::as_str),
-            Some("turn-nanobot")
+            Some("turn-mutsuki-core")
         );
         assert_eq!(drained[0].payload, Some(payload));
     }
@@ -1142,7 +1144,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-interrupt".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         store
@@ -1248,7 +1250,7 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-reset".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         let rollback = ChatRollbackResult {
             rolled_back: true,
@@ -1348,12 +1350,12 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn nanobot_turn_stop_stages_interrupt_and_returns_guide_ids() {
+    fn mutsuki_core_turn_stop_stages_interrupt_and_returns_guide_ids() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         store
             .running_turns
@@ -1371,11 +1373,11 @@ mod agent_event_sink_tests {
                 ..pending_turn("queued")
             });
 
-        let cleared = stage_nanobot_turn_stop(
+        let cleared = stage_mutsuki_core_turn_stop(
             &store,
             "task-1",
             &running_turn,
-            NanobotTurnStopKind::Interrupt,
+            MutsukiCoreTurnStopKind::Interrupt,
         );
 
         assert_eq!(cleared, vec!["guide-1".to_string()]);
@@ -1393,12 +1395,12 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn nanobot_turn_stop_stages_reset_without_interrupt_mark() {
+    fn mutsuki_core_turn_stop_stages_reset_without_interrupt_mark() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-reset".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         store
             .pending_turns
@@ -1411,8 +1413,12 @@ mod agent_event_sink_tests {
                 ..pending_turn("queued")
             });
 
-        let cleared =
-            stage_nanobot_turn_stop(&store, "task-1", &running_turn, NanobotTurnStopKind::Reset);
+        let cleared = stage_mutsuki_core_turn_stop(
+            &store,
+            "task-1",
+            &running_turn,
+            MutsukiCoreTurnStopKind::Reset,
+        );
 
         assert_eq!(cleared, vec!["guide-reset".to_string()]);
         assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
@@ -1434,12 +1440,12 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn nanobot_interrupt_turn_reset_stashes_pending_rollback() {
+    fn mutsuki_core_interrupt_turn_reset_stashes_pending_rollback() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-reset".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         let rollback = ChatRollbackResult {
             rolled_back: true,
@@ -1448,11 +1454,11 @@ mod agent_event_sink_tests {
             removed_event_ids: vec!["evt-1".to_string()],
         };
 
-        let (_cleared, result) = stage_nanobot_interrupt_turn(
+        let (_cleared, result) = stage_mutsuki_core_interrupt_turn(
             &store,
             "task-1",
             &running_turn,
-            NanobotTurnStopKind::Reset,
+            MutsukiCoreTurnStopKind::Reset,
             Some(rollback.clone()),
         );
 
@@ -1471,19 +1477,19 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn nanobot_interrupt_turn_interrupt_does_not_stash_rollback() {
+    fn mutsuki_core_interrupt_turn_interrupt_does_not_stash_rollback() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-interrupt".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
 
-        let (_cleared, result) = stage_nanobot_interrupt_turn(
+        let (_cleared, result) = stage_mutsuki_core_interrupt_turn(
             &store,
             "task-1",
             &running_turn,
-            NanobotTurnStopKind::Interrupt,
+            MutsukiCoreTurnStopKind::Interrupt,
             Some(ChatRollbackResult {
                 rolled_back: true,
                 restored_content: "ignored".to_string(),
@@ -1527,12 +1533,12 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn reset_session_plan_for_nanobot_running_turn_stages_reset() {
+    fn reset_session_plan_for_mutsuki_core_running_turn_stages_reset() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-reset".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         store
             .pending_turns
@@ -1541,7 +1547,7 @@ mod agent_event_sink_tests {
             .entry("task-1".to_string())
             .or_default()
             .push_back(PendingChatTurn {
-                guide_id: Some("guide-nanobot".to_string()),
+                guide_id: Some("guide-mutsuki-core".to_string()),
                 ..pending_turn("queued")
             });
 
@@ -1550,7 +1556,7 @@ mod agent_event_sink_tests {
         assert_eq!(
             plan,
             ResetSessionPlan {
-                cleared_guide_ids: vec!["guide-nanobot".to_string()],
+                cleared_guide_ids: vec!["guide-mutsuki-core".to_string()],
                 stopped_running: true,
                 immediate_cleanup: false,
             }
@@ -1625,7 +1631,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-1".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         store
@@ -1651,7 +1657,7 @@ mod agent_event_sink_tests {
         assert_eq!(snapshot.phase, "running_and_queued");
         assert_eq!(
             snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_NANOBOT)
+            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
         );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-1"));
@@ -1667,7 +1673,7 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         mark_pending_reset_cleanup(&store, "task-1");
@@ -1702,7 +1708,7 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-persisted".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
 
         persist_runtime_state(
@@ -1727,7 +1733,7 @@ mod agent_event_sink_tests {
         assert_eq!(snapshot.phase, "running_and_queued");
         assert_eq!(
             snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_NANOBOT)
+            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
         );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-persisted"));
@@ -1779,7 +1785,7 @@ mod agent_event_sink_tests {
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -1789,7 +1795,7 @@ mod agent_event_sink_tests {
         assert_eq!(snapshot.phase, "abandoned");
         assert_eq!(
             snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_NANOBOT)
+            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
         );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-old"));
@@ -1808,7 +1814,7 @@ mod agent_event_sink_tests {
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -1830,7 +1836,7 @@ mod agent_event_sink_tests {
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'nanobot', 'running', 'stale-epoch', 1)"#,
+               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -1838,7 +1844,7 @@ mod agent_event_sink_tests {
             &conn,
             "task-1",
             &PendingChatTurn {
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
                 ..pending_turn("recover")
             },
         )
@@ -1849,7 +1855,7 @@ mod agent_event_sink_tests {
             .expect("recoverable turn");
 
         assert_eq!(turn.turn_id, "turn-recover");
-        assert_eq!(turn.runtime_channel, RUNTIME_CHANNEL_NANOBOT);
+        assert_eq!(turn.runtime_channel, RUNTIME_CHANNEL_MUTSUKI_CORE);
         assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
         assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
     }
@@ -1871,7 +1877,7 @@ mod agent_event_sink_tests {
             &RunningTurn {
                 turn_id: "turn-live".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             "running",
             None,
@@ -1892,7 +1898,7 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-live".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_NANOBOT.to_string(),
+            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
 
         persist_runtime_state(
@@ -2035,7 +2041,7 @@ mod agent_event_sink_tests {
                 "task-1",
                 "turn-live",
                 "codex",
-                "nanobot",
+                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2087,7 +2093,7 @@ mod agent_event_sink_tests {
                 "task-1",
                 "turn-restore",
                 "codex",
-                "nanobot",
+                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2168,7 +2174,7 @@ mod agent_event_sink_tests {
                 "task-1",
                 "turn-dead",
                 "codex",
-                "nanobot",
+                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2230,7 +2236,7 @@ mod agent_event_sink_tests {
         let proc_builtin =
             crate::chat::runner::start_test_process_session(child_1, &json!({"boot": true}))
                 .unwrap();
-        let proc_nanobot =
+        let proc_mutsuki_core =
             crate::chat::runner::start_test_process_session(child_2, &json!({"boot": true}))
                 .unwrap();
 
@@ -2244,8 +2250,8 @@ mod agent_event_sink_tests {
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-2', 'turn-nanobot', 'codex', 'nanobot', 'running', ?1, 'stale-2', 2)"#,
-            rusqlite::params![proc_nanobot.clone()],
+               VALUES ('task-2', 'turn-mutsuki-core', 'codex', 'mutsuki_core', 'running', ?1, 'stale-2', 2)"#,
+            rusqlite::params![proc_mutsuki_core.clone()],
         )
         .unwrap();
 
@@ -2255,10 +2261,10 @@ mod agent_event_sink_tests {
         assert!(restored.iter().any(|state| state.task_id == "task-1"
             && state.turn.runtime_channel == RUNTIME_CHANNEL_BUILTIN));
         assert!(restored.iter().any(|state| state.task_id == "task-2"
-            && state.turn.runtime_channel == RUNTIME_CHANNEL_NANOBOT));
+            && state.turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE));
 
         crate::chat::runner::remove_test_process_session(&proc_builtin);
-        crate::chat::runner::remove_test_process_session(&proc_nanobot);
+        crate::chat::runner::remove_test_process_session(&proc_mutsuki_core);
     }
 
     #[test]
@@ -2369,7 +2375,7 @@ mod agent_event_sink_tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)
@@ -2378,7 +2384,7 @@ mod agent_event_sink_tests {
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','nanobot')),
+              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
@@ -2412,7 +2418,7 @@ mod agent_event_sink_tests {
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );
@@ -2569,8 +2575,8 @@ mod agent_event_sink_tests {
             &conn,
             "task-1",
             BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_NANOBOT,
-            "nanobot-thread",
+            crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
+            "mutsuki-core-thread",
         )
         .unwrap();
 
@@ -2588,16 +2594,16 @@ mod agent_event_sink_tests {
                 &conn,
                 "task-1",
                 BACKEND_CODEX,
-                crate::RUNTIME_CHANNEL_NANOBOT,
+                crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
             ),
-            Some("nanobot-thread".to_string())
+            Some("mutsuki-core-thread".to_string())
         );
         assert_eq!(
             load_persisted_resume_session_id(
                 &conn,
                 "task-1",
                 BACKEND_CLAUDE,
-                crate::RUNTIME_CHANNEL_NANOBOT,
+                crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
             ),
             None
         );

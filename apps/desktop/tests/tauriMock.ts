@@ -412,7 +412,7 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
-    agentRuntimeChannel: "builtin" as "builtin" | "nanobot",
+    agentRuntimeChannel: "builtin" as "builtin" | "mutsuki_core",
     codexProfile: {
       profile: "default",
       model: null,
@@ -2176,7 +2176,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
-        agentRuntimeChannel: settings?.agentRuntimeChannel === "nanobot" ? "nanobot" : "builtin",
+        agentRuntimeChannel: settings?.agentRuntimeChannel === "mutsuki_core" ? "mutsuki_core" : "builtin",
         codexProfile: {
           profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
           model: typeof codexProfile?.model === "string" && codexProfile.model.trim()

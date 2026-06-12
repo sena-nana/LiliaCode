@@ -36,6 +36,6 @@ ignore = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 keyring = "4.0.1"
 keyring-core = "1.0.0"
-mutsuki-runtime-contracts = { path = "../../../vendor/NanoBot/crates/mutsuki-runtime-contracts" }
-mutsuki-runtime-core = { path = "../../../vendor/NanoBot/crates/mutsuki-runtime-core" }
-mutsuki-runtime-host = { path = "../../../vendor/NanoBot/crates/mutsuki-runtime-host" }
+mutsuki-runtime-contracts = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-contracts" }
+mutsuki-runtime-core = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-core" }
+mutsuki-runtime-host = { path = "../../../vendor/MutsukiCore/crates/mutsuki-runtime-host" }

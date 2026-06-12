@@ -10,7 +10,7 @@ use crate::chat::runner::RunnerLifecycleEvent;
 use crate::chat::state::RuntimeControlEvent;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::util::now_millis;
-use crate::RUNTIME_CHANNEL_NANOBOT;
+use crate::RUNTIME_CHANNEL_MUTSUKI_CORE;
 
 use super::{RuntimeStep, RuntimeTurnContext};
 
@@ -120,7 +120,7 @@ pub(super) fn persist_runtime_diagnostic<R: Runtime>(
         app,
         AgentTimelineEventInput {
             id: Some(format!(
-                "{}:{}:nanobot-runtime",
+                "{}:{}:mutsuki-core-runtime",
                 context.task_id, context.turn_id
             )),
             task_id: context.task_id.clone(),
@@ -128,8 +128,8 @@ pub(super) fn persist_runtime_diagnostic<R: Runtime>(
             backend: context.backend.clone(),
             kind: "diagnostic".to_string(),
             status,
-            title: "NanoBot Runtime".to_string(),
-            summary: Some("NanoBot Rust Core 已接管本轮本地运行时边界".to_string()),
+            title: "MutsukiCore Runtime".to_string(),
+            summary: Some("MutsukiCore 已接管本轮本地运行时边界".to_string()),
             payload: diagnostic_payload(
                 context,
                 operation_count,
@@ -157,7 +157,7 @@ pub(super) fn diagnostic_payload(
     output: &crate::chat::runner::RunnerOutput,
 ) -> JsonValue {
     json!({
-        "runtimeChannel": RUNTIME_CHANNEL_NANOBOT,
+        "runtimeChannel": RUNTIME_CHANNEL_MUTSUKI_CORE,
         "agentId": context.agent_id,
         "operationCount": operation_count,
         "sourceCount": source_count,

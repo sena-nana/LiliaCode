@@ -400,7 +400,7 @@ mod tests {
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','nanobot')),
+                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
               PRIMARY KEY (task_id, backend, runtime_channel)

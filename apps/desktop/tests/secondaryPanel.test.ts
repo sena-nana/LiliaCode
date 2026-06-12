@@ -438,7 +438,7 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "reset_pending_finish",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-reset",
       pendingResetCleanup: true,
@@ -458,7 +458,7 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "abandoned",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-old",
     });
@@ -477,7 +477,7 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "abandoned",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-old",
     });
@@ -545,7 +545,7 @@ describe("SecondaryPanel project chat navigation", () => {
     });
     setMockRuntimeSnapshot("t-003", {
       phase: "running",
-      runtimeChannel: "nanobot",
+      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-project",
     });
