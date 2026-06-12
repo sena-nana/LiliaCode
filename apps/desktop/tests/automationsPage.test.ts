@@ -16,13 +16,22 @@ vi.mock("@vue-flow/core", async () => {
       nodes: { type: Array, default: () => [] },
       edges: { type: Array, default: () => [] },
     },
-    setup(props, { slots }) {
+    emits: ["node-click"],
+    setup(props, { slots, emit }) {
       return () =>
         h(
           "div",
           { "data-testid": "automation-flow" },
           (props.nodes as Array<{ id: string; data: unknown }>).map((node) =>
-            h("button", { key: node.id, type: "button" }, slots["node-automation"]?.({ data: node.data })),
+            h(
+              "button",
+              {
+                key: node.id,
+                type: "button",
+                onClick: () => emit("node-click", { node }),
+              },
+              slots["node-automation"]?.({ data: node.data }),
+            ),
           ),
         );
     },
@@ -62,6 +71,7 @@ describe("Automations page", () => {
     expect(view.getByRole("img", { name: "节点小地图" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
     expect(view.getByRole("button", { name: "添加人工确认" })).toBeEnabled();
+    expect(view.getByRole("textbox", { name: "手动 Payload" })).toBeInTheDocument();
     await fireEvent.click(view.getByRole("button", { name: "放大画布" }));
     await fireEvent.click(view.getByRole("button", { name: "缩小画布" }));
     await fireEvent.click(view.getByRole("button", { name: "适应视图" }));
@@ -73,6 +83,60 @@ describe("Automations page", () => {
     expect(within(inspector).getByRole("button", { name: "task_created" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "task_status_changed" })).toBeInTheDocument();
     expect(within(inspector).getByText("运行历史")).toBeInTheDocument();
+  });
+
+  it("暴露 Agent、工具和手动运行 Payload 配置", async () => {
+    const view = render(Automations);
+
+    await waitFor(() => {
+      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+    });
+
+    const flow = view.getByTestId("automation-flow");
+    await fireEvent.click(within(flow).getByText("复盘 Agent"));
+    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+
+    await fireEvent.update(within(inspector).getByLabelText("模型"), "gpt-5.5");
+    await fireEvent.update(within(inspector).getByLabelText("工作目录"), "C:\\Files\\workspace\\Lilia");
+
+    await fireEvent.click(view.getByRole("button", { name: "添加工具" }));
+    await fireEvent.change(within(inspector).getByLabelText("动作"), { target: { value: "send_guide" } });
+    await fireEvent.update(within(inspector).getByLabelText("引导内容"), "请确认 ${trigger.taskId}");
+    await fireEvent.change(within(inspector).getByLabelText("优先级"), { target: { value: "high" } });
+
+    await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_save_draft")?.input.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "agent-1",
+            config: expect.objectContaining({
+              model: "gpt-5.5",
+              projectCwd: "C:\\Files\\workspace\\Lilia",
+            }),
+          }),
+          expect.objectContaining({
+            kind: "tool",
+            config: expect.objectContaining({
+              action: "send_guide",
+              text: "请确认 ${trigger.taskId}",
+              priority: "high",
+            }),
+          }),
+        ]),
+      );
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "发布" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "手动 Payload" }), '{"reason":"smoke"}');
+    await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_run_once")).toEqual({
+        id: "auto-1",
+        input: { payload: { reason: "smoke" } },
+      });
+    });
   });
 
   it("保存草稿、发布、启停并手动运行后显示运行历史和节点状态", async () => {
