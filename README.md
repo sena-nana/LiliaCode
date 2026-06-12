@@ -50,6 +50,16 @@ LiliaCode focuses on software engineering. Other applications in the same family
 
 LiliaCode still prioritizes its own recoverable task structure over upstream CLI or SDK history formats. Raw Claude / Codex history can be imported as a bridge into Lilia tasks, but the local task timeline remains the primary working model.
 
+## Getting Claude or Codex Running
+
+After installing and opening LiliaCode, go to Settings -> Connection and follow the first-run checklist at the top of the page. The checklist does not block the main UI, and you can reopen it from the Connection page after dismissing it.
+
+- Run Claude: make sure Node.js 18+ is available, then choose Claude on the Connection page. Use CC-Switch as a local proxy, or switch to Direct and enter an Anthropic API key. If Base URL is empty, Lilia uses `https://api.anthropic.com`.
+- Run Codex: install Codex CLI with `npm i -g @openai/codex`, then make sure Lilia can detect `codex app-server`. Lilia requires Codex CLI `0.128.0+` for the app-server protocol it uses.
+- Use CC-Switch: start the local CC-Switch service and keep the proxy URL at, or set it to, `http://127.0.0.1:15721`. For Codex through CC-Switch, the selected upstream provider must support the OpenAI Responses API and the current Codex model.
+- Use Direct mode: switch the current backend connection mode to Direct and enter the matching API key. Claude uses `ANTHROPIC_API_KEY` semantics, while Codex uses `OPENAI_API_KEY` semantics. Keys are stored in the system credential store and are not echoed back in Settings.
+- Fix failures: the Connection page maps missing Node, missing Codex CLI, old app-server support, unreachable CC-Switch, and missing direct API keys to concrete repair suggestions. After fixing an item, click Refresh check, then return to a conversation and send the first message.
+
 ## Feature Status
 
 The list below tracks the current real integration surface. Only capabilities that are usable as user-facing features are marked complete; partially integrated and not-yet-integrated items remain unchecked. Last checked: 2026-06-04.
