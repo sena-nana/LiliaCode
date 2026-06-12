@@ -71,13 +71,23 @@ GitHub Pages 部署由仓库中的 Actions workflow 自动完成。推送到 `ma
 
 GitHub Actions 会在 pull request 到 `main`、推送到 `main` 或手动触发时运行 CI。CI 会执行 `yarn verify`，并单独构建文档站，确保桌面测试、前端构建、Tauri Rust 检查、contracts 类型检查和文档构建都通过。
 
-推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包时推送 `v*` tag：
+推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包前，先同步并检查四处版本号：根 `package.json`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json`。版本号必须与发布 tag 去掉 `v` 后一致。
+
+```bash
+yarn release:check --tag vX.Y.Z
+```
+
+检查通过后推送 `v*` tag：
 
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-Release workflow 会先运行 `yarn verify`，再构建 Windows Tauri 安装包，并上传到 draft GitHub Release。当前发布包暂不包含代码签名、macOS 公证、Linux/macOS 安装包或自动更新。
+Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri 安装包，并上传到 draft GitHub Release。安装包命名按 `LiliaCode_<version>_x64-setup.*` 检查；release draft 会附带首发检查清单和自动生成的变更记录。
+
+正式发布前必须在 Windows 环境下载 draft Release 里的安装包，确认安装、启动主窗口和卸载流程可完成。当前发布包没有代码签名，Windows SmartScreen 或安全软件警告属于预期风险；当前也不包含 macOS 公证、Linux/macOS 安装包或 Tauri updater 自动更新。首发阶段升级方式是手动下载并安装新版 Windows 安装包。
+
+GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 
 ## 图标
 
