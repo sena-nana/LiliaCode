@@ -8,7 +8,7 @@ import type {
   ChatComposerState,
   ChatSlashCommandWorkflow,
   CodexThreadGoal,
-  CodexReviewTarget,
+  LiliaReviewTarget,
   Project,
   SuggestionItem,
 } from "@lilia/contracts";
@@ -17,7 +17,7 @@ import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ComposerProjectPicker from "../../components/chat/ComposerProjectPicker.vue";
 import ChatSidebarHost from "../../components/chat/ChatSidebarHost.vue";
 import ImageViewer from "../../components/chat/ImageViewer.vue";
-import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
+import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import type { ChatImageViewerSource } from "../../components/chat/imageViewer";
 import TodoFloat from "../../components/todo/TodoFloat.vue";
 import type { PendingAsk } from "../../composables/useAskUser";
@@ -81,22 +81,22 @@ const emit = defineEmits<{
   "clear-codex-goal": [];
   "insert-draft-text": [text: string];
   send: [content: string, attachments: ChatAttachment[]];
-  "start-codex-review": [
+  "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ];
-  "start-codex-fix-suggestion": [
+  "start-lilia-fix-suggestion": [
     content: string,
     attachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ];
-  "start-codex-compact": [];
+  "start-lilia-compact": [];
   "start-session-fork": [];
-  "open-codex-iab": [];
-  "submit-codex-iab": [];
+  "open-lilia-iab": [];
+  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
-  "start-codex-batch-apply": [input: CodexBatchApplyInput];
+  "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -162,12 +162,12 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="showExpiredPendingActions"
             :can-retry-event="canRetryEvent"
-            :can-start-codex-batch-apply="composerState.backend === 'codex' && !isTurnRunning && !hasBlockingPendingAction"
+            :can-start-lilia-batch-apply="composerState.backend === 'codex' && !isTurnRunning && !hasBlockingPendingAction"
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
             @insert-draft-text="emit('insert-draft-text', $event)"
-            @start-codex-batch-apply="emit('start-codex-batch-apply', $event)"
+            @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
           >
             <template #controls>
               <div class="chat-controls">
@@ -200,12 +200,12 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :insert-draft-text-key="insertDraftTextKey"
                   :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
-                  @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
-                  @start-codex-fix-suggestion="(content, outgoingAttachments, target) => emit('start-codex-fix-suggestion', content, outgoingAttachments, target)"
-                  @start-codex-compact="emit('start-codex-compact')"
+                  @start-lilia-review="(content, outgoingAttachments, target) => emit('start-lilia-review', content, outgoingAttachments, target)"
+                  @start-lilia-fix-suggestion="(content, outgoingAttachments, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, target)"
+                  @start-lilia-compact="emit('start-lilia-compact')"
                   @start-session-fork="emit('start-session-fork')"
-                  @open-codex-iab="emit('open-codex-iab')"
-                  @submit-codex-iab="emit('submit-codex-iab')"
+                  @open-lilia-iab="emit('open-lilia-iab')"
+                  @submit-lilia-iab="emit('submit-lilia-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

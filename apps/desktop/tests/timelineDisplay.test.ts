@@ -611,7 +611,7 @@ describe("timeline event expansion", () => {
   it("Codex 修复建议最终回复可发起批量应用", async () => {
     const view = render(AgentTimeline, {
       props: {
-        canStartCodexBatchApply: true,
+        canStartLiliaBatchApply: true,
         events: [
           timelineEvent({
             id: "reply-apply-1",
@@ -637,7 +637,7 @@ describe("timeline event expansion", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "应用建议" }));
 
-    expect(view.emitted("start-codex-batch-apply")?.[0]).toEqual([{
+    expect(view.emitted("start-lilia-batch-apply")?.[0]).toEqual([{
       sourceTurnId: "turn-source",
       sourceKind: "fix_suggestion",
       sourceSummary: "建议修复权限边界",
@@ -647,7 +647,7 @@ describe("timeline event expansion", () => {
   it("普通 Codex 最终回复不显示批量应用入口", () => {
     const view = render(AgentTimeline, {
       props: {
-        canStartCodexBatchApply: true,
+        canStartLiliaBatchApply: true,
         events: [
           timelineEvent({
             id: "reply-normal-1",

@@ -1,7 +1,7 @@
 import { computed, ref } from "vue";
 import { describe, expect, it } from "vitest";
 import type { ChatComposerState, ChatWorkflow } from "@lilia/contracts";
-import { useCodexWorkflowActions } from "../src/pages/taskDetail/useCodexWorkflowActions";
+import { useLiliaWorkflowActions } from "../src/pages/taskDetail/useLiliaWorkflowActions";
 
 function composerState(backend: ChatComposerState["backend"]): ChatComposerState {
   return {
@@ -16,7 +16,7 @@ function composerState(backend: ChatComposerState["backend"]): ChatComposerState
 function setupWorkflowActions(backend: ChatComposerState["backend"]) {
   const sent: ChatWorkflow[] = [];
   const composer = ref<ChatComposerState | null>(composerState(backend));
-  const actions = useCodexWorkflowActions({
+  const actions = useLiliaWorkflowActions({
     hasContext: computed(() => true),
     composer,
     isTurnRunning: ref(false),
@@ -29,7 +29,7 @@ function setupWorkflowActions(backend: ChatComposerState["backend"]) {
   return { actions, sent };
 }
 
-describe("useCodexWorkflowActions", () => {
+describe("useLiliaWorkflowActions", () => {
   it("session fork workflow follows the active backend", async () => {
     const codex = setupWorkflowActions("codex");
     await codex.actions.onStartSessionFork();

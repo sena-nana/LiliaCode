@@ -43,6 +43,10 @@ import {
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
 
 export const EMPTY_PROMPT_CODEX_WORKFLOWS = new Set([
+  "lilia_review",
+  "lilia_fix_suggestion",
+  "lilia_batch_apply",
+  "lilia_compact",
   "codex_review",
   "codex_fix_suggestion",
   "codex_batch_apply",
@@ -392,7 +396,7 @@ const CODEX_MEMORY_MODES = new Set(["enabled", "disabled"]);
 
 function readCodexReviewWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_review") return null;
+  if (workflow?.type !== "lilia_review" && workflow?.type !== "codex_review") return null;
   const target = normalizeCodexReviewTarget(workflow.target);
   if (!target) throw new Error("Codex review workflow missing a valid target");
   const instructions = stringOrNull(workflow.instructions)?.trim() || "";
@@ -402,7 +406,7 @@ function readCodexReviewWorkflow(cmd) {
 
 function readCodexFixSuggestionWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_fix_suggestion") return null;
+  if (workflow?.type !== "lilia_fix_suggestion" && workflow?.type !== "codex_fix_suggestion") return null;
   const target = normalizeCodexReviewTarget(workflow.target);
   if (!target) throw new Error("Codex fix suggestion workflow missing a valid target");
   const mode = workflow.mode === "apply" ? "apply" : "suggest";
@@ -412,7 +416,7 @@ function readCodexFixSuggestionWorkflow(cmd) {
 
 function readCodexBatchApplyWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_batch_apply") return null;
+  if (workflow?.type !== "lilia_batch_apply" && workflow?.type !== "codex_batch_apply") return null;
   const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
   const sourceKind = stringOrNull(workflow.sourceKind);
   const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
@@ -477,7 +481,7 @@ function readCodexGoalWorkflow(cmd) {
 
 function readCodexCompactWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "codex_compact";
+  return workflow?.type === "lilia_compact" || workflow?.type === "codex_compact";
 }
 
 function readCodexBackgroundTerminalsCleanWorkflow(cmd) {

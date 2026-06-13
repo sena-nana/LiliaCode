@@ -2,11 +2,11 @@ use crate::chat::types::ChatWorkflow;
 
 pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<&'static str> {
     match workflow? {
-        ChatWorkflow::CodexReview { .. } => Some("codex_review"),
-        ChatWorkflow::CodexFixSuggestion { .. } => Some("codex_fix_suggestion"),
-        ChatWorkflow::CodexBatchApply { .. } => Some("codex_batch_apply"),
+        ChatWorkflow::LiliaReview { .. } => Some("lilia_review"),
+        ChatWorkflow::LiliaFixSuggestion { .. } => Some("lilia_fix_suggestion"),
+        ChatWorkflow::LiliaBatchApply { .. } => Some("lilia_batch_apply"),
         ChatWorkflow::CodexGoal { .. } => Some("codex_goal"),
-        ChatWorkflow::CodexCompact => Some("codex_compact"),
+        ChatWorkflow::LiliaCompact => Some("lilia_compact"),
         ChatWorkflow::CodexBackgroundTerminalsClean => Some("codex_background_terminals_clean"),
         ChatWorkflow::CodexMemoryMode { .. } => Some("codex_memory_mode"),
         ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
@@ -27,11 +27,11 @@ pub(crate) fn automation_run_id(workflow: Option<&ChatWorkflow>) -> Option<Strin
 
 pub(crate) fn parse_workflow_kind(value: &str) -> Option<&'static str> {
     match value {
-        "codex_review" => Some("codex_review"),
-        "codex_fix_suggestion" => Some("codex_fix_suggestion"),
-        "codex_batch_apply" => Some("codex_batch_apply"),
+        "lilia_review" | "codex_review" => Some("lilia_review"),
+        "lilia_fix_suggestion" | "codex_fix_suggestion" => Some("lilia_fix_suggestion"),
+        "lilia_batch_apply" | "codex_batch_apply" => Some("lilia_batch_apply"),
         "codex_goal" => Some("codex_goal"),
-        "codex_compact" => Some("codex_compact"),
+        "lilia_compact" | "codex_compact" => Some("lilia_compact"),
         "codex_background_terminals_clean" => Some("codex_background_terminals_clean"),
         "codex_memory_mode" => Some("codex_memory_mode"),
         "codex_memory_reset" => Some("codex_memory_reset"),

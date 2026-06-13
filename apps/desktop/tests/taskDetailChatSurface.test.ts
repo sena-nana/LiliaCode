@@ -56,14 +56,14 @@ function renderSurface() {
           },
         }),
         ChatComposer: defineComponent({
-          emits: ["start-codex-fix-suggestion"],
+          emits: ["start-lilia-fix-suggestion"],
           setup(_, { emit }) {
             return () =>
               h("div", [
                 h("button", {
                   type: "button",
                   onClick: () => emit(
-                    "start-codex-fix-suggestion",
+                    "start-lilia-fix-suggestion",
                     "优先给最小修复",
                     [],
                     { type: "uncommittedChanges" },
@@ -103,7 +103,7 @@ describe("TaskDetailChatSurface", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "stub fix suggestion" }));
 
-    expect(view.emitted("start-codex-fix-suggestion")?.[0]).toEqual([
+    expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
       [],
       { type: "uncommittedChanges" },

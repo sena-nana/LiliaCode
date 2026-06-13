@@ -36,20 +36,20 @@ import {
   getRuntimeSnapshot,
   ackRestoredRollback,
   interruptTurn,
-  openCodexIab,
+  openLiliaIab,
   onAgentTimeline,
   onAgentTimelineBatch,
   onDone,
   onTurnStarted,
   sendMessage,
   setComposerState,
-  submitCodexIab,
+  submitLiliaIab,
 } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
-import { useCodexWorkflowActions } from "./useCodexWorkflowActions";
+import { useLiliaWorkflowActions } from "./useLiliaWorkflowActions";
 import {
   clearPendingInteractionsForTask,
   hydratePendingInteractions,
@@ -88,6 +88,7 @@ export function useTaskComposerController(options: {
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
   const { activeBackend } = useConnectionStatus({ probe: !context.isPopup.value });
   let loadSeq = 0;
+  let runtimeEventSeq = 0;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
 
   const composerForView = computed<ChatComposerState>(() =>
@@ -206,25 +207,25 @@ export function useTaskComposerController(options: {
     }
   }
 
-  async function onOpenCodexIab() {
+  async function onOpenLiliaIab() {
     if (!context.hasContext.value) return;
     if (composerForView.value.backend !== "codex") {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("IAB 仅支持 Codex 会话。"));
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前后端尚未实现 Lilia IAB。"));
       return;
     }
     const raw = window.prompt("IAB URL", "about:blank");
     if (raw === null) return;
     const url = raw.trim() || "about:blank";
     try {
-      await openCodexIab(props.taskId, url);
+      await openLiliaIab(props.taskId, url);
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打开 IAB 失败：${String(err)}`));
     }
   }
 
-  function codexIabMessage(snapshot: Awaited<ReturnType<typeof submitCodexIab>>["snapshot"]): string {
+  function liliaIabMessage(snapshot: Awaited<ReturnType<typeof submitLiliaIab>>["snapshot"]): string {
     const lines = [
-      "Codex IAB 页面交互结果",
+      "Lilia IAB 页面交互结果",
       `URL: ${snapshot.url}`,
       snapshot.title ? `标题: ${snapshot.title}` : null,
       snapshot.note ? `备注: ${snapshot.note}` : null,
@@ -235,18 +236,18 @@ export function useTaskComposerController(options: {
     return lines.join("\n");
   }
 
-  async function onSubmitCodexIab() {
+  async function onSubmitLiliaIab() {
     if (!context.hasContext.value) return;
     if (composerForView.value.backend !== "codex") {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("IAB 结果只能回送到 Codex 会话。"));
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前后端尚未实现 Lilia IAB 结果回送。"));
       return;
     }
     const note = window.prompt("IAB 备注")?.trim() ?? "";
     try {
-      const result = await submitCodexIab(props.taskId, note);
+      const result = await submitLiliaIab(props.taskId, note);
       if (result.delivery === "runner" && result.stdinForwarded) return;
       await sendAgentMessage(
-        codexIabMessage(result.snapshot),
+        liliaIabMessage(result.snapshot),
         result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
         undefined,
         undefined,
@@ -257,7 +258,7 @@ export function useTaskComposerController(options: {
     }
   }
 
-  const codexWorkflowActions = useCodexWorkflowActions({
+  const liliaWorkflowActions = useLiliaWorkflowActions({
     hasContext: context.hasContext,
     composer,
     isTurnRunning,
@@ -387,10 +388,32 @@ export function useTaskComposerController(options: {
     attachments.value = rollback.restoredAttachments;
   }
 
+  function currentPendingRequestIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const ask of pendingAskUsers.value) {
+      if (ask.requestId) ids.add(ask.requestId);
+    }
+    for (const consent of pendingToolConsents.value) {
+      ids.add(consent.requestId);
+    }
+    for (const interaction of pendingCodexInteractions.value) {
+      ids.add(interaction.requestId);
+    }
+    for (const change of pendingArchitectureChanges.value) {
+      ids.add(change.requestId);
+    }
+    return ids;
+  }
+
   async function loadAll() {
     const seq = ++loadSeq;
     const taskId = props.taskId;
     const projectId = props.projectId;
+    const pendingBeforeLoad = currentPendingRequestIds();
+    const timelineEventIdsBeforeLoad = new Set(
+      timeline.persistedTimelineEvents.value.map((event) => event.id),
+    );
+    const runtimeSeqBeforeLoad = runtimeEventSeq;
     if (context.isPopup.value && !context.conversationRouteState.value.isLiveDraft) {
       context.popupContentReady.value = false;
     }
@@ -413,21 +436,31 @@ export function useTaskComposerController(options: {
         runtimeSnapshotLoad,
       ]);
       if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-      timeline.applyLoadedTimelineEvents(events);
+      const timelineEventIdsToPreserve = new Set(
+        timeline.persistedTimelineEvents.value
+          .filter((event) => !timelineEventIdsBeforeLoad.has(event.id))
+          .map((event) => event.id),
+      );
+      timeline.applyLoadedTimelineEvents(events, timelineEventIdsToPreserve);
       const activeRequestIds = hydratePendingInteractions(events, props.taskId);
-      clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
-      isTurnRunning.value = runtimeSnapshot
-        ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
-        : false;
-      if (runtimeSnapshot?.phase === "abandoned") {
-        clearPendingInteractionsForTask(taskId);
-        timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
-          runtimeAbandonedMessage(runtimeSnapshot),
-        ));
+      for (const requestId of currentPendingRequestIds()) {
+        if (!pendingBeforeLoad.has(requestId)) activeRequestIds.add(requestId);
       }
-      if (runtimeSnapshot?.rollback?.rolledBack) {
-        restoreDraftFromRollback(runtimeSnapshot.rollback);
-        void ackRestoredRollback(taskId);
+      clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
+      if (runtimeSeqBeforeLoad === runtimeEventSeq) {
+        isTurnRunning.value = runtimeSnapshot
+          ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
+          : false;
+        if (runtimeSnapshot?.phase === "abandoned") {
+          clearPendingInteractionsForTask(taskId);
+          timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
+            runtimeAbandonedMessage(runtimeSnapshot),
+          ));
+        }
+        if (runtimeSnapshot?.rollback?.rolledBack) {
+          restoreDraftFromRollback(runtimeSnapshot.rollback);
+          void ackRestoredRollback(taskId);
+        }
       }
       if (!comp) return;
     } finally {
@@ -458,11 +491,13 @@ export function useTaskComposerController(options: {
       }),
       onTurnStarted((e) => {
         if (e.taskId !== props.taskId) return;
+        runtimeEventSeq += 1;
         isTurnRunning.value = true;
         timeline.markQueuedUserMessageSuccessful();
       }),
       onDone((e) => {
         if (e.taskId !== props.taskId) return;
+        runtimeEventSeq += 1;
         isTurnRunning.value = false;
         clearPendingInteractionsForTask(e.taskId);
         if (e.rollback?.rolledBack) {
@@ -526,9 +561,9 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onExecuteSlashCommand,
-    onOpenCodexIab,
-    onSubmitCodexIab,
-    ...codexWorkflowActions,
+    onOpenLiliaIab,
+    onSubmitLiliaIab,
+    ...liliaWorkflowActions,
     onInsertGuide,
     onInsertDraftText,
     onInterrupt,

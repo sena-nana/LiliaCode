@@ -18,7 +18,7 @@ import {
 import type {
   ChatAttachment,
   ChatComposerState,
-  CodexReviewTarget,
+  LiliaReviewTarget,
   PermissionMode,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
@@ -43,12 +43,12 @@ const emit = defineEmits<{
   pickAttachments: [];
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
-  startCodexReview: [target: CodexReviewTarget];
-  startCodexFixSuggestion: [target: CodexReviewTarget];
-  startCodexCompact: [];
+  startLiliaReview: [target: LiliaReviewTarget];
+  startLiliaFixSuggestion: [target: LiliaReviewTarget];
+  startLiliaCompact: [];
   startSessionFork: [];
-  openCodexIab: [];
-  submitCodexIab: [];
+  openLiliaIab: [];
+  submitLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -97,14 +97,14 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-function startReview(target: CodexReviewTarget) {
+function startReview(target: LiliaReviewTarget) {
   closeReviewMenu();
-  emit("startCodexReview", target);
+  emit("startLiliaReview", target);
 }
 
-function startFixSuggestion(target: CodexReviewTarget) {
+function startFixSuggestion(target: LiliaReviewTarget) {
   closeFixSuggestionMenu();
-  emit("startCodexFixSuggestion", target);
+  emit("startLiliaFixSuggestion", target);
 }
 
 function startBranchReview() {
@@ -319,9 +319,9 @@ onBeforeUnmount(() => {
           type="button"
           class="chat-chip chat-chip--icon"
           :disabled="actionsBlocked"
-          title="打开 Codex IAB"
-          aria-label="打开 Codex IAB"
-          @click="emit('openCodexIab')"
+          title="打开 Lilia IAB"
+          aria-label="打开 Lilia IAB"
+          @click="emit('openLiliaIab')"
         >
           <Globe :size="14" aria-hidden="true" />
         </button>
@@ -332,7 +332,7 @@ onBeforeUnmount(() => {
           :disabled="actionsBlocked"
           title="回送 IAB 截图"
           aria-label="回送 IAB 截图"
-          @click="emit('submitCodexIab')"
+          @click="emit('submitLiliaIab')"
         >
           <Camera :size="14" aria-hidden="true" />
         </button>
@@ -342,9 +342,9 @@ onBeforeUnmount(() => {
           class="chat-chip chat-chip--icon"
           :class="{ 'is-disabled': compactDisabled }"
           :disabled="compactDisabled || actionsBlocked"
-          title="压缩 Codex 上下文"
-          aria-label="压缩 Codex 上下文"
-          @click="emit('startCodexCompact')"
+          title="压缩上下文"
+          aria-label="压缩上下文"
+          @click="emit('startLiliaCompact')"
         >
           <Combine :size="14" aria-hidden="true" />
         </button>

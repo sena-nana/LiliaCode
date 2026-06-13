@@ -16,7 +16,7 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatSlashCommandWorkflow,
-  CodexReviewTarget,
+  LiliaReviewTarget,
   PermissionMode,
   SuggestionItem,
 } from "@lilia/contracts";
@@ -68,20 +68,20 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   send: [content: string, attachments: ChatAttachment[]];
-  "start-codex-review": [
+  "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ];
-  "start-codex-fix-suggestion": [
+  "start-lilia-fix-suggestion": [
     content: string,
     attachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ];
-  "start-codex-compact": [];
+  "start-lilia-compact": [];
   "start-session-fork": [];
-  "open-codex-iab": [];
-  "submit-codex-iab": [];
+  "open-lilia-iab": [];
+  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -477,18 +477,18 @@ function submitEntry() {
   send();
 }
 
-function startCodexReview(target: CodexReviewTarget) {
+function startLiliaReview(target: LiliaReviewTarget) {
   if (hasPending.value) return;
   const value = richInput.serializedText.value.trim();
-  emit("start-codex-review", value, attachmentsForView.value, target);
+  emit("start-lilia-review", value, attachmentsForView.value, target);
   richInput.resetInput();
   clearComposerContextState();
 }
 
-function startCodexFixSuggestion(target: CodexReviewTarget) {
+function startLiliaFixSuggestion(target: LiliaReviewTarget) {
   if (hasPending.value) return;
   const value = richInput.serializedText.value.trim();
-  emit("start-codex-fix-suggestion", value, attachmentsForView.value, target);
+  emit("start-lilia-fix-suggestion", value, attachmentsForView.value, target);
   richInput.resetInput();
   clearComposerContextState();
 }
@@ -900,12 +900,12 @@ defineExpose({ focusInput, getDraftSnapshot });
         @pick-attachments="emit('pick-attachments')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
-        @start-codex-review="startCodexReview"
-        @start-codex-fix-suggestion="startCodexFixSuggestion"
-        @start-codex-compact="emit('start-codex-compact')"
+        @start-lilia-review="startLiliaReview"
+        @start-lilia-fix-suggestion="startLiliaFixSuggestion"
+        @start-lilia-compact="emit('start-lilia-compact')"
         @start-session-fork="emit('start-session-fork')"
-        @open-codex-iab="emit('open-codex-iab')"
-        @submit-codex-iab="emit('submit-codex-iab')"
+        @open-lilia-iab="emit('open-lilia-iab')"
+        @submit-lilia-iab="emit('submit-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />
