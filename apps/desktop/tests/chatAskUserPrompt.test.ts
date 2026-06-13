@@ -131,14 +131,6 @@ function finishCodexWorkflow(sessionId: string) {
   mockInvoke.mockClear();
 }
 
-async function clickCodexNativeMenuItem(
-  view: ReturnType<typeof render>,
-  name: string | RegExp,
-) {
-  await fireEvent.click(view.getByRole("button", { name: "Codex 原生接口" }));
-  await fireEvent.click(view.getByRole("menuitem", { name }));
-}
-
 function emitAskUserRequest(
   taskId: string,
   spec: AskUserSpec = askUserSpec,
@@ -845,60 +837,14 @@ describe("chat AskUser prompt", () => {
     });
   });
 
-  it("Codex goal 和原生接口动作以 workflow 进入发送命令", async () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("完成全链路收口");
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    try {
-      const view = await renderCodexTaskDetail();
+  it("Codex compact 入口以 workflow 进入发送命令", async () => {
+    const view = await renderCodexTaskDetail();
 
-      const workflows = [
-        {
-          sessionId: "thread-goal",
-          run: () => clickCodexNativeMenuItem(view, /设置 Goal/),
-          workflow: {
-            type: "codex_goal",
-            action: "set",
-            objective: "完成全链路收口",
-            status: "active",
-            tokenBudget: null,
-          },
-        },
-        {
-          sessionId: "thread-compact",
-          run: () => fireEvent.click(view.getByRole("button", { name: "压缩 Codex 上下文" })),
-          workflow: { type: "codex_compact" },
-        },
-        {
-          sessionId: "thread-memory",
-          run: () => clickCodexNativeMenuItem(view, "启用 Memory"),
-          workflow: { type: "codex_memory_mode", mode: "enabled" },
-        },
-        {
-          sessionId: "thread-memory-reset",
-          run: () => clickCodexNativeMenuItem(view, /重置 Memory/),
-          workflow: { type: "codex_memory_reset" },
-        },
-        {
-          sessionId: "thread-fork",
-          run: () => clickCodexNativeMenuItem(view, "Fork 当前 Thread"),
-          workflow: { type: "codex_thread_fork", excludeTurns: true },
-        },
-        {
-          sessionId: "thread-config",
-          run: () => clickCodexNativeMenuItem(view, "读取配置诊断"),
-          workflow: { type: "codex_config_diagnostics", includeLayers: true },
-        },
-      ];
-
-      for (const item of workflows) {
-        await item.run();
-        await expectLatestChatSend({ content: "", workflow: item.workflow });
-        finishCodexWorkflow(item.sessionId);
-      }
-    } finally {
-      promptSpy.mockRestore();
-      confirmSpy.mockRestore();
-    }
+    await fireEvent.click(view.getByRole("button", { name: "压缩 Codex 上下文" }));
+    await expectLatestChatSend({
+      content: "",
+      workflow: { type: "codex_compact" },
+    });
   });
 
 

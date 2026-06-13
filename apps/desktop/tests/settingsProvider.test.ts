@@ -303,53 +303,22 @@ describe("Settings provider switch", () => {
     expect(input.value).toBe("Ctrl+Alt+P");
   });
 
-  it("Codex profile settings 保存受控 permissions 与 workspace roots", async () => {
+  it("Agent 设置页不再显示 Codex profile/model/reasoning/workspace roots/permission 配置", async () => {
     const view = await renderSettings("/settings?tab=agent");
 
-    await fireEvent.click(view.getByRole("radio", { name: "高" }));
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "agent_interaction_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"reasoningEffort\":\"high\"")
-        ),
-      ).toBe(true);
-    });
-    await fireEvent.click(view.getByRole("radio", { name: "工作区" }));
-    await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "agent_interaction_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"permissions\":{\"profile\":\"workspaceWrite\"}")
-        ),
-      ).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings")).toBe(true);
     });
 
-    const roots = view.container.querySelector(".ui-textarea") as HTMLTextAreaElement;
-    await fireEvent.update(roots, "C:/repo\nC:/repo\nD:/shared\n");
-    await fireEvent.blur(roots);
-
-    await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "agent_interaction_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"runtimeWorkspaceRoots\":[\"C:/repo\",\"D:/shared\"]")
-        ),
-      ).toBe(true);
-    });
-
+    expect(view.queryByText("Codex 配置档案")).not.toBeInTheDocument();
+    expect(view.queryByText("Codex 模型")).not.toBeInTheDocument();
+    expect(view.queryByText("推理强度")).not.toBeInTheDocument();
+    expect(view.queryByText("运行时工作区根目录")).not.toBeInTheDocument();
+    expect(view.queryByText("Codex 权限")).not.toBeInTheDocument();
     expect(view.queryByText("Codex 高级字段")).not.toBeInTheDocument();
     expect(view.queryByText("扩展历史")).not.toBeInTheDocument();
     expect(view.queryByText("命令执行权限")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".ui-textarea")).toBeNull();
   });
 
   it("Agent 设置页可以切换运行时通道", async () => {

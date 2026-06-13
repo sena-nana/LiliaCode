@@ -10,7 +10,7 @@ mod agent_event_sink_tests {
     use crate::agent_timeline::AgentTimelineEventInput;
     use crate::chat::commands::{
         agent_interaction_response_payload, attach_stdin_delivery,
-        composer_permission_update_payload, control_event_attributes, plan_reset_session,
+        composer_runtime_settings_update_payload, control_event_attributes, plan_reset_session,
         record_mutsuki_core_control_event, stage_mutsuki_core_interrupt_turn,
         stage_mutsuki_core_turn_stop, MutsukiCoreTurnStopKind, ResetSessionPlan,
     };
@@ -207,20 +207,21 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn composer_permission_update_payload_requires_existing_changed_permission() {
+    fn composer_runtime_settings_update_payload_requires_existing_changed_settings() {
         let mut previous = default_composer("task-1");
         previous.permission = "ask".to_string();
+        previous.model = "gpt-5".to_string();
         let mut next = previous.clone();
 
-        assert_eq!(composer_permission_update_payload(None, &next), None);
+        assert_eq!(composer_runtime_settings_update_payload(None, &next), None);
         assert_eq!(
-            composer_permission_update_payload(Some(&previous), &next),
+            composer_runtime_settings_update_payload(Some(&previous), &next),
             None
         );
 
         next.permission = "readonly".to_string();
         assert_eq!(
-            composer_permission_update_payload(Some(&previous), &next),
+            composer_runtime_settings_update_payload(Some(&previous), &next),
             Some(json!({
                 "type": "settings_update",
                 "permission": "readonly",
@@ -229,8 +230,29 @@ mod agent_event_sink_tests {
 
         next.permission = "invalid".to_string();
         assert_eq!(
-            composer_permission_update_payload(Some(&previous), &next),
+            composer_runtime_settings_update_payload(Some(&previous), &next),
             None
+        );
+
+        next.permission = previous.permission.clone();
+        next.model = "gpt-5.1".to_string();
+        assert_eq!(
+            composer_runtime_settings_update_payload(Some(&previous), &next),
+            Some(json!({
+                "type": "settings_update",
+                "model": "gpt-5.1",
+            }))
+        );
+
+        next.permission = "full".to_string();
+        next.model = "  gpt-5.2  ".to_string();
+        assert_eq!(
+            composer_runtime_settings_update_payload(Some(&previous), &next),
+            Some(json!({
+                "type": "settings_update",
+                "permission": "full",
+                "model": "gpt-5.2",
+            }))
         );
     }
 

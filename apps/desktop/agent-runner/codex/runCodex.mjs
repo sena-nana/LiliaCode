@@ -192,26 +192,40 @@ export async function updateCodexThreadSettings(server, threadId, cmd, protocol)
   }
 }
 
-export function applyCodexRuntimePermission(server, threadId, cmd, ctx, permission, protocol) {
-  const normalized = normalizeRuntimePermission(permission);
-  if (!normalized) return null;
-  cmd.permission = normalized;
-  ctx.executionPermission = normalized;
+export function applyCodexRuntimeSettings(server, threadId, cmd, ctx, update, protocol) {
+  const normalizedPermission = normalizeRuntimePermission(update?.permission);
+  const model = stringOrNull(update?.model)?.trim() || null;
+  if (!normalizedPermission && !model) return null;
+  if (normalizedPermission) {
+    cmd.permission = normalizedPermission;
+    ctx.executionPermission = normalizedPermission;
+  }
+  if (model) {
+    cmd.model = model;
+    cmd.codexSettings = {
+      ...(isRecord(cmd.codexSettings) ? cmd.codexSettings : {}),
+      model,
+    };
+  }
   const pending = updateCodexThreadSettings(server, threadId, cmd, protocol)
     .then((result) => {
       if (!result.ok) return result;
+      const parts = [];
+      if (normalizedPermission) parts.push(`权限已切换为 ${normalizedPermission}`);
+      if (model) parts.push(`模型已切换为 ${model}`);
       protocol.emitTimeline({
         kind: "diagnostic",
         status: "info",
-        title: "Codex permission updated",
-        summary: `权限已切换为 ${normalized}`,
+        title: "Codex settings updated",
+        summary: parts.join("，"),
         payload: {
           backend: "codex",
           subkind: "settings",
-          permission: normalized,
+          permission: normalizedPermission,
+          model,
           fallback: false,
         },
-        sourceId: "codex:settings:permission",
+        sourceId: "codex:settings:runtime",
       });
       return result;
     });
@@ -1583,12 +1597,12 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ctx.withCodexElicitation = (kind, fn) =>
       withCodexElicitation(server, threadId, ctx, kind, fn);
     context.interactions?.handleSettingsUpdate?.((update) => {
-      applyCodexRuntimePermission(
+      applyCodexRuntimeSettings(
         server,
         threadId,
         cmd,
         ctx,
-        update?.permission,
+        update,
         context.protocol,
       );
     });

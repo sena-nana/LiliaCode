@@ -2,7 +2,6 @@ import type { ComputedRef, Ref } from "vue";
 import type {
   ChatAttachment,
   ChatWorkflow,
-  CodexMemoryMode,
   CodexReviewTarget,
 } from "@lilia/contracts";
 import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
@@ -79,28 +78,6 @@ export function useCodexWorkflowActions(options: {
     await sendCodexWorkflow({ type: "codex_compact" });
   }
 
-  async function onSetCodexMemoryMode(mode: CodexMemoryMode) {
-    await sendCodexWorkflow({ type: "codex_memory_mode", mode });
-  }
-
-  async function onResetCodexMemory() {
-    await sendCodexWorkflow({ type: "codex_memory_reset" });
-  }
-
-  async function onForkCodexThread() {
-    await sendCodexWorkflow({
-      type: "codex_thread_fork",
-      excludeTurns: true,
-    });
-  }
-
-  async function onReadCodexConfigDiagnostics() {
-    await sendCodexWorkflow({
-      type: "codex_config_diagnostics",
-      includeLayers: true,
-    });
-  }
-
   async function onStartCodexBatchApply(input: CodexBatchApplyInput) {
     const sourceSummary = input.sourceSummary.trim();
     if (!sourceSummary) return;
@@ -142,10 +119,6 @@ export function useCodexWorkflowActions(options: {
     onStartCodexReview,
     onStartCodexFixSuggestion,
     onStartCodexCompact,
-    onSetCodexMemoryMode,
-    onResetCodexMemory,
-    onForkCodexThread,
-    onReadCodexConfigDiagnostics,
     onStartCodexBatchApply,
     onSetCodexGoal,
     onRefreshCodexGoal,

@@ -56,14 +56,10 @@ function renderSurface() {
           },
         }),
         ChatComposer: defineComponent({
-          emits: ["set-codex-goal", "start-codex-fix-suggestion"],
+          emits: ["start-codex-fix-suggestion"],
           setup(_, { emit }) {
             return () =>
               h("div", [
-                h("button", {
-                  type: "button",
-                  onClick: () => emit("set-codex-goal", "新的 Codex 目标"),
-                }, "stub set goal"),
                 h("button", {
                   type: "button",
                   onClick: () => emit(
@@ -76,7 +72,16 @@ function renderSurface() {
               ]);
           },
         }),
-        TodoFloat: true,
+        TodoFloat: defineComponent({
+          emits: ["set-codex-goal"],
+          setup(_, { emit }) {
+            return () =>
+              h("button", {
+                type: "button",
+                onClick: () => emit("set-codex-goal", "新的 Codex 目标"),
+              }, "stub set goal");
+          },
+        }),
         ChatSidebarHost: true,
         ImageViewer: true,
       },
@@ -85,7 +90,7 @@ function renderSurface() {
 }
 
 describe("TaskDetailChatSurface", () => {
-  it("forwards Codex goal setting events from the composer", async () => {
+  it("forwards Codex goal setting events from TodoFloat", async () => {
     const view = renderSurface();
 
     await fireEvent.click(view.getByRole("button", { name: "stub set goal" }));
