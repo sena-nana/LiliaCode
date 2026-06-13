@@ -24,19 +24,13 @@ import type {
   ChatComposerState,
   ChatRuntimeSnapshot,
   ChatWorkflow,
-  ClaudeSessionAttachInput,
-  ClaudeSessionAttachResult,
-  ClaudeSessionPreviewInput,
-  ClaudeSessionPreview,
-  ClaudeSessionSearchInput,
-  ClaudeSessionSearchResult,
-  CodexThreadAttachInput,
-  CodexThreadAttachResult,
-  CodexThreadPreviewInput,
-  CodexThreadPreview,
-  CodexThreadRuntimeState,
-  CodexThreadSearchInput,
-  CodexThreadSearchResult,
+  HistoryImportAttachInput,
+  HistoryImportAttachResult,
+  HistoryImportPreviewInput,
+  HistoryImportPreview,
+  HistoryImportRuntimeState,
+  HistoryImportSearchInput,
+  HistoryImportSearchResult,
   ChatInterruptResult,
   AgentTimelineEvent,
   ChatSendResult,
@@ -79,19 +73,13 @@ export type {
   ChatSlashCommandSearchResult,
   ChatWorkflow,
   ChatRuntimeSnapshot,
-  ClaudeSessionAttachInput,
-  ClaudeSessionAttachResult,
-  ClaudeSessionPreviewInput,
-  ClaudeSessionPreview,
-  ClaudeSessionSearchInput,
-  ClaudeSessionSearchResult,
-  CodexThreadAttachInput,
-  CodexThreadAttachResult,
-  CodexThreadPreviewInput,
-  CodexThreadPreview,
-  CodexThreadRuntimeState,
-  CodexThreadSearchInput,
-  CodexThreadSearchResult,
+  HistoryImportAttachInput,
+  HistoryImportAttachResult,
+  HistoryImportPreviewInput,
+  HistoryImportPreview,
+  HistoryImportRuntimeState,
+  HistoryImportSearchInput,
+  HistoryImportSearchResult,
   ConnectionMode,
   BackendEnvStatus,
   CCSwitchConfig,
@@ -132,46 +120,28 @@ export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]>
   return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
 }
 
-export function searchCodexThreads(
-  input: CodexThreadSearchInput,
-): Promise<CodexThreadSearchResult> {
-  return invoke<CodexThreadSearchResult>("codex_thread_search", { input });
+export function searchHistoryImports(
+  input: HistoryImportSearchInput,
+): Promise<HistoryImportSearchResult> {
+  return invoke<HistoryImportSearchResult>("history_import_search", { input });
 }
 
-export function previewCodexThread(input: CodexThreadPreviewInput): Promise<CodexThreadPreview> {
-  return invoke<CodexThreadPreview>("codex_thread_preview", { input });
+export function previewHistoryImport(input: HistoryImportPreviewInput): Promise<HistoryImportPreview> {
+  return invoke<HistoryImportPreview>("history_import_preview", { input });
 }
 
-export function attachCodexThread(
-  input: CodexThreadAttachInput,
-): Promise<CodexThreadAttachResult> {
-  return invoke<CodexThreadAttachResult>("codex_thread_attach", { input });
+export function attachHistoryImport(
+  input: HistoryImportAttachInput,
+): Promise<HistoryImportAttachResult> {
+  return invoke<HistoryImportAttachResult>("history_import_attach", { input });
 }
 
-export function listCodexThreadRuntimeStates(): Promise<CodexThreadRuntimeState[]> {
-  return invoke<CodexThreadRuntimeState[]>("codex_thread_runtime_states");
+export function listHistoryImportRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
+  return invoke<HistoryImportRuntimeState[]>("history_import_runtime_states");
 }
 
-export function cleanCodexThreadBackgroundTerminals(threadId: string): Promise<void> {
-  return invoke<void>("codex_thread_clean_background_terminals", { threadId });
-}
-
-export function searchClaudeSessions(
-  input: ClaudeSessionSearchInput,
-): Promise<ClaudeSessionSearchResult> {
-  return invoke<ClaudeSessionSearchResult>("claude_session_search", { input });
-}
-
-export function previewClaudeSession(
-  input: ClaudeSessionPreviewInput,
-): Promise<ClaudeSessionPreview> {
-  return invoke<ClaudeSessionPreview>("claude_session_preview", { input });
-}
-
-export function attachClaudeSession(
-  input: ClaudeSessionAttachInput,
-): Promise<ClaudeSessionAttachResult> {
-  return invoke<ClaudeSessionAttachResult>("claude_session_attach", { input });
+export function cleanHistoryImportBackgroundTerminals(itemId: string): Promise<void> {
+  return invoke<void>("history_import_clean_background_terminals", { itemId });
 }
 
 /**

@@ -1,11 +1,12 @@
 pub(crate) mod bulk;
 pub(crate) mod preview;
 mod types;
-mod utility;
+pub(crate) mod utility;
 
 pub use types::{
     CodexThreadAttachInput, CodexThreadAttachResult, CodexThreadPreview, CodexThreadPreviewInput,
-    CodexThreadRuntimeState, CodexThreadSearchInput, CodexThreadSearchResult, CodexThreadSummary,
+    CodexThreadPreviewMessage, CodexThreadRuntimeState, CodexThreadSearchInput,
+    CodexThreadSearchResult, CodexThreadSummary,
 };
 
 use rusqlite::{params, OptionalExtension};
@@ -28,17 +29,7 @@ use self::bulk::persist_history_events_batch;
 use self::preview::preview_events_from_inputs;
 use self::utility::run_codex_history_utility;
 
-#[tauri::command]
-pub async fn codex_thread_search(
-    app: AppHandle,
-    input: CodexThreadSearchInput,
-) -> Result<CodexThreadSearchResult, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_search_blocking(app, input))
-        .await
-        .map_err(|err| format!("Codex history search 任务执行失败：{err}"))?
-}
-
-fn codex_thread_search_blocking(
+pub(crate) fn codex_thread_search_blocking(
     app: AppHandle,
     input: CodexThreadSearchInput,
 ) -> Result<CodexThreadSearchResult, String> {
@@ -55,19 +46,7 @@ fn codex_thread_search_blocking(
     })
 }
 
-#[tauri::command]
-pub fn codex_thread_runtime_states(
-    app: AppHandle,
-    chat_store: tauri::State<'_, ChatStore>,
-) -> Result<Vec<CodexThreadRuntimeState>, String> {
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return Ok(Vec::new());
-    };
-    let conn = store.conn()?;
-    query_codex_thread_runtime_states(&conn, &chat_store)
-}
-
-fn query_codex_thread_runtime_states(
+pub(crate) fn query_codex_thread_runtime_states(
     conn: &rusqlite::Connection,
     chat_store: &ChatStore,
 ) -> Result<Vec<CodexThreadRuntimeState>, String> {
@@ -136,7 +115,9 @@ fn query_codex_thread_runtime_states(
     Ok(out)
 }
 
-fn clean_background_terminals_payload(thread_id: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn clean_background_terminals_payload(
+    thread_id: &str,
+) -> Result<serde_json::Value, String> {
     let thread_id = thread_id.trim();
     if thread_id.is_empty() {
         return Err("Codex threadId 不能为空".to_string());
@@ -145,6 +126,14 @@ fn clean_background_terminals_payload(thread_id: &str) -> Result<serde_json::Val
         "action": "cleanBackgroundTerminals",
         "threadId": thread_id,
     }))
+}
+
+pub(crate) fn clean_codex_thread_background_terminals_blocking(
+    app: &AppHandle,
+    thread_id: &str,
+) -> Result<(), String> {
+    let payload = clean_background_terminals_payload(thread_id)?;
+    run_codex_history_utility(app, payload).map(|_| ())
 }
 
 pub(crate) fn archive_thread_payload(thread_id: &str) -> Result<serde_json::Value, String> {
@@ -201,19 +190,6 @@ pub(crate) fn sync_thread_title_blocking<R: Runtime>(
     result
 }
 
-#[tauri::command]
-pub async fn codex_thread_clean_background_terminals(
-    app: AppHandle,
-    thread_id: String,
-) -> Result<(), String> {
-    let payload = clean_background_terminals_payload(&thread_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        run_codex_history_utility(&app, payload).map(|_| ())
-    })
-    .await
-    .map_err(|err| format!("Codex thread clean 任务执行失败：{err}"))?
-}
-
 pub(crate) fn sync_thread_archive_blocking<R: Runtime>(
     app: &AppHandle<R>,
     thread_id: &str,
@@ -260,17 +236,7 @@ where
     }
 }
 
-#[tauri::command]
-pub async fn codex_thread_preview(
-    app: AppHandle,
-    input: CodexThreadPreviewInput,
-) -> Result<CodexThreadPreview, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_preview_blocking(app, input))
-        .await
-        .map_err(|err| format!("Codex history preview 任务执行失败：{err}"))?
-}
-
-fn codex_thread_preview_blocking(
+pub(crate) fn codex_thread_preview_blocking(
     app: AppHandle,
     input: CodexThreadPreviewInput,
 ) -> Result<CodexThreadPreview, String> {
@@ -573,17 +539,7 @@ fn spawn_codex_history_sync(app: AppHandle, task_id: String, thread_id: String) 
     });
 }
 
-#[tauri::command]
-pub async fn codex_thread_attach(
-    app: AppHandle,
-    input: CodexThreadAttachInput,
-) -> Result<CodexThreadAttachResult, String> {
-    tauri::async_runtime::spawn_blocking(move || codex_thread_attach_blocking(app, input))
-        .await
-        .map_err(|err| format!("Codex history attach 任务执行失败：{err}"))?
-}
-
-fn codex_thread_attach_blocking(
+pub(crate) fn codex_thread_attach_blocking(
     app: AppHandle,
     input: CodexThreadAttachInput,
 ) -> Result<CodexThreadAttachResult, String> {
