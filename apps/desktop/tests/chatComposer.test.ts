@@ -702,7 +702,7 @@ describe("ChatComposer", () => {
     await fireEvent.click(reviewButton);
     await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
 
-    expect(view.emitted("start-codex-review")?.[0]).toEqual([
+    expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "",
       [],
       { type: "uncommittedChanges" },
@@ -721,7 +721,7 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
     await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
 
-    expect(view.emitted("start-codex-review")?.[0]).toEqual([
+    expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "重点看权限边界",
       [],
       { type: "uncommittedChanges" },
@@ -744,11 +744,11 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
     await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
 
-    expect(view.emitted("start-codex-review")?.[0]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-review")?.[0]?.[2]).toEqual({
       type: "baseBranch",
       branch: "main",
     });
-    expect(view.emitted("start-codex-review")?.[1]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-review")?.[1]?.[2]).toEqual({
       type: "commit",
       sha: "abc123",
     });
@@ -767,7 +767,7 @@ describe("ChatComposer", () => {
     await fireEvent.click(fixButton);
     await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
 
-    expect(view.emitted("start-codex-fix-suggestion")?.[0]).toEqual([
+    expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "",
       [],
       { type: "uncommittedChanges" },
@@ -786,7 +786,7 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
     await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
 
-    expect(view.emitted("start-codex-fix-suggestion")?.[0]).toEqual([
+    expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
       [],
       { type: "uncommittedChanges" },
@@ -809,11 +809,11 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
     await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
 
-    expect(view.emitted("start-codex-fix-suggestion")?.[0]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-fix-suggestion")?.[0]?.[2]).toEqual({
       type: "baseBranch",
       branch: "main",
     });
-    expect(view.emitted("start-codex-fix-suggestion")?.[1]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-fix-suggestion")?.[1]?.[2]).toEqual({
       type: "commit",
       sha: "abc123",
     });
@@ -869,7 +869,7 @@ describe("ChatComposer", () => {
 
     expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
     expect(view.queryByRole("menuitem", { name: /未提交改动/ })).toBeNull();
-    expect(view.emitted("start-codex-review")).toBeUndefined();
+    expect(view.emitted("start-lilia-review")).toBeUndefined();
   });
 
   it("阻塞 pending 交互时隐藏修复建议入口", async () => {
@@ -882,7 +882,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
-    expect(view.emitted("start-codex-fix-suggestion")).toBeUndefined();
+    expect(view.emitted("start-lilia-fix-suggestion")).toBeUndefined();
   });
 
   it("Codex 后端可从工具栏发起上下文压缩", async () => {
@@ -893,11 +893,11 @@ describe("ChatComposer", () => {
       },
     });
 
-    const compactButton = view.getByRole("button", { name: "压缩 Codex 上下文" });
+    const compactButton = view.getByRole("button", { name: "压缩上下文" });
     expect(compactButton).not.toBeDisabled();
     await fireEvent.click(compactButton);
 
-    expect(view.emitted("start-codex-compact")?.length).toBe(1);
+    expect(view.emitted("start-lilia-compact")?.length).toBe(1);
   });
 
   it("Claude 和 Codex 后端可从同一工具栏入口分叉当前会话", async () => {
@@ -931,7 +931,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    const openButton = view.getByRole("button", { name: "打开 Codex IAB" });
+    const openButton = view.getByRole("button", { name: "打开 Lilia IAB" });
     const submitButton = view.getByRole("button", { name: "回送 IAB 截图" });
     expect(openButton).not.toBeDisabled();
     expect(submitButton).not.toBeDisabled();
@@ -939,8 +939,8 @@ describe("ChatComposer", () => {
     await fireEvent.click(openButton);
     await fireEvent.click(submitButton);
 
-    expect(view.emitted("open-codex-iab")?.length).toBe(1);
-    expect(view.emitted("submit-codex-iab")?.length).toBe(1);
+    expect(view.emitted("open-lilia-iab")?.length).toBe(1);
+    expect(view.emitted("submit-lilia-iab")?.length).toBe(1);
   });
 
   it("非 Codex 隐藏 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
@@ -951,7 +951,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.queryByRole("button", { name: "打开 Codex IAB" })).toBeNull();
+    expect(view.queryByRole("button", { name: "打开 Lilia IAB" })).toBeNull();
     expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
 
     await view.rerender({
@@ -960,7 +960,7 @@ describe("ChatComposer", () => {
       sending: true,
     });
 
-    expect(view.getByRole("button", { name: "打开 Codex IAB" })).not.toBeDisabled();
+    expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
     expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
   });
 
@@ -972,14 +972,14 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.queryByRole("button", { name: "压缩 Codex 上下文" })).toBeNull();
+    expect(view.queryByRole("button", { name: "压缩上下文" })).toBeNull();
 
     await view.rerender({
       state: codexState,
       attachments: [],
       sending: true,
     });
-    expect(view.getByRole("button", { name: "压缩 Codex 上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
 
     await view.rerender({
       state: codexState,
@@ -987,7 +987,7 @@ describe("ChatComposer", () => {
       sending: false,
       compactDisabled: true,
     });
-    expect(view.getByRole("button", { name: "压缩 Codex 上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
   });
 
   it("Codex 后端不再从工具栏清理后台终端", async () => {

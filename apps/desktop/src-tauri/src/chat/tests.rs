@@ -590,17 +590,17 @@ mod agent_event_sink_tests {
     #[test]
     fn empty_codex_workflows_do_not_persist_user_message() {
         let workflows = vec![
-            ChatWorkflow::CodexReview {
-                target: CodexReviewTarget::UncommittedChanges,
+            ChatWorkflow::LiliaReview {
+                target: LiliaReviewTarget::UncommittedChanges,
                 instructions: None,
                 delivery: Some("inline".to_string()),
             },
-            ChatWorkflow::CodexFixSuggestion {
-                target: CodexReviewTarget::UncommittedChanges,
+            ChatWorkflow::LiliaFixSuggestion {
+                target: LiliaReviewTarget::UncommittedChanges,
                 instructions: None,
                 mode: Some("suggest".to_string()),
             },
-            ChatWorkflow::CodexBatchApply {
+            ChatWorkflow::LiliaBatchApply {
                 source_turn_id: "turn-source".to_string(),
                 source_kind: "fix_suggestion".to_string(),
                 source_summary: "建议修复权限边界".to_string(),
@@ -612,7 +612,7 @@ mod agent_event_sink_tests {
                 status: Some("active".to_string()),
                 token_budget: None,
             },
-            ChatWorkflow::CodexCompact,
+            ChatWorkflow::LiliaCompact,
             ChatWorkflow::CodexBackgroundTerminalsClean,
             ChatWorkflow::CodexMemoryMode {
                 mode: "enabled".to_string(),
@@ -660,29 +660,29 @@ mod agent_event_sink_tests {
         assert!(goal_json.get("token_budget").is_none());
 
         let fix = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "codex_fix_suggestion",
+            "type": "lilia_fix_suggestion",
             "target": { "type": "baseBranch", "branch": "main" },
             "instructions": "只给建议",
             "mode": "suggest",
         }))
         .unwrap();
-        let ChatWorkflow::CodexFixSuggestion { mode, .. } = &fix else {
+        let ChatWorkflow::LiliaFixSuggestion { mode, .. } = &fix else {
             panic!("unexpected workflow: {fix:?}");
         };
         assert_eq!(mode.as_deref(), Some("suggest"));
         let fix_json = serde_json::to_value(&fix).unwrap();
-        assert_eq!(fix_json["type"], json!("codex_fix_suggestion"));
+        assert_eq!(fix_json["type"], json!("lilia_fix_suggestion"));
         assert_eq!(fix_json["target"]["branch"], json!("main"));
 
         let batch_apply = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "codex_batch_apply",
+            "type": "lilia_batch_apply",
             "sourceTurnId": "turn-source",
             "sourceKind": "fix_suggestion",
             "sourceSummary": "建议修复权限边界",
             "instructions": "应用最小改动",
         }))
         .unwrap();
-        let ChatWorkflow::CodexBatchApply {
+        let ChatWorkflow::LiliaBatchApply {
             source_turn_id,
             source_kind,
             source_summary,
@@ -826,8 +826,8 @@ mod agent_event_sink_tests {
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
-        let workflow = ChatWorkflow::CodexFixSuggestion {
-            target: CodexReviewTarget::UncommittedChanges,
+        let workflow = ChatWorkflow::LiliaFixSuggestion {
+            target: LiliaReviewTarget::UncommittedChanges,
             instructions: Some("重点看全链路".to_string()),
             mode: Some("suggest".to_string()),
         };
@@ -849,7 +849,7 @@ mod agent_event_sink_tests {
         assert_eq!(payload["resumeSessionId"], json!("thread-1"));
         assert_eq!(payload["planMode"], json!(true));
         assert_eq!(payload["permission"], json!("ask"));
-        assert_eq!(payload["workflow"]["type"], json!("codex_fix_suggestion"));
+        assert_eq!(payload["workflow"]["type"], json!("lilia_fix_suggestion"));
         assert_eq!(payload["workflow"]["mode"], json!("suggest"));
         assert_eq!(payload["workflow"]["instructions"], json!("重点看全链路"));
         assert_eq!(payload["extensions"]["mcpServers"], json!([]));
@@ -857,7 +857,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn runner_stdin_payload_keeps_codex_batch_apply_workflow() {
+    fn runner_stdin_payload_keeps_lilia_batch_apply_workflow() {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -866,7 +866,7 @@ mod agent_event_sink_tests {
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
-        let workflow = ChatWorkflow::CodexBatchApply {
+        let workflow = ChatWorkflow::LiliaBatchApply {
             source_turn_id: "turn-source".to_string(),
             source_kind: "fix_suggestion".to_string(),
             source_summary: "建议修复权限边界".to_string(),
@@ -886,7 +886,7 @@ mod agent_event_sink_tests {
 
         assert_eq!(payload["backend"], json!("codex"));
         assert_eq!(payload["prompt"], json!(""));
-        assert_eq!(payload["workflow"]["type"], json!("codex_batch_apply"));
+        assert_eq!(payload["workflow"]["type"], json!("lilia_batch_apply"));
         assert_eq!(payload["workflow"]["sourceTurnId"], json!("turn-source"));
         assert_eq!(payload["workflow"]["sourceKind"], json!("fix_suggestion"));
         assert_eq!(

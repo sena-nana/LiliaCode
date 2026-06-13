@@ -245,7 +245,7 @@ describe("chat scheduler", () => {
     });
     const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
     expect(send?.[1]).toMatchObject({
-      content: expect.stringContaining("Codex IAB 页面交互结果"),
+      content: expect.stringContaining("Lilia IAB 页面交互结果"),
       attachments: [expect.objectContaining({
         name: "IAB 截图.png",
         path: expect.stringContaining("iab-snapshots"),

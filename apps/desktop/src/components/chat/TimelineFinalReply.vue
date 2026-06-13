@@ -3,17 +3,17 @@ import { computed } from "vue";
 import { WandSparkles } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import MarkdownBlock from "./MarkdownBlock.vue";
-import type { CodexBatchApplyInput } from "./codexBatchApply";
+import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { readTimelinePayloadRecord, timelineFinalText } from "./timelineDisplay";
 
 const props = withDefaults(defineProps<{
   event: AgentTimelineEvent;
   streaming?: boolean;
-  canStartCodexBatchApply?: boolean;
+  canStartLiliaBatchApply?: boolean;
 }>(), {
   streaming: false,
-  canStartCodexBatchApply: false,
+  canStartLiliaBatchApply: false,
 });
 
 const content = computed(() => timelineFinalText(props.event));
@@ -31,7 +31,7 @@ const sourceKind = computed(() => {
   return value === "review" || value === "fix_suggestion" ? value : null;
 });
 const canApplySuggestion = computed(() =>
-  props.canStartCodexBatchApply &&
+  props.canStartLiliaBatchApply &&
   props.event.status === "success" &&
   sourceKind.value !== null &&
   hasContent.value &&
@@ -41,12 +41,12 @@ const canApplySuggestion = computed(() =>
 
 const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
-  "start-codex-batch-apply": [input: CodexBatchApplyInput];
+  "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
 }>();
 
-function startCodexBatchApply() {
+function startLiliaBatchApply() {
   if (!canApplySuggestion.value || !props.event.turnId || !sourceKind.value) return;
-  emit("start-codex-batch-apply", {
+  emit("start-lilia-batch-apply", {
     sourceTurnId: props.event.turnId,
     sourceKind: sourceKind.value,
     sourceSummary: content.value,
@@ -83,7 +83,7 @@ function startCodexBatchApply() {
         class="timeline-card--final-reply__action"
         title="应用建议"
         aria-label="应用建议"
-        @click="startCodexBatchApply"
+        @click="startLiliaBatchApply"
       >
         <WandSparkles :size="14" aria-hidden="true" />
         <span>应用建议</span>

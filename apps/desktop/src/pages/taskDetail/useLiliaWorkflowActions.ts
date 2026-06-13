@@ -3,12 +3,12 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatWorkflow,
-  CodexReviewTarget,
+  LiliaReviewTarget,
 } from "@lilia/contracts";
-import type { CodexBatchApplyInput } from "../../components/chat/codexBatchApply";
+import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import type { PendingAgentAction } from "../../composables/usePendingAgentActions";
 
-export function useCodexWorkflowActions(options: {
+export function useLiliaWorkflowActions(options: {
   hasContext: ComputedRef<boolean>;
   composer: Ref<ChatComposerState | null>;
   isTurnRunning: Ref<boolean>;
@@ -21,19 +21,19 @@ export function useCodexWorkflowActions(options: {
     workflow?: ChatWorkflow | null,
   ) => Promise<void>;
 }) {
-  function canStartCodexWorkflow() {
+  function canStartLiliaWorkflow() {
     return options.hasContext.value &&
       !options.isTurnRunning.value &&
       options.blockingPendingAgentActions.value.length === 0;
   }
 
-  async function sendHandledCodexWorkflow(
+  async function sendHandledLiliaWorkflow(
     content: string,
     outgoingAttachments: ChatAttachment[],
     workflow: ChatWorkflow,
     clearComposerAttachments = false,
   ) {
-    if (!canStartCodexWorkflow()) return;
+    if (!canStartLiliaWorkflow()) return;
     try {
       await options.sendAgentMessage(content, outgoingAttachments, undefined, workflow);
       if (clearComposerAttachments) options.attachments.value = [];
@@ -42,60 +42,70 @@ export function useCodexWorkflowActions(options: {
     }
   }
 
-  async function onStartCodexReview(
+  async function onStartLiliaReview(
     content: string,
     outgoingAttachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ) {
     const workflow: ChatWorkflow = {
-      type: "codex_review",
+      type: "lilia_review",
       target,
       delivery: "inline",
     };
     const instructions = content.trim();
     if (instructions) workflow.instructions = instructions;
-    await sendHandledCodexWorkflow(instructions, outgoingAttachments, workflow, true);
+    await sendLiliaWorkflow(workflow, instructions, outgoingAttachments, true);
   }
 
-  async function onStartCodexFixSuggestion(
+  async function onStartLiliaFixSuggestion(
     content: string,
     outgoingAttachments: ChatAttachment[],
-    target: CodexReviewTarget,
+    target: LiliaReviewTarget,
   ) {
     const workflow: ChatWorkflow = {
-      type: "codex_fix_suggestion",
+      type: "lilia_fix_suggestion",
       target,
       mode: "suggest",
     };
     const instructions = content.trim();
     if (instructions) workflow.instructions = instructions;
-    await sendHandledCodexWorkflow(instructions, outgoingAttachments, workflow, true);
+    await sendLiliaWorkflow(workflow, instructions, outgoingAttachments, true);
   }
 
-  async function sendCodexWorkflow(workflow: ChatWorkflow) {
-    await sendHandledCodexWorkflow("", [], workflow);
+  async function sendLiliaWorkflow(
+    workflow: ChatWorkflow,
+    content = "",
+    outgoingAttachments: ChatAttachment[] = [],
+    clearComposerAttachments = false,
+  ) {
+    await sendHandledLiliaWorkflow(
+      content,
+      outgoingAttachments,
+      workflow,
+      clearComposerAttachments,
+    );
   }
 
-  async function onStartCodexCompact() {
-    await sendCodexWorkflow({ type: "codex_compact" });
+  async function onStartLiliaCompact() {
+    await sendLiliaWorkflow({ type: "lilia_compact" });
   }
 
   async function onStartSessionFork() {
     const backend = options.composer.value?.backend;
     if (backend === "codex") {
-      await sendCodexWorkflow({ type: "codex_thread_fork", excludeTurns: true });
+      await sendLiliaWorkflow({ type: "codex_thread_fork", excludeTurns: true });
       return;
     }
     if (backend === "claude") {
-      await sendHandledCodexWorkflow("", [], { type: "claude_session_fork" });
+      await sendLiliaWorkflow({ type: "claude_session_fork" });
     }
   }
 
-  async function onStartCodexBatchApply(input: CodexBatchApplyInput) {
+  async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
     const sourceSummary = input.sourceSummary.trim();
     if (!sourceSummary) return;
-    await sendCodexWorkflow({
-      type: "codex_batch_apply",
+    await sendLiliaWorkflow({
+      type: "lilia_batch_apply",
       sourceTurnId: input.sourceTurnId,
       sourceKind: input.sourceKind,
       sourceSummary,
@@ -105,7 +115,7 @@ export function useCodexWorkflowActions(options: {
   async function onSetCodexGoal(objective: string) {
     const trimmed = objective.trim();
     if (!trimmed) return;
-    await sendCodexWorkflow({
+    await sendLiliaWorkflow({
       type: "codex_goal",
       action: "set",
       objective: trimmed,
@@ -115,25 +125,25 @@ export function useCodexWorkflowActions(options: {
   }
 
   async function onRefreshCodexGoal() {
-    await sendCodexWorkflow({
+    await sendLiliaWorkflow({
       type: "codex_goal",
       action: "refresh",
     });
   }
 
   async function onClearCodexGoal() {
-    await sendCodexWorkflow({
+    await sendLiliaWorkflow({
       type: "codex_goal",
       action: "clear",
     });
   }
 
   return {
-    onStartCodexReview,
-    onStartCodexFixSuggestion,
-    onStartCodexCompact,
+    onStartLiliaReview,
+    onStartLiliaFixSuggestion,
+    onStartLiliaCompact,
     onStartSessionFork,
-    onStartCodexBatchApply,
+    onStartLiliaBatchApply,
     onSetCodexGoal,
     onRefreshCodexGoal,
     onClearCodexGoal,

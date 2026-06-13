@@ -820,11 +820,11 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
 pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatWorkflow>) -> bool {
     !(matches!(
         workflow,
-        Some(ChatWorkflow::CodexReview { .. })
-            | Some(ChatWorkflow::CodexFixSuggestion { .. })
-            | Some(ChatWorkflow::CodexBatchApply { .. })
+        Some(ChatWorkflow::LiliaReview { .. })
+            | Some(ChatWorkflow::LiliaFixSuggestion { .. })
+            | Some(ChatWorkflow::LiliaBatchApply { .. })
             | Some(ChatWorkflow::CodexGoal { .. })
-            | Some(ChatWorkflow::CodexCompact)
+            | Some(ChatWorkflow::LiliaCompact)
             | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
             | Some(ChatWorkflow::CodexMemoryMode { .. })
             | Some(ChatWorkflow::CodexMemoryReset)

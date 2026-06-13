@@ -773,7 +773,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "重点看权限边界",
       workflow: {
-        type: "codex_review",
+        type: "lilia_review",
         target: { type: "uncommittedChanges" },
         instructions: "重点看权限边界",
         delivery: "inline",
@@ -789,7 +789,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "优先给最小修复",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
         instructions: "优先给最小修复",
         mode: "suggest",
@@ -829,7 +829,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "",
       workflow: {
-        type: "codex_batch_apply",
+        type: "lilia_batch_apply",
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -840,10 +840,10 @@ describe("chat AskUser prompt", () => {
   it("Codex compact 入口以 workflow 进入发送命令", async () => {
     const view = await renderCodexTaskDetail();
 
-    await fireEvent.click(view.getByRole("button", { name: "压缩 Codex 上下文" }));
+    await fireEvent.click(view.getByRole("button", { name: "压缩上下文" }));
     await expectLatestChatSend({
       content: "",
-      workflow: { type: "codex_compact" },
+      workflow: { type: "lilia_compact" },
     });
   });
 

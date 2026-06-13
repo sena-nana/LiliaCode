@@ -70,27 +70,27 @@ export interface ChatSendResult {
   turnId: string;
 }
 
-export type CodexReviewTarget =
+export type LiliaReviewTarget =
   | { type: "uncommittedChanges" }
   | { type: "baseBranch"; branch: string }
   | { type: "commit"; sha: string };
 
-export interface CodexReviewWorkflow {
-  type: "codex_review";
-  target: CodexReviewTarget;
+export interface LiliaReviewWorkflow {
+  type: "lilia_review";
+  target: LiliaReviewTarget;
   instructions?: string;
   delivery?: "inline" | "detached";
 }
 
-export interface CodexFixSuggestionWorkflow {
-  type: "codex_fix_suggestion";
-  target: CodexReviewTarget;
+export interface LiliaFixSuggestionWorkflow {
+  type: "lilia_fix_suggestion";
+  target: LiliaReviewTarget;
   instructions?: string;
   mode?: "suggest" | "apply";
 }
 
-export interface CodexBatchApplyWorkflow {
-  type: "codex_batch_apply";
+export interface LiliaBatchApplyWorkflow {
+  type: "lilia_batch_apply";
   sourceTurnId: string;
   sourceKind: "review" | "fix_suggestion";
   sourceSummary: string;
@@ -113,8 +113,8 @@ export interface CodexGoalWorkflow {
   tokenBudget?: number | null;
 }
 
-export interface CodexCompactWorkflow {
-  type: "codex_compact";
+export interface LiliaCompactWorkflow {
+  type: "lilia_compact";
 }
 
 export interface CodexBackgroundTerminalsCleanWorkflow {
@@ -170,11 +170,11 @@ export interface CodexThreadGoal {
 }
 
 export type ChatWorkflow =
-  | CodexReviewWorkflow
-  | CodexFixSuggestionWorkflow
-  | CodexBatchApplyWorkflow
+  | LiliaReviewWorkflow
+  | LiliaFixSuggestionWorkflow
+  | LiliaBatchApplyWorkflow
   | CodexGoalWorkflow
-  | CodexCompactWorkflow
+  | LiliaCompactWorkflow
   | CodexBackgroundTerminalsCleanWorkflow
   | CodexMemoryModeWorkflow
   | CodexMemoryResetWorkflow

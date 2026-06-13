@@ -247,11 +247,11 @@ export function saveClipboardText(input: { text: string }): Promise<ChatAttachme
   return invoke<ChatAttachment>("chat_save_clipboard_text", { input });
 }
 
-export function openCodexIab(taskId: string, url?: string | null): Promise<void> {
+export function openLiliaIab(taskId: string, url?: string | null): Promise<void> {
   return invoke<void>("codex_iab_open", { taskId, url: url ?? null });
 }
 
-export function submitCodexIab(
+export function submitLiliaIab(
   taskId: string,
   note?: string | null,
 ): Promise<CodexIabSubmitResult> {

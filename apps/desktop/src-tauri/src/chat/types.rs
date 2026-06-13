@@ -118,24 +118,24 @@ pub(crate) struct ChatSendResult {
     tag = "type"
 )]
 pub(crate) enum ChatWorkflow {
-    #[serde(rename = "codex_review")]
-    CodexReview {
-        target: CodexReviewTarget,
+    #[serde(rename = "lilia_review", alias = "codex_review")]
+    LiliaReview {
+        target: LiliaReviewTarget,
         #[serde(default)]
         instructions: Option<String>,
         #[serde(default)]
         delivery: Option<String>,
     },
-    #[serde(rename = "codex_fix_suggestion")]
-    CodexFixSuggestion {
-        target: CodexReviewTarget,
+    #[serde(rename = "lilia_fix_suggestion", alias = "codex_fix_suggestion")]
+    LiliaFixSuggestion {
+        target: LiliaReviewTarget,
         #[serde(default)]
         instructions: Option<String>,
         #[serde(default)]
         mode: Option<String>,
     },
-    #[serde(rename = "codex_batch_apply")]
-    CodexBatchApply {
+    #[serde(rename = "lilia_batch_apply", alias = "codex_batch_apply")]
+    LiliaBatchApply {
         source_turn_id: String,
         source_kind: String,
         source_summary: String,
@@ -152,8 +152,8 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         token_budget: Option<u64>,
     },
-    #[serde(rename = "codex_compact")]
-    CodexCompact,
+    #[serde(rename = "lilia_compact", alias = "codex_compact")]
+    LiliaCompact,
     #[serde(rename = "codex_background_terminals_clean")]
     CodexBackgroundTerminalsClean,
     #[serde(rename = "codex_memory_mode")]
@@ -185,7 +185,7 @@ pub(crate) enum ChatWorkflow {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
-pub(crate) enum CodexReviewTarget {
+pub(crate) enum LiliaReviewTarget {
     #[serde(rename = "uncommittedChanges")]
     UncommittedChanges,
     #[serde(rename = "baseBranch")]

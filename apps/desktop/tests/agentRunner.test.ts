@@ -156,7 +156,7 @@ describe("runner core", () => {
       backend: "codex",
       prompt: "",
       workflow: {
-        type: "codex_review",
+        type: "lilia_review",
         target: { type: "uncommittedChanges" },
       },
     }, {
@@ -175,7 +175,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-review",
       workflow: {
-        type: "codex_review",
+        type: "lilia_review",
         target: { type: "uncommittedChanges" },
       },
     });
@@ -187,7 +187,7 @@ describe("runner core", () => {
       backend: "codex",
       prompt: "",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -207,7 +207,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-fix",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -220,7 +220,7 @@ describe("runner core", () => {
       backend: "codex",
       prompt: "",
       workflow: {
-        type: "codex_batch_apply",
+        type: "lilia_batch_apply",
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -241,7 +241,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-batch",
       workflow: {
-        type: "codex_batch_apply",
+        type: "lilia_batch_apply",
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
       },
@@ -286,7 +286,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "codex",
       prompt: "",
-      workflow: { type: "codex_compact" },
+      workflow: { type: "lilia_compact" },
     }, {
       protocol,
       env: {},
@@ -302,7 +302,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "thread-compact",
-      workflow: { type: "codex_compact" },
+      workflow: { type: "lilia_compact" },
     });
   });
 
@@ -2124,7 +2124,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "codex_review",
+        type: "lilia_review",
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
@@ -2166,7 +2166,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
@@ -2221,7 +2221,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "full",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -2249,7 +2249,7 @@ describe("Codex app-server mapping", () => {
         runtimeWorkspaceRoots: ["C:/repo"],
       },
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -2355,7 +2355,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "codex_batch_apply",
+        type: "lilia_batch_apply",
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -2427,7 +2427,7 @@ describe("Codex app-server mapping", () => {
       prompt: "可以直接修",
       permission: "full",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "commit", sha: "abc123" },
         instructions: "可以直接修",
         mode: "apply",
@@ -2456,7 +2456,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
       },
       protocol,
@@ -2480,7 +2480,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "codex_fix_suggestion",
+        type: "lilia_fix_suggestion",
         target: { type: "baseBranch", branch: "main" },
       },
       protocol,
@@ -2524,7 +2524,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       planMode: false,
-      workflow: { type: "codex_compact" },
+      workflow: { type: "lilia_compact" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2569,7 +2569,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_compact" },
+      workflow: { type: "lilia_compact" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2940,7 +2940,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "codex_review",
+        type: "lilia_review",
         target: { type: "commit", sha: "abc123" },
       },
     }, { mcpServers: [], warnings: [] }, {

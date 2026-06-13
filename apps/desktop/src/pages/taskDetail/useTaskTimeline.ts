@@ -155,16 +155,18 @@ export function mergeTimelineEvents(
 export function mergeLoadedTimelineEvents(
   loaded: AgentTimelineEvent[],
   current: AgentTimelineEvent[],
+  preserveEventIds: Set<string> = new Set(),
 ): AgentTimelineEvent[] {
   const loadedKeys = new Set(
     loaded
       .filter(isUserMessageEvent)
       .map(userMessageIdentityKey),
   );
-  const optimisticEvents = current.filter((event) =>
-    isQueuedUserMessageEvent(event) && !loadedKeys.has(userMessageIdentityKey(event))
+  const preservedEvents = current.filter((event) =>
+    preserveEventIds.has(event.id) ||
+    (isQueuedUserMessageEvent(event) && !loadedKeys.has(userMessageIdentityKey(event)))
   );
-  return mergeTimelineEvents(loaded, optimisticEvents);
+  return mergeTimelineEvents(loaded, preservedEvents);
 }
 
 export function markFirstQueuedUserMessageSuccessful(
@@ -365,10 +367,14 @@ export function useTaskTimeline(options: {
     }
   }
 
-  function applyLoadedTimelineEvents(events: AgentTimelineEvent[]) {
+  function applyLoadedTimelineEvents(
+    events: AgentTimelineEvent[],
+    preserveEventIds: Set<string> = new Set(),
+  ) {
     persistedTimelineEvents.value = mergeLoadedTimelineEvents(
       events,
       persistedTimelineEvents.value,
+      preserveEventIds,
     );
   }
 

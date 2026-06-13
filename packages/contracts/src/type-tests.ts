@@ -13,7 +13,7 @@ import type {
   ChatWorkflow,
   CodexIabSnapshot,
   CodexIabSubmitResult,
-  CodexReviewTarget,
+  LiliaReviewTarget,
   CodexProfileSettings,
   ProjectRoadmap,
   SuggestionItem,
@@ -148,10 +148,10 @@ export type ChatMessageIncludesAttachmentsTypeTest = Assert<
   >
 >;
 
-export type CodexFixSuggestionWorkflowTypeTest = Assert<
+export type LiliaFixSuggestionWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "codex_fix_suggestion";
+      type: "lilia_fix_suggestion";
       target: { type: "baseBranch"; branch: "main" };
       instructions: "只给建议";
       mode: "suggest";
@@ -160,10 +160,10 @@ export type CodexFixSuggestionWorkflowTypeTest = Assert<
   >
 >;
 
-export type CodexBatchApplyWorkflowTypeTest = Assert<
+export type LiliaBatchApplyWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "codex_batch_apply";
+      type: "lilia_batch_apply";
       sourceTurnId: "turn-1";
       sourceKind: "fix_suggestion";
       sourceSummary: "建议修复权限边界";
@@ -221,15 +221,15 @@ export type SlashCommandWorkflowTypeTest = Assert<
   >
 >;
 
-export type CodexFixSuggestionTargetTypeTest = Assert<
-  Extends<{ type: "commit"; sha: "abc123" }, CodexReviewTarget>
+export type LiliaFixSuggestionTargetTypeTest = Assert<
+  Extends<{ type: "commit"; sha: "abc123" }, LiliaReviewTarget>
 >;
 
-export type CodexFixSuggestionRejectsInvalidTargetTypeTest = Assert<
+export type LiliaFixSuggestionRejectsInvalidTargetTypeTest = Assert<
   Extends<
     Extends<
       {
-        type: "codex_fix_suggestion";
+        type: "lilia_fix_suggestion";
         target: { type: "baseBranch" };
       },
       ChatWorkflow
