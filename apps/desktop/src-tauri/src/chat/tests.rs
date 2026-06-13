@@ -624,6 +624,12 @@ mod agent_event_sink_tests {
             ChatWorkflow::LiliaConfigDiagnostics {
                 include_layers: Some(true),
             },
+            ChatWorkflow::LiliaProviderSettings {
+                action: "update".to_string(),
+                common: None,
+                codex: None,
+                claude: None,
+            },
             ChatWorkflow::SlashCommand {
                 command_id: "native:help".to_string(),
                 source: "native".to_string(),
@@ -725,6 +731,54 @@ mod agent_event_sink_tests {
         let diagnostics_json = serde_json::to_value(&diagnostics).unwrap();
         assert_eq!(diagnostics_json["includeLayers"], json!(false));
         assert!(diagnostics_json.get("include_layers").is_none());
+
+        let provider_settings = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_provider_settings",
+            "action": "update",
+            "common": { "model": "gpt-5.5", "permission": "ask" },
+            "codex": {
+                "profile": "deep",
+                "reasoningEffort": "high",
+                "permissionProfile": "workspaceWrite",
+                "runtimeWorkspaceRoots": ["C:/repo"],
+                "persistExtendedHistory": true,
+            },
+            "claude": {
+                "allowedTools": ["Read"],
+                "disallowedTools": ["Bash"],
+                "additionalDirectories": ["D:/shared"],
+                "maxTurns": 4,
+                "maxBudgetUsd": 1.5,
+            },
+        }))
+        .unwrap();
+        let ChatWorkflow::LiliaProviderSettings {
+            common,
+            codex,
+            claude,
+            ..
+        } = &provider_settings
+        else {
+            panic!("unexpected workflow: {provider_settings:?}");
+        };
+        assert_eq!(common.as_ref().and_then(|value| value.model.as_deref()), Some("gpt-5.5"));
+        assert_eq!(
+            codex.as_ref().and_then(|value| value.reasoning_effort.as_deref()),
+            Some("high")
+        );
+        assert_eq!(
+            claude.as_ref().and_then(|value| value.additional_directories.as_ref()).unwrap(),
+            &vec!["D:/shared".to_string()]
+        );
+        let provider_settings_json = serde_json::to_value(&provider_settings).unwrap();
+        assert_eq!(provider_settings_json["type"], json!("lilia_provider_settings"));
+        assert_eq!(provider_settings_json["codex"]["reasoningEffort"], json!("high"));
+        assert_eq!(
+            provider_settings_json["codex"]["runtimeWorkspaceRoots"],
+            json!(["C:/repo"])
+        );
+        assert_eq!(provider_settings_json["claude"]["maxBudgetUsd"], json!(1.5));
+        assert!(provider_settings_json["codex"].get("reasoning_effort").is_none());
 
         let slash = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "slash_command",
@@ -884,6 +938,52 @@ mod agent_event_sink_tests {
             payload["workflow"]["sourceSummary"],
             json!("建议修复权限边界")
         );
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_lilia_provider_settings_workflow() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            plan_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let workflow = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_provider_settings",
+            "action": "update",
+            "common": { "model": "gpt-5.6", "permission": "readonly" },
+            "codex": {
+                "reasoningEffort": "high",
+                "runtimeWorkspaceRoots": ["C:/repo"],
+                "persistExtendedHistory": true
+            }
+        }))
+        .unwrap();
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "",
+            &[],
+            Some(&workflow),
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["prompt"], json!(""));
+        assert_eq!(payload["workflow"]["type"], json!("lilia_provider_settings"));
+        assert_eq!(payload["workflow"]["action"], json!("update"));
+        assert_eq!(payload["workflow"]["common"]["permission"], json!("readonly"));
+        assert_eq!(payload["workflow"]["codex"]["reasoningEffort"], json!("high"));
+        assert_eq!(
+            payload["workflow"]["codex"]["runtimeWorkspaceRoots"],
+            json!(["C:/repo"])
+        );
+        assert_eq!(payload["workflow"]["codex"]["persistExtendedHistory"], json!(true));
     }
 
     #[test]

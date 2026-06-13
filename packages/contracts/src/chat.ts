@@ -142,6 +142,35 @@ export interface LiliaConfigDiagnosticsWorkflow {
   includeLayers?: boolean;
 }
 
+export interface LiliaProviderSettingsCommon {
+  model?: string;
+  permission?: PermissionMode;
+}
+
+export interface LiliaProviderSettingsCodex {
+  profile?: string;
+  reasoningEffort?: string;
+  permissionProfile?: string;
+  runtimeWorkspaceRoots?: string[];
+  persistExtendedHistory?: boolean;
+}
+
+export interface LiliaProviderSettingsClaude {
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  additionalDirectories?: string[];
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+}
+
+export interface LiliaProviderSettingsWorkflow {
+  type: "lilia_provider_settings";
+  action: "diagnose" | "update";
+  common?: LiliaProviderSettingsCommon;
+  codex?: LiliaProviderSettingsCodex;
+  claude?: LiliaProviderSettingsClaude;
+}
+
 export interface AutomationRunWorkflow {
   type: "automation";
   automationRunId: string;
@@ -176,6 +205,7 @@ export type ChatWorkflow =
   | LiliaMemoryResetWorkflow
   | LiliaSessionForkWorkflow
   | LiliaConfigDiagnosticsWorkflow
+  | LiliaProviderSettingsWorkflow
   | AutomationRunWorkflow
   | ChatSlashCommandWorkflow;
 

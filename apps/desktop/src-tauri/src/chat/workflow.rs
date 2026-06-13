@@ -12,6 +12,7 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<&'static 
         ChatWorkflow::LiliaMemoryReset => Some("lilia_memory_reset"),
         ChatWorkflow::LiliaSessionFork { .. } => Some("lilia_session_fork"),
         ChatWorkflow::LiliaConfigDiagnostics { .. } => Some("lilia_config_diagnostics"),
+        ChatWorkflow::LiliaProviderSettings { .. } => Some("lilia_provider_settings"),
         ChatWorkflow::Automation { .. } => Some("automation"),
         ChatWorkflow::SlashCommand { .. } => Some("slash_command"),
     }
@@ -36,6 +37,7 @@ pub(crate) fn parse_workflow_kind(value: &str) -> Option<&'static str> {
         "lilia_memory_reset" => Some("lilia_memory_reset"),
         "lilia_session_fork" => Some("lilia_session_fork"),
         "lilia_config_diagnostics" => Some("lilia_config_diagnostics"),
+        "lilia_provider_settings" => Some("lilia_provider_settings"),
         "automation" => Some("automation"),
         "slash_command" => Some("slash_command"),
         _ => None,

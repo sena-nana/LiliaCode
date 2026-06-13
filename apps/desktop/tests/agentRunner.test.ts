@@ -337,6 +337,7 @@ describe("runner core", () => {
       { type: "lilia_memory_reset" },
       { type: "lilia_session_fork" },
       { type: "lilia_config_diagnostics" },
+      { type: "lilia_provider_settings", action: "diagnose" },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -1028,6 +1029,58 @@ describe("Claude helpers", () => {
     }))).rejects.toThrow("Lilia memory mode workflow missing a valid mode");
 
     expect(queryCalled).toBe(false);
+  });
+
+  it("Claude provider settings reports unsupported advanced fields without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      model: "claude-sonnet-4-6",
+      permission: "ask",
+      workflow: {
+        type: "lilia_provider_settings",
+        action: "update",
+        common: { model: "claude-opus-4-5", permission: "readonly" },
+        claude: {
+          allowedTools: ["Read"],
+          additionalDirectories: ["D:/shared"],
+          maxTurns: 4,
+        },
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Claude provider settings recorded",
+        payload: expect.objectContaining({
+          backend: "claude",
+          source: "lilia",
+          subkind: "provider_settings",
+          action: "update",
+          supported: { model: "claude-opus-4-5", permission: "readonly" },
+          unsupported: {
+            allowedTools: ["Read"],
+            additionalDirectories: ["D:/shared"],
+            maxTurns: 4,
+          },
+          unsupportedKeys: ["allowedTools", "additionalDirectories", "maxTurns"],
+          native: false,
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({ type: "done", sessionId: null, subtype: "success" });
   });
 
   it("Claude config diagnostics reports safe Lilia and runtime facts without SDK query", async () => {
@@ -3222,6 +3275,110 @@ describe("Codex app-server mapping", () => {
       line.event.payload.requirements?.allowedApprovalsReviewers?.[0] === "user"
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("updates Codex provider settings through thread settings", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: {
+        type: "lilia_provider_settings",
+        action: "update",
+        common: { model: "gpt-5.6", permission: "readonly" },
+        codex: {
+          profile: "deep",
+          reasoningEffort: "high",
+          permissionProfile: "readOnly",
+          runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+          persistExtendedHistory: true,
+        },
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    const updateCalls = calls.filter((call) => call.method === "thread/settings/update");
+    expect(updateCalls.at(-1)).toMatchObject({
+      params: {
+        threadId: "thread-1",
+        model: "gpt-5.6",
+        reasoningEffort: "high",
+        effort: "high",
+        runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+        permissions: ":read-only",
+        approvalPolicy: "never",
+        persistExtendedHistory: true,
+      },
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Codex provider settings updated",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "provider_settings",
+          action: "update",
+          method: "thread/settings/update",
+        }),
+      }),
+    }));
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("rejects empty Codex provider settings update before turn start", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      workflow: { type: "lilia_provider_settings", action: "update" },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("Lilia provider settings update requires at least one supported setting");
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
   });
 
   it("normalizes Codex review commit target for app-server schema", async () => {

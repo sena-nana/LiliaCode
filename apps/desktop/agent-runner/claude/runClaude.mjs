@@ -28,6 +28,7 @@ import {
   createClaudeCanUseTool,
   createClaudeHooks,
 } from "./permissions.mjs";
+import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -288,6 +289,7 @@ const LILIA_GOAL_STATUSES = new Set([
   "complete",
 ]);
 const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
+const LILIA_PROVIDER_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
 const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_review",
   "lilia_fix_suggestion",
@@ -342,6 +344,50 @@ function claudeConfigDiagnosticsPayload(cmd) {
       warnings: runtimeExtensions.warnings,
     },
   };
+}
+
+function readStringList(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    const text = stringOrNull(item)?.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
+function readClaudeProviderSettingsWorkflow(workflow) {
+  if (workflow?.type !== "lilia_provider_settings") return null;
+  const action = stringOrNull(workflow.action);
+  if (!LILIA_PROVIDER_SETTINGS_ACTIONS.has(action)) {
+    throw new Error("Lilia provider settings workflow missing a valid action");
+  }
+  const common = isRecord(workflow.common) ? workflow.common : {};
+  const claude = isRecord(workflow.claude) ? workflow.claude : {};
+  const supported = {};
+  const unsupported = {};
+  const model = stringOrNull(common.model)?.trim();
+  const permission = normalizeRuntimePermission(common.permission);
+  if (model) supported.model = model;
+  if (permission) supported.permission = permission;
+
+  for (const key of ["allowedTools", "disallowedTools", "additionalDirectories"]) {
+    const values = readStringList(claude[key]);
+    if (values.length > 0) unsupported[key] = values;
+  }
+  if (typeof claude.maxTurns === "number" && Number.isFinite(claude.maxTurns)) {
+    unsupported.maxTurns = claude.maxTurns;
+  }
+  if (typeof claude.maxBudgetUsd === "number" && Number.isFinite(claude.maxBudgetUsd)) {
+    unsupported.maxBudgetUsd = claude.maxBudgetUsd;
+  }
+  if (action === "update" && Object.keys(supported).length === 0 && Object.keys(unsupported).length === 0) {
+    throw new Error("Lilia provider settings update requires at least one supported setting");
+  }
+  return { action, supported, unsupported };
 }
 
 async function runClaudeLocalLiliaWorkflow(cmd, context) {
@@ -435,6 +481,36 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
       payload: {
         includeLayers: workflow.includeLayers !== false,
         ...claudeConfigDiagnosticsPayload(cmd),
+      },
+    });
+    return true;
+  }
+  if (workflow.type === "lilia_provider_settings") {
+    const settings = readClaudeProviderSettingsWorkflow(workflow);
+    const supportedKeys = Object.keys(settings.supported);
+    const unsupportedKeys = Object.keys(settings.unsupported);
+    if (settings.action === "update") {
+      if (settings.supported.model) cmd.model = settings.supported.model;
+      if (settings.supported.permission) cmd.permission = settings.supported.permission;
+    }
+    emitClaudeLocalWorkflowTimeline(context, workflow, {
+      subkind: "provider_settings",
+      title: settings.action === "update"
+        ? "Claude provider settings recorded"
+        : "Claude provider settings diagnostics",
+      summary: unsupportedKeys.length > 0
+        ? "Claude provider settings 包含当前未稳定接入的字段，已写入诊断。"
+        : "Claude provider settings 已由 Lilia 记录。",
+      payload: {
+        action: settings.action,
+        supported: settings.supported,
+        supportedKeys,
+        unsupported: settings.unsupported,
+        unsupportedKeys,
+        native: false,
+        reason: unsupportedKeys.length > 0
+          ? "Claude SDK advanced settings are not enabled as a persistent Lilia provider settings surface yet."
+          : "Lilia records safe common settings without simulating provider-side persistence.",
       },
     });
     return true;

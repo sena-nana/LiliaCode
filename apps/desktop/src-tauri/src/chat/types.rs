@@ -170,6 +170,16 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         include_layers: Option<bool>,
     },
+    #[serde(rename = "lilia_provider_settings")]
+    LiliaProviderSettings {
+        action: String,
+        #[serde(default)]
+        common: Option<LiliaProviderSettingsCommon>,
+        #[serde(default)]
+        codex: Option<LiliaProviderSettingsCodex>,
+        #[serde(default)]
+        claude: Option<LiliaProviderSettingsClaude>,
+    },
     #[serde(rename = "automation")]
     Automation { automation_run_id: String },
     #[serde(rename = "slash_command")]
@@ -190,6 +200,45 @@ pub(crate) enum LiliaReviewTarget {
     BaseBranch { branch: String },
     #[serde(rename = "commit")]
     Commit { sha: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiliaProviderSettingsCommon {
+    #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
+    pub(crate) permission: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiliaProviderSettingsCodex {
+    #[serde(default)]
+    pub(crate) profile: Option<String>,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) permission_profile: Option<String>,
+    #[serde(default)]
+    pub(crate) runtime_workspace_roots: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) persist_extended_history: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiliaProviderSettingsClaude {
+    #[serde(default)]
+    pub(crate) allowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) disallowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) additional_directories: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) max_turns: Option<u64>,
+    #[serde(default)]
+    pub(crate) max_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

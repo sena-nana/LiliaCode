@@ -183,6 +183,31 @@ export type LiliaSessionForkWorkflowTypeTest = Assert<
   >
 >;
 
+export type LiliaProviderSettingsWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_provider_settings";
+      action: "update";
+      common: { model: "gpt-5.5"; permission: "ask" };
+      codex: {
+        profile: "deep";
+        reasoningEffort: "high";
+        permissionProfile: "workspaceWrite";
+        runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
+        persistExtendedHistory: true;
+      };
+      claude: {
+        allowedTools: ["Read"];
+        disallowedTools: ["Bash"];
+        additionalDirectories: ["D:/PROJECT/workspace/Lilia/docs"];
+        maxTurns: 8;
+        maxBudgetUsd: 1.5;
+      };
+    },
+    ChatWorkflow
+  >
+>;
+
 export type AutomationRunWorkflowTypeTest = Assert<
   Extends<
     {
