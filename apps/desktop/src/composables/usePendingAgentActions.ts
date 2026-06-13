@@ -6,6 +6,7 @@ import type {
   PendingCodexMcpElicitation,
   PendingCodexPermissionApproval,
 } from "./useCodexPendingInteractions";
+import type { PendingArchitectureChange } from "./useProjectArchitectureInteractions";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
@@ -18,6 +19,7 @@ export type PendingAgentActionKind =
   | "plan_approval"
   | "mcp_elicitation"
   | "permission_approval"
+  | "architecture_change"
   | "title_update";
 
 export type PendingAgentAction =
@@ -37,6 +39,7 @@ export type PendingAgentAction =
     }
   | PendingCodexMcpElicitation
   | PendingCodexPermissionApproval
+  | PendingArchitectureChange
   | {
       kind: "title_update";
       taskId: string;
@@ -72,6 +75,11 @@ export type PendingAgentActionResolution =
       decision: "allow" | "deny";
     }
   | {
+      kind: "architecture_change";
+      requestId: string;
+      decision: "allow" | "deny";
+    }
+  | {
       kind: "title_update";
       requestId: string;
       decision: "accept" | "decline";
@@ -82,6 +90,7 @@ export function usePendingAgentActionsForTask(
   toolConsents: ComputedRef<ToolConsentRequest[]>,
   codexInteractions: ComputedRef<PendingCodexInteraction[]> = computed(() => []),
   timelineEvents: ComputedRef<AgentTimelineEvent[]> = computed(() => []),
+  architectureChanges: ComputedRef<PendingArchitectureChange[]> = computed(() => []),
 ): ComputedRef<PendingAgentAction[]> {
   return computed(() => [
     ...asks.value.map((ask): PendingAgentAction => ({
@@ -99,6 +108,7 @@ export function usePendingAgentActionsForTask(
       request,
     })),
     ...codexInteractions.value,
+    ...architectureChanges.value,
     ...timelineEvents.value.flatMap(titleUpdateActionForEvent),
   ]);
 }
@@ -146,6 +156,10 @@ export function pendingActionForTimelineEvent(
     }
     if (action.kind === "permission_approval" && event.kind === "diagnostic") {
       if (readPayloadString(event, "requestId") === action.requestId) return action;
+      continue;
+    }
+    if (action.kind === "architecture_change" && event.kind === "architecture_change") {
+      if (readPayloadString(event, "requestId") === action.requestId) return action;
     }
   }
   return null;
@@ -156,6 +170,7 @@ export function timelineEventRequiresAgentAction(event: AgentTimelineEvent): boo
   if (event.kind === "title_update") return true;
   if (event.kind === "plan") return true;
   if (event.kind === "ask_user") return true;
+  if (event.kind === "architecture_change") return true;
   if (readPayloadString(event, "interaction") === "mcp_elicitation") return true;
   if (readPayloadString(event, "interaction") === "permission_approval") return true;
   return readPayloadString(event, "interaction") === "tool_consent";

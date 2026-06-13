@@ -1412,8 +1412,11 @@ fn build_runner_conversation_context<R: Runtime>(
     let store = app.try_state::<LiliaStore>()?;
     let conn = store.conn().ok()?;
     let current = load_context_task_row(&conn, task_id).ok().flatten()?;
-    let parent_task_id = current.parent_id.clone()?;
     let project_id = current.project_id.clone();
+    if project_id.is_none() && current.parent_id.is_none() {
+        return None;
+    }
+    let parent_task_id = current.parent_id.clone();
     let mut tasks = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -1422,9 +1425,11 @@ fn build_runner_conversation_context<R: Runtime>(
         tasks.push(task);
     }
 
-    if seen.insert(parent_task_id.clone()) {
-        if let Ok(Some(task)) = load_context_task(&conn, &parent_task_id, true) {
-            tasks.push(task);
+    if let Some(parent_task_id) = parent_task_id.as_deref() {
+        if seen.insert(parent_task_id.to_string()) {
+            if let Ok(Some(task)) = load_context_task(&conn, parent_task_id, true) {
+                tasks.push(task);
+            }
         }
     }
 
@@ -1446,6 +1451,7 @@ fn build_runner_conversation_context<R: Runtime>(
     Some(serde_json::json!({
         "currentTaskId": task_id,
         "parentTaskId": parent_task_id,
+        "projectId": project_id,
         "tasks": tasks,
     }))
 }

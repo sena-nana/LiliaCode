@@ -21,6 +21,7 @@ export type LiliaToolKind =
   | "plan"
   | "todo_list"
   | "ask_user"
+  | "architecture_change"
   | "tool";
 
 /** 工具子分类。 */
@@ -79,6 +80,7 @@ export interface LiliaToolPayload {
   approved?: boolean | null;
   executionPermission?: string;
   revisionRequest?: string;
+  architectureImpacts?: unknown;
   // todo_list
   items?: Array<{ text: string; completed?: boolean; status?: string } | string>;
   // ask_user
@@ -92,6 +94,13 @@ export interface LiliaToolPayload {
   }>;
   cancelled?: boolean;
   structuredContent?: unknown;
+  // architecture_change
+  projectId?: string;
+  permission?: string;
+  requiresConfirmation?: boolean;
+  beforeVersion?: number;
+  afterVersion?: number | null;
+  reason?: string;
   // tool 兜底
   toolName?: string;
   hookName?: string;

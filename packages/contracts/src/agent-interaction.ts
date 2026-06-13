@@ -1,5 +1,9 @@
 import type { AskUserResult, AskUserSpec } from "./ask-user";
 import type {
+  ProjectArchitectureInteractionPayload,
+  ProjectArchitectureInteractionResult,
+} from "./architecture";
+import type {
   ChatBackendKind,
   CodexToolConsentDecision,
   ToolConsentResponsePayload,
@@ -10,6 +14,7 @@ export type AgentInteractionKind =
   | "plan_approval"
   | "tool_consent"
   | "ask_user"
+  | "architecture_change"
   | "mcp_elicitation"
   | "permission_approval";
 
@@ -72,6 +77,7 @@ export interface CodexPermissionApprovalResult {
 export type AgentInteractionPayloadByKind = {
   plan_approval: AskUserSpec;
   ask_user: AskUserSpec;
+  architecture_change: ProjectArchitectureInteractionPayload;
   tool_consent: ToolConsentInteractionPayload;
   mcp_elicitation: CodexMcpElicitationPayload;
   permission_approval: CodexPermissionApprovalPayload;
@@ -80,6 +86,7 @@ export type AgentInteractionPayloadByKind = {
 export type AgentInteractionResultByKind = {
   plan_approval: AskUserResult;
   ask_user: AskUserResult;
+  architecture_change: ProjectArchitectureInteractionResult;
   tool_consent: ToolConsentResponsePayload;
   mcp_elicitation: CodexMcpElicitationResult;
   permission_approval: CodexPermissionApprovalResult;
@@ -89,6 +96,7 @@ export type AgentInteractionRequest =
   | AgentInteractionRequestOf<"plan_approval">
   | AgentInteractionRequestOf<"tool_consent">
   | AgentInteractionRequestOf<"ask_user">
+  | AgentInteractionRequestOf<"architecture_change">
   | AgentInteractionRequestOf<"mcp_elicitation">
   | AgentInteractionRequestOf<"permission_approval">;
 
@@ -96,6 +104,7 @@ export type AgentInteractionResponse =
   | AgentInteractionResponseOf<"plan_approval">
   | AgentInteractionResponseOf<"tool_consent">
   | AgentInteractionResponseOf<"ask_user">
+  | AgentInteractionResponseOf<"architecture_change">
   | AgentInteractionResponseOf<"mcp_elicitation">
   | AgentInteractionResponseOf<"permission_approval">;
 

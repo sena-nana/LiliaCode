@@ -1,11 +1,13 @@
 import type {
   AgentInteractionRequest,
   AskUserSpec,
+  ProjectArchitectureInteractionPayload,
   ToolConsentRequest,
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
 import { handleCodexPendingInteractionRequest } from "./useCodexPendingInteractions";
+import { handleProjectArchitectureInteractionRequest } from "./useProjectArchitectureInteractions";
 import { handleToolConsentRequest } from "./useToolConsentBridge";
 
 let installed = false;
@@ -61,6 +63,16 @@ function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRe
 
 function handleInteraction(req: AgentInteractionRequest) {
   if (handleCodexPendingInteractionRequest(req)) return;
+  if (req.kind === "architecture_change") {
+    handleProjectArchitectureInteractionRequest({
+      taskId: req.taskId,
+      turnId: req.turnId || null,
+      backend: req.backend,
+      requestId: req.requestId,
+      payload: req.payload as ProjectArchitectureInteractionPayload,
+    });
+    return;
+  }
   if (req.kind === "tool_consent") {
     handleToolConsentRequest(toolRequestFromInteraction(req));
     return;

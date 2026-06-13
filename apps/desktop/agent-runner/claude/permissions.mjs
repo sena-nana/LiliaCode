@@ -9,6 +9,7 @@ import {
   readPlanRevisionRequest,
 } from "../claudePlan.mjs";
 import { isLiliaAskUserTool } from "../askUser.mjs";
+import { isLiliaArchitectureTool } from "../architecture.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
 import { rememberClaudeTool } from "./state.mjs";
@@ -232,6 +233,9 @@ export async function handleClaudePlanPermission(toolName, input, opts, ctx) {
     status: "success",
     sourceId,
   });
+  ctx.approvedArchitectureImpacts = Array.isArray(pendingPayload.architectureImpacts)
+    ? pendingPayload.architectureImpacts
+    : [];
   return {
     behavior: "allow",
     updatedInput: input,
@@ -272,7 +276,7 @@ export function emitReadonlyDeniedClaudeTool(toolName, input, opts, ctx) {
 export function createClaudeCanUseTool(ctx) {
   return async function claudeCanUseTool(toolName, input, opts) {
     const safeInput = isRecord(input) ? input : {};
-    if (isLiliaAskUserTool(toolName)) {
+    if (isLiliaAskUserTool(toolName) || isLiliaArchitectureTool(toolName)) {
       return { behavior: "allow", updatedInput: safeInput };
     }
     if (isClaudePlanTool(toolName)) {

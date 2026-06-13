@@ -1,4 +1,5 @@
 import { normalizeAskUserResult } from "./askUser.mjs";
+import { emitArchitectureTimeline } from "./architecture.mjs";
 import { oneLineSummary, stringOrNull } from "./utils.mjs";
 
 export function normalizeToolConsentResult(value) {
@@ -45,6 +46,7 @@ const INTERACTION_RESPONSE_KINDS = new Set([
   "ask_user",
   "mcp_elicitation",
   "permission_approval",
+  "architecture_change",
 ]);
 
 function isCodexInteractionKind(kind) {
@@ -68,6 +70,8 @@ export function createInteractionBroker({
   let askUserSeq = 1;
   const codexPending = new Map();
   let codexSeq = 1;
+  const architecturePending = new Map();
+  let architectureSeq = 1;
   let settingsUpdateHandler = null;
   let codexIabResultHandler = null;
 
@@ -187,6 +191,35 @@ export function createInteractionBroker({
     });
   }
 
+  function requestArchitectureChange(payload, options = {}) {
+    const id = `architecture-${architectureSeq++}`;
+    const backend = options.backend === "codex" ? "codex" : "claude";
+    const autoApply = options.autoApply === true;
+    const requestPayload = {
+      ...payload,
+      requestId: id,
+      status: autoApply ? "applied" : "pending",
+      requiresConfirmation: !autoApply,
+    };
+    emitArchitectureTimeline({ protocol }, id, requestPayload, autoApply ? "info" : "requires_action");
+    emitInteractionRequest(id, "architecture_change", requestPayload, backend);
+    return new Promise((resolve) => {
+      architecturePending.set(id, {
+        kind: "architecture_change",
+        resolve: (result) => {
+          emitArchitectureTimeline(
+            { protocol },
+            id,
+            requestPayload,
+            result?.decision === "allow" ? "success" : "cancelled",
+            result,
+          );
+          resolve(result);
+        },
+      });
+    });
+  }
+
   function handleControlLine(line) {
     let msg;
     try {
@@ -213,6 +246,13 @@ export function createInteractionBroker({
         pending.resolve(normalizeCodexInteractionResult(kind, msg.result));
         return;
       }
+      if (kind === "architecture_change") {
+        const pending = architecturePending.get(msg.id);
+        if (!pending || pending.kind !== kind) return;
+        architecturePending.delete(msg.id);
+        pending.resolve(normalizeArchitectureChangeResult(msg.result));
+        return;
+      }
       const pending = askUserPending.get(msg.id);
       if (!pending || pending.kind !== kind) return;
       askUserPending.delete(msg.id);
@@ -232,6 +272,7 @@ export function createInteractionBroker({
     requestUserConsent,
     requestAskUser,
     requestCodexInteraction,
+    requestArchitectureChange,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
@@ -243,7 +284,18 @@ export function createInteractionBroker({
       consent: consentPending.size,
       askUser: askUserPending.size,
       codex: codexPending.size,
+      architecture: architecturePending.size,
     }),
+  };
+}
+
+function normalizeArchitectureChangeResult(value) {
+  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    decision: row.decision === "allow" ? "allow" : "deny",
+    graph: row.graph ?? null,
+    event: row.event ?? null,
+    message: stringOrNull(row.message),
   };
 }
 

@@ -12,6 +12,7 @@ export * from "./agent-interaction";
 export * from "./timeline";
 export * from "./suggestions";
 export * from "./automation";
+export * from "./architecture";
 
 export { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "./timelineDisplay";
 export type { TimelineDisplayInput } from "./timelineDisplay";

@@ -12,6 +12,12 @@ import {
   isLiliaConversationContextTool,
 } from "../conversationContext.mjs";
 import {
+  architectureContextEnabled,
+  codexUpdateProjectArchitectureDynamicTool,
+  createArchitectureChangeHandler,
+  isLiliaArchitectureTool,
+} from "../architecture.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
@@ -299,6 +305,9 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   const dynamicTools = [codexAskUserDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
+  }
+  if (architectureContextEnabled(cmd.conversationContext)) {
+    dynamicTools.push(codexUpdateProjectArchitectureDynamicTool);
   }
   if (resumeSessionId) {
     const resumeParams = {
@@ -1514,6 +1523,12 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
       output = await createCodexAskUserHandler(requestAskUser)(input);
     } else if (isLiliaConversationContextTool(toolName)) {
       output = await createConversationContextHandler(ctx.cmd?.conversationContext)(input);
+    } else if (isLiliaArchitectureTool(toolName)) {
+      output = await createArchitectureChangeHandler({
+        cmd: ctx.cmd,
+        ctx,
+        backend: "codex",
+      })(input);
     } else {
       return false;
     }

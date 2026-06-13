@@ -19,6 +19,9 @@ import {
   usePendingCodexInteractionsForTask,
 } from "../../composables/useCodexPendingInteractions";
 import {
+  usePendingProjectArchitectureChangesForTask,
+} from "../../composables/useProjectArchitectureInteractions";
+import {
   usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../../composables/useToolConsentBridge";
@@ -73,11 +76,13 @@ export function useTaskComposerController(options: {
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
   const pendingToolConsents = usePendingToolConsentsForTask(() => props.taskId);
   const pendingCodexInteractions = usePendingCodexInteractionsForTask(() => props.taskId);
+  const pendingArchitectureChanges = usePendingProjectArchitectureChangesForTask(() => props.taskId);
   const runtimePendingAgentActions = usePendingAgentActionsForTask(
     pendingAskUsers,
     pendingToolConsents,
     pendingCodexInteractions,
     timeline.timelineEvents,
+    pendingArchitectureChanges,
   );
   const agentInteractionSettings = useAgentInteractionSettings();
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
@@ -99,7 +104,8 @@ export function useTaskComposerController(options: {
       nonInterruptMode.value ||
       action.kind === "title_update" ||
       action.kind === "mcp_elicitation" ||
-      action.kind === "permission_approval"
+      action.kind === "permission_approval" ||
+      action.kind === "architecture_change"
     ),
   );
   const blockingPendingAgentActions = computed(() =>
@@ -297,6 +303,7 @@ export function useTaskComposerController(options: {
     pendingToolConsent,
     pendingToolConsents,
     pendingCodexInteractions,
+    pendingArchitectureChanges,
   });
 
   async function onComposerUpdate(next: ChatComposerState) {

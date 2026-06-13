@@ -325,6 +325,147 @@
   font-size: 12px;
 }
 
+.architecture-panel {
+  min-height: 100%;
+  color: var(--text);
+}
+
+.architecture-panel__empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.architecture-panel__empty--error {
+  color: var(--danger);
+}
+
+.architecture-panel__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.architecture-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.architecture-panel__eyebrow {
+  margin: 0 0 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.architecture-panel__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.architecture-panel__rollback {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.architecture-panel__summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.architecture-panel .markdown-block__mermaid {
+  margin: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.architecture-panel__section {
+  display: grid;
+  gap: 6px;
+}
+
+.architecture-panel__section-title {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.architecture-panel__item,
+.architecture-panel__change {
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.architecture-panel__item {
+  display: grid;
+  gap: 5px;
+}
+
+.architecture-panel__item p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.architecture-panel__item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.architecture-panel__item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-panel__item-head span,
+.architecture-panel__change-status {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.architecture-panel__meta {
+  color: var(--text-faint) !important;
+}
+
+.architecture-panel__change {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .debug-panel {
   display: flex;
   flex-direction: column;
@@ -3032,6 +3173,14 @@
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.timeline-pending-action__mini-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .timeline-pending-action--expired {

@@ -37,6 +37,8 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS task_runtime_finalizations;
         DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
+        DROP TABLE IF EXISTS project_architecture_changes;
+        DROP TABLE IF EXISTS project_architecture_graphs;
         DROP TABLE IF EXISTS task_milestone_links;
         DROP TABLE IF EXISTS milestones;
         DROP TABLE IF EXISTS task_dependencies;
@@ -147,6 +149,37 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_task_milestone_links_milestone
           ON task_milestone_links(milestone_id);
+
+        CREATE TABLE project_architecture_graphs (
+          project_id TEXT PRIMARY KEY,
+          version    INTEGER NOT NULL,
+          graph_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE project_architecture_changes (
+          id                TEXT PRIMARY KEY,
+          project_id        TEXT NOT NULL,
+          task_id           TEXT NOT NULL,
+          turn_id           TEXT,
+          backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          status            TEXT NOT NULL CHECK (status IN
+                            ('proposed','pending','applied','rejected','rolled_back')),
+          permission_mode   TEXT NOT NULL CHECK (permission_mode IN ('ask','full','readonly')),
+          summary           TEXT NOT NULL DEFAULT '',
+          changes_json      TEXT NOT NULL,
+          before_graph_json TEXT,
+          after_graph_json  TEXT,
+          created_at        INTEGER NOT NULL,
+          resolved_at       INTEGER,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_project_architecture_changes_project_created
+          ON project_architecture_changes(project_id, created_at DESC);
+        CREATE INDEX idx_project_architecture_changes_task
+          ON project_architecture_changes(task_id, created_at DESC);
 
         CREATE TABLE task_agent_sessions (
           task_id         TEXT NOT NULL,

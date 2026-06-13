@@ -9,6 +9,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useRoute, useRouter } from "vue-router";
 import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
+import { registerArchitectureChatSidebarPanel } from "../composables/useArchitectureChatSidebarPanel";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
 import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
 import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
@@ -186,6 +187,7 @@ function onDraftProjectPickerError(message: string) {
 
 const unlisteners: UnlistenFn[] = [];
 let unregisterDebugPanel: (() => void) | null = null;
+let unregisterArchitecturePanel: (() => void) | null = null;
 
 function syncDebugPanelRegistration() {
   if (!hasContext.value || !composerController.agentInteractionSettings.debug.value) {
@@ -195,6 +197,16 @@ function syncDebugPanelRegistration() {
   }
   if (unregisterDebugPanel) return;
   unregisterDebugPanel = registerDebugChatSidebarPanel();
+}
+
+function syncArchitecturePanelRegistration() {
+  if (!hasContext.value || !props.projectId || isPopup.value) {
+    unregisterArchitecturePanel?.();
+    unregisterArchitecturePanel = null;
+    return;
+  }
+  if (unregisterArchitecturePanel) return;
+  unregisterArchitecturePanel = registerArchitectureChatSidebarPanel();
 }
 
 onMounted(async () => {
@@ -216,6 +228,8 @@ onUnmounted(async () => {
   timeline.disposeTimeline();
   unregisterDebugPanel?.();
   unregisterDebugPanel = null;
+  unregisterArchitecturePanel?.();
+  unregisterArchitecturePanel = null;
   for (const unlisten of unlisteners) {
     try {
       await unlisten();
@@ -276,6 +290,12 @@ watch(
 watch(
   () => [hasContext.value, composerController.agentInteractionSettings.debug.value] as const,
   syncDebugPanelRegistration,
+  { immediate: true },
+);
+
+watch(
+  () => [hasContext.value, props.projectId ?? "", isPopup.value] as const,
+  syncArchitecturePanelRegistration,
   { immediate: true },
 );
 

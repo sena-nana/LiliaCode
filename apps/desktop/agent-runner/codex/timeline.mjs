@@ -680,6 +680,9 @@ export function resolveCodexPlanApproval(ctx, result) {
   }
   if (isPlanApprovalAccepted(result)) {
     ctx.planApproved = true;
+    ctx.approvedArchitectureImpacts = Array.isArray(ctx.pendingPlanPayload.architectureImpacts)
+      ? ctx.pendingPlanPayload.architectureImpacts
+      : [];
   } else {
     ctx.planCancelled = true;
   }

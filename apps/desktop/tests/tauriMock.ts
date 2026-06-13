@@ -2596,6 +2596,37 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         throw new Error(message);
       }
       return undefined;
+    case "project_architecture_apply": {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const graph = {
+        projectId: String(input.projectId ?? "lilia"),
+        version: 1,
+        summary: "",
+        nodes: [],
+        edges: [],
+        updatedAt: Date.now(),
+      };
+      return {
+        graph,
+        event: {
+          id: typeof input.requestId === "string" ? input.requestId : "architecture-1",
+          projectId: graph.projectId,
+          taskId: String(input.taskId ?? ""),
+          turnId: typeof input.turnId === "string" ? input.turnId : null,
+          backend: input.backend === "codex" ? "codex" : "claude",
+          permission: typeof input.permission === "string" ? input.permission : "ask",
+          status: "applied",
+          reason: typeof input.reason === "string" ? input.reason : "",
+          changes: Array.isArray(input.changes) ? input.changes : [],
+          beforeVersion: 0,
+          afterVersion: 1,
+          createdAt: Date.now(),
+          resolvedAt: Date.now(),
+        },
+      };
+    }
     case "chat_ack_restored_rollback":
       return undefined;
 
