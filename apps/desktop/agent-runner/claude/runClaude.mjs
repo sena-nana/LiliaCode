@@ -1,4 +1,4 @@
-import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, forkSession, query, tool } from "@anthropic-ai/claude-agent-sdk";
 import { createClaudeStreamState, dispatchClaudeStreamEvent } from "../claudeStream.mjs";
 import {
   askUserQuestionInputSchema,
@@ -113,8 +113,68 @@ export function createLiliaAskUserServer({
   });
 }
 
+function isClaudeSessionForkWorkflow(cmd) {
+  return cmd?.workflow?.type === "claude_session_fork";
+}
+
+async function runClaudeSessionForkWorkflow(cmd, context, cwd) {
+  if (!isClaudeSessionForkWorkflow(cmd)) return false;
+  const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "started",
+    title: "Claude session fork started",
+    summary: "正在分叉 Claude session",
+    payload: {
+      backend: "claude",
+      subkind: "session_fork",
+      sourceSessionId: sourceSessionId || null,
+    },
+    sourceId: `claude:session-fork:start:${sourceSessionId || "missing"}`,
+  });
+  try {
+    if (!sourceSessionId) throw new Error("当前 Claude task 没有可 fork 的 session");
+    const forkClaudeSession = context.forkClaudeSession || forkSession;
+    const result = await forkClaudeSession(sourceSessionId, { dir: cwd });
+    const sessionId = typeof result?.sessionId === "string" ? result.sessionId.trim() : "";
+    if (!sessionId) throw new Error("Claude forkSession did not return a session id");
+    context.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "success",
+      title: "Claude session fork completed",
+      summary: "已分叉 Claude session",
+      payload: {
+        backend: "claude",
+        subkind: "session_fork",
+        sourceSessionId,
+        sessionId,
+      },
+      sourceId: `claude:session-fork:completed:${sourceSessionId}:${sessionId}`,
+    });
+    context.protocol.emit({ type: "done", sessionId, subtype: "success" });
+  } catch (err) {
+    context.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Claude session fork failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "claude",
+        subkind: "session_fork",
+        sourceSessionId: sourceSessionId || null,
+        error: err?.message || String(err),
+      },
+      sourceId: `claude:session-fork:error:${sourceSessionId || "missing"}`,
+    });
+    throw err;
+  }
+  return true;
+}
+
 export async function runClaude(cmd, context) {
   const { cwd, prompt, model, resumeSessionId } = cmd;
+  const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
+  if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
   const permission = cmd.permission === "full" || cmd.permission === "readonly"
     ? cmd.permission
@@ -148,7 +208,7 @@ export async function runClaude(cmd, context) {
     createTool: context.createClaudeTool || tool,
   });
   const options = {
-    cwd: cwd || (context.cwd ? context.cwd() : process.cwd()),
+    cwd: workingDir,
     model: model || undefined,
     resume: resumeSessionId || undefined,
     includePartialMessages: true,

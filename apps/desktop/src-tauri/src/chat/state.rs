@@ -829,6 +829,7 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
             | Some(ChatWorkflow::CodexMemoryMode { .. })
             | Some(ChatWorkflow::CodexMemoryReset)
             | Some(ChatWorkflow::CodexThreadFork { .. })
+            | Some(ChatWorkflow::ClaudeSessionFork)
             | Some(ChatWorkflow::CodexConfigDiagnostics { .. })
             | Some(ChatWorkflow::SlashCommand { .. })
     ) && content.trim().is_empty())

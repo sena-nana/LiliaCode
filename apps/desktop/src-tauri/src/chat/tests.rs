@@ -621,6 +621,7 @@ mod agent_event_sink_tests {
             ChatWorkflow::CodexThreadFork {
                 exclude_turns: Some(true),
             },
+            ChatWorkflow::ClaudeSessionFork,
             ChatWorkflow::CodexConfigDiagnostics {
                 include_layers: Some(true),
             },
@@ -712,6 +713,14 @@ mod agent_event_sink_tests {
         let fork_json = serde_json::to_value(&fork).unwrap();
         assert_eq!(fork_json["excludeTurns"], json!(false));
         assert!(fork_json.get("exclude_turns").is_none());
+
+        let claude_fork = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "claude_session_fork",
+        }))
+        .unwrap();
+        assert!(matches!(claude_fork, ChatWorkflow::ClaudeSessionFork));
+        let claude_fork_json = serde_json::to_value(&claude_fork).unwrap();
+        assert_eq!(claude_fork_json["type"], json!("claude_session_fork"));
 
         let diagnostics = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "codex_config_diagnostics",

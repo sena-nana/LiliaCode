@@ -1,6 +1,7 @@
 import type { ComputedRef, Ref } from "vue";
 import type {
   ChatAttachment,
+  ChatComposerState,
   ChatWorkflow,
   CodexReviewTarget,
 } from "@lilia/contracts";
@@ -9,6 +10,7 @@ import type { PendingAgentAction } from "../../composables/usePendingAgentAction
 
 export function useCodexWorkflowActions(options: {
   hasContext: ComputedRef<boolean>;
+  composer: Ref<ChatComposerState | null>;
   isTurnRunning: Ref<boolean>;
   blockingPendingAgentActions: ComputedRef<PendingAgentAction[]>;
   attachments: Ref<ChatAttachment[]>;
@@ -78,6 +80,17 @@ export function useCodexWorkflowActions(options: {
     await sendCodexWorkflow({ type: "codex_compact" });
   }
 
+  async function onStartSessionFork() {
+    const backend = options.composer.value?.backend;
+    if (backend === "codex") {
+      await sendCodexWorkflow({ type: "codex_thread_fork", excludeTurns: true });
+      return;
+    }
+    if (backend === "claude") {
+      await sendHandledCodexWorkflow("", [], { type: "claude_session_fork" });
+    }
+  }
+
   async function onStartCodexBatchApply(input: CodexBatchApplyInput) {
     const sourceSummary = input.sourceSummary.trim();
     if (!sourceSummary) return;
@@ -119,6 +132,7 @@ export function useCodexWorkflowActions(options: {
     onStartCodexReview,
     onStartCodexFixSuggestion,
     onStartCodexCompact,
+    onStartSessionFork,
     onStartCodexBatchApply,
     onSetCodexGoal,
     onRefreshCodexGoal,

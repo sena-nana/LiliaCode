@@ -900,6 +900,29 @@ describe("ChatComposer", () => {
     expect(view.emitted("start-codex-compact")?.length).toBe(1);
   });
 
+  it("Claude 和 Codex 后端可从同一工具栏入口分叉当前会话", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    const claudeForkButton = view.getByRole("button", { name: "分叉当前会话" });
+    expect(claudeForkButton).not.toBeDisabled();
+    await fireEvent.click(claudeForkButton);
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+    });
+    const codexForkButton = view.getByRole("button", { name: "分叉当前会话" });
+    expect(codexForkButton).not.toBeDisabled();
+    await fireEvent.click(codexForkButton);
+
+    expect(view.emitted("start-session-fork")?.length).toBe(2);
+  });
+
   it("Codex 后端可从工具栏打开和回送 IAB", async () => {
     const view = render(ChatComposer, {
       props: {

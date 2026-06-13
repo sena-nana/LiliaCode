@@ -6,6 +6,10 @@ import { runClaude } from "./claude/runClaude.mjs";
 import { EMPTY_PROMPT_CODEX_WORKFLOWS, runCodex } from "./codex/runCodex.mjs";
 import { runDryRun } from "./dryRun.mjs";
 
+export const EMPTY_PROMPT_CLAUDE_WORKFLOWS = new Set([
+  "claude_session_fork",
+]);
+
 export function createRunnerContext(deps = {}) {
   const protocol = deps.protocol || createProtocolEmitter({ write: deps.write });
   const emitConsentTimeline = (id, payload, status, decisionMessage = "") =>
@@ -27,11 +31,13 @@ export function createRunnerContext(deps = {}) {
 
 export async function runAgentTurn(cmd, deps = {}) {
   const context = createRunnerContext(deps);
+  const workflowType = typeof cmd?.workflow?.type === "string" ? cmd.workflow.type : "";
   const allowsEmptyCodexWorkflow =
     cmd?.backend === "codex" &&
-    cmd?.workflow &&
-    typeof cmd.workflow === "object" &&
-    EMPTY_PROMPT_CODEX_WORKFLOWS.has(cmd.workflow.type);
+    EMPTY_PROMPT_CODEX_WORKFLOWS.has(workflowType);
+  const allowsEmptyClaudeWorkflow =
+    cmd?.backend === "claude" &&
+    EMPTY_PROMPT_CLAUDE_WORKFLOWS.has(workflowType);
   if (typeof cmd?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
@@ -40,7 +46,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     ...cmd,
     prompt: buildPromptWithAttachments(cmd.prompt, cmd.attachments),
   };
-  if (nextCmd.prompt.trim().length === 0 && !allowsEmptyCodexWorkflow) {
+  if (nextCmd.prompt.trim().length === 0 && !allowsEmptyCodexWorkflow && !allowsEmptyClaudeWorkflow) {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }

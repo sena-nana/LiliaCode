@@ -11,6 +11,7 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<&'static 
         ChatWorkflow::CodexMemoryMode { .. } => Some("codex_memory_mode"),
         ChatWorkflow::CodexMemoryReset => Some("codex_memory_reset"),
         ChatWorkflow::CodexThreadFork { .. } => Some("codex_thread_fork"),
+        ChatWorkflow::ClaudeSessionFork => Some("claude_session_fork"),
         ChatWorkflow::CodexConfigDiagnostics { .. } => Some("codex_config_diagnostics"),
         ChatWorkflow::Automation { .. } => Some("automation"),
         ChatWorkflow::SlashCommand { .. } => Some("slash_command"),
@@ -35,6 +36,7 @@ pub(crate) fn parse_workflow_kind(value: &str) -> Option<&'static str> {
         "codex_memory_mode" => Some("codex_memory_mode"),
         "codex_memory_reset" => Some("codex_memory_reset"),
         "codex_thread_fork" => Some("codex_thread_fork"),
+        "claude_session_fork" => Some("claude_session_fork"),
         "codex_config_diagnostics" => Some("codex_config_diagnostics"),
         "automation" => Some("automation"),
         "slash_command" => Some("slash_command"),
@@ -55,6 +57,14 @@ mod tests {
         assert_eq!(workflow_kind(Some(&workflow)), Some("automation"));
         assert_eq!(automation_run_id(Some(&workflow)).as_deref(), Some("run-1"));
         assert_eq!(parse_workflow_kind("automation"), Some("automation"));
+        assert_eq!(
+            workflow_kind(Some(&ChatWorkflow::ClaudeSessionFork)),
+            Some("claude_session_fork")
+        );
+        assert_eq!(
+            parse_workflow_kind("claude_session_fork"),
+            Some("claude_session_fork")
+        );
         assert_eq!(workflow_kind(None), None);
     }
 }

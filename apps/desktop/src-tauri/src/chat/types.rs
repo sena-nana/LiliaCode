@@ -165,6 +165,8 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         exclude_turns: Option<bool>,
     },
+    #[serde(rename = "claude_session_fork")]
+    ClaudeSessionFork,
     #[serde(rename = "codex_config_diagnostics")]
     CodexConfigDiagnostics {
         #[serde(default)]
