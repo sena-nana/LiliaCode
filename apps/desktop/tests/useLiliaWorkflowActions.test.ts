@@ -30,6 +30,35 @@ function setupWorkflowActions(backend: ChatComposerState["backend"]) {
 }
 
 describe("useLiliaWorkflowActions", () => {
+  it("compact workflow uses the Lilia protocol for every backend", async () => {
+    const codex = setupWorkflowActions("codex");
+    await codex.actions.onStartLiliaCompact();
+    expect(codex.sent).toEqual([{ type: "lilia_compact" }]);
+
+    const claude = setupWorkflowActions("claude");
+    await claude.actions.onStartLiliaCompact();
+    expect(claude.sent).toEqual([{ type: "lilia_compact" }]);
+  });
+
+  it("fix suggestion workflow uses the Lilia protocol for every backend", async () => {
+    const codex = setupWorkflowActions("codex");
+    await codex.actions.onStartLiliaFixSuggestion("检查空状态", [], { type: "uncommittedChanges" });
+    expect(codex.sent).toEqual([{
+      type: "lilia_fix_suggestion",
+      target: { type: "uncommittedChanges" },
+      mode: "suggest",
+      instructions: "检查空状态",
+    }]);
+
+    const claude = setupWorkflowActions("claude");
+    await claude.actions.onStartLiliaFixSuggestion("", [], { type: "uncommittedChanges" });
+    expect(claude.sent).toEqual([{
+      type: "lilia_fix_suggestion",
+      target: { type: "uncommittedChanges" },
+      mode: "suggest",
+    }]);
+  });
+
   it("session fork workflow uses the Lilia protocol for every backend", async () => {
     const codex = setupWorkflowActions("codex");
     await codex.actions.onStartSessionFork();

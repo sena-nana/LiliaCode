@@ -72,6 +72,10 @@ export async function* singleClaudePromptStream(prompt) {
   };
 }
 
+export function claudeCompactPromptStream() {
+  return singleClaudePromptStream("/compact");
+}
+
 export function createLiliaAskUserServer({
   createServer = createSdkMcpServer,
   createTool = tool,
@@ -289,13 +293,7 @@ const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_fix_suggestion",
   "lilia_batch_apply",
   "lilia_session_fork",
-]);
-const CLAUDE_LOCAL_LILIA_DIAGNOSTICS = new Map([
-  ["lilia_memory_mode", "Claude 当前没有可由 Lilia 控制的 thread memory mode。"],
-  ["lilia_memory_reset", "Claude 当前没有可由 Lilia 重置的全局 memory 接口。"],
-  ["lilia_background_terminals_clean", "Claude 当前没有可由 Lilia 清理的后台终端接口。"],
-  ["lilia_config_diagnostics", "Claude 当前没有等价的 runtime config diagnostics 接口。"],
-  ["lilia_compact", "Claude 当前没有可由 Lilia 手动触发的上下文压缩接口。"],
+  "lilia_compact",
 ]);
 
 function normalizeLiliaGoalStatus(status) {
@@ -307,21 +305,43 @@ function emitClaudeWorkflowDone(context, sessionId = null) {
   context.protocol.emit({ type: "done", sessionId, subtype: "success" });
 }
 
-function emitClaudeUnsupportedWorkflow(context, workflow, reason) {
+function emitClaudeLocalWorkflowTimeline(context, workflow, config) {
   context.protocol.emitTimeline({
     kind: "diagnostic",
-    status: "info",
-    title: "Lilia workflow handled locally",
-    summary: reason,
+    status: config.status || "success",
+    title: config.title,
+    summary: config.summary,
     payload: {
       backend: "claude",
-      subkind: "lilia_workflow",
+      source: "lilia",
+      subkind: config.subkind,
       workflowType: workflow?.type ?? null,
-      reason,
+      ...config.payload,
     },
-    sourceId: `claude:lilia-workflow:${workflow?.type ?? "unknown"}:${Date.now()}`,
+    sourceId: `claude:lilia-${config.subkind || "workflow"}:${Date.now()}`,
   });
   emitClaudeWorkflowDone(context);
+}
+
+function claudeConfigDiagnosticsPayload(cmd) {
+  const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
+  return {
+    cwd: stringOrNull(cmd.cwd),
+    model: stringOrNull(cmd.model),
+    permission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
+    planMode: cmd.planMode === true,
+    hasResumeSession: Boolean(stringOrNull(cmd.resumeSessionId)),
+    runtimeExtensions: {
+      mcpServerCount: Object.keys(runtimeExtensions.mcpServers || {}).length,
+      mcpServers: Object.keys(runtimeExtensions.mcpServers || {}),
+      skillCount: runtimeExtensions.skills.length,
+      skills: runtimeExtensions.skills,
+      pluginCount: runtimeExtensions.plugins.length,
+      plugins: runtimeExtensions.plugins,
+      warningCount: runtimeExtensions.warnings.length,
+      warnings: runtimeExtensions.warnings,
+    },
+  };
 }
 
 async function runClaudeLocalLiliaWorkflow(cmd, context) {
@@ -366,23 +386,129 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
     return true;
   }
-  const diagnostic = CLAUDE_LOCAL_LILIA_DIAGNOSTICS.get(workflow.type);
-  if (diagnostic) {
+  if (workflow.type === "lilia_memory_mode") {
     const mode = stringOrNull(workflow.mode);
-    if (workflow.type === "lilia_memory_mode" && !LILIA_MEMORY_MODES.has(mode)) {
+    if (!LILIA_MEMORY_MODES.has(mode)) {
       throw new Error("Lilia memory mode workflow missing a valid mode");
     }
-    emitClaudeUnsupportedWorkflow(context, workflow, diagnostic);
+    emitClaudeLocalWorkflowTimeline(context, workflow, {
+      subkind: "memory_mode",
+      title: "Claude memory mode recorded",
+      summary: `Lilia memory mode set to ${mode} for Claude UI state`,
+      payload: {
+        mode,
+        native: false,
+        reason: "Claude SDK has no equivalent Lilia-controllable memory mode.",
+      },
+    });
+    return true;
+  }
+  if (workflow.type === "lilia_memory_reset") {
+    emitClaudeLocalWorkflowTimeline(context, workflow, {
+      subkind: "memory_reset",
+      title: "Claude memory reset recorded",
+      summary: "Lilia memory reset completed for Claude UI state",
+      payload: {
+        native: false,
+        reason: "Claude SDK has no equivalent global memory reset endpoint.",
+      },
+    });
+    return true;
+  }
+  if (workflow.type === "lilia_background_terminals_clean") {
+    emitClaudeLocalWorkflowTimeline(context, workflow, {
+      subkind: "background_terminals_clean",
+      title: "Claude background terminals clean completed",
+      summary: "No Lilia-managed Claude background terminals required cleanup",
+      payload: {
+        cleanedCount: 0,
+        native: false,
+      },
+    });
+    return true;
+  }
+  if (workflow.type === "lilia_config_diagnostics") {
+    emitClaudeLocalWorkflowTimeline(context, workflow, {
+      subkind: "config_diagnostics",
+      title: "Claude config diagnostics",
+      summary: "Lilia+Claude runtime diagnostics collected",
+      payload: {
+        includeLayers: workflow.includeLayers !== false,
+        ...claudeConfigDiagnosticsPayload(cmd),
+      },
+    });
     return true;
   }
   return false;
 }
 
-export async function runClaude(cmd, context) {
+function readClaudeCompactWorkflow(cmd) {
+  return readLiliaWorkflow(cmd)?.type === "lilia_compact";
+}
+
+function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null) {
+  const failed = status === "error";
+  const completed = status === "success";
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status,
+    title: failed
+      ? "Claude compact failed"
+      : completed
+        ? "Claude compact completed"
+        : "Claude compact started",
+    summary: failed
+      ? err?.message || String(err)
+      : completed
+        ? "Claude 原生上下文压缩已完成"
+        : "正在通过 Claude 原生 /compact 压缩上下文",
+    payload: {
+      backend: "claude",
+      subkind: "compact",
+      sourceSessionId: sourceSessionId || null,
+      method: "/compact",
+      ...(failed ? { error: err?.message || String(err) } : {}),
+    },
+    sourceId: `claude:compact:${failed ? "error" : completed ? "completed" : "start"}:${sourceSessionId || "missing"}`,
+  });
+}
+
+async function runClaudeCompactWorkflow(cmd, context, workingDir) {
+  if (!readClaudeCompactWorkflow(cmd)) return false;
+  const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
+  emitClaudeCompactTimeline(context, "started", sourceSessionId);
+  try {
+    if (!sourceSessionId) throw new Error("当前 Claude task 没有可 compact 的 session");
+    const result = await runClaudeQueryTurn(
+      {
+        ...cmd,
+        prompt: "",
+        resumeSessionId: sourceSessionId,
+        planMode: false,
+      },
+      context,
+      workingDir,
+      {
+        promptStream: claudeCompactPromptStream(),
+        emitRuntimeWarnings: false,
+        skipPromptSuggestions: true,
+        suppressDone: true,
+      },
+    );
+    if (result?.compactResult === "failed") {
+      throw new Error(result.compactError || "Claude compact failed");
+    }
+    emitClaudeCompactTimeline(context, "success", sourceSessionId);
+    emitClaudeWorkflowDone(context, result?.sessionId || sourceSessionId);
+  } catch (err) {
+    emitClaudeCompactTimeline(context, "error", sourceSessionId, err);
+    throw err;
+  }
+  return true;
+}
+
+async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const { cwd, prompt, model, resumeSessionId } = cmd;
-  const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
-  if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
-  if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
   const permission = cmd.permission === "full" || cmd.permission === "readonly"
@@ -406,6 +532,8 @@ export async function runClaude(cmd, context) {
     reasoningBlocks: new Map(),
     sawAssistantTextBlock: false,
     resultSeen: false,
+    compactResult: null,
+    compactError: null,
     activeTools: new Map(),
     commandEdits: new Map(),
   };
@@ -421,7 +549,7 @@ export async function runClaude(cmd, context) {
     model: model || undefined,
     resume: resumeSessionId || undefined,
     includePartialMessages: true,
-    promptSuggestions: true,
+    promptSuggestions: overrides.skipPromptSuggestions === true ? false : true,
     canUseTool: createClaudeCanUseTool(ctx),
     hooks: createClaudeHooks(ctx),
     systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform),
@@ -443,10 +571,15 @@ export async function runClaude(cmd, context) {
     ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),
     ...permOpts,
   };
-  emitRuntimeExtensionWarnings(context.protocol, "claude", runtimeExtensions.warnings);
+  if (overrides.emitRuntimeWarnings !== false) {
+    emitRuntimeExtensionWarnings(context.protocol, "claude", runtimeExtensions.warnings);
+  }
 
   const createClaudeQuery = context.createClaudeQuery || query;
-  const claudeQuery = createClaudeQuery({ prompt: singleClaudePromptStream(workflowPrompt || prompt), options });
+  const claudeQuery = createClaudeQuery({
+    prompt: overrides.promptStream ?? singleClaudePromptStream(workflowPrompt || prompt),
+    options,
+  });
   ctx.query = claudeQuery;
   context.interactions?.handleSettingsUpdate?.((update) => {
     applyClaudeRuntimePermission(ctx, update?.permission);
@@ -508,11 +641,13 @@ export async function runClaude(cmd, context) {
             },
             sourceId: msg.uuid,
           });
-          context.protocol.emit({
-            type: "done",
-            sessionId: msg.session_id || lastSessionId,
-            subtype: msg.subtype,
-          });
+          if (overrides.suppressDone !== true) {
+            context.protocol.emit({
+              type: "done",
+              sessionId: msg.session_id || lastSessionId,
+              subtype: msg.subtype,
+            });
+          }
           break;
         }
         case "prompt_suggestion": {
@@ -572,8 +707,24 @@ export async function runClaude(cmd, context) {
       },
       sourceId: `${lastSessionId}:turn:done`,
     });
-    context.protocol.emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
+    if (overrides.suppressDone !== true) {
+      context.protocol.emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
+    }
   }
+  return {
+    sessionId: lastSessionId,
+    compactResult: ctx.compactResult,
+    compactError: ctx.compactError,
+  };
+}
+
+export async function runClaude(cmd, context) {
+  const { cwd } = cmd;
+  const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
+  if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
+  await runClaudeQueryTurn(cmd, context, workingDir);
 }
 
 export function handleClaudeStreamEvent(msg, ctx) {

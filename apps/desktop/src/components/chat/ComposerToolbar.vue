@@ -254,7 +254,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <div v-if="state.backend === 'codex'" ref="fixSuggestionRoot" class="chat-review-menu">
+        <div ref="fixSuggestionRoot" class="chat-review-menu">
           <button
             type="button"
             class="chat-chip chat-chip--icon"
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
           <Camera :size="14" aria-hidden="true" />
         </button>
         <button
-          v-if="state.backend === 'codex'"
+          v-if="state.backend === 'codex' || state.backend === 'claude'"
           type="button"
           class="chat-chip chat-chip--icon"
           :class="{ 'is-disabled': compactDisabled }"
