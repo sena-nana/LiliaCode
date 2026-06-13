@@ -79,6 +79,7 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
+  "start-session-fork": [];
   "open-codex-iab": [];
   "submit-codex-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
@@ -893,6 +894,7 @@ defineExpose({ focusInput, getDraftSnapshot });
         :review-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :fix-suggestion-disabled="state.backend !== 'codex' || sending === true || hasPending"
         :compact-disabled="compactDisabled === true || state.backend !== 'codex' || sending === true || hasPending"
+        :session-fork-disabled="sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -901,6 +903,7 @@ defineExpose({ focusInput, getDraftSnapshot });
         @start-codex-review="startCodexReview"
         @start-codex-fix-suggestion="startCodexFixSuggestion"
         @start-codex-compact="emit('start-codex-compact')"
+        @start-session-fork="emit('start-session-fork')"
         @open-codex-iab="emit('open-codex-iab')"
         @submit-codex-iab="emit('submit-codex-iab')"
         @submit-entry="submitEntry"

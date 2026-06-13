@@ -173,6 +173,15 @@ export type CodexBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
+export type ClaudeSessionForkWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "claude_session_fork";
+    },
+    ChatWorkflow
+  >
+>;
+
 export type AutomationRunWorkflowTypeTest = Assert<
   Extends<
     {

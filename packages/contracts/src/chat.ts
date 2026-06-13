@@ -137,6 +137,10 @@ export interface CodexThreadForkWorkflow {
   excludeTurns?: boolean;
 }
 
+export interface ClaudeSessionForkWorkflow {
+  type: "claude_session_fork";
+}
+
 export interface CodexConfigDiagnosticsWorkflow {
   type: "codex_config_diagnostics";
   includeLayers?: boolean;
@@ -175,6 +179,7 @@ export type ChatWorkflow =
   | CodexMemoryModeWorkflow
   | CodexMemoryResetWorkflow
   | CodexThreadForkWorkflow
+  | ClaudeSessionForkWorkflow
   | CodexConfigDiagnosticsWorkflow
   | AutomationRunWorkflow
   | ChatSlashCommandWorkflow;

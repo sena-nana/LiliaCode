@@ -24,7 +24,7 @@ use crate::chat::types::{
 use crate::provider::load_agent_interaction_settings;
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
-use crate::{agent_timeline, BACKEND_CODEX, RUNTIME_CHANNEL_MUTSUKI_CORE};
+use crate::{agent_timeline, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_MUTSUKI_CORE};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MutsukiCoreTurnStopKind {
@@ -69,6 +69,11 @@ pub fn chat_send_message(
     ) && composer.backend != BACKEND_CODEX
     {
         return Err("Codex workflow 只能在 Codex 后端中启动".to_string());
+    }
+    if matches!(workflow, Some(ChatWorkflow::ClaudeSessionFork))
+        && composer.backend != BACKEND_CLAUDE
+    {
+        return Err("Claude workflow 只能在 Claude 后端中启动".to_string());
     }
     let slash_command_id = match &workflow {
         Some(ChatWorkflow::SlashCommand { command_id, .. }) => Some(command_id.clone()),

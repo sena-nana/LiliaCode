@@ -363,6 +363,31 @@ describe("runner core", () => {
     }
   });
 
+  it("Claude session fork workflow 允许空 prompt 进入 Claude 后端", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "claude",
+      prompt: "",
+      workflow: { type: "claude_session_fork" },
+    }, {
+      protocol,
+      env: {},
+      runClaude: async (cmd: any) => {
+        protocol.emit({ type: "done", sessionId: "claude-fork", workflow: cmd.workflow });
+      },
+      runCodex: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(json()[0]).toMatchObject({
+      type: "done",
+      sessionId: "claude-fork",
+      workflow: { type: "claude_session_fork" },
+    });
+  });
+
   it("按 backend 路由，并把附件路径注入 prompt", async () => {
     const { protocol } = captureProtocol();
     let seen: any = null;
@@ -684,6 +709,85 @@ describe("Claude helpers", () => {
       suggestion: "请继续检查 Claude 原生建议展示。",
       uuid: "suggestion-1",
     });
+  });
+
+  it("Claude session fork workflow calls forkSession and emits the forked session id", async () => {
+    const { protocol, json } = captureProtocol();
+    let forkInput: any = null;
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-source",
+      workflow: { type: "claude_session_fork" },
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      forkClaudeSession: async (sessionId: string, options: any) => {
+        forkInput = { sessionId, options };
+        return { sessionId: "claude-forked" };
+      },
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return (async function* () {})();
+      },
+    } as any);
+
+    expect(forkInput).toEqual({
+      sessionId: "claude-source",
+      options: { dir: "C:/repo" },
+    });
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-forked",
+      subtype: "success",
+    });
+  });
+
+  it("Claude session fork workflow requires an existing session checkpoint", async () => {
+    const { protocol, json } = captureProtocol();
+    let forkCalled = false;
+    let queryCalled = false;
+
+    await expect(runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      workflow: { type: "claude_session_fork" },
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      forkClaudeSession: async () => {
+        forkCalled = true;
+        return { sessionId: "claude-forked" };
+      },
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return (async function* () {})();
+      },
+    } as any)).rejects.toThrow("当前 Claude task 没有可 fork 的 session");
+
+    expect(forkCalled).toBe(false);
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Claude session fork failed",
+      }),
+    }));
   });
 
   it("plan mode 初始进入 Claude plan，确认后恢复原执行权限映射", () => {

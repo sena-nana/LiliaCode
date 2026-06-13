@@ -388,6 +388,7 @@ watch(
     @start-codex-review="composerController.onStartCodexReview"
     @start-codex-fix-suggestion="composerController.onStartCodexFixSuggestion"
     @start-codex-compact="composerController.onStartCodexCompact"
+    @start-session-fork="composerController.onStartSessionFork"
     @open-codex-iab="composerController.onOpenCodexIab"
     @submit-codex-iab="composerController.onSubmitCodexIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"

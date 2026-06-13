@@ -259,6 +259,7 @@ export function useTaskComposerController(options: {
 
   const codexWorkflowActions = useCodexWorkflowActions({
     hasContext: context.hasContext,
+    composer,
     isTurnRunning,
     blockingPendingAgentActions,
     attachments,

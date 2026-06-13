@@ -92,6 +92,7 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
+  "start-session-fork": [];
   "open-codex-iab": [];
   "submit-codex-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
@@ -202,6 +203,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @start-codex-fix-suggestion="(content, outgoingAttachments, target) => emit('start-codex-fix-suggestion', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
+                  @start-session-fork="emit('start-session-fork')"
                   @open-codex-iab="emit('open-codex-iab')"
                   @submit-codex-iab="emit('submit-codex-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"

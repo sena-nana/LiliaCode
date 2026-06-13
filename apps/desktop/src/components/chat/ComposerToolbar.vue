@@ -8,6 +8,7 @@ import {
   FileQuestion,
   GitBranch,
   GitCommit,
+  GitFork,
   Globe,
   ListChecks,
   Paperclip,
@@ -33,6 +34,7 @@ const props = defineProps<{
   reviewDisabled: boolean;
   fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
+  sessionForkDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   startCodexReview: [target: CodexReviewTarget];
   startCodexFixSuggestion: [target: CodexReviewTarget];
   startCodexCompact: [];
+  startSessionFork: [];
   openCodexIab: [];
   submitCodexIab: [];
   submitEntry: [];
@@ -299,6 +302,18 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <button
+          v-if="state.backend === 'codex' || state.backend === 'claude'"
+          type="button"
+          class="chat-chip chat-chip--icon"
+          :class="{ 'is-disabled': sessionForkDisabled }"
+          :disabled="sessionForkDisabled || actionsBlocked"
+          title="分叉当前会话"
+          aria-label="分叉当前会话"
+          @click="emit('startSessionFork')"
+        >
+          <GitFork :size="14" aria-hidden="true" />
+        </button>
         <button
           v-if="state.backend === 'codex'"
           type="button"
