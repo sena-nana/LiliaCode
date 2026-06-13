@@ -754,10 +754,10 @@ describe("ChatComposer", () => {
     });
   });
 
-  it("Codex 后端可从工具栏发起修复建议", async () => {
+  it("Claude 和 Codex 后端可从工具栏发起修复建议", async () => {
     const view = render(ChatComposer, {
       props: {
-        state: codexState,
+        state: baseState,
         attachments: [],
       },
     });
@@ -768,6 +768,18 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
+      "",
+      [],
+      { type: "uncommittedChanges" },
+    ]);
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+    });
+    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
+    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    expect(view.emitted("start-lilia-fix-suggestion")?.[1]).toEqual([
       "",
       [],
       { type: "uncommittedChanges" },
@@ -820,7 +832,7 @@ describe("ChatComposer", () => {
     promptSpy.mockRestore();
   });
 
-  it("非 Codex 或运行中时禁用代码审查入口", async () => {
+  it("Claude 和 Codex 后端显示代码审查入口，运行中时禁用", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -828,7 +840,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
+    expect(view.getByRole("button", { name: "代码审查" })).not.toBeDisabled();
 
     await view.rerender({
       state: codexState,
@@ -839,20 +851,13 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
   });
 
-  it("非 Codex 或运行中时隐藏或禁用修复建议入口", async () => {
+  it("运行中时禁用修复建议入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
+        sending: true,
         attachments: [],
       },
-    });
-
-    expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
-
-    await view.rerender({
-      state: codexState,
-      attachments: [],
-      sending: true,
     });
 
     expect(view.getByRole("button", { name: "修复建议" })).toBeDisabled();
@@ -885,10 +890,10 @@ describe("ChatComposer", () => {
     expect(view.emitted("start-lilia-fix-suggestion")).toBeUndefined();
   });
 
-  it("Codex 后端可从工具栏发起上下文压缩", async () => {
+  it("Claude 和 Codex 后端可从工具栏发起上下文压缩", async () => {
     const view = render(ChatComposer, {
       props: {
-        state: codexState,
+        state: baseState,
         attachments: [],
       },
     });
@@ -898,6 +903,13 @@ describe("ChatComposer", () => {
     await fireEvent.click(compactButton);
 
     expect(view.emitted("start-lilia-compact")?.length).toBe(1);
+
+    await view.rerender({
+      state: codexState,
+      attachments: [],
+    });
+    await fireEvent.click(view.getByRole("button", { name: "压缩上下文" }));
+    expect(view.emitted("start-lilia-compact")?.length).toBe(2);
   });
 
   it("Claude 和 Codex 后端可从同一工具栏入口分叉当前会话", async () => {
@@ -964,25 +976,19 @@ describe("ChatComposer", () => {
     expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
   });
 
-  it("非 Codex 时隐藏 compact 入口，运行中或阻塞 pending 时禁用", async () => {
+  it("compact 入口在运行中或禁用状态时禁用", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
+        sending: true,
       },
     });
 
-    expect(view.queryByRole("button", { name: "压缩上下文" })).toBeNull();
-
-    await view.rerender({
-      state: codexState,
-      attachments: [],
-      sending: true,
-    });
     expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
 
     await view.rerender({
-      state: codexState,
+      state: baseState,
       attachments: [],
       sending: false,
       compactDisabled: true,

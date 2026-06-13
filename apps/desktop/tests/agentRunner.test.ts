@@ -597,6 +597,23 @@ describe("interaction broker", () => {
 });
 
 describe("Claude helpers", () => {
+  function emptyClaudeQuery() {
+    return (async function* () {})();
+  }
+
+  function claudeRunnerContext(protocol: any, overrides: Record<string, unknown> = {}) {
+    return {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      ...overrides,
+    } as any;
+  }
+
   it("子对话才会注册 Claude 查询对话上下文工具", () => {
     const createdTools: any[] = [];
     const createTool = (...args: any[]) => {
@@ -788,6 +805,297 @@ describe("Claude helpers", () => {
         title: "Claude session fork failed",
       }),
     }));
+  });
+
+  it("Claude compact workflow sends native /compact and emits done", async () => {
+    const { protocol, json } = captureProtocol();
+    let seenPrompt = "";
+    let seenOptions: any = null;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-source",
+      workflow: { type: "lilia_compact" },
+    }, claudeRunnerContext(protocol, {
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: ({ prompt, options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          for await (const msg of prompt) {
+            seenPrompt = msg.message.content[0].text;
+          }
+          yield {
+            type: "system",
+            subtype: "status",
+            status: "compacting",
+            session_id: "claude-source",
+            uuid: "compact-status-1",
+          };
+          yield {
+            type: "system",
+            subtype: "compact_boundary",
+            session_id: "claude-source",
+            uuid: "compact-boundary-1",
+            compact_metadata: {
+              trigger: "manual",
+              pre_tokens: 12000,
+              post_tokens: 3000,
+              duration_ms: 42,
+            },
+          };
+          yield {
+            type: "system",
+            subtype: "status",
+            compact_result: "success",
+            session_id: "claude-source",
+            uuid: "compact-status-2",
+          };
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-source",
+            uuid: "compact-result",
+          };
+        })();
+      },
+    }));
+
+    expect(seenPrompt).toBe("/compact");
+    expect(seenOptions).toMatchObject({
+      resume: "claude-source",
+      promptSuggestions: false,
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.title === "Lilia workflow handled locally"
+    )).toBe(false);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Claude compact boundary" &&
+      line.event.payload.preTokens === 12000 &&
+      line.event.payload.postTokens === 3000
+    )).toBe(true);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-source",
+      subtype: "success",
+    });
+  });
+
+  it("Claude compact workflow requires an existing session checkpoint", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await expect(runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      workflow: { type: "lilia_compact" },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }))).rejects.toThrow("当前 Claude task 没有可 compact 的 session");
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Claude compact failed",
+      }),
+    }));
+  });
+
+  it("Claude compact workflow fails when native compact reports failed", async () => {
+    const { protocol, json } = captureProtocol();
+
+    await expect(runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-source",
+      workflow: { type: "lilia_compact" },
+    }, claudeRunnerContext(protocol, {
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: () => (async function* () {
+        yield {
+          type: "system",
+          subtype: "status",
+          compact_result: "failed",
+          compact_error: "native compact failed",
+          session_id: "claude-source",
+          uuid: "compact-status-failed",
+        };
+        yield {
+          type: "result",
+          is_error: false,
+          subtype: "success",
+          session_id: "claude-source",
+          uuid: "compact-result-failed",
+        };
+      })(),
+    }))).rejects.toThrow("native compact failed");
+
+    expect(json().some((line) =>
+      line.type === "done" &&
+      line.sessionId === "claude-source"
+    )).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Claude compact failed",
+      }),
+    }));
+  });
+
+  it.each([
+    {
+      name: "memory mode",
+      workflow: { type: "lilia_memory_mode", mode: "enabled" },
+      title: "Claude memory mode recorded",
+      payload: { subkind: "memory_mode", mode: "enabled", native: false },
+    },
+    {
+      name: "memory reset",
+      workflow: { type: "lilia_memory_reset" },
+      title: "Claude memory reset recorded",
+      payload: { subkind: "memory_reset", native: false },
+    },
+    {
+      name: "background terminals clean",
+      workflow: { type: "lilia_background_terminals_clean" },
+      title: "Claude background terminals clean completed",
+      payload: { subkind: "background_terminals_clean", cleanedCount: 0 },
+    },
+  ])("Claude $name workflow is handled by Lilia without SDK query", async ({ workflow, title, payload }) => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-source",
+      workflow,
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.title === "Lilia workflow handled locally"
+    )).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title,
+        payload: expect.objectContaining({
+          backend: "claude",
+          source: "lilia",
+          ...payload,
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({ type: "done", sessionId: null, subtype: "success" });
+  });
+
+  it("Claude memory mode workflow rejects invalid mode before SDK query", async () => {
+    const { protocol } = captureProtocol();
+    let queryCalled = false;
+
+    await expect(runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      workflow: { type: "lilia_memory_mode", mode: "maybe" },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }))).rejects.toThrow("Lilia memory mode workflow missing a valid mode");
+
+    expect(queryCalled).toBe(false);
+  });
+
+  it("Claude config diagnostics reports safe Lilia and runtime facts without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      model: "claude-sonnet-4-6",
+      permission: "full",
+      planMode: true,
+      resumeSessionId: "claude-source",
+      workflow: { type: "lilia_config_diagnostics" },
+      extensions: {
+        claude: {
+          skills: ["reviewer"],
+          plugins: [{ type: "local", path: "C:/plugins/one" }],
+          warnings: ["skip unsafe setting"],
+          mcpServers: {
+            lilia: { type: "stdio", command: "ignored" },
+            safeServer: {
+              type: "stdio",
+              command: "node",
+              args: ["server.mjs"],
+              env: { API_KEY: "secret-value" },
+            },
+          },
+        },
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    const diagnostic = json().find((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Claude config diagnostics"
+    );
+    expect(diagnostic).toMatchObject({
+      event: {
+        status: "success",
+        payload: {
+          backend: "claude",
+          source: "lilia",
+          subkind: "config_diagnostics",
+          cwd: "C:/repo",
+          model: "claude-sonnet-4-6",
+          permission: "full",
+          planMode: true,
+          hasResumeSession: true,
+          runtimeExtensions: {
+            mcpServerCount: 1,
+            mcpServers: ["safeServer"],
+            skillCount: 1,
+            skills: ["reviewer"],
+            pluginCount: 1,
+            warningCount: 2,
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("secret-value");
+    expect(JSON.stringify(diagnostic)).not.toContain("API_KEY");
   });
 
   it("plan mode 初始进入 Claude plan，确认后恢复原执行权限映射", () => {

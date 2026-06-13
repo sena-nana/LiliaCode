@@ -474,21 +474,64 @@ export function mapClaudeSystemTimeline(msg, ctx) {
         });
         return;
       case "status":
+        if (msg.compact_result) {
+          ctx.compactResult = msg.compact_result;
+          ctx.compactError = msg.compact_error;
+        }
         emitTimeline({
           kind: "turn",
-          status: msg.status || msg.compact_result || "info",
+          status: msg.compact_result === "failed"
+            ? "error"
+            : msg.compact_result === "success"
+              ? "success"
+              : msg.status === "compacting"
+                ? "running"
+                : msg.status || "info",
           title: "Claude status",
           summary: msg.compact_error || msg.status || "",
           payload: {
             backend: "claude",
+            subkind: msg.compact_result || msg.compact_error || msg.status === "compacting"
+              ? "compact"
+              : undefined,
             status: msg.status,
             permissionMode: msg.permissionMode,
             compactResult: msg.compact_result,
+            compactError: msg.compact_error,
             sessionId: msg.session_id,
           },
           sourceId: msg.uuid,
         });
         return;
+      case "compact_boundary": {
+        const metadata = isRecord(msg.compact_metadata) ? msg.compact_metadata : {};
+        const preTokens = typeof metadata.pre_tokens === "number" ? metadata.pre_tokens : null;
+        const postTokens = typeof metadata.post_tokens === "number" ? metadata.post_tokens : null;
+        const tokenSummary = preTokens !== null && postTokens !== null
+          ? `${preTokens} -> ${postTokens} tokens`
+          : preTokens !== null
+            ? `${preTokens} tokens`
+            : "";
+        emitTimeline({
+          kind: "diagnostic",
+          status: "success",
+          title: "Claude compact boundary",
+          summary: tokenSummary,
+          payload: {
+            backend: "claude",
+            subkind: "compact",
+            trigger: metadata.trigger,
+            preTokens,
+            postTokens,
+            durationMs: metadata.duration_ms,
+            preservedSegment: metadata.preserved_segment,
+            preservedMessages: metadata.preserved_messages,
+            sessionId: msg.session_id,
+          },
+          sourceId: msg.uuid,
+        });
+        return;
+      }
       case "session_state_changed":
         emitTimeline({
           kind: "turn",
