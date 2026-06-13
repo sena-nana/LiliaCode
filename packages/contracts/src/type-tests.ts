@@ -11,8 +11,8 @@ import type {
   ChatMessage,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
-  CodexIabSnapshot,
-  CodexIabSubmitResult,
+  LiliaIabSnapshot,
+  LiliaIabSubmitResult,
   LiliaReviewTarget,
   CodexProfileSettings,
   ProjectRoadmap,
@@ -82,7 +82,7 @@ export type ChatAttachmentSchemaTypeTest = Assert<
   >
 >;
 
-export type CodexIabSnapshotTypeTest = Assert<
+export type LiliaIabSnapshotTypeTest = Assert<
   Extends<
     {
       taskId: "task-1";
@@ -95,18 +95,18 @@ export type CodexIabSnapshotTypeTest = Assert<
       status: "captured";
       warning: null;
     },
-    CodexIabSnapshot
+    LiliaIabSnapshot
   >
 >;
 
-export type CodexIabSubmitResultTypeTest = Assert<
+export type LiliaIabSubmitResultTypeTest = Assert<
   Extends<
     {
-      snapshot: CodexIabSnapshot;
+      snapshot: LiliaIabSnapshot;
       delivery: "runner";
       stdinForwarded: true;
     },
-    CodexIabSubmitResult
+    LiliaIabSubmitResult
   >
 >;
 

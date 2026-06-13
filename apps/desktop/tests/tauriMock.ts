@@ -400,8 +400,8 @@ let nextAgentInteractionResponseError: string | null = null;
 let clipboardFilePaths: string[] = [];
 let clipboardImageSeq = 0;
 let clipboardTextSeq = 0;
-let codexIabSeq = 0;
-let nextCodexIabDelivery: "runner" | "message" = "message";
+let liliaIabSeq = 0;
+let nextLiliaIabDelivery: "runner" | "message" = "message";
 let activeBackend: "claude" | "codex" = "claude";
 type MockProviderBackend = "claude" | "codex";
 type MockRouterMode = "cc-switch" | "direct";
@@ -422,10 +422,10 @@ let ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
 let ccSwitchReachable = true;
 let nodeAvailable = true;
 
-function createMockCodexIabSnapshot(args: Record<string, unknown>) {
+function createMockLiliaIabSnapshot(args: Record<string, unknown>) {
   const taskId = String(args.taskId);
-  codexIabSeq += 1;
-  const path = `C:\\Users\\mock\\.lilia\\cache\\iab-snapshots\\iab-${codexIabSeq}.png`;
+  liliaIabSeq += 1;
+  const path = `C:\\Users\\mock\\.lilia\\cache\\iab-snapshots\\iab-${liliaIabSeq}.png`;
   return {
     taskId,
     url: "https://example.com/debug",
@@ -434,7 +434,7 @@ function createMockCodexIabSnapshot(args: Record<string, unknown>) {
     capturedAt: Date.now(),
     screenshotPath: path,
     screenshotAttachment: {
-      id: `att-iab-${codexIabSeq}`,
+      id: `att-iab-${liliaIabSeq}`,
       name: "IAB 截图.png",
       path,
       kind: "file",
@@ -906,8 +906,8 @@ export function resetTauriMockData() {
   clipboardFilePaths = [];
   clipboardImageSeq = 0;
   clipboardTextSeq = 0;
-  codexIabSeq = 0;
-  nextCodexIabDelivery = "message";
+  liliaIabSeq = 0;
+  nextLiliaIabDelivery = "message";
   activeBackend = "claude";
   providerConfigs = {
     claude: { backend: "claude", baseUrl: null, hasApiKey: false },
@@ -1034,8 +1034,8 @@ export function failNextMockAgentInteractionResponse(message: string) {
   nextAgentInteractionResponseError = message;
 }
 
-export function setNextMockCodexIabDelivery(delivery: "runner" | "message") {
-  nextCodexIabDelivery = delivery;
+export function setNextMockLiliaIabDelivery(delivery: "runner" | "message") {
+  nextLiliaIabDelivery = delivery;
 }
 
 export function emitWebviewDragDropEvent(payload: unknown) {
@@ -3046,17 +3046,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "codex_iab_open":
-    case "codex_iab_navigate":
+    case "lilia_iab_open":
       return undefined;
 
-    case "codex_iab_capture":
-      return createMockCodexIabSnapshot(args);
-
-    case "codex_iab_submit": {
-      const snapshot = createMockCodexIabSnapshot(args);
-      const delivery = nextCodexIabDelivery;
-      nextCodexIabDelivery = "message";
+    case "lilia_iab_submit": {
+      const snapshot = createMockLiliaIabSnapshot(args);
+      const delivery = nextLiliaIabDelivery;
+      nextLiliaIabDelivery = "message";
       return {
         snapshot,
         delivery,

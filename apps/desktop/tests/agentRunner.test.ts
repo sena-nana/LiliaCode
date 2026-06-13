@@ -36,7 +36,7 @@ import {
   updateCodexThreadSettings,
   applyCodexRuntimeSettings,
   flushCodexRuntimeSettings,
-  handleCodexIabResult,
+  handleLiliaIabResult,
   startCodexAppServerTurn,
   withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
@@ -2135,7 +2135,7 @@ describe("Codex app-server mapping", () => {
     expect(consentTimeline).toEqual([]);
   });
 
-  it("steers Codex IAB snapshots back into the active turn", async () => {
+  it("steers Lilia IAB snapshots back into the active Codex turn", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
     const server = {
@@ -2152,7 +2152,7 @@ describe("Codex app-server mapping", () => {
       currentTurnId: "turn-1",
     };
 
-    await handleCodexIabResult(ctx, {
+    await handleLiliaIabResult(ctx, {
       taskId: "task-1",
       url: "https://example.com/debug",
       title: "Debug Page",
@@ -2168,7 +2168,7 @@ describe("Codex app-server mapping", () => {
         event: expect.objectContaining({
           kind: "tool",
           status: "success",
-          title: "Codex IAB snapshot",
+          title: "Lilia IAB snapshot",
           payload: expect.objectContaining({
             backend: "codex",
             subkind: "codex_iab",

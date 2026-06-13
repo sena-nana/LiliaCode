@@ -1,8 +1,8 @@
 import type { ChatAttachment } from "./chat";
 
-export type CodexIabSnapshotStatus = "captured" | "metadata_only";
+export type LiliaIabSnapshotStatus = "captured" | "metadata_only";
 
-export interface CodexIabSnapshot {
+export interface LiliaIabSnapshot {
   taskId: string;
   url: string;
   title: string | null;
@@ -10,12 +10,12 @@ export interface CodexIabSnapshot {
   capturedAt: number;
   screenshotPath: string | null;
   screenshotAttachment: ChatAttachment | null;
-  status: CodexIabSnapshotStatus;
+  status: LiliaIabSnapshotStatus;
   warning: string | null;
 }
 
-export interface CodexIabSubmitResult {
-  snapshot: CodexIabSnapshot;
+export interface LiliaIabSubmitResult {
+  snapshot: LiliaIabSnapshot;
   delivery: "runner" | "message";
   stdinForwarded: boolean;
 }

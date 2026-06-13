@@ -47,8 +47,8 @@ import type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
-  CodexIabSnapshot,
-  CodexIabSubmitResult,
+  LiliaIabSnapshot,
+  LiliaIabSubmitResult,
   ChatRollbackResult,
   ProjectArchitectureApplyInput,
   ProjectArchitectureApplyResult,
@@ -96,8 +96,8 @@ export type {
   CodexMcpElicitationResult,
   CodexPermissionApprovalPayload,
   CodexPermissionApprovalResult,
-  CodexIabSnapshot,
-  CodexIabSubmitResult,
+  LiliaIabSnapshot,
+  LiliaIabSubmitResult,
   ChatRollbackResult,
   ProjectArchitectureApplyInput,
   ProjectArchitectureApplyResult,
@@ -218,14 +218,14 @@ export function saveClipboardText(input: { text: string }): Promise<ChatAttachme
 }
 
 export function openLiliaIab(taskId: string, url?: string | null): Promise<void> {
-  return invoke<void>("codex_iab_open", { taskId, url: url ?? null });
+  return invoke<void>("lilia_iab_open", { taskId, url: url ?? null });
 }
 
 export function submitLiliaIab(
   taskId: string,
   note?: string | null,
-): Promise<CodexIabSubmitResult> {
-  return invoke<CodexIabSubmitResult>("codex_iab_submit", { taskId, note: note ?? null });
+): Promise<LiliaIabSubmitResult> {
+  return invoke<LiliaIabSubmitResult>("lilia_iab_submit", { taskId, note: note ?? null });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {
