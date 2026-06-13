@@ -92,10 +92,6 @@ const emit = defineEmits<{
     target: CodexReviewTarget,
   ];
   "start-codex-compact": [];
-  "set-codex-memory-mode": [mode: "enabled" | "disabled"];
-  "reset-codex-memory": [];
-  "fork-codex-thread": [];
-  "read-codex-config-diagnostics": [];
   "open-codex-iab": [];
   "submit-codex-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
@@ -206,11 +202,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-codex-review="(content, outgoingAttachments, target) => emit('start-codex-review', content, outgoingAttachments, target)"
                   @start-codex-fix-suggestion="(content, outgoingAttachments, target) => emit('start-codex-fix-suggestion', content, outgoingAttachments, target)"
                   @start-codex-compact="emit('start-codex-compact')"
-                  @set-codex-memory-mode="emit('set-codex-memory-mode', $event)"
-                  @reset-codex-memory="emit('reset-codex-memory')"
-                  @set-codex-goal="emit('set-codex-goal', $event)"
-                  @fork-codex-thread="emit('fork-codex-thread')"
-                  @read-codex-config-diagnostics="emit('read-codex-config-diagnostics')"
                   @open-codex-iab="emit('open-codex-iab')"
                   @submit-codex-iab="emit('submit-codex-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"

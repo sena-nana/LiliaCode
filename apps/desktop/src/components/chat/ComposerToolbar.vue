@@ -2,20 +2,15 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
-  Brain,
   Camera,
   CodeXml,
   Combine,
   FileQuestion,
-  FileCog,
-  Goal,
   GitBranch,
   GitCommit,
-  GitFork,
   Globe,
   ListChecks,
   Paperclip,
-  RotateCcw,
   ShieldCheck,
   Square,
 } from "lucide-vue-next";
@@ -38,7 +33,6 @@ const props = defineProps<{
   reviewDisabled: boolean;
   fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
-  codexWorkflowDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -50,11 +44,6 @@ const emit = defineEmits<{
   startCodexReview: [target: CodexReviewTarget];
   startCodexFixSuggestion: [target: CodexReviewTarget];
   startCodexCompact: [];
-  setCodexMemoryMode: [mode: "enabled" | "disabled"];
-  resetCodexMemory: [];
-  setCodexGoal: [objective: string];
-  forkCodexThread: [];
-  readCodexConfigDiagnostics: [];
   openCodexIab: [];
   submitCodexIab: [];
   submitEntry: [];
@@ -65,8 +54,6 @@ const reviewOpen = ref(false);
 const reviewRoot = ref<HTMLElement | null>(null);
 const fixSuggestionOpen = ref(false);
 const fixSuggestionRoot = ref<HTMLElement | null>(null);
-const codexWorkflowOpen = ref(false);
-const codexWorkflowRoot = ref<HTMLElement | null>(null);
 
 function closeReviewMenu() {
   reviewOpen.value = false;
@@ -74,10 +61,6 @@ function closeReviewMenu() {
 
 function closeFixSuggestionMenu() {
   fixSuggestionOpen.value = false;
-}
-
-function closeCodexWorkflowMenu() {
-  codexWorkflowOpen.value = false;
 }
 
 function toggleReviewMenu() {
@@ -90,11 +73,6 @@ function toggleFixSuggestionMenu() {
   fixSuggestionOpen.value = !fixSuggestionOpen.value;
 }
 
-function toggleCodexWorkflowMenu() {
-  if (props.codexWorkflowDisabled || props.actionsBlocked) return;
-  codexWorkflowOpen.value = !codexWorkflowOpen.value;
-}
-
 function onDocPointer(e: PointerEvent) {
   if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
   if (
@@ -102,9 +80,6 @@ function onDocPointer(e: PointerEvent) {
     !fixSuggestionRoot.value.contains(e.target as Node)
   ) {
     closeFixSuggestionMenu();
-  }
-  if (codexWorkflowRoot.value && !codexWorkflowRoot.value.contains(e.target as Node)) {
-    closeCodexWorkflowMenu();
   }
 }
 
@@ -115,10 +90,6 @@ function onKey(e: KeyboardEvent) {
   }
   if (e.key === "Escape" && fixSuggestionOpen.value) {
     closeFixSuggestionMenu();
-    e.stopPropagation();
-  }
-  if (e.key === "Escape" && codexWorkflowOpen.value) {
-    closeCodexWorkflowMenu();
     e.stopPropagation();
   }
 }
@@ -157,34 +128,6 @@ function startCommitFixSuggestion() {
   else closeFixSuggestionMenu();
 }
 
-function setMemoryMode(mode: "enabled" | "disabled") {
-  closeCodexWorkflowMenu();
-  emit("setCodexMemoryMode", mode);
-}
-
-function resetMemory() {
-  closeCodexWorkflowMenu();
-  if (!window.confirm("重置 Codex memory？")) return;
-  emit("resetCodexMemory");
-}
-
-function setGoal() {
-  closeCodexWorkflowMenu();
-  const objective = window.prompt("Codex goal")?.trim();
-  if (!objective) return;
-  emit("setCodexGoal", objective);
-}
-
-function forkThread() {
-  closeCodexWorkflowMenu();
-  emit("forkCodexThread");
-}
-
-function readConfigDiagnostics() {
-  closeCodexWorkflowMenu();
-  emit("readCodexConfigDiagnostics");
-}
-
 function syncDocumentListeners(open: boolean) {
   if (open) {
     document.addEventListener("pointerdown", onDocPointer, true);
@@ -196,9 +139,9 @@ function syncDocumentListeners(open: boolean) {
 }
 
 watch(
-  [reviewOpen, fixSuggestionOpen, codexWorkflowOpen],
-  ([review, fixSuggestion, workflow]) => {
-    syncDocumentListeners(review || fixSuggestion || workflow);
+  [reviewOpen, fixSuggestionOpen],
+  ([review, fixSuggestion]) => {
+    syncDocumentListeners(review || fixSuggestion);
   },
 );
 
@@ -353,81 +296,6 @@ onBeforeUnmount(() => {
             >
               <GitCommit :size="14" aria-hidden="true" />
               <span class="dd__item-label">指定提交...</span>
-            </button>
-          </div>
-        </div>
-        <div v-if="state.backend === 'codex'" ref="codexWorkflowRoot" class="chat-review-menu">
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': codexWorkflowOpen, 'is-disabled': codexWorkflowDisabled }"
-            :disabled="codexWorkflowDisabled || actionsBlocked"
-            title="Codex 原生接口"
-            aria-label="Codex 原生接口"
-            :aria-haspopup="true"
-            :aria-expanded="codexWorkflowOpen"
-            @click="toggleCodexWorkflowMenu"
-          >
-            <Brain :size="14" aria-hidden="true" />
-          </button>
-          <div
-            v-if="codexWorkflowOpen"
-            class="dd__menu dd__menu--top chat-review-menu__menu"
-            role="menu"
-          >
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="setMemoryMode('enabled')"
-            >
-              <Brain :size="14" aria-hidden="true" />
-              <span class="dd__item-label">启用 Memory</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="setMemoryMode('disabled')"
-            >
-              <Brain :size="14" aria-hidden="true" />
-              <span class="dd__item-label">关闭 Memory</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="resetMemory"
-            >
-              <RotateCcw :size="14" aria-hidden="true" />
-              <span class="dd__item-label">重置 Memory...</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="setGoal"
-            >
-              <Goal :size="14" aria-hidden="true" />
-              <span class="dd__item-label">设置 Goal...</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="forkThread"
-            >
-              <GitFork :size="14" aria-hidden="true" />
-              <span class="dd__item-label">Fork 当前 Thread</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="readConfigDiagnostics"
-            >
-              <FileCog :size="14" aria-hidden="true" />
-              <span class="dd__item-label">读取配置诊断</span>
             </button>
           </div>
         </div>

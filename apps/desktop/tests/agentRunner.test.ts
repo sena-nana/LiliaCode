@@ -34,7 +34,7 @@ import {
   startCodexAppServerThread,
   syncCodexThreadHistory,
   updateCodexThreadSettings,
-  applyCodexRuntimePermission,
+  applyCodexRuntimeSettings,
   flushCodexRuntimeSettings,
   handleCodexIabResult,
   startCodexAppServerTurn,
@@ -3052,7 +3052,7 @@ describe("Codex app-server mapping", () => {
     ]);
   });
 
-  it("runtime permission update refreshes Codex thread settings and later turn params", async () => {
+  it("runtime settings update refreshes Codex thread settings and later turn params", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
     const server = {
@@ -3070,22 +3070,33 @@ describe("Codex app-server mapping", () => {
     const ctx: any = createCodexRunContext(cmd, protocol, "thread-1");
     ctx.settingsUpdatePromises = [];
 
-    applyCodexRuntimePermission(server as any, "thread-1", cmd, ctx, "readonly", protocol);
+    applyCodexRuntimeSettings(
+      server as any,
+      "thread-1",
+      cmd,
+      ctx,
+      { permission: "readonly", model: "gpt-5.7" },
+      protocol,
+    );
     await flushCodexRuntimeSettings(ctx);
     await startCodexAppServerTurn(server as any, "thread-1", "after update", cmd, () => "C:/repo");
 
     expect(cmd.permission).toBe("readonly");
+    expect(cmd.model).toBe("gpt-5.7");
+    expect(cmd.codexSettings.model).toBe("gpt-5.7");
     expect(ctx.executionPermission).toBe("readonly");
     expect(calls[0]).toMatchObject({
       method: "thread/settings/update",
       params: {
         threadId: "thread-1",
+        model: "gpt-5.7",
         sandboxPolicy: { type: "readOnly" },
       },
     });
     expect(calls[1]).toMatchObject({
       method: "turn/start",
       params: {
+        model: "gpt-5.7",
         approvalPolicy: "never",
         sandboxPolicy: { type: "readOnly" },
       },

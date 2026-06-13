@@ -346,20 +346,50 @@ pub(crate) fn agent_interaction_response_payload(
     })
 }
 
-pub(crate) fn composer_permission_update_payload(
+pub(crate) fn composer_runtime_settings_update_payload(
     previous: Option<&ChatComposerState>,
     next: &ChatComposerState,
 ) -> Option<JsonValue> {
-    if !previous.is_some_and(|previous| previous.permission != next.permission) {
+    let Some(previous) = previous else {
         return None;
+    };
+    let mut payload = serde_json::Map::from_iter([(
+        "type".to_string(),
+        JsonValue::String("settings_update".to_string()),
+    )]);
+    if previous.permission != next.permission {
+        match next.permission.as_str() {
+            "full" | "readonly" | "ask" => {
+                payload.insert(
+                    "permission".to_string(),
+                    JsonValue::String(next.permission.clone()),
+                );
+            }
+            _ => {}
+        }
     }
-    match next.permission.as_str() {
-        "full" | "readonly" | "ask" => Some(serde_json::json!({
-            "type": "settings_update",
-            "permission": next.permission,
-        })),
-        _ => None,
+    if previous.model != next.model {
+        let model = next.model.trim();
+        if !model.is_empty() {
+            payload.insert("model".to_string(), JsonValue::String(model.to_string()));
+        }
     }
+    if payload.len() == 1 {
+        None
+    } else {
+        Some(JsonValue::Object(payload))
+    }
+}
+
+fn composer_runtime_settings_update_attributes(payload: &JsonValue) -> BTreeMap<String, String> {
+    let mut attributes = BTreeMap::new();
+    if let Some(permission) = payload.get("permission").and_then(JsonValue::as_str) {
+        attributes.insert("permission".to_string(), permission.to_string());
+    }
+    if let Some(model) = payload.get("model").and_then(JsonValue::as_str) {
+        attributes.insert("model".to_string(), model.to_string());
+    }
+    attributes
 }
 
 pub(crate) fn control_event_attributes(
@@ -605,7 +635,7 @@ pub fn chat_set_composer_state(
     let payload = {
         let mut composers = store.composers.lock().unwrap();
         let previous = composers.get(&state.task_id);
-        let payload = composer_permission_update_payload(previous, &state);
+        let payload = composer_runtime_settings_update_payload(previous, &state);
         composers.insert(state.task_id.clone(), state.clone());
         payload
     };
@@ -620,7 +650,7 @@ pub fn chat_set_composer_state(
         .as_ref()
         .is_some_and(|turn| turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE)
     {
-        let mut attributes = control_event_attributes([("permission", state.permission.clone())]);
+        let mut attributes = composer_runtime_settings_update_attributes(&payload);
         attributes.insert("stdinForwarded".to_string(), "runtime".to_string());
         record_mutsuki_core_control_event_for_app(
             &app,
@@ -632,11 +662,11 @@ pub fn chat_set_composer_state(
         );
         return;
     }
+    let mut attributes = composer_runtime_settings_update_attributes(&payload);
     let write_result = write_runner_stdin(&store, &state.task_id, payload);
-    let mut attributes = control_event_attributes([("permission", state.permission.clone())]);
     attach_stdin_delivery(&mut attributes, &write_result);
     if let Err(err) = write_result {
-        eprintln!("[chat] runtime permission update failed: {err}");
+        eprintln!("[chat] runtime settings update failed: {err}");
     }
 }
 
