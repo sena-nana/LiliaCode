@@ -830,6 +830,7 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
             | Some(ChatWorkflow::LiliaMemoryReset)
             | Some(ChatWorkflow::LiliaSessionFork { .. })
             | Some(ChatWorkflow::LiliaConfigDiagnostics { .. })
+            | Some(ChatWorkflow::LiliaProviderSettings { .. })
             | Some(ChatWorkflow::SlashCommand { .. })
     ) && content.trim().is_empty())
 }

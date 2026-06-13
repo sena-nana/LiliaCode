@@ -131,6 +131,12 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
+  async function onApplyLiliaProviderSettings(
+    workflow: Extract<ChatWorkflow, { type: "lilia_provider_settings" }>,
+  ) {
+    await sendLiliaWorkflow(workflow);
+  }
+
   return {
     onStartLiliaReview,
     onStartLiliaFixSuggestion,
@@ -140,5 +146,6 @@ export function useLiliaWorkflowActions(options: {
     onSetLiliaGoal,
     onRefreshLiliaGoal,
     onClearLiliaGoal,
+    onApplyLiliaProviderSettings,
   };
 }

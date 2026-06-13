@@ -503,6 +503,77 @@ function readCodexConfigDiagnosticsWorkflow(cmd) {
   };
 }
 
+const PROVIDER_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function readCodexProviderSettingsWorkflow(cmd) {
+  const workflow = readCodexWorkflow(cmd);
+  if (workflow?.type !== "lilia_provider_settings") return null;
+  const action = stringOrNull(workflow.action);
+  if (!PROVIDER_SETTINGS_ACTIONS.has(action)) {
+    throw new Error("Lilia provider settings workflow missing a valid action");
+  }
+  const common = isRecord(workflow.common) ? workflow.common : {};
+  const codex = isRecord(workflow.codex) ? workflow.codex : {};
+  const updates = {};
+  const model = stringOrNull(common.model)?.trim();
+  const permission = normalizeRuntimePermission(common.permission);
+  const profile = stringOrNull(codex.profile)?.trim();
+  const reasoningEffort = stringOrNull(codex.reasoningEffort)?.trim();
+  const permissionProfile = stringOrNull(codex.permissionProfile)?.trim();
+  const runtimeWorkspaceRoots = stringArray(codex.runtimeWorkspaceRoots);
+
+  if (model) updates.model = model;
+  if (permission) updates.permission = permission;
+  if (profile) updates.profile = profile;
+  if (reasoningEffort) updates.reasoningEffort = reasoningEffort;
+  if (permissionProfile) updates.permissionProfile = permissionProfile;
+  if (runtimeWorkspaceRoots.length > 0) updates.runtimeWorkspaceRoots = runtimeWorkspaceRoots;
+  if (hasOwn(codex, "persistExtendedHistory")) {
+    updates.persistExtendedHistory = codex.persistExtendedHistory === true;
+  }
+  if (action === "update" && Object.keys(updates).length === 0) {
+    throw new Error("Lilia provider settings update requires at least one supported setting");
+  }
+  return { action, updates };
+}
+
+function codexSettingsCmdFromProviderWorkflow(cmd, workflow) {
+  const next = {
+    ...cmd,
+    codexSettings: isRecord(cmd.codexSettings) ? { ...cmd.codexSettings } : {},
+  };
+  if (workflow.updates.model) {
+    next.model = workflow.updates.model;
+    next.codexSettings.model = workflow.updates.model;
+  }
+  if (workflow.updates.permission) {
+    next.permission = workflow.updates.permission;
+  }
+  if (workflow.updates.profile) {
+    next.codexSettings.profile = workflow.updates.profile;
+  }
+  if (workflow.updates.reasoningEffort) {
+    next.codexSettings.reasoningEffort = workflow.updates.reasoningEffort;
+  }
+  if (workflow.updates.permissionProfile) {
+    next.codexSettings.permissions = {
+      ...(isRecord(next.codexSettings.permissions) ? next.codexSettings.permissions : {}),
+      profile: workflow.updates.permissionProfile,
+    };
+  }
+  if (workflow.updates.runtimeWorkspaceRoots) {
+    next.codexSettings.runtimeWorkspaceRoots = workflow.updates.runtimeWorkspaceRoots;
+  }
+  if (hasOwn(workflow.updates, "persistExtendedHistory")) {
+    next.codexSettings.persistExtendedHistory = workflow.updates.persistExtendedHistory;
+  }
+  return next;
+}
+
 function emitCodexWorkflowTimeline(ctx, config, threadId, status, error = null) {
   const failed = status === "error";
   const completed = status === "success";
@@ -1303,6 +1374,81 @@ async function runCodexConfigDiagnosticsWorkflow(server, threadId, cmd, ctx, cwd
   return true;
 }
 
+async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
+  const workflow = readCodexProviderSettingsWorkflow(cmd);
+  if (!workflow) return false;
+  await flushCodexRuntimeSettings(ctx);
+  const effectiveCmd = codexSettingsCmdFromProviderWorkflow(cmd, workflow);
+  const params = buildCodexThreadSettingsParams(threadId, effectiveCmd);
+  const settingsKeys = Object.keys(params).filter((key) => key !== "threadId");
+  if (workflow.action === "diagnose") {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "info",
+      title: "Codex provider settings diagnostics",
+      summary: settingsKeys.length
+        ? `当前可应用 ${settingsKeys.length} 项 Codex provider settings`
+        : "当前没有可应用的 Codex provider settings 更新",
+      payload: {
+        backend: "codex",
+        subkind: "provider_settings",
+        action: workflow.action,
+        threadId,
+        settingsKeys,
+        params,
+      },
+      sourceId: `codex:provider-settings:diagnose:${threadId}`,
+    });
+    emitCodexWorkflowDone(ctx, threadId);
+    return true;
+  }
+
+  try {
+    await server.request("thread/settings/update", params);
+    cmd.permission = effectiveCmd.permission;
+    cmd.model = effectiveCmd.model;
+    cmd.codexSettings = effectiveCmd.codexSettings;
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "success",
+      title: "Codex provider settings updated",
+      summary: settingsKeys.length
+        ? `已更新 ${settingsKeys.length} 项 Codex provider settings`
+        : "Codex provider settings 已更新",
+      payload: {
+        backend: "codex",
+        subkind: "provider_settings",
+        action: workflow.action,
+        method: "thread/settings/update",
+        threadId,
+        settingsKeys,
+        params,
+      },
+      sourceId: `codex:provider-settings:update:${threadId}`,
+    });
+  } catch (err) {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex provider settings update failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "provider_settings",
+        action: workflow.action,
+        method: "thread/settings/update",
+        threadId,
+        settingsKeys,
+        error: err?.message || String(err),
+      },
+      sourceId: `codex:provider-settings:error:${threadId}`,
+    });
+    throw err;
+  }
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
 async function runCodexRequestWorkflow(server, threadId, cmd, ctx, config) {
   const workflow = config.read(cmd);
   if (!workflow) return false;
@@ -1478,6 +1624,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexMemoryResetWorkflow },
   { run: runCodexThreadForkWorkflow, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
+  { run: runCodexProviderSettingsWorkflow },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },

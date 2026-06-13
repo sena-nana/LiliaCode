@@ -68,4 +68,22 @@ describe("useLiliaWorkflowActions", () => {
     await claude.actions.onStartSessionFork();
     expect(claude.sent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
   });
+
+  it("provider settings workflow is passed through for every backend", async () => {
+    const workflow: ChatWorkflow = {
+      type: "lilia_provider_settings",
+      action: "update",
+      common: { model: "gpt-5.5", permission: "ask" },
+      codex: { reasoningEffort: "high" },
+      claude: { maxTurns: 4 },
+    };
+
+    const codex = setupWorkflowActions("codex");
+    await codex.actions.onApplyLiliaProviderSettings(workflow);
+    expect(codex.sent).toEqual([workflow]);
+
+    const claude = setupWorkflowActions("claude");
+    await claude.actions.onApplyLiliaProviderSettings(workflow);
+    expect(claude.sent).toEqual([workflow]);
+  });
 });
