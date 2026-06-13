@@ -42,23 +42,6 @@ import {
 } from "./timeline.mjs";
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
 
-export const EMPTY_PROMPT_CODEX_WORKFLOWS = new Set([
-  "lilia_review",
-  "lilia_fix_suggestion",
-  "lilia_batch_apply",
-  "lilia_compact",
-  "codex_review",
-  "codex_fix_suggestion",
-  "codex_batch_apply",
-  "codex_goal",
-  "codex_compact",
-  "codex_background_terminals_clean",
-  "codex_memory_mode",
-  "codex_memory_reset",
-  "codex_thread_fork",
-  "codex_config_diagnostics",
-]);
-
 export async function initializeCodexAppServer(server) {
   await server.request("initialize", {
     clientInfo: {
@@ -396,9 +379,9 @@ const CODEX_MEMORY_MODES = new Set(["enabled", "disabled"]);
 
 function readCodexReviewWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_review" && workflow?.type !== "codex_review") return null;
+  if (workflow?.type !== "lilia_review") return null;
   const target = normalizeCodexReviewTarget(workflow.target);
-  if (!target) throw new Error("Codex review workflow missing a valid target");
+  if (!target) throw new Error("Lilia review workflow missing a valid target");
   const instructions = stringOrNull(workflow.instructions)?.trim() || "";
   const delivery = workflow.delivery === "detached" ? "detached" : "inline";
   return { target, instructions, delivery };
@@ -406,9 +389,9 @@ function readCodexReviewWorkflow(cmd) {
 
 function readCodexFixSuggestionWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_fix_suggestion" && workflow?.type !== "codex_fix_suggestion") return null;
+  if (workflow?.type !== "lilia_fix_suggestion") return null;
   const target = normalizeCodexReviewTarget(workflow.target);
-  if (!target) throw new Error("Codex fix suggestion workflow missing a valid target");
+  if (!target) throw new Error("Lilia fix suggestion workflow missing a valid target");
   const mode = workflow.mode === "apply" ? "apply" : "suggest";
   const instructions = stringOrNull(workflow.instructions)?.trim() || "";
   return { target, instructions, mode };
@@ -416,15 +399,15 @@ function readCodexFixSuggestionWorkflow(cmd) {
 
 function readCodexBatchApplyWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_batch_apply" && workflow?.type !== "codex_batch_apply") return null;
+  if (workflow?.type !== "lilia_batch_apply") return null;
   const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
   const sourceKind = stringOrNull(workflow.sourceKind);
   const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
-  if (!sourceTurnId) throw new Error("Codex batch apply workflow missing sourceTurnId");
+  if (!sourceTurnId) throw new Error("Lilia batch apply workflow missing sourceTurnId");
   if (sourceKind !== "review" && sourceKind !== "fix_suggestion") {
-    throw new Error("Codex batch apply workflow missing a valid sourceKind");
+    throw new Error("Lilia batch apply workflow missing a valid sourceKind");
   }
-  if (!sourceSummary) throw new Error("Codex batch apply workflow missing sourceSummary");
+  if (!sourceSummary) throw new Error("Lilia batch apply workflow missing sourceSummary");
   return {
     sourceTurnId,
     sourceKind,
@@ -461,14 +444,14 @@ function numberOrNull(value) {
 
 function readCodexGoalWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_goal") return null;
+  if (workflow?.type !== "lilia_goal") return null;
   const action = stringOrNull(workflow.action);
   if (!CODEX_GOAL_ACTIONS.has(action)) {
-    throw new Error("Codex goal workflow missing a valid action");
+    throw new Error("Lilia goal workflow missing a valid action");
   }
   const objective = stringOrNull(workflow.objective)?.trim() || "";
   if (action === "set" && !objective) {
-    throw new Error("Codex goal workflow missing objective");
+    throw new Error("Lilia goal workflow missing objective");
   }
   const tokenBudget = numberOrNull(workflow.tokenBudget);
   return {
@@ -481,32 +464,32 @@ function readCodexGoalWorkflow(cmd) {
 
 function readCodexCompactWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "lilia_compact" || workflow?.type === "codex_compact";
+  return workflow?.type === "lilia_compact";
 }
 
 function readCodexBackgroundTerminalsCleanWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "codex_background_terminals_clean";
+  return workflow?.type === "lilia_background_terminals_clean";
 }
 
 function readCodexMemoryModeWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_memory_mode") return null;
+  if (workflow?.type !== "lilia_memory_mode") return null;
   const mode = stringOrNull(workflow.mode);
   if (!CODEX_MEMORY_MODES.has(mode)) {
-    throw new Error("Codex memory mode workflow missing a valid mode");
+    throw new Error("Lilia memory mode workflow missing a valid mode");
   }
   return { mode };
 }
 
 function readCodexMemoryResetWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "codex_memory_reset";
+  return workflow?.type === "lilia_memory_reset";
 }
 
 function readCodexThreadForkWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_thread_fork") return null;
+  if (workflow?.type !== "lilia_session_fork") return null;
   return {
     excludeTurns: workflow.excludeTurns !== false,
   };
@@ -514,7 +497,7 @@ function readCodexThreadForkWorkflow(cmd) {
 
 function readCodexConfigDiagnosticsWorkflow(cmd) {
   const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "codex_config_diagnostics") return null;
+  if (workflow?.type !== "lilia_config_diagnostics") return null;
   return {
     includeLayers: workflow.includeLayers !== false,
   };
@@ -1094,10 +1077,10 @@ function emitCodexGoalWorkflowTimeline(ctx, action, goal) {
   ctx.protocol.emitTimeline({
     kind: "goal",
     status: cleared ? "cancelled" : "info",
-    title: cleared ? "Codex goal cleared" : "Codex goal updated",
+    title: cleared ? "Lilia Goal cleared" : "Lilia Goal updated",
     summary: cleared
-      ? "已清除 Codex thread goal"
-      : stringOrNull(goal?.objective) || "Codex thread goal",
+      ? "已清除 Lilia Goal"
+      : stringOrNull(goal?.objective) || "Lilia Goal",
     payload: {
       backend: "codex",
       subkind: "thread_goal",

@@ -6,7 +6,7 @@ import type {
   ChatComposerState,
   ChatSlashCommandWorkflow,
   ChatWorkflow,
-  CodexThreadGoal,
+  LiliaThreadGoal,
 } from "@lilia/contracts";
 import {
   useAskUserForTask,
@@ -121,8 +121,8 @@ export function useTaskComposerController(options: {
     const question = ask.spec.questions[0];
     return question ? { questionId: question.id, turnId: ask.turnId } : null;
   });
-  const currentCodexGoal = computed<CodexThreadGoal | null>(() =>
-    latestCodexGoalFromTimeline(timeline.timelineEvents.value),
+  const currentLiliaGoal = computed<LiliaThreadGoal | null>(() =>
+    latestLiliaGoalFromTimeline(timeline.timelineEvents.value),
   );
 
   function withActiveBackend(state: ChatComposerState): ChatComposerState {
@@ -554,7 +554,7 @@ export function useTaskComposerController(options: {
     pendingAgentActions,
     blockingPendingAgentActions,
     pendingPlanApproval,
-    currentCodexGoal,
+    currentLiliaGoal,
     agentInteractionSettings,
     nonInterruptMode,
     activeBackend,
@@ -590,9 +590,9 @@ function stripRestoredAttachmentReferences(
   return next.replace(/[ \t]{2,}/g, " ").trim();
 }
 
-function latestCodexGoalFromTimeline(
+function latestLiliaGoalFromTimeline(
   events: readonly { kind: string; payload: unknown; updatedAt: number }[],
-): CodexThreadGoal | null {
+): LiliaThreadGoal | null {
   let latest: { payload: unknown; updatedAt: number } | null = null;
   for (const event of events) {
     if (event.kind !== "goal") continue;
@@ -605,5 +605,5 @@ function latestCodexGoalFromTimeline(
   if (row.cleared === true) return null;
   const goal = row.goal;
   if (!goal || typeof goal !== "object" || Array.isArray(goal)) return null;
-  return goal as CodexThreadGoal;
+  return goal as LiliaThreadGoal;
 }

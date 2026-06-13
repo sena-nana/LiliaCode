@@ -38,7 +38,7 @@ codex app-server generate-ts --out <experimental> --experimental
 | `thread/settings/update` | 更新后续 turns 的 sticky 设置：`cwd`、approval、sandbox、permissions、model、effort、summary、`collaborationMode`、personality 等。 | 已实现 | Lilia 用它应用 Codex profile 的 reasoning effort、runtime workspace roots 和受控 permissions；Plan 仍只用 `turn/start.collaborationMode`，不写成 sticky 默认。 |
 | `thread/memoryMode/set` | 设置线程 memory mode。参数：`threadId`、`mode`。 | 已实现 | Codex 工具栏原生接口菜单可手动启用 / 关闭，runner 调用 `mode: "enabled" | "disabled"` 并写 diagnostic timeline。 |
 | `memory/reset` | 重置 Codex memory。无参数。 | 已实现 | Codex 工具栏原生接口菜单提供二次确认后手动触发；这是 Codex 自身全局 / 账户语义，不会在普通 turn 中自动调用。 |
-| `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 已实现 | Lilia 暴露为用户手动触发的 Codex workflow；runner 调用后写入 diagnostic timeline，但不接管 Codex background terminal 生命周期。 |
+| `thread/backgroundTerminals/clean` | 清理指定 thread 的 background terminals。参数：`threadId`。 | 已实现 | 通过 `lilia_background_terminals_clean` 分发到 Codex runner；runner 调用后写入 diagnostic timeline，但不接管 Codex background terminal 生命周期。 |
 | `thread/search` | 搜索 threads。支持分页、排序、sourceKinds、archived、`searchTerm`。 | 已实现 | Lilia 从左侧栏底部导入入口搜索 app-server threads，支持分页、关键词和归档开关，并可导入为新的 Lilia task。 |
 | `thread/turns/list` | 分页读取指定 thread 的 turns，可选择 item detail。 | 已实现 | Lilia 用它生成 Codex thread 预览和历史接入时的 timeline 回补。 |
 | `thread/turns/items/list` | 分页读取指定 turn 的 items。 | 已实现 | 当 turns 返回 items 缺失或标记截断时，Lilia 补拉 turn items 后再映射到统一 timeline。 |
@@ -80,8 +80,8 @@ codex app-server generate-ts --out <experimental> --experimental
 
 ## 非 experimental 新接口备注
 
-- `thread/goal/set|get|clear` 和 `thread/goal/updated|cleared` 已接入：goal 包含 objective、status、tokenBudget、tokensUsed 等状态；runner 建立 / 恢复 Codex thread 后执行 goal workflow，UI 从 latest goal timeline event 派生 composer 顶部状态行。
-- `thread/compact/start` 已接入：Lilia 提供手动 Codex compact workflow，从聊天工具栏触发后调用 `{ threadId }`，成功 / 失败都写入 diagnostic timeline；不做自动 token 阈值压缩。
+- `thread/goal/set|get|clear` 和 `thread/goal/updated|cleared` 已接入：goal 包含 objective、status、tokenBudget、tokensUsed 等状态；`lilia_goal` 在 Codex adapter 中分发到这些 app-server 方法，UI 从 latest goal timeline event 派生 Lilia Goal 状态行。
+- `thread/compact/start` 已接入：`lilia_compact` 在 Codex adapter 中调用 `{ threadId }`，成功 / 失败都写入 diagnostic timeline；不做自动 token 阈值压缩。
 - `review/start` 在 `codex-cli 0.136.0` 生成的 `ReviewStartParams` 中只包含 `threadId`、`target`、`delivery`；Lilia 已停止向该请求传 `prompt`。
 
 ## Codex Plan 语义落点
@@ -114,7 +114,7 @@ collaborationMode: {
 - 能把 Codex plan 事件映射到 Lilia 时间线与 `plan_approval` 展示。
 - 能处理 Codex command / file change approval 的通用确认请求、增强审批字段和 Lilia 编辑后执行流程。
 - 能在 Codex 等待 Lilia UI 交互时回写 `thread/increment_elicitation` / `thread/decrement_elicitation`。
-- 已有 `review/start` 代码审查 workflow 的 runner / UI 基础接入；修复建议已通过 Lilia workflow + `turn/start` 打通用户交互到 runner 全链路；批量改动等专项工作流仍需后续单独设计。
+- 已有 `lilia_review` / `lilia_fix_suggestion` / `lilia_batch_apply` 的 runner / UI 接入；Codex adapter 分别落到 `review/start`、`turn/start` 和强制 Plan 确认后的应用流程。
 
 当前已接入：
 
@@ -125,27 +125,27 @@ collaborationMode: {
 
 ## Codex 全链路稳定化验收
 
-下一阶段接入收口的验收口径是：现有 Codex workflow 必须从用户入口进入统一 `ChatWorkflow`，经 Tauri `chat_send_message` 写入 runner stdin，由 Node runner 调用 Codex app-server，并把 timeline / pending interaction / done session 状态回到 UI。
+当前接入收口的验收口径是：用户入口只提交 Lilia `ChatWorkflow` discriminant（例如 `lilia_review`、`lilia_goal`、`lilia_session_fork`），经 Tauri `chat_send_message` 写入 runner stdin，由 Node runner 按 provider 分发；Codex adapter 调用 app-server，并把 timeline / pending interaction / done session 状态回到 UI。不保留 `codex_*` workflow type 兼容分支。
 
 当前稳定化范围：
 
-- **用户入口到 runner**：普通输入、Plan、Review、Fix Suggestion、Batch Apply、Goal、Compact、Memory mode / reset、Thread fork、Config diagnostics、Background terminals clean 均以 `ChatWorkflow` 透传；空 prompt 只允许这些 Codex workflow 启动。
+- **用户入口到 runner**：普通输入、Plan、Review、Fix Suggestion、Batch Apply、Goal、Compact、Memory mode / reset、Session fork、Config diagnostics、Background terminals clean 均以 Lilia `ChatWorkflow` 透传；空 prompt 只允许这些 Lilia workflow 启动。
 - **runner 到用户交互**：Codex AskUser、Plan approval、command / file approval 统一走 `interaction_request`，前端用 `chat_respond_agent_interaction` 回写 runner stdin；等待 UI 期间由 runner 成对调用 `thread/increment_elicitation` / `thread/decrement_elicitation`。
-- **状态回流**：Codex turn、plan / todo、assistant message、command、file change、goal、diagnostic、error 映射到统一 timeline；Fork 成功后更新 session id；手动原生动作成功后发 `done`。
+- **状态回流**：Codex turn、plan / todo、assistant message、command、file change、Lilia Goal、diagnostic、error 映射到统一 timeline；Session fork 成功后更新 session id；手动原生动作成功后发 `done`。
 - **命令编辑闭环**：Codex command approval 被用户编辑后，Lilia 执行修改版命令，取消原 approval，并通过 `turn/steer` 把执行结果回灌给 Codex。
 
 测试锚点：
 
 - `apps/desktop/tests/chatAskUserPrompt.test.ts` 覆盖 TaskDetail / composer / timeline / goal 用户入口到 `chat_send_message.workflow`，以及 pending AskUser / Plan / Tool Consent 回写。
 - `apps/desktop/tests/chatComposer.test.ts`、`timelineDisplay.test.ts`、`todoFloat.test.ts` 覆盖入口组件 emit 与 Batch Apply / Goal 交互。
-- `apps/desktop/src-tauri/src/chat/tests.rs` 覆盖 Rust `ChatWorkflow` 序列化、Codex-only gate、runner stdin payload 和 interaction response payload。
+- `apps/desktop/src-tauri/src/chat/tests.rs` 覆盖 Rust `ChatWorkflow` 序列化、Lilia workflow kind、runner stdin payload 和 interaction response payload。
 - `apps/desktop/tests/agentRunner.test.ts` 覆盖 fake Codex app-server 下的 Plan、Review、Fix Suggestion、Batch Apply、Goal、原生动作、approval、elicitation、edited command 和 timeline 映射。
 
 ## 接入优先级
 
 1. **Codex Plan collaboration mode**：`collaborationMode/list` + `turn/start.collaborationMode`。这是与 Codex Desktop 最接近的计划模式入口。
 2. **Codex 历史入口**：已接入 `thread/search`、`thread/turns/list` 和 `thread/turns/items/list`，用于从左侧栏底部入口搜索、预览、导入和新建 Lilia task。
-3. **Codex 原生手动动作**：已从 composer 工具栏打通到 runner，包括 memory mode、memory reset、thread fork、config / requirements diagnostics；这些动作只在 Codex 后端、无运行中 turn / 阻塞交互时可触发。
+3. **Lilia 手动动作到 Codex adapter**：memory mode、memory reset、session fork、config / requirements diagnostics 等从 Lilia workflow 进入 runner；Codex adapter 调用对应 app-server 方法，Claude adapter 对无等价原生接口的动作写入 Lilia diagnostic。
 4. **环境 / remote / realtime**：暂不默认接入；这些接口涉及更大的权限、UI 和生命周期边界，需要单独设计。
 5. **进程管理泛化**：`process/spawn` 当前只作为 Lilia 编辑后执行命令的 fallback，不作为通用终端 / 进程管理入口。
 

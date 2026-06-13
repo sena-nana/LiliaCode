@@ -36,7 +36,7 @@ function renderSurface() {
       insertDraftTextContent: "",
       pendingAgentActions: [],
       hasBlockingPendingAction: false,
-      currentCodexGoal: null,
+      currentLiliaGoal: null,
       showExpiredPendingActions: false,
       canRetryEvent: () => false,
       composerState: codexComposerState,
@@ -73,12 +73,12 @@ function renderSurface() {
           },
         }),
         TodoFloat: defineComponent({
-          emits: ["set-codex-goal"],
+          emits: ["set-lilia-goal"],
           setup(_, { emit }) {
             return () =>
               h("button", {
                 type: "button",
-                onClick: () => emit("set-codex-goal", "新的 Codex 目标"),
+                onClick: () => emit("set-lilia-goal", "新的 Lilia Goal"),
               }, "stub set goal");
           },
         }),
@@ -90,12 +90,12 @@ function renderSurface() {
 }
 
 describe("TaskDetailChatSurface", () => {
-  it("forwards Codex goal setting events from TodoFloat", async () => {
+  it("forwards Lilia Goal setting events from TodoFloat", async () => {
     const view = renderSurface();
 
     await fireEvent.click(view.getByRole("button", { name: "stub set goal" }));
 
-    expect(view.emitted("set-codex-goal")?.[0]).toEqual(["新的 Codex 目标"]);
+    expect(view.emitted("set-lilia-goal")?.[0]).toEqual(["新的 Lilia Goal"]);
   });
 
   it("forwards Codex fix suggestion events from the composer", async () => {

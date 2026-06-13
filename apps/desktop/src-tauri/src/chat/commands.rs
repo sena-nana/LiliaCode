@@ -24,7 +24,7 @@ use crate::chat::types::{
 use crate::provider::load_agent_interaction_settings;
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
-use crate::{agent_timeline, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_MUTSUKI_CORE};
+use crate::{agent_timeline, RUNTIME_CHANNEL_MUTSUKI_CORE};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MutsukiCoreTurnStopKind {
@@ -37,35 +37,6 @@ pub(crate) struct ResetSessionPlan {
     pub(crate) cleared_guide_ids: Vec<String>,
     pub(crate) stopped_running: bool,
     pub(crate) immediate_cleanup: bool,
-}
-
-fn validate_workflow_backend(workflow: &Option<ChatWorkflow>, backend: &str) -> Result<(), String> {
-    if matches!(
-        workflow,
-        Some(ChatWorkflow::LiliaReview { .. })
-            | Some(ChatWorkflow::LiliaFixSuggestion { .. })
-            | Some(ChatWorkflow::LiliaBatchApply { .. })
-            | Some(ChatWorkflow::LiliaCompact)
-    ) && backend != BACKEND_CODEX
-    {
-        return Err("当前后端尚未实现该 Lilia 工作流".to_string());
-    }
-    if matches!(
-        workflow,
-        Some(ChatWorkflow::CodexGoal { .. })
-            | Some(ChatWorkflow::CodexBackgroundTerminalsClean)
-            | Some(ChatWorkflow::CodexMemoryMode { .. })
-            | Some(ChatWorkflow::CodexMemoryReset)
-            | Some(ChatWorkflow::CodexThreadFork { .. })
-            | Some(ChatWorkflow::CodexConfigDiagnostics { .. })
-    ) && backend != BACKEND_CODEX
-    {
-        return Err("Codex workflow 只能在 Codex 后端中启动".to_string());
-    }
-    if matches!(workflow, Some(ChatWorkflow::ClaudeSessionFork)) && backend != BACKEND_CLAUDE {
-        return Err("Claude workflow 只能在 Claude 后端中启动".to_string());
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -83,7 +54,6 @@ pub fn chat_send_message(
     let active_backend = load_active_backend(&app);
     validate_backend_ready_for_send(&active_backend)?;
     let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
-    validate_workflow_backend(&workflow, &composer.backend)?;
     let slash_command_id = match &workflow {
         Some(ChatWorkflow::SlashCommand { command_id, .. }) => Some(command_id.clone()),
         _ => None,

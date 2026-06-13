@@ -118,7 +118,7 @@ pub(crate) struct ChatSendResult {
     tag = "type"
 )]
 pub(crate) enum ChatWorkflow {
-    #[serde(rename = "lilia_review", alias = "codex_review")]
+    #[serde(rename = "lilia_review")]
     LiliaReview {
         target: LiliaReviewTarget,
         #[serde(default)]
@@ -126,7 +126,7 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         delivery: Option<String>,
     },
-    #[serde(rename = "lilia_fix_suggestion", alias = "codex_fix_suggestion")]
+    #[serde(rename = "lilia_fix_suggestion")]
     LiliaFixSuggestion {
         target: LiliaReviewTarget,
         #[serde(default)]
@@ -134,7 +134,7 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         mode: Option<String>,
     },
-    #[serde(rename = "lilia_batch_apply", alias = "codex_batch_apply")]
+    #[serde(rename = "lilia_batch_apply")]
     LiliaBatchApply {
         source_turn_id: String,
         source_kind: String,
@@ -142,8 +142,8 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         instructions: Option<String>,
     },
-    #[serde(rename = "codex_goal")]
-    CodexGoal {
+    #[serde(rename = "lilia_goal")]
+    LiliaGoal {
         action: String,
         #[serde(default)]
         objective: Option<String>,
@@ -152,23 +152,21 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         token_budget: Option<u64>,
     },
-    #[serde(rename = "lilia_compact", alias = "codex_compact")]
+    #[serde(rename = "lilia_compact")]
     LiliaCompact,
-    #[serde(rename = "codex_background_terminals_clean")]
-    CodexBackgroundTerminalsClean,
-    #[serde(rename = "codex_memory_mode")]
-    CodexMemoryMode { mode: String },
-    #[serde(rename = "codex_memory_reset")]
-    CodexMemoryReset,
-    #[serde(rename = "codex_thread_fork")]
-    CodexThreadFork {
+    #[serde(rename = "lilia_background_terminals_clean")]
+    LiliaBackgroundTerminalsClean,
+    #[serde(rename = "lilia_memory_mode")]
+    LiliaMemoryMode { mode: String },
+    #[serde(rename = "lilia_memory_reset")]
+    LiliaMemoryReset,
+    #[serde(rename = "lilia_session_fork")]
+    LiliaSessionFork {
         #[serde(default)]
         exclude_turns: Option<bool>,
     },
-    #[serde(rename = "claude_session_fork")]
-    ClaudeSessionFork,
-    #[serde(rename = "codex_config_diagnostics")]
-    CodexConfigDiagnostics {
+    #[serde(rename = "lilia_config_diagnostics")]
+    LiliaConfigDiagnostics {
         #[serde(default)]
         include_layers: Option<bool>,
     },

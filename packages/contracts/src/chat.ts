@@ -97,7 +97,7 @@ export interface LiliaBatchApplyWorkflow {
   instructions?: string;
 }
 
-export type CodexGoalStatus =
+export type LiliaGoalStatus =
   | "active"
   | "paused"
   | "blocked"
@@ -105,11 +105,11 @@ export type CodexGoalStatus =
   | "budgetLimited"
   | "complete";
 
-export interface CodexGoalWorkflow {
-  type: "codex_goal";
+export interface LiliaGoalWorkflow {
+  type: "lilia_goal";
   action: "set" | "refresh" | "clear";
   objective?: string;
-  status?: CodexGoalStatus;
+  status?: LiliaGoalStatus;
   tokenBudget?: number | null;
 }
 
@@ -117,32 +117,28 @@ export interface LiliaCompactWorkflow {
   type: "lilia_compact";
 }
 
-export interface CodexBackgroundTerminalsCleanWorkflow {
-  type: "codex_background_terminals_clean";
+export interface LiliaBackgroundTerminalsCleanWorkflow {
+  type: "lilia_background_terminals_clean";
 }
 
-export type CodexMemoryMode = "enabled" | "disabled";
+export type LiliaMemoryMode = "enabled" | "disabled";
 
-export interface CodexMemoryModeWorkflow {
-  type: "codex_memory_mode";
-  mode: CodexMemoryMode;
+export interface LiliaMemoryModeWorkflow {
+  type: "lilia_memory_mode";
+  mode: LiliaMemoryMode;
 }
 
-export interface CodexMemoryResetWorkflow {
-  type: "codex_memory_reset";
+export interface LiliaMemoryResetWorkflow {
+  type: "lilia_memory_reset";
 }
 
-export interface CodexThreadForkWorkflow {
-  type: "codex_thread_fork";
+export interface LiliaSessionForkWorkflow {
+  type: "lilia_session_fork";
   excludeTurns?: boolean;
 }
 
-export interface ClaudeSessionForkWorkflow {
-  type: "claude_session_fork";
-}
-
-export interface CodexConfigDiagnosticsWorkflow {
-  type: "codex_config_diagnostics";
+export interface LiliaConfigDiagnosticsWorkflow {
+  type: "lilia_config_diagnostics";
   includeLayers?: boolean;
 }
 
@@ -158,10 +154,10 @@ export interface ChatSlashCommandWorkflow {
   arguments: Record<string, string>;
 }
 
-export interface CodexThreadGoal {
+export interface LiliaThreadGoal {
   threadId: string;
   objective: string;
-  status: CodexGoalStatus;
+  status: LiliaGoalStatus;
   tokenBudget: number | null;
   tokensUsed: number;
   timeUsedSeconds: number;
@@ -173,14 +169,13 @@ export type ChatWorkflow =
   | LiliaReviewWorkflow
   | LiliaFixSuggestionWorkflow
   | LiliaBatchApplyWorkflow
-  | CodexGoalWorkflow
+  | LiliaGoalWorkflow
   | LiliaCompactWorkflow
-  | CodexBackgroundTerminalsCleanWorkflow
-  | CodexMemoryModeWorkflow
-  | CodexMemoryResetWorkflow
-  | CodexThreadForkWorkflow
-  | ClaudeSessionForkWorkflow
-  | CodexConfigDiagnosticsWorkflow
+  | LiliaBackgroundTerminalsCleanWorkflow
+  | LiliaMemoryModeWorkflow
+  | LiliaMemoryResetWorkflow
+  | LiliaSessionForkWorkflow
+  | LiliaConfigDiagnosticsWorkflow
   | AutomationRunWorkflow
   | ChatSlashCommandWorkflow;
 

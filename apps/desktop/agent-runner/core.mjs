@@ -3,11 +3,20 @@ import { createProtocolEmitter } from "./protocol.mjs";
 import { createInteractionBroker, emitAskUserTimeline } from "./interactions.mjs";
 import { emitToolConsentTimeline } from "./toolConsentTimeline.mjs";
 import { runClaude } from "./claude/runClaude.mjs";
-import { EMPTY_PROMPT_CODEX_WORKFLOWS, runCodex } from "./codex/runCodex.mjs";
+import { runCodex } from "./codex/runCodex.mjs";
 import { runDryRun } from "./dryRun.mjs";
 
-export const EMPTY_PROMPT_CLAUDE_WORKFLOWS = new Set([
-  "claude_session_fork",
+export const EMPTY_PROMPT_LILIA_WORKFLOWS = new Set([
+  "lilia_review",
+  "lilia_fix_suggestion",
+  "lilia_batch_apply",
+  "lilia_goal",
+  "lilia_compact",
+  "lilia_background_terminals_clean",
+  "lilia_memory_mode",
+  "lilia_memory_reset",
+  "lilia_session_fork",
+  "lilia_config_diagnostics",
 ]);
 
 export function createRunnerContext(deps = {}) {
@@ -32,12 +41,7 @@ export function createRunnerContext(deps = {}) {
 export async function runAgentTurn(cmd, deps = {}) {
   const context = createRunnerContext(deps);
   const workflowType = typeof cmd?.workflow?.type === "string" ? cmd.workflow.type : "";
-  const allowsEmptyCodexWorkflow =
-    cmd?.backend === "codex" &&
-    EMPTY_PROMPT_CODEX_WORKFLOWS.has(workflowType);
-  const allowsEmptyClaudeWorkflow =
-    cmd?.backend === "claude" &&
-    EMPTY_PROMPT_CLAUDE_WORKFLOWS.has(workflowType);
+  const allowsEmptyLiliaWorkflow = EMPTY_PROMPT_LILIA_WORKFLOWS.has(workflowType);
   if (typeof cmd?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
@@ -46,7 +50,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     ...cmd,
     prompt: buildPromptWithAttachments(cmd.prompt, cmd.attachments),
   };
-  if (nextCmd.prompt.trim().length === 0 && !allowsEmptyCodexWorkflow && !allowsEmptyClaudeWorkflow) {
+  if (nextCmd.prompt.trim().length === 0 && !allowsEmptyLiliaWorkflow) {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }

@@ -254,7 +254,7 @@ describe("runner core", () => {
       backend: "codex",
       prompt: "",
       workflow: {
-        type: "codex_goal",
+        type: "lilia_goal",
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -274,7 +274,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-goal",
       workflow: {
-        type: "codex_goal",
+        type: "lilia_goal",
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -311,7 +311,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "codex",
       prompt: "",
-      workflow: { type: "codex_background_terminals_clean" },
+      workflow: { type: "lilia_background_terminals_clean" },
     }, {
       protocol,
       env: {},
@@ -327,16 +327,16 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "thread-clean",
-      workflow: { type: "codex_background_terminals_clean" },
+      workflow: { type: "lilia_background_terminals_clean" },
     });
   });
 
   it("Codex native workflow 允许空 prompt 进入 Codex 后端", async () => {
     for (const workflow of [
-      { type: "codex_memory_mode", mode: "enabled" },
-      { type: "codex_memory_reset" },
-      { type: "codex_thread_fork" },
-      { type: "codex_config_diagnostics" },
+      { type: "lilia_memory_mode", mode: "enabled" },
+      { type: "lilia_memory_reset" },
+      { type: "lilia_session_fork" },
+      { type: "lilia_config_diagnostics" },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -368,7 +368,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "claude",
       prompt: "",
-      workflow: { type: "claude_session_fork" },
+      workflow: { type: "lilia_session_fork" },
     }, {
       protocol,
       env: {},
@@ -384,7 +384,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "claude-fork",
-      workflow: { type: "claude_session_fork" },
+      workflow: { type: "lilia_session_fork" },
     });
   });
 
@@ -720,7 +720,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      workflow: { type: "claude_session_fork" },
+      workflow: { type: "lilia_session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -759,7 +759,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      workflow: { type: "claude_session_fork" },
+      workflow: { type: "lilia_session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -2607,7 +2607,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       planMode: false,
-      workflow: { type: "codex_background_terminals_clean" },
+      workflow: { type: "lilia_background_terminals_clean" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2658,7 +2658,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_background_terminals_clean" },
+      workflow: { type: "lilia_background_terminals_clean" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2695,7 +2695,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_memory_mode", mode: "enabled" },
+      workflow: { type: "lilia_memory_mode", mode: "enabled" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2735,7 +2735,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_memory_mode", mode: "maybe" },
+      workflow: { type: "lilia_memory_mode", mode: "maybe" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2743,7 +2743,7 @@ describe("Codex app-server mapping", () => {
       createCodexAppServer: () => server,
       env: {},
       cwd: () => "C:/repo",
-    })).rejects.toThrow("Codex memory mode workflow missing a valid mode");
+    })).rejects.toThrow("Lilia memory mode workflow missing a valid mode");
   });
 
   it("resets Codex memory through memory/reset", async () => {
@@ -2765,7 +2765,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_memory_reset" },
+      workflow: { type: "lilia_memory_reset" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2813,7 +2813,7 @@ describe("Codex app-server mapping", () => {
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
         permissions: { profile: "workspaceWrite" },
       },
-      workflow: { type: "codex_thread_fork" },
+      workflow: { type: "lilia_session_fork" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2885,7 +2885,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "codex_config_diagnostics" },
+      workflow: { type: "lilia_config_diagnostics" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -2991,7 +2991,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "codex_goal",
+        type: "lilia_goal",
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -3055,7 +3055,7 @@ describe("Codex app-server mapping", () => {
         prompt: "",
         permission: "ask",
         workflow: {
-          type: "codex_goal",
+          type: "lilia_goal",
           action,
         },
       }, { mcpServers: [], warnings: [] }, {
