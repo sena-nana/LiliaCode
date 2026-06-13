@@ -8,7 +8,7 @@ mod automation;
 mod chat;
 mod claude_history;
 mod codex_history;
-mod codex_iab;
+mod lilia_iab;
 mod conversation_suggestions;
 mod github;
 mod history_import;
@@ -209,10 +209,8 @@ pub fn run() {
             history_import::history_import_attach,
             history_import::history_import_runtime_states,
             history_import::history_import_clean_background_terminals,
-            codex_iab::codex_iab_open,
-            codex_iab::codex_iab_navigate,
-            codex_iab::codex_iab_capture,
-            codex_iab::codex_iab_submit,
+            lilia_iab::lilia_iab_open,
+            lilia_iab::lilia_iab_submit,
             provider::chat_check_env,
             provider::provider_get_config,
             provider::provider_set_config,

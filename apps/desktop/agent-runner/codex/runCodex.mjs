@@ -1553,7 +1553,7 @@ async function requestCodexRuntimeInteraction(ctx, kind, payload) {
     ctx.interactions.requestCodexInteraction(kind, payload));
 }
 
-function normalizeCodexIabSnapshot(value) {
+function normalizeLiliaIabSnapshot(value) {
   if (!isRecord(value)) return null;
   const taskId = stringOrNull(value.taskId);
   const url = stringOrNull(value.url) || "about:blank";
@@ -1572,9 +1572,9 @@ function normalizeCodexIabSnapshot(value) {
   };
 }
 
-function codexIabAdditionalContext(snapshot) {
+function liliaIabAdditionalContext(snapshot) {
   const lines = [
-    "Lilia Codex IAB interaction result:",
+    "Lilia IAB interaction result:",
     `- URL: ${snapshot.url}`,
     snapshot.title ? `- Title: ${snapshot.title}` : null,
     snapshot.note ? `- User note: ${snapshot.note}` : null,
@@ -1586,13 +1586,13 @@ function codexIabAdditionalContext(snapshot) {
   return lines.join("\n");
 }
 
-export async function handleCodexIabResult(ctx, snapshotValue) {
-  const snapshot = normalizeCodexIabSnapshot(snapshotValue);
+export async function handleLiliaIabResult(ctx, snapshotValue) {
+  const snapshot = normalizeLiliaIabSnapshot(snapshotValue);
   if (!snapshot) return;
   ctx.protocol.emitTimeline({
     kind: "tool",
     status: snapshot.status === "captured" ? "success" : "info",
-    title: "Codex IAB snapshot",
+    title: "Lilia IAB snapshot",
     summary: oneLineSummary(snapshot.note || snapshot.title || snapshot.url),
     payload: {
       backend: "codex",
@@ -1612,7 +1612,7 @@ export async function handleCodexIabResult(ctx, snapshotValue) {
   await ctx.server.request("turn/steer", {
     threadId: ctx.threadId,
     turnId: ctx.currentTurnId,
-    additionalContext: codexIabAdditionalContext(snapshot),
+    additionalContext: liliaIabAdditionalContext(snapshot),
   });
 }
 
@@ -1755,13 +1755,13 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         context.protocol,
       );
     });
-    context.interactions?.handleCodexIabResult?.((snapshot) => {
+    context.interactions?.handleLiliaIabResult?.((snapshot) => {
       ctx.settingsUpdatePromises.push(
-        handleCodexIabResult(ctx, snapshot).catch((err) => {
+        handleLiliaIabResult(ctx, snapshot).catch((err) => {
           context.protocol.emitTimeline({
             kind: "error",
             status: "error",
-            title: "Codex IAB result failed",
+            title: "Lilia IAB result failed",
             summary: err?.message || String(err),
             payload: {
               backend: "codex",

@@ -23,7 +23,7 @@ const IAB_MIN_HEIGHT: f64 = 480.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CodexIabSnapshot {
+pub(crate) struct LiliaIabSnapshot {
     pub(crate) task_id: String,
     pub(crate) url: String,
     pub(crate) title: Option<String>,
@@ -37,14 +37,14 @@ pub(crate) struct CodexIabSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CodexIabSubmitResult {
-    pub(crate) snapshot: CodexIabSnapshot,
+pub(crate) struct LiliaIabSubmitResult {
+    pub(crate) snapshot: LiliaIabSnapshot,
     pub(crate) delivery: String,
     pub(crate) stdin_forwarded: bool,
 }
 
 pub(crate) fn iab_window_label(task_id: &str) -> String {
-    let mut out = String::from("codex-iab-");
+    let mut out = String::from("lilia-iab-");
     for ch in task_id.chars() {
         if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
             out.push(ch);
@@ -59,7 +59,7 @@ pub(crate) fn iab_window_label(task_id: &str) -> String {
 }
 
 fn iab_title(task_id: &str) -> String {
-    format!("Codex IAB · {task_id}")
+    format!("Lilia IAB · {task_id}")
 }
 
 fn normalize_note(note: Option<String>) -> Option<String> {
@@ -277,7 +277,7 @@ fn build_snapshot<R: Runtime>(
     task_id: &str,
     note: Option<String>,
     window: &WebviewWindow<R>,
-) -> CodexIabSnapshot {
+) -> LiliaIabSnapshot {
     let captured_at = now_millis();
     let note = normalize_note(note);
     let url = window_url(window);
@@ -287,7 +287,7 @@ fn build_snapshot<R: Runtime>(
     match capture_window_png(window, &path) {
         Ok(()) => {
             let attachment = describe_iab_screenshot(&path);
-            CodexIabSnapshot {
+            LiliaIabSnapshot {
                 task_id: task_id.to_string(),
                 url,
                 title,
@@ -299,7 +299,7 @@ fn build_snapshot<R: Runtime>(
                 warning: None,
             }
         }
-        Err(err) => CodexIabSnapshot {
+        Err(err) => LiliaIabSnapshot {
             task_id: task_id.to_string(),
             url,
             title,
@@ -313,30 +313,45 @@ fn build_snapshot<R: Runtime>(
     }
 }
 
-fn iab_result_payload(snapshot: &CodexIabSnapshot) -> JsonValue {
+fn codex_iab_result_payload(snapshot: &LiliaIabSnapshot) -> JsonValue {
     serde_json::json!({
         "type": "codex_iab_result",
         "snapshot": snapshot,
     })
 }
 
-fn submit_result(snapshot: CodexIabSnapshot, stdin_forwarded: bool) -> CodexIabSubmitResult {
-    CodexIabSubmitResult {
+fn submit_result(snapshot: LiliaIabSnapshot, stdin_forwarded: bool) -> LiliaIabSubmitResult {
+    LiliaIabSubmitResult {
         snapshot,
         delivery: if stdin_forwarded { "runner" } else { "message" }.to_string(),
         stdin_forwarded,
     }
 }
 
-fn can_forward_iab_to_runner(running: Option<&RunningTurn>) -> bool {
+fn can_forward_lilia_iab_to_codex_runner(running: Option<&RunningTurn>) -> bool {
     running.is_some_and(|turn| {
         turn.backend == BACKEND_CODEX && turn.runtime_channel == RUNTIME_CHANNEL_BUILTIN
     })
 }
 
+fn forward_lilia_iab_to_running_backend(
+    store: &ChatStore,
+    task_id: &str,
+    snapshot: &LiliaIabSnapshot,
+) -> Result<bool, String> {
+    let can_forward_to_codex = {
+        let turns = store.running_turns.lock().unwrap();
+        can_forward_lilia_iab_to_codex_runner(turns.get(task_id))
+    };
+    if !can_forward_to_codex {
+        return Ok(false);
+    }
+    write_runner_stdin_for_task(store, task_id, codex_iab_result_payload(snapshot))
+}
+
 fn iab_window<R: Runtime>(app: &AppHandle<R>, task_id: &str) -> Result<WebviewWindow<R>, String> {
     app.get_webview_window(&iab_window_label(task_id))
-        .ok_or_else(|| "尚未打开 Codex IAB 窗口".to_string())
+        .ok_or_else(|| "尚未打开 Lilia IAB 窗口".to_string())
 }
 
 fn open_iab_window<R: Runtime>(
@@ -362,13 +377,13 @@ fn open_iab_window<R: Runtime>(
         .resizable(true)
         .background_color(BG)
         .build()
-        .map_err(|e| format!("创建 Codex IAB 窗口失败：{e}"))?;
+        .map_err(|e| format!("创建 Lilia IAB 窗口失败：{e}"))?;
     focus_window(&window);
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) fn codex_iab_open(
+pub(crate) fn lilia_iab_open(
     app: AppHandle,
     task_id: String,
     url: Option<String>,
@@ -377,45 +392,17 @@ pub(crate) fn codex_iab_open(
 }
 
 #[tauri::command]
-pub(crate) fn codex_iab_navigate(
-    app: AppHandle,
-    task_id: String,
-    url: String,
-) -> Result<(), String> {
-    open_iab_window(&app, task_id, Some(url))
-}
-
-#[tauri::command]
-pub(crate) fn codex_iab_capture(
-    app: AppHandle,
-    task_id: String,
-    note: Option<String>,
-) -> Result<CodexIabSnapshot, String> {
-    let window = iab_window(&app, &task_id)?;
-    focus_window(&window);
-    Ok(build_snapshot(&task_id, note, &window))
-}
-
-#[tauri::command]
-pub(crate) fn codex_iab_submit(
+pub(crate) fn lilia_iab_submit(
     app: AppHandle,
     task_id: String,
     note: Option<String>,
     store: tauri::State<'_, ChatStore>,
-) -> Result<CodexIabSubmitResult, String> {
+) -> Result<LiliaIabSubmitResult, String> {
     let window = iab_window(&app, &task_id)?;
     focus_window(&window);
     let snapshot = build_snapshot(&task_id, note, &window);
-    let can_forward = {
-        let turns = store.running_turns.lock().unwrap();
-        can_forward_iab_to_runner(turns.get(&task_id))
-    };
-    if can_forward {
-        let stdin_forwarded =
-            write_runner_stdin_for_task(&store, &task_id, iab_result_payload(&snapshot))?;
-        return Ok(submit_result(snapshot, stdin_forwarded));
-    }
-    Ok(submit_result(snapshot, false))
+    let stdin_forwarded = forward_lilia_iab_to_running_backend(&store, &task_id, &snapshot)?;
+    Ok(submit_result(snapshot, stdin_forwarded))
 }
 
 #[cfg(test)]
@@ -424,13 +411,13 @@ mod tests {
 
     #[test]
     fn iab_window_label_is_stable_and_safe() {
-        assert_eq!(iab_window_label("task-1"), "codex-iab-task-1");
-        assert_eq!(iab_window_label("项目/任务 1"), "codex-iab-------1");
+        assert_eq!(iab_window_label("task-1"), "lilia-iab-task-1");
+        assert_eq!(iab_window_label("项目/任务 1"), "lilia-iab-------1");
     }
 
     #[test]
     fn iab_result_payload_wraps_snapshot() {
-        let snapshot = CodexIabSnapshot {
+        let snapshot = LiliaIabSnapshot {
             task_id: "task-1".to_string(),
             url: "https://example.com/".to_string(),
             title: Some("Example".to_string()),
@@ -442,7 +429,7 @@ mod tests {
             warning: None,
         };
 
-        let payload = iab_result_payload(&snapshot);
+        let payload = codex_iab_result_payload(&snapshot);
 
         assert_eq!(payload["type"], "codex_iab_result");
         assert_eq!(payload["snapshot"]["url"], "https://example.com/");
@@ -471,9 +458,9 @@ mod tests {
             ..codex_builtin.clone()
         };
 
-        assert!(can_forward_iab_to_runner(Some(&codex_builtin)));
-        assert!(!can_forward_iab_to_runner(Some(&claude_builtin)));
-        assert!(!can_forward_iab_to_runner(Some(&codex_mutsuki)));
-        assert!(!can_forward_iab_to_runner(None));
+        assert!(can_forward_lilia_iab_to_codex_runner(Some(&codex_builtin)));
+        assert!(!can_forward_lilia_iab_to_codex_runner(Some(&claude_builtin)));
+        assert!(!can_forward_lilia_iab_to_codex_runner(Some(&codex_mutsuki)));
+        assert!(!can_forward_lilia_iab_to_codex_runner(None));
     }
 }

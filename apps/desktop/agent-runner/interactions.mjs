@@ -73,7 +73,7 @@ export function createInteractionBroker({
   const architecturePending = new Map();
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
-  let codexIabResultHandler = null;
+  let liliaIabResultHandler = null;
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
     protocol.emit({
@@ -264,7 +264,7 @@ export function createInteractionBroker({
       return;
     }
     if (msg.type === "codex_iab_result") {
-      codexIabResultHandler?.(msg.snapshot);
+      liliaIabResultHandler?.(msg.snapshot);
     }
   }
 
@@ -277,8 +277,8 @@ export function createInteractionBroker({
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
     },
-    handleCodexIabResult: (handler) => {
-      codexIabResultHandler = typeof handler === "function" ? handler : null;
+    handleLiliaIabResult: (handler) => {
+      liliaIabResultHandler = typeof handler === "function" ? handler : null;
     },
     pendingCounts: () => ({
       consent: consentPending.size,

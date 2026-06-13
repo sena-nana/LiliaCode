@@ -19,7 +19,7 @@ import {
   setMockActiveBackend,
   setMockChatRunning,
   setMockComposerStateHandler,
-  setNextMockCodexIabDelivery,
+  setNextMockLiliaIabDelivery,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
 import { createDraftTask } from "../src/services/tasksStore";
@@ -202,11 +202,11 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("Codex IAB 运行中回送时只注入 runner，不降级发送消息", async () => {
+  it("Lilia IAB 运行中回送时只注入 runner，不降级发送消息", async () => {
     setMockActiveBackend("codex");
     await useConnectionStatus({ probe: false }).setActiveBackend("codex");
     setMockChatRunning("t-002", true);
-    setNextMockCodexIabDelivery("runner");
+    setNextMockLiliaIabDelivery("runner");
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
     const view = await renderTaskDetail();
     await waitFor(() => {
@@ -218,17 +218,17 @@ describe("chat scheduler", () => {
     await fireEvent.click(view.getByRole("button", { name: "回送 IAB 截图" }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "codex_iab_submit")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "lilia_iab_submit")).toBe(true);
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
     expect(promptSpy).toHaveBeenCalledWith("IAB 备注");
     promptSpy.mockRestore();
   });
 
-  it("Codex IAB 空闲回送降级为带截图附件的用户消息", async () => {
+  it("Lilia IAB 空闲回送降级为带截图附件的用户消息", async () => {
     setMockActiveBackend("codex");
     await useConnectionStatus({ probe: false }).setActiveBackend("codex");
-    setNextMockCodexIabDelivery("message");
+    setNextMockLiliaIabDelivery("message");
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
     const view = await renderTaskDetail();
     await waitFor(() => {
