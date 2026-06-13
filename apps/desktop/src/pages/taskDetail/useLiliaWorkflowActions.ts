@@ -91,14 +91,7 @@ export function useLiliaWorkflowActions(options: {
   }
 
   async function onStartSessionFork() {
-    const backend = options.composer.value?.backend;
-    if (backend === "codex") {
-      await sendLiliaWorkflow({ type: "codex_thread_fork", excludeTurns: true });
-      return;
-    }
-    if (backend === "claude") {
-      await sendLiliaWorkflow({ type: "claude_session_fork" });
-    }
+    await sendLiliaWorkflow({ type: "lilia_session_fork", excludeTurns: true });
   }
 
   async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
@@ -112,11 +105,11 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
-  async function onSetCodexGoal(objective: string) {
+  async function onSetLiliaGoal(objective: string) {
     const trimmed = objective.trim();
     if (!trimmed) return;
     await sendLiliaWorkflow({
-      type: "codex_goal",
+      type: "lilia_goal",
       action: "set",
       objective: trimmed,
       status: "active",
@@ -124,16 +117,16 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
-  async function onRefreshCodexGoal() {
+  async function onRefreshLiliaGoal() {
     await sendLiliaWorkflow({
-      type: "codex_goal",
+      type: "lilia_goal",
       action: "refresh",
     });
   }
 
-  async function onClearCodexGoal() {
+  async function onClearLiliaGoal() {
     await sendLiliaWorkflow({
-      type: "codex_goal",
+      type: "lilia_goal",
       action: "clear",
     });
   }
@@ -144,8 +137,8 @@ export function useLiliaWorkflowActions(options: {
     onStartLiliaCompact,
     onStartSessionFork,
     onStartLiliaBatchApply,
-    onSetCodexGoal,
-    onRefreshCodexGoal,
-    onClearCodexGoal,
+    onSetLiliaGoal,
+    onRefreshLiliaGoal,
+    onClearLiliaGoal,
   };
 }

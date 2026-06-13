@@ -42,6 +42,7 @@ import {
   mapClaudeSystemTimeline,
   sweepActiveClaudeTools,
 } from "./timeline.mjs";
+import { isRecord, stringOrNull } from "../utils.mjs";
 
 export function buildClaudePlatformAppend(platform = process.platform) {
   if (platform !== "win32") return "";
@@ -113,12 +114,12 @@ export function createLiliaAskUserServer({
   });
 }
 
-function isClaudeSessionForkWorkflow(cmd) {
-  return cmd?.workflow?.type === "claude_session_fork";
+function readLiliaWorkflow(cmd) {
+  return isRecord(cmd?.workflow) ? cmd.workflow : null;
 }
 
 async function runClaudeSessionForkWorkflow(cmd, context, cwd) {
-  if (!isClaudeSessionForkWorkflow(cmd)) return false;
+  if (readLiliaWorkflow(cmd)?.type !== "lilia_session_fork") return false;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -171,10 +172,218 @@ async function runClaudeSessionForkWorkflow(cmd, context, cwd) {
   return true;
 }
 
+function normalizeLiliaReviewTarget(target) {
+  if (!isRecord(target)) return null;
+  const type = stringOrNull(target.type);
+  if (type === "uncommittedChanges") return { type };
+  if (type === "baseBranch") {
+    const branch = stringOrNull(target.branch)?.trim();
+    return branch ? { type, branch } : null;
+  }
+  if (type === "commit") {
+    const sha = stringOrNull(target.sha)?.trim();
+    return sha ? { type, sha } : null;
+  }
+  return null;
+}
+
+function liliaReviewTargetText(target) {
+  if (target.type === "uncommittedChanges") return "当前工作区未提交改动";
+  if (target.type === "baseBranch") return `当前工作区相对分支 ${target.branch} 的差异`;
+  return `提交 ${target.sha}`;
+}
+
+function readLiliaReviewWorkflow(cmd) {
+  const workflow = readLiliaWorkflow(cmd);
+  if (workflow?.type !== "lilia_review") return null;
+  const target = normalizeLiliaReviewTarget(workflow.target);
+  if (!target) throw new Error("Lilia review workflow missing a valid target");
+  return {
+    target,
+    instructions: stringOrNull(workflow.instructions)?.trim() || "",
+  };
+}
+
+function readLiliaFixSuggestionWorkflow(cmd) {
+  const workflow = readLiliaWorkflow(cmd);
+  if (workflow?.type !== "lilia_fix_suggestion") return null;
+  const target = normalizeLiliaReviewTarget(workflow.target);
+  if (!target) throw new Error("Lilia fix suggestion workflow missing a valid target");
+  return {
+    target,
+    instructions: stringOrNull(workflow.instructions)?.trim() || "",
+    mode: workflow.mode === "apply" ? "apply" : "suggest",
+  };
+}
+
+function readLiliaBatchApplyWorkflow(cmd) {
+  const workflow = readLiliaWorkflow(cmd);
+  if (workflow?.type !== "lilia_batch_apply") return null;
+  const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
+  const sourceKind = stringOrNull(workflow.sourceKind);
+  const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
+  if (!sourceTurnId) throw new Error("Lilia batch apply workflow missing sourceTurnId");
+  if (sourceKind !== "review" && sourceKind !== "fix_suggestion") {
+    throw new Error("Lilia batch apply workflow missing a valid sourceKind");
+  }
+  if (!sourceSummary) throw new Error("Lilia batch apply workflow missing sourceSummary");
+  return {
+    sourceTurnId,
+    sourceKind,
+    sourceSummary,
+    instructions: stringOrNull(workflow.instructions)?.trim() || "",
+  };
+}
+
+function buildClaudeWorkflowPrompt(cmd) {
+  const review = readLiliaReviewWorkflow(cmd);
+  if (review) {
+    return [
+      "Lilia code review workflow.",
+      `Review target: ${liliaReviewTargetText(review.target)}.`,
+      "Focus on bugs, regressions, risky behavior, and missing tests. Put findings first with file and line references where possible.",
+      review.instructions ? `User instructions: ${review.instructions}` : null,
+      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  const fix = readLiliaFixSuggestionWorkflow(cmd);
+  if (fix) {
+    return [
+      "Lilia fix suggestion workflow.",
+      `Target: ${liliaReviewTargetText(fix.target)}.`,
+      fix.mode === "apply"
+        ? "Apply the smallest correct fix for the target. Keep changes scoped."
+        : "Suggest a concrete fix plan without editing files unless explicitly necessary.",
+      fix.instructions ? `User instructions: ${fix.instructions}` : null,
+      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  const batch = readLiliaBatchApplyWorkflow(cmd);
+  if (batch) {
+    return [
+      "Lilia batch apply workflow.",
+      `Source kind: ${batch.sourceKind}.`,
+      `Source turn: ${batch.sourceTurnId}.`,
+      "Apply the following reviewed suggestion with the smallest correct code changes.",
+      "",
+      batch.sourceSummary,
+      batch.instructions ? `\nUser instructions: ${batch.instructions}` : null,
+      cmd.prompt?.trim() ? `\nAdditional user message: ${cmd.prompt.trim()}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  return null;
+}
+
+const LILIA_GOAL_ACTIONS = new Set(["set", "refresh", "clear"]);
+const LILIA_GOAL_STATUSES = new Set([
+  "active",
+  "paused",
+  "blocked",
+  "usageLimited",
+  "budgetLimited",
+  "complete",
+]);
+const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
+const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
+  "lilia_review",
+  "lilia_fix_suggestion",
+  "lilia_batch_apply",
+  "lilia_session_fork",
+]);
+const CLAUDE_LOCAL_LILIA_DIAGNOSTICS = new Map([
+  ["lilia_memory_mode", "Claude 当前没有可由 Lilia 控制的 thread memory mode。"],
+  ["lilia_memory_reset", "Claude 当前没有可由 Lilia 重置的全局 memory 接口。"],
+  ["lilia_background_terminals_clean", "Claude 当前没有可由 Lilia 清理的后台终端接口。"],
+  ["lilia_config_diagnostics", "Claude 当前没有等价的 runtime config diagnostics 接口。"],
+  ["lilia_compact", "Claude 当前没有可由 Lilia 手动触发的上下文压缩接口。"],
+]);
+
+function normalizeLiliaGoalStatus(status) {
+  const value = stringOrNull(status);
+  return LILIA_GOAL_STATUSES.has(value) ? value : "active";
+}
+
+function emitClaudeWorkflowDone(context, sessionId = null) {
+  context.protocol.emit({ type: "done", sessionId, subtype: "success" });
+}
+
+function emitClaudeUnsupportedWorkflow(context, workflow, reason) {
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Lilia workflow handled locally",
+    summary: reason,
+    payload: {
+      backend: "claude",
+      subkind: "lilia_workflow",
+      workflowType: workflow?.type ?? null,
+      reason,
+    },
+    sourceId: `claude:lilia-workflow:${workflow?.type ?? "unknown"}:${Date.now()}`,
+  });
+  emitClaudeWorkflowDone(context);
+}
+
+async function runClaudeLocalLiliaWorkflow(cmd, context) {
+  const workflow = readLiliaWorkflow(cmd);
+  if (!workflow) return false;
+  if (CLAUDE_QUERY_LILIA_WORKFLOWS.has(workflow.type)) return false;
+  if (workflow.type === "lilia_goal") {
+    const action = stringOrNull(workflow.action);
+    if (!LILIA_GOAL_ACTIONS.has(action)) {
+      throw new Error("Lilia goal workflow missing a valid action");
+    }
+    const objective = stringOrNull(workflow.objective)?.trim() || "";
+    if (action === "set" && !objective) throw new Error("Lilia goal workflow missing objective");
+    const cleared = action === "clear";
+    const goal = cleared
+      ? null
+      : {
+        threadId: stringOrNull(cmd.resumeSessionId) || "claude-local",
+        objective: objective || "Lilia Goal",
+        status: normalizeLiliaGoalStatus(workflow.status),
+        tokenBudget: typeof workflow.tokenBudget === "number" ? workflow.tokenBudget : null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+    context.protocol.emitTimeline({
+      kind: "goal",
+      status: cleared ? "cancelled" : "info",
+      title: cleared ? "Lilia Goal cleared" : "Lilia Goal updated",
+      summary: cleared ? "已清除 Lilia Goal" : goal.objective,
+      payload: {
+        backend: "claude",
+        subkind: "lilia_goal",
+        action,
+        cleared,
+        goal,
+        goalStatus: goal?.status ?? null,
+      },
+      sourceId: `claude:lilia-goal:${action}:${Date.now()}`,
+    });
+    emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
+    return true;
+  }
+  const diagnostic = CLAUDE_LOCAL_LILIA_DIAGNOSTICS.get(workflow.type);
+  if (diagnostic) {
+    const mode = stringOrNull(workflow.mode);
+    if (workflow.type === "lilia_memory_mode" && !LILIA_MEMORY_MODES.has(mode)) {
+      throw new Error("Lilia memory mode workflow missing a valid mode");
+    }
+    emitClaudeUnsupportedWorkflow(context, workflow, diagnostic);
+    return true;
+  }
+  return false;
+}
+
 export async function runClaude(cmd, context) {
   const { cwd, prompt, model, resumeSessionId } = cmd;
   const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
   if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
+  const workflowPrompt = buildClaudeWorkflowPrompt(cmd);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
   const permission = cmd.permission === "full" || cmd.permission === "readonly"
     ? cmd.permission
@@ -237,7 +446,7 @@ export async function runClaude(cmd, context) {
   emitRuntimeExtensionWarnings(context.protocol, "claude", runtimeExtensions.warnings);
 
   const createClaudeQuery = context.createClaudeQuery || query;
-  const claudeQuery = createClaudeQuery({ prompt: singleClaudePromptStream(prompt), options });
+  const claudeQuery = createClaudeQuery({ prompt: singleClaudePromptStream(workflowPrompt || prompt), options });
   ctx.query = claudeQuery;
   context.interactions?.handleSettingsUpdate?.((update) => {
     applyClaudeRuntimePermission(ctx, update?.permission);

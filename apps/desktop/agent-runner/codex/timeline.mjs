@@ -337,7 +337,7 @@ function emitCodexGoalTimeline(eventType, params, ctx) {
   ctx.protocol.emitTimeline({
     kind: "goal",
     status: codexGoalTimelineStatus(goal, cleared),
-    title: cleared ? "Codex goal cleared" : "Codex goal updated",
+    title: cleared ? "Lilia Goal cleared" : "Lilia Goal updated",
     summary: cleared
       ? "Codex thread goal 已清除"
       : shortText(goal?.objective, 1200) || "Codex thread goal",

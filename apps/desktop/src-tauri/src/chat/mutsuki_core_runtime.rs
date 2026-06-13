@@ -1516,7 +1516,7 @@ mod tests {
             project_cwd: "C:/repo".to_string(),
             prompt_length: 12,
             attachment_count: 2,
-            workflow_type: Some("codex_goal"),
+            workflow_type: Some("lilia_goal"),
             automation_run_id: None,
             source_id: "lilia:codex".to_string(),
             agent_id: "lilia-codex-agent".to_string(),
@@ -1609,7 +1609,7 @@ mod tests {
                     "projectCwd": "D:/repo",
                     "promptLength": 23,
                     "attachmentCount": 3,
-                    "workflowType": "codex_goal",
+                    "workflowType": "lilia_goal",
                     "resumeSessionId": "thread-restore",
                     "permission": "workspace-write",
                     "composerRuntimeWorkspaceRoots": ["D:/repo", "E:/shared"],
@@ -1625,7 +1625,7 @@ mod tests {
         assert_eq!(context.project_cwd, "D:/repo");
         assert_eq!(context.prompt_length, 23);
         assert_eq!(context.attachment_count, 3);
-        assert_eq!(context.workflow_type, Some("codex_goal"));
+        assert_eq!(context.workflow_type, Some("lilia_goal"));
         assert_eq!(context.resume_session_id.as_deref(), Some("thread-restore"));
         assert_eq!(context.permission, "workspace-write");
         assert_eq!(

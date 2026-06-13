@@ -1681,10 +1681,10 @@ mod tests {
 
     #[test]
     fn runner_lifecycle_classifies_workflow_and_runtime_events() {
-        let workflow = ChatWorkflow::CodexMemoryReset;
+        let workflow = ChatWorkflow::LiliaMemoryReset;
         assert_eq!(
             workflow_kind(Some(&workflow)),
-            Some("codex_memory_reset")
+            Some("lilia_memory_reset")
         );
         assert_eq!(workflow_kind(None), None);
 

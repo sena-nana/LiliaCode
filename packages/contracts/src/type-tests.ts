@@ -173,10 +173,11 @@ export type LiliaBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
-export type ClaudeSessionForkWorkflowTypeTest = Assert<
+export type LiliaSessionForkWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "claude_session_fork";
+      type: "lilia_session_fork";
+      excludeTurns: true;
     },
     ChatWorkflow
   >

@@ -7,7 +7,7 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatSlashCommandWorkflow,
-  CodexThreadGoal,
+  LiliaThreadGoal,
   LiliaReviewTarget,
   Project,
   SuggestionItem,
@@ -54,7 +54,7 @@ defineProps<{
   insertDraftTextContent: string;
   pendingAgentActions: PendingAgentAction[];
   hasBlockingPendingAction: boolean;
-  currentCodexGoal: CodexThreadGoal | null;
+  currentLiliaGoal: LiliaThreadGoal | null;
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
@@ -76,9 +76,9 @@ const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "close-image": [];
   "insert-guide": [todo: TaskTodo];
-  "set-codex-goal": [objective: string];
-  "refresh-codex-goal": [];
-  "clear-codex-goal": [];
+  "set-lilia-goal": [objective: string];
+  "refresh-lilia-goal": [];
+  "clear-lilia-goal": [];
   "insert-draft-text": [text: string];
   send: [content: string, attachments: ChatAttachment[]];
   "start-lilia-review": [
@@ -162,7 +162,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="showExpiredPendingActions"
             :can-retry-event="canRetryEvent"
-            :can-start-lilia-batch-apply="composerState.backend === 'codex' && !isTurnRunning && !hasBlockingPendingAction"
+            :can-start-lilia-batch-apply="!isTurnRunning && !hasBlockingPendingAction"
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
@@ -174,13 +174,13 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                 <TodoFloat
                   v-if="taskId"
                   :task-id="taskId"
-                  :show-goal="composerState.backend === 'codex'"
-                  :goal="currentCodexGoal"
+                  :show-goal="true"
+                  :goal="currentLiliaGoal"
                   :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== 'title_update')"
                   @insert-guide="emit('insert-guide', $event)"
-                  @set-codex-goal="emit('set-codex-goal', $event)"
-                  @refresh-codex-goal="emit('refresh-codex-goal')"
-                  @clear-codex-goal="emit('clear-codex-goal')"
+                  @set-lilia-goal="emit('set-lilia-goal', $event)"
+                  @refresh-lilia-goal="emit('refresh-lilia-goal')"
+                  @clear-lilia-goal="emit('clear-lilia-goal')"
                 />
                 <ChatComposer
                   ref="composerRef"

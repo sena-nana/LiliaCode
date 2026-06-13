@@ -588,7 +588,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn empty_codex_workflows_do_not_persist_user_message() {
+    fn empty_lilia_workflows_do_not_persist_user_message() {
         let workflows = vec![
             ChatWorkflow::LiliaReview {
                 target: LiliaReviewTarget::UncommittedChanges,
@@ -606,23 +606,22 @@ mod agent_event_sink_tests {
                 source_summary: "建议修复权限边界".to_string(),
                 instructions: None,
             },
-            ChatWorkflow::CodexGoal {
+            ChatWorkflow::LiliaGoal {
                 action: "set".to_string(),
                 objective: Some("完成 Thread Goal 接入".to_string()),
                 status: Some("active".to_string()),
                 token_budget: None,
             },
             ChatWorkflow::LiliaCompact,
-            ChatWorkflow::CodexBackgroundTerminalsClean,
-            ChatWorkflow::CodexMemoryMode {
+            ChatWorkflow::LiliaBackgroundTerminalsClean,
+            ChatWorkflow::LiliaMemoryMode {
                 mode: "enabled".to_string(),
             },
-            ChatWorkflow::CodexMemoryReset,
-            ChatWorkflow::CodexThreadFork {
+            ChatWorkflow::LiliaMemoryReset,
+            ChatWorkflow::LiliaSessionFork {
                 exclude_turns: Some(true),
             },
-            ChatWorkflow::ClaudeSessionFork,
-            ChatWorkflow::CodexConfigDiagnostics {
+            ChatWorkflow::LiliaConfigDiagnostics {
                 include_layers: Some(true),
             },
             ChatWorkflow::SlashCommand {
@@ -644,14 +643,14 @@ mod agent_event_sink_tests {
     #[test]
     fn chat_workflow_serializes_struct_variant_fields_as_camel_case() {
         let goal = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "codex_goal",
+            "type": "lilia_goal",
             "action": "set",
             "objective": "完成接口接入",
             "status": "active",
             "tokenBudget": 100,
         }))
         .unwrap();
-        let ChatWorkflow::CodexGoal { token_budget, .. } = &goal else {
+        let ChatWorkflow::LiliaGoal { token_budget, .. } = &goal else {
             panic!("unexpected workflow: {goal:?}");
         };
         assert_eq!(*token_budget, Some(100));
@@ -702,11 +701,11 @@ mod agent_event_sink_tests {
         assert!(batch_apply_json.get("source_turn_id").is_none());
 
         let fork = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "codex_thread_fork",
+            "type": "lilia_session_fork",
             "excludeTurns": false,
         }))
         .unwrap();
-        let ChatWorkflow::CodexThreadFork { exclude_turns } = &fork else {
+        let ChatWorkflow::LiliaSessionFork { exclude_turns } = &fork else {
             panic!("unexpected workflow: {fork:?}");
         };
         assert_eq!(*exclude_turns, Some(false));
@@ -714,20 +713,12 @@ mod agent_event_sink_tests {
         assert_eq!(fork_json["excludeTurns"], json!(false));
         assert!(fork_json.get("exclude_turns").is_none());
 
-        let claude_fork = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "claude_session_fork",
-        }))
-        .unwrap();
-        assert!(matches!(claude_fork, ChatWorkflow::ClaudeSessionFork));
-        let claude_fork_json = serde_json::to_value(&claude_fork).unwrap();
-        assert_eq!(claude_fork_json["type"], json!("claude_session_fork"));
-
         let diagnostics = serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "codex_config_diagnostics",
+            "type": "lilia_config_diagnostics",
             "includeLayers": false,
         }))
         .unwrap();
-        let ChatWorkflow::CodexConfigDiagnostics { include_layers } = &diagnostics else {
+        let ChatWorkflow::LiliaConfigDiagnostics { include_layers } = &diagnostics else {
             panic!("unexpected workflow: {diagnostics:?}");
         };
         assert_eq!(*include_layers, Some(false));

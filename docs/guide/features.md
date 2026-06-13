@@ -12,6 +12,7 @@
 - [x] 引导功能：提供优先级操作队列，让用户消息和插件行为进入统一引导队列。
 - [x] MCP 基础接入：支持从 Agent 配置中发现并接入 MCP server。
 - [x] 统一交互协议：跨后端统一计划确认、工具确认和 Agent 提问。
+- [x] 统一 Lilia 工作流：界面层只暴露 Lilia 操作，内部按 Claude / Codex provider 分发。
 - [ ] 智能模型选择：根据请求类型自动选择模型级别和思考强度。
 - [x] 文件上下文：支持通过 `@` 提及文件、目录和图片等上下文。
 - [x] 斜杠命令：支持在输入框通过 `/` 打开命令面板，执行内置命令和 `.lilia/commands` 项目命令，并把执行结果回写到任务 timeline；还不承诺完整代理后端原生命令。
@@ -23,6 +24,7 @@
 - [x] Claude 历史导入：搜索、预览并导入本地 Claude 历史会话。
 - [x] Claude Skills：管理用户级和项目级 Claude Skills。
 - [x] Claude MCP 管理：在界面中增删改外部 Claude MCP server。
+- [x] Claude Lilia 工作流：支持审查、修复建议、批量应用、会话分叉和 Goal / 诊断类本地落点。
 - [ ] Claude Plugins：完整管理 Claude Plugin 的安装、启停、更新和作用域。
 - [ ] Claude Hooks：管理 Claude Code Hooks，并展示执行结果。
 - [ ] Claude Subagents：支持 Claude Code Subagents 或自定义 Agent 的展示与调度。
@@ -34,8 +36,7 @@
 - [x] Codex 环境检查：提示 Codex CLI、API 和连接状态是否可用。
 - [x] Codex MCP 管理：读取并增删改启停用户级 stdio Codex MCP server，HTTP / OAuth / 未知 transport 只读展示。
 - [x] Codex 配置档案：支持 profiles、reasoning effort、runtime workspace roots、受控 permissions 和项目级默认。
-- [x] Codex 专项工作流：支持代码审查和修复建议。
-- [x] Codex 批量改动工作流：可从审查 / 修复建议进入强制 Plan 确认后的应用流程。
+- [x] Codex Lilia 工作流适配：支持审查、修复建议、批量应用、压缩、会话分叉、Goal、memory、配置诊断和后台终端清理。
 - [x] 内置浏览器交互：Codex 可打开和导航 IAB 窗口，采集页面标题 / URL / 截图元数据，并把结果送回运行中的 turn 或作为消息附件；截图采集目前以 Windows 为主。
 
 ## LiliaCode 特色功能

@@ -30,13 +30,13 @@ function setupWorkflowActions(backend: ChatComposerState["backend"]) {
 }
 
 describe("useLiliaWorkflowActions", () => {
-  it("session fork workflow follows the active backend", async () => {
+  it("session fork workflow uses the Lilia protocol for every backend", async () => {
     const codex = setupWorkflowActions("codex");
     await codex.actions.onStartSessionFork();
-    expect(codex.sent).toEqual([{ type: "codex_thread_fork", excludeTurns: true }]);
+    expect(codex.sent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
 
     const claude = setupWorkflowActions("claude");
     await claude.actions.onStartSessionFork();
-    expect(claude.sent).toEqual([{ type: "claude_session_fork" }]);
+    expect(claude.sent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
   });
 });

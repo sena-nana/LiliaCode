@@ -23,13 +23,13 @@ import {
   onTodoChanged,
   type TaskTodoPriority,
 } from "../../services/todos";
-import type { CodexThreadGoal, TaskTodo } from "@lilia/contracts";
+import type { LiliaThreadGoal, TaskTodo } from "@lilia/contracts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const props = withDefaults(defineProps<{
   taskId: string;
   showGoal?: boolean;
-  goal?: CodexThreadGoal | null;
+  goal?: LiliaThreadGoal | null;
   goalDisabled?: boolean;
 }>(), {
   showGoal: false,
@@ -39,9 +39,9 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   "insert-guide": [todo: TaskTodo];
-  "set-codex-goal": [objective: string];
-  "refresh-codex-goal": [];
-  "clear-codex-goal": [];
+  "set-lilia-goal": [objective: string];
+  "refresh-lilia-goal": [];
+  "clear-lilia-goal": [];
 }>();
 
 const todos = ref<TaskTodo[]>([]);
@@ -82,7 +82,7 @@ const goalMeta = computed(() => {
   return `${status} · ${tokenText} tokens`;
 });
 
-const GOAL_STATUS_LABELS: Record<CodexThreadGoal["status"], string> = {
+const GOAL_STATUS_LABELS: Record<LiliaThreadGoal["status"], string> = {
   active: "进行中",
   paused: "已暂停",
   blocked: "受阻",
@@ -97,7 +97,7 @@ function priorityLabel(priority: TaskTodoPriority): string {
   return "中";
 }
 
-function goalStatusLabel(status: CodexThreadGoal["status"]): string {
+function goalStatusLabel(status: LiliaThreadGoal["status"]): string {
   return GOAL_STATUS_LABELS[status] ?? status;
 }
 
@@ -130,19 +130,19 @@ function onInsertGuide(todo: TaskTodo) {
 
 function onSetGoal() {
   if (props.goalDisabled) return;
-  const next = window.prompt("Codex goal", props.goal?.objective ?? "")?.trim();
+  const next = window.prompt("Lilia Goal", props.goal?.objective ?? "")?.trim();
   if (!next) return;
-  emit("set-codex-goal", next);
+  emit("set-lilia-goal", next);
 }
 
 function onRefreshGoal() {
   if (props.goalDisabled) return;
-  emit("refresh-codex-goal");
+  emit("refresh-lilia-goal");
 }
 
 function onClearGoal() {
   if (props.goalDisabled || !props.goal) return;
-  emit("clear-codex-goal");
+  emit("clear-lilia-goal");
 }
 
 watch(
@@ -172,7 +172,7 @@ onUnmounted(async () => {
     <section v-if="visibleGoal" class="todo-float__section todo-float__section--goal">
       <ul class="todo-float__list">
         <li class="todo-float__row todo-float__row--goal">
-          <span class="todo-float__source todo-float__source--goal" title="Codex Goal">
+          <span class="todo-float__source todo-float__source--goal" title="Lilia Goal">
             <Goal :size="12" aria-hidden="true" />
           </span>
           <span class="todo-float__text" :title="goalText">{{ goalText }}</span>
@@ -183,7 +183,7 @@ onUnmounted(async () => {
               class="todo-float__icon-btn"
               :disabled="goalDisabled"
               title="设置 Goal"
-              aria-label="设置 Codex goal"
+              aria-label="设置 Lilia Goal"
               @click="onSetGoal"
             >
               <Pencil :size="12" aria-hidden="true" />
@@ -193,7 +193,7 @@ onUnmounted(async () => {
               class="todo-float__icon-btn"
               :disabled="goalDisabled"
               title="刷新 Goal"
-              aria-label="刷新 Codex goal"
+              aria-label="刷新 Lilia Goal"
               @click="onRefreshGoal"
             >
               <RefreshCw :size="12" aria-hidden="true" />
@@ -203,7 +203,7 @@ onUnmounted(async () => {
               class="todo-float__icon-btn todo-float__icon-btn--danger"
               :disabled="goalDisabled || !goal"
               title="清除 Goal"
-              aria-label="清除 Codex goal"
+              aria-label="清除 Lilia Goal"
               @click="onClearGoal"
             >
               <Trash2 :size="12" aria-hidden="true" />

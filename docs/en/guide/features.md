@@ -12,6 +12,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Guidance queue: provide a priority action queue so user messages and plugin behavior enter a unified guidance flow.
 - [x] Basic MCP integration: discover and connect MCP servers from agent configuration.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
+- [x] Unified Lilia workflows: the UI exposes Lilia operations only, with provider-specific dispatch for Claude and Codex internally.
 - [ ] Intelligent model selection: automatically choose model level and reasoning intensity based on request type.
 - [x] File context: mention files, directories, images, and other context with `@`.
 - [ ] Slash commands: support backend-native commands and project-defined commands.
@@ -23,6 +24,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Claude history import: search, preview, and import local Claude history sessions.
 - [x] Claude Skills: manage user-level and project-level Claude Skills.
 - [x] Claude MCP management: add, edit, and remove external Claude MCP servers in the UI.
+- [x] Claude Lilia workflows: support review, fix suggestion, batch apply, session fork, and local Goal / diagnostic handling.
 - [ ] Claude Plugins: fully manage Claude Plugin installation, enablement, updates, and scope.
 - [ ] Claude Hooks: manage Claude Code Hooks and show execution results.
 - [ ] Claude Subagents: display and schedule Claude Code Subagents or custom agents.
@@ -34,8 +36,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Codex environment checks: show whether the Codex CLI, API, and connection state are available.
 - [x] Codex MCP management: discover, create, edit, delete, and enable user-level stdio Codex MCP servers; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support profiles, reasoning effort, runtime workspace roots, controlled permissions, and project-level defaults.
-- [x] Codex workflows: support code review and fix suggestions.
-- [x] Codex batch-change workflows: apply review / fix suggestions through a forced Plan approval flow.
+- [x] Codex Lilia workflow adapter: support review, fix suggestion, batch apply, compact, session fork, Goal, memory, config diagnostics, and background-terminal cleanup.
 - [ ] Built-in browser interaction: interact with users or debug code through IAB.
 
 ## LiliaCode-Specific Features

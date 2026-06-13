@@ -61,12 +61,13 @@
 | 系统事件映射 | 已接入 | 已处理 tool progress / summary、auth status、subagent task、notification、api retry、status、session state、hook lifecycle、permission denied、mirror error。 |
 | Claude 内置工具显示 | 已接入 | 已归一化 Bash、Read/Write/Edit/MultiEdit、Glob/Grep、NotebookEdit、WebSearch/WebFetch、TodoWrite、Task/Agent、ExitPlanMode。`LS`、`NotebookRead` 当前走未登记工具兜底，显示为通用 `tool`；如需精确展示，应补 `packages/contracts/src/claudeTools.mjs` 映射和测试。 |
 | 未登记工具兜底 | 已接入 | 未登记 Claude 工具落到 Lilia 通用 `tool` kind，保留 toolName 和 input。 |
+| Lilia workflow adapter | 已接入 | `lilia_review`、`lilia_fix_suggestion`、`lilia_batch_apply` 会构造结构化 Claude prompt 后进入 `query()`；`lilia_session_fork` 调用 SDK `forkSession()`；`lilia_goal` 写入 Lilia Goal timeline；`lilia_compact`、memory、config diagnostics 和 background-terminal cleanup 在 Claude adapter 中写明确的 Lilia diagnostic。 |
 
 ## 部分接入接口
 
 | 接口 / 能力 | Lilia 状态 | 说明 |
 |---|---|---|
-| Sessions | 部分接入 | Lilia 保存 `session_id` 并 resume；导入入口可搜索本地 Claude JSONL 历史、预览消息 / timeline，并 attach 为 Lilia task 后后台同步历史事件；未接入 `continue`、`forkSession`、`resumeSessionAt`、`sessionId` 或完整 session 管理 API。 |
+| Sessions | 部分接入 | Lilia 保存 `session_id` 并 resume；导入入口可搜索本地 Claude JSONL 历史、预览消息 / timeline，并 attach 为 Lilia task 后后台同步历史事件；`lilia_session_fork` 已调用 SDK `forkSession()`，但未接入 `continue`、`resumeSessionAt`、`sessionId` 或完整 session 管理 API。 |
 | Subagents / `Task` / `Agent` | 部分接入 | 可显示 Task / Agent 调用、任务进度和通知；未提供 subagent 定义、管理或主动调度 UI。 |
 | Plugins | 部分接入 | 可发现和启停用户级本地 plugin；未做安装、更新、项目级 / marketplace 作用域管理。 |
 | Hooks | 部分接入 | 可注册少量 SDK hook，并能显示 hook lifecycle 事件；未提供 hooks 配置管理和结果面板。 |
@@ -101,7 +102,7 @@
 | `listSessions()` | 未接入 | Claude 历史导入当前读取本地 `~/.claude/projects/*.jsonl`，未调用 SDK session 列表 API。 |
 | `getSessionMessages()` | 未接入 | Claude 历史导入当前从本地 JSONL 解析并回补 timeline，未调用 SDK message API。 |
 | `getSessionInfo()` | 未接入 | Claude 历史导入当前从本地 JSONL 摘要出 session 元信息，未调用 SDK info API。 |
-| `forkSession()` | 未接入 | 未暴露 fork 历史会话。 |
+| `forkSession()` | 已接入 | 通过 `lilia_session_fork` 分发到 Claude adapter，并把 fork 后的 `sessionId` 作为 runner `done.sessionId` 回写。 |
 | `listSubagents()` | 未接入 | 未读取 session 下 subagent 列表。 |
 | `getSubagentMessages()` | 未接入 | 未读取 subagent transcript。 |
 | `renameSession()` / `tagSession()` / `deleteSession()` | 未接入 | Lilia 使用自己的 task/session 元数据管理。 |
@@ -135,6 +136,7 @@ Tauri chat runner
 关键边界：
 
 - Lilia 不直接改写 Claude transcript；运行中只保存自己的 task timeline、composer 状态和 SDK session id，历史导入也只读取本地 Claude JSONL 后写入 Lilia task timeline。
+- UI 层只提交 Lilia `ChatWorkflow` discriminant，不提交 `claude_*` workflow type；Claude runner 只作为 provider adapter 消费这些 Lilia workflow。
 - Claude 原生 Todo、Task、Plan 只做镜像和展示；Lilia 不把它们改造成自有协议后再喂回 Claude。
 - 只读模式是 Lilia 运行时门禁：读工具白名单之外的工具会被拒绝并写入 timeline。
 - 外部 MCP server 名称 `lilia` 保留给内置 AskUser server，用户配置中同名 server 会被跳过。
@@ -145,7 +147,7 @@ Tauri chat runner
 1. **MCP 能力补齐**：HTTP / SSE transport、tool policy、elicitation 和 auth 流程需要先设计 UI 与安全边界。
 2. **Subagents 管理**：读取 / 定义 `agents`，并把 Task / Agent 事件与可调度列表打通。
 3. **Hooks 管理**：展示 hooks 配置、执行结果和失败诊断，而不是只消费生命周期事件。
-4. **Session 恢复增强**：在现有本地 Claude 历史搜索、预览、attach 和 timeline 同步基础上，评估 `listSessions` / `getSessionMessages` / `forkSession` 是否需要接入 SDK session API。
+4. **Session 恢复增强**：在现有本地 Claude 历史搜索、预览、attach、`forkSession` 和 timeline 同步基础上，评估 `listSessions` / `getSessionMessages` 等 SDK session API 是否需要接入。
 5. **SDK 设置面**：逐步暴露 `allowedTools`、`disallowedTools`、`settings`、`sandbox`、`thinking`、`effort` 等高级选项。
 6. **Alpha / beta 接口**：除非有明确产品目标，`sessionStore`、remote control、assistant worker 和 task budget 继续按高变动面观察。
 
