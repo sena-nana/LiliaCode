@@ -2,19 +2,16 @@ import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AgentTimelineEvent,
-  ClaudeSessionSummary,
-  CodexThreadRuntimeState,
-  CodexThreadSummary,
+  HistoryImportItem,
+  HistoryImportRuntimeState,
 } from "@lilia/contracts";
 import ConversationImport from "../src/pages/ConversationImport.vue";
 import {
-  attachClaudeSession,
-  cleanCodexThreadBackgroundTerminals,
-  listCodexThreadRuntimeStates,
-  previewClaudeSession,
-  previewCodexThread,
-  searchClaudeSessions,
-  searchCodexThreads,
+  attachHistoryImport,
+  cleanHistoryImportBackgroundTerminals,
+  listHistoryImportRuntimeStates,
+  previewHistoryImport,
+  searchHistoryImports,
 } from "../src/services/chat";
 
 const routerMock = vi.hoisted(() => ({
@@ -32,31 +29,23 @@ vi.mock("../src/services/tasksStore", () => ({
 }));
 
 vi.mock("../src/services/chat", () => ({
-  attachClaudeSession: vi.fn(async () => ({
-    taskId: "task-claude-imported",
+  attachHistoryImport: vi.fn(async (input: { provider: "codex" | "claude"; itemId: string }) => ({
+    taskId: input.provider === "claude" ? "task-claude-imported" : "task-imported",
     projectId: null,
-    sessionId: "claude-session-1",
+    itemId: input.itemId,
     task: null,
     eventCount: 0,
   })),
-  attachCodexThread: vi.fn(async () => ({
-    taskId: "task-imported",
-    projectId: null,
-    threadId: "thread-1",
-    task: null,
-    eventCount: 0,
-  })),
-  cleanCodexThreadBackgroundTerminals: vi.fn(async () => undefined),
-  listCodexThreadRuntimeStates: vi.fn(async () => []),
-  previewClaudeSession: vi.fn(),
-  previewCodexThread: vi.fn(),
-  searchClaudeSessions: vi.fn(),
-  searchCodexThreads: vi.fn(),
+  cleanHistoryImportBackgroundTerminals: vi.fn(async () => undefined),
+  listHistoryImportRuntimeStates: vi.fn(async () => []),
+  previewHistoryImport: vi.fn(),
+  searchHistoryImports: vi.fn(),
 }));
 
-function threadSummary(patch: Partial<CodexThreadSummary> = {}): CodexThreadSummary {
+function threadSummary(patch: Partial<HistoryImportItem> = {}): HistoryImportItem {
   return {
     id: "thread-1",
+    provider: "codex",
     title: "优化导入对话界面",
     status: "completed",
     model: "gpt-5.4",
@@ -69,9 +58,10 @@ function threadSummary(patch: Partial<CodexThreadSummary> = {}): CodexThreadSumm
   };
 }
 
-function claudeSessionSummary(patch: Partial<ClaudeSessionSummary> = {}): ClaudeSessionSummary {
+function claudeSessionSummary(patch: Partial<HistoryImportItem> = {}): HistoryImportItem {
   return {
     id: "claude-session-1",
+    provider: "claude",
     title: "整理 Claude 历史导入",
     status: null,
     model: "claude-sonnet-4-5",
@@ -86,9 +76,9 @@ function claudeSessionSummary(patch: Partial<ClaudeSessionSummary> = {}): Claude
   };
 }
 
-function runtimeState(patch: Partial<CodexThreadRuntimeState> = {}): CodexThreadRuntimeState {
+function runtimeState(patch: Partial<HistoryImportRuntimeState> = {}): HistoryImportRuntimeState {
   return {
-    threadId: "thread-1",
+    itemId: "thread-1",
     taskId: "task-1",
     taskTitle: "优化导入对话界面",
     projectId: null,
@@ -123,25 +113,23 @@ function timelineEvent(
 describe("ConversationImport", () => {
   beforeEach(() => {
     routerMock.push.mockClear();
-    vi.mocked(attachClaudeSession).mockClear();
-    vi.mocked(cleanCodexThreadBackgroundTerminals).mockClear();
-    vi.mocked(listCodexThreadRuntimeStates).mockResolvedValue([]);
-    vi.mocked(previewClaudeSession).mockReset();
-    vi.mocked(previewCodexThread).mockReset();
-    vi.mocked(searchClaudeSessions).mockReset();
-    vi.mocked(searchCodexThreads).mockReset();
+    vi.mocked(attachHistoryImport).mockClear();
+    vi.mocked(cleanHistoryImportBackgroundTerminals).mockClear();
+    vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([]);
+    vi.mocked(previewHistoryImport).mockReset();
+    vi.mocked(searchHistoryImports).mockReset();
   });
 
   it("renders Codex history preview by default", async () => {
     const thread = threadSummary();
-    vi.mocked(searchCodexThreads).mockResolvedValue({
-      threads: [thread],
+    vi.mocked(searchHistoryImports).mockResolvedValue({
+      items: [thread],
       nextCursor: null,
     });
-    vi.mocked(previewCodexThread).mockImplementation(async (input) => {
+    vi.mocked(previewHistoryImport).mockImplementation(async (input) => {
       if (input.detail === "full") {
         return {
-          thread,
+          item: thread,
           eventCount: 2,
           messages: [],
           hasFullPreview: true,
@@ -161,7 +149,7 @@ describe("ConversationImport", () => {
         };
       }
       return {
-        thread,
+        item: thread,
         eventCount: 99,
         messages: [],
         hasFullPreview: true,
@@ -184,23 +172,27 @@ describe("ConversationImport", () => {
     expect(within(sidebar as HTMLElement).getByRole("button", { name: /优化导入对话界面/ }))
       .toBeInTheDocument();
     expect(view.getByRole("button", { name: "导入到收集箱" })).toBeEnabled();
-    expect(previewCodexThread).toHaveBeenCalledWith({ threadId: "thread-1", detail: "full" });
+    expect(previewHistoryImport).toHaveBeenCalledWith({
+      provider: "codex",
+      itemId: "thread-1",
+      detail: "full",
+    });
   });
 
   it("先显示 Lilia 管理会话，再合并后台 Codex 历史", async () => {
-    let resolveSearch: (value: { threads: CodexThreadSummary[]; nextCursor: string | null }) => void;
-    const searchPromise = new Promise<{ threads: CodexThreadSummary[]; nextCursor: string | null }>((resolve) => {
+    let resolveSearch: (value: { items: HistoryImportItem[]; nextCursor: string | null }) => void;
+    const searchPromise = new Promise<{ items: HistoryImportItem[]; nextCursor: string | null }>((resolve) => {
       resolveSearch = resolve;
     });
-    vi.mocked(listCodexThreadRuntimeStates).mockResolvedValue([
+    vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
       runtimeState({
-        threadId: "thread-lilia",
+        itemId: "thread-lilia",
         taskTitle: "Lilia 本地 Codex 对话",
       }),
     ]);
-    vi.mocked(searchCodexThreads).mockReturnValue(searchPromise);
-    vi.mocked(previewCodexThread).mockResolvedValue({
-      thread: threadSummary({ id: "thread-lilia", title: "Lilia 本地 Codex 对话" }),
+    vi.mocked(searchHistoryImports).mockReturnValue(searchPromise);
+    vi.mocked(previewHistoryImport).mockResolvedValue({
+      item: threadSummary({ id: "thread-lilia", title: "Lilia 本地 Codex 对话" }),
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
@@ -221,7 +213,7 @@ describe("ConversationImport", () => {
     expect(within(sidebar as HTMLElement).queryByText("远端 Codex 历史")).not.toBeInTheDocument();
 
     resolveSearch!({
-      threads: [
+      items: [
         threadSummary({
           id: "thread-lilia",
           title: "Codex 历史补全标题",
@@ -252,23 +244,23 @@ describe("ConversationImport", () => {
   });
 
   it("搜索词可直接命中 Lilia 本地任务标题", async () => {
-    let resolveSearch: (value: { threads: CodexThreadSummary[]; nextCursor: string | null }) => void;
-    const searchPromise = new Promise<{ threads: CodexThreadSummary[]; nextCursor: string | null }>((resolve) => {
+    let resolveSearch: (value: { items: HistoryImportItem[]; nextCursor: string | null }) => void;
+    const searchPromise = new Promise<{ items: HistoryImportItem[]; nextCursor: string | null }>((resolve) => {
       resolveSearch = resolve;
     });
-    vi.mocked(listCodexThreadRuntimeStates).mockResolvedValue([
+    vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
       runtimeState({
-        threadId: "thread-local-search",
+        itemId: "thread-local-search",
         taskTitle: "只在 Lilia 里的任务",
       }),
       runtimeState({
-        threadId: "thread-other",
+        itemId: "thread-other",
         taskTitle: "另一个任务",
       }),
     ]);
-    vi.mocked(searchCodexThreads).mockReturnValue(searchPromise);
-    vi.mocked(previewCodexThread).mockResolvedValue({
-      thread: threadSummary({ id: "thread-local-search", title: "只在 Lilia 里的任务" }),
+    vi.mocked(searchHistoryImports).mockReturnValue(searchPromise);
+    vi.mocked(previewHistoryImport).mockResolvedValue({
+      item: threadSummary({ id: "thread-local-search", title: "只在 Lilia 里的任务" }),
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
@@ -293,7 +285,7 @@ describe("ConversationImport", () => {
       name: /另一个任务/,
     })).not.toBeInTheDocument();
 
-    resolveSearch!({ threads: [], nextCursor: null });
+    resolveSearch!({ items: [], nextCursor: null });
   });
 
   it("在 Codex 导入列表显示 Lilia 管理状态并清理运行中后台终端", async () => {
@@ -302,21 +294,21 @@ describe("ConversationImport", () => {
       title: "整理 Codex 会话管理",
       preview: "讨论设置页中的会话维护入口。",
     });
-    vi.mocked(searchCodexThreads).mockResolvedValue({
-      threads: [thread],
+    vi.mocked(searchHistoryImports).mockResolvedValue({
+      items: [thread],
       nextCursor: null,
     });
-    vi.mocked(listCodexThreadRuntimeStates).mockResolvedValue([
+    vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
       runtimeState({
-        threadId: "thread-running",
+        itemId: "thread-running",
         taskId: "task-running",
         taskTitle: "打通 tsconfig paths 搜索",
         running: true,
         pending: true,
       }),
     ]);
-    vi.mocked(previewCodexThread).mockResolvedValue({
-      thread,
+    vi.mocked(previewHistoryImport).mockResolvedValue({
+      item: thread,
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
@@ -345,7 +337,7 @@ describe("ConversationImport", () => {
     }));
 
     await waitFor(() => {
-      expect(cleanCodexThreadBackgroundTerminals).toHaveBeenCalledWith("thread-running");
+      expect(cleanHistoryImportBackgroundTerminals).toHaveBeenCalledWith("thread-running");
       expect(within(sidebar as HTMLElement).getByText("后台终端已清理")).toBeInTheDocument();
     });
   });
@@ -353,25 +345,25 @@ describe("ConversationImport", () => {
   it("切换到 Claude 后搜索、预览并导入 Claude session", async () => {
     const thread = threadSummary();
     const session = claudeSessionSummary();
-    vi.mocked(searchCodexThreads).mockResolvedValue({
-      threads: [thread],
+    vi.mocked(searchHistoryImports).mockResolvedValueOnce({
+      items: [thread],
       nextCursor: null,
     });
-    vi.mocked(previewCodexThread).mockResolvedValue({
-      thread,
+    vi.mocked(previewHistoryImport).mockResolvedValue({
+      item: thread,
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
       events: [],
     });
-    vi.mocked(searchClaudeSessions).mockResolvedValue({
-      sessions: [session],
+    vi.mocked(searchHistoryImports).mockResolvedValueOnce({
+      items: [session],
       nextCursor: null,
     });
-    vi.mocked(previewClaudeSession).mockImplementation(async (input) => {
+    vi.mocked(previewHistoryImport).mockImplementation(async (input) => {
       if (input.detail === "full") {
         return {
-          session,
+          item: session,
           eventCount: 2,
           messages: [],
           hasFullPreview: true,
@@ -393,7 +385,7 @@ describe("ConversationImport", () => {
         };
       }
       return {
-        session,
+        item: session,
         eventCount: 2,
         messages: [],
         hasFullPreview: true,
@@ -418,19 +410,21 @@ describe("ConversationImport", () => {
     await waitFor(() => {
       expect(view.container.querySelector(".agent-timeline")).toBeInTheDocument();
     });
-    expect(previewClaudeSession).toHaveBeenCalledWith({
-      sessionId: "claude-session-1",
+    expect(previewHistoryImport).toHaveBeenCalledWith({
+      provider: "claude",
+      itemId: "claude-session-1",
       detail: "full",
     });
 
     await fireEvent.click(view.getByRole("button", { name: "导入到收集箱" }));
     await waitFor(() => {
-      expect(attachClaudeSession).toHaveBeenCalledWith({
+      expect(attachHistoryImport).toHaveBeenCalledWith({
+        provider: "claude",
         mode: "new",
-        sessionId: "claude-session-1",
+        itemId: "claude-session-1",
         taskId: null,
         projectId: null,
-        session,
+        item: session,
       });
     });
     expect(routerMock.push).toHaveBeenCalledWith("/chats/task-claude-imported");

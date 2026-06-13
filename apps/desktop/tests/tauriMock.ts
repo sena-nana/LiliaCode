@@ -2194,10 +2194,17 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
       ];
 
-    case "codex_thread_search": {
+    case "history_import_search": {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
+      const provider = input.provider === "claude" ? "claude" : "codex";
+      if (provider === "claude") {
+        return {
+          items: [],
+          nextCursor: null,
+        };
+      }
       const term = String(input.searchTerm ?? "").trim().toLowerCase();
       const includeArchived = input.archived === true;
       const limit = typeof input.limit === "number" ? Math.max(1, input.limit) : 20;
@@ -2220,19 +2227,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const page = filtered.slice(cursor, cursor + limit);
       const nextOffset = cursor + limit;
       return {
-        threads: page.map((thread) => ({ ...thread })),
+        items: page.map((thread) => ({ ...thread, provider: "codex" })),
         nextCursor: nextOffset < filtered.length ? `offset:${nextOffset}` : null,
       };
     }
 
-    case "codex_thread_runtime_states": {
+    case "history_import_runtime_states": {
       return Object.entries(codexTaskSessions).flatMap(([taskId, threadId]) => {
         const task = tasks.find((row) => row.id === taskId && !row.archived);
         if (!task) return [];
         const queuedCount = chatQueued[taskId]?.length ?? 0;
         const running = chatRunning[taskId] === true;
         return [{
-          threadId,
+          itemId: threadId,
           taskId,
           taskTitle: task.title,
           projectId: task.projectId,
@@ -2244,10 +2251,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       });
     }
 
-    case "codex_thread_clean_background_terminals": {
-      const threadId = String(args.threadId ?? "").trim();
-      if (!threadId) throw new Error("Codex threadId 不能为空");
-      cleanedCodexThreads.push(threadId);
+    case "history_import_clean_background_terminals": {
+      const itemId = String(args.itemId ?? "").trim();
+      if (!itemId) throw new Error("Codex threadId 不能为空");
+      cleanedCodexThreads.push(itemId);
       return undefined;
     }
 

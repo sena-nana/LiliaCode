@@ -3,8 +3,8 @@ mod utility;
 
 pub use types::{
     ClaudeSessionAttachInput, ClaudeSessionAttachResult, ClaudeSessionPreview,
-    ClaudeSessionPreviewInput, ClaudeSessionSearchInput, ClaudeSessionSearchResult,
-    ClaudeSessionSummary,
+    ClaudeSessionPreviewInput, ClaudeSessionPreviewMessage, ClaudeSessionSearchInput,
+    ClaudeSessionSearchResult, ClaudeSessionSummary,
 };
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -24,17 +24,7 @@ use crate::{BACKEND_CLAUDE, RUNTIME_CHANNEL_BUILTIN};
 
 use self::utility::run_claude_history_utility;
 
-#[tauri::command]
-pub async fn claude_session_search(
-    app: AppHandle,
-    input: ClaudeSessionSearchInput,
-) -> Result<ClaudeSessionSearchResult, String> {
-    tauri::async_runtime::spawn_blocking(move || claude_session_search_blocking(app, input))
-        .await
-        .map_err(|err| format!("Claude history search 任务执行失败：{err}"))?
-}
-
-fn claude_session_search_blocking(
+pub(crate) fn claude_session_search_blocking(
     app: AppHandle,
     input: ClaudeSessionSearchInput,
 ) -> Result<ClaudeSessionSearchResult, String> {
@@ -51,17 +41,7 @@ fn claude_session_search_blocking(
     })
 }
 
-#[tauri::command]
-pub async fn claude_session_preview(
-    app: AppHandle,
-    input: ClaudeSessionPreviewInput,
-) -> Result<ClaudeSessionPreview, String> {
-    tauri::async_runtime::spawn_blocking(move || claude_session_preview_blocking(app, input))
-        .await
-        .map_err(|err| format!("Claude history preview 任务执行失败：{err}"))?
-}
-
-fn claude_session_preview_blocking(
+pub(crate) fn claude_session_preview_blocking(
     app: AppHandle,
     input: ClaudeSessionPreviewInput,
 ) -> Result<ClaudeSessionPreview, String> {
@@ -326,17 +306,7 @@ fn spawn_claude_history_sync(app: AppHandle, task_id: String, session_id: String
     });
 }
 
-#[tauri::command]
-pub async fn claude_session_attach(
-    app: AppHandle,
-    input: ClaudeSessionAttachInput,
-) -> Result<ClaudeSessionAttachResult, String> {
-    tauri::async_runtime::spawn_blocking(move || claude_session_attach_blocking(app, input))
-        .await
-        .map_err(|err| format!("Claude history attach 任务执行失败：{err}"))?
-}
-
-fn claude_session_attach_blocking(
+pub(crate) fn claude_session_attach_blocking(
     app: AppHandle,
     input: ClaudeSessionAttachInput,
 ) -> Result<ClaudeSessionAttachResult, String> {

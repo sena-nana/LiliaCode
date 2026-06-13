@@ -14,19 +14,15 @@ import {
 } from "lucide-vue-next";
 import type {
   AgentTimelineEvent,
-  ClaudeSessionSummary,
-  CodexThreadRuntimeState,
-  CodexThreadSummary,
+  HistoryImportItem,
+  HistoryImportRuntimeState,
 } from "@lilia/contracts";
 import {
-  attachClaudeSession,
-  attachCodexThread,
-  cleanCodexThreadBackgroundTerminals,
-  listCodexThreadRuntimeStates,
-  previewClaudeSession,
-  previewCodexThread,
-  searchClaudeSessions,
-  searchCodexThreads,
+  attachHistoryImport,
+  cleanHistoryImportBackgroundTerminals,
+  listHistoryImportRuntimeStates,
+  previewHistoryImport,
+  searchHistoryImports,
 } from "../services/chat";
 import { ensureOrphansLoaded, ensureProjectTasksLoaded } from "../services/tasksStore";
 import AgentTimeline from "../components/chat/AgentTimeline.vue";
@@ -35,7 +31,6 @@ import ChatScrollMap from "../components/chat/ChatScrollMap.vue";
 const route = useRoute();
 const router = useRouter();
 type ImportSource = "codex" | "claude";
-type ImportItem = CodexThreadSummary | ClaudeSessionSummary;
 
 const source = ref<ImportSource>("codex");
 const query = ref("");
@@ -45,9 +40,9 @@ const loadingMore = ref(false);
 const importing = ref(false);
 const error = ref("");
 const importError = ref("");
-const items = ref<ImportItem[]>([]);
+const items = ref<HistoryImportItem[]>([]);
 const nextCursor = ref<string | null>(null);
-const runtimeStates = ref<CodexThreadRuntimeState[]>([]);
+const runtimeStates = ref<HistoryImportRuntimeState[]>([]);
 const cleaningThreadId = ref<string | null>(null);
 const rowMessages = ref<Record<string, { kind: "ok" | "error"; text: string }>>({});
 const selectedItemId = ref<string | null>(null);
@@ -79,16 +74,16 @@ const selectedItem = computed(() =>
   items.value.find((item) => item.id === selectedItemId.value) ?? null,
 );
 
-const runtimeByThreadId = computed(() => {
-  const map = new Map<string, CodexThreadRuntimeState>();
-  for (const state of runtimeStates.value) map.set(state.threadId, state);
+const runtimeByItemId = computed(() => {
+  const map = new Map<string, HistoryImportRuntimeState>();
+  for (const state of runtimeStates.value) map.set(state.itemId, state);
   return map;
 });
 
 const importRows = computed(() =>
   items.value.map((item) => {
     const runtime = source.value === "codex"
-      ? runtimeByThreadId.value.get(item.id) ?? null
+      ? runtimeByItemId.value.get(item.id) ?? item.runtime ?? null
       : null;
     return {
       item,
@@ -127,10 +122,11 @@ function formatTime(value: number | null): string {
   }).format(new Date(value));
 }
 
-function localThreadFromRuntime(state: CodexThreadRuntimeState): CodexThreadSummary {
+function localItemFromRuntime(state: HistoryImportRuntimeState): HistoryImportItem {
   return {
-    id: state.threadId,
-    title: state.taskTitle.trim() || state.threadId,
+    id: state.itemId,
+    provider: "codex",
+    title: state.taskTitle.trim() || state.itemId,
     status: state.running ? "running" : state.queued ? "queued" : null,
     model: null,
     sourceKind: "lilia",
@@ -138,31 +134,33 @@ function localThreadFromRuntime(state: CodexThreadRuntimeState): CodexThreadSumm
     updatedAt: null,
     archived: false,
     preview: null,
+    runtime: state,
   };
 }
 
-function runtimeMatchesSearch(state: CodexThreadRuntimeState, searchTerm: string): boolean {
+function runtimeMatchesSearch(state: HistoryImportRuntimeState, searchTerm: string): boolean {
   const term = searchTerm.trim().toLowerCase();
   if (!term) return true;
-  return [state.taskTitle, state.threadId]
+  return [state.taskTitle, state.itemId]
     .some((value) => value.toLowerCase().includes(term));
 }
 
-function localThreadsFromRuntimeStates(
-  states: CodexThreadRuntimeState[],
+function localItemsFromRuntimeStates(
+  states: HistoryImportRuntimeState[],
   searchTerm: string,
-): CodexThreadSummary[] {
+): HistoryImportItem[] {
   return states
     .filter((state) => runtimeMatchesSearch(state, searchTerm))
-    .map(localThreadFromRuntime);
+    .map(localItemFromRuntime);
 }
 
-function mergeCodexThread(
-  existing: CodexThreadSummary,
-  incoming: CodexThreadSummary,
-): CodexThreadSummary {
+function mergeCodexItem(
+  existing: HistoryImportItem,
+  incoming: HistoryImportItem,
+): HistoryImportItem {
   return {
     id: existing.id,
+    provider: "codex",
     title: incoming.title.trim() ? incoming.title : existing.title,
     status: incoming.status ?? existing.status,
     model: incoming.model ?? existing.model,
@@ -171,25 +169,26 @@ function mergeCodexThread(
     updatedAt: incoming.updatedAt ?? existing.updatedAt,
     archived: incoming.archived || existing.archived,
     preview: incoming.preview ?? existing.preview,
+    runtime: existing.runtime ?? incoming.runtime ?? null,
   };
 }
 
-function mergeCodexThreads(
-  base: CodexThreadSummary[],
-  incoming: CodexThreadSummary[],
-): CodexThreadSummary[] {
+function mergeCodexItems(
+  base: HistoryImportItem[],
+  incoming: HistoryImportItem[],
+): HistoryImportItem[] {
   const indexById = new Map<string, number>();
   const out = base.map((item, index) => {
     indexById.set(item.id, index);
     return item;
   });
-  for (const thread of incoming) {
-    const index = indexById.get(thread.id);
+  for (const item of incoming) {
+    const index = indexById.get(item.id);
     if (index === undefined) {
-      indexById.set(thread.id, out.length);
-      out.push(thread);
+      indexById.set(item.id, out.length);
+      out.push(item);
     } else {
-      out[index] = mergeCodexThread(out[index], thread);
+      out[index] = mergeCodexItem(out[index], item);
     }
   }
   return out;
@@ -201,10 +200,10 @@ function selectFirstItemIfNeeded() {
   }
 }
 
-async function loadRuntimeStates(): Promise<CodexThreadRuntimeState[]> {
+async function loadRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
   if (source.value !== "codex") return [];
   try {
-    const states = await listCodexThreadRuntimeStates();
+    const states = await listHistoryImportRuntimeStates();
     runtimeStates.value = states;
     return states;
   } catch (err) {
@@ -227,26 +226,14 @@ async function loadThreads(cursor: string | null = null) {
       cursor,
       limit: 20,
       archived: currentSource === "codex" ? includeArchived.value : null,
+      provider: currentSource,
     };
-    if (currentSource === "claude") {
-      const result = await searchClaudeSessions(input);
-      if (seq !== searchSeq) return;
-      items.value = append ? [...items.value, ...result.sessions] : result.sessions;
-      nextCursor.value = result.nextCursor;
-    } else {
-      if (append) {
-        const result = await searchCodexThreads(input);
-        if (seq !== searchSeq) return;
-        items.value = mergeCodexThreads(items.value as CodexThreadSummary[], result.threads);
-        nextCursor.value = result.nextCursor;
-        return;
-      }
-
+    if (currentSource === "codex" && !append) {
       const runtimePromise = loadRuntimeStates();
-      const searchPromise = searchCodexThreads(input);
+      const searchPromise = searchHistoryImports(input);
       const states = await runtimePromise;
       if (seq !== searchSeq) return;
-      items.value = localThreadsFromRuntimeStates(states, input.searchTerm ?? "");
+      items.value = localItemsFromRuntimeStates(states, input.searchTerm ?? "");
       nextCursor.value = null;
       loading.value = false;
       selectFirstItemIfNeeded();
@@ -260,7 +247,16 @@ async function loadThreads(cursor: string | null = null) {
         return;
       }
       if (seq !== searchSeq) return;
-      items.value = mergeCodexThreads(items.value as CodexThreadSummary[], result.threads);
+      items.value = mergeCodexItems(items.value, result.items);
+      nextCursor.value = result.nextCursor;
+    } else {
+      const result = await searchHistoryImports(input);
+      if (seq !== searchSeq) return;
+      items.value = append && currentSource === "codex"
+        ? mergeCodexItems(items.value, result.items)
+        : append
+          ? [...items.value, ...result.items]
+          : result.items;
       nextCursor.value = result.nextCursor;
     }
     selectFirstItemIfNeeded();
@@ -296,7 +292,7 @@ function resetPreviewState() {
   fullPreviewLoading.value = false;
 }
 
-async function selectItem(item: ImportItem) {
+async function selectItem(item: HistoryImportItem) {
   selectedItemId.value = item.id;
   previewEventCount.value = null;
   fullPreviewEvents.value = [];
@@ -308,9 +304,11 @@ async function selectItem(item: ImportItem) {
   const seq = ++previewSeq;
   fullPreviewSeq += 1;
   try {
-    const result = source.value === "claude"
-      ? await previewClaudeSession({ sessionId: item.id, detail: "lite" })
-      : await previewCodexThread({ threadId: item.id, detail: "lite" });
+    const result = await previewHistoryImport({
+      provider: source.value,
+      itemId: item.id,
+      detail: "lite",
+    });
     if (seq !== previewSeq) return;
     previewEventCount.value = result.hasFullPreview ? null : result.eventCount;
     if (result.hasFullPreview) void loadFullPreview(item.id);
@@ -327,9 +325,11 @@ async function loadFullPreview(itemId: string = selectedItem.value?.id ?? "") {
   fullPreviewError.value = "";
   const seq = ++fullPreviewSeq;
   try {
-    const result = source.value === "claude"
-      ? await previewClaudeSession({ sessionId: itemId, detail: "full" })
-      : await previewCodexThread({ threadId: itemId, detail: "full" });
+    const result = await previewHistoryImport({
+      provider: source.value,
+      itemId,
+      detail: "full",
+    });
     if (seq === fullPreviewSeq) {
       fullPreviewEvents.value = result.events;
       previewEventCount.value = result.eventCount;
@@ -351,21 +351,14 @@ async function importSelectedItem() {
   importing.value = true;
   importError.value = "";
   try {
-    const result = source.value === "claude"
-      ? await attachClaudeSession({
-        mode: "new",
-        sessionId: item.id,
-        taskId: null,
-        projectId: routeProjectId.value ?? null,
-        session: item as ClaudeSessionSummary,
-      })
-      : await attachCodexThread({
-        mode: "new",
-        threadId: item.id,
-        taskId: null,
-        projectId: routeProjectId.value ?? null,
-        thread: item as CodexThreadSummary,
-      });
+    const result = await attachHistoryImport({
+      provider: source.value,
+      mode: "new",
+      itemId: item.id,
+      taskId: null,
+      projectId: routeProjectId.value ?? null,
+      item,
+    });
     if (result.projectId) {
       await ensureProjectTasksLoaded(result.projectId, true);
       await router.push(`/projects/${result.projectId}/tasks/${result.taskId}`);
@@ -393,7 +386,7 @@ function setSource(next: ImportSource) {
   void loadThreads();
 }
 
-async function cleanThread(item: ImportItem) {
+async function cleanThread(item: HistoryImportItem) {
   if (source.value !== "codex" || cleaningThreadId.value) return;
   cleaningThreadId.value = item.id;
   rowMessages.value = {
@@ -401,7 +394,7 @@ async function cleanThread(item: ImportItem) {
     [item.id]: { kind: "ok", text: "正在清理后台终端..." },
   };
   try {
-    await cleanCodexThreadBackgroundTerminals(item.id);
+    await cleanHistoryImportBackgroundTerminals(item.id);
     rowMessages.value = {
       ...rowMessages.value,
       [item.id]: { kind: "ok", text: "后台终端已清理" },

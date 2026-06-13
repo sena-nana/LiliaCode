@@ -11,6 +11,7 @@ mod codex_history;
 mod codex_iab;
 mod conversation_suggestions;
 mod github;
+mod history_import;
 mod plugins;
 mod popup_windows;
 mod project_shell;
@@ -203,14 +204,11 @@ pub fn run() {
             chat::commands::chat_ack_restored_rollback,
             chat::commands::chat_set_composer_state,
             chat::commands::chat_reset_session,
-            claude_history::claude_session_search,
-            claude_history::claude_session_preview,
-            claude_history::claude_session_attach,
-            codex_history::codex_thread_search,
-            codex_history::codex_thread_preview,
-            codex_history::codex_thread_attach,
-            codex_history::codex_thread_runtime_states,
-            codex_history::codex_thread_clean_background_terminals,
+            history_import::history_import_search,
+            history_import::history_import_preview,
+            history_import::history_import_attach,
+            history_import::history_import_runtime_states,
+            history_import::history_import_clean_background_terminals,
             codex_iab::codex_iab_open,
             codex_iab::codex_iab_navigate,
             codex_iab::codex_iab_capture,
