@@ -53,6 +53,7 @@ const AGENT_TIMELINE_TOOL_WINDOW_KINDS = new Set([
   "file_read",
   "file_change",
   "todo_list",
+  "architecture_change",
   "subagent",
 ]);
 

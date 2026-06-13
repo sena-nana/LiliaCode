@@ -5,6 +5,11 @@ import {
   createClaudeAskUserHandler,
 } from "../askUser.mjs";
 import {
+  architectureContextEnabled,
+  createArchitectureChangeHandler,
+  updateProjectArchitectureInputSchema,
+} from "../architecture.mjs";
+import {
   buildConversationContextToolDescription,
   conversationContextEnabled,
   createConversationContextHandler,
@@ -71,6 +76,7 @@ export function createLiliaAskUserServer({
   createTool = tool,
   requestAskUser,
   conversationContext = null,
+  architectureHandler = null,
 }) {
   const tools = [
     createTool(
@@ -87,6 +93,15 @@ export function createLiliaAskUserServer({
       buildConversationContextToolDescription(),
       queryConversationContextInputSchema,
       createConversationContextHandler(conversationContext),
+      { alwaysLoad: true },
+    ));
+  }
+  if (architectureContextEnabled(conversationContext) && architectureHandler) {
+    tools.push(createTool(
+      "update_project_architecture",
+      "Update Lilia's project-level architecture graph with structured changes.",
+      updateProjectArchitectureInputSchema,
+      architectureHandler,
       { alwaysLoad: true },
     ));
   }
@@ -128,6 +143,7 @@ export async function runClaude(cmd, context) {
   const liliaAskUserServer = createLiliaAskUserServer({
     requestAskUser: context.interactions.requestAskUser,
     conversationContext: cmd.conversationContext,
+    architectureHandler: createArchitectureChangeHandler({ cmd, ctx, backend: "claude" }),
     createServer: context.createSdkMcpServer || createSdkMcpServer,
     createTool: context.createClaudeTool || tool,
   });
@@ -147,10 +163,12 @@ export async function runClaude(cmd, context) {
     toolAliases: {
       AskUserQuestion: "mcp__lilia__ask_user_question",
       QueryConversationContext: "mcp__lilia__query_conversation_context",
+      UpdateProjectArchitecture: "mcp__lilia__update_project_architecture",
     },
     toolConfig: {
       askUserQuestion: { previewFormat: "markdown" },
       queryConversationContext: { previewFormat: "markdown" },
+      updateProjectArchitecture: { previewFormat: "markdown" },
     },
     ...(runtimeExtensions.skills.length > 0 ? { skills: runtimeExtensions.skills } : {}),
     ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),

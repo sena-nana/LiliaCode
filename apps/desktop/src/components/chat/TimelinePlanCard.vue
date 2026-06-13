@@ -67,8 +67,34 @@ const allowedPromptRows = computed(() => {
     return text ? [{ key: `${index}:${text}`, text }] : [];
   });
 });
+const architectureImpactRows = computed(() => {
+  const impacts = payload.value.architectureImpacts;
+  if (!Array.isArray(impacts)) return [];
+  return impacts.flatMap((impact, impactIndex) => {
+    if (!isRecord(impact)) return [];
+    const reason = compactPayloadLine(impact.reason, 240);
+    const changes = Array.isArray(impact.changes) ? impact.changes : [];
+    const changeRows = changes
+      .map((change) => {
+        if (!isRecord(change)) return "";
+        return compactPayloadLine(architectureChangeText(change), 240) ||
+          compactPayloadLine(change.type, 80);
+      })
+      .filter(Boolean);
+    const rows = reason ? [reason, ...changeRows] : changeRows;
+    return rows.map((text, rowIndex) => ({
+      key: `${impactIndex}:${rowIndex}:${text}`,
+      text,
+    }));
+  });
+});
 const hasStructuredBody = computed(() =>
-  Boolean(planText.value || revisionRequest.value || allowedPromptRows.value.length),
+  Boolean(
+    planText.value ||
+    revisionRequest.value ||
+    allowedPromptRows.value.length ||
+    architectureImpactRows.value.length,
+  ),
 );
 const eventTitle = computed(() => props.event.title?.trim() ?? "");
 const statusKind = computed<PlanStatusKind>(() => {
@@ -131,6 +157,22 @@ function readPayloadText(value: unknown): string {
 function compactPayloadLine(value: unknown, max: number): string {
   const text = readPayloadText(value).replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function architectureChangeText(change: Record<string, unknown>): string {
+  const type = readPayloadText(change.type);
+  if (type === "upsert_node") {
+    const node = isRecord(change.node) ? change.node : {};
+    return `更新节点：${compactPayloadLine(node.label, 120) || compactPayloadLine(node.id, 120)}`;
+  }
+  if (type === "remove_node") return `移除节点：${compactPayloadLine(change.nodeId, 120)}`;
+  if (type === "upsert_edge") {
+    const edge = isRecord(change.edge) ? change.edge : {};
+    return `更新关系：${compactPayloadLine(edge.label, 120) || compactPayloadLine(edge.id, 120)}`;
+  }
+  if (type === "remove_edge") return `移除关系：${compactPayloadLine(change.edgeId, 120)}`;
+  if (type === "set_summary") return "更新架构摘要";
+  return type;
 }
 
 </script>
@@ -205,6 +247,23 @@ function compactPayloadLine(value: unknown, max: number): string {
               tone="muted"
               class="timeline-plan-card__markdown"
             />
+          </section>
+
+          <section
+            v-if="architectureImpactRows.length"
+            class="timeline-plan-card__section"
+            aria-label="架构影响"
+          >
+            <p class="timeline-plan-card__section-label">架构影响</p>
+            <ul class="timeline-plan-card__prompt-list">
+              <li
+                v-for="row in architectureImpactRows"
+                :key="row.key"
+                class="timeline-plan-card__prompt-item"
+              >
+                {{ row.text }}
+              </li>
+            </ul>
           </section>
 
           <section

@@ -1,5 +1,9 @@
 import type { Ref } from "vue";
-import type { AgentTimelineEvent, AskUserSpec } from "@lilia/contracts";
+import type {
+  AgentTimelineEvent,
+  AskUserSpec,
+  ProjectArchitectureInteractionPayload,
+} from "@lilia/contracts";
 import {
   clearAskUsersForTask,
   resolveAskUserById,
@@ -13,6 +17,12 @@ import {
   respondCodexPermissionApproval,
   type PendingCodexInteraction,
 } from "../../composables/useCodexPendingInteractions";
+import {
+  clearProjectArchitectureInteractionsForTask,
+  hydrateProjectArchitectureInteraction,
+  respondProjectArchitectureChange,
+  type PendingArchitectureChange,
+} from "../../composables/useProjectArchitectureInteractions";
 import { clearConversationRequiresAction } from "../../composables/useConversationActivity";
 import type { PendingAgentActionResolution } from "../../composables/usePendingAgentActions";
 import {
@@ -34,6 +44,7 @@ export function usePendingInteractionActions(options: {
   pendingToolConsent: Ref<ToolConsentRequest | null>;
   pendingToolConsents: Ref<ToolConsentRequest[]>;
   pendingCodexInteractions: Ref<PendingCodexInteraction[]>;
+  pendingArchitectureChanges: Ref<PendingArchitectureChange[]>;
 }) {
   function onResolveAskUser(result: Parameters<typeof resolveAskUserById>[1]) {
     const ask = options.pendingAskUser.value;
@@ -122,6 +133,18 @@ export function usePendingInteractionActions(options: {
       }
       return;
     }
+    if (resolution.kind === "architecture_change") {
+      const request = options.pendingArchitectureChanges.value.find(
+        (item) => item.requestId === resolution.requestId,
+      );
+      if (!request) return;
+      try {
+        await respondProjectArchitectureChange(request, resolution.decision);
+      } catch (err) {
+        console.error("[project-architecture] respond failed", err);
+      }
+      return;
+    }
     resolveAskUserById(resolution.askId, resolution.result);
   }
 
@@ -139,6 +162,7 @@ export function clearPendingInteractionsForTask(
   clearAskUsersForTask(taskId, options);
   clearToolConsentForTask(taskId, options);
   clearCodexPendingInteractionsForTask(taskId, options);
+  clearProjectArchitectureInteractionsForTask(taskId, options);
   if (!options.keepRequestIds && options.turnId === undefined) {
     clearConversationRequiresAction(taskId);
   }
@@ -197,6 +221,18 @@ export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId:
     if (event.kind === "title_update") continue;
     const interaction = payloadString(event, "interaction");
     const requestId = payloadString(event, "requestId");
+    if (event.kind === "architecture_change") {
+      if (!requestId || !payload) continue;
+      activeRequestIds.add(requestId);
+      hydrateProjectArchitectureInteraction({
+        taskId: event.taskId,
+        turnId: event.turnId,
+        backend: event.backend,
+        requestId,
+        payload: payload as unknown as ProjectArchitectureInteractionPayload,
+      });
+      continue;
+    }
     if (!interaction || !requestId || !payload) continue;
     activeRequestIds.add(requestId);
     if (interaction === "tool_consent") {

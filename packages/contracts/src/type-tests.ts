@@ -21,6 +21,9 @@ import type {
   TimelineDisplayInput,
   ToolConsentRequest,
   ToolConsentResponsePayload,
+  ProjectArchitectureGraph,
+  ProjectArchitectureChange,
+  ProjectArchitectureInteractionPayload,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -335,6 +338,48 @@ export type ProjectRoadmapSnapshotTypeTest = Assert<
   >
 >;
 
+export type ProjectArchitectureGraphTypeTest = Assert<
+  Extends<
+    {
+      projectId: "p-1";
+      version: 1;
+      summary: "桌面应用";
+      nodes: [{
+        id: "desktop-ui";
+        label: "Desktop UI";
+        type: "component";
+        summary: "Vue 前端";
+        paths: ["apps/desktop/src"];
+        tags: ["frontend"];
+      }];
+      edges: [{
+        id: "ui-tauri";
+        from: "desktop-ui";
+        to: "tauri";
+        type: "calls";
+        label: "IPC";
+        summary: "通过 invoke 调用 Tauri 命令";
+      }];
+      updatedAt: 1;
+    },
+    ProjectArchitectureGraph
+  >
+>;
+
+export type ProjectArchitectureChangeTypeTest = Assert<
+  Extends<
+    | {
+        type: "upsert_node";
+        node: ProjectArchitectureGraph["nodes"][number];
+      }
+    | {
+        type: "set_summary";
+        summary: "跨端契约优先";
+      },
+    ProjectArchitectureChange
+  >
+>;
+
 export type ToolConsentRequestTypeTest = Assert<
   Extends<
     {
@@ -445,6 +490,20 @@ export type AgentInteractionPlanApprovalRequestTypeTest = Assert<
           confirmLabel: "按计划执行";
         }];
       };
+    },
+    AgentInteractionRequest
+  >
+>;
+
+export type AgentInteractionArchitectureRequestTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      turnId: "turn-1";
+      backend: "claude";
+      requestId: "arch-1";
+      kind: "architecture_change";
+      payload: ProjectArchitectureInteractionPayload;
     },
     AgentInteractionRequest
   >

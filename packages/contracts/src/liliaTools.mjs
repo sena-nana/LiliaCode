@@ -185,6 +185,45 @@ function askUserCancelled(payload) {
   return payload.cancelled === true || result.cancelled === true;
 }
 
+function readArchitectureChanges(payload) {
+  const raw = Array.isArray(payload.changes) ? payload.changes : [];
+  return raw.map((change) => isRecord(change) ? change : null).filter(Boolean);
+}
+
+function architectureChangeLabel(change) {
+  const type = compactLine(pick(change, ["type"]), 80);
+  if (type === "set_summary") return "更新项目摘要";
+  if (type === "remove_node") {
+    return `删除节点 ${compactLine(pick(change, ["nodeId"]), 120) || ""}`.trim();
+  }
+  if (type === "remove_edge") {
+    return `删除关系 ${compactLine(pick(change, ["edgeId"]), 120) || ""}`.trim();
+  }
+  const node = readRecord(change.node);
+  if (type === "upsert_node") {
+    return `更新节点 ${compactLine(pick(node, ["label", "id"]), 120) || ""}`.trim();
+  }
+  const edge = readRecord(change.edge);
+  if (type === "upsert_edge") {
+    const label = compactLine(pick(edge, ["label", "id"]), 120);
+    const from = compactLine(pick(edge, ["from"]), 80);
+    const to = compactLine(pick(edge, ["to"]), 80);
+    return `更新关系 ${label || [from, to].filter(Boolean).join(" -> ")}`.trim();
+  }
+  return type || "架构变更";
+}
+
+function architectureChangeStatusLabel(payload, status) {
+  if (payload.status === "applied" || status === "success") return "已应用架构变更";
+  if (payload.status === "rejected" || status === "cancelled" || status === "skipped") {
+    return "已拒绝架构变更";
+  }
+  if (payload.requiresConfirmation === true || status === "requires_action") {
+    return "等待确认架构变更";
+  }
+  return "提出架构变更";
+}
+
 const LILIA_TOOL_REGISTRY = {
   command: {
     default: {
@@ -415,6 +454,39 @@ const LILIA_TOOL_REGISTRY = {
               ? markdownDetail("用户取消了提问。", "muted", true)
               : null,
             hasResult ? null : codeDetail("OUTPUT", pick(payload, ["output"])),
+          ],
+        };
+      },
+    },
+  },
+  architecture_change: {
+    default: {
+      action: "更新架构",
+      icon: "git-branch",
+      bucket: "architecture",
+      unit: "次架构变更",
+      build(payload, status) {
+        const changes = readArchitectureChanges(payload);
+        const reason = readFirstText(payload, ["reason"], 1200);
+        const versionText = [
+          payload.beforeVersion !== undefined ? `v${payload.beforeVersion}` : "",
+          payload.afterVersion !== undefined && payload.afterVersion !== null
+            ? `v${payload.afterVersion}`
+            : "",
+        ].filter(Boolean).join(" -> ");
+        return {
+          object: reason,
+          label: architectureChangeStatusLabel(payload, status),
+          preview: reason || changes.map(architectureChangeLabel).slice(0, 2).join("；"),
+          count: Math.max(1, changes.length),
+          details: [
+            markdownDetail(reason, "default", true),
+            fieldsDetail([
+              displayField("version", versionText),
+              displayField("permission", pick(payload, ["permission"])),
+              displayField("project", pick(payload, ["projectId"])),
+            ]),
+            changes.length ? listDetail(changes.map(architectureChangeLabel), true) : null,
           ],
         };
       },

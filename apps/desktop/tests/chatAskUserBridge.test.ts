@@ -15,6 +15,7 @@ import {
   respondConsent,
   useToolConsentForTask,
 } from "../src/composables/useToolConsentBridge";
+import { usePendingProjectArchitectureChangesForTask } from "../src/composables/useProjectArchitectureInteractions";
 
 describe("chat AskUser bridge service", () => {
   it("订阅统一 Agent interaction 并把响应写回 runner", async () => {
@@ -125,6 +126,70 @@ describe("chat AskUser bridge service", () => {
           updatedInput: { command: "echo skipped" },
         },
       }, undefined);
+    } finally {
+      unlisten();
+    }
+  });
+
+  it("架构图自动应用请求不进入 pending，并把应用结果写回 runner", async () => {
+    const unlisten = await installAgentInteractionBridge();
+    try {
+      emitTauriEvent("chat:agent-interaction-request", {
+        taskId: "task-1",
+        turnId: "turn-1",
+        backend: "claude",
+        requestId: "architecture-1",
+        kind: "architecture_change",
+        payload: {
+          projectId: "lilia",
+          taskId: "task-1",
+          turnId: "turn-1",
+          backend: "claude",
+          permission: "full",
+          status: "applied",
+          reason: "计划内补全架构图",
+          changes: [{
+            type: "upsert_node",
+            node: {
+              id: "desktop",
+              label: "Desktop",
+              type: "module",
+              summary: "",
+              paths: ["apps/desktop"],
+              tags: [],
+            },
+          }],
+          requiresConfirmation: false,
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith(
+          "project_architecture_apply",
+          expect.objectContaining({
+            input: expect.objectContaining({
+              projectId: "lilia",
+              requestId: "architecture-1",
+              permission: "full",
+            }),
+          }),
+          undefined,
+        );
+        expect(mockInvoke).toHaveBeenCalledWith(
+          "chat_respond_agent_interaction",
+          expect.objectContaining({
+            taskId: "task-1",
+            requestId: "architecture-1",
+            kind: "architecture_change",
+            result: expect.objectContaining({
+              decision: "allow",
+              message: "架构图已更新",
+            }),
+          }),
+          undefined,
+        );
+      });
+      expect(usePendingProjectArchitectureChangesForTask("task-1").value).toEqual([]);
     } finally {
       unlisten();
     }

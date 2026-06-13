@@ -64,6 +64,24 @@ export function readPlanAllowedPrompts(input) {
     .filter((item) => item.prompt);
 }
 
+export function readPlanArchitectureImpacts(input) {
+  const raw = Array.isArray(input?.architectureImpacts)
+    ? input.architectureImpacts
+    : Array.isArray(input?.architecture_impacts)
+      ? input.architecture_impacts
+      : [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const changes = Array.isArray(item.changes) ? item.changes : [];
+      return {
+        reason: compactLine(item.reason, 800),
+        changes,
+      };
+    })
+    .filter((item) => item && item.changes.length > 0);
+}
+
 export function extractPlanTextFromInput(input) {
   return readFirstText(input, ["plan", "content", "text", "markdown"], 12000);
 }
@@ -102,6 +120,7 @@ export function buildPlanPayload({
     source,
     plan,
     allowedPrompts: readPlanAllowedPrompts(input),
+    architectureImpacts: readPlanArchitectureImpacts(input),
     approved,
     executionPermission,
     ...(revisionRequest ? { revisionRequest } : {}),

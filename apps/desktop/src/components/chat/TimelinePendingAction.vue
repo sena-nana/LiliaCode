@@ -37,7 +37,9 @@ const actionKey = computed(() =>
         ? `mcp:${props.action.requestId}`
         : props.action.kind === "permission_approval"
           ? `permission:${props.action.requestId}`
-          : `ask:${props.action.ask.id}`,
+          : props.action.kind === "architecture_change"
+            ? `architecture:${props.action.requestId}`
+            : `ask:${props.action.ask.id}`,
 );
 const activeAsk = computed(() =>
   props.action.kind === "ask_user" || props.action.kind === "plan_approval"
@@ -97,6 +99,19 @@ const mcpAction = computed(() =>
 );
 const permissionAction = computed(() =>
   props.action.kind === "permission_approval" ? props.action : null,
+);
+const architectureAction = computed(() =>
+  props.action.kind === "architecture_change" ? props.action : null,
+);
+const architectureChangeRows = computed(() => {
+  const changes = architectureAction.value?.payload.changes ?? [];
+  return changes.slice(0, 5).map((change, index) => ({
+    key: `${index}:${change.type}`,
+    text: architectureChangeText(change),
+  }));
+});
+const architectureExtraCount = computed(() =>
+  Math.max(0, (architectureAction.value?.payload.changes.length ?? 0) - architectureChangeRows.value.length),
 );
 const mcpFields = computed(() => {
   const schema = mcpAction.value?.payload.requestedSchema;
@@ -280,6 +295,35 @@ function decidePermission(decision: "allow" | "deny") {
     requestId: props.action.requestId,
     decision,
   });
+}
+
+function decideArchitecture(decision: "allow" | "deny") {
+  if (props.action.kind !== "architecture_change" || codexSubmitting.value) return;
+  codexSubmitting.value = true;
+  emit("resolve", {
+    kind: "architecture_change",
+    requestId: props.action.requestId,
+    decision,
+  });
+}
+
+function architectureChangeText(change: { type: string; [key: string]: unknown }): string {
+  if (change.type === "upsert_node") {
+    const node = change.node && typeof change.node === "object" && !Array.isArray(change.node)
+      ? change.node as Record<string, unknown>
+      : {};
+    return `更新节点：${stringValue(node.label) || stringValue(node.id) || "未命名节点"}`;
+  }
+  if (change.type === "remove_node") return `移除节点：${stringValue(change.nodeId)}`;
+  if (change.type === "upsert_edge") {
+    const edge = change.edge && typeof change.edge === "object" && !Array.isArray(change.edge)
+      ? change.edge as Record<string, unknown>
+      : {};
+    return `更新关系：${stringValue(edge.label) || stringValue(edge.id) || "未命名关系"}`;
+  }
+  if (change.type === "remove_edge") return `移除关系：${stringValue(change.edgeId)}`;
+  if (change.type === "set_summary") return "更新架构摘要";
+  return change.type;
 }
 
 watch(actionKey, () => {
@@ -478,6 +522,46 @@ watch(actionKey, () => {
           @click="decideMcp('accept')"
         >
           同意
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section
+    v-else-if="architectureAction"
+    class="timeline-pending-action timeline-pending-action--architecture"
+    role="region"
+    aria-label="架构图变更确认"
+  >
+    <div class="timeline-pending-action__stack">
+      <div class="timeline-pending-action__title-preview">
+        {{ architectureAction.payload.reason || "Agent 提议更新项目架构图" }}
+      </div>
+      <ul class="timeline-pending-action__mini-list">
+        <li
+          v-for="row in architectureChangeRows"
+          :key="row.key"
+        >
+          {{ row.text }}
+        </li>
+        <li v-if="architectureExtraCount > 0">另有 {{ architectureExtraCount }} 项变更</li>
+      </ul>
+      <div class="composer-inline__actions">
+        <button
+          type="button"
+          class="ui-button ui-button--ghost composer-inline__btn"
+          :disabled="codexSubmitting"
+          @click="decideArchitecture('deny')"
+        >
+          拒绝
+        </button>
+        <button
+          type="button"
+          class="ui-button ui-button--primary composer-inline__btn"
+          :disabled="codexSubmitting"
+          @click="decideArchitecture('allow')"
+        >
+          应用
         </button>
       </div>
     </div>

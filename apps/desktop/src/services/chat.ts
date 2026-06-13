@@ -56,6 +56,13 @@ import type {
   CodexIabSnapshot,
   CodexIabSubmitResult,
   ChatRollbackResult,
+  ProjectArchitectureApplyInput,
+  ProjectArchitectureApplyResult,
+  ProjectArchitectureChangeEvent,
+  ProjectArchitectureChangeRecord,
+  ProjectArchitectureGraph,
+  ProjectArchitectureRejectInput,
+  ProjectArchitectureRollbackResult,
 } from "@lilia/contracts";
 
 export type {
@@ -104,6 +111,13 @@ export type {
   CodexIabSnapshot,
   CodexIabSubmitResult,
   ChatRollbackResult,
+  ProjectArchitectureApplyInput,
+  ProjectArchitectureApplyResult,
+  ProjectArchitectureChangeEvent,
+  ProjectArchitectureChangeRecord,
+  ProjectArchitectureGraph,
+  ProjectArchitectureRejectInput,
+  ProjectArchitectureRollbackResult,
 };
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
@@ -363,6 +377,44 @@ export function setConversationSuggestionSettings(
   return invoke<void>("conversation_suggestions_set_settings", { settings });
 }
 
+export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {
+  return invoke<ProjectArchitectureGraph>("project_architecture_get", { projectId });
+}
+
+export function listProjectArchitectureChanges(
+  projectId: string,
+  limit = 20,
+): Promise<ProjectArchitectureChangeRecord[]> {
+  return invoke<ProjectArchitectureChangeRecord[]>("project_architecture_list_changes", {
+    projectId,
+    limit,
+  });
+}
+
+export function applyProjectArchitecture(
+  input: ProjectArchitectureApplyInput,
+): Promise<ProjectArchitectureApplyResult> {
+  return invoke<ProjectArchitectureApplyResult>("project_architecture_apply", { input });
+}
+
+export function rejectProjectArchitecture(
+  input: ProjectArchitectureRejectInput,
+): Promise<ProjectArchitectureChangeEvent> {
+  return invoke<ProjectArchitectureChangeEvent>("project_architecture_reject", { input });
+}
+
+export function rollbackProjectArchitecture(
+  projectId: string,
+  taskId: string,
+  backend: ChatBackendKind,
+): Promise<ProjectArchitectureRollbackResult> {
+  return invoke<ProjectArchitectureRollbackResult>("project_architecture_rollback", {
+    projectId,
+    taskId,
+    backend,
+  });
+}
+
 // ---- 事件订阅 ----
 // UI 只订阅 turn 状态和 agent timeline；文本、工具、错误都归入 timeline 事件。
 
@@ -392,6 +444,7 @@ const AGENT_INTERACTION_KINDS = new Set([
   "ask_user",
   "mcp_elicitation",
   "permission_approval",
+  "architecture_change",
 ]);
 
 function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {

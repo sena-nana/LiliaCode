@@ -89,6 +89,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "project_milestones",
         apply: migrate_project_milestones,
     },
+    SchemaMigration {
+        version: 20,
+        name: "project_architecture",
+        apply: migrate_project_architecture,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -579,6 +584,44 @@ fn migrate_project_milestones(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 project_milestones 失败：{e}"))
+}
+
+fn migrate_project_architecture(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE project_architecture_graphs (
+          project_id TEXT PRIMARY KEY,
+          version    INTEGER NOT NULL,
+          graph_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE project_architecture_changes (
+          id                TEXT PRIMARY KEY,
+          project_id        TEXT NOT NULL,
+          task_id           TEXT NOT NULL,
+          turn_id           TEXT,
+          backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          status            TEXT NOT NULL CHECK (status IN
+                            ('proposed','pending','applied','rejected','rolled_back')),
+          permission_mode   TEXT NOT NULL CHECK (permission_mode IN ('ask','full','readonly')),
+          summary           TEXT NOT NULL DEFAULT '',
+          changes_json      TEXT NOT NULL,
+          before_graph_json TEXT,
+          after_graph_json  TEXT,
+          created_at        INTEGER NOT NULL,
+          resolved_at       INTEGER,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_project_architecture_changes_project_created
+          ON project_architecture_changes(project_id, created_at DESC);
+        CREATE INDEX idx_project_architecture_changes_task
+          ON project_architecture_changes(task_id, created_at DESC);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 project_architecture 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(
