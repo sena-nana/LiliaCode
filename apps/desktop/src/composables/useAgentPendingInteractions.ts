@@ -2,10 +2,10 @@ import { computed, reactive, type ComputedRef } from "vue";
 import type {
   AgentInteractionRequest,
   AgentInteractionResponse,
-  CodexMcpElicitationPayload,
-  CodexMcpElicitationResult,
-  CodexPermissionApprovalPayload,
-  CodexPermissionApprovalResult,
+  McpElicitationPayload,
+  McpElicitationResult,
+  PermissionApprovalPayload,
+  PermissionApprovalResult,
 } from "@lilia/contracts";
 import { respondAgentInteraction } from "../services/chat";
 import {
@@ -13,27 +13,27 @@ import {
   markConversationRequiresAction,
 } from "./useConversationActivity";
 
-export interface PendingCodexMcpElicitation {
+interface PendingMcpElicitation {
   kind: "mcp_elicitation";
   taskId: string;
   turnId: string | null;
   requestId: string;
-  payload: CodexMcpElicitationPayload;
+  payload: McpElicitationPayload;
 }
 
-export interface PendingCodexPermissionApproval {
+interface PendingPermissionApproval {
   kind: "permission_approval";
   taskId: string;
   turnId: string | null;
   requestId: string;
-  payload: CodexPermissionApprovalPayload;
+  payload: PermissionApprovalPayload;
 }
 
-export type PendingCodexInteraction =
-  | PendingCodexMcpElicitation
-  | PendingCodexPermissionApproval;
+export type PendingAgentInteraction =
+  | PendingMcpElicitation
+  | PendingPermissionApproval;
 
-const pending = reactive<Record<string, Record<string, PendingCodexInteraction>>>({});
+const pending = reactive<Record<string, Record<string, PendingAgentInteraction>>>({});
 
 type TaskIdSource = string | (() => string);
 
@@ -41,12 +41,12 @@ function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
 }
 
-export interface ClearCodexPendingInteractionsForTaskOptions {
+interface ClearAgentPendingInteractionsForTaskOptions {
   turnId?: string | null;
   keepRequestIds?: Set<string>;
 }
 
-function taskBucket(taskId: string): Record<string, PendingCodexInteraction> {
+function taskBucket(taskId: string): Record<string, PendingAgentInteraction> {
   if (!pending[taskId]) pending[taskId] = {};
   return pending[taskId];
 }
@@ -56,7 +56,7 @@ function clearPending(taskId: string, requestId: string) {
   clearConversationRequiresAction(taskId, requestId);
 }
 
-function mcpPayload(value: unknown): CodexMcpElicitationPayload | null {
+function mcpPayload(value: unknown): McpElicitationPayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const mode = row.mode === "url" ? "url" : row.mode === "form" ? "form" : null;
@@ -77,7 +77,7 @@ function mcpPayload(value: unknown): CodexMcpElicitationPayload | null {
   };
 }
 
-function permissionPayload(value: unknown): CodexPermissionApprovalPayload | null {
+function permissionPayload(value: unknown): PermissionApprovalPayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const threadId = typeof row.threadId === "string" ? row.threadId : "";
@@ -98,31 +98,40 @@ function permissionPayload(value: unknown): CodexPermissionApprovalPayload | nul
   };
 }
 
-export function handleCodexPendingInteractionRequest(req: AgentInteractionRequest): boolean {
-  if (req.kind !== "mcp_elicitation" && req.kind !== "permission_approval") return false;
-  const payload = req.kind === "mcp_elicitation"
-    ? mcpPayload(req.payload)
-    : permissionPayload(req.payload);
+export function handleAgentPendingInteractionRequest(req: AgentInteractionRequest): boolean {
+  if (req.kind === "mcp_elicitation") {
+    const payload = mcpPayload(req.payload);
+    if (!payload) return false;
+    hydrateAgentPendingInteraction({
+      kind: req.kind,
+      taskId: req.taskId,
+      turnId: req.turnId || null,
+      requestId: req.requestId,
+      payload,
+    });
+    return true;
+  }
+  if (req.kind !== "permission_approval") return false;
+  const payload = permissionPayload(req.payload);
   if (!payload) return false;
-  taskBucket(req.taskId)[req.requestId] = {
+  hydrateAgentPendingInteraction({
     kind: req.kind,
     taskId: req.taskId,
     turnId: req.turnId || null,
     requestId: req.requestId,
     payload,
-  } as PendingCodexInteraction;
-  markConversationRequiresAction(req.taskId, req.requestId);
+  });
   return true;
 }
 
-export function hydrateCodexPendingInteraction(interaction: PendingCodexInteraction) {
+export function hydrateAgentPendingInteraction(interaction: PendingAgentInteraction) {
   taskBucket(interaction.taskId)[interaction.requestId] = interaction;
   markConversationRequiresAction(interaction.taskId, interaction.requestId);
 }
 
-export function clearCodexPendingInteractionsForTask(
+export function clearAgentPendingInteractionsForTask(
   taskId: string,
-  options: ClearCodexPendingInteractionsForTaskOptions = {},
+  options: ClearAgentPendingInteractionsForTaskOptions = {},
 ) {
   const bucket = pending[taskId];
   if (!bucket) return;
@@ -135,19 +144,19 @@ export function clearCodexPendingInteractionsForTask(
   if (Object.keys(bucket).length === 0) delete pending[taskId];
 }
 
-export function usePendingCodexInteractionsForTask(
+export function usePendingAgentInteractionsForTask(
   taskId: TaskIdSource,
-): ComputedRef<PendingCodexInteraction[]> {
+): ComputedRef<PendingAgentInteraction[]> {
   return computed(() => {
     const bucket = pending[readTaskId(taskId)];
     return bucket ? Object.values(bucket) : [];
   });
 }
 
-export async function respondCodexMcpElicitation(
+export async function respondMcpElicitation(
   taskId: string,
   requestId: string,
-  result: CodexMcpElicitationResult,
+  result: McpElicitationResult,
 ): Promise<void> {
   await respondAgentInteraction({
     taskId,
@@ -158,10 +167,10 @@ export async function respondCodexMcpElicitation(
   clearPending(taskId, requestId);
 }
 
-export async function respondCodexPermissionApproval(
+export async function respondPermissionApproval(
   taskId: string,
   requestId: string,
-  result: CodexPermissionApprovalResult,
+  result: PermissionApprovalResult,
 ): Promise<void> {
   await respondAgentInteraction({
     taskId,

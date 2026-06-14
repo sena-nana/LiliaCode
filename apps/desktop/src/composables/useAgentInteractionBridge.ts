@@ -6,7 +6,7 @@ import type {
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
-import { handleCodexPendingInteractionRequest } from "./useCodexPendingInteractions";
+import { handleAgentPendingInteractionRequest } from "./useAgentPendingInteractions";
 import { handleProjectArchitectureInteractionRequest } from "./useProjectArchitectureInteractions";
 import { handleToolConsentRequest } from "./useToolConsentBridge";
 
@@ -62,7 +62,7 @@ function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRe
 }
 
 function handleInteraction(req: AgentInteractionRequest) {
-  if (handleCodexPendingInteractionRequest(req)) return;
+  if (handleAgentPendingInteractionRequest(req)) return;
   if (req.kind === "architecture_change") {
     handleProjectArchitectureInteractionRequest({
       taskId: req.taskId,

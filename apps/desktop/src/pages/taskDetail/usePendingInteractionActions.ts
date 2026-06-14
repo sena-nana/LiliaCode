@@ -11,12 +11,12 @@ import {
 } from "../../composables/useAskUser";
 import { hydrateAgentAskUserRequest } from "../../composables/useAgentAskUserBridge";
 import {
-  clearCodexPendingInteractionsForTask,
-  hydrateCodexPendingInteraction,
-  respondCodexMcpElicitation,
-  respondCodexPermissionApproval,
-  type PendingCodexInteraction,
-} from "../../composables/useCodexPendingInteractions";
+  clearAgentPendingInteractionsForTask,
+  hydrateAgentPendingInteraction,
+  respondMcpElicitation,
+  respondPermissionApproval,
+  type PendingAgentInteraction,
+} from "../../composables/useAgentPendingInteractions";
 import {
   clearProjectArchitectureInteractionsForTask,
   hydrateProjectArchitectureInteraction,
@@ -43,7 +43,7 @@ export function usePendingInteractionActions(options: {
   pendingAskUser: Ref<PendingAsk | null>;
   pendingToolConsent: Ref<ToolConsentRequest | null>;
   pendingToolConsents: Ref<ToolConsentRequest[]>;
-  pendingCodexInteractions: Ref<PendingCodexInteraction[]>;
+  pendingAgentInteractions: Ref<PendingAgentInteraction[]>;
   pendingArchitectureChanges: Ref<PendingArchitectureChange[]>;
 }) {
   function onResolveAskUser(result: Parameters<typeof resolveAskUserById>[1]) {
@@ -95,7 +95,7 @@ export function usePendingInteractionActions(options: {
     }
     if (resolution.kind === "mcp_elicitation") {
       try {
-        await respondCodexMcpElicitation(
+        await respondMcpElicitation(
           options.taskId(),
           resolution.requestId,
           {
@@ -104,17 +104,17 @@ export function usePendingInteractionActions(options: {
           },
         );
       } catch (err) {
-        console.error("[codex-mcp-elicitation] respond failed", err);
+        console.error("[mcp-elicitation] respond failed", err);
       }
       return;
     }
     if (resolution.kind === "permission_approval") {
-      const request = options.pendingCodexInteractions.value.find(
+      const request = options.pendingAgentInteractions.value.find(
         (item) => item.kind === "permission_approval" && item.requestId === resolution.requestId,
       );
       if (!request || request.kind !== "permission_approval") return;
       try {
-        await respondCodexPermissionApproval(
+        await respondPermissionApproval(
           options.taskId(),
           resolution.requestId,
           resolution.decision === "allow"
@@ -129,7 +129,7 @@ export function usePendingInteractionActions(options: {
               },
         );
       } catch (err) {
-        console.error("[codex-permission-approval] respond failed", err);
+        console.error("[permission-approval] respond failed", err);
       }
       return;
     }
@@ -161,7 +161,7 @@ export function clearPendingInteractionsForTask(
 ) {
   clearAskUsersForTask(taskId, options);
   clearToolConsentForTask(taskId, options);
-  clearCodexPendingInteractionsForTask(taskId, options);
+  clearAgentPendingInteractionsForTask(taskId, options);
   clearProjectArchitectureInteractionsForTask(taskId, options);
   if (!options.keepRequestIds && options.turnId === undefined) {
     clearConversationRequiresAction(taskId);
@@ -260,7 +260,7 @@ export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId:
     }
     if (interaction === "mcp_elicitation") {
       const requestedSchema = payload.requestedSchema;
-      hydrateCodexPendingInteraction({
+      hydrateAgentPendingInteraction({
         kind: "mcp_elicitation",
         taskId: event.taskId,
         turnId: event.turnId,
@@ -280,7 +280,7 @@ export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId:
       continue;
     }
     if (interaction === "permission_approval") {
-      hydrateCodexPendingInteraction({
+      hydrateAgentPendingInteraction({
         kind: "permission_approval",
         taskId: event.taskId,
         turnId: event.turnId,
