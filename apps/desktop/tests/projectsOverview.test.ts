@@ -2,11 +2,8 @@ import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { describe, expect, it, beforeEach } from "vitest";
 import ProjectsOverview from "../src/pages/project/ProjectsOverview.vue";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
 
 async function renderProjectsOverview() {
-  await Promise.all([projectsReady, allTasksReady]);
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [

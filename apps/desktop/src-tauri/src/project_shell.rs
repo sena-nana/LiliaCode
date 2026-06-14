@@ -34,18 +34,21 @@ pub(crate) struct ProjectSettings {
 // ---------- Project / Git ----------
 
 pub(crate) fn load_project_settings<R: Runtime>(app: &AppHandle<R>) -> ProjectSettings {
-    load_store_value(app, PROJECT_SETTINGS_KEY)
-        // 兼容历史可能存的纯字符串。
-        .or_else(|| {
-            load_store_value::<String, _>(app, PROJECT_SETTINGS_KEY).map(|clone_parent_dir| {
-                ProjectSettings {
-                    clone_parent_dir: Some(clone_parent_dir),
-                    codex_defaults: None,
-                    github_binding: None,
-                }
-            })
-        })
-        .unwrap_or_default()
+    if let Some(settings) = load_store_value(app, PROJECT_SETTINGS_KEY) {
+        return settings;
+    }
+
+    let Some(clone_parent_dir) = load_store_value::<String, _>(app, PROJECT_SETTINGS_KEY) else {
+        return ProjectSettings::default();
+    };
+    let settings = ProjectSettings {
+        clone_parent_dir: Some(clone_parent_dir),
+        ..ProjectSettings::default()
+    };
+    if let Err(err) = save_project_settings(app, &settings) {
+        eprintln!("[project-settings] migrate legacy clone parent failed: {err}");
+    }
+    settings
 }
 
 pub(crate) fn save_project_settings<R: Runtime>(
