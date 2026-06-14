@@ -16,8 +16,8 @@ import {
   usePendingAgentActionsForTask,
 } from "../../composables/usePendingAgentActions";
 import {
-  usePendingCodexInteractionsForTask,
-} from "../../composables/useCodexPendingInteractions";
+  usePendingAgentInteractionsForTask,
+} from "../../composables/useAgentPendingInteractions";
 import {
   usePendingProjectArchitectureChangesForTask,
 } from "../../composables/useProjectArchitectureInteractions";
@@ -75,12 +75,12 @@ export function useTaskComposerController(options: {
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
   const pendingToolConsents = usePendingToolConsentsForTask(() => props.taskId);
-  const pendingCodexInteractions = usePendingCodexInteractionsForTask(() => props.taskId);
+  const pendingAgentInteractions = usePendingAgentInteractionsForTask(() => props.taskId);
   const pendingArchitectureChanges = usePendingProjectArchitectureChangesForTask(() => props.taskId);
   const runtimePendingAgentActions = usePendingAgentActionsForTask(
     pendingAskUsers,
     pendingToolConsents,
-    pendingCodexInteractions,
+    pendingAgentInteractions,
     timeline.timelineEvents,
     pendingArchitectureChanges,
   );
@@ -304,7 +304,7 @@ export function useTaskComposerController(options: {
     pendingAskUser,
     pendingToolConsent,
     pendingToolConsents,
-    pendingCodexInteractions,
+    pendingAgentInteractions,
     pendingArchitectureChanges,
   });
 
@@ -396,7 +396,7 @@ export function useTaskComposerController(options: {
     for (const consent of pendingToolConsents.value) {
       ids.add(consent.requestId);
     }
-    for (const interaction of pendingCodexInteractions.value) {
+    for (const interaction of pendingAgentInteractions.value) {
       ids.add(interaction.requestId);
     }
     for (const change of pendingArchitectureChanges.value) {

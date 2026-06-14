@@ -1,11 +1,7 @@
 import { computed, type ComputedRef } from "vue";
 import type { AgentTimelineEvent, AskUserResult } from "@lilia/contracts";
 import type { PendingAsk } from "./useAskUser";
-import type {
-  PendingCodexInteraction,
-  PendingCodexMcpElicitation,
-  PendingCodexPermissionApproval,
-} from "./useCodexPendingInteractions";
+import type { PendingAgentInteraction } from "./useAgentPendingInteractions";
 import type { PendingArchitectureChange } from "./useProjectArchitectureInteractions";
 import type {
   ToolConsentDecision,
@@ -37,8 +33,7 @@ export type PendingAgentAction =
       requestId: string | null;
       ask: PendingAsk;
     }
-  | PendingCodexMcpElicitation
-  | PendingCodexPermissionApproval
+  | PendingAgentInteraction
   | PendingArchitectureChange
   | {
       kind: "title_update";
@@ -88,7 +83,7 @@ export type PendingAgentActionResolution =
 export function usePendingAgentActionsForTask(
   asks: ComputedRef<PendingAsk[]>,
   toolConsents: ComputedRef<ToolConsentRequest[]>,
-  codexInteractions: ComputedRef<PendingCodexInteraction[]> = computed(() => []),
+  agentInteractions: ComputedRef<PendingAgentInteraction[]> = computed(() => []),
   timelineEvents: ComputedRef<AgentTimelineEvent[]> = computed(() => []),
   architectureChanges: ComputedRef<PendingArchitectureChange[]> = computed(() => []),
 ): ComputedRef<PendingAgentAction[]> {
@@ -107,7 +102,7 @@ export function usePendingAgentActionsForTask(
       requestId: request.requestId,
       request,
     })),
-    ...codexInteractions.value,
+    ...agentInteractions.value,
     ...architectureChanges.value,
     ...timelineEvents.value.flatMap(titleUpdateActionForEvent),
   ]);

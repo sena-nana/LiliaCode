@@ -126,7 +126,7 @@ describe("pending agent actions", () => {
     expect(pendingActionForTimelineEvent(event, actions.value)).toBe(actions.value[0]);
   });
 
-  it("attaches Codex MCP and permission actions to matching timeline events", () => {
+  it("attaches MCP and permission actions to matching timeline events", () => {
     const actions = usePendingAgentActionsForTask(
       computed(() => []),
       computed(() => []),
