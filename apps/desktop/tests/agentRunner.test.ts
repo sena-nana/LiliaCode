@@ -1031,9 +1031,10 @@ describe("Claude helpers", () => {
     expect(queryCalled).toBe(false);
   });
 
-  it("Claude provider settings reports unsupported advanced fields without SDK query", async () => {
+  it("Claude provider settings passes advanced fields to SDK query", async () => {
     const { protocol, json } = captureProtocol();
-    let queryCalled = false;
+    let seenPrompt = "";
+    let seenOptions: any = null;
 
     await runClaude({
       cwd: "C:/repo",
@@ -1046,41 +1047,51 @@ describe("Claude helpers", () => {
         common: { model: "claude-opus-4-5", permission: "readonly" },
         claude: {
           allowedTools: ["Read"],
+          disallowedTools: ["Bash"],
           additionalDirectories: ["D:/shared"],
           maxTurns: 4,
+          maxBudgetUsd: 1.5,
         },
       },
     }, claudeRunnerContext(protocol, {
-      createClaudeQuery: () => {
-        queryCalled = true;
-        return emptyClaudeQuery();
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: ({ prompt, options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          for await (const msg of prompt) {
+            seenPrompt = msg.message.content[0].text;
+          }
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-provider-settings",
+            uuid: "provider-settings-result",
+          };
+        })();
       },
     }));
 
-    expect(queryCalled).toBe(false);
-    expect(json()).toContainEqual(expect.objectContaining({
-      type: "timeline",
-      event: expect.objectContaining({
-        kind: "diagnostic",
-        status: "success",
-        title: "Claude provider settings recorded",
-        payload: expect.objectContaining({
-          backend: "claude",
-          source: "lilia",
-          subkind: "provider_settings",
-          action: "update",
-          supported: { model: "claude-opus-4-5", permission: "readonly" },
-          unsupported: {
-            allowedTools: ["Read"],
-            additionalDirectories: ["D:/shared"],
-            maxTurns: 4,
-          },
-          unsupportedKeys: ["allowedTools", "additionalDirectories", "maxTurns"],
-          native: false,
-        }),
-      }),
-    }));
-    expect(json()).toContainEqual({ type: "done", sessionId: null, subtype: "success" });
+    expect(seenPrompt).toContain("Lilia Claude provider settings workflow.");
+    expect(seenOptions).toMatchObject({
+      model: "claude-opus-4-5",
+      permissionMode: "default",
+      allowedTools: ["Read"],
+      disallowedTools: ["Bash"],
+      additionalDirectories: ["D:/shared"],
+      maxTurns: 4,
+      maxBudgetUsd: 1.5,
+    });
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.payload?.unsupportedKeys
+    )).toBe(false);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-provider-settings",
+      subtype: "success",
+    });
   });
 
   it("Claude config diagnostics reports safe Lilia and runtime facts without SDK query", async () => {

@@ -240,7 +240,7 @@ function readLiliaBatchApplyWorkflow(cmd) {
   };
 }
 
-function buildClaudeWorkflowPrompt(cmd) {
+function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
   const review = readLiliaReviewWorkflow(cmd);
   if (review) {
     return [
@@ -276,6 +276,18 @@ function buildClaudeWorkflowPrompt(cmd) {
       cmd.prompt?.trim() ? `\nAdditional user message: ${cmd.prompt.trim()}` : null,
     ].filter(Boolean).join("\n");
   }
+  if (providerSettings) {
+    const optionKeys = Object.keys(providerSettings.options);
+    const supportedKeys = Object.keys(providerSettings.supported);
+    return [
+      "Lilia Claude provider settings workflow.",
+      `Action: ${providerSettings.action}.`,
+      "Use the supplied Claude SDK options for this turn and report the effective setting summary briefly.",
+      optionKeys.length > 0 ? `Claude option keys: ${optionKeys.join(", ")}.` : null,
+      supportedKeys.length > 0 ? `Common setting keys: ${supportedKeys.join(", ")}.` : null,
+      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
+    ].filter(Boolean).join("\n");
+  }
   return null;
 }
 
@@ -296,6 +308,7 @@ const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_batch_apply",
   "lilia_session_fork",
   "lilia_compact",
+  "lilia_provider_settings",
 ]);
 
 function normalizeLiliaGoalStatus(status) {
@@ -368,7 +381,7 @@ function readClaudeProviderSettingsWorkflow(workflow) {
   const common = isRecord(workflow.common) ? workflow.common : {};
   const claude = isRecord(workflow.claude) ? workflow.claude : {};
   const supported = {};
-  const unsupported = {};
+  const options = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
   if (model) supported.model = model;
@@ -376,18 +389,18 @@ function readClaudeProviderSettingsWorkflow(workflow) {
 
   for (const key of ["allowedTools", "disallowedTools", "additionalDirectories"]) {
     const values = readStringList(claude[key]);
-    if (values.length > 0) unsupported[key] = values;
+    if (values.length > 0) options[key] = values;
   }
   if (typeof claude.maxTurns === "number" && Number.isFinite(claude.maxTurns)) {
-    unsupported.maxTurns = claude.maxTurns;
+    options.maxTurns = claude.maxTurns;
   }
   if (typeof claude.maxBudgetUsd === "number" && Number.isFinite(claude.maxBudgetUsd)) {
-    unsupported.maxBudgetUsd = claude.maxBudgetUsd;
+    options.maxBudgetUsd = claude.maxBudgetUsd;
   }
-  if (action === "update" && Object.keys(supported).length === 0 && Object.keys(unsupported).length === 0) {
-    throw new Error("Lilia provider settings update requires at least one supported setting");
+  if (action === "update" && Object.keys(supported).length === 0 && Object.keys(options).length === 0) {
+    throw new Error("Lilia provider settings update requires at least one valid setting");
   }
-  return { action, supported, unsupported };
+  return { action, supported, options };
 }
 
 async function runClaudeLocalLiliaWorkflow(cmd, context) {
@@ -485,41 +498,21 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     });
     return true;
   }
-  if (workflow.type === "lilia_provider_settings") {
-    const settings = readClaudeProviderSettingsWorkflow(workflow);
-    const supportedKeys = Object.keys(settings.supported);
-    const unsupportedKeys = Object.keys(settings.unsupported);
-    if (settings.action === "update") {
-      if (settings.supported.model) cmd.model = settings.supported.model;
-      if (settings.supported.permission) cmd.permission = settings.supported.permission;
-    }
-    emitClaudeLocalWorkflowTimeline(context, workflow, {
-      subkind: "provider_settings",
-      title: settings.action === "update"
-        ? "Claude provider settings recorded"
-        : "Claude provider settings diagnostics",
-      summary: unsupportedKeys.length > 0
-        ? "Claude provider settings 包含当前未稳定接入的字段，已写入诊断。"
-        : "Claude provider settings 已由 Lilia 记录。",
-      payload: {
-        action: settings.action,
-        supported: settings.supported,
-        supportedKeys,
-        unsupported: settings.unsupported,
-        unsupportedKeys,
-        native: false,
-        reason: unsupportedKeys.length > 0
-          ? "Claude SDK advanced settings are not enabled as a persistent Lilia provider settings surface yet."
-          : "Lilia records safe common settings without simulating provider-side persistence.",
-      },
-    });
-    return true;
-  }
   return false;
 }
 
 function readClaudeCompactWorkflow(cmd) {
   return readLiliaWorkflow(cmd)?.type === "lilia_compact";
+}
+
+function applyClaudeProviderSettingsWorkflow(cmd) {
+  const settings = readClaudeProviderSettingsWorkflow(readLiliaWorkflow(cmd));
+  if (!settings) return null;
+  if (settings.action === "update") {
+    if (settings.supported.model) cmd.model = settings.supported.model;
+    if (settings.supported.permission) cmd.permission = settings.supported.permission;
+  }
+  return settings;
 }
 
 function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null) {
@@ -584,8 +577,9 @@ async function runClaudeCompactWorkflow(cmd, context, workingDir) {
 }
 
 async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
-  const { cwd, prompt, model, resumeSessionId } = cmd;
-  const workflowPrompt = buildClaudeWorkflowPrompt(cmd);
+  const providerSettings = applyClaudeProviderSettingsWorkflow(cmd);
+  const { prompt, model, resumeSessionId } = cmd;
+  const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
   const permission = cmd.permission === "full" || cmd.permission === "readonly"
     ? cmd.permission
@@ -645,6 +639,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     },
     ...(runtimeExtensions.skills.length > 0 ? { skills: runtimeExtensions.skills } : {}),
     ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),
+    ...(providerSettings?.options || {}),
     ...permOpts,
   };
   if (overrides.emitRuntimeWarnings !== false) {
