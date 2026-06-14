@@ -1,11 +1,9 @@
 import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import type { ChatAttachment } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
 import {
   completeMockAgentTurn,
   emitMockTimelineEvent,
@@ -124,10 +122,6 @@ async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {
 
 describe("chat scheduler", () => {
   let unlistenToolConsent: (() => void) | null = null;
-
-  beforeEach(async () => {
-    await Promise.all([projectsReady, allTasksReady]);
-  });
 
   afterEach(async () => {
     const pendingConsent = useToolConsentForTask("t-002").value;

@@ -6,8 +6,6 @@ import ChatSidebarHost from "../src/components/chat/ChatSidebarHost.vue";
 import TitleBar from "../src/components/TitleBar.vue";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
 import {
   closeChatSidebar,
   openChatSidebar,
@@ -99,7 +97,6 @@ function sidebarResizer(container: HTMLElement): HTMLElement {
 }
 
 async function renderTaskDetail() {
-  await Promise.all([projectsReady, allTasksReady]);
   const router = createLiliaRouter(createMemoryHistory());
   await router.push("/projects/lilia/tasks/t-002");
   await router.isReady();

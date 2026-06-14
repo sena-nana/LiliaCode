@@ -1,4 +1,9 @@
-import { compactLine, readRecord } from "./liliaTools.mjs";
+import {
+  compactLine,
+  deriveLiliaToolDisplay,
+  getLiliaToolRule,
+  readRecord,
+} from "./liliaTools.mjs";
 import type {
   AgentTimelineDisplay,
   AgentTimelineDisplayListItem,
@@ -6,9 +11,8 @@ import type {
   AgentTimelinePayload,
 } from "./timeline";
 import { applyDisplayContext, createDisplayContext } from "./timelineDisplay/context";
-import { cleanDisplay, fallbackDisplay } from "./timelineDisplay/detailHelpers";
+import { asString, cleanDisplay, fallbackDisplay } from "./timelineDisplay/detailHelpers";
 import { buildByKind } from "./timelineDisplay/kindDisplay";
-import { tryDeriveToolDisplay } from "./timelineDisplay/toolLegacy";
 
 export interface TimelineDisplayInput {
   kind: string;
@@ -32,7 +36,6 @@ export function deriveTimelineDisplay(input: TimelineDisplayInput): AgentTimelin
     title,
     summary,
     input.status,
-    isAgentTimelineToolWindowKind,
   );
   const display = toolDisplay
     ? cleanDisplay(toolDisplay)
@@ -59,6 +62,30 @@ const AGENT_TIMELINE_TOOL_WINDOW_KINDS = new Set([
 
 export function isAgentTimelineToolWindowKind(kind: string): boolean {
   return AGENT_TIMELINE_TOOL_WINDOW_KINDS.has(kind);
+}
+
+function tryDeriveToolDisplay(
+  kind: string,
+  payload: Record<string, unknown>,
+  title: string,
+  summary: string,
+  status: AgentTimelineEventStatus,
+): AgentTimelineDisplay | null {
+  const subkind = asString(payload.subkind);
+  if (!getLiliaToolRule(kind, subkind)) return null;
+  const display = deriveLiliaToolDisplay({
+    kind,
+    subkind,
+    payload,
+    title,
+    status,
+  });
+  if (!display) return null;
+  return {
+    ...display,
+    object: display.object?.trim() ? display.object : title,
+    preview: summary || display.preview || title,
+  };
 }
 
 export type { AgentTimelineDisplayListItem };
