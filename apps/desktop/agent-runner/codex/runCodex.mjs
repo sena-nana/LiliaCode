@@ -82,6 +82,10 @@ function jsonObjectOrNull(value) {
   return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
 }
 
+function jsonArrayOrNull(value) {
+  return Array.isArray(value) && value.length > 0 ? value.slice() : null;
+}
+
 function booleanOrNull(value) {
   return typeof value === "boolean" ? value : null;
 }
@@ -97,6 +101,8 @@ function normalizeCodexSettings(cmd) {
     runtimeWorkspaceRoots: stringArray(input.runtimeWorkspaceRoots),
     permissionProfile: codexPermissionProfileId(permissionProfile),
     responsesApiClientMetadata: jsonObjectOrNull(input.responsesApiClientMetadata),
+    environments: jsonArrayOrNull(input.environments),
+    experimentalRawEvents: booleanOrNull(input.experimentalRawEvents),
     additionalContext: stringOrNull(input.additionalContext)?.trim() || null,
     persistExtendedHistory: booleanOrNull(input.persistExtendedHistory),
     initialTurnsPage: jsonObjectOrNull(input.initialTurnsPage),
@@ -131,6 +137,15 @@ function assignCodexAdvancedThreadParams(params, settings) {
   if (settings.persistExtendedHistory !== null) {
     params.persistExtendedHistory = settings.persistExtendedHistory;
   }
+  if (settings.environments) {
+    params.environments = settings.environments;
+  }
+  if (settings.experimentalRawEvents !== null) {
+    params.experimentalRawEvents = settings.experimentalRawEvents;
+  }
+  if (settings.responsesApiClientMetadata) {
+    params.responsesapiClientMetadata = settings.responsesApiClientMetadata;
+  }
 }
 
 function assignCodexResumeParams(params, settings) {
@@ -142,6 +157,12 @@ function assignCodexResumeParams(params, settings) {
 function assignCodexTurnParams(params, settings) {
   if (settings.responsesApiClientMetadata) {
     params.responsesapiClientMetadata = settings.responsesApiClientMetadata;
+  }
+  if (settings.environments) {
+    params.environments = settings.environments;
+  }
+  if (settings.experimentalRawEvents !== null) {
+    params.experimentalRawEvents = settings.experimentalRawEvents;
   }
   if (settings.additionalContext) params.additionalContext = settings.additionalContext;
 }
@@ -526,6 +547,8 @@ function readCodexProviderSettingsWorkflow(cmd) {
   const reasoningEffort = stringOrNull(codex.reasoningEffort)?.trim();
   const permissionProfile = stringOrNull(codex.permissionProfile)?.trim();
   const runtimeWorkspaceRoots = stringArray(codex.runtimeWorkspaceRoots);
+  const environments = jsonArrayOrNull(codex.environments);
+  const responsesApiClientMetadata = jsonObjectOrNull(codex.responsesApiClientMetadata);
 
   if (model) updates.model = model;
   if (permission) updates.permission = permission;
@@ -535,6 +558,13 @@ function readCodexProviderSettingsWorkflow(cmd) {
   if (runtimeWorkspaceRoots.length > 0) updates.runtimeWorkspaceRoots = runtimeWorkspaceRoots;
   if (hasOwn(codex, "persistExtendedHistory")) {
     updates.persistExtendedHistory = codex.persistExtendedHistory === true;
+  }
+  if (environments) updates.environments = environments;
+  if (hasOwn(codex, "experimentalRawEvents")) {
+    updates.experimentalRawEvents = codex.experimentalRawEvents === true;
+  }
+  if (responsesApiClientMetadata) {
+    updates.responsesApiClientMetadata = responsesApiClientMetadata;
   }
   if (action === "update" && Object.keys(updates).length === 0) {
     throw new Error("Lilia provider settings update requires at least one supported setting");
@@ -571,6 +601,15 @@ function codexSettingsCmdFromProviderWorkflow(cmd, workflow) {
   }
   if (hasOwn(workflow.updates, "persistExtendedHistory")) {
     next.codexSettings.persistExtendedHistory = workflow.updates.persistExtendedHistory;
+  }
+  if (workflow.updates.environments) {
+    next.codexSettings.environments = workflow.updates.environments;
+  }
+  if (hasOwn(workflow.updates, "experimentalRawEvents")) {
+    next.codexSettings.experimentalRawEvents = workflow.updates.experimentalRawEvents;
+  }
+  if (workflow.updates.responsesApiClientMetadata) {
+    next.codexSettings.responsesApiClientMetadata = workflow.updates.responsesApiClientMetadata;
   }
   return next;
 }

@@ -173,6 +173,10 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         title: Option<String>,
         #[serde(default)]
+        tag: Option<String>,
+        #[serde(default)]
+        archived: Option<bool>,
+        #[serde(default)]
         limit: Option<u64>,
         #[serde(default)]
         cursor: Option<String>,
@@ -240,6 +244,12 @@ pub(crate) struct LiliaProviderSettingsCodex {
     pub(crate) runtime_workspace_roots: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) persist_extended_history: Option<bool>,
+    #[serde(default)]
+    pub(crate) environments: Option<Vec<JsonValue>>,
+    #[serde(default)]
+    pub(crate) experimental_raw_events: Option<bool>,
+    #[serde(default)]
+    pub(crate) responses_api_client_metadata: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,6 +265,36 @@ pub(crate) struct LiliaProviderSettingsClaude {
     pub(crate) max_turns: Option<u64>,
     #[serde(default)]
     pub(crate) max_budget_usd: Option<f64>,
+    #[serde(default)]
+    pub(crate) tools: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) permission_prompt_tool_name: Option<String>,
+    #[serde(default)]
+    pub(crate) settings: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) managed_settings: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) setting_sources: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) sandbox: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) output_format: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) include_hook_events: Option<bool>,
+    #[serde(default)]
+    pub(crate) forward_subagent_text: Option<bool>,
+    #[serde(default)]
+    pub(crate) agent_progress_summaries: Option<bool>,
+    #[serde(default, rename = "continue")]
+    pub(crate) continue_session: Option<bool>,
+    #[serde(default)]
+    pub(crate) resume_session_at: Option<String>,
+    #[serde(default)]
+    pub(crate) session_id: Option<String>,
+    #[serde(default)]
+    pub(crate) abort_after_ms: Option<u64>,
+    #[serde(default)]
+    pub(crate) session_store: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

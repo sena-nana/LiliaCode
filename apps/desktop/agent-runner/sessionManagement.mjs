@@ -4,11 +4,12 @@ import {
   previewCodexThreadLiteWithServer,
   readCodexThreadTurns,
   renameCodexThreadWithServer,
+  archiveCodexThreadWithServer,
   searchCodexThreadsWithServer,
 } from "./codex/threadData.mjs";
 import { isRecord, shortText, stringOrNull } from "./utils.mjs";
 
-const SESSION_MANAGEMENT_ACTIONS = new Set(["list", "info", "messages", "rename"]);
+const SESSION_MANAGEMENT_ACTIONS = new Set(["list", "info", "messages", "rename", "tag", "delete", "archive"]);
 const DEFAULT_LIMIT = 20;
 
 function limitValue(value, fallback = DEFAULT_LIMIT, max = 100) {
@@ -31,21 +32,31 @@ function readSessionManagementWorkflow(cmd) {
   }
   const sessionId = stringOrNull(workflow.sessionId)?.trim() || "";
   const title = stringOrNull(workflow.title)?.trim() || "";
-  if ((action === "info" || action === "messages" || action === "rename") && !sessionId) {
+  const tag = hasOwn(workflow, "tag") ? stringOrNull(workflow.tag)?.trim() || null : null;
+  if (action !== "list" && !sessionId) {
     throw new Error("Lilia session management workflow missing sessionId");
   }
   if (action === "rename" && !title) {
     throw new Error("Lilia session management rename requires a non-empty title");
   }
+  if (action === "tag" && !hasOwn(workflow, "tag")) {
+    throw new Error("Lilia session management tag requires tag");
+  }
   return {
     action,
     sessionId,
     title,
+    tag,
+    archived: workflow.archived === true,
     limit: limitValue(workflow.limit),
     cursor: stringOrNull(workflow.cursor)?.trim() || null,
     searchTerm: stringOrNull(workflow.searchTerm)?.trim() || "",
     includeSystemMessages: workflow.includeSystemMessages === true,
   };
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 function emitSessionManagementTimeline(protocol, backend, workflow, status, config) {
@@ -80,6 +91,17 @@ function emitSessionManagementDone(protocol, workflow, fallbackSessionId = null)
     sessionId: workflow.sessionId || fallbackSessionId || null,
     subtype: "success",
   });
+}
+
+function completeUnsupportedSessionManagement(protocol, backend, workflow, fallbackSessionId, result, summary) {
+  emitSessionManagementTimeline(protocol, backend, workflow, "success", {
+    native: false,
+    result,
+    threadId: fallbackSessionId,
+    summary,
+  });
+  emitSessionManagementDone(protocol, workflow, fallbackSessionId);
+  return true;
 }
 
 function normalizeClaudeSessionInfo(info) {
@@ -145,6 +167,8 @@ export async function runClaudeSessionManagementWorkflow(cmd, context, workingDi
       ? safeContext.getClaudeSessionMessages
       : claudeSdk.getSessionMessages,
     renameSession: hasContextKey("renameClaudeSession") ? safeContext.renameClaudeSession : claudeSdk.renameSession,
+    tagSession: hasContextKey("tagClaudeSession") ? safeContext.tagClaudeSession : claudeSdk.tagSession,
+    deleteSession: hasContextKey("deleteClaudeSession") ? safeContext.deleteClaudeSession : claudeSdk.deleteSession,
   };
   try {
     let result;
@@ -193,12 +217,33 @@ export async function runClaudeSessionManagementWorkflow(cmd, context, workingDi
         messages: normalized,
         nextCursor: normalized.length >= workflow.limit ? String(offset + normalized.length) : null,
       };
-    } else {
+    } else if (workflow.action === "rename") {
       if (typeof sdk.renameSession !== "function") {
         throw new Error("Claude SDK renameSession is not available");
       }
       await sdk.renameSession(workflow.sessionId, workflow.title, options);
       result = { sessionId: workflow.sessionId, title: workflow.title, renamed: true };
+    } else if (workflow.action === "tag") {
+      if (typeof sdk.tagSession !== "function") {
+        throw new Error("Claude SDK tagSession is not available");
+      }
+      await sdk.tagSession(workflow.sessionId, workflow.tag, options);
+      result = { sessionId: workflow.sessionId, tag: workflow.tag, tagged: true };
+    } else if (workflow.action === "delete") {
+      if (typeof sdk.deleteSession !== "function") {
+        throw new Error("Claude SDK deleteSession is not available");
+      }
+      await sdk.deleteSession(workflow.sessionId, options);
+      result = { sessionId: workflow.sessionId, deleted: true };
+    } else {
+      return completeUnsupportedSessionManagement(
+        safeContext.protocol,
+        "claude",
+        workflow,
+        stringOrNull(cmd.resumeSessionId),
+        { sessionId: workflow.sessionId, unsupported: true, reason: "Claude SDK has no archiveSession API." },
+        "Claude session archive is unsupported by the SDK",
+      );
     }
     emitSessionManagementTimeline(safeContext.protocol, "claude", workflow, "success", {
       native: true,
@@ -245,8 +290,22 @@ export async function runCodexSessionManagementWorkflow(
         messages: codexPreviewMessagesFromTurns(turns, workflow.limit),
         nextCursor,
       };
-    } else {
+    } else if (workflow.action === "rename") {
       result = await renameCodexThreadWithServer(server, workflow.sessionId, workflow.title);
+    } else if (workflow.action === "archive") {
+      result = await archiveCodexThreadWithServer(server, workflow.sessionId, workflow.archived);
+    } else {
+      const reason = workflow.action === "tag"
+        ? "Codex app-server thread tags are not available."
+        : "Codex app-server thread delete is not available.";
+      return completeUnsupportedSessionManagement(
+        ctx.protocol,
+        "codex",
+        workflow,
+        threadId,
+        { threadId: workflow.sessionId, unsupported: true, reason },
+        `Codex session management ${workflow.action} is unsupported`,
+      );
     }
     emitSessionManagementTimeline(ctx.protocol, "codex", workflow, "success", {
       native: true,
