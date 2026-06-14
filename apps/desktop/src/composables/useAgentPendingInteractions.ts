@@ -80,21 +80,15 @@ function mcpPayload(value: unknown): McpElicitationPayload | null {
 function permissionPayload(value: unknown): PermissionApprovalPayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  const threadId = typeof row.threadId === "string" ? row.threadId : "";
-  const turnId = typeof row.turnId === "string" ? row.turnId : "";
-  const itemId = typeof row.itemId === "string" ? row.itemId : "";
-  const cwd = typeof row.cwd === "string" ? row.cwd : "";
-  if (!threadId || !turnId || !itemId || !cwd) return null;
+  const providerContext = row.providerContext && typeof row.providerContext === "object" && !Array.isArray(row.providerContext)
+    ? row.providerContext as PermissionApprovalPayload["providerContext"]
+    : undefined;
+  const requestedAccess = row.requestedAccess ?? row.permissions ?? {};
   return {
-    threadId,
-    turnId,
-    itemId,
-    startedAtMs: typeof row.startedAtMs === "number" && Number.isFinite(row.startedAtMs)
-      ? row.startedAtMs
-      : 0,
-    cwd,
     reason: typeof row.reason === "string" ? row.reason : null,
-    permissions: row.permissions,
+    requestedAccess,
+    scopeSuggestion: row.scopeSuggestion,
+    providerContext,
   };
 }
 

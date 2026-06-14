@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./claudeTools.mjs": "./src/claudeTools.mjs",
+    "./liliaAgentProtocol.mjs": "./src/liliaAgentProtocol.mjs",
     "./liliaTools.mjs": "./src/liliaTools.mjs",
     "./toolUtils.mjs": "./src/toolUtils.mjs"
   },

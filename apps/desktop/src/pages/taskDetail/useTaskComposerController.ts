@@ -4,9 +4,11 @@ import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   ChatAttachment,
   ChatComposerState,
+  ChatRuntimeCommand,
   ChatSlashCommandWorkflow,
   ChatWorkflow,
   LiliaThreadGoal,
+  ProviderRuntimeOptions,
 } from "@lilia/contracts";
 import {
   useAskUserForTask,
@@ -138,10 +140,12 @@ export function useTaskComposerController(options: {
     outgoingAttachments: ChatAttachment[] = [],
     guideId?: string,
     workflow?: ChatWorkflow | null,
+    runtimeCommand?: ChatRuntimeCommand | null,
+    runtimeOptions?: ProviderRuntimeOptions | null,
     titleContent?: string,
   ) {
     if (!context.hasContext.value) return;
-    if (!content.trim() && outgoingAttachments.length === 0 && !workflow) return;
+    if (!content.trim() && outgoingAttachments.length === 0 && !workflow && !runtimeCommand) return;
 
     let optimisticId: string | null = null;
     try {
@@ -165,6 +169,8 @@ export function useTaskComposerController(options: {
         outgoingAttachments,
         guideId,
         workflow,
+        runtimeCommand,
+        runtimeOptions,
       );
       timeline.removeTimelineEvent(optimistic.id);
     } catch (err) {
@@ -201,7 +207,7 @@ export function useTaskComposerController(options: {
     }
     try {
       const commandName = workflow.commandId.split(":").at(1) ?? workflow.commandId;
-      await sendAgentMessage("", [], undefined, workflow, `/${commandName}`);
+      await sendAgentMessage("", [], undefined, workflow, null, null, `/${commandName}`);
     } catch {
       // sendAgentMessage 已写入本地错误 timeline。
     }
@@ -251,6 +257,8 @@ export function useTaskComposerController(options: {
         result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
         undefined,
         undefined,
+        null,
+        null,
         result.snapshot.note || result.snapshot.title || result.snapshot.url,
       );
     } catch (err) {

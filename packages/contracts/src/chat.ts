@@ -1,4 +1,4 @@
-import type { CodexComposerSettings, CodexProfileSettings } from "./provider";
+import type { CodexProfileSettings } from "./provider";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -132,11 +132,6 @@ export interface LiliaMemoryResetWorkflow {
   type: "lilia_memory_reset";
 }
 
-export interface LiliaSessionForkWorkflow {
-  type: "lilia_session_fork";
-  excludeTurns?: boolean;
-}
-
 export type LiliaSessionManagementAction =
   | "list"
   | "info"
@@ -146,7 +141,7 @@ export type LiliaSessionManagementAction =
   | "delete"
   | "archive";
 
-export interface LiliaSessionManagementWorkflow {
+export interface LiliaSessionManagementCommand {
   type: "lilia_session_management";
   action: LiliaSessionManagementAction;
   sessionId?: string;
@@ -164,22 +159,33 @@ export interface LiliaConfigDiagnosticsWorkflow {
   includeLayers?: boolean;
 }
 
-export interface LiliaProviderSettingsCommon {
-  model?: string;
-  permission?: PermissionMode;
+export interface LiliaSessionForkCommand {
+  type: "lilia_session_fork";
+  excludeTurns?: boolean;
 }
 
-export interface LiliaProviderSettingsCodex {
-  profile?: string;
+export interface LiliaRuntimeSettingsCommon {
+  model?: string;
+  permission?: PermissionMode;
   reasoningEffort?: string;
   runtimeWorkspaceRoots?: string[];
+}
+
+export interface ProviderRuntimeOptionsCodex {
+  profile?: string;
+  model?: string | null;
+  reasoningEffort?: string;
+  runtimeWorkspaceRoots?: string[];
+  additionalContext?: string | null;
   persistExtendedHistory?: boolean;
+  initialTurnsPage?: Record<string, unknown> | null;
+  excludeTurns?: string[];
   environments?: unknown[];
   experimentalRawEvents?: boolean;
   responsesApiClientMetadata?: Record<string, unknown>;
 }
 
-export interface LiliaProviderSettingsClaude {
+export interface ProviderRuntimeOptionsClaude {
   allowedTools?: string[];
   disallowedTools?: string[];
   additionalDirectories?: string[];
@@ -202,12 +208,27 @@ export interface LiliaProviderSettingsClaude {
   sessionStore?: Record<string, unknown>;
 }
 
-export interface LiliaProviderSettingsWorkflow {
+export interface ExperimentalProviderOptions {
+  provider: ChatBackendKind;
+  capability: string;
+  payload: Record<string, unknown>;
+  fallback: "diagnostic" | "unsupported" | "ignore";
+}
+
+export interface ProviderRuntimeOptions {
+  common?: LiliaRuntimeSettingsCommon;
+  provider?: {
+    codex?: ProviderRuntimeOptionsCodex;
+    claude?: ProviderRuntimeOptionsClaude;
+  };
+  experimentalProviderOptions?: ExperimentalProviderOptions[];
+}
+
+export interface LiliaProviderSettingsCommand {
   type: "lilia_provider_settings";
   action: "diagnose" | "update";
-  common?: LiliaProviderSettingsCommon;
-  codex?: LiliaProviderSettingsCodex;
-  claude?: LiliaProviderSettingsClaude;
+  common?: never;
+  runtimeOptions?: never;
 }
 
 export interface AutomationRunWorkflow {
@@ -242,12 +263,14 @@ export type ChatWorkflow =
   | LiliaBackgroundTerminalsCleanWorkflow
   | LiliaMemoryModeWorkflow
   | LiliaMemoryResetWorkflow
-  | LiliaSessionForkWorkflow
-  | LiliaSessionManagementWorkflow
   | LiliaConfigDiagnosticsWorkflow
-  | LiliaProviderSettingsWorkflow
   | AutomationRunWorkflow
   | ChatSlashCommandWorkflow;
+
+export type ChatRuntimeCommand =
+  | LiliaSessionForkCommand
+  | LiliaSessionManagementCommand
+  | LiliaProviderSettingsCommand;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;
@@ -297,7 +320,6 @@ export interface ChatComposerState {
   model: string;
   planMode: boolean;
   permission: PermissionMode;
-  codexSettings?: CodexComposerSettings;
 }
 
 export interface ChatModelOption {

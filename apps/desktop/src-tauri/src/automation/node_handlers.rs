@@ -560,12 +560,14 @@ fn dispatch_agent_turn<R: Runtime>(
                 project_cwd,
                 Vec::new(),
                 workflow.clone(),
+                None,
+                None,
                 message.clone(),
                 turn_id.clone(),
                 runtime_channel,
                 None,
             );
-            if should_persist_user_message(&message.content, &workflow) {
+            if should_persist_user_message(&message.content, &workflow, &None) {
                 persist_and_emit_message_timeline_event(
                     app,
                     &message,
@@ -585,7 +587,7 @@ fn dispatch_agent_turn<R: Runtime>(
         running.insert(task_id.clone(), true);
     }
 
-    if should_persist_user_message(&message.content, &workflow) {
+    if should_persist_user_message(&message.content, &workflow, &None) {
         persist_and_emit_message_timeline_event(
             app,
             &message,
@@ -603,6 +605,8 @@ fn dispatch_agent_turn<R: Runtime>(
         project_cwd,
         Vec::new(),
         workflow,
+        None,
+        None,
         turn_id.clone(),
     );
     Ok(ChatSendResult {

@@ -5,21 +5,26 @@ import { emitToolConsentTimeline } from "./toolConsentTimeline.mjs";
 import { runClaude } from "./claude/runClaude.mjs";
 import { runCodex } from "./codex/runCodex.mjs";
 import { runDryRun } from "./dryRun.mjs";
+import {
+  liliaRuntimeCommandMetadata,
+  liliaWorkflowMetadata,
+} from "@lilia/contracts/liliaAgentProtocol.mjs";
 
-export const EMPTY_PROMPT_LILIA_WORKFLOWS = new Set([
-  "lilia_review",
-  "lilia_fix_suggestion",
-  "lilia_batch_apply",
-  "lilia_goal",
-  "lilia_compact",
-  "lilia_background_terminals_clean",
-  "lilia_memory_mode",
-  "lilia_memory_reset",
-  "lilia_session_fork",
-  "lilia_session_management",
-  "lilia_config_diagnostics",
-  "lilia_provider_settings",
-]);
+function isRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeRunnerCommand(cmd) {
+  const turn = isRecord(cmd?.turn) ? cmd.turn : {};
+  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  return {
+    ...cmd,
+    turn,
+    workflow: isRecord(cmd?.workflow) ? cmd.workflow : null,
+    runtimeCommand: isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null,
+    runtimeOptions,
+  };
+}
 
 export function createRunnerContext(deps = {}) {
   const protocol = deps.protocol || createProtocolEmitter({ write: deps.write });
@@ -42,17 +47,42 @@ export function createRunnerContext(deps = {}) {
 
 export async function runAgentTurn(cmd, deps = {}) {
   const context = createRunnerContext(deps);
+  cmd = normalizeRunnerCommand(cmd);
   const workflowType = typeof cmd?.workflow?.type === "string" ? cmd.workflow.type : "";
-  const allowsEmptyLiliaWorkflow = EMPTY_PROMPT_LILIA_WORKFLOWS.has(workflowType);
-  if (typeof cmd?.prompt !== "string") {
+  const runtimeCommandType = typeof cmd?.runtimeCommand?.type === "string" ? cmd.runtimeCommand.type : "";
+  const workflowMetadata = workflowType ? liliaWorkflowMetadata(workflowType) : null;
+  const runtimeCommandMetadata = runtimeCommandType ? liliaRuntimeCommandMetadata(runtimeCommandType) : null;
+  if (workflowType && !workflowMetadata) {
+    context.protocol.emit({ type: "error", message: `unknown workflow: ${workflowType}` });
+    return { ok: false, exitCode: 1 };
+  }
+  if (runtimeCommandType && !runtimeCommandMetadata) {
+    context.protocol.emit({ type: "error", message: `unknown runtimeCommand: ${runtimeCommandType}` });
+    return { ok: false, exitCode: 1 };
+  }
+  const turn = isRecord(cmd.turn) ? cmd.turn : null;
+  if (typeof turn?.prompt !== "string") {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }
+  const turnAttachments = Array.isArray(turn.attachments) ? turn.attachments : undefined;
   const nextCmd = {
     ...cmd,
-    prompt: buildPromptWithAttachments(cmd.prompt, cmd.attachments),
+    prompt: buildPromptWithAttachments(turn.prompt, turnAttachments),
+    cwd: typeof turn.cwd === "string" ? turn.cwd : undefined,
+    attachments: turnAttachments,
+    model: typeof turn.model === "string" ? turn.model : undefined,
+    resumeSessionId: typeof turn.resumeSessionId === "string" ? turn.resumeSessionId : undefined,
+    planMode: typeof turn.planMode === "boolean" ? turn.planMode : undefined,
+    permission: typeof turn.permission === "string" ? turn.permission : undefined,
   };
-  if (nextCmd.prompt.trim().length === 0 && !allowsEmptyLiliaWorkflow) {
+  const allowsEmptyWorkflowPrompt = workflowMetadata?.requiresPrompt === false;
+  const allowsEmptyRuntimeCommandPrompt = runtimeCommandMetadata?.requiresPrompt === false;
+  if (
+    nextCmd.prompt.trim().length === 0 &&
+    !allowsEmptyWorkflowPrompt &&
+    !allowsEmptyRuntimeCommandPrompt
+  ) {
     context.protocol.emit({ type: "error", message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }

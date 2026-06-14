@@ -7,9 +7,9 @@ mod diagnostic;
 
 use mutsuki_runtime_contracts::{
     AgentParticipation, AgentSpec, Envelope, LeaseToken, OperationDescriptor, OperationHandlerKey,
-    OperationSnapshot, OperationStatus, RefDescriptor, RuntimeError, ScalarValue, ScopeRuleSpec,
-    SideEffectPolicy, SourceDescriptor, SourceRef, SourceSnapshot, StrategyResult,
-    StrategyResultStatus,
+    OperationSnapshot, OperationStatus, PluginDescriptor, PluginSnapshot, PluginStatus,
+    RefDescriptor, RuntimeError, ScalarValue, ScopeRuleSpec, SideEffectPolicy, SourceDescriptor,
+    SourceRef, SourceSnapshot, StrategyResult, StrategyResultStatus,
 };
 use mutsuki_runtime_core::{
     AgentRuntime, AgentScheduler, BackendEventSink, BackendPayload, OperationBackend,
@@ -226,7 +226,7 @@ struct RuntimeTurnContext {
     project_cwd: String,
     prompt_length: usize,
     attachment_count: usize,
-    workflow_type: Option<&'static str>,
+    workflow_type: Option<String>,
     automation_run_id: Option<String>,
     source_id: String,
     agent_id: String,
@@ -868,6 +868,25 @@ fn control_delivery_decision(agent_id: &str, delivery: &RuntimeControlDelivery) 
 }
 
 impl<R: Runtime> OperationBackend for LiliaRuntimeBackend<R> {
+    fn list_plugins(&self) -> RuntimeResult<Vec<PluginSnapshot>> {
+        Ok(vec![PluginSnapshot {
+            descriptor: PluginDescriptor {
+                plugin_id: PLUGIN_ID.to_string(),
+                generation: 0,
+                name: "Lilia local runtime".to_string(),
+                description: "Local Mutsuki runtime adapter".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                capabilities: vec![
+                    "lilia.chat".to_string(),
+                    "lilia.runner".to_string(),
+                    "lilia.runner.control".to_string(),
+                ],
+                metadata: BTreeMap::new(),
+            },
+            status: PluginStatus::Enabled,
+        }])
+    }
+
     fn list_operations(&self, _agent_id: &str) -> RuntimeResult<Vec<OperationSnapshot>> {
         Ok(self.operations.clone())
     }
@@ -1516,7 +1535,7 @@ mod tests {
             project_cwd: "C:/repo".to_string(),
             prompt_length: 12,
             attachment_count: 2,
-            workflow_type: Some("lilia_goal"),
+            workflow_type: Some("lilia_goal".to_string()),
             automation_run_id: None,
             source_id: "lilia:codex".to_string(),
             agent_id: "lilia-codex-agent".to_string(),
@@ -1625,7 +1644,7 @@ mod tests {
         assert_eq!(context.project_cwd, "D:/repo");
         assert_eq!(context.prompt_length, 23);
         assert_eq!(context.attachment_count, 3);
-        assert_eq!(context.workflow_type, Some("lilia_goal"));
+        assert_eq!(context.workflow_type.as_deref(), Some("lilia_goal"));
         assert_eq!(context.resume_session_id.as_deref(), Some("thread-restore"));
         assert_eq!(context.permission, "workspace-write");
         assert_eq!(
@@ -1978,6 +1997,25 @@ mod tests {
     }
 
     impl OperationBackend for ControlBackend {
+        fn list_plugins(&self) -> RuntimeResult<Vec<PluginSnapshot>> {
+            Ok(vec![PluginSnapshot {
+                descriptor: PluginDescriptor {
+                    plugin_id: PLUGIN_ID.to_string(),
+                    generation: 0,
+                    name: "Lilia local runtime".to_string(),
+                    description: "Local Mutsuki runtime adapter".to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    capabilities: vec![
+                        "lilia.chat".to_string(),
+                        "lilia.runner".to_string(),
+                        "lilia.runner.control".to_string(),
+                    ],
+                    metadata: BTreeMap::new(),
+                },
+                status: PluginStatus::Enabled,
+            }])
+        }
+
         fn list_operations(&self, _agent_id: &str) -> RuntimeResult<Vec<OperationSnapshot>> {
             Ok(runtime_operations())
         }
@@ -2009,6 +2047,7 @@ mod tests {
     fn started_control_runtime(context: &RuntimeTurnContext) -> (AgentRuntime, ControlBackend) {
         let mut runtime = AgentRuntime::new();
         let mut backend = ControlBackend::default();
+        register_runtime_resources(&mut runtime, context);
         runtime
             .register_agent(AgentSpec {
                 agent_id: context.agent_id.clone(),
@@ -2034,6 +2073,7 @@ mod tests {
             control_context: Some(context.clone()),
             ..ControlBackend::default()
         };
+        register_runtime_resources(&mut runtime, context);
         runtime
             .register_agent(AgentSpec {
                 agent_id: context.agent_id.clone(),

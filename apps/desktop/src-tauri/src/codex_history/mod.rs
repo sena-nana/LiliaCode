@@ -646,6 +646,7 @@ mod tests {
               project_cwd     TEXT NOT NULL,
               attachments_json TEXT NOT NULL DEFAULT '[]',
               workflow_json   TEXT,
+              runtime_command_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
@@ -802,6 +803,8 @@ mod tests {
                 project_cwd: "D:/repo".to_string(),
                 attachments: Vec::new(),
                 workflow: None,
+                runtime_command: None,
+                runtime_options: None,
                 message: crate::chat::types::ChatMessage {
                     id: "msg-1".to_string(),
                     task_id: "task-1".to_string(),

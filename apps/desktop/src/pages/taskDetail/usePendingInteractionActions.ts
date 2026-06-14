@@ -120,14 +120,16 @@ export function usePendingInteractionActions(options: {
           resolution.decision === "allow"
             ? {
                 action: "approve",
-                permissions: request.payload.permissions,
-                scope: "turn",
+                grantedAccess: request.payload.requestedAccess,
+                scope: request.payload.scopeSuggestion ?? "turn",
+                providerContext: request.payload.providerContext,
               }
             : {
                 action: "decline",
-                permissions: {},
-                scope: "turn",
+                grantedAccess: {},
+                scope: request.payload.scopeSuggestion ?? "turn",
                 strictAutoReview: true,
+                providerContext: request.payload.providerContext,
               },
         );
       } catch (err) {
@@ -288,13 +290,12 @@ export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId:
         turnId: event.turnId,
         requestId,
         payload: {
-          threadId: typeof payload.threadId === "string" ? payload.threadId : "",
-          turnId: typeof payload.turnId === "string" ? payload.turnId : "",
-          itemId: typeof payload.itemId === "string" ? payload.itemId : "",
-          startedAtMs: typeof payload.startedAtMs === "number" ? payload.startedAtMs : 0,
-          cwd: typeof payload.cwd === "string" ? payload.cwd : "",
           reason: typeof payload.reason === "string" ? payload.reason : null,
-          permissions: payload.permissions,
+          requestedAccess: payload.requestedAccess ?? payload.permissions,
+          scopeSuggestion: payload.scopeSuggestion,
+          providerContext: payload.providerContext && typeof payload.providerContext === "object" && !Array.isArray(payload.providerContext)
+            ? payload.providerContext as Record<string, unknown>
+            : undefined,
         },
       });
     }

@@ -22,8 +22,10 @@ import type {
   ChatContextSearchResult,
   ChatSlashCommandSearchResult,
   ChatComposerState,
+  ChatRuntimeCommand,
   ChatRuntimeSnapshot,
   ChatWorkflow,
+  ProviderRuntimeOptions,
   HistoryImportAttachInput,
   HistoryImportAttachResult,
   HistoryImportPreviewInput,
@@ -72,7 +74,9 @@ export type {
   ChatContextSearchResult,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
+  ChatRuntimeCommand,
   ChatRuntimeSnapshot,
+  ProviderRuntimeOptions,
   HistoryImportAttachInput,
   HistoryImportAttachResult,
   HistoryImportPreviewInput,
@@ -157,6 +161,8 @@ export function sendMessage(
   attachments: ChatAttachment[] = [],
   guideId?: string,
   workflow?: ChatWorkflow | null,
+  runtimeCommand?: ChatRuntimeCommand | null,
+  runtimeOptions?: ProviderRuntimeOptions | null,
 ): Promise<ChatSendResult> {
   return invoke<ChatSendResult>("chat_send_message", {
     taskId,
@@ -166,6 +172,8 @@ export function sendMessage(
     attachments,
     guideId: guideId ?? null,
     workflow: workflow ?? null,
+    runtimeCommand: runtimeCommand ?? null,
+    runtimeOptions: runtimeOptions ?? null,
   });
 }
 

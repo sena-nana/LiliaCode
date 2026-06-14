@@ -94,6 +94,16 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "project_architecture",
         apply: migrate_project_architecture,
     },
+    SchemaMigration {
+        version: 21,
+        name: "task_pending_turns_runtime_command",
+        apply: migrate_task_pending_turns_runtime_command,
+    },
+    SchemaMigration {
+        version: 22,
+        name: "task_pending_turns_runtime_options",
+        apply: migrate_task_pending_turns_runtime_options,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -295,6 +305,8 @@ fn migrate_task_pending_turns(conn: &Connection) -> Result<(), String> {
           project_cwd     TEXT NOT NULL,
           attachments_json TEXT NOT NULL DEFAULT '[]',
           workflow_json   TEXT,
+          runtime_command_json TEXT,
+          runtime_options_json TEXT,
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
@@ -527,7 +539,7 @@ fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String>
         );
 
         INSERT INTO task_pending_turns_next
-          (id, task_id, content, composer_json, project_cwd, attachments_json, workflow_json, message_json, turn_id, runtime_channel, guide_id, created_at)
+          (id, task_id, content, composer_json, project_cwd, attachments_json, workflow_json, runtime_command_json, runtime_options_json, message_json, turn_id, runtime_channel, guide_id, created_at)
         SELECT
           id,
           task_id,
@@ -536,6 +548,8 @@ fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String>
           project_cwd,
           attachments_json,
           workflow_json,
+          NULL,
+          NULL,
           message_json,
           turn_id,
           CASE runtime_channel WHEN 'nanobot' THEN 'mutsuki_core' ELSE runtime_channel END,
@@ -550,6 +564,64 @@ fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String>
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 MutsukiCore runtime_channel 失败：{e}"))
+}
+
+fn migrate_task_pending_turns_runtime_command(conn: &Connection) -> Result<(), String> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(task_pending_turns)")
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut has = false;
+            for row in rows {
+                if row? == "runtime_command_json" {
+                    has = true;
+                    break;
+                }
+            }
+            Ok(has)
+        })
+        .map_err(|e| {
+            format!("lilia-store: 检查 task_pending_turns runtime_command_json 失败：{e}")
+        })?;
+    if has_column {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_pending_turns
+          ADD COLUMN runtime_command_json TEXT;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_pending_turns runtime_command_json 失败：{e}"))
+}
+
+fn migrate_task_pending_turns_runtime_options(conn: &Connection) -> Result<(), String> {
+    let has_column = conn
+        .prepare("PRAGMA table_info(task_pending_turns)")
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut has = false;
+            for row in rows {
+                if row? == "runtime_options_json" {
+                    has = true;
+                    break;
+                }
+            }
+            Ok(has)
+        })
+        .map_err(|e| {
+            format!("lilia-store: 检查 task_pending_turns runtime_options_json 失败：{e}")
+        })?;
+    if has_column {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE task_pending_turns
+          ADD COLUMN runtime_options_json TEXT;
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 task_pending_turns runtime_options_json 失败：{e}"))
 }
 
 fn migrate_project_milestones(conn: &Connection) -> Result<(), String> {

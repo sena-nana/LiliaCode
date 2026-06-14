@@ -19,7 +19,8 @@ use crate::chat::state::{
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
-    ChatRollbackResult, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
+    ChatRollbackResult, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
+    ProviderRuntimeOptions,
 };
 use crate::provider::load_agent_interaction_settings;
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
@@ -49,6 +50,8 @@ pub fn chat_send_message(
     attachments: Vec<ChatAttachment>,
     guide_id: Option<String>,
     workflow: Option<ChatWorkflow>,
+    runtime_command: Option<ChatRuntimeCommand>,
+    runtime_options: Option<ProviderRuntimeOptions>,
     store: State<'_, ChatStore>,
 ) -> Result<ChatSendResult, String> {
     let active_backend = load_active_backend(&app);
@@ -70,7 +73,7 @@ pub fn chat_send_message(
     // turn_id 在 user 消息入库前就分配，并与 agent turn 共享 —— 让两者落到同一个
     // turn_seq，user 消息天然占据 turn 内 intra_turn_order=0 的位置。
     let turn_id = format!("turn-{}", now_millis());
-    let persist_user_message = should_persist_user_message(&content, &workflow);
+    let persist_user_message = should_persist_user_message(&content, &workflow, &runtime_command);
     store
         .composers
         .lock()
@@ -121,6 +124,8 @@ pub fn chat_send_message(
                 project_cwd,
                 attachments,
                 workflow,
+                runtime_command,
+                runtime_options,
                 user_msg.clone(),
                 turn_id.clone(),
                 runtime_channel,
@@ -166,6 +171,8 @@ pub fn chat_send_message(
         project_cwd,
         attachments,
         workflow,
+        runtime_command,
+        runtime_options,
         turn_id.clone(),
     );
 

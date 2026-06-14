@@ -34,11 +34,18 @@ function normalizePermissionApprovalResult(value) {
       ? row.action
       : row.strictAutoReview === true
         ? "cancel"
-        : isRecord(row.permissions) && Object.keys(row.permissions).length > 0
+        : isRecord(row.grantedAccess) && Object.keys(row.grantedAccess).length > 0
           ? "approve"
-          : "decline";
+          : isRecord(row.permissions) && Object.keys(row.permissions).length > 0
+            ? "approve"
+            : "decline";
   return {
     action,
+    grantedAccess: row.grantedAccess && typeof row.grantedAccess === "object" && !Array.isArray(row.grantedAccess)
+      ? row.grantedAccess
+      : row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
+        ? row.permissions
+        : {},
     permissions: row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
       ? row.permissions
       : {},
@@ -162,12 +169,10 @@ export function createInteractionBroker({
             }
           : {
               subkind: "permission_approval",
-              threadId: stringOrNull(payload?.threadId),
-              turnId: stringOrNull(payload?.turnId),
-              itemId: stringOrNull(payload?.itemId),
-              cwd: stringOrNull(payload?.cwd),
               reason: stringOrNull(payload?.reason),
-              permissions: payload?.permissions ?? null,
+              requestedAccess: payload?.requestedAccess ?? payload?.permissions ?? null,
+              scopeSuggestion: payload?.scopeSuggestion ?? null,
+              providerContext: payload?.providerContext ?? null,
             }),
         ...(result
           ? {

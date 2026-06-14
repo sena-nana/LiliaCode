@@ -11,7 +11,7 @@ use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatRollbackResult,
-    ChatRuntimeSnapshot, ChatWorkflow,
+    ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow, ProviderRuntimeOptions,
 };
 use crate::store::LiliaStore;
 use crate::{
@@ -26,6 +26,8 @@ pub(crate) struct PendingChatTurn {
     pub(crate) project_cwd: String,
     pub(crate) attachments: Vec<ChatAttachment>,
     pub(crate) workflow: Option<ChatWorkflow>,
+    pub(crate) runtime_command: Option<ChatRuntimeCommand>,
+    pub(crate) runtime_options: Option<ProviderRuntimeOptions>,
     pub(crate) message: ChatMessage,
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
@@ -635,12 +637,22 @@ pub(crate) fn persist_pending_turn(
         .as_ref()
         .map(|workflow| serialize_pending_turn_field(workflow, "workflow"))
         .transpose()?;
+    let runtime_command_json = turn
+        .runtime_command
+        .as_ref()
+        .map(|command| serialize_pending_turn_field(command, "runtime_command"))
+        .transpose()?;
+    let runtime_options_json = turn
+        .runtime_options
+        .as_ref()
+        .map(|options| serialize_pending_turn_field(options, "runtime_options"))
+        .transpose()?;
     let message_json = serialize_pending_turn_field(&turn.message, "message")?;
     conn.execute(
         r#"INSERT INTO task_pending_turns
            (task_id, content, composer_json, project_cwd, attachments_json, workflow_json,
-            message_json, turn_id, runtime_channel, guide_id, created_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+            runtime_command_json, runtime_options_json, message_json, turn_id, runtime_channel, guide_id, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"#,
         params![
             task_id,
             turn.content,
@@ -648,6 +660,8 @@ pub(crate) fn persist_pending_turn(
             turn.project_cwd,
             attachments_json,
             workflow_json,
+            runtime_command_json,
+            runtime_options_json,
             message_json,
             turn.turn_id,
             normalize_runtime_channel(&turn.runtime_channel),
@@ -688,17 +702,23 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
     let workflow_json: Option<String> = row
         .get(5)
         .map_err(|e| format!("读取 pending turn workflow 失败：{e}"))?;
-    let message_json: String = row
+    let runtime_command_json: Option<String> = row
         .get(6)
+        .map_err(|e| format!("读取 pending turn runtime_command 失败：{e}"))?;
+    let runtime_options_json: Option<String> = row
+        .get(7)
+        .map_err(|e| format!("读取 pending turn runtime_options 失败：{e}"))?;
+    let message_json: String = row
+        .get(8)
         .map_err(|e| format!("读取 pending turn message 失败：{e}"))?;
     let turn_id: String = row
-        .get(7)
+        .get(9)
         .map_err(|e| format!("读取 pending turn turn_id 失败：{e}"))?;
     let runtime_channel: String = row
-        .get(8)
+        .get(10)
         .map_err(|e| format!("读取 pending turn runtime_channel 失败：{e}"))?;
     let guide_id: Option<String> = row
-        .get(9)
+        .get(11)
         .map_err(|e| format!("读取 pending turn guide_id 失败：{e}"))?;
     Ok((
         id,
@@ -710,6 +730,14 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
             workflow: workflow_json
                 .as_deref()
                 .map(|text| deserialize_pending_turn_field(text, "workflow"))
+                .transpose()?,
+            runtime_command: runtime_command_json
+                .as_deref()
+                .map(|text| deserialize_pending_turn_field(text, "runtime_command"))
+                .transpose()?,
+            runtime_options: runtime_options_json
+                .as_deref()
+                .map(|text| deserialize_pending_turn_field(text, "runtime_options"))
                 .transpose()?,
             message: deserialize_pending_turn_field(&message_json, "message")?,
             turn_id,
@@ -726,7 +754,7 @@ pub(crate) fn take_next_persisted_pending_turn(
     let row = conn
         .query_row(
             r#"SELECT id, content, composer_json, project_cwd, attachments_json, workflow_json,
-                      message_json, turn_id, runtime_channel, guide_id
+                      runtime_command_json, runtime_options_json, message_json, turn_id, runtime_channel, guide_id
                FROM task_pending_turns
                WHERE task_id = ?1
                ORDER BY id ASC
@@ -785,6 +813,8 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     workflow: Option<ChatWorkflow>,
+    runtime_command: Option<ChatRuntimeCommand>,
+    runtime_options: Option<ProviderRuntimeOptions>,
     message: ChatMessage,
     turn_id: String,
     runtime_channel: String,
@@ -796,6 +826,8 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
         project_cwd,
         attachments,
         workflow,
+        runtime_command,
+        runtime_options,
         message,
         turn_id,
         runtime_channel,
@@ -817,8 +849,19 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
     queue.len()
 }
 
-pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatWorkflow>) -> bool {
-    !(matches!(
+pub(crate) fn should_persist_user_message(
+    content: &str,
+    workflow: &Option<ChatWorkflow>,
+    runtime_command: &Option<ChatRuntimeCommand>,
+) -> bool {
+    let empty = content.trim().is_empty();
+    if !empty {
+        return true;
+    }
+    if runtime_command.is_some() {
+        return false;
+    }
+    !matches!(
         workflow,
         Some(ChatWorkflow::LiliaReview { .. })
             | Some(ChatWorkflow::LiliaFixSuggestion { .. })
@@ -828,12 +871,10 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
             | Some(ChatWorkflow::LiliaBackgroundTerminalsClean)
             | Some(ChatWorkflow::LiliaMemoryMode { .. })
             | Some(ChatWorkflow::LiliaMemoryReset)
-            | Some(ChatWorkflow::LiliaSessionFork { .. })
-            | Some(ChatWorkflow::LiliaSessionManagement { .. })
             | Some(ChatWorkflow::LiliaConfigDiagnostics { .. })
-            | Some(ChatWorkflow::LiliaProviderSettings { .. })
             | Some(ChatWorkflow::SlashCommand { .. })
-    ) && content.trim().is_empty())
+            | Some(ChatWorkflow::Automation { .. })
+    )
 }
 
 pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<String> {

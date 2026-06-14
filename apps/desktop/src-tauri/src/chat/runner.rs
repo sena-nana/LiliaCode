@@ -33,9 +33,12 @@ use crate::chat::timeline_sink::{
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
     AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatRollbackResult,
-    ChatWorkflow, CodexComposerSettings, DoneEvent, TurnStartedEvent,
+    ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent, ProviderRuntimeOptions,
+    TurnStartedEvent,
 };
-use crate::chat::workflow::{automation_run_id, workflow_kind};
+use crate::chat::workflow::{
+    automation_run_id, runtime_command_kind, workflow_kind,
+};
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
     CodexProfileSettings,
@@ -52,6 +55,8 @@ pub(crate) struct RunnerInvocation {
     pub(crate) project_cwd: String,
     pub(crate) attachments: Vec<ChatAttachment>,
     pub(crate) workflow: Option<ChatWorkflow>,
+    pub(crate) runtime_command: Option<ChatRuntimeCommand>,
+    pub(crate) runtime_options: Option<ProviderRuntimeOptions>,
     pub(crate) turn_id: String,
     pub(crate) runtime_channel: String,
     pub(crate) resume_session_id: Option<String>,
@@ -262,6 +267,8 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     workflow: Option<ChatWorkflow>,
+    runtime_command: Option<ChatRuntimeCommand>,
+    runtime_options: Option<ProviderRuntimeOptions>,
     turn_id: String,
 ) {
     let runtime_channel = load_agent_interaction_settings(&app).agent_runtime_channel;
@@ -274,6 +281,8 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
         project_cwd,
         attachments,
         workflow,
+        runtime_command,
+        runtime_options,
         turn_id,
         runtime_channel,
     );
@@ -287,6 +296,8 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
     workflow: Option<ChatWorkflow>,
+    runtime_command: Option<ChatRuntimeCommand>,
+    runtime_options: Option<ProviderRuntimeOptions>,
     turn_id: String,
     runtime_channel: String,
 ) {
@@ -318,6 +329,8 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
         project_cwd,
         attachments,
         workflow,
+        runtime_command,
+        runtime_options,
         turn_id,
         runtime_channel,
         resume_session_id,
@@ -427,7 +440,7 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
     if let Err(err) = set_guide_status_for_app(&app, turn.guide_id.as_deref(), "sent") {
         eprintln!("[todo-guides] mark recovered queued guide sent failed: {err}");
     }
-    if should_persist_user_message(&turn.content, &turn.workflow) {
+    if should_persist_user_message(&turn.content, &turn.workflow, &turn.runtime_command) {
         persist_and_emit_message_timeline_event(
             &app,
             &turn.message,
@@ -445,6 +458,8 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
         turn.project_cwd,
         turn.attachments,
         turn.workflow,
+        turn.runtime_command,
+        turn.runtime_options,
         turn.turn_id,
         turn.runtime_channel,
     );
@@ -470,6 +485,8 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let project_cwd = invocation.project_cwd;
     let attachments_for_thread = invocation.attachments;
     let workflow_for_thread = invocation.workflow;
+    let runtime_command_for_thread = invocation.runtime_command;
+    let runtime_options_for_thread = invocation.runtime_options;
     let automation_run_id_for_thread = automation_run_id(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
     let runtime_channel_for_thread = invocation.runtime_channel;
@@ -479,29 +496,27 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let backend_for_thread = composer_for_thread.backend.clone();
     let connection = resolve_connection_for(app_handle, &backend_for_thread);
     let extensions = plugins::runtime_extensions(app_handle, Some(&project_cwd));
-    let codex_settings = if backend_for_thread == BACKEND_CODEX {
-        Some(build_effective_codex_settings(
-            app_handle,
-            &composer_for_thread,
-        ))
-    } else {
-        None
-    };
+    let runtime_options = build_provider_runtime_options(
+        app_handle,
+        &backend_for_thread,
+        &composer_for_thread,
+        runtime_command_for_thread.as_ref(),
+        runtime_options_for_thread.as_ref(),
+    );
     let mut stdin_payload = build_runner_stdin_payload(
         &backend_for_thread,
         &project_cwd,
         &prompt_for_thread,
         &attachments_for_thread,
         workflow_for_thread.as_ref(),
+        runtime_command_for_thread.as_ref(),
+        runtime_options.as_ref(),
         &composer_for_thread,
         resume_session_id.as_deref(),
         &extensions,
     );
     if let Some(context) = build_runner_conversation_context(app_handle, &task_id_for_thread) {
         stdin_payload["conversationContext"] = context;
-    }
-    if let Some(settings) = codex_settings {
-        stdin_payload["codexSettings"] = settings;
     }
     record_runner_lifecycle(
         observer,
@@ -513,9 +528,12 @@ pub(crate) fn start_runner_session<R: Runtime>(
             "queuedCount": queued_count,
             "attachmentCount": attachments_for_thread.len(),
             "workflowType": workflow_kind(workflow_for_thread.as_ref()),
-            "hasCodexSettings": stdin_payload.get("codexSettings").is_some(),
+            "runtimeCommandType": runtime_command_kind(runtime_command_for_thread.as_ref()),
+            "hasRuntimeOptions": stdin_payload.get("runtimeOptions").is_some(),
             "codexRuntimeWorkspaceRootCount": stdin_payload
-                .get("codexSettings")
+                .get("runtimeOptions")
+                .and_then(|options| options.get("provider"))
+                .and_then(|provider| provider.get("codex"))
                 .and_then(|settings| settings.get("runtimeWorkspaceRoots"))
                 .and_then(|roots| roots.as_array())
                 .map(|roots| roots.len()),
@@ -594,6 +612,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
             &prompt_for_thread,
             &attachments_for_thread,
             workflow_for_thread.as_ref(),
+            runtime_command_for_thread.as_ref(),
             &composer_for_thread,
             resume_session_id.as_deref(),
         );
@@ -1045,20 +1064,27 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
     prompt: &str,
     attachments: &[ChatAttachment],
     workflow: Option<&ChatWorkflow>,
+    runtime_command: Option<&ChatRuntimeCommand>,
+    runtime_options: Option<&JsonValue>,
     composer: &ChatComposerState,
     resume_session_id: Option<&str>,
     extensions: &T,
 ) -> JsonValue {
-    serde_json::json!({
-        "backend": backend,
+    let turn = serde_json::json!({
         "cwd": project_cwd,
         "prompt": prompt,
         "attachments": attachments,
-        "workflow": workflow,
         "model": composer.model,
         "resumeSessionId": resume_session_id,
         "planMode": composer.plan_mode,
         "permission": composer.permission,
+    });
+    serde_json::json!({
+        "backend": backend,
+        "turn": turn,
+        "workflow": workflow,
+        "runtimeCommand": runtime_command,
+        "runtimeOptions": runtime_options,
         "extensions": extensions,
     })
 }
@@ -1068,6 +1094,7 @@ fn runtime_state_context_json(
     prompt: &str,
     attachments: &[ChatAttachment],
     workflow: Option<&ChatWorkflow>,
+    runtime_command: Option<&ChatRuntimeCommand>,
     composer: &ChatComposerState,
     resume_session_id: Option<&str>,
 ) -> String {
@@ -1076,6 +1103,7 @@ fn runtime_state_context_json(
         "promptLength": prompt.chars().count(),
         "attachmentCount": attachments.len(),
         "workflowType": workflow_kind(workflow),
+        "runtimeCommandType": runtime_command_kind(runtime_command),
         "automationRunId": automation_run_id(workflow),
         "resumeSessionId": resume_session_id,
         "permission": composer.permission,
@@ -1086,6 +1114,66 @@ fn runtime_state_context_json(
             .unwrap_or_default(),
     })
     .to_string()
+}
+
+fn build_provider_runtime_options<R: Runtime>(
+    app: &AppHandle<R>,
+    backend: &str,
+    composer: &ChatComposerState,
+    runtime_command: Option<&ChatRuntimeCommand>,
+    runtime_options: Option<&ProviderRuntimeOptions>,
+) -> Option<JsonValue> {
+    let mut provider = serde_json::Map::new();
+    if backend == BACKEND_CODEX {
+        provider.insert(
+            "codex".to_string(),
+            build_effective_codex_settings(app, composer),
+        );
+    }
+    if let Some(options) = runtime_options {
+        if let Ok(value) = serde_json::to_value(options) {
+            return Some(merge_runtime_provider_defaults(value, provider));
+        }
+    }
+    if matches!(
+        runtime_command,
+        Some(ChatRuntimeCommand::LiliaProviderSettings { .. })
+    ) {
+        return Some(merge_runtime_provider_defaults(
+            serde_json::json!({}),
+            provider,
+        ));
+    }
+    if provider.is_empty() {
+        None
+    } else {
+        Some(JsonValue::Object(
+            [("provider".to_string(), JsonValue::Object(provider))]
+                .into_iter()
+                .collect(),
+        ))
+    }
+}
+
+fn merge_runtime_provider_defaults(
+    mut value: JsonValue,
+    defaults: serde_json::Map<String, JsonValue>,
+) -> JsonValue {
+    if defaults.is_empty() {
+        return value;
+    }
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    if !value.get("provider").is_some_and(|provider| provider.is_object()) {
+        value["provider"] = serde_json::json!({});
+    }
+    for (key, default_value) in defaults {
+        if value["provider"].get(&key).is_none() || value["provider"][&key].is_null() {
+            value["provider"][key] = default_value;
+        }
+    }
+    value
 }
 
 fn build_effective_codex_settings<R: Runtime>(
@@ -1287,7 +1375,7 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
         if let Err(err) = set_guide_status_for_app(&app_handle, turn.guide_id.as_deref(), "sent") {
             eprintln!("[todo-guides] mark queued guide sent failed: {err}");
         }
-        if should_persist_user_message(&turn.content, &turn.workflow) {
+        if should_persist_user_message(&turn.content, &turn.workflow, &turn.runtime_command) {
             persist_and_emit_message_timeline_event(
                 &app_handle,
                 &turn.message,
@@ -1305,6 +1393,8 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
             turn.project_cwd,
             turn.attachments,
             turn.workflow,
+            turn.runtime_command,
+            turn.runtime_options,
             turn.turn_id,
             runtime_channel,
         );
@@ -1632,7 +1722,7 @@ mod tests {
     fn runner_lifecycle_classifies_workflow_and_runtime_events() {
         let workflow = ChatWorkflow::LiliaMemoryReset;
         assert_eq!(
-            workflow_kind(Some(&workflow)),
+            workflow_kind(Some(&workflow)).as_deref(),
             Some("lilia_memory_reset")
         );
         assert_eq!(workflow_kind(None), None);
@@ -1729,6 +1819,8 @@ mod tests {
                 project_cwd: "C:\\repo".to_string(),
                 attachments: Vec::new(),
                 workflow: None,
+                runtime_command: None,
+                runtime_options: None,
                 message: crate::chat::types::ChatMessage {
                     id: "u-next".to_string(),
                     task_id: "task-1".to_string(),
@@ -1772,6 +1864,8 @@ mod tests {
                 project_cwd: "C:\\repo".to_string(),
                 attachments: Vec::new(),
                 workflow: None,
+                runtime_command: None,
+                runtime_options: None,
                 message: crate::chat::types::ChatMessage {
                     id: "u-queued".to_string(),
                     task_id: "task-1".to_string(),
