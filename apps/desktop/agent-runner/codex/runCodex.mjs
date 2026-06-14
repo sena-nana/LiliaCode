@@ -498,7 +498,7 @@ function readCodexMemoryResetWorkflow(cmd) {
 
 function readCodexThreadForkRuntimeCommand(cmd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "lilia_session_fork") return null;
+  if (command?.type !== "session_fork") return null;
   return {
     excludeTurns: command.excludeTurns !== false,
   };
@@ -512,18 +512,18 @@ function readCodexConfigDiagnosticsWorkflow(cmd) {
   };
 }
 
-const PROVIDER_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function readCodexProviderSettingsRuntimeCommand(cmd) {
+function readCodexRuntimeSettingsCommand(cmd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "lilia_provider_settings") return null;
+  if (command?.type !== "runtime_settings") return null;
   const action = stringOrNull(command.action);
-  if (!PROVIDER_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia provider settings runtime command missing a valid action");
+  if (!RUNTIME_SETTINGS_ACTIONS.has(action)) {
+    throw new Error("Lilia runtime settings command missing a valid action");
   }
   const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
   const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
@@ -1436,8 +1436,8 @@ async function runCodexConfigDiagnosticsWorkflow(server, threadId, cmd, ctx, cwd
   return true;
 }
 
-async function runCodexProviderSettingsRuntimeCommand(server, threadId, cmd, ctx) {
-  const command = readCodexProviderSettingsRuntimeCommand(cmd);
+async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
+  const command = readCodexRuntimeSettingsCommand(cmd);
   if (!command) return false;
   await flushCodexRuntimeSettings(ctx);
   const effectiveCmd = codexSettingsCmdFromRuntimeCommand(cmd, command);
@@ -1703,7 +1703,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexMemoryResetWorkflow },
   { run: runCodexThreadForkRuntimeCommand, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
-  { run: runCodexProviderSettingsRuntimeCommand },
+  { run: runCodexRuntimeSettingsCommand },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },

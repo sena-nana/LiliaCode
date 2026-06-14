@@ -126,7 +126,7 @@ function readLiliaWorkflow(cmd) {
 
 async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "lilia_session_fork") return false;
+  if (command?.type !== "session_fork") return false;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -282,7 +282,7 @@ function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
     const optionKeys = Object.keys(providerSettings.options);
     const supportedKeys = Object.keys(providerSettings.supported);
     return [
-      "Lilia Claude provider settings runtime command.",
+      "Lilia Claude runtime settings command.",
       `Action: ${providerSettings.action}.`,
       "Use the supplied Claude SDK options for this turn and report the effective setting summary briefly.",
       optionKeys.length > 0 ? `Claude option keys: ${optionKeys.join(", ")}.` : null,
@@ -303,7 +303,7 @@ const LILIA_GOAL_STATUSES = new Set([
   "complete",
 ]);
 const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
-const LILIA_PROVIDER_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
 const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_review",
   "lilia_fix_suggestion",
@@ -390,11 +390,11 @@ function readClaudeToolsOption(value) {
   return null;
 }
 
-function readClaudeProviderSettingsRuntimeCommand(command, runtimeOptions = {}) {
-  if (command?.type !== "lilia_provider_settings") return null;
+function readClaudeRuntimeSettingsCommand(command, runtimeOptions = {}) {
+  if (command?.type !== "runtime_settings") return null;
   const action = stringOrNull(command.action);
-  if (!LILIA_PROVIDER_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia provider settings runtime command missing a valid action");
+  if (!RUNTIME_SETTINGS_ACTIONS.has(action)) {
+    throw new Error("Lilia runtime settings command missing a valid action");
   }
   const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
   const common = isRecord(runtimeOptions.common) ? runtimeOptions.common : {};
@@ -551,9 +551,9 @@ function readClaudeCompactWorkflow(cmd) {
   return readLiliaWorkflow(cmd)?.type === "lilia_compact";
 }
 
-function applyClaudeProviderSettingsRuntimeCommand(cmd) {
+function applyClaudeRuntimeSettingsCommand(cmd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  const settings = readClaudeProviderSettingsRuntimeCommand(
+  const settings = readClaudeRuntimeSettingsCommand(
     command,
     isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
   );
@@ -670,7 +670,7 @@ async function runClaudeCompactWorkflow(cmd, context, workingDir) {
 }
 
 async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
-  const providerSettings = applyClaudeProviderSettingsRuntimeCommand(cmd);
+  const providerSettings = applyClaudeRuntimeSettingsCommand(cmd);
   const { prompt, model, resumeSessionId } = cmd;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);

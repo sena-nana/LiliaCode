@@ -698,24 +698,24 @@ mod agent_event_sink_tests {
         assert!(batch_apply_json.get("source_turn_id").is_none());
 
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "lilia_session_fork",
+            "type": "session_fork",
             "excludeTurns": false,
         })).is_err());
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "lilia_session_management",
+            "type": "session_management",
             "action": "list",
         })).is_err());
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
-            "type": "lilia_provider_settings",
+            "type": "runtime_settings",
             "action": "diagnose",
         })).is_err());
 
         let fork = serde_json::from_value::<ChatRuntimeCommand>(json!({
-            "type": "lilia_session_fork",
+            "type": "session_fork",
             "excludeTurns": false,
         }))
         .unwrap();
-        let ChatRuntimeCommand::LiliaSessionFork { exclude_turns } = &fork else {
+        let ChatRuntimeCommand::SessionFork { exclude_turns } = &fork else {
             panic!("unexpected runtime command: {fork:?}");
         };
         assert_eq!(*exclude_turns, Some(false));
@@ -724,7 +724,7 @@ mod agent_event_sink_tests {
         assert!(fork_json.get("exclude_turns").is_none());
 
         let session_management = serde_json::from_value::<ChatRuntimeCommand>(json!({
-            "type": "lilia_session_management",
+            "type": "session_management",
             "action": "tag",
             "sessionId": "thread-1",
             "title": "???",
@@ -736,7 +736,7 @@ mod agent_event_sink_tests {
             "includeSystemMessages": true,
         }))
         .unwrap();
-        let ChatRuntimeCommand::LiliaSessionManagement {
+        let ChatRuntimeCommand::SessionManagement {
             action,
             session_id,
             title,
@@ -760,7 +760,7 @@ mod agent_event_sink_tests {
         assert_eq!(search_term.as_deref(), Some("bug"));
         assert_eq!(*include_system_messages, Some(true));
         let session_management_json = serde_json::to_value(&session_management).unwrap();
-        assert_eq!(session_management_json["type"], json!("lilia_session_management"));
+        assert_eq!(session_management_json["type"], json!("session_management"));
         assert_eq!(session_management_json["sessionId"], json!("thread-1"));
         assert_eq!(session_management_json["tag"], json!("release"));
         assert_eq!(session_management_json["archived"], json!(true));
@@ -786,11 +786,11 @@ mod agent_event_sink_tests {
         assert!(diagnostics_json.get("include_layers").is_none());
 
         let provider_settings = serde_json::from_value::<ChatRuntimeCommand>(json!({
-            "type": "lilia_provider_settings",
+            "type": "runtime_settings",
             "action": "update"
         }))
         .unwrap();
-        let ChatRuntimeCommand::LiliaProviderSettings { action } = &provider_settings
+        let ChatRuntimeCommand::RuntimeSettings { action } = &provider_settings
         else {
             panic!("unexpected runtime command: {provider_settings:?}");
         };
@@ -846,7 +846,7 @@ mod agent_event_sink_tests {
             Some(true)
         );
         let provider_settings_json = serde_json::to_value(&provider_settings).unwrap();
-        assert_eq!(provider_settings_json["type"], json!("lilia_provider_settings"));
+        assert_eq!(provider_settings_json["type"], json!("runtime_settings"));
         assert!(provider_settings_json.get("common").is_none());
         assert!(provider_settings_json.get("runtimeOptions").is_none());
         let provider_settings_json = serde_json::to_value(&runtime_options).unwrap();
@@ -1050,7 +1050,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn runner_stdin_payload_keeps_lilia_provider_settings_runtime_command() {
+    fn runner_stdin_payload_keeps_runtime_settings_runtime_command() {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -1060,7 +1060,7 @@ mod agent_event_sink_tests {
             codex_settings: CodexComposerSettings::default(),
         };
         let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
-            "type": "lilia_provider_settings",
+            "type": "runtime_settings",
             "action": "update"
         }))
         .unwrap();
@@ -1094,7 +1094,7 @@ mod agent_event_sink_tests {
         assert!(payload.get("protocol").is_none());
         assert_eq!(
             payload["runtimeCommand"]["type"],
-            json!("lilia_provider_settings")
+            json!("runtime_settings")
         );
         assert_eq!(payload["runtimeCommand"]["action"], json!("update"));
         assert!(payload["runtimeCommand"].get("common").is_none());
@@ -1115,7 +1115,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn runner_stdin_payload_keeps_lilia_session_management_runtime_command() {
+    fn runner_stdin_payload_keeps_session_management_runtime_command() {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -1125,7 +1125,7 @@ mod agent_event_sink_tests {
             codex_settings: CodexComposerSettings::default(),
         };
         let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
-            "type": "lilia_session_management",
+            "type": "session_management",
             "action": "rename",
             "sessionId": "thread-1",
             "title": "新标题",
@@ -1155,7 +1155,7 @@ mod agent_event_sink_tests {
         assert!(payload.get("protocol").is_none());
         assert_eq!(
             payload["runtimeCommand"]["type"],
-            json!("lilia_session_management")
+            json!("session_management")
         );
         assert_eq!(payload["runtimeCommand"]["action"], json!("rename"));
         assert_eq!(payload["runtimeCommand"]["sessionId"], json!("thread-1"));

@@ -376,9 +376,9 @@ describe("runner core", () => {
 
   it("Codex native runtime command 允许空 prompt 进入 Codex 后端", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_fork" },
-      { type: "lilia_session_management", action: "list" },
-      { type: "lilia_provider_settings", action: "diagnose" },
+      { type: "session_fork" },
+      { type: "session_management", action: "list" },
+      { type: "runtime_settings", action: "diagnose" },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -410,7 +410,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "claude",
       turn: runnerTurn(""),
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
       }, {
       protocol,
       env: {},
@@ -426,7 +426,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "claude-fork",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     });
   });
 
@@ -984,7 +984,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -1023,7 +1023,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -1056,18 +1056,18 @@ describe("Claude helpers", () => {
 
   it("handles Claude session management through SDK session APIs", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
-      { type: "lilia_session_management", action: "info", sessionId: "claude-session-1" },
+      { type: "session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
+      { type: "session_management", action: "info", sessionId: "claude-session-1" },
       {
-        type: "lilia_session_management",
+        type: "session_management",
         action: "messages",
         sessionId: "claude-session-1",
         limit: 3,
         cursor: "2",
         includeSystemMessages: true,
       },
-      { type: "lilia_session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
-      { type: "lilia_session_management", action: "delete", sessionId: "claude-session-1" },
+      { type: "session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
+      { type: "session_management", action: "delete", sessionId: "claude-session-1" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -1148,7 +1148,7 @@ describe("Claude helpers", () => {
     await expect(runClaudeSessionManagementRuntimeCommand({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "lilia_session_management", action: "archive", sessionId: "claude-session-1" },
+      runtimeCommand: { type: "session_management", action: "archive", sessionId: "claude-session-1" },
     }, { protocol } as any, "C:/repo")).resolves.toBe(true);
 
     expect(json()).toContainEqual(expect.objectContaining({
@@ -1174,7 +1174,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       runtimeCommand: {
-        type: "lilia_session_management",
+        type: "session_management",
         action: "rename",
         sessionId: "claude-session-1",
         title: "新标题",
@@ -1434,7 +1434,7 @@ describe("Claude helpers", () => {
       model: "claude-sonnet-4-6",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -1484,7 +1484,7 @@ describe("Claude helpers", () => {
       },
     }));
 
-    expect(seenPrompt).toContain("Lilia Claude provider settings runtime command.");
+    expect(seenPrompt).toContain("Lilia Claude runtime settings command.");
     expect(seenOptions).toMatchObject({
       model: "claude-opus-4-5",
       permissionMode: "default",
@@ -3649,7 +3649,7 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -3754,9 +3754,9 @@ describe("Codex app-server mapping", () => {
 
   it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "list", searchTerm: "fix", limit: 10 },
-      { type: "lilia_session_management", action: "messages", sessionId: "thread-target", limit: 5 },
-      { type: "lilia_session_management", action: "archive", sessionId: "thread-target", archived: true },
+      { type: "session_management", action: "list", searchTerm: "fix", limit: 10 },
+      { type: "session_management", action: "messages", sessionId: "thread-target", limit: 5 },
+      { type: "session_management", action: "archive", sessionId: "thread-target", archived: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -3837,8 +3837,8 @@ describe("Codex app-server mapping", () => {
 
   it("reports unsupported diagnostic for Codex session tag and delete", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "tag", sessionId: "thread-target", tag: "release" },
-      { type: "lilia_session_management", action: "delete", sessionId: "thread-target" },
+      { type: "session_management", action: "tag", sessionId: "thread-target", tag: "release" },
+      { type: "session_management", action: "delete", sessionId: "thread-target" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -3906,7 +3906,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -3987,7 +3987,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -4089,7 +4089,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      runtimeCommand: { type: "lilia_provider_settings", action: "update" },
+      runtimeCommand: { type: "runtime_settings", action: "update" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },

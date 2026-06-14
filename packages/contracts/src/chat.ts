@@ -132,7 +132,7 @@ export interface LiliaMemoryResetWorkflow {
   type: "lilia_memory_reset";
 }
 
-export type LiliaSessionManagementAction =
+export type SessionManagementAction =
   | "list"
   | "info"
   | "messages"
@@ -141,9 +141,9 @@ export type LiliaSessionManagementAction =
   | "delete"
   | "archive";
 
-export interface LiliaSessionManagementCommand {
-  type: "lilia_session_management";
-  action: LiliaSessionManagementAction;
+export interface SessionManagementRuntimeCommand {
+  type: "session_management";
+  action: SessionManagementAction;
   sessionId?: string;
   title?: string;
   tag?: string | null;
@@ -159,8 +159,8 @@ export interface LiliaConfigDiagnosticsWorkflow {
   includeLayers?: boolean;
 }
 
-export interface LiliaSessionForkCommand {
-  type: "lilia_session_fork";
+export interface SessionForkRuntimeCommand {
+  type: "session_fork";
   excludeTurns?: boolean;
 }
 
@@ -224,8 +224,8 @@ export interface ProviderRuntimeOptions {
   experimentalProviderOptions?: ExperimentalProviderOptions[];
 }
 
-export interface LiliaProviderSettingsCommand {
-  type: "lilia_provider_settings";
+export interface RuntimeSettingsCommand {
+  type: "runtime_settings";
   action: "diagnose" | "update";
   common?: never;
   runtimeOptions?: never;
@@ -268,9 +268,9 @@ export type ChatWorkflow =
   | ChatSlashCommandWorkflow;
 
 export type ChatRuntimeCommand =
-  | LiliaSessionForkCommand
-  | LiliaSessionManagementCommand
-  | LiliaProviderSettingsCommand;
+  | SessionForkRuntimeCommand
+  | SessionManagementRuntimeCommand
+  | RuntimeSettingsCommand;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;

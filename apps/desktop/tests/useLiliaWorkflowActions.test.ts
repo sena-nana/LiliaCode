@@ -46,13 +46,13 @@ describe("useLiliaWorkflowActions", () => {
   it("session fork uses runtimeCommand", async () => {
     const view = setupWorkflowActions();
     await view.actions.onStartSessionFork();
-    expect(view.runtimeSent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
+    expect(view.runtimeSent).toEqual([{ type: "session_fork", excludeTurns: true }]);
     expect(view.sent).toEqual([]);
   });
 
   it("provider settings is passed through as runtimeCommand", async () => {
     const command: ChatRuntimeCommand = {
-      type: "lilia_provider_settings",
+      type: "runtime_settings",
       action: "update",
     };
     const runtimeOptions: ProviderRuntimeOptions = {
@@ -64,7 +64,7 @@ describe("useLiliaWorkflowActions", () => {
     };
 
     const view = setupWorkflowActions();
-    await view.actions.onApplyLiliaProviderSettings(command, runtimeOptions);
+    await view.actions.onApplyRuntimeSettings(command, runtimeOptions);
     expect(view.runtimeSent).toEqual([command]);
     expect(view.runtimeOptionsSent.at(-1)).toEqual(runtimeOptions);
     expect(view.sent).toEqual([]);
