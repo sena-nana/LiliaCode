@@ -625,6 +625,8 @@ mod agent_event_sink_tests {
                 action: "list".to_string(),
                 session_id: None,
                 title: None,
+                tag: None,
+                archived: None,
                 limit: Some(20),
                 cursor: None,
                 search_term: None,
@@ -730,9 +732,11 @@ mod agent_event_sink_tests {
 
         let session_management = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "lilia_session_management",
-            "action": "messages",
+            "action": "tag",
             "sessionId": "thread-1",
             "title": "新标题",
+            "tag": "release",
+            "archived": true,
             "limit": 20,
             "cursor": "cursor-1",
             "searchTerm": "bug",
@@ -743,6 +747,8 @@ mod agent_event_sink_tests {
             action,
             session_id,
             title,
+            tag,
+            archived,
             limit,
             cursor,
             search_term,
@@ -751,9 +757,11 @@ mod agent_event_sink_tests {
         else {
             panic!("unexpected workflow: {session_management:?}");
         };
-        assert_eq!(action, "messages");
+        assert_eq!(action, "tag");
         assert_eq!(session_id.as_deref(), Some("thread-1"));
         assert_eq!(title.as_deref(), Some("新标题"));
+        assert_eq!(tag.as_deref(), Some("release"));
+        assert_eq!(*archived, Some(true));
         assert_eq!(*limit, Some(20));
         assert_eq!(cursor.as_deref(), Some("cursor-1"));
         assert_eq!(search_term.as_deref(), Some("bug"));
@@ -761,6 +769,8 @@ mod agent_event_sink_tests {
         let session_management_json = serde_json::to_value(&session_management).unwrap();
         assert_eq!(session_management_json["type"], json!("lilia_session_management"));
         assert_eq!(session_management_json["sessionId"], json!("thread-1"));
+        assert_eq!(session_management_json["tag"], json!("release"));
+        assert_eq!(session_management_json["archived"], json!(true));
         assert_eq!(session_management_json["searchTerm"], json!("bug"));
         assert_eq!(
             session_management_json["includeSystemMessages"],
@@ -792,6 +802,9 @@ mod agent_event_sink_tests {
                 "permissionProfile": "workspaceWrite",
                 "runtimeWorkspaceRoots": ["C:/repo"],
                 "persistExtendedHistory": true,
+                "environments": [{ "id": "env-1" }],
+                "experimentalRawEvents": true,
+                "responsesApiClientMetadata": { "surface": "lilia" },
             },
             "claude": {
                 "allowedTools": ["Read"],
@@ -799,6 +812,21 @@ mod agent_event_sink_tests {
                 "additionalDirectories": ["D:/shared"],
                 "maxTurns": 4,
                 "maxBudgetUsd": 1.5,
+                "tools": { "type": "preset", "preset": "claude_code" },
+                "permissionPromptToolName": "mcp__lilia__permission_prompt",
+                "settings": { "model": "claude-opus-4-5" },
+                "managedSettings": { "sandbox": { "enabled": true } },
+                "settingSources": ["user", "project"],
+                "sandbox": { "enabled": true },
+                "outputFormat": { "type": "json" },
+                "includeHookEvents": true,
+                "forwardSubagentText": true,
+                "agentProgressSummaries": true,
+                "continue": true,
+                "resumeSessionAt": "message-uuid",
+                "sessionId": "00000000-0000-4000-8000-000000000001",
+                "abortAfterMs": 3000,
+                "sessionStore": { "explicit": true },
             },
         }))
         .unwrap();
@@ -820,6 +848,10 @@ mod agent_event_sink_tests {
             claude.as_ref().and_then(|value| value.additional_directories.as_ref()).unwrap(),
             &vec!["D:/shared".to_string()]
         );
+        assert_eq!(
+            claude.as_ref().and_then(|value| value.continue_session),
+            Some(true)
+        );
         let provider_settings_json = serde_json::to_value(&provider_settings).unwrap();
         assert_eq!(provider_settings_json["type"], json!("lilia_provider_settings"));
         assert_eq!(provider_settings_json["codex"]["reasoningEffort"], json!("high"));
@@ -827,7 +859,15 @@ mod agent_event_sink_tests {
             provider_settings_json["codex"]["runtimeWorkspaceRoots"],
             json!(["C:/repo"])
         );
+        assert_eq!(provider_settings_json["codex"]["experimentalRawEvents"], json!(true));
+        assert_eq!(
+            provider_settings_json["codex"]["responsesApiClientMetadata"],
+            json!({ "surface": "lilia" })
+        );
         assert_eq!(provider_settings_json["claude"]["maxBudgetUsd"], json!(1.5));
+        assert_eq!(provider_settings_json["claude"]["continue"], json!(true));
+        assert_eq!(provider_settings_json["claude"]["abortAfterMs"], json!(3000));
+        assert!(provider_settings_json["claude"].get("continue_session").is_none());
         assert!(provider_settings_json["codex"].get("reasoning_effort").is_none());
 
         let slash = serde_json::from_value::<ChatWorkflow>(json!({

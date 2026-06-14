@@ -187,8 +187,10 @@ export type LiliaSessionManagementWorkflowTypeTest = Assert<
   Extends<
     {
       type: "lilia_session_management";
-      action: "messages";
+      action: "tag";
       sessionId: "thread-1";
+      tag: "release";
+      archived: true;
       limit: 20;
       cursor: "cursor-1";
       searchTerm: "bug";
@@ -210,6 +212,9 @@ export type LiliaProviderSettingsWorkflowTypeTest = Assert<
         permissionProfile: "workspaceWrite";
         runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
         persistExtendedHistory: true;
+        environments: [{ id: "env-1" }];
+        experimentalRawEvents: true;
+        responsesApiClientMetadata: { surface: "lilia" };
       };
       claude: {
         allowedTools: ["Read"];
@@ -217,6 +222,21 @@ export type LiliaProviderSettingsWorkflowTypeTest = Assert<
         additionalDirectories: ["D:/PROJECT/workspace/Lilia/docs"];
         maxTurns: 8;
         maxBudgetUsd: 1.5;
+        tools: { type: "preset"; preset: "claude_code" };
+        permissionPromptToolName: "mcp__lilia__permission_prompt";
+        settings: { model: "claude-opus-4-5" };
+        managedSettings: { sandbox: { enabled: true } };
+        settingSources: ["user", "project"];
+        sandbox: { enabled: true };
+        outputFormat: { type: "json" };
+        includeHookEvents: true;
+        forwardSubagentText: true;
+        agentProgressSummaries: true;
+        continue: true;
+        resumeSessionAt: "message-uuid";
+        sessionId: "00000000-0000-4000-8000-000000000001";
+        abortAfterMs: 3000;
+        sessionStore: { explicit: true };
       };
     },
     ChatWorkflow

@@ -68,6 +68,8 @@ mod tests {
                 action: "list".to_string(),
                 session_id: None,
                 title: None,
+                tag: None,
+                archived: None,
                 limit: None,
                 cursor: None,
                 search_term: None,

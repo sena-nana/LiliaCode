@@ -132,6 +132,16 @@ export async function renameCodexThreadWithServer(server, threadId, name) {
   return { threadId: trimmedThreadId, name: trimmedName, renamed: true };
 }
 
+export async function archiveCodexThreadWithServer(server, threadId, archived = true) {
+  const trimmedThreadId = stringOrNull(threadId)?.trim();
+  if (!trimmedThreadId) throw new Error("Codex threadId is required");
+  await server.request("thread/archive", {
+    threadId: trimmedThreadId,
+    archived: archived !== false,
+  });
+  return { threadId: trimmedThreadId, archived: archived !== false };
+}
+
 function needsItemBackfill(turn) {
   if (!isRecord(turn)) return false;
   if (!Array.isArray(turn.items)) return true;

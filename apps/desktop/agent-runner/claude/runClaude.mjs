@@ -374,6 +374,24 @@ function readStringList(value) {
   return out;
 }
 
+function readStringOption(value) {
+  return stringOrNull(value)?.trim() || null;
+}
+
+function readPlainObject(value) {
+  return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
+}
+
+function readClaudeToolsOption(value) {
+  const list = readStringList(value);
+  if (list.length > 0) return list;
+  if (isRecord(value) && value.type === "preset") {
+    const preset = readStringOption(value.preset);
+    if (preset) return { type: "preset", preset };
+  }
+  return null;
+}
+
 function readClaudeProviderSettingsWorkflow(workflow) {
   if (workflow?.type !== "lilia_provider_settings") return null;
   const action = stringOrNull(workflow.action);
@@ -393,11 +411,36 @@ function readClaudeProviderSettingsWorkflow(workflow) {
     const values = readStringList(claude[key]);
     if (values.length > 0) options[key] = values;
   }
+  const tools = readClaudeToolsOption(claude.tools);
+  if (tools) options.tools = tools;
+  const permissionPromptToolName = readStringOption(claude.permissionPromptToolName);
+  if (permissionPromptToolName) options.permissionPromptToolName = permissionPromptToolName;
+  const settingsPath = readStringOption(claude.settings);
+  const settingsObject = readPlainObject(claude.settings);
+  if (settingsPath || settingsObject) options.settings = settingsPath || settingsObject;
+  const managedSettings = readPlainObject(claude.managedSettings);
+  if (managedSettings) options.managedSettings = managedSettings;
+  const settingSources = readStringList(claude.settingSources);
+  if (settingSources.length > 0) options.settingSources = settingSources;
+  for (const key of ["sandbox", "outputFormat", "sessionStore"]) {
+    const object = readPlainObject(claude[key]);
+    if (object) options[key] = object;
+  }
   if (typeof claude.maxTurns === "number" && Number.isFinite(claude.maxTurns)) {
     options.maxTurns = claude.maxTurns;
   }
   if (typeof claude.maxBudgetUsd === "number" && Number.isFinite(claude.maxBudgetUsd)) {
     options.maxBudgetUsd = claude.maxBudgetUsd;
+  }
+  for (const key of ["includeHookEvents", "forwardSubagentText", "agentProgressSummaries", "continue"]) {
+    if (typeof claude[key] === "boolean") options[key] = claude[key];
+  }
+  for (const key of ["resumeSessionAt", "sessionId"]) {
+    const value = readStringOption(claude[key]);
+    if (value) options[key] = value;
+  }
+  if (typeof claude.abortAfterMs === "number" && Number.isFinite(claude.abortAfterMs) && claude.abortAfterMs > 0) {
+    options.abortAfterMs = Math.trunc(claude.abortAfterMs);
   }
   if (action === "update" && Object.keys(supported).length === 0 && Object.keys(options).length === 0) {
     throw new Error("Lilia provider settings update requires at least one valid setting");
@@ -632,6 +675,16 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const planMode = cmd.planMode === true;
   const permOpts = mapClaudeInitialPermission(permission, planMode);
   let lastSessionId = null;
+  const providerOptions = { ...(providerSettings?.options || {}) };
+  const abortAfterMs = providerOptions.abortAfterMs;
+  delete providerOptions.abortAfterMs;
+  let abortTimer = null;
+  if (typeof abortAfterMs === "number" && abortAfterMs > 0) {
+    providerOptions.abortController = new AbortController();
+    abortTimer = setTimeout(() => {
+      providerOptions.abortController.abort();
+    }, abortAfterMs);
+  }
   const ctx = {
     protocol: context.protocol,
     interactions: context.interactions,
@@ -686,7 +739,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     },
     ...(runtimeExtensions.skills.length > 0 ? { skills: runtimeExtensions.skills } : {}),
     ...(runtimeExtensions.plugins.length > 0 ? { plugins: runtimeExtensions.plugins } : {}),
-    ...(providerSettings?.options || {}),
+    ...providerOptions,
     ...permOpts,
   };
   if (overrides.emitRuntimeWarnings !== false) {
@@ -702,114 +755,118 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   context.interactions?.handleSettingsUpdate?.((update) => {
     applyClaudeRuntimePermission(ctx, update?.permission);
   });
-  for await (const msg of claudeQuery) {
-    if (msg.session_id) {
-      lastSessionId = msg.session_id;
-      ctx.sessionId = msg.session_id;
-    }
+  try {
+    for await (const msg of claudeQuery) {
+      if (msg.session_id) {
+        lastSessionId = msg.session_id;
+        ctx.sessionId = msg.session_id;
+      }
 
-    try {
-      mapClaudeSystemTimeline(msg, ctx);
-      switch (msg.type) {
-        case "stream_event": {
-          handleClaudeStreamEvent(msg, ctx);
-          break;
-        }
-        case "assistant": {
-          const content = msg?.message?.content;
-          if (Array.isArray(content)) {
-            for (const b of content) {
-              if (b && b.type === "text") {
-                ctx.sawAssistantTextBlock = true;
-                if (typeof b.text === "string" && b.text.trim()) {
-                  ctx.latestAssistantText = b.text;
+      try {
+        mapClaudeSystemTimeline(msg, ctx);
+        switch (msg.type) {
+          case "stream_event": {
+            handleClaudeStreamEvent(msg, ctx);
+            break;
+          }
+          case "assistant": {
+            const content = msg?.message?.content;
+            if (Array.isArray(content)) {
+              for (const b of content) {
+                if (b && b.type === "text") {
+                  ctx.sawAssistantTextBlock = true;
+                  if (typeof b.text === "string" && b.text.trim()) {
+                    ctx.latestAssistantText = b.text;
+                  }
+                }
+                if (b && b.type === "tool_use") {
+                  context.protocol.emit({ type: "tool_use", name: b.name, input: b.input });
+                  emitClaudeToolTimeline(b, msg, ctx);
                 }
               }
-              if (b && b.type === "tool_use") {
-                context.protocol.emit({ type: "tool_use", name: b.name, input: b.input });
-                emitClaudeToolTimeline(b, msg, ctx);
+            }
+            break;
+          }
+          case "result": {
+            ctx.resultSeen = true;
+            const errorSummary = msg.is_error
+              ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
+              : "";
+            const status = msg.is_error ? "error" : "success";
+            const fragmentsEmitted = finalizeClaudeTextFragments(ctx, status);
+            sweepActiveClaudeTools(ctx, status, msg?.session_id);
+            finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
+            emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSessionId);
+            context.protocol.emitTimeline({
+              kind: "turn",
+              status,
+              title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
+              summary: errorSummary,
+              payload: {
+                backend: "claude",
+                subtype: msg.subtype,
+                stopReason: msg.stop_reason,
+                terminalReason: msg.terminal_reason,
+                totalCostUsd: msg.total_cost_usd,
+                usage: msg.usage,
+                modelUsage: msg.modelUsage,
+                permissionDenials: msg.permission_denials,
+                errors: msg.errors,
+                sessionId: msg.session_id || lastSessionId,
+              },
+              sourceId: msg.uuid,
+            });
+            if (overrides.suppressDone !== true) {
+              context.protocol.emit({
+                type: "done",
+                sessionId: msg.session_id || lastSessionId,
+                subtype: msg.subtype,
+              });
+            }
+            break;
+          }
+          case "prompt_suggestion": {
+            if (typeof msg.suggestion === "string" && msg.suggestion.trim()) {
+              context.protocol.emit({
+                type: "prompt_suggestion",
+                suggestion: msg.suggestion,
+                uuid: msg.uuid,
+              });
+            }
+            break;
+          }
+          case "user":
+          case "user_replay": {
+            const content = msg?.message?.content;
+            if (Array.isArray(content)) {
+              for (const b of content) {
+                if (b && b.type === "tool_result") {
+                  emitClaudeToolResultTimeline(b, msg, ctx);
+                }
               }
             }
+            break;
           }
-          break;
+          case "system":
+          default:
+            break;
         }
-        case "result": {
-          ctx.resultSeen = true;
-          const errorSummary = msg.is_error
-            ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
-            : "";
-          const status = msg.is_error ? "error" : "success";
-          const fragmentsEmitted = finalizeClaudeTextFragments(ctx, status);
-          sweepActiveClaudeTools(ctx, status, msg?.session_id);
-          finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
-          emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSessionId);
-          context.protocol.emitTimeline({
-            kind: "turn",
-            status,
-            title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
-            summary: errorSummary,
-            payload: {
-              backend: "claude",
-              subtype: msg.subtype,
-              stopReason: msg.stop_reason,
-              terminalReason: msg.terminal_reason,
-              totalCostUsd: msg.total_cost_usd,
-              usage: msg.usage,
-              modelUsage: msg.modelUsage,
-              permissionDenials: msg.permission_denials,
-              errors: msg.errors,
-              sessionId: msg.session_id || lastSessionId,
-            },
-            sourceId: msg.uuid,
-          });
-          if (overrides.suppressDone !== true) {
-            context.protocol.emit({
-              type: "done",
-              sessionId: msg.session_id || lastSessionId,
-              subtype: msg.subtype,
-            });
-          }
-          break;
-        }
-        case "prompt_suggestion": {
-          if (typeof msg.suggestion === "string" && msg.suggestion.trim()) {
-            context.protocol.emit({
-              type: "prompt_suggestion",
-              suggestion: msg.suggestion,
-              uuid: msg.uuid,
-            });
-          }
-          break;
-        }
-        case "user":
-        case "user_replay": {
-          const content = msg?.message?.content;
-          if (Array.isArray(content)) {
-            for (const b of content) {
-              if (b && b.type === "tool_result") {
-                emitClaudeToolResultTimeline(b, msg, ctx);
-              }
-            }
-          }
-          break;
-        }
-        case "system":
-        default:
-          break;
+      } catch (err) {
+        context.protocol.emitTimeline({
+          kind: "error",
+          status: "error",
+          title: "Claude event mapping",
+          summary: err?.message || String(err),
+          payload: {
+            backend: "claude",
+            rawType: msg?.type,
+          },
+          sourceId: msg?.uuid,
+        });
       }
-    } catch (err) {
-      context.protocol.emitTimeline({
-        kind: "error",
-        status: "error",
-        title: "Claude event mapping",
-        summary: err?.message || String(err),
-        payload: {
-          backend: "claude",
-          rawType: msg?.type,
-        },
-        sourceId: msg?.uuid,
-      });
     }
+  } finally {
+    if (abortTimer) clearTimeout(abortTimer);
   }
   if (lastSessionId && !ctx.resultSeen) {
     const fragmentsEmitted = finalizeClaudeTextFragments(ctx, "success");

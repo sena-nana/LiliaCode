@@ -137,13 +137,22 @@ export interface LiliaSessionForkWorkflow {
   excludeTurns?: boolean;
 }
 
-export type LiliaSessionManagementAction = "list" | "info" | "messages" | "rename";
+export type LiliaSessionManagementAction =
+  | "list"
+  | "info"
+  | "messages"
+  | "rename"
+  | "tag"
+  | "delete"
+  | "archive";
 
 export interface LiliaSessionManagementWorkflow {
   type: "lilia_session_management";
   action: LiliaSessionManagementAction;
   sessionId?: string;
   title?: string;
+  tag?: string | null;
+  archived?: boolean;
   limit?: number;
   cursor?: string;
   searchTerm?: string;
@@ -166,6 +175,9 @@ export interface LiliaProviderSettingsCodex {
   permissionProfile?: string;
   runtimeWorkspaceRoots?: string[];
   persistExtendedHistory?: boolean;
+  environments?: unknown[];
+  experimentalRawEvents?: boolean;
+  responsesApiClientMetadata?: Record<string, unknown>;
 }
 
 export interface LiliaProviderSettingsClaude {
@@ -174,6 +186,21 @@ export interface LiliaProviderSettingsClaude {
   additionalDirectories?: string[];
   maxTurns?: number;
   maxBudgetUsd?: number;
+  tools?: string[] | { type: "preset"; preset: string };
+  permissionPromptToolName?: string;
+  settings?: string | Record<string, unknown>;
+  managedSettings?: Record<string, unknown>;
+  settingSources?: string[];
+  sandbox?: Record<string, unknown>;
+  outputFormat?: Record<string, unknown>;
+  includeHookEvents?: boolean;
+  forwardSubagentText?: boolean;
+  agentProgressSummaries?: boolean;
+  continue?: boolean;
+  resumeSessionAt?: string;
+  sessionId?: string;
+  abortAfterMs?: number;
+  sessionStore?: Record<string, unknown>;
 }
 
 export interface LiliaProviderSettingsWorkflow {

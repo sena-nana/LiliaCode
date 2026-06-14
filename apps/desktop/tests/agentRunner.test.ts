@@ -1036,7 +1036,8 @@ describe("Claude helpers", () => {
         cursor: "2",
         includeSystemMessages: true,
       },
-      { type: "lilia_session_management", action: "rename", sessionId: "claude-session-1", title: "新标题" },
+      { type: "lilia_session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
+      { type: "lilia_session_management", action: "delete", sessionId: "claude-session-1" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -1072,6 +1073,12 @@ describe("Claude helpers", () => {
         renameClaudeSession: async (sessionId: string, title: string, options: any) => {
           calls.push({ method: "renameSession", sessionId, title, options });
         },
+        tagClaudeSession: async (sessionId: string, tag: string | null, options: any) => {
+          calls.push({ method: "tagSession", sessionId, tag, options });
+        },
+        deleteClaudeSession: async (sessionId: string, options: any) => {
+          calls.push({ method: "deleteSession", sessionId, options });
+        },
       } as any, "C:/repo");
 
       expect(calls[0]).toMatchObject({
@@ -1081,7 +1088,9 @@ describe("Claude helpers", () => {
             ? "getSessionInfo"
             : workflow.action === "messages"
               ? "getSessionMessages"
-              : "renameSession",
+              : workflow.action === "tag"
+                ? "tagSession"
+                : "deleteSession",
       });
       expect(json()).toContainEqual(expect.objectContaining({
         type: "timeline",
@@ -1101,6 +1110,31 @@ describe("Claude helpers", () => {
         line.sessionId === (workflow.sessionId || "claude-current")
       )).toBe(true);
     }
+  });
+
+  it("reports unsupported diagnostic for Claude session archive", async () => {
+    const { protocol, json } = captureProtocol();
+
+    await expect(runClaudeSessionManagementWorkflow({
+      cwd: "C:/repo",
+      prompt: "",
+      workflow: { type: "lilia_session_management", action: "archive", sessionId: "claude-session-1" },
+    }, { protocol } as any, "C:/repo")).resolves.toBe(true);
+
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "session_management",
+          action: "archive",
+          native: false,
+          result: expect.objectContaining({ unsupported: true }),
+        }),
+      }),
+    }));
   });
 
   it("reports unsupported diagnostic when Claude session rename API is unavailable", async () => {
@@ -1379,6 +1413,21 @@ describe("Claude helpers", () => {
           additionalDirectories: ["D:/shared"],
           maxTurns: 4,
           maxBudgetUsd: 1.5,
+          tools: { type: "preset", preset: "claude_code" },
+          permissionPromptToolName: "mcp__lilia__permission_prompt",
+          settings: { model: "claude-opus-4-5" },
+          managedSettings: { sandbox: { enabled: true } },
+          settingSources: ["user", "project"],
+          sandbox: { enabled: true },
+          outputFormat: { type: "json" },
+          includeHookEvents: true,
+          forwardSubagentText: true,
+          agentProgressSummaries: true,
+          continue: true,
+          resumeSessionAt: "message-uuid",
+          sessionId: "00000000-0000-4000-8000-000000000001",
+          abortAfterMs: 3000,
+          sessionStore: { explicit: true },
         },
       },
     }, claudeRunnerContext(protocol, {
@@ -1410,7 +1459,23 @@ describe("Claude helpers", () => {
       additionalDirectories: ["D:/shared"],
       maxTurns: 4,
       maxBudgetUsd: 1.5,
+      tools: { type: "preset", preset: "claude_code" },
+      permissionPromptToolName: "mcp__lilia__permission_prompt",
+      settings: { model: "claude-opus-4-5" },
+      managedSettings: { sandbox: { enabled: true } },
+      settingSources: ["user", "project"],
+      sandbox: { enabled: true },
+      outputFormat: { type: "json" },
+      includeHookEvents: true,
+      forwardSubagentText: true,
+      agentProgressSummaries: true,
+      continue: true,
+      resumeSessionAt: "message-uuid",
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      sessionStore: { explicit: true },
     });
+    expect(seenOptions.abortController).toBeInstanceOf(AbortController);
+    expect(seenOptions.abortAfterMs).toBeUndefined();
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.payload?.unsupportedKeys
@@ -3619,9 +3684,8 @@ describe("Codex app-server mapping", () => {
   it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
     for (const workflow of [
       { type: "lilia_session_management", action: "list", searchTerm: "fix", limit: 10 },
-      { type: "lilia_session_management", action: "info", sessionId: "thread-target" },
       { type: "lilia_session_management", action: "messages", sessionId: "thread-target", limit: 5 },
-      { type: "lilia_session_management", action: "rename", sessionId: "thread-target", title: "新标题" },
+      { type: "lilia_session_management", action: "archive", sessionId: "thread-target", archived: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -3656,7 +3720,7 @@ describe("Codex app-server mapping", () => {
               nextCursor: null,
             };
           }
-          if (method === "thread/name/set") return {};
+          if (method === "thread/archive") return {};
           return {};
         },
         notify: () => {},
@@ -3700,6 +3764,56 @@ describe("Codex app-server mapping", () => {
     }
   });
 
+  it("reports unsupported diagnostic for Codex session tag and delete", async () => {
+    for (const workflow of [
+      { type: "lilia_session_management", action: "tag", sessionId: "thread-target", tag: "release" },
+      { type: "lilia_session_management", action: "delete", sessionId: "thread-target" },
+    ]) {
+      const { protocol, json } = captureProtocol();
+      const calls: any[] = [];
+      const server = {
+        request: async (method: string, params: any) => {
+          calls.push({ method, params });
+          return {};
+        },
+        notify: () => {},
+        respond: () => {},
+        drainNotifications: () => [],
+        close: () => {},
+      };
+
+      await runCodexAppServer({
+        backend: "codex",
+        prompt: "",
+        permission: "ask",
+        workflow,
+      }, { mcpServers: [], warnings: [] }, {
+        protocol,
+        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+        emitToolConsentTimeline: () => {},
+        createCodexAppServer: () => server,
+        env: {},
+        cwd: () => "C:/repo",
+      });
+
+      expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+      expect(json()).toContainEqual(expect.objectContaining({
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "diagnostic",
+          status: "success",
+          payload: expect.objectContaining({
+            backend: "codex",
+            subkind: "session_management",
+            action: workflow.action,
+            native: false,
+            result: expect.objectContaining({ unsupported: true }),
+          }),
+        }),
+      }));
+    }
+  });
+
   it("updates Codex provider settings through thread settings", async () => {
     const { protocol, json } = captureProtocol();
     const calls: any[] = [];
@@ -3730,6 +3844,9 @@ describe("Codex app-server mapping", () => {
           permissionProfile: "readOnly",
           runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
           persistExtendedHistory: true,
+          environments: [{ id: "env-1" }],
+          experimentalRawEvents: true,
+          responsesApiClientMetadata: { surface: "lilia" },
         },
       },
     }, { mcpServers: [], warnings: [] }, {
@@ -3753,8 +3870,11 @@ describe("Codex app-server mapping", () => {
         permissions: ":read-only",
         approvalPolicy: "never",
         persistExtendedHistory: true,
+        environments: [{ id: "env-1" }],
+        experimentalRawEvents: true,
       },
     });
+    expect(updateCalls.at(-1)?.params.responsesapiClientMetadata).toEqual({ surface: "lilia" });
     expect(json()).toContainEqual(expect.objectContaining({
       type: "timeline",
       event: expect.objectContaining({
@@ -3770,6 +3890,52 @@ describe("Codex app-server mapping", () => {
       }),
     }));
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("falls back Codex provider settings advanced fields to turn start", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") throw new Error("settings update failed");
+        if (method === "turn/start") return { turnId: "turn-1" };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [
+        { method: "turn/completed", params: { threadId: "thread-1", turn: { status: "completed" } } },
+      ],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "hello",
+      permission: "ask",
+      codexSettings: {
+        environments: [{ id: "env-1" }],
+        experimentalRawEvents: true,
+        responsesApiClientMetadata: { surface: "lilia" },
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.find((call) => call.method === "turn/start")).toMatchObject({
+      params: {
+        environments: [{ id: "env-1" }],
+        experimentalRawEvents: true,
+        responsesapiClientMetadata: { surface: "lilia" },
+      },
+    });
   });
 
   it("rejects empty Codex provider settings update before turn start", async () => {
