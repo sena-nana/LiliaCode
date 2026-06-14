@@ -1,7 +1,6 @@
-import type { ComputedRef, Ref } from "vue";
+import type { ComputedRef } from "vue";
 import type {
   ChatAttachment,
-  ChatComposerState,
   ChatRuntimeCommand,
   ChatWorkflow,
   LiliaReviewTarget,
@@ -10,20 +9,24 @@ import type {
 import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import type { PendingAgentAction } from "../../composables/usePendingAgentActions";
 
+export interface LiliaWorkflowSendAgentMessageInput {
+  turn: {
+    content: string;
+    outgoingAttachments?: ChatAttachment[];
+    guideId?: string;
+    titleContent?: string;
+  };
+  workflow?: ChatWorkflow | null;
+  runtimeCommand?: ChatRuntimeCommand | null;
+  runtimeOptions?: ProviderRuntimeOptions | null;
+}
+
 export function useLiliaWorkflowActions(options: {
   hasContext: ComputedRef<boolean>;
-  composer: Ref<ChatComposerState | null>;
   isTurnRunning: Ref<boolean>;
   blockingPendingAgentActions: ComputedRef<PendingAgentAction[]>;
   attachments: Ref<ChatAttachment[]>;
-  sendAgentMessage: (
-    content: string,
-    outgoingAttachments?: ChatAttachment[],
-    guideId?: string,
-    workflow?: ChatWorkflow | null,
-    runtimeCommand?: ChatRuntimeCommand | null,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-  ) => Promise<void>;
+  sendAgentMessage: (input: LiliaWorkflowSendAgentMessageInput) => Promise<void>;
 }) {
   function canStartLiliaWorkflow() {
     return options.hasContext.value &&
@@ -39,7 +42,7 @@ export function useLiliaWorkflowActions(options: {
   ) {
     if (!canStartLiliaWorkflow()) return;
     try {
-      await options.sendAgentMessage(content, outgoingAttachments, undefined, workflow);
+      await options.sendAgentMessage({ turn: { content, outgoingAttachments }, workflow });
       if (clearComposerAttachments) options.attachments.value = [];
     } catch {
       return;
@@ -95,7 +98,13 @@ export function useLiliaWorkflowActions(options: {
   }
 
   async function onStartSessionFork() {
-    await options.sendAgentMessage("", [], undefined, null, { type: "lilia_session_fork", excludeTurns: true });
+    await options.sendAgentMessage({
+      turn: {
+        content: "",
+        outgoingAttachments: [],
+      },
+      runtimeCommand: { type: "lilia_session_fork", excludeTurns: true },
+    });
   }
 
   async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
@@ -139,7 +148,14 @@ export function useLiliaWorkflowActions(options: {
     runtimeCommand: Extract<ChatRuntimeCommand, { type: "lilia_provider_settings" }>,
     runtimeOptions?: ProviderRuntimeOptions | null,
   ) {
-    await options.sendAgentMessage("", [], undefined, null, runtimeCommand, runtimeOptions ?? null);
+    await options.sendAgentMessage({
+      turn: {
+        content: "",
+        outgoingAttachments: [],
+      },
+      runtimeCommand,
+      runtimeOptions: runtimeOptions ?? null,
+    });
   }
 
   return {

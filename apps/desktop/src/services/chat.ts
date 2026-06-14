@@ -153,27 +153,31 @@ export function cleanHistoryImportBackgroundTerminals(itemId: string): Promise<v
  * Agent 的过程与最终回复通过 agent timeline 异步推回。
  * projectCwd 决定 agent 能看到的文件树。
  */
-export function sendMessage(
-  taskId: string,
-  content: string,
-  composer: ChatComposerState,
-  projectCwd: string,
-  attachments: ChatAttachment[] = [],
-  guideId?: string,
-  workflow?: ChatWorkflow | null,
-  runtimeCommand?: ChatRuntimeCommand | null,
-  runtimeOptions?: ProviderRuntimeOptions | null,
-): Promise<ChatSendResult> {
+export interface SendMessageInput {
+  taskId: string;
+  turn: {
+    content: string;
+    composer: ChatComposerState;
+    projectCwd: string;
+    attachments?: ChatAttachment[];
+    guideId?: string | null;
+  };
+  workflow?: ChatWorkflow | null;
+  runtimeCommand?: ChatRuntimeCommand | null;
+  runtimeOptions?: ProviderRuntimeOptions | null;
+}
+
+export function sendMessage(input: SendMessageInput): Promise<ChatSendResult> {
   return invoke<ChatSendResult>("chat_send_message", {
-    taskId,
-    content,
-    composer,
-    projectCwd,
-    attachments,
-    guideId: guideId ?? null,
-    workflow: workflow ?? null,
-    runtimeCommand: runtimeCommand ?? null,
-    runtimeOptions: runtimeOptions ?? null,
+    taskId: input.taskId,
+    content: input.turn.content,
+    composer: input.turn.composer,
+    projectCwd: input.turn.projectCwd,
+    attachments: input.turn.attachments ?? [],
+    guideId: input.turn.guideId ?? null,
+    workflow: input.workflow ?? null,
+    runtimeCommand: input.runtimeCommand ?? null,
+    runtimeOptions: input.runtimeOptions ?? null,
   });
 }
 
