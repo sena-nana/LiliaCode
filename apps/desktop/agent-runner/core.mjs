@@ -16,6 +16,7 @@ export const EMPTY_PROMPT_LILIA_WORKFLOWS = new Set([
   "lilia_memory_mode",
   "lilia_memory_reset",
   "lilia_session_fork",
+  "lilia_session_management",
   "lilia_config_diagnostics",
   "lilia_provider_settings",
 ]);

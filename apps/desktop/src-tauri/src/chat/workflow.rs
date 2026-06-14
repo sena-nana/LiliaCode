@@ -11,6 +11,7 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<&'static 
         ChatWorkflow::LiliaMemoryMode { .. } => Some("lilia_memory_mode"),
         ChatWorkflow::LiliaMemoryReset => Some("lilia_memory_reset"),
         ChatWorkflow::LiliaSessionFork { .. } => Some("lilia_session_fork"),
+        ChatWorkflow::LiliaSessionManagement { .. } => Some("lilia_session_management"),
         ChatWorkflow::LiliaConfigDiagnostics { .. } => Some("lilia_config_diagnostics"),
         ChatWorkflow::LiliaProviderSettings { .. } => Some("lilia_provider_settings"),
         ChatWorkflow::Automation { .. } => Some("automation"),
@@ -36,6 +37,7 @@ pub(crate) fn parse_workflow_kind(value: &str) -> Option<&'static str> {
         "lilia_memory_mode" => Some("lilia_memory_mode"),
         "lilia_memory_reset" => Some("lilia_memory_reset"),
         "lilia_session_fork" => Some("lilia_session_fork"),
+        "lilia_session_management" => Some("lilia_session_management"),
         "lilia_config_diagnostics" => Some("lilia_config_diagnostics"),
         "lilia_provider_settings" => Some("lilia_provider_settings"),
         "automation" => Some("automation"),
@@ -62,8 +64,24 @@ mod tests {
             Some("lilia_session_fork")
         );
         assert_eq!(
+            workflow_kind(Some(&ChatWorkflow::LiliaSessionManagement {
+                action: "list".to_string(),
+                session_id: None,
+                title: None,
+                limit: None,
+                cursor: None,
+                search_term: None,
+                include_system_messages: None,
+            })),
+            Some("lilia_session_management")
+        );
+        assert_eq!(
             parse_workflow_kind("lilia_session_fork"),
             Some("lilia_session_fork")
+        );
+        assert_eq!(
+            parse_workflow_kind("lilia_session_management"),
+            Some("lilia_session_management")
         );
         assert_eq!(workflow_kind(None), None);
     }

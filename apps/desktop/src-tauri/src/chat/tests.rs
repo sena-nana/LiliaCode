@@ -621,6 +621,15 @@ mod agent_event_sink_tests {
             ChatWorkflow::LiliaSessionFork {
                 exclude_turns: Some(true),
             },
+            ChatWorkflow::LiliaSessionManagement {
+                action: "list".to_string(),
+                session_id: None,
+                title: None,
+                limit: Some(20),
+                cursor: None,
+                search_term: None,
+                include_system_messages: None,
+            },
             ChatWorkflow::LiliaConfigDiagnostics {
                 include_layers: Some(true),
             },
@@ -718,6 +727,47 @@ mod agent_event_sink_tests {
         let fork_json = serde_json::to_value(&fork).unwrap();
         assert_eq!(fork_json["excludeTurns"], json!(false));
         assert!(fork_json.get("exclude_turns").is_none());
+
+        let session_management = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_session_management",
+            "action": "messages",
+            "sessionId": "thread-1",
+            "title": "新标题",
+            "limit": 20,
+            "cursor": "cursor-1",
+            "searchTerm": "bug",
+            "includeSystemMessages": true,
+        }))
+        .unwrap();
+        let ChatWorkflow::LiliaSessionManagement {
+            action,
+            session_id,
+            title,
+            limit,
+            cursor,
+            search_term,
+            include_system_messages,
+        } = &session_management
+        else {
+            panic!("unexpected workflow: {session_management:?}");
+        };
+        assert_eq!(action, "messages");
+        assert_eq!(session_id.as_deref(), Some("thread-1"));
+        assert_eq!(title.as_deref(), Some("新标题"));
+        assert_eq!(*limit, Some(20));
+        assert_eq!(cursor.as_deref(), Some("cursor-1"));
+        assert_eq!(search_term.as_deref(), Some("bug"));
+        assert_eq!(*include_system_messages, Some(true));
+        let session_management_json = serde_json::to_value(&session_management).unwrap();
+        assert_eq!(session_management_json["type"], json!("lilia_session_management"));
+        assert_eq!(session_management_json["sessionId"], json!("thread-1"));
+        assert_eq!(session_management_json["searchTerm"], json!("bug"));
+        assert_eq!(
+            session_management_json["includeSystemMessages"],
+            json!(true)
+        );
+        assert!(session_management_json.get("session_id").is_none());
+        assert!(session_management_json.get("search_term").is_none());
 
         let diagnostics = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "lilia_config_diagnostics",
@@ -984,6 +1034,50 @@ mod agent_event_sink_tests {
             json!(["C:/repo"])
         );
         assert_eq!(payload["workflow"]["codex"]["persistExtendedHistory"], json!(true));
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_lilia_session_management_workflow() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            plan_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let workflow = serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_session_management",
+            "action": "rename",
+            "sessionId": "thread-1",
+            "title": "新标题",
+            "limit": 20,
+            "cursor": "cursor-1",
+            "searchTerm": "bug",
+            "includeSystemMessages": true,
+        }))
+        .unwrap();
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "",
+            &[],
+            Some(&workflow),
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["prompt"], json!(""));
+        assert_eq!(payload["workflow"]["type"], json!("lilia_session_management"));
+        assert_eq!(payload["workflow"]["action"], json!("rename"));
+        assert_eq!(payload["workflow"]["sessionId"], json!("thread-1"));
+        assert_eq!(payload["workflow"]["title"], json!("新标题"));
+        assert_eq!(payload["workflow"]["searchTerm"], json!("bug"));
+        assert_eq!(payload["workflow"]["includeSystemMessages"], json!(true));
+        assert!(payload["workflow"].get("session_id").is_none());
     }
 
     #[test]

@@ -829,6 +829,7 @@ pub(crate) fn should_persist_user_message(content: &str, workflow: &Option<ChatW
             | Some(ChatWorkflow::LiliaMemoryMode { .. })
             | Some(ChatWorkflow::LiliaMemoryReset)
             | Some(ChatWorkflow::LiliaSessionFork { .. })
+            | Some(ChatWorkflow::LiliaSessionManagement { .. })
             | Some(ChatWorkflow::LiliaConfigDiagnostics { .. })
             | Some(ChatWorkflow::LiliaProviderSettings { .. })
             | Some(ChatWorkflow::SlashCommand { .. })

@@ -137,6 +137,19 @@ export interface LiliaSessionForkWorkflow {
   excludeTurns?: boolean;
 }
 
+export type LiliaSessionManagementAction = "list" | "info" | "messages" | "rename";
+
+export interface LiliaSessionManagementWorkflow {
+  type: "lilia_session_management";
+  action: LiliaSessionManagementAction;
+  sessionId?: string;
+  title?: string;
+  limit?: number;
+  cursor?: string;
+  searchTerm?: string;
+  includeSystemMessages?: boolean;
+}
+
 export interface LiliaConfigDiagnosticsWorkflow {
   type: "lilia_config_diagnostics";
   includeLayers?: boolean;
@@ -204,6 +217,7 @@ export type ChatWorkflow =
   | LiliaMemoryModeWorkflow
   | LiliaMemoryResetWorkflow
   | LiliaSessionForkWorkflow
+  | LiliaSessionManagementWorkflow
   | LiliaConfigDiagnosticsWorkflow
   | LiliaProviderSettingsWorkflow
   | AutomationRunWorkflow

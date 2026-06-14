@@ -58,6 +58,9 @@ import {
   searchClaudeSessions,
   syncClaudeSessionHistoryForTask,
 } from "../agent-runner/claude/history.mjs";
+import {
+  runClaudeSessionManagementWorkflow,
+} from "../agent-runner/sessionManagement.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(join(testsDir, "..", "agent-runner.mjs"), "utf8");
@@ -344,6 +347,7 @@ describe("runner core", () => {
       { type: "lilia_memory_mode", mode: "enabled" },
       { type: "lilia_memory_reset" },
       { type: "lilia_session_fork" },
+      { type: "lilia_session_management", action: "list" },
       { type: "lilia_config_diagnostics" },
       { type: "lilia_provider_settings", action: "diagnose" },
     ]) {
@@ -1016,6 +1020,118 @@ describe("Claude helpers", () => {
         kind: "diagnostic",
         status: "error",
         title: "Claude session fork failed",
+      }),
+    }));
+  });
+
+  it("handles Claude session management through SDK session APIs", async () => {
+    for (const workflow of [
+      { type: "lilia_session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
+      { type: "lilia_session_management", action: "info", sessionId: "claude-session-1" },
+      {
+        type: "lilia_session_management",
+        action: "messages",
+        sessionId: "claude-session-1",
+        limit: 3,
+        cursor: "2",
+        includeSystemMessages: true,
+      },
+      { type: "lilia_session_management", action: "rename", sessionId: "claude-session-1", title: "新标题" },
+    ]) {
+      const { protocol, json } = captureProtocol();
+      const calls: any[] = [];
+
+      await runClaudeSessionManagementWorkflow({
+        cwd: "C:/repo",
+        prompt: "",
+        resumeSessionId: "claude-current",
+        workflow,
+      }, {
+        protocol,
+        listClaudeSessions: async (options: any) => {
+          calls.push({ method: "listSessions", options });
+          return [{
+            sessionId: "claude-session-1",
+            summary: "Fix flow",
+            lastModified: 10,
+            cwd: "C:/repo",
+          }];
+        },
+        getClaudeSessionInfo: async (sessionId: string, options: any) => {
+          calls.push({ method: "getSessionInfo", sessionId, options });
+          return { sessionId, summary: "Session info", lastModified: 11 };
+        },
+        getClaudeSessionMessages: async (sessionId: string, options: any) => {
+          calls.push({ method: "getSessionMessages", sessionId, options });
+          return [{
+            type: "user",
+            uuid: "msg-1",
+            message: { content: "用户问题" },
+          }];
+        },
+        renameClaudeSession: async (sessionId: string, title: string, options: any) => {
+          calls.push({ method: "renameSession", sessionId, title, options });
+        },
+      } as any, "C:/repo");
+
+      expect(calls[0]).toMatchObject({
+        method: workflow.action === "list"
+          ? "listSessions"
+          : workflow.action === "info"
+            ? "getSessionInfo"
+            : workflow.action === "messages"
+              ? "getSessionMessages"
+              : "renameSession",
+      });
+      expect(json()).toContainEqual(expect.objectContaining({
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "diagnostic",
+          status: "success",
+          payload: expect.objectContaining({
+            backend: "claude",
+            subkind: "session_management",
+            action: workflow.action,
+            native: true,
+          }),
+        }),
+      }));
+      expect(json().some((line) =>
+        line.type === "done" &&
+        line.sessionId === (workflow.sessionId || "claude-current")
+      )).toBe(true);
+    }
+  });
+
+  it("reports unsupported diagnostic when Claude session rename API is unavailable", async () => {
+    const { protocol, json } = captureProtocol();
+
+    await expect(runClaudeSessionManagementWorkflow({
+      cwd: "C:/repo",
+      prompt: "",
+      workflow: {
+        type: "lilia_session_management",
+        action: "rename",
+        sessionId: "claude-session-1",
+        title: "新标题",
+      },
+    }, {
+      protocol,
+      renameClaudeSession: null,
+    } as any, "C:/repo")).rejects.toThrow("Claude SDK renameSession is not available");
+
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "session_management",
+          action: "rename",
+          native: false,
+          error: "Claude SDK renameSession is not available",
+        }),
       }),
     }));
   });
@@ -3498,6 +3614,90 @@ describe("Codex app-server mapping", () => {
       line.event.payload.requirements?.allowedApprovalsReviewers?.[0] === "user"
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
+    for (const workflow of [
+      { type: "lilia_session_management", action: "list", searchTerm: "fix", limit: 10 },
+      { type: "lilia_session_management", action: "info", sessionId: "thread-target" },
+      { type: "lilia_session_management", action: "messages", sessionId: "thread-target", limit: 5 },
+      { type: "lilia_session_management", action: "rename", sessionId: "thread-target", title: "新标题" },
+    ]) {
+      const { protocol, json } = captureProtocol();
+      const calls: any[] = [];
+      const server = {
+        request: async (method: string, params: any) => {
+          calls.push({ method, params });
+          if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+          if (method === "thread/search") {
+            return {
+              data: [{
+                id: "thread-target",
+                title: "Fix flow",
+                updatedAt: 10,
+              }],
+              nextCursor: "next-1",
+            };
+          }
+          if (method === "thread/turns/list") {
+            return {
+              data: [{
+                id: "turn-1",
+                items: [{
+                  type: "userMessage",
+                  id: "msg-1",
+                  text: "用户问题",
+                }, {
+                  type: "agentMessage",
+                  id: "msg-2",
+                  text: "助手回答",
+                }],
+              }],
+              nextCursor: null,
+            };
+          }
+          if (method === "thread/name/set") return {};
+          return {};
+        },
+        notify: () => {},
+        respond: () => {},
+        drainNotifications: () => [],
+        close: () => {},
+      };
+
+      await runCodexAppServer({
+        backend: "codex",
+        prompt: "",
+        permission: "ask",
+        workflow,
+      }, { mcpServers: [], warnings: [] }, {
+        protocol,
+        interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+        emitToolConsentTimeline: () => {},
+        createCodexAppServer: () => server,
+        env: {},
+        cwd: () => "C:/repo",
+      });
+
+      expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+      expect(json()).toContainEqual(expect.objectContaining({
+        type: "timeline",
+        event: expect.objectContaining({
+          kind: "diagnostic",
+          status: "success",
+          payload: expect.objectContaining({
+            backend: "codex",
+            subkind: "session_management",
+            action: workflow.action,
+            native: true,
+          }),
+        }),
+      }));
+      expect(json().some((line) =>
+        line.type === "done" &&
+        line.sessionId === (workflow.sessionId || null)
+      )).toBe(true);
+    }
   });
 
   it("updates Codex provider settings through thread settings", async () => {
