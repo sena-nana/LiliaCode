@@ -24,10 +24,11 @@ import {
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
-import { codexPermissionProfileId } from "./settings.mjs";
 import {
+  codexPermissionProfileIdForMode,
   mapCodexApprovalPolicy,
   mapCodexSandboxMode,
+  mapCodexSandboxPolicy,
   maybeHandleCodexApprovalRequest,
 } from "./permissions.mjs";
 import {
@@ -92,14 +93,11 @@ function booleanOrNull(value) {
 
 function normalizeCodexSettings(cmd) {
   const input = isRecord(cmd.codexSettings) ? cmd.codexSettings : {};
-  const permissions = isRecord(input.permissions) ? input.permissions : {};
-  const permissionProfile = stringOrNull(permissions.profile);
   return {
     profile: stringOrNull(input.profile) || "default",
     model: stringOrNull(input.model) || stringOrNull(cmd.model) || null,
     reasoningEffort: stringOrNull(input.reasoningEffort),
     runtimeWorkspaceRoots: stringArray(input.runtimeWorkspaceRoots),
-    permissionProfile: codexPermissionProfileId(permissionProfile),
     responsesApiClientMetadata: jsonObjectOrNull(input.responsesApiClientMetadata),
     environments: jsonArrayOrNull(input.environments),
     experimentalRawEvents: booleanOrNull(input.experimentalRawEvents),
@@ -107,14 +105,7 @@ function normalizeCodexSettings(cmd) {
     persistExtendedHistory: booleanOrNull(input.persistExtendedHistory),
     initialTurnsPage: jsonObjectOrNull(input.initialTurnsPage),
     excludeTurns: stringArray(input.excludeTurns),
-    commandExecPermissionProfile: codexPermissionProfileId(input.commandExecPermissionProfile),
   };
-}
-
-function codexSandboxPolicy(permission) {
-  if (permission === "full") return { type: "dangerFullAccess" };
-  if (permission === "readonly") return { type: "readOnly" };
-  return { type: "workspaceWrite" };
 }
 
 function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = false } = {}) {
@@ -126,10 +117,9 @@ function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = fal
   if (settings.runtimeWorkspaceRoots.length > 0) {
     params.runtimeWorkspaceRoots = settings.runtimeWorkspaceRoots;
   }
-  if (settings.permissionProfile) {
-    params.permissions = settings.permissionProfile;
-  } else if (includeSandbox) {
-    params.sandboxPolicy = codexSandboxPolicy(cmd.permission);
+  if (includeSandbox) {
+    params.permissions = codexPermissionProfileIdForMode(cmd.permission);
+    params.sandboxPolicy = mapCodexSandboxPolicy(cmd.permission);
   }
 }
 
@@ -310,7 +300,7 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   };
   assignCodexSettingsParams(common, settings, cmd);
   assignCodexAdvancedThreadParams(common, settings);
-  if (!settings.permissionProfile) common.sandbox = mapCodexSandboxMode(permission);
+  common.sandbox = mapCodexSandboxMode(permission);
   const dynamicTools = [codexAskUserDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
@@ -441,17 +431,10 @@ function readCodexBatchApplyWorkflow(cmd) {
 function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
   if (workflow.mode !== "suggest") return cmd;
   const codexSettings = isRecord(cmd?.codexSettings) ? { ...cmd.codexSettings } : {};
-  const permissions = isRecord(codexSettings.permissions)
-    ? { ...codexSettings.permissions }
-    : {};
-  permissions.profile = "readOnly";
   return {
     ...cmd,
     permission: "readonly",
-    codexSettings: {
-      ...codexSettings,
-      permissions,
-    },
+    codexSettings,
   };
 }
 
@@ -545,7 +528,6 @@ function readCodexProviderSettingsWorkflow(cmd) {
   const permission = normalizeRuntimePermission(common.permission);
   const profile = stringOrNull(codex.profile)?.trim();
   const reasoningEffort = stringOrNull(codex.reasoningEffort)?.trim();
-  const permissionProfile = stringOrNull(codex.permissionProfile)?.trim();
   const runtimeWorkspaceRoots = stringArray(codex.runtimeWorkspaceRoots);
   const environments = jsonArrayOrNull(codex.environments);
   const responsesApiClientMetadata = jsonObjectOrNull(codex.responsesApiClientMetadata);
@@ -554,7 +536,6 @@ function readCodexProviderSettingsWorkflow(cmd) {
   if (permission) updates.permission = permission;
   if (profile) updates.profile = profile;
   if (reasoningEffort) updates.reasoningEffort = reasoningEffort;
-  if (permissionProfile) updates.permissionProfile = permissionProfile;
   if (runtimeWorkspaceRoots.length > 0) updates.runtimeWorkspaceRoots = runtimeWorkspaceRoots;
   if (hasOwn(codex, "persistExtendedHistory")) {
     updates.persistExtendedHistory = codex.persistExtendedHistory === true;
@@ -589,12 +570,6 @@ function codexSettingsCmdFromProviderWorkflow(cmd, workflow) {
   }
   if (workflow.updates.reasoningEffort) {
     next.codexSettings.reasoningEffort = workflow.updates.reasoningEffort;
-  }
-  if (workflow.updates.permissionProfile) {
-    next.codexSettings.permissions = {
-      ...(isRecord(next.codexSettings.permissions) ? next.codexSettings.permissions : {}),
-      profile: workflow.updates.permissionProfile,
-    };
   }
   if (workflow.updates.runtimeWorkspaceRoots) {
     next.codexSettings.runtimeWorkspaceRoots = workflow.updates.runtimeWorkspaceRoots;
@@ -754,11 +729,37 @@ function readCollaborationModes(result) {
 }
 
 export async function readCodexPlanModePreset(server) {
+  let result;
   try {
-    const result = await server.request("collaborationMode/list", {});
-    return readCollaborationModes(result).find((mode) => mode.mode === "plan") || null;
+    result = await server.request("collaborationMode/list", {});
   } catch (err) {
-    return null;
+    throw new Error(`Codex plan mode unavailable: collaborationMode/list failed: ${err?.message || String(err)}`);
+  }
+  const preset = readCollaborationModes(result).find((mode) => mode.mode === "plan") || null;
+  if (!preset) {
+    throw new Error("Codex plan mode unavailable: plan collaboration preset is missing");
+  }
+  return preset;
+}
+
+async function requireCodexPlanModePreset(server, protocol, sourceId = "codex:plan-mode") {
+  try {
+    return await readCodexPlanModePreset(server);
+  } catch (err) {
+    protocol?.emitTimeline?.({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex plan mode unavailable",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "plan_mode",
+        method: "collaborationMode/list",
+        error: err?.message || String(err),
+      },
+      sourceId,
+    });
+    throw err;
   }
 }
 
@@ -1133,7 +1134,11 @@ async function runCodexBatchApplyWorkflow(server, threadId, cmd, ctx, cwdFn = pr
     cwd: cmd.cwd || cwdFn(),
   });
   const selectedModel = normalizeCodexSettings(cmd).model || ctx.selectedModel || null;
-  const planPreset = await readCodexPlanModePreset(server);
+  const planPreset = await requireCodexPlanModePreset(
+    server,
+    ctx.protocol,
+    `codex:batch-apply:plan-mode:${threadId}:${workflow.sourceTurnId}`,
+  );
   emitCodexDiagnostic(ctx, {
     status: "started",
     title: "Codex batch apply started",
@@ -1574,12 +1579,23 @@ function codexGrantedPermissions(value) {
 }
 
 function codexPermissionApprovalResponse(result) {
+  const permissions = codexGrantedPermissions(result?.permissions);
+  const action =
+    result?.action === "approve" || result?.action === "decline" || result?.action === "cancel"
+      ? result.action
+      : result?.strictAutoReview === true
+        ? "cancel"
+        : Object.keys(permissions).length > 0
+          ? "approve"
+          : "decline";
   return {
-    permissions: codexGrantedPermissions(result?.permissions),
+    permissions: action === "approve" ? permissions : {},
     scope: result?.scope === "session" ? "session" : "turn",
-    ...(typeof result?.strictAutoReview === "boolean"
-      ? { strictAutoReview: result.strictAutoReview }
-      : {}),
+    ...(action !== "approve"
+      ? { strictAutoReview: true }
+      : typeof result?.strictAutoReview === "boolean"
+        ? { strictAutoReview: result.strictAutoReview }
+        : {}),
   };
 }
 
@@ -1587,7 +1603,7 @@ async function requestCodexRuntimeInteraction(ctx, kind, payload) {
   if (!ctx?.interactions?.requestCodexInteraction) {
     return kind === "mcp_elicitation"
       ? { action: "cancel", content: null, _meta: null }
-      : { permissions: {}, scope: "turn", strictAutoReview: true };
+      : { action: "cancel", permissions: {}, scope: "turn", strictAutoReview: true };
   }
   return runCodexUiInteraction(ctx, kind, () =>
     ctx.interactions.requestCodexInteraction(kind, payload));
@@ -1783,7 +1799,6 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     );
     await syncCodexThreadHistory(server, threadId, cmd, context.protocol);
     const selectedModel = normalizeCodexSettings(cmd).model || session.model || null;
-    const planPreset = cmd.planMode === true ? await readCodexPlanModePreset(server) : null;
     const ctx = createCodexRunContext(cmd, context.protocol, threadId);
     ctx.cmd = cmd;
     ctx.selectedModel = selectedModel;
@@ -1820,6 +1835,9 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         }),
       );
     });
+    const planPreset = cmd.planMode === true
+      ? await requireCodexPlanModePreset(server, context.protocol)
+      : null;
     if (await runCodexWorkflowIfPresent(
       server,
       threadId,

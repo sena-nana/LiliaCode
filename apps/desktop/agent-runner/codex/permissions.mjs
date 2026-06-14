@@ -19,8 +19,20 @@ export function mapCodexPermission(p) {
   }
 }
 
+export function codexPermissionProfileIdForMode(permission) {
+  if (permission === "full") return codexPermissionProfileId("dangerFullAccess");
+  if (permission === "readonly") return codexPermissionProfileId("readOnly");
+  return codexPermissionProfileId("workspaceWrite");
+}
+
 export function mapCodexSandboxMode(permission) {
   return mapCodexPermission(permission).sandboxMode;
+}
+
+export function mapCodexSandboxPolicy(permission) {
+  if (permission === "full") return { type: "dangerFullAccess" };
+  if (permission === "readonly") return { type: "readOnly" };
+  return { type: "workspaceWrite" };
 }
 
 export function mapCodexApprovalPolicy(permission) {
@@ -153,9 +165,7 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
           server,
           edit,
           payload.cwd,
-          codexPermissionProfileId(ctx?.cmd?.codexSettings?.commandExecPermissionProfile, {
-            allowAppServerId: true,
-          }),
+          codexPermissionProfileIdForMode(ctx?.executionPermission),
         );
         emitLiliaEditedCommandTimeline(ctx, payload, edit, result, result.exitCode === 0 ? "success" : "error");
         server.respond(msg.id, { decision: codexCancelDecision(payload.availableDecisions) });

@@ -11,8 +11,8 @@ use super::credentials::{
     assistant_ai_account, has_secret, normalize_secret, provider_account, read_secret, write_secret,
 };
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, CCSwitchConfig, CodexControlledPermissions,
-    CodexProfileSettings, ProviderConfig,
+    AgentInteractionSettings, AssistantAIConfig, CCSwitchConfig, CodexProfileSettings,
+    ProviderConfig,
 };
 
 pub(crate) const CC_SWITCH_DEFAULT_URL: &str = "http://127.0.0.1:15721";
@@ -249,12 +249,6 @@ pub(crate) fn normalize_codex_profile_settings(
         runtime_workspace_roots: normalize_runtime_workspace_roots(
             settings.runtime_workspace_roots,
         ),
-        permissions: CodexControlledPermissions {
-            profile: match settings.permissions.profile.as_str() {
-                "readOnly" | "workspaceWrite" | "dangerFullAccess" => settings.permissions.profile,
-                _ => "default".to_string(),
-            },
-        },
         responses_api_client_metadata: normalize_json_object(
             settings.responses_api_client_metadata,
         ),
@@ -262,9 +256,6 @@ pub(crate) fn normalize_codex_profile_settings(
         persist_extended_history: settings.persist_extended_history,
         initial_turns_page: normalize_json_object(settings.initial_turns_page),
         exclude_turns: normalize_string_list(settings.exclude_turns),
-        command_exec_permission_profile: normalize_optional_permission_profile(
-            settings.command_exec_permission_profile,
-        ),
     }
 }
 
@@ -310,14 +301,6 @@ pub(crate) fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     normalized
 }
 
-pub(crate) fn normalize_optional_permission_profile(value: Option<String>) -> Option<String> {
-    let value = normalize_optional_string(value)?;
-    match value.as_str() {
-        "default" | "readOnly" | "workspaceWrite" | "dangerFullAccess" => Some(value),
-        _ => None,
-    }
-}
-
 pub(crate) fn load_router_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> String {
     let key = router_key_for_backend(normalize_backend(backend)).unwrap_or(ROUTER_KEY_CLAUDE);
     load_store_value::<String, _>(app, key)
@@ -341,15 +324,11 @@ mod tests {
                 "C:/repo".to_string(),
                 "D:/shared".to_string(),
             ],
-            permissions: CodexControlledPermissions {
-                profile: "{\"fileSystem\":true}".to_string(),
-            },
             responses_api_client_metadata: Some(serde_json::json!({ "surface": "lilia" })),
             additional_context: Some("  extra context  ".to_string()),
             persist_extended_history: Some(true),
             initial_turns_page: Some(serde_json::json!([])),
             exclude_turns: vec![" turn-1 ".to_string(), "turn-1".to_string(), "".to_string()],
-            command_exec_permission_profile: Some("workspaceWrite".to_string()),
         });
 
         assert_eq!(normalized.profile, "default");
@@ -359,7 +338,6 @@ mod tests {
             normalized.runtime_workspace_roots,
             vec!["C:/repo", "D:/shared"]
         );
-        assert_eq!(normalized.permissions.profile, "default");
         assert_eq!(
             normalized.responses_api_client_metadata,
             Some(serde_json::json!({ "surface": "lilia" }))
@@ -371,10 +349,6 @@ mod tests {
         assert_eq!(normalized.persist_extended_history, Some(true));
         assert_eq!(normalized.initial_turns_page, None);
         assert_eq!(normalized.exclude_turns, vec!["turn-1"]);
-        assert_eq!(
-            normalized.command_exec_permission_profile.as_deref(),
-            Some("workspaceWrite")
-        );
     }
 
     #[test]

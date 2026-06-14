@@ -17,7 +17,12 @@ import { createLiliaAskUserServer, runClaude } from "../agent-runner/claude/runC
 import {
   createConversationContextHandler,
 } from "../agent-runner/conversationContext.mjs";
-import { maybeHandleCodexApprovalRequest } from "../agent-runner/codex/permissions.mjs";
+import {
+  codexPermissionProfileIdForMode,
+  mapCodexApprovalPolicy,
+  mapCodexSandboxMode,
+  maybeHandleCodexApprovalRequest,
+} from "../agent-runner/codex/permissions.mjs";
 import {
   codexHistoryTimelineEvents,
   createCodexRunContext,
@@ -1589,6 +1594,20 @@ describe("Claude helpers", () => {
 });
 
 describe("Codex app-server mapping", () => {
+  it("derives Codex permission profile from Lilia permission mode", () => {
+    expect(mapCodexApprovalPolicy("full")).toBe("never");
+    expect(mapCodexSandboxMode("full")).toBe("danger-full-access");
+    expect(codexPermissionProfileIdForMode("full")).toBe(":danger-no-sandbox");
+
+    expect(mapCodexApprovalPolicy("ask")).toBe("on-request");
+    expect(mapCodexSandboxMode("ask")).toBe("workspace-write");
+    expect(codexPermissionProfileIdForMode("ask")).toBe(":workspace");
+
+    expect(mapCodexApprovalPolicy("readonly")).toBe("never");
+    expect(mapCodexSandboxMode("readonly")).toBe("read-only");
+    expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
+  });
+
   it("serializes Codex app-server request params, including null for no-arg methods", async () => {
     const writes: string[] = [];
     const stdout = new PassThrough();
@@ -2416,11 +2435,7 @@ describe("Codex app-server mapping", () => {
         protocol,
         threadId: "thread-1",
         currentTurnId: "turn-1",
-        cmd: {
-          codexSettings: {
-            commandExecPermissionProfile: "workspaceWrite",
-          },
-        },
+        executionPermission: "ask",
         interactions: {
           requestUserConsent: async () => ({
             id: "consent-2",
@@ -2518,8 +2533,16 @@ describe("Codex app-server mapping", () => {
     );
 
     expect(calls).toEqual([
-      ["request", "command/exec", { command: "pnpm test --changed", cwd: undefined }],
-      ["request", "process/spawn", { command: "pnpm test --changed", cwd: undefined }],
+      ["request", "command/exec", {
+        command: "pnpm test --changed",
+        cwd: undefined,
+        permissionProfile: ":workspace",
+      }],
+      ["request", "process/spawn", {
+        command: "pnpm test --changed",
+        cwd: undefined,
+        permissionProfile: ":workspace",
+      }],
       ["respond", "approval-rpc-4", { decision: "decline" }],
     ]);
     expect(json()).toEqual([
@@ -2774,13 +2797,11 @@ describe("Codex app-server mapping", () => {
         model: "gpt-5.4-mini",
         reasoningEffort: "high",
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-        permissions: { profile: "workspaceWrite" },
         responsesApiClientMetadata: { surface: "lilia-test" },
         additionalContext: "extra context",
         persistExtendedHistory: true,
         initialTurnsPage: { limit: 20 },
         excludeTurns: ["turn-old", "turn-old", ""],
-        commandExecPermissionProfile: "workspaceWrite",
       },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
@@ -2997,7 +3018,7 @@ describe("Codex app-server mapping", () => {
     const turnStart = calls.find((call) => call.method === "turn/start");
     expect(turnStart.params.approvalPolicy).toBe("never");
     expect(turnStart.params.permissions).toBe(":read-only");
-    expect(turnStart.params.sandboxPolicy).toBeUndefined();
+    expect(turnStart.params.sandboxPolicy).toEqual({ type: "readOnly" });
   });
 
   it("overrides Codex fix suggestion suggest mode permission profiles to read only", async () => {
@@ -3010,7 +3031,6 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       codexSettings: {
-        permissions: { profile: "dangerFullAccess" },
         runtimeWorkspaceRoots: ["C:/repo"],
       },
       workflow: {
@@ -3208,7 +3228,7 @@ describe("Codex app-server mapping", () => {
     expect(turnStart.params.input[0].text).toContain("Target: commit:abc123");
     expect(turnStart.params.approvalPolicy).toBe("never");
     expect(turnStart.params.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
-    expect(turnStart.params.permissions).toBeUndefined();
+    expect(turnStart.params.permissions).toBe(":danger-no-sandbox");
   });
 
   it("uses uncommitted target prompt for Codex fix suggestion workflow", async () => {
@@ -3576,7 +3596,6 @@ describe("Codex app-server mapping", () => {
       codexSettings: {
         model: "gpt-5.5",
         runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-        permissions: { profile: "workspaceWrite" },
       },
       workflow: { type: "lilia_session_fork" },
     }, { mcpServers: [], warnings: [] }, {
@@ -3841,7 +3860,6 @@ describe("Codex app-server mapping", () => {
         codex: {
           profile: "deep",
           reasoningEffort: "high",
-          permissionProfile: "readOnly",
           runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
           persistExtendedHistory: true,
           environments: [{ id: "env-1" }],
@@ -4185,7 +4203,6 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       codexSettings: {
         runtimeWorkspaceRoots: ["C:/repo"],
-        permissions: { profile: "readOnly" },
       },
     }, protocol);
 
@@ -4195,7 +4212,7 @@ describe("Codex app-server mapping", () => {
       params: {
         threadId: "thread-1",
         runtimeWorkspaceRoots: ["C:/repo"],
-        permissions: ":read-only",
+        permissions: ":workspace",
       },
     });
     expect(json()).toEqual([
@@ -4373,7 +4390,9 @@ describe("Codex app-server mapping", () => {
     const server = {
       request: async (method: string) => {
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
-        if (method === "collaborationMode/list") return { data: [] };
+        if (method === "collaborationMode/list") {
+          return { data: [{ name: "plan", mode: "plan", reasoning_effort: "medium" }] };
+        }
         if (method === "turn/start") {
           turnStarts += 1;
           return { turn: { id: `turn-${turnStarts}` } };
@@ -4648,7 +4667,9 @@ describe("Codex app-server mapping", () => {
       request: async (method: string, params: any) => {
         calls.push({ type: "server", method, params });
         if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
-        if (method === "collaborationMode/list") return { data: [] };
+        if (method === "collaborationMode/list") {
+          return { data: [{ name: "plan", mode: "plan", reasoning_effort: "medium" }] };
+        }
         if (method === "turn/start") {
           turnStarts += 1;
           return { turn: { id: `turn-${turnStarts}` } };
@@ -4727,6 +4748,39 @@ describe("Codex app-server mapping", () => {
       line.event.payload.revisionRequest === "先补充回滚方案"
     )).toBe(true);
     expect(json().some((line) => line.type === "user_message")).toBe(false);
+  });
+
+  it("Codex plan mode fails before turn/start when plan preset is missing", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
+        if (method === "collaborationMode/list") return { data: [] };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "请制定计划",
+      permission: "ask",
+      planMode: true,
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("plan collaboration preset is missing");
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
   });
 });
 

@@ -205,7 +205,6 @@ describe("chat AskUser bridge service", () => {
         model: null,
         reasoningEffort: null,
         runtimeWorkspaceRoots: [],
-        permissions: { profile: "default" },
       },
     });
 
@@ -223,7 +222,6 @@ describe("chat AskUser bridge service", () => {
         model: null,
         reasoningEffort: null,
         runtimeWorkspaceRoots: [],
-        permissions: { profile: "default" },
       },
     });
   });

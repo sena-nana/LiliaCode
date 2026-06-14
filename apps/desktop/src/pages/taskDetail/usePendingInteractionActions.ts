@@ -119,10 +119,12 @@ export function usePendingInteractionActions(options: {
           resolution.requestId,
           resolution.decision === "allow"
             ? {
+                action: "approve",
                 permissions: request.payload.permissions,
                 scope: "turn",
               }
             : {
+                action: "decline",
                 permissions: {},
                 scope: "turn",
                 strictAutoReview: true,

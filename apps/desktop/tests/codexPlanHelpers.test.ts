@@ -39,6 +39,17 @@ describe("Codex plan helpers", () => {
     });
   });
 
+  it("fails when plan collaboration preset is unavailable", async () => {
+    await expect(readCodexPlanModePreset({
+      request: async () => ({ data: [] }),
+    } as any)).rejects.toThrow("plan collaboration preset is missing");
+    await expect(readCodexPlanModePreset({
+      request: async () => {
+        throw new Error("unsupported");
+      },
+    } as any)).rejects.toThrow("collaborationMode/list failed");
+  });
+
   it("builds revision and execution prompts", () => {
     expect(buildCodexPlanRevisionPrompt("先补充回滚方案")).toContain("先补充回滚方案");
     expect(buildCodexPlanRevisionPrompt("先补充回滚方案")).toContain("不要执行文件修改或命令");

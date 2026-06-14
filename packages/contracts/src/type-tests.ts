@@ -209,7 +209,6 @@ export type LiliaProviderSettingsWorkflowTypeTest = Assert<
       codex: {
         profile: "deep";
         reasoningEffort: "high";
-        permissionProfile: "workspaceWrite";
         runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
         persistExtendedHistory: true;
         environments: [{ id: "env-1" }];
@@ -346,13 +345,11 @@ export type CodexProfileSettingsShapeTypeTest = Assert<
       model: "gpt-5.5";
       reasoningEffort: "high";
       runtimeWorkspaceRoots: ["C:/repo", "D:/shared"];
-      permissions: { profile: "workspaceWrite" };
       responsesApiClientMetadata: { surface: "lilia" };
       additionalContext: "本轮额外上下文";
       persistExtendedHistory: true;
       initialTurnsPage: { limit: 20 };
       excludeTurns: ["turn-old"];
-      commandExecPermissionProfile: "workspaceWrite";
     },
     CodexProfileSettings
   >
