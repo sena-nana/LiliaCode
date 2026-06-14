@@ -358,8 +358,6 @@ pub(crate) struct CodexComposerSettings {
     #[serde(default)]
     pub(crate) runtime_workspace_roots: Option<Vec<String>>,
     #[serde(default)]
-    pub(crate) permissions: Option<CodexComposerPermissions>,
-    #[serde(default)]
     pub(crate) responses_api_client_metadata: Option<JsonValue>,
     #[serde(default)]
     pub(crate) additional_context: Option<String>,
@@ -369,15 +367,6 @@ pub(crate) struct CodexComposerSettings {
     pub(crate) initial_turns_page: Option<JsonValue>,
     #[serde(default)]
     pub(crate) exclude_turns: Option<Vec<String>>,
-    #[serde(default)]
-    pub(crate) command_exec_permission_profile: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CodexComposerPermissions {
-    #[serde(default)]
-    pub(crate) profile: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

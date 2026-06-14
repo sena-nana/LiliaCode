@@ -559,7 +559,7 @@ mod agent_event_sink_tests {
         let payload = agent_interaction_response_payload(
             "permission-1".to_string(),
             "permission_approval".to_string(),
-            json!({ "permissions": {}, "scope": "turn" }),
+            json!({ "action": "cancel", "permissions": {}, "scope": "turn" }),
         );
 
         record_mutsuki_core_control_event(
@@ -799,7 +799,6 @@ mod agent_event_sink_tests {
             "codex": {
                 "profile": "deep",
                 "reasoningEffort": "high",
-                "permissionProfile": "workspaceWrite",
                 "runtimeWorkspaceRoots": ["C:/repo"],
                 "persistExtendedHistory": true,
                 "environments": [{ "id": "env-1" }],

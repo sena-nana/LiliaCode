@@ -1113,22 +1113,6 @@ fn build_effective_codex_settings<R: Runtime>(
         .or_else(|| normalize_reasoning_effort(project.reasoning_effort.clone()))
         .or_else(|| normalize_reasoning_effort(global.reasoning_effort.clone()));
     let runtime_workspace_roots = effective_runtime_workspace_roots(local, &project, &global);
-    let permissions_profile = normalize_permission_profile(
-        local
-            .permissions
-            .as_ref()
-            .map(|permissions| permissions.profile.clone())
-            .or_else(|| {
-                let project_profile =
-                    normalize_permission_profile(Some(project.permissions.profile.clone()));
-                if project_profile == "default" {
-                    None
-                } else {
-                    Some(project_profile)
-                }
-            })
-            .or_else(|| Some(global.permissions.profile.clone())),
-    );
     let responses_api_client_metadata =
         normalize_json_object(local.responses_api_client_metadata.clone())
             .or_else(|| normalize_json_object(project.responses_api_client_metadata.clone()))
@@ -1148,18 +1132,6 @@ fn build_effective_codex_settings<R: Runtime>(
         &project.exclude_turns,
         &global.exclude_turns,
     );
-    let command_exec_permission_profile =
-        normalize_optional_permission_profile(local.command_exec_permission_profile.clone())
-            .or_else(|| {
-                normalize_optional_permission_profile(
-                    project.command_exec_permission_profile.clone(),
-                )
-            })
-            .or_else(|| {
-                normalize_optional_permission_profile(
-                    global.command_exec_permission_profile.clone(),
-                )
-            });
     let profile = normalize_codex_settings_profile(local.profile.clone())
         .or_else(|| {
             let project_profile = normalize_codex_settings_profile(Some(project.profile));
@@ -1172,15 +1144,11 @@ fn build_effective_codex_settings<R: Runtime>(
         "model": model,
         "reasoningEffort": reasoning_effort,
         "runtimeWorkspaceRoots": runtime_workspace_roots,
-        "permissions": {
-            "profile": permissions_profile,
-        },
         "responsesApiClientMetadata": responses_api_client_metadata,
         "additionalContext": additional_context,
         "persistExtendedHistory": persist_extended_history,
         "initialTurnsPage": initial_turns_page,
         "excludeTurns": exclude_turns,
-        "commandExecPermissionProfile": command_exec_permission_profile,
     })
 }
 
@@ -1252,25 +1220,6 @@ fn normalize_string_list(values: Vec<String>) -> Vec<String> {
         normalized.push(trimmed.to_string());
     }
     normalized
-}
-
-fn normalize_permission_profile(value: Option<String>) -> String {
-    match normalize_optional_string(value).as_deref() {
-        Some("readOnly") => "readOnly".to_string(),
-        Some("workspaceWrite") => "workspaceWrite".to_string(),
-        Some("dangerFullAccess") => "dangerFullAccess".to_string(),
-        _ => "default".to_string(),
-    }
-}
-
-fn normalize_optional_permission_profile(value: Option<String>) -> Option<String> {
-    match normalize_optional_string(value).as_deref() {
-        Some("default") => Some("default".to_string()),
-        Some("readOnly") => Some("readOnly".to_string()),
-        Some("workspaceWrite") => Some("workspaceWrite".to_string()),
-        Some("dangerFullAccess") => Some("dangerFullAccess".to_string()),
-        _ => None,
-    }
 }
 
 fn normalize_codex_settings_profile(value: Option<String>) -> Option<String> {

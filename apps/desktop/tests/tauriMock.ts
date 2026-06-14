@@ -534,13 +534,11 @@ function defaultAgentInteractionSettings() {
       model: null,
       reasoningEffort: null,
       runtimeWorkspaceRoots: [] as string[],
-      permissions: { profile: "default" },
       responsesApiClientMetadata: null as Record<string, unknown> | null,
       additionalContext: null as string | null,
       persistExtendedHistory: null as boolean | null,
       initialTurnsPage: null as Record<string, unknown> | null,
       excludeTurns: [] as string[],
-      commandExecPermissionProfile: null as string | null,
     },
   };
 }
@@ -2506,7 +2504,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           persistExtendedHistory?: unknown;
           initialTurnsPage?: unknown;
           excludeTurns?: unknown;
-          commandExecPermissionProfile?: unknown;
         };
       } | undefined;
       const codexProfile = settings?.codexProfile;
@@ -2525,11 +2522,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           runtimeWorkspaceRoots: Array.isArray(codexProfile?.runtimeWorkspaceRoots)
             ? codexProfile.runtimeWorkspaceRoots.map(String)
             : [],
-          permissions: {
-            profile: typeof codexProfile?.permissions?.profile === "string"
-              ? codexProfile.permissions.profile
-              : "default",
-          },
           responsesApiClientMetadata: normalizeMockJsonObject(codexProfile?.responsesApiClientMetadata),
           additionalContext: typeof codexProfile?.additionalContext === "string" && codexProfile.additionalContext.trim()
             ? codexProfile.additionalContext.trim()
@@ -2539,9 +2531,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             : null,
           initialTurnsPage: normalizeMockJsonObject(codexProfile?.initialTurnsPage),
           excludeTurns: normalizeMockStringList(codexProfile?.excludeTurns),
-          commandExecPermissionProfile: typeof codexProfile?.commandExecPermissionProfile === "string"
-            ? codexProfile.commandExecPermissionProfile
-            : null,
         },
       };
       return undefined;

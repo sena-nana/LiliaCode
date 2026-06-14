@@ -172,7 +172,6 @@ export interface LiliaProviderSettingsCommon {
 export interface LiliaProviderSettingsCodex {
   profile?: string;
   reasoningEffort?: string;
-  permissionProfile?: string;
   runtimeWorkspaceRoots?: string[];
   persistExtendedHistory?: boolean;
   environments?: unknown[];

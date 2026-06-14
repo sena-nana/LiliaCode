@@ -20,20 +20,6 @@ fn default_agent_runtime_channel() -> String {
     crate::RUNTIME_CHANNEL_BUILTIN.to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CodexControlledPermissions {
-    pub(crate) profile: String,
-}
-
-impl Default for CodexControlledPermissions {
-    fn default() -> Self {
-        Self {
-            profile: "default".to_string(),
-        }
-    }
-}
-
 fn default_codex_profile_name() -> String {
     "default".to_string()
 }
@@ -50,8 +36,6 @@ pub(crate) struct CodexProfileSettings {
     #[serde(default)]
     pub(crate) runtime_workspace_roots: Vec<String>,
     #[serde(default)]
-    pub(crate) permissions: CodexControlledPermissions,
-    #[serde(default)]
     pub(crate) responses_api_client_metadata: Option<JsonValue>,
     #[serde(default)]
     pub(crate) additional_context: Option<String>,
@@ -61,8 +45,6 @@ pub(crate) struct CodexProfileSettings {
     pub(crate) initial_turns_page: Option<JsonValue>,
     #[serde(default)]
     pub(crate) exclude_turns: Vec<String>,
-    #[serde(default)]
-    pub(crate) command_exec_permission_profile: Option<String>,
 }
 
 impl Default for CodexProfileSettings {
@@ -72,13 +54,11 @@ impl Default for CodexProfileSettings {
             model: None,
             reasoning_effort: None,
             runtime_workspace_roots: Vec::new(),
-            permissions: CodexControlledPermissions::default(),
             responses_api_client_metadata: None,
             additional_context: None,
             persist_extended_history: None,
             initial_turns_page: None,
             exclude_turns: Vec::new(),
-            command_exec_permission_profile: None,
         }
     }
 }

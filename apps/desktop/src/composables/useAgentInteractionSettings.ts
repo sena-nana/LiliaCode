@@ -14,13 +14,11 @@ const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
     model: null,
     reasoningEffort: null,
     runtimeWorkspaceRoots: [],
-    permissions: { profile: "default" },
     responsesApiClientMetadata: null,
     additionalContext: null,
     persistExtendedHistory: null,
     initialTurnsPage: null,
     excludeTurns: [],
-    commandExecPermissionProfile: null,
   },
 };
 
@@ -62,17 +60,11 @@ export function normalizeAgentInteractionSettings(
       model: normalizeNullableText(codexProfile?.model),
       reasoningEffort: normalizeReasoningEffort(codexProfile?.reasoningEffort),
       runtimeWorkspaceRoots: uniqueTrimmedStrings(codexProfile?.runtimeWorkspaceRoots),
-      permissions: {
-        profile: normalizePermissionProfile(codexProfile?.permissions?.profile),
-      },
       responsesApiClientMetadata: normalizeJsonObject(codexProfile?.responsesApiClientMetadata),
       additionalContext: normalizeNullableText(codexProfile?.additionalContext),
       persistExtendedHistory: normalizeNullableBoolean(codexProfile?.persistExtendedHistory),
       initialTurnsPage: normalizeJsonObject(codexProfile?.initialTurnsPage),
       excludeTurns: uniqueTrimmedStrings(codexProfile?.excludeTurns),
-      commandExecPermissionProfile: normalizeOptionalPermissionProfile(
-        codexProfile?.commandExecPermissionProfile,
-      ),
     },
   };
 }
@@ -103,22 +95,6 @@ function normalizeReasoningEffort(value: unknown): AgentInteractionSettings["cod
 
 function normalizeProfile(value: unknown): AgentInteractionSettings["codexProfile"]["profile"] {
   return value === "fast" || value === "balanced" || value === "deep" ? value : "default";
-}
-
-function normalizePermissionProfile(
-  value: unknown,
-): AgentInteractionSettings["codexProfile"]["permissions"]["profile"] {
-  return value === "readOnly" || value === "workspaceWrite" || value === "dangerFullAccess"
-    ? value
-    : "default";
-}
-
-function normalizeOptionalPermissionProfile(
-  value: unknown,
-): AgentInteractionSettings["codexProfile"]["commandExecPermissionProfile"] {
-  return value === "default" || value === "readOnly" || value === "workspaceWrite" || value === "dangerFullAccess"
-    ? value
-    : null;
 }
 
 export function sameCodexProfile(

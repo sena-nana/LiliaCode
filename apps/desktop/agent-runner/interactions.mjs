@@ -1,6 +1,6 @@
 import { normalizeAskUserResult } from "./askUser.mjs";
 import { emitArchitectureTimeline } from "./architecture.mjs";
-import { oneLineSummary, stringOrNull } from "./utils.mjs";
+import { isRecord, oneLineSummary, stringOrNull } from "./utils.mjs";
 
 export function normalizeToolConsentResult(value) {
   const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -29,7 +29,16 @@ function normalizeMcpElicitationResult(value) {
 
 function normalizePermissionApprovalResult(value) {
   const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const action =
+    row.action === "approve" || row.action === "decline" || row.action === "cancel"
+      ? row.action
+      : row.strictAutoReview === true
+        ? "cancel"
+        : isRecord(row.permissions) && Object.keys(row.permissions).length > 0
+          ? "approve"
+          : "decline";
   return {
+    action,
     permissions: row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
       ? row.permissions
       : {},
@@ -316,10 +325,7 @@ function codexInteractionCompletedStatus(kind, result) {
     return result?.action === "accept" ? "success" : "cancelled";
   }
   if (kind === "permission_approval") {
-    return result?.strictAutoReview === true &&
-      Object.keys(result?.permissions || {}).length === 0
-      ? "cancelled"
-      : "success";
+    return result?.action === "approve" ? "success" : "cancelled";
   }
   return "success";
 }

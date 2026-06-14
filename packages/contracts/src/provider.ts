@@ -6,16 +6,6 @@ export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type CodexSettingsProfile = "default" | "fast" | "balanced" | "deep";
 
-export type CodexPermissionProfile =
-  | "default"
-  | "readOnly"
-  | "workspaceWrite"
-  | "dangerFullAccess";
-
-export interface CodexControlledPermissions {
-  profile: CodexPermissionProfile;
-}
-
 export type CodexJsonObject = Record<string, unknown>;
 
 export interface CodexProfileSettings {
@@ -23,13 +13,11 @@ export interface CodexProfileSettings {
   model: string | null;
   reasoningEffort: CodexReasoningEffort | null;
   runtimeWorkspaceRoots: string[];
-  permissions: CodexControlledPermissions;
   responsesApiClientMetadata: CodexJsonObject | null;
   additionalContext: string | null;
   persistExtendedHistory: boolean | null;
   initialTurnsPage: CodexJsonObject | null;
   excludeTurns: string[];
-  commandExecPermissionProfile: CodexPermissionProfile | null;
 }
 
 export interface CodexComposerSettings {
@@ -37,13 +25,11 @@ export interface CodexComposerSettings {
   model?: string | null;
   reasoningEffort?: CodexReasoningEffort | null;
   runtimeWorkspaceRoots?: string[] | null;
-  permissions?: CodexControlledPermissions | null;
   responsesApiClientMetadata?: CodexJsonObject | null;
   additionalContext?: string | null;
   persistExtendedHistory?: boolean | null;
   initialTurnsPage?: CodexJsonObject | null;
   excludeTurns?: string[] | null;
-  commandExecPermissionProfile?: CodexPermissionProfile | null;
 }
 
 export interface ProviderConfig {

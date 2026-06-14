@@ -702,6 +702,7 @@ describe("chat AskUser prompt", () => {
         requestId: "permission-t-002",
         kind: "permission_approval",
         result: {
+          action: "approve",
           permissions: {
             network: { domains: [{ domain: "example.com" }] },
           },
