@@ -41,6 +41,7 @@ import {
   resolveCodexPlanApproval,
 } from "./timeline.mjs";
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
+import { runCodexSessionManagementWorkflow } from "../sessionManagement.mjs";
 
 export async function initializeCodexAppServer(server) {
   await server.request("initialize", {
@@ -1724,6 +1725,14 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
   emitCodexRuntimeExtensionsTimeline(context.protocol, runtimeExtensions);
   try {
     await initializeCodexAppServer(server);
+    if (await runCodexSessionManagementWorkflow(
+      server,
+      stringOrNull(cmd.resumeSessionId),
+      cmd,
+      { protocol: context.protocol },
+    )) {
+      return;
+    }
     const session = await startCodexAppServerSession(server, cmd, context.cwd || process.cwd);
     const threadId = session.threadId;
     if (!threadId) throw new Error("Codex app-server did not return a thread id");

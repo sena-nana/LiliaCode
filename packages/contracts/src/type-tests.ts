@@ -183,6 +183,21 @@ export type LiliaSessionForkWorkflowTypeTest = Assert<
   >
 >;
 
+export type LiliaSessionManagementWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_session_management";
+      action: "messages";
+      sessionId: "thread-1";
+      limit: 20;
+      cursor: "cursor-1";
+      searchTerm: "bug";
+      includeSystemMessages: true;
+    },
+    ChatWorkflow
+  >
+>;
+
 export type LiliaProviderSettingsWorkflowTypeTest = Assert<
   Extends<
     {

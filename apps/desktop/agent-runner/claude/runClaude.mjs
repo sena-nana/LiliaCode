@@ -29,6 +29,7 @@ import {
   createClaudeHooks,
 } from "./permissions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
+import { runClaudeSessionManagementWorkflow } from "../sessionManagement.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -308,6 +309,7 @@ const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_batch_apply",
   "lilia_session_fork",
   "lilia_compact",
+  "lilia_session_management",
   "lilia_provider_settings",
 ]);
 
@@ -842,6 +844,7 @@ export async function runClaude(cmd, context) {
   const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
   if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeSessionManagementWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);
 }

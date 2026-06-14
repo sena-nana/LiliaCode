@@ -165,6 +165,22 @@ pub(crate) enum ChatWorkflow {
         #[serde(default)]
         exclude_turns: Option<bool>,
     },
+    #[serde(rename = "lilia_session_management")]
+    LiliaSessionManagement {
+        action: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        limit: Option<u64>,
+        #[serde(default)]
+        cursor: Option<String>,
+        #[serde(default)]
+        search_term: Option<String>,
+        #[serde(default)]
+        include_system_messages: Option<bool>,
+    },
     #[serde(rename = "lilia_config_diagnostics")]
     LiliaConfigDiagnostics {
         #[serde(default)]
