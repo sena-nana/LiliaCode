@@ -6,7 +6,7 @@ use super::paths::{
     claude_root_for, list_subdirs, sanitize_extension_name, PLUGINS_SUBDIR, PLUGIN_MANIFEST,
     SCOPE_USER,
 };
-use super::types::ClaudePlugin;
+use super::types::PluginPackage;
 
 fn sanitize_plugin_name(raw: &str) -> Result<String, String> {
     sanitize_extension_name(raw, "plugin")
@@ -39,7 +39,7 @@ fn parse_plugin_manifest(text: &str) -> Option<PluginManifest> {
 pub fn list_claude_plugins<R: Runtime>(
     app: &AppHandle<R>,
     scope: &str,
-) -> (Vec<ClaudePlugin>, Vec<String>) {
+) -> (Vec<PluginPackage>, Vec<String>) {
     let mut warnings = Vec::new();
     // 一期 plugin 只看 user scope。
     if scope != SCOPE_USER {
@@ -69,7 +69,8 @@ pub fn list_claude_plugins<R: Runtime>(
             warnings.push(format!("{} 不是合法 JSON", manifest_path.display()));
             PluginManifest::default()
         });
-        out.push(ClaudePlugin {
+        out.push(PluginPackage {
+            backend: "claude".to_string(),
             scope: scope.to_string(),
             name: dir_name,
             description: m.description.unwrap_or_default(),

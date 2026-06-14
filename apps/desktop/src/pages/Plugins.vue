@@ -13,24 +13,19 @@ import {
 } from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
-  createClaudeSkill,
-  deleteClaudeMcpServer,
-  deleteCodexMcpServer,
-  deleteClaudeSkill,
-  openClaudeMcpConfig,
-  openCodexConfig,
-  setClaudeMcpServerEnabled,
-  setCodexMcpServerEnabled,
-  setClaudePluginEnabled,
-  setClaudeSkillEnabled,
-  type ClaudeMcpServer,
-  type ClaudePlugin,
-  type ClaudeSkill,
-  type CodexMcpServer,
+  createSkill,
+  deleteMcpServer,
+  deleteSkill,
+  openMcpConfig,
+  setMcpServerEnabled,
+  setPackageEnabled,
+  setSkillEnabled,
+  type PluginMcpServer,
+  type PluginPackage,
+  type PluginSkill,
 } from "../services/plugins";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
-import { useClaudeMcpEditor } from "./plugins/useClaudeMcpEditor";
-import { useCodexMcpEditor } from "./plugins/useCodexMcpEditor";
+import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
 import SkillCreateDialog from "./plugins/SkillCreateDialog.vue";
 import ClaudeMcpEditorDialog from "./plugins/ClaudeMcpEditorDialog.vue";
@@ -57,27 +52,34 @@ const newName = ref("");
 const newDesc = ref("");
 const creating = ref(false);
 const createError = ref<string | null>(null);
-const pendingRemoveSkill = ref<ClaudeSkill | null>(null);
-const pendingRemoveMcp = ref<ClaudeMcpServer | null>(null);
-const pendingRemoveCodexMcp = ref<CodexMcpServer | null>(null);
+const pendingRemoveSkill = ref<PluginSkill | null>(null);
+const pendingRemoveMcp = ref<PluginMcpServer | null>(null);
 const removing = ref(false);
 const query = ref("");
 const selectedKey = ref<string | null>(null);
 
-const mcpEditor = useClaudeMcpEditor({ refresh });
-const codexMcpEditor = useCodexMcpEditor({ refresh });
+const mcpEditor = useMcpServerEditor<PluginMcpServer>({
+  backend: "claude",
+  label: "Claude MCP",
+  refresh,
+});
+const codexMcpEditor = useMcpServerEditor<PluginMcpServer>({
+  backend: "codex",
+  label: "Codex MCP",
+  refresh,
+});
 const USER_SKILLS_ROOT = "~/.claude/skills/";
 
 type PluginEntry =
-  | { kind: "skill"; key: string; title: string; meta: string; searchText: string; item: ClaudeSkill }
-  | { kind: "plugin"; key: string; title: string; meta: string; searchText: string; item: ClaudePlugin }
+  | { kind: "skill"; key: string; title: string; meta: string; searchText: string; item: PluginSkill }
+  | { kind: "plugin"; key: string; title: string; meta: string; searchText: string; item: PluginPackage }
   | {
       kind: "claude-mcp";
       key: string;
       title: string;
       meta: string;
       searchText: string;
-      item: ClaudeMcpServer;
+      item: PluginMcpServer;
     }
   | {
       kind: "codex-mcp";
@@ -85,7 +87,7 @@ type PluginEntry =
       title: string;
       meta: string;
       searchText: string;
-      item: CodexMcpServer;
+      item: PluginMcpServer;
     };
 
 interface DetailRow {
@@ -98,7 +100,7 @@ function enabledLabel(enabled: boolean) {
   return enabled ? "已启用" : "已停用";
 }
 
-function codexTransportLabel(server: CodexMcpServer) {
+function codexTransportLabel(server: PluginMcpServer) {
   if (server.transport === "stdio") return "stdio";
   if (server.transport === "http") return "HTTP";
   if (server.transport === "oauth") return "OAuth";
@@ -109,8 +111,12 @@ function commandLine(command: string, args: string[]) {
   return [command, ...args].filter(Boolean).join(" ").trim();
 }
 
-function codexServerSummary(server: CodexMcpServer) {
+function codexServerSummary(server: PluginMcpServer) {
   return commandLine(server.command, server.args) || `${codexTransportLabel(server)} MCP server`;
+}
+
+function mcpBackendLabel(server: PluginMcpServer) {
+  return server.backend === "claude" ? "Claude MCP" : "Codex MCP";
 }
 
 function normalizePath(value: string | null | undefined) {
@@ -135,7 +141,7 @@ function projectSkillsRootFromPath(path: string) {
   return `${normalized.slice(0, markerIndex)}\\.claude\\skills\\`;
 }
 
-function projectLabelForSkill(skill: ClaudeSkill) {
+function projectLabelForSkill(skill: PluginSkill) {
   if (skill.scope !== "project") return "";
   const skillPath = normalizePath(skill.path);
   const matchedProject = projectOptions.value.find((project) =>
@@ -145,7 +151,7 @@ function projectLabelForSkill(skill: ClaudeSkill) {
   return projectFolderFromSkillPath(skill.path) || "项目";
 }
 
-function skillLocation(skill: ClaudeSkill) {
+function skillLocation(skill: PluginSkill) {
   if (skill.scope === "user") return USER_SKILLS_ROOT;
   const skillPath = normalizePath(skill.path);
   const project = projectOptions.value.find((option) =>
@@ -310,7 +316,7 @@ async function confirmCreate() {
   createError.value = null;
   creating.value = true;
   try {
-    await createClaudeSkill(
+    await createSkill(
       "user",
       null,
       newName.value,
@@ -325,9 +331,9 @@ async function confirmCreate() {
   }
 }
 
-async function toggleSkill(skill: ClaudeSkill) {
+async function toggleSkill(skill: PluginSkill) {
   try {
-    await setClaudeSkillEnabled(
+    await setSkillEnabled(
       skill.scope,
       skill.scope === "project" ? projectCwd.value : null,
       skill.name,
@@ -339,28 +345,19 @@ async function toggleSkill(skill: ClaudeSkill) {
   }
 }
 
-async function togglePlugin(plugin: ClaudePlugin) {
+async function togglePlugin(plugin: PluginPackage) {
   try {
-    await setClaudePluginEnabled(plugin.scope, plugin.name, !plugin.enabled);
+    await setPackageEnabled(plugin.backend, plugin.scope, plugin.name, !plugin.enabled);
     plugin.enabled = !plugin.enabled;
   } catch (err) {
     errorText.value = String(err);
   }
 }
 
-async function toggleMcp(server: ClaudeMcpServer) {
-  try {
-    await setClaudeMcpServerEnabled(server.name, !server.enabled);
-    server.enabled = !server.enabled;
-  } catch (err) {
-    errorText.value = String(err);
-  }
-}
-
-async function toggleCodexMcp(server: CodexMcpServer) {
+async function toggleMcp(server: PluginMcpServer) {
   if (!server.editable) return;
   try {
-    await setCodexMcpServerEnabled(server.name, !server.enabled);
+    await setMcpServerEnabled(server.backend, server.name, !server.enabled);
     server.enabled = !server.enabled;
   } catch (err) {
     errorText.value = String(err);
@@ -373,18 +370,15 @@ async function confirmRemove() {
   try {
     if (pendingRemoveSkill.value) {
       const skill = pendingRemoveSkill.value;
-      await deleteClaudeSkill(
+      await deleteSkill(
         skill.scope,
         skill.scope === "project" ? projectCwd.value : null,
         skill.name,
       );
       pendingRemoveSkill.value = null;
     } else if (pendingRemoveMcp.value) {
-      await deleteClaudeMcpServer(pendingRemoveMcp.value.name);
+      await deleteMcpServer(pendingRemoveMcp.value.backend, pendingRemoveMcp.value.name);
       pendingRemoveMcp.value = null;
-    } else if (pendingRemoveCodexMcp.value) {
-      await deleteCodexMcpServer(pendingRemoveCodexMcp.value.name);
-      pendingRemoveCodexMcp.value = null;
     }
     await refresh();
   } catch (err) {
@@ -394,17 +388,9 @@ async function confirmRemove() {
   }
 }
 
-async function openClaudeMcp() {
+async function openMcp(server: PluginMcpServer) {
   try {
-    await openClaudeMcpConfig();
-  } catch (err) {
-    errorText.value = String(err);
-  }
-}
-
-async function openCodex() {
-  try {
-    await openCodexConfig();
+    await openMcpConfig(server.backend);
   } catch (err) {
     errorText.value = String(err);
   }
@@ -426,8 +412,7 @@ function canCreateInDetail() {
 function toggleSelected(entry: PluginEntry) {
   if (entry.kind === "skill") void toggleSkill(entry.item);
   else if (entry.kind === "plugin") void togglePlugin(entry.item);
-  else if (entry.kind === "claude-mcp") void toggleMcp(entry.item);
-  else void toggleCodexMcp(entry.item);
+  else void toggleMcp(entry.item);
 }
 
 function editSelected(entry: PluginEntry) {
@@ -439,13 +424,12 @@ function removeSelected(entry: PluginEntry) {
   if (entry.kind === "skill") pendingRemoveSkill.value = entry.item;
   else if (entry.kind === "claude-mcp") pendingRemoveMcp.value = entry.item;
   else if (entry.kind === "codex-mcp" && entry.item.editable) {
-    pendingRemoveCodexMcp.value = entry.item;
+    pendingRemoveMcp.value = entry.item;
   }
 }
 
 function openSelectedConfig(entry: PluginEntry) {
-  if (entry.kind === "claude-mcp") void openClaudeMcp();
-  else if (entry.kind === "codex-mcp") void openCodex();
+  if (entry.kind === "claude-mcp" || entry.kind === "codex-mcp") void openMcp(entry.item);
 }
 
 function actionLabel(entry: PluginEntry) {
@@ -688,22 +672,20 @@ function canOpenConfig(entry: PluginEntry) {
     />
 
     <ConfirmDialog
-      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null || pendingRemoveCodexMcp !== null"
+      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null"
       :title="pendingRemoveSkill
         ? `删除 skill「${pendingRemoveSkill?.name ?? ''}」？`
-        : pendingRemoveMcp
-          ? `删除 Claude MCP「${pendingRemoveMcp?.name ?? ''}」？`
-          : `删除 Codex MCP「${pendingRemoveCodexMcp?.name ?? ''}」？`"
+        : `删除 ${pendingRemoveMcp ? mcpBackendLabel(pendingRemoveMcp) : 'MCP'}「${pendingRemoveMcp?.name ?? ''}」？`"
       :message="pendingRemoveSkill
         ? '该 skill 目录会被整体删除，不可恢复。'
-        : pendingRemoveMcp
+        : pendingRemoveMcp?.backend === 'claude'
           ? '该 MCP server 会从 Lilia 配置中删除，不可恢复。'
           : '该 stdio MCP server 会从 Codex config.toml 中删除，不可恢复。'"
       confirm-text="删除"
       busy-text="删除中…"
       :busy="removing"
       danger
-      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null; pendingRemoveCodexMcp = null"
+      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null"
       @confirm="confirmRemove"
     />
   </section>
