@@ -66,6 +66,10 @@ const routeProjectId = computed(() => {
   return Array.isArray(value) ? value[0] : value;
 });
 
+const isCodexSource = computed(() => source.value === "codex");
+const sourceName = computed(() => (isCodexSource.value ? "Codex" : "Claude"));
+const sourceEntity = computed(() => (isCodexSource.value ? "Codex thread" : "Claude session"));
+
 const importTargetLabel = computed(() =>
   routeProjectId.value ? "导入到当前项目" : "导入到收集箱",
 );
@@ -82,26 +86,25 @@ const runtimeByItemId = computed(() => {
 
 const importRows = computed(() =>
   items.value.map((item) => {
-    const runtime = source.value === "codex"
+    const runtime = isCodexSource.value
       ? runtimeByItemId.value.get(item.id) ?? item.runtime ?? null
       : null;
     return {
       item,
       runtime,
-      canCleanThread: runtime?.running === true,
+      canCleanHistoryImport: runtime?.running === true,
     };
   }),
 );
 
-const sourceLabel = computed(() => source.value === "claude" ? "Claude session" : "Codex thread");
-const sourceListLabel = computed(() => `${sourceLabel.value} 列表`);
-const sourcePreviewLabel = computed(() => `${sourceLabel.value} 预览`);
-const searchPlaceholder = computed(() => `搜索 ${sourceLabel.value}`);
-const loadingLabel = computed(() => `正在读取 ${source.value === "claude" ? "Claude" : "Codex"} 历史`);
-const emptyListLabel = computed(() => `没有找到 ${sourceLabel.value}`);
-const emptyPreviewLabel = computed(() => `这个 ${sourceLabel.value} 暂无可预览事件。`);
-const choosePreviewLabel = computed(() => `选择一个 ${sourceLabel.value} 后查看摘要并导入。`);
-const showArchivedToggle = computed(() => source.value === "codex");
+const sourceListLabel = computed(() => `${sourceEntity.value} 列表`);
+const sourcePreviewLabel = computed(() => `${sourceEntity.value} 预览`);
+const searchPlaceholder = computed(() => `搜索 ${sourceEntity.value}`);
+const loadingLabel = computed(() => `正在读取 ${sourceName.value} 历史`);
+const emptyListLabel = computed(() => `没有找到 ${sourceEntity.value}`);
+const emptyPreviewLabel = computed(() => `这个 ${sourceEntity.value} 暂无可预览事件。`);
+const choosePreviewLabel = computed(() => `选择一个 ${sourceEntity.value} 后查看摘要并导入。`);
+const showArchivedToggle = computed(() => isCodexSource.value);
 
 const selectedItemMeta = computed(() => {
   const item = selectedItem.value;
@@ -196,12 +199,12 @@ function mergeCodexItems(
 
 function selectFirstItemIfNeeded() {
   if (!selectedItemId.value && items.value[0]) {
-    void selectItem(items.value[0]);
+    void selectHistoryImport(items.value[0]);
   }
 }
 
 async function loadRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
-  if (source.value !== "codex") return [];
+  if (!isCodexSource.value) return [];
   try {
     const states = await listHistoryImportRuntimeStates();
     runtimeStates.value = states;
@@ -213,7 +216,7 @@ async function loadRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
   }
 }
 
-async function loadThreads(cursor: string | null = null) {
+async function loadHistoryImports(cursor: string | null = null) {
   const seq = ++searchSeq;
   const append = !!cursor;
   const currentSource = source.value;
@@ -276,7 +279,7 @@ function scheduleSearch() {
     resetPreviewState();
     rowMessages.value = {};
     importError.value = "";
-    void loadThreads();
+    void loadHistoryImports();
   }, 240);
 }
 
@@ -292,7 +295,7 @@ function resetPreviewState() {
   fullPreviewLoading.value = false;
 }
 
-async function selectItem(item: HistoryImportItem) {
+async function selectHistoryImport(item: HistoryImportItem) {
   selectedItemId.value = item.id;
   previewEventCount.value = null;
   fullPreviewEvents.value = [];
@@ -383,11 +386,11 @@ function setSource(next: ImportSource) {
   if (next === "claude") runtimeStates.value = [];
   rowMessages.value = {};
   importError.value = "";
-  void loadThreads();
+  void loadHistoryImports();
 }
 
-async function cleanThread(item: HistoryImportItem) {
-  if (source.value !== "codex" || cleaningThreadId.value) return;
+async function cleanHistoryImport(item: HistoryImportItem) {
+  if (!isCodexSource.value || cleaningThreadId.value) return;
   cleaningThreadId.value = item.id;
   rowMessages.value = {
     ...rowMessages.value,
@@ -416,7 +419,7 @@ watch(() => includeArchived.value, () => {
 });
 
 onMounted(() => {
-  void loadThreads();
+  void loadHistoryImports();
 });
 </script>
 
@@ -488,7 +491,7 @@ onMounted(() => {
                   type="button"
                   class="conversation-import__row-select"
                   :title="row.item.title"
-                  @click="selectItem(row.item)"
+                  @click="selectHistoryImport(row.item)"
                 >
                   <span class="conversation-import__row-head">
                     <span class="conversation-import__row-title">{{ row.item.title }}</span>
@@ -521,14 +524,14 @@ onMounted(() => {
                     <span>{{ rowMessages[row.item.id].text }}</span>
                   </span>
                 </button>
-                <div v-if="row.canCleanThread" class="conversation-import__row-actions">
+                <div v-if="row.canCleanHistoryImport" class="conversation-import__row-actions">
                   <button
                     type="button"
                     class="conversation-import__clean-button ui-button ui-button--ghost"
                     :disabled="cleaningThreadId !== null"
                     title="清理后台终端"
                     aria-label="清理后台终端"
-                    @click="cleanThread(row.item)"
+                    @click="cleanHistoryImport(row.item)"
                   >
                     <Loader2
                       v-if="cleaningThreadId === row.item.id"
@@ -546,7 +549,7 @@ onMounted(() => {
               type="button"
               class="conversation-import__more ui-button ui-button--ghost"
               :disabled="loadingMore"
-              @click="loadThreads(nextCursor)"
+              @click="loadHistoryImports(nextCursor)"
             >
               <Loader2 v-if="loadingMore" :size="14" class="is-spinning" aria-hidden="true" />
               <ChevronDown v-else :size="14" aria-hidden="true" />

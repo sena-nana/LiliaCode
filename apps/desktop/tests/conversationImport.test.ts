@@ -42,41 +42,28 @@ vi.mock("../src/services/chat", () => ({
   searchHistoryImports: vi.fn(),
 }));
 
-function threadSummary(patch: Partial<HistoryImportItem> = {}): HistoryImportItem {
+function historyImportItem(patch: Partial<HistoryImportItem> = {}): HistoryImportItem {
+  const provider = patch.provider ?? "codex";
   return {
-    id: "thread-1",
-    provider: "codex",
-    title: "优化导入对话界面",
-    status: "completed",
-    model: "gpt-5.4",
-    sourceKind: "codex",
+    id: provider === "claude" ? "claude-session-1" : "thread-1",
+    provider,
+    title: provider === "claude" ? "整理 Claude 历史导入" : "优化导入对话界面",
+    status: provider === "claude" ? null : "completed",
+    model: provider === "claude" ? "claude-sonnet-4-5" : "gpt-5.4",
+    sourceKind: provider,
     createdAt: 1735689600000,
-    updatedAt: 1735693200000,
+    updatedAt: provider === "claude" ? 1735696800000 : 1735693200000,
     archived: false,
-    preview: "这段对话内容不应该出现在左侧列表",
+    preview: provider === "claude"
+      ? "Claude 历史摘要不出现在左侧行内"
+      : "这段对话内容不应该出现在左侧列表",
+    cwd: provider === "claude" ? "D:\\PROJECT\\workspace\\Lilia" : null,
+    project: provider === "claude" ? "d--PROJECT-workspace-Lilia" : null,
     ...patch,
   };
 }
 
-function claudeSessionSummary(patch: Partial<HistoryImportItem> = {}): HistoryImportItem {
-  return {
-    id: "claude-session-1",
-    provider: "claude",
-    title: "整理 Claude 历史导入",
-    status: null,
-    model: "claude-sonnet-4-5",
-    sourceKind: "claude",
-    createdAt: 1735689600000,
-    updatedAt: 1735696800000,
-    archived: false,
-    preview: "Claude 历史摘要不出现在左侧行内",
-    cwd: "D:\\PROJECT\\workspace\\Lilia",
-    project: "d--PROJECT-workspace-Lilia",
-    ...patch,
-  };
-}
-
-function runtimeState(patch: Partial<HistoryImportRuntimeState> = {}): HistoryImportRuntimeState {
+function historyImportRuntimeState(patch: Partial<HistoryImportRuntimeState> = {}): HistoryImportRuntimeState {
   return {
     itemId: "thread-1",
     taskId: "task-1",
@@ -121,7 +108,7 @@ describe("ConversationImport", () => {
   });
 
   it("renders Codex history preview by default", async () => {
-    const thread = threadSummary();
+    const thread = historyImportItem();
     vi.mocked(searchHistoryImports).mockResolvedValue({
       items: [thread],
       nextCursor: null,
@@ -185,14 +172,14 @@ describe("ConversationImport", () => {
       resolveSearch = resolve;
     });
     vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
-      runtimeState({
+      historyImportRuntimeState({
         itemId: "thread-lilia",
         taskTitle: "Lilia 本地 Codex 对话",
       }),
     ]);
     vi.mocked(searchHistoryImports).mockReturnValue(searchPromise);
     vi.mocked(previewHistoryImport).mockResolvedValue({
-      item: threadSummary({ id: "thread-lilia", title: "Lilia 本地 Codex 对话" }),
+      item: historyImportItem({ id: "thread-lilia", title: "Lilia 本地 Codex 对话" }),
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
@@ -214,13 +201,13 @@ describe("ConversationImport", () => {
 
     resolveSearch!({
       items: [
-        threadSummary({
+        historyImportItem({
           id: "thread-lilia",
           title: "Codex 历史补全标题",
           model: "gpt-5.5",
           preview: "app-server 返回的预览摘要。",
         }),
-        threadSummary({
+        historyImportItem({
           id: "thread-remote",
           title: "远端 Codex 历史",
           preview: "另一个 app-server thread。",
@@ -249,18 +236,18 @@ describe("ConversationImport", () => {
       resolveSearch = resolve;
     });
     vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
-      runtimeState({
+      historyImportRuntimeState({
         itemId: "thread-local-search",
         taskTitle: "只在 Lilia 里的任务",
       }),
-      runtimeState({
+      historyImportRuntimeState({
         itemId: "thread-other",
         taskTitle: "另一个任务",
       }),
     ]);
     vi.mocked(searchHistoryImports).mockReturnValue(searchPromise);
     vi.mocked(previewHistoryImport).mockResolvedValue({
-      item: threadSummary({ id: "thread-local-search", title: "只在 Lilia 里的任务" }),
+      item: historyImportItem({ id: "thread-local-search", title: "只在 Lilia 里的任务" }),
       eventCount: 0,
       messages: [],
       hasFullPreview: false,
@@ -289,7 +276,7 @@ describe("ConversationImport", () => {
   });
 
   it("在 Codex 导入列表显示 Lilia 管理状态并清理运行中后台终端", async () => {
-    const thread = threadSummary({
+    const thread = historyImportItem({
       id: "thread-running",
       title: "整理 Codex 会话管理",
       preview: "讨论设置页中的会话维护入口。",
@@ -299,7 +286,7 @@ describe("ConversationImport", () => {
       nextCursor: null,
     });
     vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([
-      runtimeState({
+      historyImportRuntimeState({
         itemId: "thread-running",
         taskId: "task-running",
         taskTitle: "打通 tsconfig paths 搜索",
@@ -343,8 +330,8 @@ describe("ConversationImport", () => {
   });
 
   it("切换到 Claude 后搜索、预览并导入 Claude session", async () => {
-    const thread = threadSummary();
-    const session = claudeSessionSummary();
+    const thread = historyImportItem();
+    const session = historyImportItem({ provider: "claude" });
     vi.mocked(searchHistoryImports).mockResolvedValueOnce({
       items: [thread],
       nextCursor: null,
