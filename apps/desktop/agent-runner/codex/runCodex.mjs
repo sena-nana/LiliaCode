@@ -1602,7 +1602,7 @@ function codexGrantedPermissions(value) {
 }
 
 function codexPermissionApprovalResponse(result) {
-  const permissions = codexGrantedPermissions(result?.grantedAccess ?? result?.permissions);
+  const permissions = codexGrantedPermissions(result?.grantedAccess);
   const action =
     result?.action === "approve" || result?.action === "decline" || result?.action === "cancel"
       ? result.action

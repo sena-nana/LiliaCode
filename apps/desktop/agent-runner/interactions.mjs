@@ -29,26 +29,18 @@ function normalizeMcpElicitationResult(value) {
 
 function normalizePermissionApprovalResult(value) {
   const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const grantedAccess = isRecord(row.grantedAccess) ? row.grantedAccess : {};
   const action =
     row.action === "approve" || row.action === "decline" || row.action === "cancel"
       ? row.action
       : row.strictAutoReview === true
         ? "cancel"
-        : isRecord(row.grantedAccess) && Object.keys(row.grantedAccess).length > 0
+        : Object.keys(grantedAccess).length > 0
           ? "approve"
-          : isRecord(row.permissions) && Object.keys(row.permissions).length > 0
-            ? "approve"
-            : "decline";
+          : "decline";
   return {
     action,
-    grantedAccess: row.grantedAccess && typeof row.grantedAccess === "object" && !Array.isArray(row.grantedAccess)
-      ? row.grantedAccess
-      : row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
-        ? row.permissions
-        : {},
-    permissions: row.permissions && typeof row.permissions === "object" && !Array.isArray(row.permissions)
-      ? row.permissions
-      : {},
+    grantedAccess,
     scope: row.scope || "turn",
     ...(typeof row.strictAutoReview === "boolean"
       ? { strictAutoReview: row.strictAutoReview }
@@ -170,7 +162,7 @@ export function createInteractionBroker({
           : {
               subkind: "permission_approval",
               reason: stringOrNull(payload?.reason),
-              requestedAccess: payload?.requestedAccess ?? payload?.permissions ?? null,
+              requestedAccess: payload?.requestedAccess ?? null,
               scopeSuggestion: payload?.scopeSuggestion ?? null,
               providerContext: payload?.providerContext ?? null,
             }),
