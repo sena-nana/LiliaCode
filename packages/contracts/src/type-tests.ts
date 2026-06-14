@@ -175,30 +175,30 @@ export type LiliaBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
-export type LiliaSessionForkRuntimeCommandTypeTest = Assert<
+export type SessionForkRuntimeCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_fork";
+      type: "session_fork";
       excludeTurns: true;
     },
     ChatRuntimeCommand
   >
 >;
 
-export type LiliaSessionForkIsNotWorkflowTypeTest = Assert<
+export type SessionForkIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_fork";
+      type: "session_fork";
       excludeTurns: true;
     },
     ChatWorkflow
   > extends true ? false : true
 >;
 
-export type LiliaSessionManagementRuntimeCommandTypeTest = Assert<
+export type SessionManagementRuntimeCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_management";
+      type: "session_management";
       action: "tag";
       sessionId: "thread-1";
       tag: "release";
@@ -212,30 +212,30 @@ export type LiliaSessionManagementRuntimeCommandTypeTest = Assert<
   >
 >;
 
-export type LiliaSessionManagementIsNotWorkflowTypeTest = Assert<
+export type SessionManagementIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_management";
+      type: "session_management";
       action: "list";
     },
     ChatWorkflow
   > extends true ? false : true
 >;
 
-export type LiliaProviderSettingsRuntimeCommandTypeTest = Assert<
+export type RuntimeSettingsCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
     },
     ChatRuntimeCommand
   >
 >;
 
-export type LiliaProviderSettingsRuntimeCommandRejectsInlineOptionsTypeTest = Assert<
+export type RuntimeSettingsCommandRejectsInlineOptionsTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
       common: { model: "gpt-5.5"; permission: "ask" };
       runtimeOptions: ProviderRuntimeOptions;
@@ -244,10 +244,10 @@ export type LiliaProviderSettingsRuntimeCommandRejectsInlineOptionsTypeTest = As
   > extends true ? false : true
 >;
 
-export type LiliaProviderSettingsIsNotWorkflowTypeTest = Assert<
+export type RuntimeSettingsIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
     },
     ChatWorkflow

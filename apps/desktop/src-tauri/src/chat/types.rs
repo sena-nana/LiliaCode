@@ -189,7 +189,7 @@ pub(crate) enum LiliaReviewTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LiliaProviderSettingsCommon {
+pub(crate) struct RuntimeSettingsCommon {
     #[serde(default)]
     pub(crate) model: Option<String>,
     #[serde(default)]
@@ -202,7 +202,7 @@ pub(crate) struct LiliaProviderSettingsCommon {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LiliaProviderSettingsCodex {
+pub(crate) struct RuntimeSettingsCodex {
     #[serde(default)]
     pub(crate) profile: Option<String>,
     #[serde(default)]
@@ -231,7 +231,7 @@ pub(crate) struct LiliaProviderSettingsCodex {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LiliaProviderSettingsClaude {
+pub(crate) struct RuntimeSettingsClaude {
     #[serde(default)]
     pub(crate) allowed_tools: Option<Vec<String>>,
     #[serde(default)]
@@ -281,13 +281,13 @@ pub(crate) struct LiliaProviderSettingsClaude {
     tag = "type"
 )]
 pub(crate) enum ChatRuntimeCommand {
-    #[serde(rename = "lilia_session_fork")]
-    LiliaSessionFork {
+    #[serde(rename = "session_fork")]
+    SessionFork {
         #[serde(default)]
         exclude_turns: Option<bool>,
     },
-    #[serde(rename = "lilia_session_management")]
-    LiliaSessionManagement {
+    #[serde(rename = "session_management")]
+    SessionManagement {
         action: String,
         #[serde(default)]
         session_id: Option<String>,
@@ -306,8 +306,8 @@ pub(crate) enum ChatRuntimeCommand {
         #[serde(default)]
         include_system_messages: Option<bool>,
     },
-    #[serde(rename = "lilia_provider_settings")]
-    LiliaProviderSettings {
+    #[serde(rename = "runtime_settings")]
+    RuntimeSettings {
         action: String,
     },
 }
@@ -316,7 +316,7 @@ pub(crate) enum ChatRuntimeCommand {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderRuntimeOptions {
     #[serde(default)]
-    pub(crate) common: Option<LiliaProviderSettingsCommon>,
+    pub(crate) common: Option<RuntimeSettingsCommon>,
     #[serde(default)]
     pub(crate) provider: Option<ProviderRuntimeOptionsProvider>,
     #[serde(default)]
@@ -327,9 +327,9 @@ pub(crate) struct ProviderRuntimeOptions {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderRuntimeOptionsProvider {
     #[serde(default)]
-    pub(crate) codex: Option<LiliaProviderSettingsCodex>,
+    pub(crate) codex: Option<RuntimeSettingsCodex>,
     #[serde(default)]
-    pub(crate) claude: Option<LiliaProviderSettingsClaude>,
+    pub(crate) claude: Option<RuntimeSettingsClaude>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

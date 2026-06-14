@@ -1137,7 +1137,7 @@ fn build_provider_runtime_options<R: Runtime>(
     }
     if matches!(
         runtime_command,
-        Some(ChatRuntimeCommand::LiliaProviderSettings { .. })
+        Some(ChatRuntimeCommand::RuntimeSettings { .. })
     ) {
         return Some(merge_runtime_provider_defaults(
             serde_json::json!({}),
