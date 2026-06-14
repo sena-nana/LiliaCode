@@ -515,6 +515,49 @@ function applyClaudeProviderSettingsWorkflow(cmd) {
   return settings;
 }
 
+function normalizeClaudeMcpElicitationPayload(request, ctx) {
+  if (!isRecord(request)) return null;
+  const serverName = stringOrNull(request.serverName) || stringOrNull(request.mcp_server_name);
+  const mode = stringOrNull(request.mode) === "url" ? "url" : "form";
+  if (!serverName) return null;
+  const payload = {
+    threadId: stringOrNull(ctx?.sessionId) || stringOrNull(request.sessionId) || stringOrNull(request.session_id) || "claude",
+    turnId: stringOrNull(request.turnId) || stringOrNull(request.turn_id),
+    serverName,
+    mode,
+    message: stringOrNull(request.message) || "",
+    _meta: request._meta ?? null,
+  };
+  if (mode === "form") payload.requestedSchema = request.requestedSchema ?? request.requested_schema ?? null;
+  if (mode === "url") {
+    payload.url = stringOrNull(request.url) || "";
+    payload.elicitationId = stringOrNull(request.elicitationId) || stringOrNull(request.elicitation_id) || "";
+  }
+  return payload;
+}
+
+function claudeMcpElicitationResponse(result) {
+  const action = result?.action === "accept" || result?.action === "decline"
+    ? result.action
+    : "cancel";
+  const content = action === "accept" && isRecord(result?.content)
+    ? result.content
+    : undefined;
+  return {
+    action,
+    ...(content ? { content } : {}),
+  };
+}
+
+async function requestClaudeMcpElicitation(request, ctx) {
+  const payload = normalizeClaudeMcpElicitationPayload(request, ctx);
+  if (!payload || !ctx?.interactions?.requestMcpElicitation) {
+    return { action: "cancel" };
+  }
+  const result = await ctx.interactions.requestMcpElicitation(payload, { backend: "claude" });
+  return claudeMcpElicitationResponse(result);
+}
+
 function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null) {
   const failed = status === "error";
   const completed = status === "success";
@@ -606,6 +649,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     compactError: null,
     activeTools: new Map(),
     commandEdits: new Map(),
+    sessionId: stringOrNull(resumeSessionId),
   };
   const liliaAskUserServer = createLiliaAskUserServer({
     requestAskUser: context.interactions.requestAskUser,
@@ -622,6 +666,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     promptSuggestions: overrides.skipPromptSuggestions === true ? false : true,
     canUseTool: createClaudeCanUseTool(ctx),
     hooks: createClaudeHooks(ctx),
+    onElicitation: (request) => requestClaudeMcpElicitation(request, ctx),
     systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform),
     mcpServers: {
       lilia: liliaAskUserServer,
@@ -656,7 +701,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     applyClaudeRuntimePermission(ctx, update?.permission);
   });
   for await (const msg of claudeQuery) {
-    if (msg.session_id) lastSessionId = msg.session_id;
+    if (msg.session_id) {
+      lastSessionId = msg.session_id;
+      ctx.sessionId = msg.session_id;
+    }
 
     try {
       mapClaudeSystemTimeline(msg, ctx);

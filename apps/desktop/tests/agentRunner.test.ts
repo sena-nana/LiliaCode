@@ -93,6 +93,14 @@ function trackedElicitation(calls: any[]) {
   };
 }
 
+function createTestInteractionBroker(protocol: any) {
+  return createInteractionBroker({
+    protocol,
+    emitToolConsentTimeline: () => {},
+    emitAskUserTimeline: () => {},
+  });
+}
+
 function createCodexTurnTestServer(
   calls: any[],
   turn: Record<string, unknown> = { status: "completed" },
@@ -595,6 +603,60 @@ describe("interaction broker", () => {
     }));
     await expect(consent).resolves.toMatchObject({ decision: "allow" });
   });
+
+  it("MCP elicitation broker preserves the Claude backend through request/response", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createTestInteractionBroker(protocol);
+
+    const result = broker.requestMcpElicitation({
+      threadId: "claude-session-1",
+      turnId: null,
+      serverName: "linear",
+      mode: "url",
+      message: "完成授权",
+      url: "https://linear.app/oauth",
+      elicitationId: "elicit-url-1",
+    }, { backend: "claude" });
+
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "interaction_request",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      backend: "claude",
+      payload: expect.objectContaining({
+        threadId: "claude-session-1",
+        serverName: "linear",
+        mode: "url",
+      }),
+    }));
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      result: { action: "decline" },
+    }));
+
+    await expect(result).resolves.toEqual({
+      action: "decline",
+      content: null,
+      _meta: null,
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "mcp",
+        status: "cancelled",
+        title: "Claude MCP elicitation",
+        payload: expect.objectContaining({
+          backend: "claude",
+          interaction: "mcp_elicitation",
+          requestId: "codex-1",
+          result: expect.objectContaining({ action: "decline" }),
+        }),
+      }),
+    }));
+  });
 });
 
 describe("Claude helpers", () => {
@@ -613,6 +675,15 @@ describe("Claude helpers", () => {
       emitToolConsentTimeline: () => {},
       ...overrides,
     } as any;
+  }
+
+  function claudeMcpElicitationContext(protocol: any, broker: any, createClaudeQuery: any) {
+    return claudeRunnerContext(protocol, {
+      interactions: broker,
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery,
+    });
   }
 
   it("子对话才会注册 Claude 查询对话上下文工具", () => {
@@ -727,6 +798,147 @@ describe("Claude helpers", () => {
       suggestion: "请继续检查 Claude 原生建议展示。",
       uuid: "suggestion-1",
     });
+  });
+
+  it("Claude onElicitation routes form accept through Lilia MCP interaction", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createTestInteractionBroker(protocol);
+    let elicitationResult: any = null;
+
+    const run = runClaude({
+      cwd: "C:/repo",
+      prompt: "需要 MCP 表单",
+      model: "claude-sonnet-4-6",
+      permission: "ask",
+    }, claudeMcpElicitationContext(protocol, broker, ({ options }: any) => (async function* () {
+      yield {
+        type: "system",
+        subtype: "status",
+        session_id: "claude-session-1",
+        uuid: "status-1",
+      };
+      elicitationResult = await options.onElicitation({
+        serverName: "linear",
+        mode: "form",
+        message: "选择项目",
+        requestedSchema: {
+          type: "object",
+          properties: { project: { type: "string", enum: ["A", "B"] } },
+          required: ["project"],
+        },
+      }, { signal: new AbortController().signal });
+      yield {
+        type: "result",
+        is_error: false,
+        subtype: "success",
+        session_id: "claude-session-1",
+        uuid: "result-1",
+      };
+    })()));
+
+    await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "interaction_request",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      backend: "claude",
+      payload: expect.objectContaining({
+        threadId: "claude-session-1",
+        serverName: "linear",
+        mode: "form",
+        message: "选择项目",
+      }),
+    }));
+
+    broker.handleControlLine(JSON.stringify({
+      type: "interaction_response",
+      id: "codex-1",
+      kind: "mcp_elicitation",
+      result: {
+        action: "accept",
+        content: { project: "B" },
+      },
+    }));
+
+    await run;
+    expect(elicitationResult).toEqual({
+      action: "accept",
+      content: { project: "B" },
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "mcp",
+        status: "success",
+        title: "Claude MCP elicitation",
+        payload: expect.objectContaining({
+          backend: "claude",
+          interaction: "mcp_elicitation",
+          result: expect.objectContaining({ action: "accept" }),
+        }),
+      }),
+    }));
+  });
+
+  it("Claude onElicitation routes URL decline and cancel through Lilia MCP interaction", async () => {
+    for (const action of ["decline", "cancel"] as const) {
+      const { protocol, json } = captureProtocol();
+      const broker = createTestInteractionBroker(protocol);
+      let elicitationResult: any = null;
+
+      const run = runClaude({
+        cwd: "C:/repo",
+        prompt: "需要 MCP URL",
+        model: "claude-sonnet-4-6",
+        permission: "ask",
+      }, claudeMcpElicitationContext(protocol, broker, ({ options }: any) => (async function* () {
+        yield {
+          type: "system",
+          subtype: "status",
+          session_id: `claude-session-${action}`,
+          uuid: `status-${action}`,
+        };
+        elicitationResult = await options.onElicitation({
+          serverName: "github",
+          mode: "url",
+          message: "打开授权链接",
+          url: "https://github.com/login/oauth",
+          elicitationId: `elicit-${action}`,
+        }, { signal: new AbortController().signal });
+        yield {
+          type: "result",
+          is_error: false,
+          subtype: "success",
+          session_id: `claude-session-${action}`,
+          uuid: `result-${action}`,
+        };
+      })()));
+
+      await waitUntil(() => json().some((line) => line.type === "interaction_request"));
+      expect(json()).toContainEqual(expect.objectContaining({
+        type: "interaction_request",
+        id: "codex-1",
+        kind: "mcp_elicitation",
+        backend: "claude",
+        payload: expect.objectContaining({
+          threadId: `claude-session-${action}`,
+          serverName: "github",
+          mode: "url",
+          url: "https://github.com/login/oauth",
+          elicitationId: `elicit-${action}`,
+        }),
+      }));
+
+      broker.handleControlLine(JSON.stringify({
+        type: "interaction_response",
+        id: "codex-1",
+        kind: "mcp_elicitation",
+        result: { action },
+      }));
+
+      await run;
+      expect(elicitationResult).toEqual({ action });
+    }
   });
 
   it("Claude session fork workflow calls forkSession and emits the forked session id", async () => {

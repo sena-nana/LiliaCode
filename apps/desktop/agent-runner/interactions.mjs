@@ -49,11 +49,11 @@ const INTERACTION_RESPONSE_KINDS = new Set([
   "architecture_change",
 ]);
 
-function isCodexInteractionKind(kind) {
+function isRuntimeInteractionKind(kind) {
   return kind === "mcp_elicitation" || kind === "permission_approval";
 }
 
-function normalizeCodexInteractionResult(kind, result) {
+function normalizeRuntimeInteractionResult(kind, result) {
   return kind === "mcp_elicitation"
     ? normalizeMcpElicitationResult(result)
     : normalizePermissionApprovalResult(result);
@@ -125,20 +125,21 @@ export function createInteractionBroker({
     });
   }
 
-  function emitCodexInteractionTimeline(id, kind, payload, status, result = null) {
+  function emitRuntimeInteractionTimeline(id, kind, payload, status, result = null, backend = "codex") {
     const isMcp = kind === "mcp_elicitation";
     const accepted = result?.action === "accept";
+    const label = backend === "claude" ? "Claude" : "Codex";
     protocol.emitTimeline({
       kind: isMcp ? "mcp" : "diagnostic",
       status,
       title: isMcp
-        ? "Codex MCP elicitation"
-        : "Codex permission approval",
+        ? `${label} MCP elicitation`
+        : `${label} permission approval`,
       summary: isMcp
         ? oneLineSummary(payload?.message || payload?.serverName || "MCP 请求用户输入")
         : oneLineSummary(payload?.reason || "Codex 请求额外权限"),
       payload: {
-        backend: "codex",
+        backend,
         interaction: kind,
         requestId: id,
         ...(isMcp
@@ -171,19 +172,29 @@ export function createInteractionBroker({
   }
 
   function requestCodexInteraction(kind, payload) {
+    return requestRuntimeInteraction(kind, payload, "codex");
+  }
+
+  function requestMcpElicitation(payload, options = {}) {
+    const backend = options.backend === "codex" ? "codex" : "claude";
+    return requestRuntimeInteraction("mcp_elicitation", payload, backend);
+  }
+
+  function requestRuntimeInteraction(kind, payload, backend = "codex") {
     const id = `codex-${codexSeq++}`;
-    emitCodexInteractionTimeline(id, kind, payload, "requires_action");
-    emitInteractionRequest(id, kind, payload, "codex");
+    emitRuntimeInteractionTimeline(id, kind, payload, "requires_action", null, backend);
+    emitInteractionRequest(id, kind, payload, backend);
     return new Promise((resolve) => {
       codexPending.set(id, {
         kind,
         resolve: (result) => {
-          emitCodexInteractionTimeline(
+          emitRuntimeInteractionTimeline(
             id,
             kind,
             payload,
             codexInteractionCompletedStatus(kind, result),
             result,
+            backend,
           );
           resolve(result);
         },
@@ -239,11 +250,11 @@ export function createInteractionBroker({
         pending.resolve(normalizeToolConsentResult(msg.result));
         return;
       }
-      if (isCodexInteractionKind(kind)) {
+      if (isRuntimeInteractionKind(kind)) {
         const pending = codexPending.get(msg.id);
         if (!pending || pending.kind !== kind) return;
         codexPending.delete(msg.id);
-        pending.resolve(normalizeCodexInteractionResult(kind, msg.result));
+        pending.resolve(normalizeRuntimeInteractionResult(kind, msg.result));
         return;
       }
       if (kind === "architecture_change") {
@@ -272,6 +283,7 @@ export function createInteractionBroker({
     requestUserConsent,
     requestAskUser,
     requestCodexInteraction,
+    requestMcpElicitation,
     requestArchitectureChange,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
