@@ -274,7 +274,7 @@ export function createInteractionBroker({
       settingsUpdateHandler?.(msg);
       return;
     }
-    if (msg.type === "codex_iab_result") {
+    if (msg.type === "lilia_iab_result") {
       liliaIabResultHandler?.(msg.snapshot);
     }
   }

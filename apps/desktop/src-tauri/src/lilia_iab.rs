@@ -313,9 +313,9 @@ fn build_snapshot<R: Runtime>(
     }
 }
 
-fn codex_iab_result_payload(snapshot: &LiliaIabSnapshot) -> JsonValue {
+fn lilia_iab_result_payload(snapshot: &LiliaIabSnapshot) -> JsonValue {
     serde_json::json!({
-        "type": "codex_iab_result",
+        "type": "lilia_iab_result",
         "snapshot": snapshot,
     })
 }
@@ -346,7 +346,7 @@ fn forward_lilia_iab_to_running_backend(
     if !can_forward_to_codex {
         return Ok(false);
     }
-    write_runner_stdin_for_task(store, task_id, codex_iab_result_payload(snapshot))
+    write_runner_stdin_for_task(store, task_id, lilia_iab_result_payload(snapshot))
 }
 
 fn iab_window<R: Runtime>(app: &AppHandle<R>, task_id: &str) -> Result<WebviewWindow<R>, String> {
@@ -429,9 +429,9 @@ mod tests {
             warning: None,
         };
 
-        let payload = codex_iab_result_payload(&snapshot);
+        let payload = lilia_iab_result_payload(&snapshot);
 
-        assert_eq!(payload["type"], "codex_iab_result");
+        assert_eq!(payload["type"], "lilia_iab_result");
         assert_eq!(payload["snapshot"]["url"], "https://example.com/");
         assert_eq!(payload["snapshot"]["note"], "note");
     }

@@ -28,7 +28,7 @@ import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
 import SkillCreateDialog from "./plugins/SkillCreateDialog.vue";
-import ClaudeMcpEditorDialog from "./plugins/ClaudeMcpEditorDialog.vue";
+import McpServerEditorDialog from "./plugins/McpServerEditorDialog.vue";
 
 const {
   tab,
@@ -637,7 +637,7 @@ function canOpenConfig(entry: PluginEntry) {
       @confirm="confirmCreate"
     />
 
-    <ClaudeMcpEditorDialog
+    <McpServerEditorDialog
       v-model:open="mcpEditor.showMcpEditor.value"
       v-model:name="mcpEditor.mcpName.value"
       v-model:command="mcpEditor.mcpCommand.value"
@@ -654,7 +654,7 @@ function canOpenConfig(entry: PluginEntry) {
       @confirm="mcpEditor.saveMcpServer"
     />
 
-    <ClaudeMcpEditorDialog
+    <McpServerEditorDialog
       v-model:open="codexMcpEditor.showMcpEditor.value"
       v-model:name="codexMcpEditor.mcpName.value"
       v-model:command="codexMcpEditor.mcpCommand.value"
