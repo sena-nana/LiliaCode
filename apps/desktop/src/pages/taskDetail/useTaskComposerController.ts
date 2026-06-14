@@ -47,17 +47,21 @@ import {
   setComposerState,
   submitLiliaIab,
 } from "../../services/chat";
+import type { SendMessageInput } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
 import { useLiliaWorkflowActions } from "./useLiliaWorkflowActions";
+import type { LiliaWorkflowSendAgentMessageInput } from "./useLiliaWorkflowActions";
 import {
   clearPendingInteractionsForTask,
   hydratePendingInteractions,
   usePendingInteractionActions,
 } from "./usePendingInteractionActions";
 import type { ChatRuntimePhase } from "@lilia/contracts";
+
+type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 
 export function useTaskComposerController(options: {
   props: TaskDetailRouteProps;
@@ -135,16 +139,14 @@ export function useTaskComposerController(options: {
     };
   }
 
-  async function sendAgentMessage(
-    content: string,
-    outgoingAttachments: ChatAttachment[] = [],
-    guideId?: string,
-    workflow?: ChatWorkflow | null,
-    runtimeCommand?: ChatRuntimeCommand | null,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-    titleContent?: string,
-  ) {
+  async function sendAgentMessage(input: SendAgentMessageInput) {
     if (!context.hasContext.value) return;
+    const outgoingAttachments = input.turn.outgoingAttachments ?? [];
+    const workflow = input.workflow ?? null;
+    const runtimeCommand = input.runtimeCommand ?? null;
+    const runtimeOptions = input.runtimeOptions ?? null;
+    const titleContent = input.turn.titleContent;
+    const content = input.turn.content;
     if (!content.trim() && outgoingAttachments.length === 0 && !workflow && !runtimeCommand) return;
 
     let optimisticId: string | null = null;
@@ -161,17 +163,20 @@ export function useTaskComposerController(options: {
       optimisticId = optimistic.id;
       timeline.upsertTimelineEvent(optimistic);
       userSendScrollKey.value += 1;
-      await sendMessage(
-        props.taskId,
-        content,
-        currentComposer,
-        cwd,
-        outgoingAttachments,
-        guideId,
+      const sendInput: SendMessageInput = {
+        taskId: props.taskId,
+        turn: {
+          content,
+          composer: currentComposer,
+          projectCwd: cwd,
+          attachments: outgoingAttachments,
+          guideId: input.turn.guideId ?? null,
+        },
         workflow,
         runtimeCommand,
         runtimeOptions,
-      );
+      };
+      await sendMessage(sendInput);
       timeline.removeTimelineEvent(optimistic.id);
     } catch (err) {
       if (optimisticId) timeline.removeTimelineEvent(optimisticId);
@@ -192,7 +197,7 @@ export function useTaskComposerController(options: {
     }
 
     try {
-      await sendAgentMessage(content, outgoingAttachments);
+      await sendAgentMessage({ turn: { content, outgoingAttachments } });
       attachments.value = [];
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
@@ -207,7 +212,14 @@ export function useTaskComposerController(options: {
     }
     try {
       const commandName = workflow.commandId.split(":").at(1) ?? workflow.commandId;
-      await sendAgentMessage("", [], undefined, workflow, null, null, `/${commandName}`);
+      await sendAgentMessage({
+        turn: {
+          content: "",
+          outgoingAttachments: [],
+          titleContent: `/${commandName}`,
+        },
+        workflow,
+      });
     } catch {
       // sendAgentMessage 已写入本地错误 timeline。
     }
@@ -252,15 +264,13 @@ export function useTaskComposerController(options: {
     try {
       const result = await submitLiliaIab(props.taskId, note);
       if (result.delivery === "runner" && result.stdinForwarded) return;
-      await sendAgentMessage(
-        liliaIabMessage(result.snapshot),
-        result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
-        undefined,
-        undefined,
-        null,
-        null,
-        result.snapshot.note || result.snapshot.title || result.snapshot.url,
-      );
+      await sendAgentMessage({
+        turn: {
+          content: liliaIabMessage(result.snapshot),
+          outgoingAttachments: result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
+          titleContent: result.snapshot.note || result.snapshot.title || result.snapshot.url,
+        },
+      });
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`回送 IAB 结果失败：${String(err)}`));
     }
@@ -268,7 +278,6 @@ export function useTaskComposerController(options: {
 
   const liliaWorkflowActions = useLiliaWorkflowActions({
     hasContext: context.hasContext,
-    composer,
     isTurnRunning,
     blockingPendingAgentActions,
     attachments,
@@ -330,7 +339,12 @@ export function useTaskComposerController(options: {
     const retryContext = timeline.retryContextForEvent(event);
     if (!retryContext) return;
     try {
-      await sendAgentMessage(retryContext.content, retryContext.attachments);
+      await sendAgentMessage({
+        turn: {
+          content: retryContext.content,
+          outgoingAttachments: retryContext.attachments,
+        },
+      });
     } catch (err) {
       console.error("[chat] retry failed", err);
     }
@@ -531,7 +545,8 @@ export function useTaskComposerController(options: {
   const guideDispatch = useGuideDispatch({
     taskId: () => props.taskId,
     ensureReady: context.ensureTaskReadyForMessage,
-    sendAgentMessage,
+    sendAgentMessage: (content, outgoingAttachments, guideId) =>
+      sendAgentMessage({ turn: { content, outgoingAttachments, guideId } }),
     ensureDispatchReady: async () => {
       await ensureComposerLoaded();
     },
