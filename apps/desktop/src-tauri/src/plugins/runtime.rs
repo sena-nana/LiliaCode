@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use tauri::{AppHandle, Runtime};
 
 use super::claude_mcp::{
@@ -8,14 +10,14 @@ use super::claude_skills::list_claude_skills;
 use super::codex_mcp::{codex_config_path, list_codex_mcp_servers};
 use super::paths::{SCOPE_PROJECT, SCOPE_USER};
 use super::types::{
-    AgentRuntimeExtensions, ClaudeRuntimeExtensions, ClaudeRuntimePlugin, ClaudeSkill,
-    CodexRuntimeExtensions, PluginsOverview,
+    AgentRuntimeExtensions, ClaudeRuntimeExtensions, ClaudeRuntimePlugin, CodexRuntimeExtensions,
+    PluginSkill, PluginsOverview,
 };
 
 fn list_scoped_claude_skills<R: Runtime>(
     app: &AppHandle<R>,
     project_cwd: Option<&str>,
-) -> (Vec<ClaudeSkill>, Vec<ClaudeSkill>, Vec<String>) {
+) -> (Vec<PluginSkill>, Vec<PluginSkill>, Vec<String>) {
     let mut warnings = Vec::new();
     let (user_skills, w1) = list_claude_skills(app, SCOPE_USER, None);
     warnings.extend(w1);
@@ -40,14 +42,18 @@ pub fn overview<R: Runtime>(app: &AppHandle<R>, project_cwd: Option<&str>) -> Pl
     let codex_config_path = codex_config_path(app)
         .ok()
         .map(|path| path.to_string_lossy().to_string());
+    let mut skills = user_skills;
+    skills.extend(project_skills);
+    let mut mcp_servers = claude_mcp_servers;
+    mcp_servers.extend(codex_mcp_servers);
+    let mut config_paths = BTreeMap::new();
+    config_paths.insert("claude".to_string(), claude_mcp_config_path);
+    config_paths.insert("codex".to_string(), codex_config_path);
     PluginsOverview {
-        claude_user_skills: user_skills,
-        claude_project_skills: project_skills,
-        claude_user_plugins: user_plugins,
-        claude_mcp_servers,
-        claude_mcp_config_path,
-        codex_mcp_servers,
-        codex_config_path,
+        skills,
+        packages: user_plugins,
+        mcp_servers,
+        config_paths,
         warnings,
     }
 }

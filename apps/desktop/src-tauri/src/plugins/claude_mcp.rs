@@ -8,7 +8,7 @@ use super::paths::{
     ensure_dir, lilia_config_dir, sanitize_extension_name, BUILTIN_CLAUDE_MCP_SERVER,
     CLAUDE_MCP_CONFIG_FILE,
 };
-use super::types::{ClaudeMcpServer, ClaudeMcpServerInput, ClaudeRuntimeMcpServer};
+use super::types::{ClaudeRuntimeMcpServer, PluginMcpServer, PluginMcpServerInput};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -115,10 +115,11 @@ fn write_claude_mcp_config(config: &ClaudeMcpConfigFile) -> Result<(), String> {
     fs::write(&path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
 }
 
-fn public_claude_mcp_server(entry: &ClaudeMcpConfigEntry, include_env: bool) -> ClaudeMcpServer {
+fn public_claude_mcp_server(entry: &ClaudeMcpConfigEntry, include_env: bool) -> PluginMcpServer {
     let mut env_keys: Vec<String> = entry.env.keys().cloned().collect();
     env_keys.sort_by_key(|key| key.to_lowercase());
-    ClaudeMcpServer {
+    PluginMcpServer {
+        backend: "claude".to_string(),
         name: entry.name.clone(),
         command: entry.command.clone(),
         args: entry.args.clone(),
@@ -129,6 +130,8 @@ fn public_claude_mcp_server(entry: &ClaudeMcpConfigEntry, include_env: bool) -> 
         },
         env_keys,
         enabled: !entry.disabled,
+        editable: true,
+        transport: Some("stdio".to_string()),
     }
 }
 
@@ -172,7 +175,7 @@ fn validate_claude_mcp_entries(
     (out, warnings)
 }
 
-pub fn list_claude_mcp_servers() -> (Vec<ClaudeMcpServer>, Vec<String>) {
+pub fn list_claude_mcp_servers() -> (Vec<PluginMcpServer>, Vec<String>) {
     let config = match read_claude_mcp_config() {
         Ok(config) => config,
         Err(e) => return (Vec::new(), vec![e]),
@@ -185,7 +188,7 @@ pub fn list_claude_mcp_servers() -> (Vec<ClaudeMcpServer>, Vec<String>) {
     (servers, warnings)
 }
 
-pub fn create_claude_mcp_server(input: ClaudeMcpServerInput) -> Result<ClaudeMcpServer, String> {
+pub fn create_claude_mcp_server(input: PluginMcpServerInput) -> Result<PluginMcpServer, String> {
     let name = sanitize_claude_mcp_name(&input.name)?;
     let command = normalize_command(&input.command)?;
     let mut config = read_claude_mcp_config()?;
@@ -212,8 +215,8 @@ pub fn create_claude_mcp_server(input: ClaudeMcpServerInput) -> Result<ClaudeMcp
 
 pub fn update_claude_mcp_server(
     name: &str,
-    input: ClaudeMcpServerInput,
-) -> Result<ClaudeMcpServer, String> {
+    input: PluginMcpServerInput,
+) -> Result<PluginMcpServer, String> {
     let current_name = sanitize_claude_mcp_name(name)?;
     let next_name = sanitize_claude_mcp_name(&input.name)?;
     let command = normalize_command(&input.command)?;

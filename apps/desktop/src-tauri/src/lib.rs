@@ -8,10 +8,10 @@ mod automation;
 mod chat;
 mod claude_history;
 mod codex_history;
-mod lilia_iab;
 mod conversation_suggestions;
 mod github;
 mod history_import;
+mod lilia_iab;
 mod plugins;
 mod popup_windows;
 mod project_shell;
@@ -250,23 +250,17 @@ pub fn run() {
             project_shell::system_open_url,
             project_shell::system_open_in_vscode,
             plugins::plugins_overview,
-            plugins::plugins_list_claude_skills,
-            plugins::plugins_create_claude_skill,
-            plugins::plugins_delete_claude_skill,
-            plugins::plugins_set_claude_skill_enabled,
-            plugins::plugins_list_claude_plugins,
-            plugins::plugins_set_claude_plugin_enabled,
-            plugins::plugins_create_claude_mcp_server,
-            plugins::plugins_update_claude_mcp_server,
-            plugins::plugins_delete_claude_mcp_server,
-            plugins::plugins_set_claude_mcp_server_enabled,
-            plugins::plugins_open_claude_mcp_config,
-            plugins::plugins_list_codex_mcp_servers,
-            plugins::plugins_create_codex_mcp_server,
-            plugins::plugins_update_codex_mcp_server,
-            plugins::plugins_delete_codex_mcp_server,
-            plugins::plugins_set_codex_mcp_server_enabled,
-            plugins::plugins_open_codex_config,
+            plugins::plugins_list_skills,
+            plugins::plugins_create_skill,
+            plugins::plugins_delete_skill,
+            plugins::plugins_set_skill_enabled,
+            plugins::plugins_list_packages,
+            plugins::plugins_set_package_enabled,
+            plugins::plugins_create_mcp_server,
+            plugins::plugins_update_mcp_server,
+            plugins::plugins_delete_mcp_server,
+            plugins::plugins_set_mcp_server_enabled,
+            plugins::plugins_open_mcp_config,
             todos::todo_list,
             todos::todo_create,
             todos::todo_update,

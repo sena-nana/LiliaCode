@@ -1,4 +1,10 @@
 import { computed, ref } from "vue";
+import {
+  createMcpServer,
+  updateMcpServer,
+  type PluginBackendKind,
+  type PluginMcpServerInput,
+} from "../../services/plugins";
 
 export interface EnvDraftRow {
   key: string;
@@ -13,24 +19,14 @@ export interface EditableMcpServer {
   envKeys: string[];
 }
 
-interface McpServerInput {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-  removeEnvKeys?: string[];
-}
-
 export function useMcpServerEditor<TServer extends EditableMcpServer>({
+  backend,
   label,
   refresh,
-  createServer,
-  updateServer,
 }: {
+  backend: PluginBackendKind;
   label: string;
   refresh: () => Promise<void>;
-  createServer: (input: McpServerInput) => Promise<TServer>;
-  updateServer: (name: string, input: McpServerInput) => Promise<TServer>;
 }) {
   const showMcpEditor = ref(false);
   const editingMcp = ref<TServer | null>(null);
@@ -100,7 +96,7 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
     mcpSaving.value = true;
     try {
       const { env, removeEnvKeys } = buildMcpEnvPatch();
-      const input = {
+      const input: PluginMcpServerInput = {
         name: mcpName.value,
         command: mcpCommand.value,
         args: mcpArgsText.value
@@ -111,9 +107,9 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
         ...(removeEnvKeys.length > 0 ? { removeEnvKeys } : {}),
       };
       if (editingMcp.value) {
-        await updateServer(editingMcp.value.name, input);
+        await updateMcpServer(backend, editingMcp.value.name, input);
       } else {
-        await createServer(input);
+        await createMcpServer(backend, input);
       }
       showMcpEditor.value = false;
       await refresh();

@@ -5,24 +5,22 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  ClaudeMcpServer,
-  ClaudeMcpServerInput,
-  ClaudePlugin,
-  ClaudeSkill,
-  CodexMcpServer,
-  CodexMcpServerInput,
+  PluginBackendKind,
+  PluginMcpServer,
+  PluginMcpServerInput,
+  PluginPackage,
   PluginScope,
+  PluginSkill,
   PluginsOverview,
 } from "@lilia/contracts";
 
 export type {
-  ClaudeMcpServer,
-  ClaudeMcpServerInput,
-  ClaudePlugin,
-  ClaudeSkill,
-  CodexMcpServer,
-  CodexMcpServerInput,
+  PluginBackendKind,
+  PluginMcpServer,
+  PluginMcpServerInput,
+  PluginPackage,
   PluginScope,
+  PluginSkill,
   PluginsOverview,
 };
 
@@ -32,23 +30,23 @@ export function pluginsOverview(projectCwd?: string | null): Promise<PluginsOver
   });
 }
 
-export function listClaudeSkills(
+export function listSkills(
   scope: PluginScope,
   projectCwd?: string | null,
-): Promise<ClaudeSkill[]> {
-  return invoke<ClaudeSkill[]>("plugins_list_claude_skills", {
+): Promise<PluginSkill[]> {
+  return invoke<PluginSkill[]>("plugins_list_skills", {
     scope,
     projectCwd: projectCwd ?? null,
   });
 }
 
-export function createClaudeSkill(
+export function createSkill(
   scope: PluginScope,
   projectCwd: string | null,
   name: string,
   description: string,
-): Promise<ClaudeSkill> {
-  return invoke<ClaudeSkill>("plugins_create_claude_skill", {
+): Promise<PluginSkill> {
+  return invoke<PluginSkill>("plugins_create_skill", {
     scope,
     projectCwd,
     name,
@@ -56,25 +54,25 @@ export function createClaudeSkill(
   });
 }
 
-export function deleteClaudeSkill(
+export function deleteSkill(
   scope: PluginScope,
   projectCwd: string | null,
   name: string,
 ): Promise<void> {
-  return invoke<void>("plugins_delete_claude_skill", {
+  return invoke<void>("plugins_delete_skill", {
     scope,
     projectCwd,
     name,
   });
 }
 
-export function setClaudeSkillEnabled(
+export function setSkillEnabled(
   scope: PluginScope,
   projectCwd: string | null,
   name: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("plugins_set_claude_skill_enabled", {
+  return invoke<void>("plugins_set_skill_enabled", {
     scope,
     projectCwd,
     name,
@@ -82,68 +80,51 @@ export function setClaudeSkillEnabled(
   });
 }
 
-export function setClaudePluginEnabled(
+export function listPackages(scope: PluginScope): Promise<PluginPackage[]> {
+  return invoke<PluginPackage[]>("plugins_list_packages", { scope });
+}
+
+export function setPackageEnabled(
+  backend: PluginBackendKind,
   scope: PluginScope,
   name: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("plugins_set_claude_plugin_enabled", {
+  return invoke<void>("plugins_set_package_enabled", {
+    backend,
     scope,
     name,
     enabled,
   });
 }
 
-export function listClaudePlugins(scope: PluginScope): Promise<ClaudePlugin[]> {
-  return invoke<ClaudePlugin[]>("plugins_list_claude_plugins", { scope });
+export function createMcpServer(
+  backend: PluginBackendKind,
+  input: PluginMcpServerInput,
+): Promise<PluginMcpServer> {
+  return invoke<PluginMcpServer>("plugins_create_mcp_server", { backend, input });
 }
 
-export function createClaudeMcpServer(input: ClaudeMcpServerInput): Promise<ClaudeMcpServer> {
-  return invoke<ClaudeMcpServer>("plugins_create_claude_mcp_server", { input });
-}
-
-export function updateClaudeMcpServer(
+export function updateMcpServer(
+  backend: PluginBackendKind,
   name: string,
-  input: ClaudeMcpServerInput,
-): Promise<ClaudeMcpServer> {
-  return invoke<ClaudeMcpServer>("plugins_update_claude_mcp_server", { name, input });
+  input: PluginMcpServerInput,
+): Promise<PluginMcpServer> {
+  return invoke<PluginMcpServer>("plugins_update_mcp_server", { backend, name, input });
 }
 
-export function deleteClaudeMcpServer(name: string): Promise<void> {
-  return invoke<void>("plugins_delete_claude_mcp_server", { name });
+export function deleteMcpServer(backend: PluginBackendKind, name: string): Promise<void> {
+  return invoke<void>("plugins_delete_mcp_server", { backend, name });
 }
 
-export function setClaudeMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
-  return invoke<void>("plugins_set_claude_mcp_server_enabled", { name, enabled });
-}
-
-export function openClaudeMcpConfig(): Promise<void> {
-  return invoke<void>("plugins_open_claude_mcp_config");
-}
-
-export function listCodexMcpServers(): Promise<CodexMcpServer[]> {
-  return invoke<CodexMcpServer[]>("plugins_list_codex_mcp_servers");
-}
-
-export function createCodexMcpServer(input: CodexMcpServerInput): Promise<CodexMcpServer> {
-  return invoke<CodexMcpServer>("plugins_create_codex_mcp_server", { input });
-}
-
-export function updateCodexMcpServer(
+export function setMcpServerEnabled(
+  backend: PluginBackendKind,
   name: string,
-  input: CodexMcpServerInput,
-): Promise<CodexMcpServer> {
-  return invoke<CodexMcpServer>("plugins_update_codex_mcp_server", { name, input });
+  enabled: boolean,
+): Promise<void> {
+  return invoke<void>("plugins_set_mcp_server_enabled", { backend, name, enabled });
 }
 
-export function deleteCodexMcpServer(name: string): Promise<void> {
-  return invoke<void>("plugins_delete_codex_mcp_server", { name });
-}
-
-export function setCodexMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
-  return invoke<void>("plugins_set_codex_mcp_server_enabled", { name, enabled });
-}
-
-export function openCodexConfig(): Promise<void> {
-  return invoke<void>("plugins_open_codex_config");
+export function openMcpConfig(backend: PluginBackendKind): Promise<void> {
+  return invoke<void>("plugins_open_mcp_config", { backend });
 }

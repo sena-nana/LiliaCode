@@ -461,6 +461,7 @@ let codexAppServerStatus = {
 };
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 const baseClaudePlugins = [{
+  backend: "claude",
   scope: "user",
   name: "demo-plugin",
   description: "测试用 Claude plugin",
@@ -469,14 +470,18 @@ const baseClaudePlugins = [{
   path: "C:\\Users\\mock\\.claude\\plugins\\demo-plugin",
 }];
 const baseClaudeMcpServers = [{
+  backend: "claude",
   name: "weather",
   command: "node",
   args: ["weather-mcp.js"],
   envKeys: ["WEATHER_TOKEN"],
   enabled: true,
+  editable: true,
+  transport: "stdio",
 }];
 const baseCodexMcpServers = [
   {
+    backend: "codex",
     name: "mock-mcp",
     command: "node",
     args: ["mock-mcp.js"],
@@ -486,6 +491,7 @@ const baseCodexMcpServers = [
     editable: true,
   },
   {
+    backend: "codex",
     name: "remote-mcp",
     command: "",
     args: [],
@@ -506,6 +512,18 @@ let codexMcpServers = baseCodexMcpServers.map((server) => ({
   args: [...server.args],
   envKeys: [...server.envKeys],
 }));
+function mcpServersForBackend(backend: string) {
+  return backend === "claude" ? claudeMcpServers : codexMcpServers;
+}
+
+function updateMcpServersForBackend(
+  backend: string,
+  updater: (servers: typeof claudeMcpServers) => typeof claudeMcpServers,
+) {
+  if (backend === "claude") claudeMcpServers = updater(claudeMcpServers);
+  else codexMcpServers = updater(codexMcpServers);
+}
+
 function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
@@ -2334,17 +2352,17 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "plugins_overview":
       return {
-        claudeUserSkills: [
+        skills: [
           {
+            backend: "claude",
             scope: "user",
             name: "mock-skill",
             description: "测试用 Skill",
             enabled: true,
             path: "C:\\Users\\mock\\.claude\\skills\\mock-skill\\SKILL.md",
           },
-        ],
-        claudeProjectSkills: [
           {
+            backend: "claude",
             scope: "project",
             name: "project-skill",
             description: "项目 Skill",
@@ -2352,23 +2370,28 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             path: "D:\\PROJECT\\workspace\\Lilia\\.claude\\skills\\project-skill\\SKILL.md",
           },
         ],
-        claudeUserPlugins: claudePlugins.map((plugin) => ({ ...plugin })),
-        claudeMcpServers: claudeMcpServers.map((server) => ({
-          ...server,
-          args: [...server.args],
-          envKeys: [...server.envKeys],
-        })),
-        claudeMcpConfigPath: "C:\\Users\\mock\\.lilia\\config\\claude-mcp-servers.json",
-        codexMcpServers: codexMcpServers.map((server) => ({
-          ...server,
-          args: [...server.args],
-          envKeys: [...server.envKeys],
-        })),
-        codexConfigPath: "C:\\Users\\mock\\.codex\\config.toml",
+        packages: claudePlugins.map((plugin) => ({ ...plugin })),
+        mcpServers: [
+          ...claudeMcpServers.map((server) => ({
+            ...server,
+            args: [...server.args],
+            envKeys: [...server.envKeys],
+          })),
+          ...codexMcpServers.map((server) => ({
+            ...server,
+            args: [...server.args],
+            envKeys: [...server.envKeys],
+          })),
+        ],
+        configPaths: {
+          claude: "C:\\Users\\mock\\.lilia\\config\\claude-mcp-servers.json",
+          codex: "C:\\Users\\mock\\.codex\\config.toml",
+        },
         warnings: [],
       };
 
-    case "plugins_set_claude_plugin_enabled": {
+    case "plugins_set_package_enabled": {
+      if (args.backend !== "claude") throw new Error("unsupported package backend");
       const name = String(args.name);
       const enabled = args.enabled === true;
       claudePlugins = claudePlugins.map((plugin) =>
@@ -2377,7 +2400,8 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "plugins_create_claude_mcp_server": {
+    case "plugins_create_mcp_server": {
+      const backend = String(args.backend);
       const input = args.input as {
         name?: string;
         command?: string;
@@ -2385,88 +2409,21 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         env?: Record<string, string>;
       };
       const server = {
+        backend,
         name: String(input.name ?? ""),
         command: String(input.command ?? ""),
         args: Array.isArray(input.args) ? input.args.map(String) : [],
         envKeys: Object.keys(input.env ?? {}),
         enabled: true,
-      };
-      claudeMcpServers = [...claudeMcpServers, server];
-      return { ...server, args: [...server.args], envKeys: [...server.envKeys] };
-    }
-
-    case "plugins_update_claude_mcp_server": {
-      const name = String(args.name);
-      const input = args.input as {
-        name?: string;
-        command?: string;
-        args?: string[];
-        env?: Record<string, string>;
-        removeEnvKeys?: string[];
-      };
-      let updated = claudeMcpServers.find((server) => server.name === name);
-      if (!updated) return undefined;
-      const removed = new Set(
-        Array.isArray(input.removeEnvKeys) ? input.removeEnvKeys.map(String) : [],
-      );
-      const envKeys = input.env
-        ? [
-            ...updated.envKeys.filter((key) => !removed.has(key) && !(key in input.env!)),
-            ...Object.keys(input.env),
-          ]
-        : updated.envKeys.filter((key) => !removed.has(key));
-      updated = {
-        ...updated,
-        name: String(input.name ?? updated.name),
-        command: String(input.command ?? updated.command),
-        args: Array.isArray(input.args) ? input.args.map(String) : updated.args,
-        envKeys,
-      };
-      claudeMcpServers = claudeMcpServers.map((server) =>
-        server.name === name ? updated : server
-      );
-      return { ...updated, args: [...updated.args], envKeys: [...updated.envKeys] };
-    }
-
-    case "plugins_delete_claude_mcp_server": {
-      const name = String(args.name);
-      claudeMcpServers = claudeMcpServers.filter((server) => server.name !== name);
-      return undefined;
-    }
-
-    case "plugins_set_claude_mcp_server_enabled": {
-      const name = String(args.name);
-      const enabled = args.enabled === true;
-      claudeMcpServers = claudeMcpServers.map((server) =>
-        server.name === name ? { ...server, enabled } : server
-      );
-      return undefined;
-    }
-
-    case "plugins_open_claude_mcp_config":
-      return undefined;
-
-    case "plugins_create_codex_mcp_server": {
-      const input = args.input as {
-        name?: string;
-        command?: string;
-        args?: string[];
-        env?: Record<string, string>;
-      };
-      const server = {
-        name: String(input.name ?? ""),
-        command: String(input.command ?? ""),
-        args: Array.isArray(input.args) ? input.args.map(String) : [],
-        envKeys: Object.keys(input.env ?? {}),
-        enabled: true,
-        transport: "stdio",
         editable: true,
+        transport: "stdio",
       };
-      codexMcpServers = [...codexMcpServers, server];
+      updateMcpServersForBackend(backend, (servers) => [...servers, server]);
       return { ...server, args: [...server.args], envKeys: [...server.envKeys] };
     }
 
-    case "plugins_update_codex_mcp_server": {
+    case "plugins_update_mcp_server": {
+      const backend = String(args.backend);
       const name = String(args.name);
       const input = args.input as {
         name?: string;
@@ -2475,8 +2432,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         env?: Record<string, string>;
         removeEnvKeys?: string[];
       };
-      let updated = codexMcpServers.find((server) => server.name === name);
-      if (!updated || !updated.editable) return undefined;
+      const servers = mcpServersForBackend(backend);
+      let updated = servers.find((server) => server.name === name);
+      if (!updated) return undefined;
+      if (backend === "codex" && !updated.editable) return undefined;
       const removed = new Set(
         Array.isArray(input.removeEnvKeys) ? input.removeEnvKeys.map(String) : [],
       );
@@ -2493,30 +2452,36 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         args: Array.isArray(input.args) ? input.args.map(String) : updated.args,
         envKeys,
       };
-      codexMcpServers = codexMcpServers.map((server) =>
-        server.name === name ? updated : server
+      updateMcpServersForBackend(backend, (servers) =>
+        servers.map((server) => (server.name === name ? updated : server)),
       );
       return { ...updated, args: [...updated.args], envKeys: [...updated.envKeys] };
     }
 
-    case "plugins_delete_codex_mcp_server": {
+    case "plugins_delete_mcp_server": {
+      const backend = String(args.backend);
       const name = String(args.name);
-      codexMcpServers = codexMcpServers.filter((server) =>
-        server.name !== name || !server.editable
+      updateMcpServersForBackend(backend, (servers) =>
+        servers.filter((server) => server.name !== name || (backend === "codex" && !server.editable)),
       );
       return undefined;
     }
 
-    case "plugins_set_codex_mcp_server_enabled": {
+    case "plugins_set_mcp_server_enabled": {
+      const backend = String(args.backend);
       const name = String(args.name);
       const enabled = args.enabled === true;
-      codexMcpServers = codexMcpServers.map((server) =>
-        server.name === name && server.editable ? { ...server, enabled } : server
+      updateMcpServersForBackend(backend, (servers) =>
+        servers.map((server) =>
+          server.name === name && (backend === "claude" || server.editable)
+            ? { ...server, enabled }
+            : server,
+        ),
       );
       return undefined;
     }
 
-    case "plugins_open_codex_config":
+    case "plugins_open_mcp_config":
       return undefined;
 
     case "chat_set_composer_state":

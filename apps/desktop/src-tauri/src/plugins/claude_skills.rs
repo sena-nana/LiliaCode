@@ -5,7 +5,7 @@ use tauri::{AppHandle, Runtime};
 use super::paths::{
     claude_root_for, ensure_dir, list_subdirs, sanitize_extension_name, SKILLS_SUBDIR, SKILL_FILE,
 };
-use super::types::ClaudeSkill;
+use super::types::PluginSkill;
 
 /// 解析 SKILL.md frontmatter（YAML 风格的 `key: value`，不支持嵌套）。
 fn parse_skill_frontmatter(text: &str) -> Option<SkillFrontmatter> {
@@ -45,7 +45,7 @@ pub fn list_claude_skills<R: Runtime>(
     app: &AppHandle<R>,
     scope: &str,
     project_cwd: Option<&str>,
-) -> (Vec<ClaudeSkill>, Vec<String>) {
+) -> (Vec<PluginSkill>, Vec<String>) {
     let mut warnings = Vec::new();
     let root = match claude_root_for(app, scope, project_cwd, SKILLS_SUBDIR) {
         Ok(p) => p,
@@ -73,7 +73,8 @@ pub fn list_claude_skills<R: Runtime>(
             warnings.push(format!("{} 缺少有效的 frontmatter", skill_file.display()));
             SkillFrontmatter::default()
         });
-        out.push(ClaudeSkill {
+        out.push(PluginSkill {
+            backend: "claude".to_string(),
             scope: scope.to_string(),
             name: fm.name.unwrap_or(dir_name),
             description: fm.description.unwrap_or_default(),
@@ -94,7 +95,7 @@ pub fn create_claude_skill<R: Runtime>(
     project_cwd: Option<&str>,
     name: &str,
     description: &str,
-) -> Result<ClaudeSkill, String> {
+) -> Result<PluginSkill, String> {
     let name = sanitize_skill_name(name)?;
     let root = claude_root_for(app, scope, project_cwd, SKILLS_SUBDIR)?;
     ensure_dir(&root)?;
@@ -111,7 +112,8 @@ pub fn create_claude_skill<R: Runtime>(
         desc_one_line.replace('\'', "''")
     );
     fs::write(&skill_file, body).map_err(|e| format!("写入 SKILL.md 失败：{e}"))?;
-    Ok(ClaudeSkill {
+    Ok(PluginSkill {
+        backend: "claude".to_string(),
         scope: scope.to_string(),
         name,
         description: desc_one_line,

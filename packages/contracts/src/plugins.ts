@@ -2,7 +2,8 @@ export type PluginScope = "user" | "project";
 
 export type PluginBackendKind = "claude" | "codex";
 
-export interface ClaudeSkill {
+export interface PluginSkill {
+  backend: PluginBackendKind;
   scope: PluginScope;
   name: string;
   description: string;
@@ -10,7 +11,8 @@ export interface ClaudeSkill {
   path: string;
 }
 
-export interface ClaudePlugin {
+export interface PluginPackage {
+  backend: PluginBackendKind;
   scope: PluginScope;
   name: string;
   description: string;
@@ -19,34 +21,19 @@ export interface ClaudePlugin {
   path: string;
 }
 
-export interface ClaudeMcpServer {
+export interface PluginMcpServer {
+  backend: PluginBackendKind;
   name: string;
   command: string;
   args: string[];
   env?: Record<string, string>;
   envKeys: string[];
   enabled: boolean;
-}
-
-export interface ClaudeMcpServerInput {
-  name: string;
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-  removeEnvKeys?: string[];
-}
-
-export interface CodexMcpServer {
-  name: string;
-  command: string;
-  args: string[];
-  envKeys: string[];
-  enabled: boolean;
-  transport: "stdio" | "http" | "oauth" | "unknown" | string;
   editable: boolean;
+  transport?: "stdio" | "http" | "oauth" | "unknown" | string;
 }
 
-export interface CodexMcpServerInput {
+export interface PluginMcpServerInput {
   name: string;
   command: string;
   args: string[];
@@ -74,7 +61,7 @@ export interface ClaudeRuntimeExtensions {
 }
 
 export interface CodexRuntimeExtensions {
-  mcpServers: CodexMcpServer[];
+  mcpServers: PluginMcpServer[];
   configPath: string | null;
   warnings: string[];
 }
@@ -85,12 +72,9 @@ export interface AgentRuntimeExtensions {
 }
 
 export interface PluginsOverview {
-  claudeUserSkills: ClaudeSkill[];
-  claudeProjectSkills: ClaudeSkill[];
-  claudeUserPlugins: ClaudePlugin[];
-  claudeMcpServers: ClaudeMcpServer[];
-  claudeMcpConfigPath: string | null;
-  codexMcpServers: CodexMcpServer[];
-  codexConfigPath: string | null;
+  skills: PluginSkill[];
+  packages: PluginPackage[];
+  mcpServers: PluginMcpServer[];
+  configPaths: Partial<Record<PluginBackendKind, string | null>>;
   warnings: string[];
 }

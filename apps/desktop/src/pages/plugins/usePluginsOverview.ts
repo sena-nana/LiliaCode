@@ -1,10 +1,9 @@
 import { computed, onMounted, ref } from "vue";
 import {
   pluginsOverview,
-  type ClaudeMcpServer,
-  type ClaudePlugin,
-  type ClaudeSkill,
-  type CodexMcpServer,
+  type PluginMcpServer,
+  type PluginPackage,
+  type PluginSkill,
 } from "../../services/plugins";
 import { listProjects } from "../../services/projectsStore";
 
@@ -21,12 +20,12 @@ export function usePluginsOverview() {
     projectsWithCwd.value.map((p) => ({ value: p.cwd, label: p.name, hint: p.cwd })),
   );
 
-  const userSkills = ref<ClaudeSkill[]>([]);
-  const projectSkills = ref<ClaudeSkill[]>([]);
-  const claudePlugins = ref<ClaudePlugin[]>([]);
-  const claudeMcpServers = ref<ClaudeMcpServer[]>([]);
+  const userSkills = ref<PluginSkill[]>([]);
+  const projectSkills = ref<PluginSkill[]>([]);
+  const claudePlugins = ref<PluginPackage[]>([]);
+  const claudeMcpServers = ref<PluginMcpServer[]>([]);
   const claudeMcpConfigPath = ref<string | null>(null);
-  const codexServers = ref<CodexMcpServer[]>([]);
+  const codexServers = ref<PluginMcpServer[]>([]);
   const codexConfigPath = ref<string | null>(null);
   const warnings = ref<string[]>([]);
   const loading = ref(false);
@@ -37,13 +36,17 @@ export function usePluginsOverview() {
     errorText.value = null;
     try {
       const data = await pluginsOverview(projectCwd.value);
-      userSkills.value = data.claudeUserSkills;
-      projectSkills.value = data.claudeProjectSkills;
-      claudePlugins.value = data.claudeUserPlugins;
-      claudeMcpServers.value = data.claudeMcpServers;
-      claudeMcpConfigPath.value = data.claudeMcpConfigPath;
-      codexServers.value = data.codexMcpServers;
-      codexConfigPath.value = data.codexConfigPath;
+      userSkills.value = data.skills.filter(
+        (skill) => skill.backend === "claude" && skill.scope === "user",
+      );
+      projectSkills.value = data.skills.filter(
+        (skill) => skill.backend === "claude" && skill.scope === "project",
+      );
+      claudePlugins.value = data.packages.filter((plugin) => plugin.backend === "claude");
+      claudeMcpServers.value = data.mcpServers.filter((server) => server.backend === "claude");
+      claudeMcpConfigPath.value = data.configPaths.claude ?? null;
+      codexServers.value = data.mcpServers.filter((server) => server.backend === "codex");
+      codexConfigPath.value = data.configPaths.codex ?? null;
       warnings.value = data.warnings;
     } catch (err) {
       errorText.value = String(err);

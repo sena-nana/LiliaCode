@@ -6,7 +6,7 @@ use tauri::{AppHandle, Runtime};
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
 use super::paths::{ensure_dir, home_dir, sanitize_extension_name};
-use super::types::{CodexMcpServer, CodexMcpServerInput};
+use super::types::{PluginMcpServer, PluginMcpServerInput};
 
 const CODEX_MCP_ROOT: &str = "mcp_servers";
 const TRANSPORT_STDIO: &str = "stdio";
@@ -165,16 +165,18 @@ fn transport_for(table: &dyn TableLike, command: &str) -> String {
     TRANSPORT_UNKNOWN.to_string()
 }
 
-fn public_codex_mcp_server(name: &str, item: &Item, warnings: &mut Vec<String>) -> CodexMcpServer {
+fn public_codex_mcp_server(name: &str, item: &Item, warnings: &mut Vec<String>) -> PluginMcpServer {
     let Some(table) = item.as_table_like() else {
         warnings.push(format!("Codex MCP server {name} 不是 table"));
-        return CodexMcpServer {
+        return PluginMcpServer {
+            backend: "codex".to_string(),
             name: name.to_string(),
             command: String::new(),
             args: Vec::new(),
+            env: None,
             env_keys: Vec::new(),
             enabled: true,
-            transport: TRANSPORT_UNKNOWN.to_string(),
+            transport: Some(TRANSPORT_UNKNOWN.to_string()),
             editable: false,
         };
     };
@@ -187,19 +189,21 @@ fn public_codex_mcp_server(name: &str, item: &Item, warnings: &mut Vec<String>) 
     let env_keys = env_keys(table.get("env"), name, warnings);
     let transport = transport_for(table, command.trim());
     let enabled = table.get("enabled").and_then(Item::as_bool).unwrap_or(true);
-    CodexMcpServer {
+    PluginMcpServer {
+        backend: "codex".to_string(),
         name: name.to_string(),
         command,
         args,
+        env: None,
         env_keys,
         enabled,
         editable: transport == TRANSPORT_STDIO,
-        transport,
+        transport: Some(transport),
     }
 }
 
 #[cfg(test)]
-fn parse_codex_mcp_servers(text: &str) -> (Vec<CodexMcpServer>, Vec<String>) {
+fn parse_codex_mcp_servers(text: &str) -> (Vec<PluginMcpServer>, Vec<String>) {
     if text.trim().is_empty() {
         return (Vec::new(), Vec::new());
     }
@@ -210,7 +214,7 @@ fn parse_codex_mcp_servers(text: &str) -> (Vec<CodexMcpServer>, Vec<String>) {
     list_codex_mcp_servers_from_doc(&doc)
 }
 
-fn list_codex_mcp_servers_from_doc(doc: &DocumentMut) -> (Vec<CodexMcpServer>, Vec<String>) {
+fn list_codex_mcp_servers_from_doc(doc: &DocumentMut) -> (Vec<PluginMcpServer>, Vec<String>) {
     let mut warnings = Vec::new();
     let Some(table) = mcp_servers_table(doc) else {
         if doc.as_table().get(CODEX_MCP_ROOT).is_some() {
@@ -218,7 +222,7 @@ fn list_codex_mcp_servers_from_doc(doc: &DocumentMut) -> (Vec<CodexMcpServer>, V
         }
         return (Vec::new(), warnings);
     };
-    let mut servers: Vec<CodexMcpServer> = table
+    let mut servers: Vec<PluginMcpServer> = table
         .iter()
         .map(|(name, item)| public_codex_mcp_server(name, item, &mut warnings))
         .collect();
@@ -228,7 +232,7 @@ fn list_codex_mcp_servers_from_doc(doc: &DocumentMut) -> (Vec<CodexMcpServer>, V
 
 pub fn list_codex_mcp_servers<R: Runtime>(
     app: &AppHandle<R>,
-) -> (Vec<CodexMcpServer>, Vec<String>) {
+) -> (Vec<PluginMcpServer>, Vec<String>) {
     let path = match codex_config_path(app) {
         Ok(p) => p,
         Err(e) => return (Vec::new(), vec![e]),
@@ -311,7 +315,7 @@ fn apply_env_update(
     Ok(())
 }
 
-fn stdio_table_from_input(input: CodexMcpServerInput) -> Result<Table, String> {
+fn stdio_table_from_input(input: PluginMcpServerInput) -> Result<Table, String> {
     let command = normalize_command(&input.command)?;
     let mut table = Table::new();
     set_stdio_fields(&mut table, command, normalize_args(input.args));
@@ -321,7 +325,11 @@ fn stdio_table_from_input(input: CodexMcpServerInput) -> Result<Table, String> {
     Ok(table)
 }
 
-fn read_public_server(doc: &DocumentMut, name: &str, action: &str) -> Result<CodexMcpServer, String> {
+fn read_public_server(
+    doc: &DocumentMut,
+    name: &str,
+    action: &str,
+) -> Result<PluginMcpServer, String> {
     let (servers, _) = list_codex_mcp_servers_from_doc(doc);
     servers
         .into_iter()
@@ -351,15 +359,17 @@ fn ensure_editable_stdio(table: &Table, key: &str) -> Result<(), String> {
     } else {
         Err(format!(
             "Codex MCP server {key} 是 {} transport，只能打开 config.toml 手动编辑",
-            server.transport
+            server
+                .transport
+                .unwrap_or_else(|| TRANSPORT_UNKNOWN.to_string())
         ))
     }
 }
 
 pub fn create_codex_mcp_server(
     app: &AppHandle,
-    input: CodexMcpServerInput,
-) -> Result<CodexMcpServer, String> {
+    input: PluginMcpServerInput,
+) -> Result<PluginMcpServer, String> {
     let name = sanitize_codex_mcp_name(&input.name)?;
     let (path, mut doc) = read_codex_doc(app)?;
     let table = ensure_mcp_servers_table_mut(&mut doc)?;
@@ -375,8 +385,8 @@ pub fn create_codex_mcp_server(
 pub fn update_codex_mcp_server(
     app: &AppHandle,
     name: &str,
-    input: CodexMcpServerInput,
-) -> Result<CodexMcpServer, String> {
+    input: PluginMcpServerInput,
+) -> Result<PluginMcpServer, String> {
     let current_name = sanitize_codex_mcp_name(name)?;
     let next_name = sanitize_codex_mcp_name(&input.name)?;
     let command = normalize_command(&input.command)?;
@@ -398,7 +408,13 @@ pub fn update_codex_mcp_server(
         let server_table = item
             .as_table_like_mut()
             .ok_or_else(|| format!("Codex MCP server {current_key} 不是 table"))?;
-        update_stdio_table(server_table, command, args, input.env, input.remove_env_keys)?;
+        update_stdio_table(
+            server_table,
+            command,
+            args,
+            input.env,
+            input.remove_env_keys,
+        )?;
     } else {
         let mut item = table
             .remove(&current_key)
@@ -406,7 +422,13 @@ pub fn update_codex_mcp_server(
         let Some(server_table) = item.as_table_like_mut() else {
             return Err(format!("Codex MCP server {current_key} 不是 table"));
         };
-        update_stdio_table(server_table, command, args, input.env, input.remove_env_keys)?;
+        update_stdio_table(
+            server_table,
+            command,
+            args,
+            input.env,
+            input.remove_env_keys,
+        )?;
         table.insert(&next_name, item);
     }
     write_codex_doc_to_path(&path, &doc)?;

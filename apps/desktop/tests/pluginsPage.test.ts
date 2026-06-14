@@ -3,16 +3,9 @@ import { describe, expect, it } from "vitest";
 import Plugins from "../src/pages/Plugins.vue";
 import { mockInvoke } from "./tauriMock";
 
-function lastClaudeMcpUpdateInput() {
-  const call = mockInvoke.mock.calls
-    .filter(([command]) => command === "plugins_update_claude_mcp_server")
-    .at(-1);
-  return call?.[1]?.input;
-}
-
 function lastCodexMcpCreateInput() {
   const call = mockInvoke.mock.calls
-    .filter(([command]) => command === "plugins_create_codex_mcp_server")
+    .filter(([command, args]) => command === "plugins_create_mcp_server" && args?.backend === "codex")
     .at(-1);
   return call?.[1]?.input;
 }
@@ -58,6 +51,12 @@ describe("Plugins page", () => {
     await waitFor(() => {
       expect(within(detail).getByText(/已停用/)).toBeInTheDocument();
     });
+    expect(
+      mockInvoke.mock.calls.some(
+        ([command, args]) =>
+          command === "plugins_set_mcp_server_enabled" && args?.backend === "claude",
+      ),
+    ).toBe(true);
 
     await fireEvent.click(view.getByRole("button", { name: /新增 MCP/ }));
     await fireEvent.update(view.getByPlaceholderText("weather-mcp"), "linear");
@@ -68,6 +67,12 @@ describe("Plugins page", () => {
     await waitFor(() => {
       expect(within(list).getByRole("button", { name: /linear/ })).toBeInTheDocument();
     });
+    expect(
+      mockInvoke.mock.calls.some(
+        ([command, args]) =>
+          command === "plugins_create_mcp_server" && args?.backend === "claude",
+      ),
+    ).toBe(true);
     await fireEvent.click(within(list).getByRole("button", { name: /linear/ }));
     expect(within(detail).getByText("uvx linear-mcp")).toBeInTheDocument();
   });
@@ -98,6 +103,12 @@ describe("Plugins page", () => {
     await waitFor(() => {
       expect(within(detail).getByText(/已停用/)).toBeInTheDocument();
     });
+    expect(
+      mockInvoke.mock.calls.some(
+        ([command, args]) =>
+          command === "plugins_set_mcp_server_enabled" && args?.backend === "codex",
+      ),
+    ).toBe(true);
 
     await fireEvent.click(view.getByRole("button", { name: /新增 MCP/ }));
     await fireEvent.update(view.getByPlaceholderText("weather-mcp"), "codex-linear");
