@@ -1636,7 +1636,7 @@ export async function handleLiliaIabResult(ctx, snapshotValue) {
     summary: oneLineSummary(snapshot.note || snapshot.title || snapshot.url),
     payload: {
       backend: "codex",
-      subkind: "codex_iab",
+      subkind: "lilia_iab",
       taskId: snapshot.taskId,
       url: snapshot.url,
       title: snapshot.title,
@@ -1813,7 +1813,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
             summary: err?.message || String(err),
             payload: {
               backend: "codex",
-              subkind: "codex_iab_result",
+              subkind: "lilia_iab_result",
             },
             sourceId: `codex:iab:error:${Date.now()}`,
           });

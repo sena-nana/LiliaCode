@@ -2575,7 +2575,7 @@ describe("Codex app-server mapping", () => {
           title: "Lilia IAB snapshot",
           payload: expect.objectContaining({
             backend: "codex",
-            subkind: "codex_iab",
+            subkind: "lilia_iab",
             url: "https://example.com/debug",
             title: "Debug Page",
             note: "button broken",
