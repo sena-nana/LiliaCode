@@ -59,20 +59,29 @@ export interface McpElicitationResult {
 }
 
 export interface PermissionApprovalPayload {
-  threadId: string;
-  turnId: string;
-  itemId: string;
-  startedAtMs: number;
-  cwd: string;
   reason: string | null;
-  permissions: unknown;
+  requestedAccess: unknown;
+  scopeSuggestion?: unknown;
+  providerContext?: {
+    codex?: {
+      threadId: string;
+      turnId: string;
+      itemId: string;
+      startedAtMs: number;
+      cwd: string;
+      permissions: unknown;
+    };
+    [provider: string]: unknown;
+  };
 }
 
 export interface PermissionApprovalResult {
   action: "approve" | "decline" | "cancel";
-  permissions: unknown;
-  scope: unknown;
+  grantedAccess?: unknown;
+  permissions?: unknown;
+  scope?: unknown;
   strictAutoReview?: boolean;
+  providerContext?: unknown;
 }
 
 export type AgentInteractionPayloadByKind = {

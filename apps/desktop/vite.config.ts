@@ -19,6 +19,9 @@ export default defineConfig(async () => ({
       "@lilia/contracts/claudeTools.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/claudeTools.mjs", import.meta.url),
       ),
+      "@lilia/contracts/liliaAgentProtocol.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/liliaAgentProtocol.mjs", import.meta.url),
+      ),
       "@lilia/contracts": fileURLToPath(
         new URL("../../packages/contracts/src/index.ts", import.meta.url),
       ),

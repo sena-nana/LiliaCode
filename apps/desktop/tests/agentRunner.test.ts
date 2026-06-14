@@ -64,7 +64,7 @@ import {
   syncClaudeSessionHistoryForTask,
 } from "../agent-runner/claude/history.mjs";
 import {
-  runClaudeSessionManagementWorkflow,
+  runClaudeSessionManagementRuntimeCommand,
 } from "../agent-runner/sessionManagement.mjs";
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
@@ -99,6 +99,10 @@ function trackedElicitation(calls: any[]) {
       calls.push(["decrement", kind]);
     }
   };
+}
+
+function runnerTurn(prompt = "", extra: Record<string, unknown> = {}) {
+  return { prompt, ...extra };
 }
 
 function createTestInteractionBroker(protocol: any) {
@@ -166,11 +170,34 @@ describe("runner core", () => {
     expect(json()).toEqual([{ type: "error", message: "missing prompt" }]);
   });
 
+  it("未知 workflow kind 被拒绝", async () => {
+    const { protocol, json } = captureProtocol();
+    const result = await runAgentTurn({
+      backend: "codex",
+      turn: runnerTurn(""),
+      workflow: {
+        type: "lilia_unknown",
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async () => {
+        throw new Error("should not run");
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: false, exitCode: 1 });
+    expect(json()).toEqual([{ type: "error", message: "unknown workflow: lilia_unknown" }]);
+  });
+
   it("Codex review workflow 允许空 prompt 进入 Codex 后端", async () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: {
         type: "lilia_review",
         target: { type: "uncommittedChanges" },
@@ -201,7 +228,7 @@ describe("runner core", () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: {
         type: "lilia_fix_suggestion",
         target: { type: "uncommittedChanges" },
@@ -234,7 +261,7 @@ describe("runner core", () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: {
         type: "lilia_batch_apply",
         sourceTurnId: "turn-source",
@@ -268,7 +295,7 @@ describe("runner core", () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: {
         type: "lilia_goal",
         action: "set",
@@ -301,7 +328,7 @@ describe("runner core", () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: { type: "lilia_compact" },
     }, {
       protocol,
@@ -326,7 +353,7 @@ describe("runner core", () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "",
+      turn: runnerTurn(""),
       workflow: { type: "lilia_background_terminals_clean" },
     }, {
       protocol,
@@ -347,25 +374,22 @@ describe("runner core", () => {
     });
   });
 
-  it("Codex native workflow 允许空 prompt 进入 Codex 后端", async () => {
-    for (const workflow of [
-      { type: "lilia_memory_mode", mode: "enabled" },
-      { type: "lilia_memory_reset" },
+  it("Codex native runtime command 允许空 prompt 进入 Codex 后端", async () => {
+    for (const runtimeCommand of [
       { type: "lilia_session_fork" },
       { type: "lilia_session_management", action: "list" },
-      { type: "lilia_config_diagnostics" },
       { type: "lilia_provider_settings", action: "diagnose" },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
         backend: "codex",
-        prompt: "",
-        workflow,
+        turn: runnerTurn(""),
+        runtimeCommand,
       }, {
         protocol,
         env: {},
         runCodex: async (cmd: any) => {
-          protocol.emit({ type: "done", sessionId: "thread-native", workflow: cmd.workflow });
+          protocol.emit({ type: "done", sessionId: "thread-native", runtimeCommand: cmd.runtimeCommand });
         },
         runClaude: async () => {
           throw new Error("wrong backend");
@@ -376,22 +400,22 @@ describe("runner core", () => {
       expect(json()[0]).toMatchObject({
         type: "done",
         sessionId: "thread-native",
-        workflow,
+        runtimeCommand,
       });
     }
   });
 
-  it("Claude session fork workflow 允许空 prompt 进入 Claude 后端", async () => {
+  it("Claude session fork runtime command 允许空 prompt 进入 Claude 后端", async () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
       backend: "claude",
-      prompt: "",
-      workflow: { type: "lilia_session_fork" },
-    }, {
+      turn: runnerTurn(""),
+      runtimeCommand: { type: "lilia_session_fork" },
+      }, {
       protocol,
       env: {},
       runClaude: async (cmd: any) => {
-        protocol.emit({ type: "done", sessionId: "claude-fork", workflow: cmd.workflow });
+        protocol.emit({ type: "done", sessionId: "claude-fork", runtimeCommand: cmd.runtimeCommand });
       },
       runCodex: async () => {
         throw new Error("wrong backend");
@@ -402,7 +426,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "claude-fork",
-      workflow: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "lilia_session_fork" },
     });
   });
 
@@ -411,20 +435,21 @@ describe("runner core", () => {
     let seen: any = null;
     const result = await runAgentTurn({
       backend: "codex",
-      prompt: "请读附件",
-      attachments: [{
-        path: "C:/tmp/a.txt",
-        name: "a.txt",
-        kind: "file",
-        mime: "text/plain",
-        size: 2048,
-      }, {
-        path: "C:/tmp/src",
-        name: "src",
-        kind: "directory",
-        size: null,
-        directory: { fileCount: 3, directoryCount: 1, totalSize: 100, truncated: true },
-      }],
+      turn: runnerTurn("请读附件", {
+        attachments: [{
+          path: "C:/tmp/a.txt",
+          name: "a.txt",
+          kind: "file",
+          mime: "text/plain",
+          size: 2048,
+        }, {
+          path: "C:/tmp/src",
+          name: "src",
+          kind: "directory",
+          size: null,
+          directory: { fileCount: 3, directoryCount: 1, totalSize: 100, truncated: true },
+        }],
+      }),
     }, {
       protocol,
       env: {},
@@ -446,7 +471,7 @@ describe("runner core", () => {
 
   it("dry-run 分支不启动真实后端", async () => {
     const { protocol, json } = captureProtocol();
-    const result = await runAgentTurn({ backend: "claude", prompt: "hi" }, {
+    const result = await runAgentTurn({ backend: "claude", turn: runnerTurn("hi") }, {
       protocol,
       env: { LILIA_AGENT_DRY_RUN: "1" },
       runDryRun: async (cmd: any, context: any) => {
@@ -950,7 +975,7 @@ describe("Claude helpers", () => {
     }
   });
 
-  it("Claude session fork workflow calls forkSession and emits the forked session id", async () => {
+  it("Claude session fork runtime command calls forkSession and emits the forked session id", async () => {
     const { protocol, json } = captureProtocol();
     let forkInput: any = null;
     let queryCalled = false;
@@ -959,7 +984,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      workflow: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "lilia_session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -990,7 +1015,7 @@ describe("Claude helpers", () => {
     });
   });
 
-  it("Claude session fork workflow requires an existing session checkpoint", async () => {
+  it("Claude session fork runtime command requires an existing session checkpoint", async () => {
     const { protocol, json } = captureProtocol();
     let forkCalled = false;
     let queryCalled = false;
@@ -998,7 +1023,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      workflow: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "lilia_session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -1030,7 +1055,7 @@ describe("Claude helpers", () => {
   });
 
   it("handles Claude session management through SDK session APIs", async () => {
-    for (const workflow of [
+    for (const runtimeCommand of [
       { type: "lilia_session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
       { type: "lilia_session_management", action: "info", sessionId: "claude-session-1" },
       {
@@ -1047,11 +1072,11 @@ describe("Claude helpers", () => {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
 
-      await runClaudeSessionManagementWorkflow({
+      await runClaudeSessionManagementRuntimeCommand({
         cwd: "C:/repo",
         prompt: "",
         resumeSessionId: "claude-current",
-        workflow,
+        runtimeCommand,
       }, {
         protocol,
         listClaudeSessions: async (options: any) => {
@@ -1087,13 +1112,13 @@ describe("Claude helpers", () => {
       } as any, "C:/repo");
 
       expect(calls[0]).toMatchObject({
-        method: workflow.action === "list"
+        method: runtimeCommand.action === "list"
           ? "listSessions"
-          : workflow.action === "info"
+          : runtimeCommand.action === "info"
             ? "getSessionInfo"
-            : workflow.action === "messages"
+            : runtimeCommand.action === "messages"
               ? "getSessionMessages"
-              : workflow.action === "tag"
+              : runtimeCommand.action === "tag"
                 ? "tagSession"
                 : "deleteSession",
       });
@@ -1105,14 +1130,14 @@ describe("Claude helpers", () => {
           payload: expect.objectContaining({
             backend: "claude",
             subkind: "session_management",
-            action: workflow.action,
+            action: runtimeCommand.action,
             native: true,
           }),
         }),
       }));
       expect(json().some((line) =>
         line.type === "done" &&
-        line.sessionId === (workflow.sessionId || "claude-current")
+        line.sessionId === (runtimeCommand.sessionId || "claude-current")
       )).toBe(true);
     }
   });
@@ -1120,10 +1145,10 @@ describe("Claude helpers", () => {
   it("reports unsupported diagnostic for Claude session archive", async () => {
     const { protocol, json } = captureProtocol();
 
-    await expect(runClaudeSessionManagementWorkflow({
+    await expect(runClaudeSessionManagementRuntimeCommand({
       cwd: "C:/repo",
       prompt: "",
-      workflow: { type: "lilia_session_management", action: "archive", sessionId: "claude-session-1" },
+      runtimeCommand: { type: "lilia_session_management", action: "archive", sessionId: "claude-session-1" },
     }, { protocol } as any, "C:/repo")).resolves.toBe(true);
 
     expect(json()).toContainEqual(expect.objectContaining({
@@ -1145,10 +1170,10 @@ describe("Claude helpers", () => {
   it("reports unsupported diagnostic when Claude session rename API is unavailable", async () => {
     const { protocol, json } = captureProtocol();
 
-    await expect(runClaudeSessionManagementWorkflow({
+    await expect(runClaudeSessionManagementRuntimeCommand({
       cwd: "C:/repo",
       prompt: "",
-      workflow: {
+      runtimeCommand: {
         type: "lilia_session_management",
         action: "rename",
         sessionId: "claude-session-1",
@@ -1408,11 +1433,14 @@ describe("Claude helpers", () => {
       prompt: "",
       model: "claude-sonnet-4-6",
       permission: "ask",
-      workflow: {
+      runtimeCommand: {
         type: "lilia_provider_settings",
         action: "update",
+      },
+      runtimeOptions: {
         common: { model: "claude-opus-4-5", permission: "readonly" },
-        claude: {
+        provider: {
+          claude: {
           allowedTools: ["Read"],
           disallowedTools: ["Bash"],
           additionalDirectories: ["D:/shared"],
@@ -1433,6 +1461,7 @@ describe("Claude helpers", () => {
           sessionId: "00000000-0000-4000-8000-000000000001",
           abortAfterMs: 3000,
           sessionStore: { explicit: true },
+          },
         },
       },
     }, claudeRunnerContext(protocol, {
@@ -1455,7 +1484,7 @@ describe("Claude helpers", () => {
       },
     }));
 
-    expect(seenPrompt).toContain("Lilia Claude provider settings workflow.");
+    expect(seenPrompt).toContain("Lilia Claude provider settings runtime command.");
     expect(seenOptions).toMatchObject({
       model: "claude-opus-4-5",
       permissionMode: "default",
@@ -2197,11 +2226,18 @@ describe("Codex app-server mapping", () => {
       kind: "permission_approval",
       backend: "codex",
       payload: expect.objectContaining({
-        threadId: "thread-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        cwd: "C:/repo",
         reason: "need network",
+        requestedAccess: expect.objectContaining({
+          network: { domains: [{ domain: "example.com" }] },
+        }),
+        providerContext: expect.objectContaining({
+          codex: expect.objectContaining({
+            threadId: "thread-1",
+            turnId: "turn-1",
+            itemId: "item-1",
+            cwd: "C:/repo",
+          }),
+        }),
       }),
     }));
 
@@ -2210,7 +2246,7 @@ describe("Codex app-server mapping", () => {
       id: "codex-1",
       kind: "permission_approval",
       result: {
-        permissions: {
+        grantedAccess: {
           network: { domains: [{ domain: "example.com" }] },
         },
         scope: "session",
@@ -2793,15 +2829,19 @@ describe("Codex app-server mapping", () => {
       prompt: "hi",
       permission: "ask",
       planMode: false,
-      codexSettings: {
-        model: "gpt-5.4-mini",
-        reasoningEffort: "high",
-        runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-        responsesApiClientMetadata: { surface: "lilia-test" },
-        additionalContext: "extra context",
-        persistExtendedHistory: true,
-        initialTurnsPage: { limit: 20 },
-        excludeTurns: ["turn-old", "turn-old", ""],
+      runtimeOptions: {
+        provider: {
+          codex: {
+            model: "gpt-5.4-mini",
+            reasoningEffort: "high",
+            runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+            responsesApiClientMetadata: { surface: "lilia-test" },
+            additionalContext: "extra context",
+            persistExtendedHistory: true,
+            initialTurnsPage: { limit: 20 },
+            excludeTurns: ["turn-old", "turn-old", ""],
+          },
+        },
       },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
@@ -2863,10 +2903,14 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       resumeSessionId: "thread-1",
-      codexSettings: {
-        persistExtendedHistory: false,
-        initialTurnsPage: { cursor: "cursor-1", limit: 10 },
-        excludeTurns: ["turn-a", "turn-a", " turn-b "],
+      runtimeOptions: {
+        provider: {
+          codex: {
+            persistExtendedHistory: false,
+            initialTurnsPage: { cursor: "cursor-1", limit: 10 },
+            excludeTurns: ["turn-a", "turn-a", " turn-b "],
+          },
+        },
       },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
@@ -3030,8 +3074,12 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      codexSettings: {
-        runtimeWorkspaceRoots: ["C:/repo"],
+      runtimeOptions: {
+        provider: {
+          codex: {
+            runtimeWorkspaceRoots: ["C:/repo"],
+          },
+        },
       },
       workflow: {
         type: "lilia_fix_suggestion",
@@ -3593,11 +3641,15 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      codexSettings: {
-        model: "gpt-5.5",
-        runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+      runtimeOptions: {
+        provider: {
+          codex: {
+            model: "gpt-5.5",
+            runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+          },
+        },
       },
-      workflow: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "lilia_session_fork" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -3701,7 +3753,7 @@ describe("Codex app-server mapping", () => {
   });
 
   it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
-    for (const workflow of [
+    for (const runtimeCommand of [
       { type: "lilia_session_management", action: "list", searchTerm: "fix", limit: 10 },
       { type: "lilia_session_management", action: "messages", sessionId: "thread-target", limit: 5 },
       { type: "lilia_session_management", action: "archive", sessionId: "thread-target", archived: true },
@@ -3752,7 +3804,7 @@ describe("Codex app-server mapping", () => {
         backend: "codex",
         prompt: "",
         permission: "ask",
-        workflow,
+        runtimeCommand,
       }, { mcpServers: [], warnings: [] }, {
         protocol,
         interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -3771,20 +3823,20 @@ describe("Codex app-server mapping", () => {
           payload: expect.objectContaining({
             backend: "codex",
             subkind: "session_management",
-            action: workflow.action,
+            action: runtimeCommand.action,
             native: true,
           }),
         }),
       }));
       expect(json().some((line) =>
         line.type === "done" &&
-        line.sessionId === (workflow.sessionId || null)
+        line.sessionId === (runtimeCommand.sessionId || null)
       )).toBe(true);
     }
   });
 
   it("reports unsupported diagnostic for Codex session tag and delete", async () => {
-    for (const workflow of [
+    for (const runtimeCommand of [
       { type: "lilia_session_management", action: "tag", sessionId: "thread-target", tag: "release" },
       { type: "lilia_session_management", action: "delete", sessionId: "thread-target" },
     ]) {
@@ -3805,7 +3857,7 @@ describe("Codex app-server mapping", () => {
         backend: "codex",
         prompt: "",
         permission: "ask",
-        workflow,
+        runtimeCommand,
       }, { mcpServers: [], warnings: [] }, {
         protocol,
         interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -3824,7 +3876,7 @@ describe("Codex app-server mapping", () => {
           payload: expect.objectContaining({
             backend: "codex",
             subkind: "session_management",
-            action: workflow.action,
+            action: runtimeCommand.action,
             native: false,
             result: expect.objectContaining({ unsupported: true }),
           }),
@@ -3853,18 +3905,22 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: {
+      runtimeCommand: {
         type: "lilia_provider_settings",
         action: "update",
+      },
+      runtimeOptions: {
         common: { model: "gpt-5.6", permission: "readonly" },
-        codex: {
-          profile: "deep",
-          reasoningEffort: "high",
-          runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
-          persistExtendedHistory: true,
-          environments: [{ id: "env-1" }],
-          experimentalRawEvents: true,
-          responsesApiClientMetadata: { surface: "lilia" },
+        provider: {
+          codex: {
+            profile: "deep",
+            reasoningEffort: "high",
+            runtimeWorkspaceRoots: ["C:/repo", "D:/shared"],
+            persistExtendedHistory: true,
+            environments: [{ id: "env-1" }],
+            experimentalRawEvents: true,
+            responsesApiClientMetadata: { surface: "lilia" },
+          },
         },
       },
     }, { mcpServers: [], warnings: [] }, {
@@ -3910,6 +3966,60 @@ describe("Codex app-server mapping", () => {
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
   });
 
+  it("emits Codex provider settings update errors with runtime command context", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") throw new Error("settings update failed");
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "lilia_provider_settings",
+        action: "update",
+      },
+      runtimeOptions: {
+        common: { model: "gpt-5.6" },
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    })).rejects.toThrow("settings update failed");
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Codex provider settings update failed",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "provider_settings",
+          action: "update",
+          method: "thread/settings/update",
+          error: "settings update failed",
+        }),
+      }),
+    }));
+  });
+
   it("falls back Codex provider settings advanced fields to turn start", async () => {
     const { protocol } = captureProtocol();
     const calls: any[] = [];
@@ -3933,10 +4043,14 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "hello",
       permission: "ask",
-      codexSettings: {
-        environments: [{ id: "env-1" }],
-        experimentalRawEvents: true,
-        responsesApiClientMetadata: { surface: "lilia" },
+      runtimeOptions: {
+        provider: {
+          codex: {
+            environments: [{ id: "env-1" }],
+            experimentalRawEvents: true,
+            responsesApiClientMetadata: { surface: "lilia" },
+          },
+        },
       },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
@@ -3975,7 +4089,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "lilia_provider_settings", action: "update" },
+      runtimeCommand: { type: "lilia_provider_settings", action: "update" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4201,8 +4315,12 @@ describe("Codex app-server mapping", () => {
 
     const result = await updateCodexThreadSettings(server as any, "thread-1", {
       permission: "ask",
-      codexSettings: {
-        runtimeWorkspaceRoots: ["C:/repo"],
+      runtimeOptions: {
+        provider: {
+          codex: {
+            runtimeWorkspaceRoots: ["C:/repo"],
+          },
+        },
       },
     }, protocol);
 
@@ -4240,7 +4358,7 @@ describe("Codex app-server mapping", () => {
     const cmd: any = {
       permission: "ask",
       cwd: "C:/repo",
-      codexSettings: {},
+      runtimeOptions: { provider: { codex: {} } },
     };
     const ctx: any = createCodexRunContext(cmd, protocol, "thread-1");
     ctx.settingsUpdatePromises = [];
@@ -4258,7 +4376,6 @@ describe("Codex app-server mapping", () => {
 
     expect(cmd.permission).toBe("readonly");
     expect(cmd.model).toBe("gpt-5.7");
-    expect(cmd.codexSettings.model).toBe("gpt-5.7");
     expect(ctx.executionPermission).toBe("readonly");
     expect(calls[0]).toMatchObject({
       method: "thread/settings/update",

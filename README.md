@@ -20,7 +20,7 @@
 
 <p align="center"><strong>A desktop client for agent-assisted software engineering.</strong></p>
 
-<p align="center">LiliaCode organizes Claude Code and Codex execution behind Lilia workflows and recoverable local task state, helping developers manage project sessions, context, todos, and execution history.</p>
+<p align="center">LiliaCode organizes Claude Code and Codex execution behind Lilia workflows, runtime commands, and recoverable local task state, helping developers manage project sessions, context, todos, and execution history.</p>
 
 <p align="center">
   <img src="./.github/assets/main-window.png" alt="LiliaCode main window" />
@@ -74,7 +74,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Guidance queue: create, queue, and serially dispatch user guidance todos, with queue state recovered during active runs.
 - [x] Basic MCP integration: Claude stdio MCP servers can be managed by Lilia and injected into runtime; Codex stdio MCP servers can be read from and managed in `~/.codex/config.toml`.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
-- [x] Unified Lilia workflows: review, fix suggestion, batch apply, context compact, session fork, Goal, memory, config diagnostics, and background-terminal cleanup use Lilia protocol names in the UI and dispatch internally by backend.
+- [x] Unified Lilia protocol: review, fix suggestion, batch apply, context compact, Goal, memory, config diagnostics, and background-terminal cleanup stay in the user-facing workflow layer; session fork and provider session controls use runtime commands and dispatch internally by backend.
 - [x] File context: mention files, directories, images, and other context with `@`, with pasted or dropped attachments also supported.
 - [ ] Intelligent model selection: Lilia does not yet automatically choose model level or reasoning intensity based on request type.
 - [x] Slash commands: open the composer `/` panel, run built-in commands and project commands from `.lilia/commands`, and write command execution results back to the task timeline; full backend-native command proxying is not yet supported.
@@ -87,7 +87,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Claude history: search local Claude JSONL sessions, preview messages / timeline, import them as Lilia tasks, and continue from the attached SDK session.
 - [x] Claude Skills: manage user-level and project-level Skills, and pass enabled skill names into the SDK.
 - [x] Claude tool display: normalize common tools including Bash, Read / Write / Edit / MultiEdit, Glob / Grep, NotebookEdit, WebSearch / WebFetch, TodoWrite, Task / Agent, and ExitPlanMode.
-- [x] Claude Lilia workflows: review / fix suggestion / batch apply run through structured Claude prompts, session fork uses the SDK, and Goal plus unsupported native-only actions write Lilia timeline diagnostics.
+- [x] Claude Lilia protocol: review / fix suggestion / batch apply run through structured Claude prompts, session fork uses runtime command handling backed by the SDK, and Goal plus unsupported native-only actions write Lilia timeline diagnostics.
 - [ ] Claude MCP management (partial): the UI can create, edit, delete, and enable stdio MCP servers; HTTP / SSE, OAuth, elicitation, tool policy, and SDK instance MCP are not yet integrated.
 - [ ] Claude Plugins (partial): Lilia can discover and enable user-level local plugins, then pass enabled plugin paths to the SDK; installation, updates, project-level scope, and marketplace scope are not yet integrated.
 - [ ] Claude Hooks (partial): the runtime registers a small SDK hook set and can display some hook lifecycle events; hooks configuration management and execution result panels are not yet available.
@@ -103,7 +103,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [x] Codex MCP management: the UI can view, create, edit, delete, and enable user-level stdio MCP servers in `~/.codex/config.toml`; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support global and project-level profiles, reasoning effort, runtime workspace roots, controlled permissions, and sticky `thread/settings/update`.
 - [x] Codex history: search, preview, import, and continue existing Codex app-server threads from the left sidebar import entry.
-- [x] Codex Lilia workflow adapter: Lilia review, fix suggestion, batch apply, compact, session fork, Goal, memory mode / reset, config diagnostics, and background-terminal cleanup dispatch to Codex app-server methods.
+- [x] Codex Lilia adapter: the workflow layer handles review, fix suggestion, batch apply, compact, Goal, memory mode / reset, config diagnostics, and background-terminal cleanup; runtime commands handle session fork and session controls through Codex app-server methods.
 - [x] Built-in browser interaction: Codex can open and navigate an IAB window, collect page title / URL / screenshot metadata, and send the result back to the running turn or as a message attachment; screenshot capture is currently Windows-first.
 
 ### LiliaCode-Specific Features

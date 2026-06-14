@@ -29,7 +29,7 @@ import {
   createClaudeHooks,
 } from "./permissions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
-import { runClaudeSessionManagementWorkflow } from "../sessionManagement.mjs";
+import { runClaudeSessionManagementRuntimeCommand } from "../sessionManagement.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -124,8 +124,9 @@ function readLiliaWorkflow(cmd) {
   return isRecord(cmd?.workflow) ? cmd.workflow : null;
 }
 
-async function runClaudeSessionForkWorkflow(cmd, context, cwd) {
-  if (readLiliaWorkflow(cmd)?.type !== "lilia_session_fork") return false;
+async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "lilia_session_fork") return false;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -281,7 +282,7 @@ function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
     const optionKeys = Object.keys(providerSettings.options);
     const supportedKeys = Object.keys(providerSettings.supported);
     return [
-      "Lilia Claude provider settings workflow.",
+      "Lilia Claude provider settings runtime command.",
       `Action: ${providerSettings.action}.`,
       "Use the supplied Claude SDK options for this turn and report the effective setting summary briefly.",
       optionKeys.length > 0 ? `Claude option keys: ${optionKeys.join(", ")}.` : null,
@@ -307,10 +308,7 @@ const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_review",
   "lilia_fix_suggestion",
   "lilia_batch_apply",
-  "lilia_session_fork",
   "lilia_compact",
-  "lilia_session_management",
-  "lilia_provider_settings",
 ]);
 
 function normalizeLiliaGoalStatus(status) {
@@ -392,14 +390,17 @@ function readClaudeToolsOption(value) {
   return null;
 }
 
-function readClaudeProviderSettingsWorkflow(workflow) {
-  if (workflow?.type !== "lilia_provider_settings") return null;
-  const action = stringOrNull(workflow.action);
+function readClaudeProviderSettingsRuntimeCommand(command, runtimeOptions = {}) {
+  if (command?.type !== "lilia_provider_settings") return null;
+  const action = stringOrNull(command.action);
   if (!LILIA_PROVIDER_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia provider settings workflow missing a valid action");
+    throw new Error("Lilia provider settings runtime command missing a valid action");
   }
-  const common = isRecord(workflow.common) ? workflow.common : {};
-  const claude = isRecord(workflow.claude) ? workflow.claude : {};
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  const common = isRecord(runtimeOptions.common) ? runtimeOptions.common : {};
+  const claude = isRecord(provider.claude)
+    ? provider.claude
+    : {};
   const supported = {};
   const options = {};
   const model = stringOrNull(common.model)?.trim();
@@ -550,8 +551,12 @@ function readClaudeCompactWorkflow(cmd) {
   return readLiliaWorkflow(cmd)?.type === "lilia_compact";
 }
 
-function applyClaudeProviderSettingsWorkflow(cmd) {
-  const settings = readClaudeProviderSettingsWorkflow(readLiliaWorkflow(cmd));
+function applyClaudeProviderSettingsRuntimeCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  const settings = readClaudeProviderSettingsRuntimeCommand(
+    command,
+    isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
+  );
   if (!settings) return null;
   if (settings.action === "update") {
     if (settings.supported.model) cmd.model = settings.supported.model;
@@ -665,7 +670,7 @@ async function runClaudeCompactWorkflow(cmd, context, workingDir) {
 }
 
 async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
-  const providerSettings = applyClaudeProviderSettingsWorkflow(cmd);
+  const providerSettings = applyClaudeProviderSettingsRuntimeCommand(cmd);
   const { prompt, model, resumeSessionId } = cmd;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
@@ -899,9 +904,9 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
 export async function runClaude(cmd, context) {
   const { cwd } = cmd;
   const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
-  if (await runClaudeSessionForkWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeSessionForkRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
-  if (await runClaudeSessionManagementWorkflow(cmd, context, workingDir)) return;
+  if (await runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);
 }

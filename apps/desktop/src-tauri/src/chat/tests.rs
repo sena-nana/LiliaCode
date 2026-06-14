@@ -618,28 +618,8 @@ mod agent_event_sink_tests {
                 mode: "enabled".to_string(),
             },
             ChatWorkflow::LiliaMemoryReset,
-            ChatWorkflow::LiliaSessionFork {
-                exclude_turns: Some(true),
-            },
-            ChatWorkflow::LiliaSessionManagement {
-                action: "list".to_string(),
-                session_id: None,
-                title: None,
-                tag: None,
-                archived: None,
-                limit: Some(20),
-                cursor: None,
-                search_term: None,
-                include_system_messages: None,
-            },
             ChatWorkflow::LiliaConfigDiagnostics {
                 include_layers: Some(true),
-            },
-            ChatWorkflow::LiliaProviderSettings {
-                action: "update".to_string(),
-                common: None,
-                codex: None,
-                claude: None,
             },
             ChatWorkflow::SlashCommand {
                 command_id: "native:help".to_string(),
@@ -650,11 +630,11 @@ mod agent_event_sink_tests {
 
         for workflow in workflows {
             let workflow = Some(workflow);
-            assert!(!should_persist_user_message("", &workflow));
-            assert!(!should_persist_user_message("  ", &workflow));
-            assert!(should_persist_user_message("补充说明", &workflow));
+            assert!(!should_persist_user_message("", &workflow, &None));
+            assert!(!should_persist_user_message("  ", &workflow, &None));
+            assert!(should_persist_user_message("补充说明", &workflow, &None));
         }
-        assert!(should_persist_user_message("", &None));
+        assert!(should_persist_user_message("", &None, &None));
     }
 
     #[test]
@@ -717,24 +697,37 @@ mod agent_event_sink_tests {
         assert_eq!(batch_apply_json["sourceSummary"], json!("建议修复权限边界"));
         assert!(batch_apply_json.get("source_turn_id").is_none());
 
-        let fork = serde_json::from_value::<ChatWorkflow>(json!({
+        assert!(serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_session_fork",
+            "excludeTurns": false,
+        })).is_err());
+        assert!(serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_session_management",
+            "action": "list",
+        })).is_err());
+        assert!(serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "lilia_provider_settings",
+            "action": "diagnose",
+        })).is_err());
+
+        let fork = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "lilia_session_fork",
             "excludeTurns": false,
         }))
         .unwrap();
-        let ChatWorkflow::LiliaSessionFork { exclude_turns } = &fork else {
-            panic!("unexpected workflow: {fork:?}");
+        let ChatRuntimeCommand::LiliaSessionFork { exclude_turns } = &fork else {
+            panic!("unexpected runtime command: {fork:?}");
         };
         assert_eq!(*exclude_turns, Some(false));
         let fork_json = serde_json::to_value(&fork).unwrap();
         assert_eq!(fork_json["excludeTurns"], json!(false));
         assert!(fork_json.get("exclude_turns").is_none());
 
-        let session_management = serde_json::from_value::<ChatWorkflow>(json!({
+        let session_management = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "lilia_session_management",
             "action": "tag",
             "sessionId": "thread-1",
-            "title": "新标题",
+            "title": "???",
             "tag": "release",
             "archived": true,
             "limit": 20,
@@ -743,7 +736,7 @@ mod agent_event_sink_tests {
             "includeSystemMessages": true,
         }))
         .unwrap();
-        let ChatWorkflow::LiliaSessionManagement {
+        let ChatRuntimeCommand::LiliaSessionManagement {
             action,
             session_id,
             title,
@@ -755,11 +748,11 @@ mod agent_event_sink_tests {
             include_system_messages,
         } = &session_management
         else {
-            panic!("unexpected workflow: {session_management:?}");
+            panic!("unexpected runtime command: {session_management:?}");
         };
         assert_eq!(action, "tag");
         assert_eq!(session_id.as_deref(), Some("thread-1"));
-        assert_eq!(title.as_deref(), Some("新标题"));
+        assert_eq!(title.as_deref(), Some("???"));
         assert_eq!(tag.as_deref(), Some("release"));
         assert_eq!(*archived, Some(true));
         assert_eq!(*limit, Some(20));
@@ -792,82 +785,101 @@ mod agent_event_sink_tests {
         assert_eq!(diagnostics_json["includeLayers"], json!(false));
         assert!(diagnostics_json.get("include_layers").is_none());
 
-        let provider_settings = serde_json::from_value::<ChatWorkflow>(json!({
+        let provider_settings = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "lilia_provider_settings",
-            "action": "update",
-            "common": { "model": "gpt-5.5", "permission": "ask" },
-            "codex": {
-                "profile": "deep",
-                "reasoningEffort": "high",
-                "runtimeWorkspaceRoots": ["C:/repo"],
-                "persistExtendedHistory": true,
-                "environments": [{ "id": "env-1" }],
-                "experimentalRawEvents": true,
-                "responsesApiClientMetadata": { "surface": "lilia" },
-            },
-            "claude": {
-                "allowedTools": ["Read"],
-                "disallowedTools": ["Bash"],
-                "additionalDirectories": ["D:/shared"],
-                "maxTurns": 4,
-                "maxBudgetUsd": 1.5,
-                "tools": { "type": "preset", "preset": "claude_code" },
-                "permissionPromptToolName": "mcp__lilia__permission_prompt",
-                "settings": { "model": "claude-opus-4-5" },
-                "managedSettings": { "sandbox": { "enabled": true } },
-                "settingSources": ["user", "project"],
-                "sandbox": { "enabled": true },
-                "outputFormat": { "type": "json" },
-                "includeHookEvents": true,
-                "forwardSubagentText": true,
-                "agentProgressSummaries": true,
-                "continue": true,
-                "resumeSessionAt": "message-uuid",
-                "sessionId": "00000000-0000-4000-8000-000000000001",
-                "abortAfterMs": 3000,
-                "sessionStore": { "explicit": true },
-            },
+            "action": "update"
         }))
         .unwrap();
-        let ChatWorkflow::LiliaProviderSettings {
-            common,
-            codex,
-            claude,
-            ..
-        } = &provider_settings
+        let ChatRuntimeCommand::LiliaProviderSettings { action } = &provider_settings
         else {
-            panic!("unexpected workflow: {provider_settings:?}");
+            panic!("unexpected runtime command: {provider_settings:?}");
         };
-        assert_eq!(common.as_ref().and_then(|value| value.model.as_deref()), Some("gpt-5.5"));
+        assert_eq!(action, "update");
+        let runtime_options = serde_json::from_value::<ProviderRuntimeOptions>(json!({
+            "common": { "model": "gpt-5.5", "permission": "ask" },
+            "provider": {
+                "codex": {
+                    "profile": "deep",
+                    "reasoningEffort": "high",
+                    "runtimeWorkspaceRoots": ["C:/repo"],
+                    "persistExtendedHistory": true,
+                    "environments": [{ "id": "env-1" }],
+                    "experimentalRawEvents": true,
+                    "responsesApiClientMetadata": { "surface": "lilia" }
+                },
+                "claude": {
+                    "allowedTools": ["Read"],
+                    "disallowedTools": ["Bash"],
+                    "additionalDirectories": ["D:/shared"],
+                    "maxTurns": 4,
+                    "maxBudgetUsd": 1.5,
+                    "tools": { "type": "preset", "preset": "claude_code" },
+                    "permissionPromptToolName": "mcp__lilia__permission_prompt",
+                    "settings": { "model": "claude-opus-4-5" },
+                    "managedSettings": { "sandbox": { "enabled": true } },
+                    "settingSources": ["user", "project"],
+                    "sandbox": { "enabled": true },
+                    "outputFormat": { "type": "json" },
+                    "includeHookEvents": true,
+                    "forwardSubagentText": true,
+                    "agentProgressSummaries": true,
+                    "continue": true,
+                    "resumeSessionAt": "message-uuid",
+                    "sessionId": "00000000-0000-4000-8000-000000000001",
+                    "abortAfterMs": 3000,
+                    "sessionStore": { "explicit": true }
+                }
+            }
+        }))
+        .unwrap();
+        let provider = runtime_options.provider.as_ref().expect("provider options");
         assert_eq!(
-            codex.as_ref().and_then(|value| value.reasoning_effort.as_deref()),
+            provider.codex.as_ref().and_then(|value| value.reasoning_effort.as_deref()),
             Some("high")
         );
         assert_eq!(
-            claude.as_ref().and_then(|value| value.additional_directories.as_ref()).unwrap(),
+            provider.claude.as_ref().and_then(|value| value.additional_directories.as_ref()).unwrap(),
             &vec!["D:/shared".to_string()]
         );
         assert_eq!(
-            claude.as_ref().and_then(|value| value.continue_session),
+            provider.claude.as_ref().and_then(|value| value.continue_session),
             Some(true)
         );
         let provider_settings_json = serde_json::to_value(&provider_settings).unwrap();
         assert_eq!(provider_settings_json["type"], json!("lilia_provider_settings"));
-        assert_eq!(provider_settings_json["codex"]["reasoningEffort"], json!("high"));
+        assert!(provider_settings_json.get("common").is_none());
+        assert!(provider_settings_json.get("runtimeOptions").is_none());
+        let provider_settings_json = serde_json::to_value(&runtime_options).unwrap();
         assert_eq!(
-            provider_settings_json["codex"]["runtimeWorkspaceRoots"],
+            provider_settings_json["provider"]["codex"]["reasoningEffort"],
+            json!("high")
+        );
+        assert_eq!(
+            provider_settings_json["provider"]["codex"]["runtimeWorkspaceRoots"],
             json!(["C:/repo"])
         );
-        assert_eq!(provider_settings_json["codex"]["experimentalRawEvents"], json!(true));
         assert_eq!(
-            provider_settings_json["codex"]["responsesApiClientMetadata"],
+            provider_settings_json["provider"]["codex"]["experimentalRawEvents"],
+            json!(true)
+        );
+        assert_eq!(
+            provider_settings_json["provider"]["codex"]["responsesApiClientMetadata"],
             json!({ "surface": "lilia" })
         );
-        assert_eq!(provider_settings_json["claude"]["maxBudgetUsd"], json!(1.5));
-        assert_eq!(provider_settings_json["claude"]["continue"], json!(true));
-        assert_eq!(provider_settings_json["claude"]["abortAfterMs"], json!(3000));
-        assert!(provider_settings_json["claude"].get("continue_session").is_none());
-        assert!(provider_settings_json["codex"].get("reasoning_effort").is_none());
+        assert_eq!(
+            provider_settings_json["provider"]["claude"]["maxBudgetUsd"],
+            json!(1.5)
+        );
+        assert_eq!(
+            provider_settings_json["provider"]["claude"]["continue"],
+            json!(true)
+        );
+        assert_eq!(
+            provider_settings_json["provider"]["claude"]["abortAfterMs"],
+            json!(3000)
+        );
+        assert!(provider_settings_json["provider"]["claude"].get("continue_session").is_none());
+        assert!(provider_settings_json["provider"]["codex"].get("reasoning_effort").is_none());
 
         let slash = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "slash_command",
@@ -972,22 +984,28 @@ mod agent_event_sink_tests {
             "重点看全链路",
             &[],
             Some(&workflow),
+            None,
+            None,
             &composer,
             Some("thread-1"),
             &json!({ "mcpServers": [], "warnings": [] }),
         );
 
         assert_eq!(payload["backend"], json!("codex"));
-        assert_eq!(payload["cwd"], json!("C:\\Files\\workspace\\Lilia"));
-        assert_eq!(payload["prompt"], json!("重点看全链路"));
-        assert_eq!(payload["resumeSessionId"], json!("thread-1"));
-        assert_eq!(payload["planMode"], json!(true));
-        assert_eq!(payload["permission"], json!("ask"));
+        assert_eq!(payload["turn"]["cwd"], json!("C:\\Files\\workspace\\Lilia"));
+        assert_eq!(payload["turn"]["prompt"], json!("重点看全链路"));
+        assert_eq!(payload["turn"]["resumeSessionId"], json!("thread-1"));
+        assert_eq!(payload["turn"]["planMode"], json!(true));
+        assert_eq!(payload["turn"]["permission"], json!("ask"));
         assert_eq!(payload["workflow"]["type"], json!("lilia_fix_suggestion"));
         assert_eq!(payload["workflow"]["mode"], json!("suggest"));
         assert_eq!(payload["workflow"]["instructions"], json!("重点看全链路"));
         assert_eq!(payload["extensions"]["mcpServers"], json!([]));
-        assert_eq!(payload["model"], json!("gpt-5.5"));
+        assert_eq!(payload["turn"]["model"], json!("gpt-5.5"));
+        assert!(payload.get("cwd").is_none());
+        assert!(payload.get("prompt").is_none());
+        assert!(payload.get("model").is_none());
+        assert!(payload.get("resumeSessionId").is_none());
     }
 
     #[test]
@@ -1013,13 +1031,15 @@ mod agent_event_sink_tests {
             "",
             &[],
             Some(&workflow),
+            None,
+            None,
             &composer,
             Some("thread-1"),
             &json!({ "mcpServers": [], "warnings": [] }),
         );
 
         assert_eq!(payload["backend"], json!("codex"));
-        assert_eq!(payload["prompt"], json!(""));
+        assert_eq!(payload["turn"]["prompt"], json!(""));
         assert_eq!(payload["workflow"]["type"], json!("lilia_batch_apply"));
         assert_eq!(payload["workflow"]["sourceTurnId"], json!("turn-source"));
         assert_eq!(payload["workflow"]["sourceKind"], json!("fix_suggestion"));
@@ -1030,7 +1050,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn runner_stdin_payload_keeps_lilia_provider_settings_workflow() {
+    fn runner_stdin_payload_keeps_lilia_provider_settings_runtime_command() {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -1039,44 +1059,63 @@ mod agent_event_sink_tests {
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
-        let workflow = serde_json::from_value::<ChatWorkflow>(json!({
+        let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "lilia_provider_settings",
-            "action": "update",
-            "common": { "model": "gpt-5.6", "permission": "readonly" },
-            "codex": {
-                "reasoningEffort": "high",
-                "runtimeWorkspaceRoots": ["C:/repo"],
-                "persistExtendedHistory": true
-            }
+            "action": "update"
         }))
         .unwrap();
+        let runtime_options = json!({
+            "common": { "model": "gpt-5.6", "permission": "readonly" },
+            "provider": {
+                "codex": {
+                    "reasoningEffort": "high",
+                    "runtimeWorkspaceRoots": ["C:/repo"],
+                    "persistExtendedHistory": true
+                }
+            }
+        });
 
         let payload = build_runner_stdin_payload(
             BACKEND_CODEX,
             "C:\\Files\\workspace\\Lilia",
             "",
             &[],
-            Some(&workflow),
+            None,
+            Some(&runtime_command),
+            Some(&runtime_options),
             &composer,
             Some("thread-1"),
             &json!({ "mcpServers": [], "warnings": [] }),
         );
 
         assert_eq!(payload["backend"], json!("codex"));
-        assert_eq!(payload["prompt"], json!(""));
-        assert_eq!(payload["workflow"]["type"], json!("lilia_provider_settings"));
-        assert_eq!(payload["workflow"]["action"], json!("update"));
-        assert_eq!(payload["workflow"]["common"]["permission"], json!("readonly"));
-        assert_eq!(payload["workflow"]["codex"]["reasoningEffort"], json!("high"));
+        assert_eq!(payload["turn"]["prompt"], json!(""));
+        assert!(payload["workflow"].is_null());
+        assert!(payload.get("protocol").is_none());
         assert_eq!(
-            payload["workflow"]["codex"]["runtimeWorkspaceRoots"],
+            payload["runtimeCommand"]["type"],
+            json!("lilia_provider_settings")
+        );
+        assert_eq!(payload["runtimeCommand"]["action"], json!("update"));
+        assert!(payload["runtimeCommand"].get("common").is_none());
+        assert!(payload["runtimeCommand"].get("runtimeOptions").is_none());
+        assert_eq!(payload["runtimeOptions"]["common"]["permission"], json!("readonly"));
+        assert_eq!(
+            payload["runtimeOptions"]["provider"]["codex"]["reasoningEffort"],
+            json!("high")
+        );
+        assert_eq!(
+            payload["runtimeOptions"]["provider"]["codex"]["runtimeWorkspaceRoots"],
             json!(["C:/repo"])
         );
-        assert_eq!(payload["workflow"]["codex"]["persistExtendedHistory"], json!(true));
+        assert_eq!(
+            payload["runtimeOptions"]["provider"]["codex"]["persistExtendedHistory"],
+            json!(true)
+        );
     }
 
     #[test]
-    fn runner_stdin_payload_keeps_lilia_session_management_workflow() {
+    fn runner_stdin_payload_keeps_lilia_session_management_runtime_command() {
         let composer = ChatComposerState {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -1085,7 +1124,7 @@ mod agent_event_sink_tests {
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
-        let workflow = serde_json::from_value::<ChatWorkflow>(json!({
+        let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "lilia_session_management",
             "action": "rename",
             "sessionId": "thread-1",
@@ -1102,21 +1141,31 @@ mod agent_event_sink_tests {
             "C:\\Files\\workspace\\Lilia",
             "",
             &[],
-            Some(&workflow),
+            None,
+            Some(&runtime_command),
+            None,
             &composer,
             Some("thread-1"),
             &json!({ "mcpServers": [], "warnings": [] }),
         );
 
         assert_eq!(payload["backend"], json!("codex"));
-        assert_eq!(payload["prompt"], json!(""));
-        assert_eq!(payload["workflow"]["type"], json!("lilia_session_management"));
-        assert_eq!(payload["workflow"]["action"], json!("rename"));
-        assert_eq!(payload["workflow"]["sessionId"], json!("thread-1"));
-        assert_eq!(payload["workflow"]["title"], json!("新标题"));
-        assert_eq!(payload["workflow"]["searchTerm"], json!("bug"));
-        assert_eq!(payload["workflow"]["includeSystemMessages"], json!(true));
-        assert!(payload["workflow"].get("session_id").is_none());
+        assert_eq!(payload["turn"]["prompt"], json!(""));
+        assert!(payload["workflow"].is_null());
+        assert!(payload.get("protocol").is_none());
+        assert_eq!(
+            payload["runtimeCommand"]["type"],
+            json!("lilia_session_management")
+        );
+        assert_eq!(payload["runtimeCommand"]["action"], json!("rename"));
+        assert_eq!(payload["runtimeCommand"]["sessionId"], json!("thread-1"));
+        assert_eq!(payload["runtimeCommand"]["title"], json!("新标题"));
+        assert_eq!(payload["runtimeCommand"]["searchTerm"], json!("bug"));
+        assert_eq!(
+            payload["runtimeCommand"]["includeSystemMessages"],
+            json!(true)
+        );
+        assert!(payload["runtimeCommand"].get("session_id").is_none());
     }
 
     #[test]
@@ -1263,6 +1312,8 @@ mod agent_event_sink_tests {
             project_cwd: "D:\\PROJECT\\workspace\\Lilia".to_string(),
             attachments: Vec::new(),
             workflow: None,
+            runtime_command: None,
+            runtime_options: None,
             message: ChatMessage {
                 id: format!("u-{id}"),
                 task_id: "task-1".to_string(),
@@ -2507,12 +2558,7 @@ mod agent_event_sink_tests {
         };
         let process_session_id =
             crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
-        for _ in 0..100 {
-            if !crate::chat::runner::process_session_is_active(&process_session_id) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        crate::chat::runner::remove_test_process_session(&process_session_id);
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
@@ -2547,7 +2593,6 @@ mod agent_event_sink_tests {
             .unwrap()
             .get("task-1")
             .is_none());
-        crate::chat::runner::remove_test_process_session(&process_session_id);
     }
 
     #[test]
@@ -2636,12 +2681,7 @@ mod agent_event_sink_tests {
             .unwrap();
         let process_session_id =
             crate::chat::runner::start_test_process_session(child, &json!({"boot": true})).unwrap();
-        for _ in 0..100 {
-            if !crate::chat::runner::process_session_is_active(&process_session_id) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        crate::chat::runner::remove_test_process_session(&process_session_id);
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
@@ -2661,7 +2701,6 @@ mod agent_event_sink_tests {
             .unwrap()
             .get("task-1")
             .is_none());
-        crate::chat::runner::remove_test_process_session(&process_session_id);
     }
 
     #[test]
@@ -2763,6 +2802,8 @@ mod agent_event_sink_tests {
               project_cwd     TEXT NOT NULL,
               attachments_json TEXT NOT NULL DEFAULT '[]',
               workflow_json   TEXT,
+              runtime_command_json TEXT,
+              runtime_options_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'

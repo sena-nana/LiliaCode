@@ -160,45 +160,10 @@ pub(crate) enum ChatWorkflow {
     LiliaMemoryMode { mode: String },
     #[serde(rename = "lilia_memory_reset")]
     LiliaMemoryReset,
-    #[serde(rename = "lilia_session_fork")]
-    LiliaSessionFork {
-        #[serde(default)]
-        exclude_turns: Option<bool>,
-    },
-    #[serde(rename = "lilia_session_management")]
-    LiliaSessionManagement {
-        action: String,
-        #[serde(default)]
-        session_id: Option<String>,
-        #[serde(default)]
-        title: Option<String>,
-        #[serde(default)]
-        tag: Option<String>,
-        #[serde(default)]
-        archived: Option<bool>,
-        #[serde(default)]
-        limit: Option<u64>,
-        #[serde(default)]
-        cursor: Option<String>,
-        #[serde(default)]
-        search_term: Option<String>,
-        #[serde(default)]
-        include_system_messages: Option<bool>,
-    },
     #[serde(rename = "lilia_config_diagnostics")]
     LiliaConfigDiagnostics {
         #[serde(default)]
         include_layers: Option<bool>,
-    },
-    #[serde(rename = "lilia_provider_settings")]
-    LiliaProviderSettings {
-        action: String,
-        #[serde(default)]
-        common: Option<LiliaProviderSettingsCommon>,
-        #[serde(default)]
-        codex: Option<LiliaProviderSettingsCodex>,
-        #[serde(default)]
-        claude: Option<LiliaProviderSettingsClaude>,
     },
     #[serde(rename = "automation")]
     Automation { automation_run_id: String },
@@ -229,6 +194,10 @@ pub(crate) struct LiliaProviderSettingsCommon {
     pub(crate) model: Option<String>,
     #[serde(default)]
     pub(crate) permission: Option<String>,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) runtime_workspace_roots: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,13 +206,21 @@ pub(crate) struct LiliaProviderSettingsCodex {
     #[serde(default)]
     pub(crate) profile: Option<String>,
     #[serde(default)]
+    pub(crate) model: Option<String>,
+    #[serde(default)]
     pub(crate) reasoning_effort: Option<String>,
     #[serde(default)]
     pub(crate) permission_profile: Option<String>,
     #[serde(default)]
     pub(crate) runtime_workspace_roots: Option<Vec<String>>,
     #[serde(default)]
+    pub(crate) additional_context: Option<String>,
+    #[serde(default)]
     pub(crate) persist_extended_history: Option<bool>,
+    #[serde(default)]
+    pub(crate) initial_turns_page: Option<JsonValue>,
+    #[serde(default)]
+    pub(crate) exclude_turns: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) environments: Option<Vec<JsonValue>>,
     #[serde(default)]
@@ -295,6 +272,73 @@ pub(crate) struct LiliaProviderSettingsClaude {
     pub(crate) abort_after_ms: Option<u64>,
     #[serde(default)]
     pub(crate) session_store: Option<JsonValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub(crate) enum ChatRuntimeCommand {
+    #[serde(rename = "lilia_session_fork")]
+    LiliaSessionFork {
+        #[serde(default)]
+        exclude_turns: Option<bool>,
+    },
+    #[serde(rename = "lilia_session_management")]
+    LiliaSessionManagement {
+        action: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        tag: Option<String>,
+        #[serde(default)]
+        archived: Option<bool>,
+        #[serde(default)]
+        limit: Option<u64>,
+        #[serde(default)]
+        cursor: Option<String>,
+        #[serde(default)]
+        search_term: Option<String>,
+        #[serde(default)]
+        include_system_messages: Option<bool>,
+    },
+    #[serde(rename = "lilia_provider_settings")]
+    LiliaProviderSettings {
+        action: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderRuntimeOptions {
+    #[serde(default)]
+    pub(crate) common: Option<LiliaProviderSettingsCommon>,
+    #[serde(default)]
+    pub(crate) provider: Option<ProviderRuntimeOptionsProvider>,
+    #[serde(default)]
+    pub(crate) experimental_provider_options: Option<Vec<ExperimentalProviderOptions>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderRuntimeOptionsProvider {
+    #[serde(default)]
+    pub(crate) codex: Option<LiliaProviderSettingsCodex>,
+    #[serde(default)]
+    pub(crate) claude: Option<LiliaProviderSettingsClaude>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExperimentalProviderOptions {
+    pub(crate) provider: String,
+    pub(crate) capability: String,
+    pub(crate) payload: JsonValue,
+    pub(crate) fallback: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

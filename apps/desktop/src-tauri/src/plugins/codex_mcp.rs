@@ -495,7 +495,7 @@ enabled = false
             .iter()
             .find(|server| server.name == "weather")
             .unwrap();
-        assert_eq!(weather.transport, TRANSPORT_STDIO);
+        assert_eq!(weather.transport.as_deref(), Some(TRANSPORT_STDIO));
         assert!(weather.editable);
         assert!(weather.enabled);
         assert_eq!(weather.command, "node");
@@ -506,14 +506,14 @@ enabled = false
             .iter()
             .find(|server| server.name == "remote")
             .unwrap();
-        assert_eq!(remote.transport, TRANSPORT_HTTP);
+        assert_eq!(remote.transport.as_deref(), Some(TRANSPORT_HTTP));
         assert!(!remote.editable);
 
         let oauth = servers
             .iter()
             .find(|server| server.name == "oauth_remote")
             .unwrap();
-        assert_eq!(oauth.transport, TRANSPORT_OAUTH);
+        assert_eq!(oauth.transport.as_deref(), Some(TRANSPORT_OAUTH));
         assert!(!oauth.editable);
         assert!(!oauth.enabled);
     }

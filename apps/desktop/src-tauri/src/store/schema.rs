@@ -239,6 +239,8 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           project_cwd     TEXT NOT NULL,
           attachments_json TEXT NOT NULL DEFAULT '[]',
           workflow_json   TEXT,
+          runtime_command_json TEXT,
+          runtime_options_json TEXT,
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
@@ -833,6 +835,8 @@ mod tests {
               project_cwd     TEXT NOT NULL,
               attachments_json TEXT NOT NULL DEFAULT '[]',
               workflow_json   TEXT,
+              runtime_command_json TEXT,
+              runtime_options_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'
@@ -1005,6 +1009,8 @@ mod tests {
               project_cwd     TEXT NOT NULL,
               attachments_json TEXT NOT NULL DEFAULT '[]',
               workflow_json   TEXT,
+              runtime_command_json TEXT,
+              runtime_options_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
               runtime_channel TEXT NOT NULL DEFAULT 'builtin'

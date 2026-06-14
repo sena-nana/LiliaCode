@@ -9,6 +9,7 @@ import type {
   ChatAttachment,
   ChatContextSearchResult,
   ChatMessage,
+  ChatRuntimeCommand,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
   LiliaIabSnapshot,
@@ -24,6 +25,7 @@ import type {
   ProjectArchitectureGraph,
   ProjectArchitectureChange,
   ProjectArchitectureInteractionPayload,
+  ProviderRuntimeOptions,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -173,17 +175,27 @@ export type LiliaBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
-export type LiliaSessionForkWorkflowTypeTest = Assert<
+export type LiliaSessionForkRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_session_fork";
+      excludeTurns: true;
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type LiliaSessionForkIsNotWorkflowTypeTest = Assert<
   Extends<
     {
       type: "lilia_session_fork";
       excludeTurns: true;
     },
     ChatWorkflow
-  >
+  > extends true ? false : true
 >;
 
-export type LiliaSessionManagementWorkflowTypeTest = Assert<
+export type LiliaSessionManagementRuntimeCommandTypeTest = Assert<
   Extends<
     {
       type: "lilia_session_management";
@@ -196,49 +208,101 @@ export type LiliaSessionManagementWorkflowTypeTest = Assert<
       searchTerm: "bug";
       includeSystemMessages: true;
     },
-    ChatWorkflow
+    ChatRuntimeCommand
   >
 >;
 
-export type LiliaProviderSettingsWorkflowTypeTest = Assert<
+export type LiliaSessionManagementIsNotWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_session_management";
+      action: "list";
+    },
+    ChatWorkflow
+  > extends true ? false : true
+>;
+
+export type LiliaProviderSettingsRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_provider_settings";
+      action: "update";
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type LiliaProviderSettingsRuntimeCommandRejectsInlineOptionsTypeTest = Assert<
   Extends<
     {
       type: "lilia_provider_settings";
       action: "update";
       common: { model: "gpt-5.5"; permission: "ask" };
-      codex: {
-        profile: "deep";
-        reasoningEffort: "high";
-        runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
-        persistExtendedHistory: true;
-        environments: [{ id: "env-1" }];
-        experimentalRawEvents: true;
-        responsesApiClientMetadata: { surface: "lilia" };
-      };
-      claude: {
-        allowedTools: ["Read"];
-        disallowedTools: ["Bash"];
-        additionalDirectories: ["D:/PROJECT/workspace/Lilia/docs"];
-        maxTurns: 8;
-        maxBudgetUsd: 1.5;
-        tools: { type: "preset"; preset: "claude_code" };
-        permissionPromptToolName: "mcp__lilia__permission_prompt";
-        settings: { model: "claude-opus-4-5" };
-        managedSettings: { sandbox: { enabled: true } };
-        settingSources: ["user", "project"];
-        sandbox: { enabled: true };
-        outputFormat: { type: "json" };
-        includeHookEvents: true;
-        forwardSubagentText: true;
-        agentProgressSummaries: true;
-        continue: true;
-        resumeSessionAt: "message-uuid";
-        sessionId: "00000000-0000-4000-8000-000000000001";
-        abortAfterMs: 3000;
-        sessionStore: { explicit: true };
-      };
+      runtimeOptions: ProviderRuntimeOptions;
+    },
+    ChatRuntimeCommand
+  > extends true ? false : true
+>;
+
+export type LiliaProviderSettingsIsNotWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "lilia_provider_settings";
+      action: "update";
     },
     ChatWorkflow
+  > extends true ? false : true
+>;
+
+export type ProviderRuntimeOptionsTypeTest = Assert<
+  Extends<
+    {
+      common: {
+        model: "gpt-5.5";
+        permission: "ask";
+        runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
+      };
+      provider: {
+        codex: {
+          profile: "deep";
+          reasoningEffort: "high";
+          runtimeWorkspaceRoots: ["D:/PROJECT/workspace/Lilia"];
+          persistExtendedHistory: true;
+          environments: [{ id: "env-1" }];
+          experimentalRawEvents: true;
+          responsesApiClientMetadata: { surface: "lilia" };
+        };
+        claude: {
+          allowedTools: ["Read"];
+          disallowedTools: ["Bash"];
+          additionalDirectories: ["D:/PROJECT/workspace/Lilia/docs"];
+          maxTurns: 8;
+          maxBudgetUsd: 1.5;
+          tools: { type: "preset"; preset: "claude_code" };
+          permissionPromptToolName: "mcp__lilia__permission_prompt";
+          settings: { model: "claude-opus-4-5" };
+          managedSettings: { sandbox: { enabled: true } };
+          settingSources: ["user", "project"];
+          sandbox: { enabled: true };
+          outputFormat: { type: "json" };
+          includeHookEvents: true;
+          forwardSubagentText: true;
+          agentProgressSummaries: true;
+          continue: true;
+          resumeSessionAt: "message-uuid";
+          sessionId: "00000000-0000-4000-8000-000000000001";
+          abortAfterMs: 3000;
+          sessionStore: { explicit: true };
+        };
+      };
+      experimentalProviderOptions: [{
+        provider: "codex";
+        capability: "raw-events";
+        payload: { enabled: true };
+        fallback: "diagnostic";
+      }];
+    },
+    ProviderRuntimeOptions
   >
 >;
 

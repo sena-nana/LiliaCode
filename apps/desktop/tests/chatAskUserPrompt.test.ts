@@ -675,14 +675,22 @@ describe("chat AskUser prompt", () => {
       payload: {
         interaction: "permission_approval",
         requestId: "permission-t-002",
-        threadId: "thread-1",
-        turnId: "turn-permission",
-        itemId: "item-1",
-        startedAtMs: 123,
-        cwd: "C:/repo",
         reason: "need network",
-        permissions: {
+        requestedAccess: {
           network: { domains: [{ domain: "example.com" }] },
+        },
+        scopeSuggestion: "turn",
+        providerContext: {
+          codex: {
+            threadId: "thread-1",
+            turnId: "turn-permission",
+            itemId: "item-1",
+            startedAtMs: 123,
+            cwd: "C:/repo",
+            permissions: {
+              network: { domains: [{ domain: "example.com" }] },
+            },
+          },
         },
       },
       createdAt: 10_000,
@@ -703,8 +711,20 @@ describe("chat AskUser prompt", () => {
         kind: "permission_approval",
         result: {
           action: "approve",
-          permissions: {
+          grantedAccess: {
             network: { domains: [{ domain: "example.com" }] },
+          },
+          providerContext: {
+            codex: {
+              threadId: "thread-1",
+              turnId: "turn-permission",
+              itemId: "item-1",
+              startedAtMs: 123,
+              cwd: "C:/repo",
+              permissions: {
+                network: { domains: [{ domain: "example.com" }] },
+              },
+            },
           },
           scope: "turn",
         },

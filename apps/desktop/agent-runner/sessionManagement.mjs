@@ -23,23 +23,23 @@ function cursorOffset(value) {
   return Number.isFinite(number) && number > 0 ? Math.trunc(number) : 0;
 }
 
-function readSessionManagementWorkflow(cmd) {
-  const workflow = isRecord(cmd?.workflow) ? cmd.workflow : null;
-  if (workflow?.type !== "lilia_session_management") return null;
-  const action = stringOrNull(workflow.action);
+function readSessionManagementRuntimeCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "lilia_session_management") return null;
+  const action = stringOrNull(command.action);
   if (!SESSION_MANAGEMENT_ACTIONS.has(action)) {
-    throw new Error("Lilia session management workflow missing a valid action");
+    throw new Error("Lilia session management runtime command missing a valid action");
   }
-  const sessionId = stringOrNull(workflow.sessionId)?.trim() || "";
-  const title = stringOrNull(workflow.title)?.trim() || "";
-  const tag = hasOwn(workflow, "tag") ? stringOrNull(workflow.tag)?.trim() || null : null;
+  const sessionId = stringOrNull(command.sessionId)?.trim() || "";
+  const title = stringOrNull(command.title)?.trim() || "";
+  const tag = hasOwn(command, "tag") ? stringOrNull(command.tag)?.trim() || null : null;
   if (action !== "list" && !sessionId) {
-    throw new Error("Lilia session management workflow missing sessionId");
+    throw new Error("Lilia session management runtime command missing sessionId");
   }
   if (action === "rename" && !title) {
     throw new Error("Lilia session management rename requires a non-empty title");
   }
-  if (action === "tag" && !hasOwn(workflow, "tag")) {
+  if (action === "tag" && !hasOwn(command, "tag")) {
     throw new Error("Lilia session management tag requires tag");
   }
   return {
@@ -47,11 +47,11 @@ function readSessionManagementWorkflow(cmd) {
     sessionId,
     title,
     tag,
-    archived: workflow.archived === true,
-    limit: limitValue(workflow.limit),
-    cursor: stringOrNull(workflow.cursor)?.trim() || null,
-    searchTerm: stringOrNull(workflow.searchTerm)?.trim() || "",
-    includeSystemMessages: workflow.includeSystemMessages === true,
+    archived: command.archived === true,
+    limit: limitValue(command.limit),
+    cursor: stringOrNull(command.cursor)?.trim() || null,
+    searchTerm: stringOrNull(command.searchTerm)?.trim() || "",
+    includeSystemMessages: command.includeSystemMessages === true,
   };
 }
 
@@ -59,48 +59,48 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function emitSessionManagementTimeline(protocol, backend, workflow, status, config) {
+function emitSessionManagementTimeline(protocol, backend, command, status, config) {
   const failed = status === "error";
   protocol.emitTimeline({
     kind: "diagnostic",
     status,
     title: failed
       ? `${backend} session management failed`
-      : `${backend} session management ${workflow.action}`,
+      : `${backend} session management ${command.action}`,
     summary: failed
       ? config.error
-      : config.summary || `${workflow.action} completed`,
+      : config.summary || `${command.action} completed`,
     payload: {
       backend,
       source: "lilia",
       subkind: "session_management",
-      action: workflow.action,
+      action: command.action,
       native: config.native === true,
-      sessionId: workflow.sessionId || null,
-      threadId: backend === "codex" ? workflow.sessionId || config.threadId || null : null,
+      sessionId: command.sessionId || null,
+      threadId: backend === "codex" ? command.sessionId || config.threadId || null : null,
       result: config.result ?? null,
       ...(failed ? { error: config.error } : {}),
     },
-    sourceId: `${backend}:session-management:${workflow.action}:${workflow.sessionId || "list"}:${Date.now()}`,
+    sourceId: `${backend}:session-management:${command.action}:${command.sessionId || "list"}:${Date.now()}`,
   });
 }
 
-function emitSessionManagementDone(protocol, workflow, fallbackSessionId = null) {
+function emitSessionManagementDone(protocol, command, fallbackSessionId = null) {
   protocol.emit({
     type: "done",
-    sessionId: workflow.sessionId || fallbackSessionId || null,
+    sessionId: command.sessionId || fallbackSessionId || null,
     subtype: "success",
   });
 }
 
-function completeUnsupportedSessionManagement(protocol, backend, workflow, fallbackSessionId, result, summary) {
-  emitSessionManagementTimeline(protocol, backend, workflow, "success", {
+function completeUnsupportedSessionManagement(protocol, backend, command, fallbackSessionId, result, summary) {
+  emitSessionManagementTimeline(protocol, backend, command, "success", {
     native: false,
     result,
     threadId: fallbackSessionId,
     summary,
   });
-  emitSessionManagementDone(protocol, workflow, fallbackSessionId);
+  emitSessionManagementDone(protocol, command, fallbackSessionId);
   return true;
 }
 
@@ -154,9 +154,9 @@ function normalizeClaudeSessionMessage(message, index = 0) {
   };
 }
 
-export async function runClaudeSessionManagementWorkflow(cmd, context, workingDir) {
-  const workflow = readSessionManagementWorkflow(cmd);
-  if (!workflow) return false;
+export async function runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir) {
+  const command = readSessionManagementRuntimeCommand(cmd);
+  if (!command) return false;
   const options = { dir: workingDir };
   const safeContext = isRecord(context) ? context : {};
   const hasContextKey = (key) => Object.prototype.hasOwnProperty.call(safeContext, key);
@@ -172,87 +172,87 @@ export async function runClaudeSessionManagementWorkflow(cmd, context, workingDi
   };
   try {
     let result;
-    if (workflow.action === "list") {
+    if (command.action === "list") {
       if (typeof sdk.listSessions !== "function") {
         throw new Error("Claude SDK listSessions is not available");
       }
       const sessions = await sdk.listSessions({
         ...options,
-        limit: workflow.limit,
-        offset: cursorOffset(workflow.cursor),
+        limit: command.limit,
+        offset: cursorOffset(command.cursor),
       });
       const normalized = (Array.isArray(sessions) ? sessions : [])
         .map(normalizeClaudeSessionInfo)
         .filter(Boolean);
-      const nextOffset = cursorOffset(workflow.cursor) + normalized.length;
+      const nextOffset = cursorOffset(command.cursor) + normalized.length;
       result = {
         sessions: normalized.filter((session) => {
-          const term = workflow.searchTerm.toLowerCase();
+          const term = command.searchTerm.toLowerCase();
           if (!term) return true;
           return [session.id, session.title, session.cwd, session.gitBranch, session.tag]
             .some((value) => stringOrNull(value)?.toLowerCase().includes(term));
         }),
-        nextCursor: normalized.length >= workflow.limit ? String(nextOffset) : null,
+        nextCursor: normalized.length >= command.limit ? String(nextOffset) : null,
       };
-    } else if (workflow.action === "info") {
+    } else if (command.action === "info") {
       if (typeof sdk.getSessionInfo !== "function") {
         throw new Error("Claude SDK getSessionInfo is not available");
       }
-      result = { session: normalizeClaudeSessionInfo(await sdk.getSessionInfo(workflow.sessionId, options)) };
-    } else if (workflow.action === "messages") {
+      result = { session: normalizeClaudeSessionInfo(await sdk.getSessionInfo(command.sessionId, options)) };
+    } else if (command.action === "messages") {
       if (typeof sdk.getSessionMessages !== "function") {
         throw new Error("Claude SDK getSessionMessages is not available");
       }
-      const offset = cursorOffset(workflow.cursor);
-      const messages = await sdk.getSessionMessages(workflow.sessionId, {
+      const offset = cursorOffset(command.cursor);
+      const messages = await sdk.getSessionMessages(command.sessionId, {
         ...options,
-        limit: workflow.limit,
+        limit: command.limit,
         offset,
-        includeSystemMessages: workflow.includeSystemMessages,
+        includeSystemMessages: command.includeSystemMessages,
       });
       const normalized = (Array.isArray(messages) ? messages : [])
         .map(normalizeClaudeSessionMessage)
         .filter(Boolean);
       result = {
         messages: normalized,
-        nextCursor: normalized.length >= workflow.limit ? String(offset + normalized.length) : null,
+        nextCursor: normalized.length >= command.limit ? String(offset + normalized.length) : null,
       };
-    } else if (workflow.action === "rename") {
+    } else if (command.action === "rename") {
       if (typeof sdk.renameSession !== "function") {
         throw new Error("Claude SDK renameSession is not available");
       }
-      await sdk.renameSession(workflow.sessionId, workflow.title, options);
-      result = { sessionId: workflow.sessionId, title: workflow.title, renamed: true };
-    } else if (workflow.action === "tag") {
+      await sdk.renameSession(command.sessionId, command.title, options);
+      result = { sessionId: command.sessionId, title: command.title, renamed: true };
+    } else if (command.action === "tag") {
       if (typeof sdk.tagSession !== "function") {
         throw new Error("Claude SDK tagSession is not available");
       }
-      await sdk.tagSession(workflow.sessionId, workflow.tag, options);
-      result = { sessionId: workflow.sessionId, tag: workflow.tag, tagged: true };
-    } else if (workflow.action === "delete") {
+      await sdk.tagSession(command.sessionId, command.tag, options);
+      result = { sessionId: command.sessionId, tag: command.tag, tagged: true };
+    } else if (command.action === "delete") {
       if (typeof sdk.deleteSession !== "function") {
         throw new Error("Claude SDK deleteSession is not available");
       }
-      await sdk.deleteSession(workflow.sessionId, options);
-      result = { sessionId: workflow.sessionId, deleted: true };
+      await sdk.deleteSession(command.sessionId, options);
+      result = { sessionId: command.sessionId, deleted: true };
     } else {
       return completeUnsupportedSessionManagement(
         safeContext.protocol,
         "claude",
-        workflow,
+        command,
         stringOrNull(cmd.resumeSessionId),
-        { sessionId: workflow.sessionId, unsupported: true, reason: "Claude SDK has no archiveSession API." },
+        { sessionId: command.sessionId, unsupported: true, reason: "Claude SDK has no archiveSession API." },
         "Claude session archive is unsupported by the SDK",
       );
     }
-    emitSessionManagementTimeline(safeContext.protocol, "claude", workflow, "success", {
+    emitSessionManagementTimeline(safeContext.protocol, "claude", command, "success", {
       native: true,
       result,
-      summary: `Claude session management ${workflow.action} completed`,
+      summary: `Claude session management ${command.action} completed`,
     });
-    emitSessionManagementDone(safeContext.protocol, workflow, stringOrNull(cmd.resumeSessionId));
+    emitSessionManagementDone(safeContext.protocol, command, stringOrNull(cmd.resumeSessionId));
   } catch (err) {
-    emitSessionManagementTimeline(safeContext.protocol, "claude", workflow, "error", {
+    emitSessionManagementTimeline(safeContext.protocol, "claude", command, "error", {
       native: false,
       error: err?.message || String(err),
     });
@@ -261,61 +261,61 @@ export async function runClaudeSessionManagementWorkflow(cmd, context, workingDi
   return true;
 }
 
-export async function runCodexSessionManagementWorkflow(
+export async function runCodexSessionManagementRuntimeCommand(
   server,
   threadId,
   cmd,
   ctx,
 ) {
-  const workflow = readSessionManagementWorkflow(cmd);
-  if (!workflow) return false;
+  const command = readSessionManagementRuntimeCommand(cmd);
+  if (!command) return false;
   try {
     let result;
-    if (workflow.action === "list") {
+    if (command.action === "list") {
       result = await searchCodexThreadsWithServer(server, {
-        limit: workflow.limit,
+        limit: command.limit,
         archived: false,
-        cursor: workflow.cursor,
-        searchTerm: workflow.searchTerm,
+        cursor: command.cursor,
+        searchTerm: command.searchTerm,
       });
-    } else if (workflow.action === "info") {
-      result = await previewCodexThreadLiteWithServer(server, workflow.sessionId);
-    } else if (workflow.action === "messages") {
-      const { turns, nextCursor } = await readCodexThreadTurns(server, workflow.sessionId, {
-        limit: workflow.limit,
-        cursor: workflow.cursor,
+    } else if (command.action === "info") {
+      result = await previewCodexThreadLiteWithServer(server, command.sessionId);
+    } else if (command.action === "messages") {
+      const { turns, nextCursor } = await readCodexThreadTurns(server, command.sessionId, {
+        limit: command.limit,
+        cursor: command.cursor,
       });
       result = {
-        threadId: workflow.sessionId,
-        messages: codexPreviewMessagesFromTurns(turns, workflow.limit),
+        threadId: command.sessionId,
+        messages: codexPreviewMessagesFromTurns(turns, command.limit),
         nextCursor,
       };
-    } else if (workflow.action === "rename") {
-      result = await renameCodexThreadWithServer(server, workflow.sessionId, workflow.title);
-    } else if (workflow.action === "archive") {
-      result = await archiveCodexThreadWithServer(server, workflow.sessionId, workflow.archived);
+    } else if (command.action === "rename") {
+      result = await renameCodexThreadWithServer(server, command.sessionId, command.title);
+    } else if (command.action === "archive") {
+      result = await archiveCodexThreadWithServer(server, command.sessionId, command.archived);
     } else {
-      const reason = workflow.action === "tag"
+      const reason = command.action === "tag"
         ? "Codex app-server thread tags are not available."
         : "Codex app-server thread delete is not available.";
       return completeUnsupportedSessionManagement(
         ctx.protocol,
         "codex",
-        workflow,
+        command,
         threadId,
-        { threadId: workflow.sessionId, unsupported: true, reason },
-        `Codex session management ${workflow.action} is unsupported`,
+        { threadId: command.sessionId, unsupported: true, reason },
+        `Codex session management ${command.action} is unsupported`,
       );
     }
-    emitSessionManagementTimeline(ctx.protocol, "codex", workflow, "success", {
+    emitSessionManagementTimeline(ctx.protocol, "codex", command, "success", {
       native: true,
       result,
       threadId,
-      summary: `Codex session management ${workflow.action} completed`,
+      summary: `Codex session management ${command.action} completed`,
     });
-    emitSessionManagementDone(ctx.protocol, workflow, threadId);
+    emitSessionManagementDone(ctx.protocol, command, threadId);
   } catch (err) {
-    emitSessionManagementTimeline(ctx.protocol, "codex", workflow, "error", {
+    emitSessionManagementTimeline(ctx.protocol, "codex", command, "error", {
       native: false,
       error: err?.message || String(err),
       threadId,

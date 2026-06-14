@@ -2,8 +2,10 @@ import type { ComputedRef, Ref } from "vue";
 import type {
   ChatAttachment,
   ChatComposerState,
+  ChatRuntimeCommand,
   ChatWorkflow,
   LiliaReviewTarget,
+  ProviderRuntimeOptions,
 } from "@lilia/contracts";
 import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import type { PendingAgentAction } from "../../composables/usePendingAgentActions";
@@ -19,6 +21,8 @@ export function useLiliaWorkflowActions(options: {
     outgoingAttachments?: ChatAttachment[],
     guideId?: string,
     workflow?: ChatWorkflow | null,
+    runtimeCommand?: ChatRuntimeCommand | null,
+    runtimeOptions?: ProviderRuntimeOptions | null,
   ) => Promise<void>;
 }) {
   function canStartLiliaWorkflow() {
@@ -91,7 +95,7 @@ export function useLiliaWorkflowActions(options: {
   }
 
   async function onStartSessionFork() {
-    await sendLiliaWorkflow({ type: "lilia_session_fork", excludeTurns: true });
+    await options.sendAgentMessage("", [], undefined, null, { type: "lilia_session_fork", excludeTurns: true });
   }
 
   async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
@@ -132,9 +136,10 @@ export function useLiliaWorkflowActions(options: {
   }
 
   async function onApplyLiliaProviderSettings(
-    workflow: Extract<ChatWorkflow, { type: "lilia_provider_settings" }>,
+    runtimeCommand: Extract<ChatRuntimeCommand, { type: "lilia_provider_settings" }>,
+    runtimeOptions?: ProviderRuntimeOptions | null,
   ) {
-    await sendLiliaWorkflow(workflow);
+    await options.sendAgentMessage("", [], undefined, null, runtimeCommand, runtimeOptions ?? null);
   }
 
   return {

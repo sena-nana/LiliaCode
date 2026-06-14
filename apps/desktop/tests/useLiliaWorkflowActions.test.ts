@@ -1,6 +1,11 @@
 import { computed, ref } from "vue";
 import { describe, expect, it } from "vitest";
-import type { ChatComposerState, ChatWorkflow } from "@lilia/contracts";
+import type {
+  ChatComposerState,
+  ChatRuntimeCommand,
+  ChatWorkflow,
+  ProviderRuntimeOptions,
+} from "@lilia/contracts";
 import { useLiliaWorkflowActions } from "../src/pages/taskDetail/useLiliaWorkflowActions";
 
 function composerState(backend: ChatComposerState["backend"]): ChatComposerState {
@@ -15,6 +20,8 @@ function composerState(backend: ChatComposerState["backend"]): ChatComposerState
 
 function setupWorkflowActions(backend: ChatComposerState["backend"]) {
   const sent: ChatWorkflow[] = [];
+  const runtimeSent: ChatRuntimeCommand[] = [];
+  const runtimeOptionsSent: Array<ProviderRuntimeOptions | null | undefined> = [];
   const composer = ref<ChatComposerState | null>(composerState(backend));
   const actions = useLiliaWorkflowActions({
     hasContext: computed(() => true),
@@ -22,11 +29,20 @@ function setupWorkflowActions(backend: ChatComposerState["backend"]) {
     isTurnRunning: ref(false),
     blockingPendingAgentActions: computed(() => []),
     attachments: ref([]),
-    sendAgentMessage: async (_content, _attachments, _guideId, workflow) => {
+    sendAgentMessage: async (
+      _content,
+      _attachments,
+      _guideId,
+      workflow,
+      runtimeCommand,
+      runtimeOptions,
+    ) => {
       if (workflow) sent.push(workflow);
+      if (runtimeCommand) runtimeSent.push(runtimeCommand);
+      runtimeOptionsSent.push(runtimeOptions);
     },
   });
-  return { actions, sent };
+  return { actions, sent, runtimeSent, runtimeOptionsSent };
 }
 
 describe("useLiliaWorkflowActions", () => {
@@ -59,31 +75,37 @@ describe("useLiliaWorkflowActions", () => {
     }]);
   });
 
-  it("session fork workflow uses the Lilia protocol for every backend", async () => {
+  it("session fork runtime command uses the Lilia protocol for every backend", async () => {
     const codex = setupWorkflowActions("codex");
     await codex.actions.onStartSessionFork();
-    expect(codex.sent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
+    expect(codex.runtimeSent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
 
     const claude = setupWorkflowActions("claude");
     await claude.actions.onStartSessionFork();
-    expect(claude.sent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
+    expect(claude.runtimeSent).toEqual([{ type: "lilia_session_fork", excludeTurns: true }]);
   });
 
-  it("provider settings workflow is passed through for every backend", async () => {
-    const workflow: ChatWorkflow = {
+  it("provider settings runtime command is passed through for every backend", async () => {
+    const command: ChatRuntimeCommand = {
       type: "lilia_provider_settings",
       action: "update",
+    };
+    const runtimeOptions: ProviderRuntimeOptions = {
       common: { model: "gpt-5.5", permission: "ask" },
-      codex: { reasoningEffort: "high" },
-      claude: { maxTurns: 4 },
+      provider: {
+        codex: { reasoningEffort: "high" },
+        claude: { maxTurns: 4 },
+      },
     };
 
     const codex = setupWorkflowActions("codex");
-    await codex.actions.onApplyLiliaProviderSettings(workflow);
-    expect(codex.sent).toEqual([workflow]);
+    await codex.actions.onApplyLiliaProviderSettings(command, runtimeOptions);
+    expect(codex.runtimeSent).toEqual([command]);
+    expect(codex.runtimeOptionsSent.at(-1)).toEqual(runtimeOptions);
 
     const claude = setupWorkflowActions("claude");
-    await claude.actions.onApplyLiliaProviderSettings(workflow);
-    expect(claude.sent).toEqual([workflow]);
+    await claude.actions.onApplyLiliaProviderSettings(command, runtimeOptions);
+    expect(claude.runtimeSent).toEqual([command]);
+    expect(claude.runtimeOptionsSent.at(-1)).toEqual(runtimeOptions);
   });
 });

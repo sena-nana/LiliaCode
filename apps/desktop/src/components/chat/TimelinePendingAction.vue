@@ -158,7 +158,10 @@ const canSubmitMcp = computed(() => {
   });
 });
 const permissionJson = computed(() =>
-  JSON.stringify(permissionAction.value?.payload.permissions ?? {}, null, 2),
+  JSON.stringify(permissionAction.value?.payload.requestedAccess ?? {}, null, 2),
+);
+const permissionCwd = computed(() =>
+  permissionAction.value?.payload.providerContext?.codex?.cwd ?? "",
 );
 
 function stringValue(value: unknown): string {
@@ -577,7 +580,7 @@ watch(actionKey, () => {
       <div class="timeline-pending-action__title-preview">
         {{ permissionAction.payload.reason || "Codex 请求额外权限" }}
       </div>
-      <div class="timeline-pending-action__meta">{{ permissionAction.payload.cwd }}</div>
+      <div class="timeline-pending-action__meta">{{ permissionCwd }}</div>
       <pre class="timeline-code-block">{{ permissionJson }}</pre>
       <div class="composer-inline__actions">
         <button

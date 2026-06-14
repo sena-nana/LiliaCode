@@ -42,7 +42,7 @@ import {
   resolveCodexPlanApproval,
 } from "./timeline.mjs";
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
-import { runCodexSessionManagementWorkflow } from "../sessionManagement.mjs";
+import { runCodexSessionManagementRuntimeCommand } from "../sessionManagement.mjs";
 
 export async function initializeCodexAppServer(server) {
   await server.request("initialize", {
@@ -92,7 +92,9 @@ function booleanOrNull(value) {
 }
 
 function normalizeCodexSettings(cmd) {
-  const input = isRecord(cmd.codexSettings) ? cmd.codexSettings : {};
+  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  const input = isRecord(provider.codex) ? provider.codex : {};
   return {
     profile: stringOrNull(input.profile) || "default",
     model: stringOrNull(input.model) || stringOrNull(cmd.model) || null,
@@ -106,6 +108,13 @@ function normalizeCodexSettings(cmd) {
     initialTurnsPage: jsonObjectOrNull(input.initialTurnsPage),
     excludeTurns: stringArray(input.excludeTurns),
   };
+}
+
+function ensureCodexRuntimeOptions(cmd) {
+  if (!isRecord(cmd.runtimeOptions)) cmd.runtimeOptions = {};
+  if (!isRecord(cmd.runtimeOptions.provider)) cmd.runtimeOptions.provider = {};
+  if (!isRecord(cmd.runtimeOptions.provider.codex)) cmd.runtimeOptions.provider.codex = {};
+  return cmd.runtimeOptions.provider.codex;
 }
 
 function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = false } = {}) {
@@ -207,10 +216,7 @@ export function applyCodexRuntimeSettings(server, threadId, cmd, ctx, update, pr
   }
   if (model) {
     cmd.model = model;
-    cmd.codexSettings = {
-      ...(isRecord(cmd.codexSettings) ? cmd.codexSettings : {}),
-      model,
-    };
+    ensureCodexRuntimeOptions(cmd).model = model;
   }
   const pending = updateCodexThreadSettings(server, threadId, cmd, protocol)
     .then((result) => {
@@ -430,11 +436,9 @@ function readCodexBatchApplyWorkflow(cmd) {
 
 function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
   if (workflow.mode !== "suggest") return cmd;
-  const codexSettings = isRecord(cmd?.codexSettings) ? { ...cmd.codexSettings } : {};
   return {
     ...cmd,
     permission: "readonly",
-    codexSettings,
   };
 }
 
@@ -492,11 +496,11 @@ function readCodexMemoryResetWorkflow(cmd) {
   return workflow?.type === "lilia_memory_reset";
 }
 
-function readCodexThreadForkWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_session_fork") return null;
+function readCodexThreadForkRuntimeCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "lilia_session_fork") return null;
   return {
-    excludeTurns: workflow.excludeTurns !== false,
+    excludeTurns: command.excludeTurns !== false,
   };
 }
 
@@ -514,15 +518,19 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function readCodexProviderSettingsWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_provider_settings") return null;
-  const action = stringOrNull(workflow.action);
+function readCodexProviderSettingsRuntimeCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "lilia_provider_settings") return null;
+  const action = stringOrNull(command.action);
   if (!PROVIDER_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia provider settings workflow missing a valid action");
+    throw new Error("Lilia provider settings runtime command missing a valid action");
   }
-  const common = isRecord(workflow.common) ? workflow.common : {};
-  const codex = isRecord(workflow.codex) ? workflow.codex : {};
+  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  const common = isRecord(runtimeOptions.common) ? runtimeOptions.common : {};
+  const codex = isRecord(provider.codex)
+    ? provider.codex
+    : {};
   const updates = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
@@ -553,38 +561,47 @@ function readCodexProviderSettingsWorkflow(cmd) {
   return { action, updates };
 }
 
-function codexSettingsCmdFromProviderWorkflow(cmd, workflow) {
+function codexSettingsCmdFromRuntimeCommand(cmd, command) {
+  const codexSettings = {
+    ...normalizeCodexSettings(cmd),
+  };
   const next = {
     ...cmd,
-    codexSettings: isRecord(cmd.codexSettings) ? { ...cmd.codexSettings } : {},
+    runtimeOptions: {
+      ...(isRecord(cmd.runtimeOptions) ? cmd.runtimeOptions : {}),
+      provider: {
+        ...(isRecord(cmd.runtimeOptions?.provider) ? cmd.runtimeOptions.provider : {}),
+        codex: codexSettings,
+      },
+    },
   };
-  if (workflow.updates.model) {
-    next.model = workflow.updates.model;
-    next.codexSettings.model = workflow.updates.model;
+  if (command.updates.model) {
+    next.model = command.updates.model;
+    codexSettings.model = command.updates.model;
   }
-  if (workflow.updates.permission) {
-    next.permission = workflow.updates.permission;
+  if (command.updates.permission) {
+    next.permission = command.updates.permission;
   }
-  if (workflow.updates.profile) {
-    next.codexSettings.profile = workflow.updates.profile;
+  if (command.updates.profile) {
+    codexSettings.profile = command.updates.profile;
   }
-  if (workflow.updates.reasoningEffort) {
-    next.codexSettings.reasoningEffort = workflow.updates.reasoningEffort;
+  if (command.updates.reasoningEffort) {
+    codexSettings.reasoningEffort = command.updates.reasoningEffort;
   }
-  if (workflow.updates.runtimeWorkspaceRoots) {
-    next.codexSettings.runtimeWorkspaceRoots = workflow.updates.runtimeWorkspaceRoots;
+  if (command.updates.runtimeWorkspaceRoots) {
+    codexSettings.runtimeWorkspaceRoots = command.updates.runtimeWorkspaceRoots;
   }
-  if (hasOwn(workflow.updates, "persistExtendedHistory")) {
-    next.codexSettings.persistExtendedHistory = workflow.updates.persistExtendedHistory;
+  if (hasOwn(command.updates, "persistExtendedHistory")) {
+    codexSettings.persistExtendedHistory = command.updates.persistExtendedHistory;
   }
-  if (workflow.updates.environments) {
-    next.codexSettings.environments = workflow.updates.environments;
+  if (command.updates.environments) {
+    codexSettings.environments = command.updates.environments;
   }
-  if (hasOwn(workflow.updates, "experimentalRawEvents")) {
-    next.codexSettings.experimentalRawEvents = workflow.updates.experimentalRawEvents;
+  if (hasOwn(command.updates, "experimentalRawEvents")) {
+    codexSettings.experimentalRawEvents = command.updates.experimentalRawEvents;
   }
-  if (workflow.updates.responsesApiClientMetadata) {
-    next.codexSettings.responsesApiClientMetadata = workflow.updates.responsesApiClientMetadata;
+  if (command.updates.responsesApiClientMetadata) {
+    codexSettings.responsesApiClientMetadata = command.updates.responsesApiClientMetadata;
   }
   return next;
 }
@@ -1323,9 +1340,9 @@ async function runCodexMemoryResetWorkflow(server, threadId, cmd, ctx) {
   });
 }
 
-async function runCodexThreadForkWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
-  const workflow = readCodexThreadForkWorkflow(cmd);
-  if (!workflow) return false;
+async function runCodexThreadForkRuntimeCommand(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const command = readCodexThreadForkRuntimeCommand(cmd);
+  if (!command) return false;
   await flushCodexRuntimeSettings(ctx);
   emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "started");
   const settings = normalizeCodexSettings(cmd);
@@ -1333,7 +1350,7 @@ async function runCodexThreadForkWorkflow(server, threadId, cmd, ctx, cwdFn = pr
     threadId,
     cwd: cmd.cwd || cwdFn(),
     approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
-    excludeTurns: workflow.excludeTurns,
+    excludeTurns: command.excludeTurns,
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   assignCodexAdvancedThreadParams(params, settings);
@@ -1354,7 +1371,7 @@ async function runCodexThreadForkWorkflow(server, threadId, cmd, ctx, cwdFn = pr
         method: CODEX_THREAD_FORK_TIMELINE.method,
         sourceThreadId: threadId,
         threadId: forkedThreadId,
-        excludeTurns: workflow.excludeTurns,
+        excludeTurns: command.excludeTurns,
       },
       sourceId: `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:completed:${threadId}:${forkedThreadId}`,
     });
@@ -1419,14 +1436,14 @@ async function runCodexConfigDiagnosticsWorkflow(server, threadId, cmd, ctx, cwd
   return true;
 }
 
-async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
-  const workflow = readCodexProviderSettingsWorkflow(cmd);
-  if (!workflow) return false;
+async function runCodexProviderSettingsRuntimeCommand(server, threadId, cmd, ctx) {
+  const command = readCodexProviderSettingsRuntimeCommand(cmd);
+  if (!command) return false;
   await flushCodexRuntimeSettings(ctx);
-  const effectiveCmd = codexSettingsCmdFromProviderWorkflow(cmd, workflow);
+  const effectiveCmd = codexSettingsCmdFromRuntimeCommand(cmd, command);
   const params = buildCodexThreadSettingsParams(threadId, effectiveCmd);
   const settingsKeys = Object.keys(params).filter((key) => key !== "threadId");
-  if (workflow.action === "diagnose") {
+  if (command.action === "diagnose") {
     ctx.protocol.emitTimeline({
       kind: "diagnostic",
       status: "info",
@@ -1437,7 +1454,7 @@ async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
       payload: {
         backend: "codex",
         subkind: "provider_settings",
-        action: workflow.action,
+        action: command.action,
         threadId,
         settingsKeys,
         params,
@@ -1452,7 +1469,7 @@ async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
     await server.request("thread/settings/update", params);
     cmd.permission = effectiveCmd.permission;
     cmd.model = effectiveCmd.model;
-    cmd.codexSettings = effectiveCmd.codexSettings;
+    cmd.runtimeOptions = effectiveCmd.runtimeOptions;
     ctx.protocol.emitTimeline({
       kind: "diagnostic",
       status: "success",
@@ -1463,7 +1480,7 @@ async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
       payload: {
         backend: "codex",
         subkind: "provider_settings",
-        action: workflow.action,
+        action: command.action,
         method: "thread/settings/update",
         threadId,
         settingsKeys,
@@ -1480,7 +1497,7 @@ async function runCodexProviderSettingsWorkflow(server, threadId, cmd, ctx) {
       payload: {
         backend: "codex",
         subkind: "provider_settings",
-        action: workflow.action,
+        action: command.action,
         method: "thread/settings/update",
         threadId,
         settingsKeys,
@@ -1558,15 +1575,21 @@ function normalizeCodexPermissionApprovalPayload(params) {
   const cwd = stringOrNull(params.cwd);
   if (!threadId || !turnId || !itemId || !cwd) return null;
   return {
-    threadId,
-    turnId,
-    itemId,
-    startedAtMs: typeof params.startedAtMs === "number" && Number.isFinite(params.startedAtMs)
+    reason: stringOrNull(params.reason),
+    requestedAccess: isRecord(params.permissions) ? params.permissions : {},
+    scopeSuggestion: "turn",
+    providerContext: {
+      codex: {
+        threadId,
+        turnId,
+        itemId,
+        startedAtMs: typeof params.startedAtMs === "number" && Number.isFinite(params.startedAtMs)
       ? params.startedAtMs
       : 0,
-    cwd,
-    reason: stringOrNull(params.reason),
-    permissions: isRecord(params.permissions) ? params.permissions : {},
+        cwd,
+        permissions: isRecord(params.permissions) ? params.permissions : {},
+      },
+    },
   };
 }
 
@@ -1579,7 +1602,7 @@ function codexGrantedPermissions(value) {
 }
 
 function codexPermissionApprovalResponse(result) {
-  const permissions = codexGrantedPermissions(result?.permissions);
+  const permissions = codexGrantedPermissions(result?.grantedAccess ?? result?.permissions);
   const action =
     result?.action === "approve" || result?.action === "decline" || result?.action === "cancel"
       ? result.action
@@ -1678,9 +1701,9 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexBackgroundTerminalsCleanWorkflow },
   { run: runCodexMemoryModeWorkflow },
   { run: runCodexMemoryResetWorkflow },
-  { run: runCodexThreadForkWorkflow, needsCwd: true },
+  { run: runCodexThreadForkRuntimeCommand, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
-  { run: runCodexProviderSettingsWorkflow },
+  { run: runCodexProviderSettingsRuntimeCommand },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },
@@ -1780,7 +1803,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
   emitCodexRuntimeExtensionsTimeline(context.protocol, runtimeExtensions);
   try {
     await initializeCodexAppServer(server);
-    if (await runCodexSessionManagementWorkflow(
+    if (await runCodexSessionManagementRuntimeCommand(
       server,
       stringOrNull(cmd.resumeSessionId),
       cmd,
