@@ -57,6 +57,7 @@ import type {
   ProjectArchitectureGraph,
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
+  CodexAccountQuotaStatus,
   QuotaUsageStats,
   QuotaUsageStatsInput,
 } from "@lilia/contracts";
@@ -108,6 +109,7 @@ export type {
   ProjectArchitectureGraph,
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
+  CodexAccountQuotaStatus,
   QuotaUsageStats,
   QuotaUsageStatsInput,
 };
@@ -355,6 +357,10 @@ export function getQuotaUsageStats(
   input: QuotaUsageStatsInput = {},
 ): Promise<QuotaUsageStats> {
   return invoke<QuotaUsageStats>("quota_usage_get_stats", { input });
+}
+
+export function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
+  return invoke<CodexAccountQuotaStatus>("quota_usage_get_codex_account_status");
 }
 
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {

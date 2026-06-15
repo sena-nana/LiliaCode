@@ -57,3 +57,22 @@ export interface QuotaUsageStats {
   backends: QuotaUsageBackendSummary[];
   recent: QuotaUsageRecentRecord[];
 }
+
+export interface CodexAccountQuotaWindow {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+}
+
+export interface CodexAccountQuotaStatus {
+  available: boolean;
+  connectionMode: string;
+  limitId: string | null;
+  limitName: string | null;
+  planType: string | null;
+  rateLimitReachedType: string | null;
+  fiveHour: CodexAccountQuotaWindow | null;
+  weekly: CodexAccountQuotaWindow | null;
+  fetchedAt: number;
+  error: string | null;
+}

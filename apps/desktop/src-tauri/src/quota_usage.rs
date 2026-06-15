@@ -1,11 +1,17 @@
 use std::collections::BTreeMap;
+use std::process::Command;
 
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
 
 use crate::agent_timeline::AgentTimelineEvent;
+use crate::chat::runner::locate_agent_runner;
+use crate::provider::{
+    build_codex_app_server_probe_status, resolve_connection_for, validate_backend_ready_for_send,
+    ConnectionMode,
+};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -116,6 +122,29 @@ pub struct QuotaUsageStats {
     pub recent: Vec<QuotaUsageRecentRecord>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAccountQuotaWindow {
+    pub used_percent: f64,
+    pub window_duration_mins: Option<f64>,
+    pub resets_at: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAccountQuotaStatus {
+    pub available: bool,
+    pub connection_mode: String,
+    pub limit_id: Option<String>,
+    pub limit_name: Option<String>,
+    pub plan_type: Option<String>,
+    pub rate_limit_reached_type: Option<String>,
+    pub five_hour: Option<CodexAccountQuotaWindow>,
+    pub weekly: Option<CodexAccountQuotaWindow>,
+    pub fetched_at: i64,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 struct AggregatedUsage {
     totals: QuotaUsageTokenTotals,
@@ -144,6 +173,89 @@ impl AggregatedUsage {
 
     fn token_totals(&self) -> QuotaUsageTokenTotals {
         self.totals.clone()
+    }
+}
+
+fn codex_account_quota_unavailable(
+    connection_mode: &str,
+    error: Option<String>,
+) -> CodexAccountQuotaStatus {
+    CodexAccountQuotaStatus {
+        available: false,
+        connection_mode: connection_mode.to_string(),
+        limit_id: None,
+        limit_name: None,
+        plan_type: None,
+        rate_limit_reached_type: None,
+        five_hour: None,
+        weekly: None,
+        fetched_at: now_millis(),
+        error,
+    }
+}
+
+fn locate_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
+    let runner = locate_agent_runner(app);
+    runner
+        .parent()
+        .map(|dir| dir.join("codex-account-quota.mjs"))
+        .unwrap_or_else(|| std::path::PathBuf::from("codex-account-quota.mjs"))
+}
+
+fn run_codex_account_quota_utility<R: Runtime>(
+    app: &AppHandle<R>,
+    codex_path: String,
+) -> CodexAccountQuotaStatus {
+    let script = locate_codex_account_quota_utility(app);
+    let output = match Command::new("node")
+        .arg(script)
+        .env("LILIA_CODEX_CLI_PATH", codex_path)
+        .env_remove("OPENAI_BASE_URL")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("CODEX_API_KEY")
+        .output()
+    {
+        Ok(output) => output,
+        Err(err) => {
+            return codex_account_quota_unavailable(
+                "codex-account",
+                Some(format!("无法启动 Codex 官方额度查询：{err}")),
+            );
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let Some(line) = stdout.lines().find(|line| !line.trim().is_empty()) else {
+        let detail = stderr.trim();
+        return codex_account_quota_unavailable(
+            "codex-account",
+            Some(if detail.is_empty() {
+                "Codex 官方额度查询没有返回数据。".to_string()
+            } else {
+                format!("Codex 官方额度查询没有返回数据：{detail}")
+            }),
+        );
+    };
+
+    match serde_json::from_str::<CodexAccountQuotaStatus>(line) {
+        Ok(mut status) => {
+            status.connection_mode = "codex-account".to_string();
+            if status.fetched_at <= 0 {
+                status.fetched_at = now_millis();
+            }
+            status
+        }
+        Err(err) => {
+            let detail = stderr.trim();
+            codex_account_quota_unavailable(
+                "codex-account",
+                Some(if detail.is_empty() {
+                    format!("解析 Codex 官方额度查询输出失败：{err}")
+                } else {
+                    format!("解析 Codex 官方额度查询输出失败：{err}；{detail}")
+                }),
+            )
+        }
     }
 }
 
@@ -556,6 +668,27 @@ pub fn quota_usage_get_stats(
         }),
         now_millis(),
     )
+}
+
+#[tauri::command]
+pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
+    let connection = resolve_connection_for(&app, BACKEND_CODEX);
+    if connection.mode != ConnectionMode::CodexAccount {
+        return codex_account_quota_unavailable(connection.mode.as_str(), None);
+    }
+    if let Err(err) = validate_backend_ready_for_send(BACKEND_CODEX) {
+        return codex_account_quota_unavailable("codex-account", Some(err));
+    }
+    let codex_app_server = build_codex_app_server_probe_status();
+    let Some(codex_path) = codex_app_server.path else {
+        let detail = if codex_app_server.public.issues.is_empty() {
+            "未找到满足要求的 Codex CLI，无法读取官方额度。".to_string()
+        } else {
+            codex_app_server.public.issues.join(" ")
+        };
+        return codex_account_quota_unavailable("codex-account", Some(detail));
+    };
+    run_codex_account_quota_utility(&app, codex_path)
 }
 
 #[cfg(test)]

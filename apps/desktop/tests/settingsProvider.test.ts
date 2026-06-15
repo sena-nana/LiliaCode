@@ -9,6 +9,7 @@ import {
   setMockGitHubPollSequence,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
+  setMockCodexAccountQuotaStatus,
   setMockProviderConfig,
   setMockQuotaUsageStats,
   setMockRouterMode,
@@ -134,6 +135,65 @@ describe("Settings provider switch", () => {
 
     expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
     expect(view.getByText("无新增记录")).toBeInTheDocument();
+  });
+
+  it("额度页在 Codex 官方账号模式显示官方 5 小时和周限额", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
+    expect(view.getByText("5 小时限额")).toBeInTheDocument();
+    expect(view.getByText("周限额")).toBeInTheDocument();
+    expect(view.getByText("25%")).toBeInTheDocument();
+    expect(view.getByText("40%")).toBeInTheDocument();
+    expect(view.getAllByText(/^重置 /)).toHaveLength(2);
+  });
+
+  it("额度页在 Codex API 模式隐藏官方额度", async () => {
+    setMockRouterMode("codex", "api");
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+    });
+    expect(view.queryByText("Codex 官方额度")).not.toBeInTheDocument();
+  });
+
+  it("额度页刷新按钮同时刷新本地统计和官方额度", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+    await view.findByText("Codex 官方额度");
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+        input: { days: 7, backend: "all" },
+      }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+    });
+  });
+
+  it("额度页官方额度失败不影响本地统计", async () => {
+    setMockCodexAccountQuotaStatus({
+      available: false,
+      connectionMode: "codex-account",
+      limitId: "codex",
+      limitName: null,
+      planType: "pro",
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      fetchedAt: Date.now(),
+      error: "Codex 未登录",
+    });
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findByText("总 Token")).toBeInTheDocument();
+    expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
+    expect(view.getByText("暂无官方额度数据")).toBeInTheDocument();
+    expect(view.getByText("Codex 未登录")).toBeInTheDocument();
   });
 
   it("点击 Codex 会写入全局 active provider", async () => {

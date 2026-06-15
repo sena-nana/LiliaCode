@@ -9,15 +9,22 @@ import {
 } from "lucide-vue-next";
 import type {
   ChatBackendKind,
+  CodexAccountQuotaStatus,
+  CodexAccountQuotaWindow,
   QuotaUsageDailyBucket,
   QuotaUsageStats,
   QuotaUsageStatsBackendFilter,
   QuotaUsageStatsDays,
 } from "@lilia/contracts";
-import { getQuotaUsageStats } from "../../services/chat";
+import { getCodexAccountQuotaStatus, getQuotaUsageStats } from "../../services/chat";
 
 type BackendOption = { value: QuotaUsageStatsBackendFilter; label: string };
 type DaysOption = { value: QuotaUsageStatsDays; label: string };
+type OfficialQuotaWindowRow = {
+  key: "fiveHour" | "weekly";
+  label: string;
+  window: CodexAccountQuotaWindow | null | undefined;
+};
 
 const backendOptions: BackendOption[] = [
   { value: "all", label: "全部" },
@@ -32,13 +39,25 @@ const daysOptions: DaysOption[] = [
 const selectedBackend = ref<QuotaUsageStatsBackendFilter>("all");
 const selectedDays = ref<QuotaUsageStatsDays>(7);
 const stats = ref<QuotaUsageStats | null>(null);
+const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const loading = ref(false);
+const quotaLoading = ref(false);
 const error = ref("");
 let requestSeq = 0;
+let quotaRequestSeq = 0;
 
 const totalRecords = computed(() => stats.value?.cost.totalRecordCount ?? 0);
 const hasUsage = computed(() => totalRecords.value > 0);
 const totalTokens = computed(() => stats.value?.totals.totalTokens ?? 0);
+const refreshing = computed(() => loading.value || quotaLoading.value);
+const showOfficialQuota = computed(() =>
+  officialQuota.value?.connectionMode === "codex-account",
+);
+const officialQuotaWindows = computed<OfficialQuotaWindowRow[]>(() => [
+  { key: "fiveHour", label: "5 小时限额", window: officialQuota.value?.fiveHour },
+  { key: "weekly", label: "周限额", window: officialQuota.value?.weekly },
+]);
+const hasOfficialQuotaWindow = computed(() => officialQuotaWindows.value.some((row) => row.window));
 const maxDailyTokens = computed(() =>
   Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
 );
@@ -84,6 +103,12 @@ function formatRecordCost(value: number | null) {
   return value === null ? "--" : formatCost(value);
 }
 
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: value >= 10 ? 0 : 1,
+  }).format(Math.max(0, Math.min(100, value)))}%`;
+}
+
 function formatDay(value: number) {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -98,6 +123,22 @@ function formatDateTime(value: number) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatUnixSeconds(value: number | null | undefined) {
+  if (!value || value <= 0) return "--";
+  return formatDateTime(value * 1000);
+}
+
+function quotaWindowLabel(window: CodexAccountQuotaWindow | null | undefined) {
+  if (!window) return "暂无数据";
+  const duration = window.windowDurationMins;
+  const durationText = duration
+    ? duration >= 1440
+      ? `${Math.round(duration / 1440)} 天窗口`
+      : `${Math.round(duration / 60)} 小时窗口`
+    : "官方窗口";
+  return `${durationText} · 剩余 ${formatPercent(100 - window.usedPercent)}`;
 }
 
 function chartX(index: number, count: number) {
@@ -156,6 +197,36 @@ async function loadStats() {
   }
 }
 
+async function loadOfficialQuota() {
+  const seq = ++quotaRequestSeq;
+  quotaLoading.value = true;
+  try {
+    const result = await getCodexAccountQuotaStatus();
+    if (seq === quotaRequestSeq) officialQuota.value = result;
+  } catch (err) {
+    if (seq === quotaRequestSeq) {
+      officialQuota.value = {
+        available: false,
+        connectionMode: "codex-account",
+        limitId: null,
+        limitName: null,
+        planType: null,
+        rateLimitReachedType: null,
+        fiveHour: null,
+        weekly: null,
+        fetchedAt: Date.now(),
+        error: String(err),
+      };
+    }
+  } finally {
+    if (seq === quotaRequestSeq) quotaLoading.value = false;
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([loadStats(), loadOfficialQuota()]);
+}
+
 async function selectBackend(backend: QuotaUsageStatsBackendFilter) {
   if (selectedBackend.value === backend) return;
   selectedBackend.value = backend;
@@ -169,7 +240,7 @@ async function selectDays(days: QuotaUsageStatsDays) {
 }
 
 onMounted(() => {
-  void loadStats();
+  void refreshAll();
 });
 </script>
 
@@ -185,10 +256,10 @@ onMounted(() => {
       <button
         type="button"
         class="ui-button ui-button--ghost quota-panel__refresh"
-        :disabled="loading"
-        @click="loadStats"
+        :disabled="refreshing"
+        @click="refreshAll"
       >
-        <RefreshCw :size="12" :class="{ 'is-spinning': loading }" aria-hidden="true" />
+        <RefreshCw :size="12" :class="{ 'is-spinning': refreshing }" aria-hidden="true" />
         刷新
       </button>
     </div>
@@ -221,6 +292,39 @@ onMounted(() => {
         >
           {{ opt.label }}
         </button>
+      </div>
+    </div>
+
+    <div v-if="showOfficialQuota" class="quota-official">
+      <div class="quota-official__head">
+        <div>
+          <strong>Codex 官方额度</strong>
+          <span>
+            {{ officialQuota?.planType ? `计划 ${officialQuota.planType}` : "官方账号" }}
+            <template v-if="officialQuota?.limitName"> · {{ officialQuota.limitName }}</template>
+          </span>
+        </div>
+        <span class="ui-badge ui-badge--muted">
+          {{ quotaLoading ? "读取中" : `查询 ${formatDateTime(officialQuota?.fetchedAt ?? Date.now())}` }}
+        </span>
+      </div>
+      <div v-if="hasOfficialQuotaWindow" class="quota-official__grid">
+        <div
+          v-for="row in officialQuotaWindows"
+          :key="row.key"
+          class="quota-official-window"
+        >
+          <span>{{ row.label }}</span>
+          <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
+          <small>{{ quotaWindowLabel(row.window) }}</small>
+          <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
+        </div>
+      </div>
+      <div v-else class="quota-official__empty">
+        暂无官方额度数据
+      </div>
+      <div v-if="officialQuota?.error" class="quota-official__error">
+        {{ officialQuota.error }}
       </div>
     </div>
 
@@ -426,6 +530,77 @@ onMounted(() => {
   color: var(--accent);
 }
 
+.quota-official {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.quota-official__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quota-official__head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.quota-official__head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.quota-official__head span,
+.quota-official-window span,
+.quota-official-window small,
+.quota-official__empty,
+.quota-official__error {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-official__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quota-official-window {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+}
+
+.quota-official-window strong {
+  color: var(--accent);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.quota-official__empty {
+  padding: 8px 2px;
+}
+
+.quota-official__error {
+  color: var(--warn);
+}
+
 .quota-chart-wrap {
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -592,6 +767,10 @@ onMounted(() => {
 
   .quota-metric--cost {
     grid-column: 1 / -1;
+  }
+
+  .quota-official__grid {
+    grid-template-columns: 1fr;
   }
 
   .quota-recent__row {
