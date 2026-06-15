@@ -26,6 +26,12 @@ async function renderSettings(initialRoute = "/settings") {
   });
 }
 
+function lastInvokeInput(command: string): Record<string, unknown> | undefined {
+  const call = [...mockInvoke.mock.calls].reverse().find(([cmd]) => cmd === command);
+  const input = call?.[1];
+  return input && typeof input === "object" ? input as Record<string, unknown> : undefined;
+}
+
 describe("Settings provider switch", () => {
   afterEach(() => {
     localStorage.removeItem("lilia.providerSetupChecklist.dismissed");
@@ -140,17 +146,15 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"baseUrl\":\"https://anthropic.example/v1\"") &&
-          JSON.stringify(args.config).includes("\"apiKey\":null") &&
-          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: {
+          baseUrl: "https://anthropic.example/v1",
+          apiKey: null,
+        },
+      });
+      expect(lastInvokeInput("provider_set_config")?.config).not.toMatchObject({
+        clearApiKey: true,
+      });
     });
     await waitFor(() => {
       expect(view.getByRole("button", { name: "保存" })).toBeEnabled();
@@ -161,15 +165,9 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: { apiKey: "sk-new" },
+      });
     });
   });
 
@@ -182,15 +180,9 @@ describe("Settings provider switch", () => {
     await fireEvent.click(await view.findByRole("button", { name: "清除" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: { clearApiKey: true },
+      });
       expect(view.getByText("未保存密钥")).toBeInTheDocument();
     });
   });
@@ -343,15 +335,9 @@ describe("Settings provider switch", () => {
         "aria-checked",
         "true",
       );
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "agent_interaction_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"agentRuntimeChannel\":\"mutsuki_core\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: { agentRuntimeChannel: "mutsuki_core" },
+      });
     });
   });
 
@@ -372,15 +358,9 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "conversation_suggestions_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"source\":\"provider\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("conversation_suggestions_set_settings")).toMatchObject({
+        settings: { source: "provider" },
+      });
     });
   });
 
@@ -394,16 +374,12 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":null") &&
-          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { apiKey: null },
+      });
+      expect(lastInvokeInput("assistant_ai_set_config")?.config).not.toMatchObject({
+        clearApiKey: true,
+      });
     });
     expect(view.getByText("密钥已保存")).toBeInTheDocument();
   });
@@ -416,29 +392,17 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { apiKey: "sk-new" },
+      });
     });
 
     await fireEvent.click(view.getByRole("button", { name: "清除" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { clearApiKey: true },
+      });
       expect(view.getByText("未保存密钥")).toBeInTheDocument();
     });
   });

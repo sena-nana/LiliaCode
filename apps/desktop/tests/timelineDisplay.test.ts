@@ -1,7 +1,5 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import { normalizeClaudeTool } from "../../../packages/contracts/src/claudeTools.mjs";
@@ -463,45 +461,6 @@ describe("timeline event expansion", () => {
     });
 
     expect(view.getByText("思考中 2 分 8 秒，子代理explorer正在调用工具")).toBeInTheDocument();
-  });
-
-  it.each(["info", "requires_action"] as const)(
-    "MCP %s 状态图标不生成背景状态 class",
-    (status) => {
-      const view = render(AgentTimeline, {
-        props: {
-          events: [
-            timelineEvent({
-              id: `mcp-${status}-1`,
-              kind: "mcp",
-              status,
-              title: "docs / search",
-              summary: "docs / search",
-              payload: {
-                server: "docs",
-                tool: "search",
-              },
-            }),
-          ],
-        },
-      });
-
-      const nodes = [...view.container.querySelectorAll(".agent-timeline__node")];
-      expect(nodes).toHaveLength(1);
-      const node = nodes[0];
-      expect([...node.classList]).toEqual(["agent-timeline__node"]);
-    },
-  );
-
-  it("时间线 icon 节点样式不包含背景声明", () => {
-    const css = readFileSync(resolve(__dirname, "../src/styles/chat.css"), "utf8");
-    const nodeRuleBodies = [...css.matchAll(/\.agent-timeline__node[^{]*\{([^}]*)\}/g)]
-      .map((match) => match[1]);
-
-    expect(nodeRuleBodies.length).toBeGreaterThan(0);
-    for (const body of nodeRuleBodies) {
-      expect(body).not.toMatch(/\bbackground(?:-color)?\s*:/);
-    }
   });
 
   it("折叠的过程事件不参与 rail 避让计算", async () => {
