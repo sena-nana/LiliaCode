@@ -929,6 +929,7 @@
 
 /* 连接状态徽章：紧贴设置齿轮右边。未配置时退化成黄色警告灯。 */
 .sb-conn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -943,6 +944,11 @@
   min-width: 0;
   opacity: 0.62;
   transition: opacity 0.35s ease, background-color 0.12s ease, color 0.12s ease, filter 0.12s ease;
+}
+
+.sb-conn--quota {
+  height: 22px;
+  padding-right: 5px;
 }
 
 .sb-footer:hover .sb-conn,
@@ -988,6 +994,139 @@
 
 .sb-conn__label--probing {
   color: var(--text-faint);
+}
+
+.sb-quota-rings {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.sb-quota-ring {
+  --quota-progress: 0%;
+  --quota-ring-color: var(--accent);
+  --quota-ring-track: color-mix(in srgb, var(--accent) 18%, transparent);
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at center, var(--bg-elev) 48%, transparent 50%),
+    conic-gradient(var(--quota-ring-color) var(--quota-progress), var(--quota-ring-track) 0);
+  color: var(--text);
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sb-quota-ring--warn {
+  --quota-ring-color: var(--warn);
+  --quota-ring-track: color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.sb-quota-ring--error {
+  --quota-ring-color: var(--err);
+  --quota-ring-track: color-mix(in srgb, var(--err) 20%, transparent);
+}
+
+.sb-quota-ring--empty {
+  --quota-ring-color: var(--text-faint);
+  --quota-ring-track: color-mix(in srgb, var(--text-faint) 18%, transparent);
+  color: var(--text-faint);
+}
+
+.sb-conn-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: 292px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  cursor: default;
+  white-space: normal;
+}
+
+.sb-conn-popover__head,
+.sb-conn-popover__quota-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sb-conn-popover__head strong,
+.sb-conn-popover__quota-main strong {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sb-conn-popover__head small,
+.sb-conn-popover__meta,
+.sb-conn-popover__quota-main small,
+.sb-conn-popover__quota-side,
+.sb-conn-popover__warn,
+.sb-conn-popover__error {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.sb-conn-popover__head {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sb-conn-popover__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sb-conn-popover__meta span {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: var(--bg-subtle);
+}
+
+.sb-conn-popover__quota-list {
+  display: grid;
+  gap: 6px;
+}
+
+.sb-conn-popover__quota-row {
+  padding: 7px;
+  border-radius: 7px;
+  background: var(--bg-subtle);
+}
+
+.sb-conn-popover__quota-main,
+.sb-conn-popover__quota-side {
+  display: grid;
+  gap: 2px;
+}
+
+.sb-conn-popover__quota-side {
+  text-align: right;
+}
+
+.sb-conn-popover__warn {
+  color: var(--warn);
+}
+
+.sb-conn-popover__error {
+  color: var(--err);
 }
 
 /* ---------------- View tabs（主区顶部，自动隐藏的浮层） ---------------- *
