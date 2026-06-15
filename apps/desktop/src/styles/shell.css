@@ -1402,6 +1402,22 @@
   padding: 0 3px 0 4px;
 }
 
+.conversation-status-float__pin .titlebar__btn {
+  width: 26px;
+  height: 26px;
+  color: var(--text-muted);
+}
+
+.conversation-status-float__pin .titlebar__btn:hover:not(.is-active) {
+  color: var(--text-muted);
+}
+
+.conversation-status-float__pin .titlebar__btn.is-active,
+.conversation-status-float__pin .titlebar__btn.is-active:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .conversation-status-float__drag {
   min-width: 0;
   display: flex;
