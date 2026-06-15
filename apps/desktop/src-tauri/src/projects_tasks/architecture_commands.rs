@@ -596,9 +596,18 @@ pub fn project_architecture_rollback(
     backend: String,
     store: State<'_, LiliaStore>,
 ) -> Result<ProjectArchitectureRollbackResult, String> {
-    validate_backend(&backend)?;
     let mut conn = store.conn()?;
-    ensure_project_exists(&conn, &project_id)?;
+    rollback_project_architecture_core(&mut conn, project_id, task_id, backend)
+}
+
+pub(crate) fn rollback_project_architecture_core(
+    conn: &mut Connection,
+    project_id: String,
+    task_id: String,
+    backend: String,
+) -> Result<ProjectArchitectureRollbackResult, String> {
+    validate_backend(&backend)?;
+    ensure_project_exists(&*conn, &project_id)?;
     let now = now_millis();
     let tx = conn
         .transaction()
@@ -835,5 +844,38 @@ mod tests {
         assert_eq!(graph.version, 3);
         assert_eq!(graph.nodes.len(), 1);
         assert_eq!(graph.nodes[0].id, "api");
+    }
+
+    #[test]
+    fn rollback_history_uses_requested_backend_for_claude_and_codex() {
+        for backend in ["claude", "codex"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            create_schema(&conn);
+            apply_project_architecture_changes_core(
+                &mut conn,
+                input(vec![ProjectArchitectureChange::UpsertNode {
+                    node: node("api"),
+                }]),
+            )
+            .unwrap();
+
+            let result = rollback_project_architecture_core(
+                &mut conn,
+                "p1".to_string(),
+                "t1".to_string(),
+                backend.to_string(),
+            )
+            .unwrap();
+
+            assert_eq!(result.event.as_ref().unwrap().backend, backend);
+            let history_backend: String = conn
+                .query_row(
+                    "SELECT backend FROM project_architecture_changes WHERE status = 'rolled_back'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(history_backend, backend);
+        }
     }
 }
