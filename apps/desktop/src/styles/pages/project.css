@@ -420,6 +420,35 @@
   opacity: 0.6;
 }
 
+.roadmap-milestone__details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 10px;
+  padding: 10px 12px 0;
+}
+
+.roadmap-milestone__field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.roadmap-milestone__field span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.roadmap-milestone__description {
+  min-height: 68px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.roadmap-milestone__date {
+  min-width: 0;
+}
+
 .roadmap-milestone__progress {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
@@ -663,6 +692,10 @@
   }
 
   .roadmap-milestone__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .roadmap-milestone__details {
     grid-template-columns: minmax(0, 1fr);
   }
 

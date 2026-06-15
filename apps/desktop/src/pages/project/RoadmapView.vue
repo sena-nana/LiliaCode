@@ -117,6 +117,23 @@ function isSaving(milestoneId: string): boolean {
   return savingMilestoneId.value === milestoneId;
 }
 
+function formatDateInput(timestamp: number | null): string {
+  if (timestamp === null) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInput(value: string): number | null {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day).getTime();
+}
+
 async function addMilestone() {
   const title = newMilestoneTitle.value.trim();
   if (!title || creatingMilestone.value) return;
@@ -148,6 +165,22 @@ async function changeMilestoneStatus(milestoneId: string, event: Event) {
   const status = (event.target as HTMLSelectElement).value as MilestoneStatus;
   await saveMilestoneChange(milestoneId, () =>
     updateMilestone(props.projectId, milestoneId, { status }),
+  );
+}
+
+async function changeMilestoneDescription(milestone: Milestone, event: Event) {
+  const description = (event.target as HTMLTextAreaElement).value.trim();
+  if (description === milestone.description) return;
+  await saveMilestoneChange(milestone.id, () =>
+    updateMilestone(props.projectId, milestone.id, { description }),
+  );
+}
+
+async function changeMilestoneDueDate(milestone: Milestone, event: Event) {
+  const dueDate = parseDateInput((event.target as HTMLInputElement).value);
+  if (dueDate === milestone.dueDate) return;
+  await saveMilestoneChange(milestone.id, () =>
+    updateMilestone(props.projectId, milestone.id, { dueDate }),
   );
 }
 
@@ -267,6 +300,32 @@ watch(
               </option>
             </select>
           </header>
+
+          <div class="roadmap-milestone__details">
+            <label class="roadmap-milestone__field roadmap-milestone__field--description">
+              <span>描述</span>
+              <textarea
+                class="ui-input roadmap-milestone__description"
+                :value="view.milestone.description"
+                :disabled="isSaving(view.milestone.id)"
+                :aria-label="`${view.milestone.title} 描述`"
+                placeholder="补充 milestone 目标、范围或验收口径"
+                rows="3"
+                @change="changeMilestoneDescription(view.milestone, $event)"
+              />
+            </label>
+            <label class="roadmap-milestone__field">
+              <span>截止日期</span>
+              <input
+                class="ui-input roadmap-milestone__date"
+                type="date"
+                :value="formatDateInput(view.milestone.dueDate)"
+                :disabled="isSaving(view.milestone.id)"
+                :aria-label="`${view.milestone.title} 截止日期`"
+                @change="changeMilestoneDueDate(view.milestone, $event)"
+              />
+            </label>
+          </div>
 
           <div class="roadmap-milestone__progress">
             <div class="roadmap-milestone__progress-bar">
