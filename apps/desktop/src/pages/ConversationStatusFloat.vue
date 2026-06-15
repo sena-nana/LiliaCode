@@ -9,7 +9,6 @@ import {
   Blend,
   MessageSquarePlus,
   Pin,
-  PinOff,
   X,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -319,8 +318,7 @@ onUnmounted(() => {
           :title="alwaysOnTop ? '取消置顶' : '置顶'"
           @click="toggleAlwaysOnTop"
         >
-          <PinOff v-if="alwaysOnTop" :size="14" aria-hidden="true" />
-          <Pin v-else :size="14" aria-hidden="true" />
+          <Pin :size="14" aria-hidden="true" />
         </button>
       </div>
 
