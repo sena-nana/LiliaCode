@@ -1,6 +1,7 @@
 import { computed, ref, type Ref } from "vue";
-import type { AutomationRun, AutomationRunNodeState } from "@lilia/contracts";
+import type { AutomationRun, AutomationRunNodeState, AutomationRunSummary } from "@lilia/contracts";
 import {
+  automationRunToSummary,
   getAutomationRun,
   listAutomationRuns,
   resumeAutomationRun,
@@ -15,7 +16,7 @@ export function useAutomationRuns(options: {
   const manualRunPayloadText = ref("");
   const running = ref(false);
   const resuming = ref(false);
-  const runs = ref<AutomationRun[]>([]);
+  const runs = ref<AutomationRunSummary[]>([]);
   const selectedRunId = ref<string | null>(null);
   const selectedRunDetail = ref<AutomationRunDetail | null>(null);
   const selectedRunNodeId = ref<string | null>(null);
@@ -29,10 +30,9 @@ export function useAutomationRuns(options: {
 
   async function refreshRuns() {
     runs.value = await listAutomationRuns(options.selectedWorkflowId.value);
-    if (!selectedRunId.value || !runs.value.some((run) => run.id === selectedRunId.value)) {
-      selectedRunId.value = runs.value[0]?.id ?? null;
+    if (selectedRunId.value && !runs.value.some((run) => run.id === selectedRunId.value)) {
+      resetRunSelection();
     }
-    await refreshSelectedRun();
   }
 
   async function refreshSelectedRun() {
@@ -48,7 +48,7 @@ export function useAutomationRuns(options: {
   }
 
   async function refreshAfterRunEvent(run: AutomationRun) {
-    await refreshRuns();
+    applyRunSummary(automationRunToSummary(run));
     if (selectedRunId.value === run.id) {
       await refreshSelectedRun();
     }
@@ -64,8 +64,9 @@ export function useAutomationRuns(options: {
         options.selectedWorkflowId.value,
         payload ? { payload } : {},
       );
+      applyRunSummary(automationRunToSummary(run));
       selectedRunId.value = run.id;
-      await refreshRuns();
+      await refreshSelectedRun();
     } catch (err) {
       options.setError(String(err));
     } finally {
@@ -84,8 +85,9 @@ export function useAutomationRuns(options: {
         nodeId,
         payload: { confirmed: true },
       });
+      applyRunSummary(automationRunToSummary(run));
       selectedRunId.value = run.id;
-      await refreshRuns();
+      await refreshSelectedRun();
     } catch (err) {
       options.setError(String(err));
     } finally {
@@ -101,6 +103,24 @@ export function useAutomationRuns(options: {
 
   function selectRunNodeState(state: AutomationRunNodeState) {
     selectedRunNodeId.value = state.nodeId;
+  }
+
+  function selectRun(run: AutomationRunSummary) {
+    if (selectedRunId.value === run.id) return;
+    selectedRunId.value = run.id;
+    selectedRunDetail.value = null;
+    selectedRunNodeId.value = null;
+  }
+
+  function applyRunSummary(run: AutomationRunSummary) {
+    if (
+      options.selectedWorkflowId.value &&
+      run.workflowId !== options.selectedWorkflowId.value
+    ) {
+      return;
+    }
+    const existing = runs.value.filter((item) => item.id !== run.id);
+    runs.value = [run, ...existing].sort((left, right) => right.startedAt - left.startedAt);
   }
 
   function parseManualRunPayload(): Record<string, unknown> | undefined {
@@ -129,6 +149,7 @@ export function useAutomationRuns(options: {
     runCurrent,
     resumeSelectedRun,
     resetRunSelection,
+    selectRun,
     selectRunNodeState,
   };
 }

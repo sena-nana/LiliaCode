@@ -45,7 +45,9 @@ export function useAutomationWorkspace(options: {
         selectedWorkflowId.value = workflowRows.value[0].id;
       }
       applySelectedWorkflow();
-      await options.refreshRuns();
+      void options.refreshRuns().catch((err) => {
+        options.setError(String(err));
+      });
     } catch (err) {
       options.setError(String(err));
     } finally {

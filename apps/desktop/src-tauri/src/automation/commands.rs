@@ -12,8 +12,8 @@ use crate::automation::repository::{
 use crate::automation::signals::manual_signal;
 use crate::automation::types::{
     AutomationResumeRunInput, AutomationRun, AutomationRunDetail, AutomationRunOnceInput,
-    AutomationRunStatus, AutomationSaveDraftInput, AutomationWorkflow, AutomationWorkflowVersion,
-    GraphExecution,
+    AutomationRunStatus, AutomationRunSummary, AutomationSaveDraftInput, AutomationWorkflow,
+    AutomationWorkflowVersion, GraphExecution,
 };
 use crate::chat::state::ChatStore;
 use crate::store::LiliaStore;
@@ -186,7 +186,7 @@ pub fn automation_resume_run<R: Runtime>(
 pub fn automation_list_runs(
     workflow_id: Option<String>,
     store: State<'_, LiliaStore>,
-) -> Result<Vec<AutomationRun>, String> {
+) -> Result<Vec<AutomationRunSummary>, String> {
     let conn = store.conn()?;
     list_runs(&conn, workflow_id.as_deref())
 }

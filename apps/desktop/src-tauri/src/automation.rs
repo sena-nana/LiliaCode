@@ -1112,6 +1112,62 @@ mod tests {
     }
 
     #[test]
+    fn list_runs_returns_lightweight_summaries_sorted_and_filtered() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_workflow_tables(&conn);
+        let scope = AutomationScopeFilter::default();
+        let trigger = AutomationSignalEnvelope {
+            id: "signal-1".to_string(),
+            kind: "timeline_event".to_string(),
+            project_id: Some("project-1".to_string()),
+            task_id: Some("task-1".to_string()),
+            backend: Some("claude".to_string()),
+            event_kind: Some("tool".to_string()),
+            automation_run_id: None,
+            payload: serde_json::json!({ "largePayload": "x".repeat(1024) }),
+            created_at: 1,
+        };
+        for (run_id, workflow_id, started_at) in [
+            ("run-old", "wf-1", 10_i64),
+            ("run-new", "wf-1", 20_i64),
+            ("run-other", "wf-2", 30_i64),
+        ] {
+            conn.execute(
+                r#"INSERT INTO automation_runs
+                   (id, workflow_id, workflow_version_id, status, trigger_json, scope_json, started_at, finished_at, error)
+                   VALUES (?1, ?2, 'ver-1', 'succeeded', ?3, ?4, ?5, ?6, NULL)"#,
+                params![
+                    run_id,
+                    workflow_id,
+                    json_text(&trigger, "trigger").unwrap(),
+                    json_text(&scope, "scope").unwrap(),
+                    started_at,
+                    started_at + 1,
+                ],
+            )
+            .unwrap();
+        }
+
+        let summaries = repository::list_runs(&conn, Some("wf-1")).unwrap();
+
+        assert_eq!(
+            summaries
+                .iter()
+                .map(|run| run.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-new", "run-old"],
+        );
+        assert_eq!(summaries[0].trigger_kind, "timeline_event");
+        assert_eq!(summaries[0].project_id.as_deref(), Some("project-1"));
+        assert_eq!(summaries[0].task_id.as_deref(), Some("task-1"));
+        assert_eq!(summaries[0].backend.as_deref(), Some("claude"));
+        assert_eq!(summaries[0].event_kind.as_deref(), Some("tool"));
+        let summary_json = serde_json::to_value(&summaries[0]).unwrap();
+        assert!(summary_json.get("trigger").is_none());
+        assert!(summary_json.get("scope").is_none());
+    }
+
+    #[test]
     fn scope_matches_backend_and_event_kind() {
         let scope = AutomationScopeFilter {
             project_ids: Vec::new(),

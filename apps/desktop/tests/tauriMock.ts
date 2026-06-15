@@ -181,6 +181,21 @@ interface AutomationRunNodeStateRow {
   finishedAt: number | null;
 }
 
+interface AutomationRunSummaryRow {
+  id: string;
+  workflowId: string;
+  workflowVersionId: string;
+  status: AutomationRunRow["status"];
+  triggerKind: string;
+  projectId?: string | null;
+  taskId?: string | null;
+  backend?: "claude" | "codex" | null;
+  eventKind?: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  error: string | null;
+}
+
 interface AgentTodoInput {
   content?: unknown;
   text?: unknown;
@@ -382,6 +397,23 @@ function cloneAutomationRun(row: AutomationRunRow): AutomationRunRow {
       backends: [...row.scope.backends],
       eventKinds: [...row.scope.eventKinds],
     },
+  };
+}
+
+function cloneAutomationRunSummary(row: AutomationRunRow): AutomationRunSummaryRow {
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    workflowVersionId: row.workflowVersionId,
+    status: row.status,
+    triggerKind: row.trigger.kind,
+    projectId: row.trigger.projectId ?? null,
+    taskId: row.trigger.taskId ?? null,
+    backend: row.trigger.backend ?? null,
+    eventKind: row.trigger.eventKind ?? null,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+    error: row.error,
   };
 }
 
@@ -1215,6 +1247,45 @@ export function finishMockAutomationRun(runId: string) {
     finishedAt: node.finishedAt ?? now,
   }));
   emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
+}
+
+export function seedMockAutomationRun() {
+  const workflow = automations[0];
+  if (!workflow) return;
+  const now = Date.now();
+  const run: AutomationRunRow = {
+    id: `run-seeded-${automationRuns.length + 1}`,
+    workflowId: workflow.id,
+    workflowVersionId: workflow.publishedVersionId ?? `${workflow.id}-v1`,
+    status: "succeeded",
+    trigger: {
+      id: `signal-seeded-${automationRuns.length + 1}`,
+      kind: "manual",
+      projectId: "lilia",
+      taskId: "t-002",
+      backend: "claude",
+      eventKind: "manual",
+      automationRunId: null,
+      payload: { source: "seed", largePayload: "x".repeat(1_024) },
+      createdAt: now,
+    },
+    scope: cloneAutomationWorkflow(workflow).scope,
+    startedAt: now,
+    finishedAt: now + 5,
+    error: null,
+  };
+  automationRuns = [run, ...automationRuns];
+  automationRunNodes[run.id] = workflow.draft.nodes.map((node) => ({
+    id: `${run.id}:${node.id}`,
+    runId: run.id,
+    nodeId: node.id,
+    status: "succeeded",
+    input: { trigger: run.trigger },
+    output: { ok: true },
+    error: null,
+    startedAt: now,
+    finishedAt: now + 5,
+  }));
 }
 
 export function mockListenerCount(event: string): number {
@@ -2272,7 +2343,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const workflowId = typeof args.workflowId === "string" ? args.workflowId : null;
       return automationRuns
         .filter((run) => !workflowId || run.workflowId === workflowId)
-        .map(cloneAutomationRun);
+        .map(cloneAutomationRunSummary);
     }
 
     case "automation_get_run": {
