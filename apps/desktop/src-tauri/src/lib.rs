@@ -17,6 +17,7 @@ mod popup_windows;
 mod project_shell;
 mod projects_tasks;
 mod provider;
+mod quota_usage;
 mod settings_store;
 mod store;
 mod todos;
@@ -216,8 +217,6 @@ pub fn run() {
             provider::provider_set_config,
             provider::provider_get_active_backend,
             provider::provider_set_active_backend,
-            provider::cc_switch_get_config,
-            provider::cc_switch_set_config,
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_test_connection,
@@ -295,6 +294,7 @@ pub fn run() {
             projects_tasks::task_reparent,
             agent_timeline::agent_timeline_list,
             agent_timeline::agent_timeline_clear_task,
+            quota_usage::quota_usage_get_stats,
             automation::commands::automation_list_workflows,
             automation::commands::automation_get_workflow,
             automation::commands::automation_save_draft,

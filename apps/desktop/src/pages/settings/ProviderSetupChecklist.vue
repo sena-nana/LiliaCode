@@ -23,7 +23,6 @@ const props = defineProps<{
   report: EnvStatusReport | null;
   status: BackendEnvStatus | null;
   routerMode: RouterMode;
-  ccSwitchBaseUrl: string | null;
   probing: boolean;
 }>();
 
@@ -49,7 +48,7 @@ const expanded = ref(!dismissed.value);
 
 const runtime = computed(() => runtimeDiagnostic(props.backend, props.report));
 const connection = computed(() =>
-  connectionDiagnostic(props.backend, props.status, props.routerMode, props.ccSwitchBaseUrl),
+  connectionDiagnostic(props.backend, props.status, props.routerMode),
 );
 
 type ChecklistStep = {
@@ -80,20 +79,20 @@ const steps = computed<ChecklistStep[]>(() => {
       key: "cli",
       title: "CLI 检查",
       hint: props.backend === "codex"
-        ? (runtimeDiag?.hint ?? "Codex 需要安装 codex CLI。")
-        : "Claude 通过本机 Node 运行 Claude Agent SDK；发送失败时检查 ANTHROPIC_API_KEY 或直连密钥。",
+        ? (runtimeDiag?.hint ?? "Codex 官方账号模式需要安装 codex CLI。")
+        : "Claude 通过本机 Node 运行 Claude Agent SDK；发送失败时检查 ANTHROPIC_API_KEY 或 API 密钥。",
       tone: props.probing ? "probing" : (codexRuntimeReady ? "ok" : "err"),
     },
     {
       key: "route",
-      title: "连接模式",
-      hint: `当前 ${backendLabel(props.backend)} 使用 ${routeMode}。CC-Switch 适合统一代理；直连适合直接填写官方或兼容 API。`,
+      title: "接入方式",
+      hint: `当前 ${backendLabel(props.backend)} 使用 ${routeMode}。API 可填写官方地址、本地代理或兼容接口；Codex 官方账号会复用 CLI 登录态。`,
       tone: "ok",
     },
     {
       key: "credential",
-      title: "密钥 / 代理",
-      hint: connectionDiag?.hint ?? "选择 CC-Switch 时启动本地代理；选择直连时填写 API key。",
+      title: "密钥 / 账号",
+      hint: connectionDiag?.hint ?? "API 模式填写 API key；Codex 官方账号模式先完成 codex login。",
       tone: props.probing ? "probing" : (connectionReady ? "ok" : "warn"),
     },
     {

@@ -9,19 +9,17 @@ import {
   RotateCw,
   Save,
   Trash2,
+  UserRound,
 } from "lucide-vue-next";
 import type {
-  CCSwitchConfig,
   ChatBackendKind,
   ProviderConfig,
   RouterMode,
 } from "@lilia/contracts";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
-  getCCSwitchConfig,
   getProviderConfig,
   getRouterMode,
-  setCCSwitchConfig,
   setProviderConfig,
   setRouterMode,
 } from "../../services/chat";
@@ -41,30 +39,27 @@ const {
   statusFor,
   probing,
   refresh,
-  ccSwitch,
 } = useConnectionStatus();
 
 const backendOptions: { value: ChatBackendKind; label: string }[] = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
 ];
-const routerOptions: { value: RouterMode; label: string }[] = [
-  { value: "cc-switch", label: "CC-Switch" },
-  { value: "direct", label: "直连" },
+const codexModeOptions: { value: RouterMode; label: string }[] = [
+  { value: "codex-account", label: "官方账号" },
+  { value: "api", label: "API" },
 ];
 
 const switchingBackend = ref<ChatBackendKind | null>(null);
-const savingCCSwitch = ref(false);
 const savingProvider = ref(false);
 const savingRouter = ref(false);
-const ccSwitchForm = ref<CCSwitchConfig>({ baseUrl: "http://127.0.0.1:15721" });
 const providerForms = ref<Record<ChatBackendKind, ProviderConfig>>({
   claude: { backend: "claude", baseUrl: null, apiKey: null, hasApiKey: false },
   codex: { backend: "codex", baseUrl: null, apiKey: null, hasApiKey: false },
 });
 const routerModes = ref<Record<ChatBackendKind, RouterMode>>({
-  claude: "cc-switch",
-  codex: "cc-switch",
+  claude: "api",
+  codex: "codex-account",
 });
 
 const selectedBackend = computed(() => activeBackend.value);
@@ -78,7 +73,6 @@ const selectedConnection = computed(() =>
     selectedBackend.value,
     selectedStatus.value,
     selectedRouterMode.value,
-    ccSwitch.value?.baseUrl ?? ccSwitchForm.value.baseUrl,
   ),
 );
 const selectedDiagnostic = computed(() => {
@@ -89,23 +83,18 @@ const selectedDiagnostic = computed(() => {
   if (runtime && runtime.tone === "err") return runtime;
   return selectedConnection.value ?? runtime;
 });
-const directDefaultUrl = computed(() => DIRECT_DEFAULT_URLS[selectedBackend.value]);
-const directApiKeyEnv = computed(() =>
+const apiDefaultUrl = computed(() => DIRECT_DEFAULT_URLS[selectedBackend.value]);
+const apiKeyEnv = computed(() =>
   selectedBackend.value === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY",
 );
-const directDescription = computed(() =>
+const apiDescription = computed(() =>
   selectedBackend.value === "codex"
-    ? "Base URL 留空时使用 OpenAI API；也可填写 OpenAI 兼容端点。"
-    : "Base URL 留空时使用 Anthropic API；也可填写 Anthropic 兼容端点。",
+    ? "Base URL 留空时使用 OpenAI API；也可填写本地代理或 OpenAI 兼容端点。"
+    : "Base URL 留空时使用 Anthropic API；也可填写本地代理或 Anthropic 兼容端点。",
 );
-
-async function loadCCSwitch() {
-  try {
-    ccSwitchForm.value = await getCCSwitchConfig();
-  } catch (err) {
-    console.error("[settings] load cc-switch config failed", err);
-  }
-}
+const showApiConfig = computed(() =>
+  selectedBackend.value === "claude" || selectedRouterMode.value === "api",
+);
 
 async function loadProvider(backend: ChatBackendKind) {
   try {
@@ -124,7 +113,7 @@ async function loadRouter(backend: ChatBackendKind) {
     const mode = await getRouterMode(backend);
     routerModes.value = {
       ...routerModes.value,
-      [backend]: mode === "direct" ? "direct" : "cc-switch",
+      [backend]: backend === "codex" && mode === "codex-account" ? "codex-account" : "api",
     };
   } catch (err) {
     console.error("[settings] load router mode failed", err);
@@ -133,25 +122,11 @@ async function loadRouter(backend: ChatBackendKind) {
 
 async function loadAllConfig() {
   await Promise.all([
-    loadCCSwitch(),
     loadProvider("claude"),
     loadProvider("codex"),
     loadRouter("claude"),
     loadRouter("codex"),
   ]);
-}
-
-async function saveCCSwitch() {
-  const cfg: CCSwitchConfig = { baseUrl: ccSwitchForm.value.baseUrl?.trim() || null };
-  savingCCSwitch.value = true;
-  try {
-    await setCCSwitchConfig(cfg);
-    await refresh();
-  } catch (err) {
-    console.error("[settings] setCCSwitchConfig failed", err);
-  } finally {
-    savingCCSwitch.value = false;
-  }
 }
 
 function normalizedProviderConfig(clearApiKey = false): ProviderConfig {
@@ -196,7 +171,7 @@ async function clearProviderKey() {
 
 async function selectRouterMode(mode: RouterMode) {
   const backend = selectedBackend.value;
-  if (savingRouter.value || routerModes.value[backend] === mode) return;
+  if (backend !== "codex" || savingRouter.value || routerModes.value[backend] === mode) return;
   const previous = routerModes.value[backend];
   routerModes.value = { ...routerModes.value, [backend]: mode };
   savingRouter.value = true;
@@ -208,6 +183,16 @@ async function selectRouterMode(mode: RouterMode) {
     console.error("[settings] set router mode failed", err);
   } finally {
     savingRouter.value = false;
+  }
+}
+
+async function ensureClaudeApiMode() {
+  if (routerModes.value.claude === "api") return;
+  routerModes.value = { ...routerModes.value, claude: "api" };
+  try {
+    await setRouterMode("claude", "api");
+  } catch (err) {
+    console.error("[settings] set Claude API mode failed", err);
   }
 }
 
@@ -230,6 +215,7 @@ async function selectBackend(backend: ChatBackendKind) {
 
 onMounted(async () => {
   await Promise.all([loadAllConfig(), refresh()]);
+  await ensureClaudeApiMode();
 });
 </script>
 
@@ -247,7 +233,6 @@ onMounted(async () => {
       :report="report"
       :status="selectedStatus"
       :router-mode="selectedRouterMode"
-      :cc-switch-base-url="ccSwitch?.baseUrl ?? ccSwitchForm.baseUrl"
       :probing="probing"
     />
 
@@ -270,11 +255,16 @@ onMounted(async () => {
     </div>
 
     <div class="settings-row">
-      <div class="settings-row__label">连接模式</div>
+      <div class="settings-row__label">接入方式</div>
       <div class="settings-row__control settings-row__control--loose">
-        <div class="ui-segmented" role="radiogroup" :aria-label="`${selectedLabel} 连接模式`">
+        <div
+          v-if="selectedBackend === 'codex'"
+          class="ui-segmented"
+          role="radiogroup"
+          aria-label="Codex 接入方式"
+        >
           <button
-            v-for="opt in routerOptions"
+            v-for="opt in codexModeOptions"
             :key="opt.value"
             type="button"
             role="radio"
@@ -286,36 +276,41 @@ onMounted(async () => {
             {{ opt.label }}
           </button>
         </div>
+        <span v-else class="settings-row__status-text muted">Claude 使用 API 接入</span>
         <span class="settings-row__status-text muted">
           {{ selectedLabel }} 当前使用 {{ routeLabel(selectedRouterMode) }}
         </span>
       </div>
     </div>
 
-    <template v-if="selectedRouterMode === 'cc-switch'">
+    <template v-if="selectedBackend === 'codex' && selectedRouterMode === 'codex-account'">
+      <div class="settings-row settings-row--stacked">
+        <div class="settings-row__label">官方账号</div>
+        <div class="settings-row__status muted">
+          使用本机 Codex CLI 的登录态。首次使用前在终端运行 <code>codex login</code>。
+        </div>
+      </div>
+
       <div class="settings-row">
-        <div class="settings-row__label">代理 URL</div>
+        <div class="settings-row__label">账号状态</div>
         <div class="settings-row__control">
-          <input
-            type="text"
-            class="ui-input"
-            placeholder="http://127.0.0.1:15721"
-            :value="ccSwitchForm.baseUrl ?? ''"
-            @input="(e) => (ccSwitchForm.baseUrl = (e.target as HTMLInputElement).value)"
-          />
-          <button type="button" class="ui-button ui-button--ghost" :disabled="savingCCSwitch" @click="saveCCSwitch">
-            <Save :size="12" aria-hidden="true" />
-            {{ savingCCSwitch ? "保存中..." : "保存" }}
+          <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
+            <UserRound :size="12" aria-hidden="true" />
+            {{ report?.codexAppServer.supportsRequiredProtocol ? "Codex CLI 可用" : "Codex CLI 不可用" }}
+          </span>
+          <button type="button" class="ui-button ui-button--ghost" :disabled="probing" @click="probe">
+            <RotateCw :size="11" aria-hidden="true" />
+            重新检测
           </button>
         </div>
       </div>
     </template>
 
-    <template v-else>
+    <template v-if="showApiConfig">
       <div class="settings-row settings-row--stacked">
-        <div class="settings-row__label">直连说明</div>
+        <div class="settings-row__label">API 来源</div>
         <div class="settings-row__status muted">
-          {{ directDescription }} 默认 URL：{{ directDefaultUrl }}
+          {{ apiDescription }} 默认 URL：{{ apiDefaultUrl }}
         </div>
       </div>
 
@@ -324,7 +319,7 @@ onMounted(async () => {
         <input
           type="text"
           class="ui-input"
-          :placeholder="directDefaultUrl"
+          :placeholder="apiDefaultUrl"
           :value="selectedProviderForm.baseUrl ?? ''"
           @input="(e) => (selectedProviderForm.baseUrl = (e.target as HTMLInputElement).value)"
         />
@@ -336,7 +331,7 @@ onMounted(async () => {
           <input
             type="password"
             class="ui-input"
-            :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : directApiKeyEnv"
+            :placeholder="selectedProviderForm.hasApiKey ? '已保存，留空保留现有值' : apiKeyEnv"
             :value="selectedProviderForm.apiKey ?? ''"
             @input="(e) => (selectedProviderForm.apiKey = (e.target as HTMLInputElement).value)"
           />

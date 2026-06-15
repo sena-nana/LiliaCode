@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, load_active_backend, load_assistant_ai_config,
-    resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
+    resolve_connection_for, AssistantAIConfig, BackendConnectionPlan, ConnectionMode,
 };
 use crate::settings_store::{load_store_value, save_store_value};
 use crate::store::LiliaStore;
@@ -1106,6 +1106,9 @@ fn assistant_ai_model_request(app: &AppHandle) -> Option<ModelRequest> {
 fn provider_model_request(app: &AppHandle) -> Option<ModelRequest> {
     let backend = load_active_backend(app);
     let plan = resolve_connection_for(app, &backend);
+    if plan.mode == ConnectionMode::CodexAccount {
+        return None;
+    }
     let base_url = effective_base_url(&backend, &plan)?;
     let api_key = provider_api_key(&backend, plan.api_key.as_deref())?;
     Some(ModelRequest {

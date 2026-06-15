@@ -11,12 +11,9 @@ use super::credentials::{
     assistant_ai_account, has_secret, normalize_secret, provider_account, read_secret, write_secret,
 };
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, CCSwitchConfig, CodexProfileSettings,
-    ProviderConfig,
+    AgentInteractionSettings, AssistantAIConfig, CodexProfileSettings, ProviderConfig,
 };
 
-pub(crate) const CC_SWITCH_DEFAULT_URL: &str = "http://127.0.0.1:15721";
-pub(crate) const CC_SWITCH_PLACEHOLDER_KEY: &str = "sk-cc-switch-proxy";
 pub(crate) const PROVIDER_ACTIVE_BACKEND_KEY: &str = "provider.activeBackend";
 pub(crate) const PROVIDER_KEY_CLAUDE: &str = "provider.claude";
 pub(crate) const PROVIDER_KEY_CODEX: &str = "provider.codex";
@@ -25,8 +22,10 @@ pub(crate) const ROUTER_KEY_CLAUDE: &str = "router.claude";
 pub(crate) const ROUTER_KEY_CODEX: &str = "router.codex";
 pub(crate) const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
 pub(crate) const AGENT_INTERACTION_KEY: &str = "agent-interaction.config";
-pub(crate) const ROUTER_CC_SWITCH: &str = "cc-switch";
-pub(crate) const ROUTER_DIRECT: &str = "direct";
+pub(crate) const ROUTER_API: &str = "api";
+pub(crate) const ROUTER_CODEX_ACCOUNT: &str = "codex-account";
+const ROUTER_CC_SWITCH_LEGACY: &str = "cc-switch";
+const ROUTER_DIRECT_LEGACY: &str = "direct";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +39,12 @@ struct ProviderConfigMetadata {
 struct AssistantAIConfigMetadata {
     base_url: Option<String>,
     model: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyApiSourceConfig {
+    base_url: Option<String>,
 }
 
 pub(crate) fn provider_key_for_backend(backend: &str) -> &'static str {
@@ -156,8 +161,15 @@ pub(crate) fn load_active_backend<R: Runtime>(app: &AppHandle<R>) -> String {
         .unwrap_or_else(|| BACKEND_CLAUDE.to_string())
 }
 
-pub(crate) fn load_cc_switch_config<R: Runtime>(app: &AppHandle<R>) -> CCSwitchConfig {
-    load_store_value(app, CC_SWITCH_KEY).unwrap_or_default()
+pub(crate) fn load_legacy_cc_switch_base_url<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    load_store_value::<LegacyApiSourceConfig, _>(app, CC_SWITCH_KEY)
+        .and_then(|config| normalize_optional_string(config.base_url))
+}
+
+pub(crate) fn uses_legacy_cc_switch_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> bool {
+    let backend = normalize_backend(backend);
+    let key = router_key_for_backend(backend).unwrap_or(ROUTER_KEY_CLAUDE);
+    load_store_value::<String, _>(app, key).as_deref() == Some(ROUTER_CC_SWITCH_LEGACY)
 }
 
 pub(crate) fn load_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> AssistantAIConfig {
@@ -302,10 +314,20 @@ pub(crate) fn normalize_string_list(values: Vec<String>) -> Vec<String> {
 }
 
 pub(crate) fn load_router_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> String {
-    let key = router_key_for_backend(normalize_backend(backend)).unwrap_or(ROUTER_KEY_CLAUDE);
-    load_store_value::<String, _>(app, key)
-        .filter(|m| matches!(m.as_str(), ROUTER_CC_SWITCH | ROUTER_DIRECT))
-        .unwrap_or_else(|| ROUTER_CC_SWITCH.to_string())
+    let backend = normalize_backend(backend);
+    let key = router_key_for_backend(backend).unwrap_or(ROUTER_KEY_CLAUDE);
+    normalize_router_mode_value(backend, load_store_value::<String, _>(app, key).as_deref())
+        .to_string()
+}
+
+fn normalize_router_mode_value(backend: &str, value: Option<&str>) -> &'static str {
+    match value {
+        Some(ROUTER_API | ROUTER_DIRECT_LEGACY | ROUTER_CC_SWITCH_LEGACY) => ROUTER_API,
+        Some(ROUTER_CODEX_ACCOUNT) if backend == BACKEND_CODEX => ROUTER_CODEX_ACCOUNT,
+        Some(ROUTER_CODEX_ACCOUNT) => ROUTER_API,
+        _ if backend == BACKEND_CODEX => ROUTER_CODEX_ACCOUNT,
+        _ => ROUTER_API,
+    }
 }
 
 #[cfg(test)]
@@ -388,5 +410,33 @@ mod tests {
         assert!(value.get("apiKey").is_none());
         assert!(value.get("hasApiKey").is_none());
         assert!(value.get("clearApiKey").is_none());
+    }
+
+    #[test]
+    fn router_mode_defaults_and_legacy_values_normalize_to_current_modes() {
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CLAUDE, None),
+            ROUTER_API
+        );
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CODEX, None),
+            ROUTER_CODEX_ACCOUNT
+        );
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CLAUDE, Some(ROUTER_DIRECT_LEGACY)),
+            ROUTER_API
+        );
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CODEX, Some(ROUTER_CC_SWITCH_LEGACY)),
+            ROUTER_API
+        );
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CLAUDE, Some(ROUTER_CODEX_ACCOUNT)),
+            ROUTER_API
+        );
+        assert_eq!(
+            normalize_router_mode_value(BACKEND_CODEX, Some(ROUTER_CODEX_ACCOUNT)),
+            ROUTER_CODEX_ACCOUNT
+        );
     }
 }

@@ -955,7 +955,7 @@ describe("ChatComposer", () => {
     expect(view.emitted("submit-lilia-iab")?.length).toBe(1);
   });
 
-  it("非 Codex 隐藏 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
+  it("Claude 和 Codex 后端保留 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -963,8 +963,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.queryByRole("button", { name: "打开 Lilia IAB" })).toBeNull();
-    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
+    expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
+    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
 
     await view.rerender({
       state: codexState,

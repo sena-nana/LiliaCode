@@ -6,6 +6,7 @@ import PopupWindowSection from "./settings/PopupWindowSection.vue";
 import ProviderConnectionSection from "./settings/ProviderConnectionSection.vue";
 import AssistantAISection from "./settings/AssistantAISection.vue";
 import AgentInteractionSection from "./settings/AgentInteractionSection.vue";
+import QuotaUsageSection from "./settings/QuotaUsageSection.vue";
 import ProjectPreferencesSection from "./settings/ProjectPreferencesSection.vue";
 import AboutSection from "./settings/AboutSection.vue";
 import {
@@ -20,6 +21,7 @@ const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
   providers: ProviderConnectionSection,
   assistant: AssistantAISection,
   agent: AgentInteractionSection,
+  quota: QuotaUsageSection,
   project: ProjectPreferencesSection,
   about: AboutSection,
 };

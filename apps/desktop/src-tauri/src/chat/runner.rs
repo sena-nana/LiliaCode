@@ -36,12 +36,10 @@ use crate::chat::types::{
     ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent, ProviderRuntimeOptions,
     TurnStartedEvent,
 };
-use crate::chat::workflow::{
-    automation_run_id, runtime_command_kind, workflow_kind,
-};
+use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
     build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
-    CodexProfileSettings,
+    CodexProfileSettings, ConnectionMode,
 };
 use crate::store::LiliaStore;
 use crate::{
@@ -557,6 +555,11 @@ pub(crate) fn start_runner_session<R: Runtime>(
         cmd.env(key_key, key);
     }
     if backend_for_thread == BACKEND_CODEX {
+        if connection.mode == ConnectionMode::CodexAccount {
+            cmd.env_remove("OPENAI_BASE_URL");
+            cmd.env_remove("OPENAI_API_KEY");
+            cmd.env_remove("CODEX_API_KEY");
+        }
         let codex_app_server = build_codex_app_server_probe_status();
         if let Some(path) = codex_app_server.path {
             cmd.env("LILIA_CODEX_CLI_PATH", path);
@@ -1165,7 +1168,10 @@ fn merge_runtime_provider_defaults(
     if !value.is_object() {
         value = serde_json::json!({});
     }
-    if !value.get("provider").is_some_and(|provider| provider.is_object()) {
+    if !value
+        .get("provider")
+        .is_some_and(|provider| provider.is_object())
+    {
         value["provider"] = serde_json::json!({});
     }
     for (key, default_value) in defaults {

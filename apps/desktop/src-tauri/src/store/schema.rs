@@ -31,6 +31,7 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         r#"
         PRAGMA foreign_keys = OFF;
 
+        DROP TABLE IF EXISTS agent_usage_records;
         DROP TABLE IF EXISTS agent_timeline_events;
         DROP TABLE IF EXISTS task_runtime_states;
         DROP TABLE IF EXISTS task_runtime_control_events;
@@ -271,6 +272,31 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_agent_timeline_events_task_id_turn
           ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+
+        CREATE TABLE agent_usage_records (
+          event_id              TEXT PRIMARY KEY,
+          task_id               TEXT NOT NULL,
+          turn_id               TEXT,
+          backend               TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          session_id            TEXT,
+          input_tokens          INTEGER NOT NULL DEFAULT 0,
+          output_tokens         INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+          cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens          INTEGER NOT NULL DEFAULT 0,
+          known_cost_usd        REAL,
+          raw_usage_json        TEXT NOT NULL,
+          created_at            INTEGER NOT NULL,
+          updated_at            INTEGER NOT NULL,
+          FOREIGN KEY (event_id) REFERENCES agent_timeline_events(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_agent_usage_records_created_at
+          ON agent_usage_records(created_at);
+        CREATE INDEX idx_agent_usage_records_backend_created
+          ON agent_usage_records(backend, created_at);
+        CREATE INDEX idx_agent_usage_records_task
+          ON agent_usage_records(task_id, created_at);
 
         CREATE TABLE automation_workflows (
           id                   TEXT PRIMARY KEY,

@@ -1,6 +1,7 @@
 import type { ChatBackendKind } from "./chat";
 
-export type RouterMode = "cc-switch" | "direct";
+export type ProviderConnectionMode = "api" | "codex-account";
+export type RouterMode = ProviderConnectionMode;
 
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
@@ -40,10 +41,6 @@ export interface ProviderConfig {
   clearApiKey?: boolean;
 }
 
-export interface CCSwitchConfig {
-  baseUrl: string | null;
-}
-
 export interface AssistantAIConfig {
   baseUrl: string | null;
   apiKey: string | null;
@@ -59,18 +56,13 @@ export interface AssistantAITestResult {
   modelMatched: boolean | null;
 }
 
-export type ConnectionMode = "cc-switch" | "custom" | "direct" | "unconfigured";
+export type ConnectionMode = "api" | "custom" | "codex-account" | "unconfigured";
 
 export interface BackendEnvStatus {
   backend: ChatBackendKind;
   hasApiKey: boolean;
   connectionMode: ConnectionMode;
   effectiveUrl: string | null;
-}
-
-export interface CCSwitchStatus {
-  reachable: boolean;
-  baseUrl: string | null;
 }
 
 export interface CodexAppServerStatus {
@@ -90,7 +82,6 @@ export interface EnvStatusReport {
   nodeAvailable: boolean;
   codexCliAvailable: boolean;
   codexAppServer: CodexAppServerStatus;
-  ccSwitch: CCSwitchStatus;
   routerModes: Record<ChatBackendKind, RouterMode>;
   backends: Record<ChatBackendKind, BackendEnvStatus>;
 }

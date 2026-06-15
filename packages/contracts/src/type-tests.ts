@@ -26,6 +26,7 @@ import type {
   ProjectArchitectureChange,
   ProjectArchitectureInteractionPayload,
   ProviderRuntimeOptions,
+  QuotaUsageStats,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -303,6 +304,66 @@ export type ProviderRuntimeOptionsTypeTest = Assert<
       }];
     },
     ProviderRuntimeOptions
+  >
+>;
+
+export type QuotaUsageStatsTypeTest = Assert<
+  Extends<
+    {
+      days: 7;
+      backend: "all";
+      rangeStart: 1;
+      rangeEnd: 2;
+      totals: {
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+      };
+      cost: {
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        totalRecordCount: 2;
+      };
+      daily: [{
+        dayStart: 1;
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 2;
+      }];
+      backends: [{
+        backend: "claude";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      recent: [{
+        eventId: "event-1";
+        taskId: "task-1";
+        turnId: "turn-1";
+        backend: "claude";
+        sessionId: "session-1";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        createdAt: 1;
+      }];
+    },
+    QuotaUsageStats
   >
 >;
 
