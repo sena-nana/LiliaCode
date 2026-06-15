@@ -1166,6 +1166,11 @@ export function resetTauriMockData() {
   mockCurrentWindow.label = "main";
   mockCurrentWindow.isMaximized.mockClear();
   mockCurrentWindow.onResized.mockClear();
+  mockCurrentWindow.onMoved.mockClear();
+  mockCurrentWindow.outerPosition.mockClear();
+  mockCurrentWindow.innerSize.mockClear();
+  mockCurrentWindow.setPosition.mockClear();
+  mockCurrentWindow.setSize.mockClear();
   mockCurrentWindow.minimize.mockClear();
   mockCurrentWindow.toggleMaximize.mockClear();
   mockCurrentWindow.setAlwaysOnTop.mockClear();
@@ -1349,6 +1354,11 @@ export const mockCurrentWindow = {
   label: "main",
   isMaximized: vi.fn(async () => false),
   onResized: vi.fn(async () => vi.fn()),
+  onMoved: vi.fn(async () => vi.fn()),
+  outerPosition: vi.fn(async () => ({ x: 80, y: 90 })),
+  innerSize: vi.fn(async () => ({ width: 360, height: 520 })),
+  setPosition: vi.fn(async () => undefined),
+  setSize: vi.fn(async () => undefined),
   minimize: vi.fn(async () => undefined),
   toggleMaximize: vi.fn(async () => undefined),
   setAlwaysOnTop: vi.fn(async () => undefined),

@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    utils::config::Color, AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -19,12 +20,13 @@ const POPUP_EXISTING_TASK_PREFIX: &str = "popup-task-";
 pub(crate) const CONVERSATION_STATUS_WINDOW_LABEL: &str = "conversation-status";
 const POPUP_WIDTH: f64 = 430.0;
 const POPUP_HEIGHT: f64 = 760.0;
-const POPUP_MIN_WIDTH: f64 = 360.0;
-const POPUP_MIN_HEIGHT: f64 = 520.0;
+const POPUP_MIN_WIDTH: f64 = 320.0;
+const POPUP_MIN_HEIGHT: f64 = 420.0;
 const STATUS_WINDOW_WIDTH: f64 = 360.0;
 const STATUS_WINDOW_HEIGHT: f64 = 520.0;
-const STATUS_WINDOW_MIN_WIDTH: f64 = 320.0;
-const STATUS_WINDOW_MIN_HEIGHT: f64 = 420.0;
+const STATUS_WINDOW_MIN_WIDTH: f64 = 260.0;
+const STATUS_WINDOW_MIN_HEIGHT: f64 = 320.0;
+const TRANSPARENT_BG: Color = Color(0x00, 0x00, 0x00, 0x00);
 static POPUP_WINDOW_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -185,9 +187,11 @@ pub(crate) fn open_conversation_status_window(app: &AppHandle) -> Result<(), Str
     .center()
     .decorations(false)
     .resizable(true)
-    .background_color(BG)
+    .transparent(true)
+    .background_color(TRANSPARENT_BG)
     .build()
     .map_err(|e| format!("创建对话状态悬浮窗失败：{e}"))?;
+    let _ = window.set_background_color(Some(TRANSPARENT_BG));
     focus_window(&window);
     Ok(())
 }

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import {
+  PhysicalPosition,
+  PhysicalSize,
+} from "@tauri-apps/api/dpi";
 import {
   AlertTriangle,
+  Blend,
   MessageSquarePlus,
   Pin,
   PinOff,
@@ -26,18 +31,32 @@ import {
 } from "../composables/useConversationActivity";
 import type { TreeDragKind } from "../composables/useSidebarTreeDrag";
 import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.vue";
+import ProviderConnectionBadge from "../components/ProviderConnectionBadge.vue";
 import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
 
 const ALWAYS_ON_TOP_STORAGE_KEY = "lilia.conversationStatus.alwaysOnTop";
 const OPACITY_STORAGE_KEY = "lilia.conversationStatus.opacity";
+const GEOMETRY_STORAGE_KEY = "lilia.conversationStatus.geometry";
+const TRANSPARENT_BODY_CLASS = "body--transparent-popup";
+const MIN_OPACITY = 0.4;
+const MAX_OPACITY = 1;
+const MIN_WINDOW_WIDTH = 260;
+const MIN_WINDOW_HEIGHT = 320;
 
-type StatusOpacity = "1" | "0.96" | "0.92" | "0.84";
+type StoredWindowGeometry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 const appWindow = getCurrentWindow();
 const loaded = ref(false);
 const error = ref<string | null>(null);
 const alwaysOnTop = ref(readStoredBoolean(ALWAYS_ON_TOP_STORAGE_KEY, false));
-const opacity = ref<StatusOpacity>(readStoredOpacity());
+const opacity = ref(readStoredOpacity());
+const opacityPanelOpen = ref(false);
+let geometryUnlisteners: Array<() => void> = [];
 
 const projects = computed(() => listProjects());
 const orphans = computed(() => listOrphanConversations());
@@ -71,12 +90,8 @@ const conversations = computed<UnifiedSidebarConversation[]>(() => {
 
 const taskIds = computed(() => conversations.value.map((item) => item.task.id));
 
-const opacityOptions: Array<{ value: StatusOpacity; label: string }> = [
-  { value: "1", label: "100" },
-  { value: "0.96", label: "96" },
-  { value: "0.92", label: "92" },
-  { value: "0.84", label: "84" },
-];
+const opacityCssValue = computed(() => opacity.value.toFixed(2));
+const opacityPercentLabel = computed(() => `${Math.round(opacity.value * 100)}%`);
 
 function readStoredBoolean(key: string, fallback: boolean): boolean {
   try {
@@ -89,16 +104,14 @@ function readStoredBoolean(key: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function readStoredOpacity(): StatusOpacity {
+function readStoredOpacity(): number {
   try {
-    const stored = localStorage.getItem(OPACITY_STORAGE_KEY);
-    if (stored === "1" || stored === "0.96" || stored === "0.92" || stored === "0.84") {
-      return stored;
-    }
+    const stored = Number(localStorage.getItem(OPACITY_STORAGE_KEY));
+    if (Number.isFinite(stored)) return clampOpacity(stored);
   } catch {
-    return "0.96";
+    return 0.96;
   }
-  return "0.96";
+  return 0.96;
 }
 
 function persistBoolean(key: string, value: boolean) {
@@ -109,12 +122,87 @@ function persistBoolean(key: string, value: boolean) {
   }
 }
 
-function persistOpacity(value: StatusOpacity) {
+function persistOpacity(value: number) {
   try {
-    localStorage.setItem(OPACITY_STORAGE_KEY, value);
+    localStorage.setItem(OPACITY_STORAGE_KEY, value.toFixed(2));
   } catch {
     /* ignore */
   }
+}
+
+function clampOpacity(value: number): number {
+  return Math.min(MAX_OPACITY, Math.max(MIN_OPACITY, value));
+}
+
+function readStoredGeometry(): StoredWindowGeometry | null {
+  try {
+    const raw = localStorage.getItem(GEOMETRY_STORAGE_KEY);
+    if (!raw) return null;
+    const { x, y, width, height } = JSON.parse(raw) as Partial<StoredWindowGeometry>;
+    if (
+      typeof x !== "number" || !Number.isFinite(x) ||
+      typeof y !== "number" || !Number.isFinite(y) ||
+      typeof width !== "number" || !Number.isFinite(width) ||
+      typeof height !== "number" || !Number.isFinite(height)
+    ) return null;
+    return {
+      x,
+      y,
+      width: Math.max(MIN_WINDOW_WIDTH, width),
+      height: Math.max(MIN_WINDOW_HEIGHT, height),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function persistCurrentGeometry() {
+  try {
+    const [position, size] = await Promise.all([
+      appWindow.outerPosition(),
+      appWindow.innerSize(),
+    ]);
+    localStorage.setItem(GEOMETRY_STORAGE_KEY, JSON.stringify({
+      x: Math.round(position.x),
+      y: Math.round(position.y),
+      width: Math.round(Math.max(MIN_WINDOW_WIDTH, size.width)),
+      height: Math.round(Math.max(MIN_WINDOW_HEIGHT, size.height)),
+    }));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function restoreStoredGeometry() {
+  const geometry = readStoredGeometry();
+  if (!geometry) return;
+  try {
+    await appWindow.setSize(new PhysicalSize(geometry.width, geometry.height));
+    await appWindow.setPosition(new PhysicalPosition(geometry.x, geometry.y));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function bindGeometryPersistence() {
+  try {
+    const [unlistenResize, unlistenMove] = await Promise.all([
+      appWindow.onResized(() => {
+        void persistCurrentGeometry();
+      }),
+      appWindow.onMoved(() => {
+        void persistCurrentGeometry();
+      }),
+    ]);
+    geometryUnlisteners = [unlistenResize, unlistenMove];
+  } catch {
+    geometryUnlisteners = [];
+  }
+}
+
+async function initializeGeometryPersistence() {
+  await restoreStoredGeometry();
+  await bindGeometryPersistence();
 }
 
 async function loadConversations() {
@@ -147,9 +235,13 @@ async function applyAlwaysOnTop(value: boolean) {
   }
 }
 
-function setOpacity(value: StatusOpacity) {
-  opacity.value = value;
-  persistOpacity(value);
+function setOpacity(value: number | string) {
+  opacity.value = clampOpacity(Number(value));
+  persistOpacity(opacity.value);
+}
+
+function toggleOpacityPanel() {
+  opacityPanelOpen.value = !opacityPanelOpen.value;
 }
 
 async function newChat() {
@@ -197,8 +289,16 @@ watch(
 );
 
 onMounted(() => {
+  document.body.classList.add(TRANSPARENT_BODY_CLASS);
+  void initializeGeometryPersistence();
   void applyAlwaysOnTop(alwaysOnTop.value);
   void loadConversations();
+});
+
+onUnmounted(() => {
+  for (const unlisten of geometryUnlisteners) unlisten();
+  geometryUnlisteners = [];
+  document.body.classList.remove(TRANSPARENT_BODY_CLASS);
 });
 </script>
 
@@ -206,15 +306,10 @@ onMounted(() => {
   <section
     class="conversation-status-float"
     :class="{ 'conversation-status-float--has-banner': error }"
-    :style="{ '--conversation-status-opacity': opacity }"
+    :style="{ '--conversation-status-opacity': opacityCssValue }"
   >
     <header class="conversation-status-float__titlebar" data-tauri-drag-region>
-      <div class="conversation-status-float__heading" data-tauri-drag-region>
-        <span class="conversation-status-float__title" data-tauri-drag-region>对话状态</span>
-        <span class="conversation-status-float__count" data-tauri-drag-region>{{ conversations.length }}</span>
-      </div>
-
-      <div class="conversation-status-float__tools">
+      <div class="conversation-status-float__pin">
         <button
           type="button"
           class="titlebar__btn"
@@ -227,20 +322,44 @@ onMounted(() => {
           <PinOff v-if="alwaysOnTop" :size="14" aria-hidden="true" />
           <Pin v-else :size="14" aria-hidden="true" />
         </button>
+      </div>
 
-        <div class="conversation-status-float__opacity" aria-label="窗口透明度">
+      <div class="conversation-status-float__drag" data-tauri-drag-region>
+      </div>
+
+      <div class="conversation-status-float__tools">
+        <ProviderConnectionBadge popover-id="conversation-status-provider-popover" />
+
+        <div class="conversation-status-float__opacity">
           <button
-            v-for="option in opacityOptions"
-            :key="option.value"
             type="button"
-            class="conversation-status-float__opacity-btn"
-            :class="{ 'is-active': opacity === option.value }"
-            :aria-pressed="opacity === option.value"
-            :title="`透明度 ${option.label}%`"
-            @click="setOpacity(option.value)"
+            class="titlebar__btn"
+            :class="{ 'is-active': opacityPanelOpen }"
+            :aria-expanded="opacityPanelOpen"
+            aria-controls="conversation-status-opacity-panel"
+            :aria-label="`窗口透明度 ${opacityPercentLabel}`"
+            :title="`窗口透明度 ${opacityPercentLabel}`"
+            @click="toggleOpacityPanel"
           >
-            {{ option.label }}
+            <Blend :size="14" aria-hidden="true" />
           </button>
+          <div
+            v-if="opacityPanelOpen"
+            id="conversation-status-opacity-panel"
+            class="conversation-status-float__opacity-panel"
+          >
+            <input
+              type="range"
+              class="conversation-status-float__opacity-range"
+              :min="MIN_OPACITY"
+              max="1"
+              step="0.01"
+              :value="opacity"
+              aria-label="窗口透明度"
+              @input="setOpacity(($event.target as HTMLInputElement).value)"
+            />
+            <span class="conversation-status-float__opacity-value">{{ opacityPercentLabel }}</span>
+          </div>
         </div>
 
         <button
