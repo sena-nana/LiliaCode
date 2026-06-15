@@ -2,11 +2,13 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
+import { createDraftOrphan } from "../src/data/tasks";
 import { createLiliaRouter } from "../src/router";
 import {
   emitTauriEvent,
   mockInvoke,
   mockListenerCount,
+  seedMockAutomationRun,
   setMockAgentTimelineDelay,
   setMockCurrentWindowLabel,
 } from "./tauriMock";
@@ -78,9 +80,27 @@ describe("App main navigation events", () => {
       expect(mockListenerCount("automation:run-updated")).toBe(1);
       expect(mockListenerCount("automation:run-finished")).toBe(1);
     });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(false);
   });
 
-  it("自动化页点击新对话会先渲染草稿聊天，不等待 timeline 和 runtime", async () => {
+  it("自动化页已有运行记录时首屏只拉摘要，点击运行后才加载详情", async () => {
+    seedMockAutomationRun();
+    const view = await renderApp("main", "/automations");
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: /manual/ })).toBeInTheDocument();
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(false);
+
+    await fireEvent.click(view.getByRole("button", { name: /manual/ }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(true);
+      expect(view.getByText("trigger-1")).toBeInTheDocument();
+    });
+  });
+
+  it("自动化页切到新对话会先渲染草稿聊天，不等待 timeline 和 runtime", async () => {
     const view = await renderApp("main", "/automations");
 
     await waitFor(() => {
@@ -89,7 +109,8 @@ describe("App main navigation events", () => {
     mockInvoke.mockClear();
     setMockAgentTimelineDelay(1_000);
 
-    await fireEvent.click(view.getAllByRole("button", { name: "新对话" })[0]);
+    const draft = createDraftOrphan();
+    await view.router.push(`/chats/${draft.id}`);
 
     await waitFor(() => {
       expect(view.router.currentRoute.value.path).toMatch(/^\/chats\/o-draft-/);
@@ -97,12 +118,11 @@ describe("App main navigation events", () => {
       expect(view.getByRole("textbox")).toBeInTheDocument();
     });
 
-    const draftId = String(view.router.currentRoute.value.params.taskId);
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "agent_timeline_list" && args?.taskId === draftId
+      cmd === "agent_timeline_list" && args?.taskId === draft.id
     )).toBe(false);
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "chat_get_runtime_snapshot" && args?.taskId === draftId
+      cmd === "chat_get_runtime_snapshot" && args?.taskId === draft.id
     )).toBe(false);
   });
 

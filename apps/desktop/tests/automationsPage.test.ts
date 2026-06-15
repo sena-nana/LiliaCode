@@ -190,7 +190,6 @@ describe("Automations page", () => {
     await waitFor(() => {
       expect(within(inspector).getByText("manual")).toBeInTheDocument();
       expect(within(inspector).getByText("项目 lilia · 任务 t-002 · 后端 claude · 事件 manual")).toBeInTheDocument();
-      expect(within(inspector).getByText("命中 scope：项目 lilia · 状态 running · 后端 claude")).toBeInTheDocument();
       expect(within(inspector).getAllByText("running").length).toBeGreaterThan(0);
       expect(within(inspector).getAllByText("succeeded").length).toBeGreaterThan(0);
       expect(within(inspector).getByText("agent-1")).toBeInTheDocument();

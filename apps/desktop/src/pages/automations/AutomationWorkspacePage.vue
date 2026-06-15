@@ -25,6 +25,7 @@ import type {
   AutomationNodeKind,
   AutomationRun,
   AutomationRunNodeState,
+  AutomationRunSummary,
   AutomationWorkflow,
   Project,
 } from "@lilia/contracts";
@@ -116,6 +117,7 @@ const {
   refreshSelectedRun,
   runCurrent,
   resumeSelectedRun,
+  selectRun,
 } = runsController;
 
 const {
@@ -162,24 +164,14 @@ function selectedRunHumanPrompt(): string {
   return prompt || "确认后继续执行自动化。";
 }
 
-function runContextMeta(run: AutomationRun): string {
+function runContextMeta(run: AutomationRunSummary): string {
   const items = [
-    run.trigger.projectId ? `项目 ${run.trigger.projectId}` : "收集箱",
-    run.trigger.taskId ? `任务 ${run.trigger.taskId}` : null,
-    run.trigger.backend ? `后端 ${run.trigger.backend}` : null,
-    run.trigger.eventKind ? `事件 ${run.trigger.eventKind}` : null,
+    run.projectId ? `项目 ${run.projectId}` : "收集箱",
+    run.taskId ? `任务 ${run.taskId}` : null,
+    run.backend ? `后端 ${run.backend}` : null,
+    run.eventKind ? `事件 ${run.eventKind}` : null,
   ].filter(Boolean);
   return items.join(" · ");
-}
-
-function runScopeMeta(run: AutomationRun): string {
-  const scopeItems = [
-    run.scope.projectIds.length ? `项目 ${run.scope.projectIds.join(", ")}` : run.scope.includeInbox ? "全部项目" : "仅非收集箱",
-    run.scope.taskStatuses.length ? `状态 ${run.scope.taskStatuses.join(", ")}` : null,
-    run.scope.backends.length ? `后端 ${run.scope.backends.join(", ")}` : null,
-    run.scope.eventKinds.length ? `事件 ${run.scope.eventKinds.join(", ")}` : null,
-  ].filter(Boolean);
-  return `命中 scope：${scopeItems.join(" · ")}`;
 }
 
 function runStatusClass(status: string) {
@@ -498,13 +490,12 @@ onBeforeUnmount(() => {
               type="button"
               class="automations-page__run"
               :class="{ 'is-active': run.id === selectedRunId }"
-              @click="selectedRunId = run.id"
+              @click="selectRun(run)"
             >
               <span class="automations-page__run-main">
-                <span class="automations-page__run-title">{{ run.trigger.kind }}</span>
+                <span class="automations-page__run-title">{{ run.triggerKind }}</span>
                 <span class="automations-page__run-meta">{{ formatTime(run.startedAt) }}</span>
                 <span class="automations-page__run-meta">{{ runContextMeta(run) }}</span>
-                <span class="automations-page__run-meta">{{ runScopeMeta(run) }}</span>
                 <span v-if="run.error" class="automations-page__run-error">{{ run.error }}</span>
               </span>
               <span class="ui-badge automations-page__status" :class="runStatusClass(run.status)">

@@ -28,6 +28,7 @@ import type {
   ProviderRuntimeOptions,
   CodexAccountQuotaStatus,
   QuotaUsageStats,
+  AutomationRunSummary,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -448,6 +449,26 @@ export type AutomationRunWorkflowTypeTest = Assert<
       automationRunId: "run-1";
     },
     ChatWorkflow
+  >
+>;
+
+export type AutomationRunSummaryTypeTest = Assert<
+  Extends<
+    {
+      id: "run-1";
+      workflowId: "workflow-1";
+      workflowVersionId: "version-1";
+      status: "succeeded";
+      triggerKind: "manual";
+      projectId: null;
+      taskId: "task-1";
+      backend: "claude";
+      eventKind: "timeline_event";
+      startedAt: 1;
+      finishedAt: 2;
+      error: null;
+    },
+    AutomationRunSummary
   >
 >;
 
