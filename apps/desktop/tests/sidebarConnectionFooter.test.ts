@@ -95,16 +95,27 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     await waitFor(() => {
       expect(view.container.querySelectorAll(".sb-quota-ring")).toHaveLength(2);
     });
+    const rings = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-quota-ring"));
+    expect(rings[0]).toHaveStyle({ "--quota-progress": "58" });
+    expect(rings[1]).toHaveStyle({ "--quota-progress": "9" });
 
     await fireEvent.mouseEnter(provider);
 
-    expect(await view.findByRole("tooltip")).toHaveTextContent("Codex 官方账号");
+    await view.findByRole("tooltip");
+    expect(view.queryByText("Codex 官方账号")).not.toBeInTheDocument();
+    expect(view.queryByText("Codex 官方账号额度")).not.toBeInTheDocument();
+    expect(view.queryByText("Pro")).not.toBeInTheDocument();
+    expect(view.queryByText("查询 01/15 16:00")).not.toBeInTheDocument();
     expect(view.queryByText("5 小时额度")).not.toBeInTheDocument();
     expect(view.queryByText("周额度")).not.toBeInTheDocument();
-    expect(view.getByText("剩余 58%")).toBeInTheDocument();
-    expect(view.getByText("剩余 9%")).toBeInTheDocument();
-    expect(view.getByText(/已用 42%/)).toBeInTheDocument();
-    expect(view.getByText(/已用 91%/)).toBeInTheDocument();
+    expect(view.getByText("5h · 剩余 58%")).toBeInTheDocument();
+    expect(view.getByText("7d · 剩余 9%")).toBeInTheDocument();
+    expect(view.getByText("刷新 01/15 16:00")).toBeInTheDocument();
+    expect(view.getByText("刷新 01/19 03:20")).toBeInTheDocument();
+    const meters = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
+    expect(meters).toHaveLength(2);
+    expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
+    expect(meters[1]).toHaveStyle({ "--quota-progress": "9" });
   });
 
   it("keeps the quota popover error state when the official quota call fails", async () => {

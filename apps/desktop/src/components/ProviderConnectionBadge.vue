@@ -7,11 +7,9 @@ import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus } from "../services/chat";
 import {
   clampPercent,
-  formatDateTime,
   formatPercent,
   formatUnixSeconds,
   quotaPercentTone,
-  quotaWindowLabel,
 } from "../utils/quotaDisplay";
 
 const QUOTA_STALE_MS = 60_000;
@@ -112,13 +110,6 @@ const shouldShowQuotaRings = computed(() =>
   isCodexOfficialAccount.value && officialQuota.value?.available === true,
 );
 
-const quotaStatusLine = computed(() => {
-  if (quotaLoading.value && !officialQuota.value) return "正在读取 Codex 官方额度…";
-  if (officialQuota.value?.error) return officialQuota.value.error;
-  if (officialQuota.value?.available) return "Codex 官方账号额度";
-  return "Codex 官方额度暂无可用数据";
-});
-
 function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
   return {
     available: false,
@@ -135,8 +126,9 @@ function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
 }
 
 function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
+  const remainingPercent = quotaRemainingPercent(window);
   return {
-    "--quota-progress": `${clampPercent(window?.usedPercent ?? 0)}%`,
+    "--quota-progress": String(remainingPercent),
   };
 }
 
@@ -144,14 +136,21 @@ function quotaRingTone(window: CodexAccountQuotaWindow | null | undefined) {
   return window ? `sb-quota-ring--${quotaPercentTone(window.usedPercent)}` : "sb-quota-ring--empty";
 }
 
-function quotaUsageLine(window: CodexAccountQuotaWindow | null | undefined): string {
-  if (!window) return "暂无数据";
-  return `已用 ${formatPercent(window.usedPercent)} · 剩余 ${formatPercent(100 - window.usedPercent)}`;
+function quotaRemainingPercent(window: CodexAccountQuotaWindow | null | undefined): number {
+  return clampPercent(100 - (window?.usedPercent ?? 0));
 }
 
-function quotaFetchedLabel(status: CodexAccountQuotaStatus | null): string {
-  if (!status?.fetchedAt) return "--";
-  return formatDateTime(status.fetchedAt);
+function quotaWindowShortLabel(window: CodexAccountQuotaWindow | null | undefined): string {
+  const mins = window?.windowDurationMins;
+  if (!mins || mins <= 0) return "额度";
+  if (mins % 1440 === 0) return `${mins / 1440}d`;
+  if (mins % 60 === 0) return `${mins / 60}h`;
+  return `${mins}m`;
+}
+
+function quotaRemainingLine(window: CodexAccountQuotaWindow | null | undefined): string {
+  if (!window) return "额度 · 暂无数据";
+  return `${quotaWindowShortLabel(window)} · 剩余 ${formatPercent(quotaRemainingPercent(window))}`;
 }
 
 async function loadOfficialQuota() {
@@ -248,6 +247,10 @@ onMounted(() => {
           :class="quotaRingTone(row.window)"
           :style="quotaRingStyle(row.window)"
         >
+          <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+            <circle class="sb-quota-ring__track" cx="8" cy="8" r="6" pathLength="100" />
+            <circle class="sb-quota-ring__value" cx="8" cy="8" r="6" pathLength="100" />
+          </svg>
         </span>
       </span>
     </template>
@@ -261,23 +264,19 @@ onMounted(() => {
       role="tooltip"
       class="sb-conn-popover"
     >
-      <span class="sb-conn-popover__head">
-        <strong>Codex 官方账号</strong>
-        <small>{{ quotaStatusLine }}</small>
-      </span>
-      <span class="sb-conn-popover__meta">
-        <span>{{ officialQuota?.planType || "套餐未知" }}</span>
-        <span>{{ officialQuota?.limitName || officialQuota?.limitId || "Codex limit" }}</span>
-        <span>{{ quotaLoading ? "读取中" : `查询 ${quotaFetchedLabel(officialQuota)}` }}</span>
-      </span>
-      <span class="sb-conn-popover__quota-list">
+      <span v-if="officialQuota?.available" class="sb-conn-popover__quota-list">
         <span v-for="row in quotaRows" :key="row.key" class="sb-conn-popover__quota-row">
-          <span class="sb-conn-popover__quota-main">
-            <small>{{ quotaWindowLabel(row.window) }}</small>
+          <span
+            class="sb-conn-popover__quota-meter"
+            :class="quotaRingTone(row.window)"
+            :style="quotaRingStyle(row.window)"
+            aria-hidden="true"
+          >
+            <span />
           </span>
-          <span class="sb-conn-popover__quota-side">
-            <span>{{ quotaUsageLine(row.window) }}</span>
-            <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
+          <span class="sb-conn-popover__quota-foot">
+            <span>{{ quotaRemainingLine(row.window) }}</span>
+            <span>刷新 {{ formatUnixSeconds(row.window?.resetsAt) }}</span>
           </span>
         </span>
       </span>
