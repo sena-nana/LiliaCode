@@ -73,7 +73,7 @@ runner stdin 的稳定形状是：
 |---|---|---|
 | `session_fork` | 从当前 provider session 分叉新 session。 | Codex 使用 thread fork；Claude 使用 session resume / transcript 能力时由 adapter 映射或 diagnostic。 |
 | `session_management` | list / info / messages / rename / tag / delete / archive 等 provider session 管理。 | Codex 接 thread list / search / turns / archive / name set；Claude 接 SDK session APIs。 |
-| `runtime_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`。 |
+| `runtime_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`；Claude 写本地诊断并把 update 映射到 SDK query options，Codex 写本地诊断并把 update 映射到 `thread/settings/update`。 |
 
 预留 runtime command 边界包括 realtime、remote environment、process session、file search session。接入这些能力时必须新增 runtime command 或 experimental capability，不得扩大 `ChatWorkflow` union。
 
@@ -141,7 +141,7 @@ Codex 的 `threadId`、`turnId`、`itemId`、`strictAutoReview`、原始 permiss
 | compact / memory / diagnostics | workflow | 用户触发的会话维护和诊断。 | 写 diagnostic。 |
 | automation / slash command | workflow | 自动化或命令触发的 Lilia 行为。 | 拒绝启动并保留状态。 |
 | session fork / management | runtime command | provider session 控制，不是 UI workflow。 | 写 unsupported diagnostic。 |
-| provider settings | runtime command + runtime options | 更新 adapter runtime 设置，不污染 workflow。 | 无有效字段时拒绝；未知 experimental capability 按 fallback。 |
+| provider settings | runtime command + runtime options | 诊断或更新 adapter runtime 设置，不污染 workflow；timeline payload 统一使用 `backend`、`subkind: "provider_settings"`、`action`、`settingsKeys`。 | 无有效字段时拒绝；未知 experimental capability 按 fallback。 |
 | permission approval | interaction | provider-neutral 权限审批。 | provider 无等价能力时走 `PermissionMode` / `tool_consent`。 |
 | plugins / extensions | runtime extensions | 当前 turn 可用扩展集合。 | 单项 warning，不阻塞其他扩展。 |
 

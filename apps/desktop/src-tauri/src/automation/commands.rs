@@ -11,9 +11,9 @@ use crate::automation::repository::{
 };
 use crate::automation::signals::manual_signal;
 use crate::automation::types::{
-    AutomationRun, AutomationRunDetail, AutomationRunOnceInput, AutomationRunStatus,
-    AutomationResumeRunInput, AutomationSaveDraftInput, AutomationWorkflow,
-    AutomationWorkflowVersion, GraphExecution,
+    AutomationResumeRunInput, AutomationRun, AutomationRunDetail, AutomationRunOnceInput,
+    AutomationRunStatus, AutomationSaveDraftInput, AutomationWorkflow, AutomationWorkflowVersion,
+    GraphExecution,
 };
 use crate::chat::state::ChatStore;
 use crate::store::LiliaStore;
@@ -25,15 +25,6 @@ pub fn automation_list_workflows(
 ) -> Result<Vec<AutomationWorkflow>, String> {
     let conn = store.conn()?;
     list_workflows(&conn)
-}
-
-#[tauri::command]
-pub fn automation_get_workflow(
-    id: String,
-    store: State<'_, LiliaStore>,
-) -> Result<Option<AutomationWorkflow>, String> {
-    let conn = store.conn()?;
-    workflow_by_id(&conn, &id)
 }
 
 #[tauri::command]

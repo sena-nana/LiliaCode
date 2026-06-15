@@ -48,10 +48,6 @@ function sameAskSpec(left: AskUserSpec, right: AskUserSpec): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function askUser(spec: AskUserSpec): Promise<AskUserResult> {
-  return askUserForTask(null, spec);
-}
-
 export function askUserForTask(
   taskId: string | null,
   spec: AskUserSpec,
@@ -72,12 +68,6 @@ export function askUserForTask(
     state.queue.push(ask);
     pumpNext();
   });
-}
-
-export function resolveAskUser(result: AskUserResult) {
-  const current = state.current;
-  if (!current) return;
-  resolveAskUserById(current.id, result);
 }
 
 export function resolveAskUserById(id: number, result: AskUserResult): boolean {

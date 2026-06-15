@@ -54,11 +54,11 @@ LiliaCode still prioritizes its own recoverable task structure over upstream CLI
 
 After installing and opening LiliaCode, go to Settings -> Connection and follow the first-run checklist at the top of the page. The checklist does not block the main UI, and you can reopen it from the Connection page after dismissing it.
 
-- Run Claude: make sure Node.js 18+ is available, then choose Claude on the Connection page. Use CC-Switch as a local proxy, or switch to Direct and enter an Anthropic API key. If Base URL is empty, Lilia uses `https://api.anthropic.com`.
-- Run Codex: install Codex CLI with `npm i -g @openai/codex`, then make sure Lilia can detect `codex app-server`. Lilia requires Codex CLI `0.128.0+` for the app-server protocol it uses.
-- Use CC-Switch: start the local CC-Switch service and keep the proxy URL at, or set it to, `http://127.0.0.1:15721`. For Codex through CC-Switch, the selected upstream provider must support the OpenAI Responses API and the current Codex model.
-- Use Direct mode: switch the current backend connection mode to Direct and enter the matching API key. Claude uses `ANTHROPIC_API_KEY` semantics, while Codex uses `OPENAI_API_KEY` semantics. Keys are stored in the system credential store and are not echoed back in Settings.
-- Fix failures: the Connection page maps missing Node, missing Codex CLI, old app-server support, unreachable CC-Switch, and missing direct API keys to concrete repair suggestions. After fixing an item, click Refresh check, then return to a conversation and send the first message.
+- Run Claude: make sure Node.js 18+ is available, then choose Claude on the Connection page and enter an Anthropic API key. If Base URL is empty, Lilia uses `https://api.anthropic.com`; you can also enter a local proxy or Anthropic-compatible endpoint.
+- Run Codex: install Codex CLI with `npm i -g @openai/codex`, then make sure Lilia can detect `codex app-server`. Lilia requires Codex CLI `0.128.0+` for the app-server protocol it uses; by default it reuses the official account session from `codex login`.
+- Codex API: to bill through an OpenAI API key, switch Codex to API mode on the Connection page and enter `OPENAI_API_KEY`. If Base URL is empty, Lilia uses `https://api.openai.com/v1`.
+- Compatible APIs / local proxies: enter the service URL directly as Base URL. CC-Switch no longer has dedicated integration and is treated as a normal API source, for example `http://127.0.0.1:15721`.
+- Fix failures: the Connection page maps missing Node, missing Codex CLI, old app-server support, missing Codex login, and missing API keys to concrete repair suggestions. After fixing an item, click Refresh check, then return to a conversation and send the first message.
 
 ## Feature Status
 
@@ -116,7 +116,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [ ] Roadmap and milestones (partial): the project Roadmap page can aggregate the current project's task state into a first-release milestone, progress, status distribution, current focus, and recently completed tasks; persisted Milestone / TaskMilestoneLink data sources are not yet integrated.
 - [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
 - [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
-- [ ] MutsukiCore integration: the experimental local channel is available as `MutsukiCore`; remote task execution and mobile access are not yet available.
+- [x] Built-in Lilia protocol: keep a single built-in runtime path.
 
 ## Project Structure
 

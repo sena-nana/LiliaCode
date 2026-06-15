@@ -31,9 +31,9 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         r#"
         PRAGMA foreign_keys = OFF;
 
+        DROP TABLE IF EXISTS agent_usage_records;
         DROP TABLE IF EXISTS agent_timeline_events;
         DROP TABLE IF EXISTS task_runtime_states;
-        DROP TABLE IF EXISTS task_runtime_control_events;
         DROP TABLE IF EXISTS task_runtime_finalizations;
         DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
@@ -184,11 +184,9 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
         CREATE TABLE task_agent_sessions (
           task_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           session_id      TEXT NOT NULL,
           updated_at      INTEGER NOT NULL,
-          PRIMARY KEY (task_id, backend, runtime_channel),
+          PRIMARY KEY (task_id, backend),
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
 
@@ -196,7 +194,6 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           task_id         TEXT PRIMARY KEY,
           turn_id         TEXT NOT NULL,
           backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-          runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           phase           TEXT NOT NULL CHECK (phase IN
                             ('running','interrupted_pending_finish','reset_pending_finish')),
           process_session_id TEXT,
@@ -208,19 +205,6 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_task_runtime_states_epoch_backend
           ON task_runtime_states(runtime_epoch, backend, updated_at);
-
-        CREATE TABLE task_runtime_control_events (
-          id              INTEGER PRIMARY KEY AUTOINCREMENT,
-          task_id         TEXT NOT NULL,
-          name            TEXT NOT NULL,
-          attributes_json TEXT NOT NULL DEFAULT '{}',
-          payload_json    TEXT,
-          created_at      INTEGER NOT NULL,
-          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX idx_task_runtime_control_events_task_id
-          ON task_runtime_control_events(task_id, id);
 
         CREATE TABLE task_runtime_finalizations (
           task_id               TEXT PRIMARY KEY,
@@ -243,8 +227,6 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           runtime_options_json TEXT,
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
-          runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                          CHECK (runtime_channel IN ('builtin','mutsuki_core')),
           guide_id        TEXT,
           created_at      INTEGER NOT NULL,
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -271,6 +253,31 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_agent_timeline_events_task_id_turn
           ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+
+        CREATE TABLE agent_usage_records (
+          event_id              TEXT PRIMARY KEY,
+          task_id               TEXT NOT NULL,
+          turn_id               TEXT,
+          backend               TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          session_id            TEXT,
+          input_tokens          INTEGER NOT NULL DEFAULT 0,
+          output_tokens         INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+          cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens          INTEGER NOT NULL DEFAULT 0,
+          known_cost_usd        REAL,
+          raw_usage_json        TEXT NOT NULL,
+          created_at            INTEGER NOT NULL,
+          updated_at            INTEGER NOT NULL,
+          FOREIGN KEY (event_id) REFERENCES agent_timeline_events(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_agent_usage_records_created_at
+          ON agent_usage_records(created_at);
+        CREATE INDEX idx_agent_usage_records_backend_created
+          ON agent_usage_records(backend, created_at);
+        CREATE INDEX idx_agent_usage_records_task
+          ON agent_usage_records(task_id, created_at);
 
         CREATE TABLE automation_workflows (
           id                   TEXT PRIMARY KEY,
@@ -342,85 +349,6 @@ mod tests {
     use super::*;
     use rusqlite::params;
 
-    fn create_reset_baseline_schema(conn: &Connection) {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE task_todos (
-              id           TEXT PRIMARY KEY,
-              task_id      TEXT NOT NULL,
-              text         TEXT NOT NULL,
-              done         INTEGER NOT NULL DEFAULT 0,
-              "order"      INTEGER NOT NULL,
-              source       TEXT NOT NULL CHECK (source IN ('user','agent')),
-              created_at   INTEGER NOT NULL,
-              updated_at   INTEGER NOT NULL
-            );
-            CREATE INDEX idx_task_todos_task_id_order
-              ON task_todos(task_id, "order");
-
-            CREATE TABLE projects (
-              id         TEXT PRIMARY KEY,
-              name       TEXT NOT NULL,
-              cwd        TEXT,
-              created_at INTEGER NOT NULL,
-              sort_order INTEGER NOT NULL DEFAULT 0,
-              pinned     INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0,
-              FOREIGN KEY (project_id) REFERENCES projects(id)
-            );
-
-            CREATE INDEX idx_tasks_project_id
-              ON tasks(project_id);
-            CREATE INDEX idx_tasks_archived
-              ON tasks(archived);
-            CREATE INDEX idx_tasks_project_archived_order
-              ON tasks(project_id, archived, pinned DESC, sort_order ASC);
-
-            CREATE TABLE task_dependencies (
-              task_id       TEXT NOT NULL,
-              depends_on_id TEXT NOT NULL,
-              PRIMARY KEY (task_id, depends_on_id),
-              FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
-              FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
-            );
-
-            CREATE INDEX idx_agent_timeline_events_task_id_turn
-              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
-            "#,
-        )
-        .unwrap();
-    }
-
     #[test]
     fn old_development_database_is_rebuilt_from_current_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -473,486 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn task_title_source_migration_defaults_existing_tasks_to_auto() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        create_reset_baseline_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks
-               (id, session_id, title, status, created_at)
-               VALUES (?1, ?2, ?3, 'running', ?4)"#,
-            params!["task-title-source", "session-1", "旧标题", 1],
-        )
-        .unwrap();
-        conn.execute_batch(&format!(
-            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
-        ))
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        let title_source: String = conn
-            .query_row(
-                "SELECT title_source FROM tasks WHERE id = 'task-title-source'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(title_source, "auto");
-    }
-
-    #[test]
-    fn task_agent_sessions_migration_creates_backend_checkpoint_table() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            INSERT INTO tasks (id, session_id, title, status, created_at)
-              VALUES ('task-session', 'legacy-session', '会话任务', 'running', 1);
-            PRAGMA user_version = 7;
-            "#,
-        )
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        conn.execute(
-            r#"INSERT INTO task_agent_sessions
-               (task_id, backend, runtime_channel, session_id, updated_at)
-               VALUES ('task-session', 'codex', 'builtin', 'codex-thread', 2)"#,
-            [],
-        )
-        .unwrap();
-        let row: (String, String, String) = conn
-            .query_row(
-                "SELECT s.session_id, t.title, s.runtime_channel FROM task_agent_sessions s JOIN tasks t ON t.id = s.task_id WHERE s.task_id = 'task-session'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            (
-                "codex-thread".to_string(),
-                "会话任务".to_string(),
-                "builtin".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn task_runtime_states_migration_creates_current_epoch_table() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE task_agent_sessions (
-              task_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              session_id      TEXT NOT NULL,
-              updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
-            );
-            INSERT INTO tasks (id, session_id, title, status, created_at)
-              VALUES ('task-runtime', 'session-1', '运行态任务', 'running', 1);
-            PRAGMA user_version = 9;
-            "#,
-        )
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        conn.execute(
-            r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-runtime', 'turn-1', 'codex', 'mutsuki_core', 'running', 'proc-1', 'epoch-1', 2)"#,
-            [],
-        )
-        .unwrap();
-        let row: (String, String, String, Option<String>) = conn
-            .query_row(
-                "SELECT turn_id, runtime_channel, phase, process_session_id FROM task_runtime_states WHERE task_id = 'task-runtime'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            (
-                "turn-1".to_string(),
-                "mutsuki_core".to_string(),
-                "running".to_string(),
-                Some("proc-1".to_string()),
-            )
-        );
-    }
-
-    #[test]
-    fn runtime_control_events_migration_creates_durable_control_queue() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE task_agent_sessions (
-              task_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              session_id      TEXT NOT NULL,
-              updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
-            );
-            CREATE TABLE task_runtime_states (
-              task_id         TEXT PRIMARY KEY,
-              turn_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              phase           TEXT NOT NULL CHECK (phase IN
-                                ('running','interrupted_pending_finish','reset_pending_finish')),
-              process_session_id TEXT,
-              runtime_epoch   TEXT NOT NULL,
-              context_json    TEXT,
-              updated_at      INTEGER NOT NULL
-            );
-            INSERT INTO tasks (id, session_id, title, status, created_at)
-              VALUES ('task-runtime', 'session-1', '运行态任务', 'running', 1);
-            PRAGMA user_version = 11;
-            "#,
-        )
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        conn.execute(
-            r#"INSERT INTO task_runtime_control_events
-               (task_id, name, attributes_json, payload_json, created_at)
-               VALUES ('task-runtime', 'interaction_response', '{"requestId":"ask-1"}', '{"type":"interaction_response"}', 2)"#,
-            [],
-        )
-        .unwrap();
-        let row: (String, String, String) = conn
-            .query_row(
-                "SELECT task_id, name, attributes_json FROM task_runtime_control_events WHERE task_id = 'task-runtime'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            (
-                "task-runtime".to_string(),
-                "interaction_response".to_string(),
-                "{\"requestId\":\"ask-1\"}".to_string(),
-            )
-        );
-    }
-
-    #[test]
-    fn pending_turns_migration_creates_durable_execution_queue() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE task_agent_sessions (
-              task_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              session_id      TEXT NOT NULL,
-              updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
-            );
-            CREATE TABLE task_runtime_states (
-              task_id         TEXT PRIMARY KEY,
-              turn_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              phase           TEXT NOT NULL CHECK (phase IN
-                                ('running','interrupted_pending_finish','reset_pending_finish')),
-              process_session_id TEXT,
-              runtime_epoch   TEXT NOT NULL,
-              context_json    TEXT,
-              updated_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_runtime_control_events (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              name            TEXT NOT NULL,
-              attributes_json TEXT NOT NULL DEFAULT '{}',
-              payload_json    TEXT,
-              created_at      INTEGER NOT NULL
-            );
-            INSERT INTO tasks (id, session_id, title, status, created_at)
-              VALUES ('task-pending', 'session-1', '排队任务', 'running', 1);
-            PRAGMA user_version = 12;
-            "#,
-        )
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        conn.execute(
-            r#"INSERT INTO task_pending_turns
-               (task_id, content, composer_json, project_cwd, attachments_json, workflow_json, message_json, turn_id, runtime_channel, guide_id, created_at)
-               VALUES ('task-pending', 'queued', '{}', 'C:/repo', '[]', NULL, '{}', 'turn-queued', 'mutsuki_core', 'guide-1', 2)"#,
-            [],
-        )
-        .unwrap();
-        let row: (String, String, String, String) = conn
-            .query_row(
-                "SELECT task_id, content, turn_id, runtime_channel FROM task_pending_turns WHERE task_id = 'task-pending'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            (
-                "task-pending".to_string(),
-                "queued".to_string(),
-                "turn-queued".to_string(),
-                "mutsuki_core".to_string(),
-            )
-        );
-    }
-
-    #[test]
-    fn runtime_finalizations_migration_creates_durable_finish_state() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE task_agent_sessions (
-              task_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              session_id      TEXT NOT NULL,
-              updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
-            );
-            CREATE TABLE task_runtime_states (
-              task_id         TEXT PRIMARY KEY,
-              turn_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              phase           TEXT NOT NULL CHECK (phase IN
-                                ('running','interrupted_pending_finish','reset_pending_finish')),
-              process_session_id TEXT,
-              runtime_epoch   TEXT NOT NULL,
-              context_json    TEXT,
-              updated_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_runtime_control_events (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              name            TEXT NOT NULL,
-              attributes_json TEXT NOT NULL DEFAULT '{}',
-              payload_json    TEXT,
-              created_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_pending_turns (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              content         TEXT NOT NULL,
-              composer_json   TEXT NOT NULL,
-              project_cwd     TEXT NOT NULL,
-              attachments_json TEXT NOT NULL DEFAULT '[]',
-              workflow_json   TEXT,
-              runtime_command_json TEXT,
-              runtime_options_json TEXT,
-              message_json    TEXT NOT NULL,
-              turn_id         TEXT NOT NULL,
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              guide_id        TEXT,
-              created_at      INTEGER NOT NULL
-            );
-            INSERT INTO tasks (id, session_id, title, status, created_at)
-              VALUES ('task-finalize', 'session-1', '收尾任务', 'running', 1);
-            PRAGMA user_version = 14;
-            "#,
-        )
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        conn.execute(
-            r#"INSERT INTO task_runtime_finalizations
-               (task_id, pending_reset_cleanup, rollback_json, updated_at)
-               VALUES ('task-finalize', 1, '{"rolledBack":true}', 2)"#,
-            [],
-        )
-        .unwrap();
-        let row: (i64, String) = conn
-            .query_row(
-                "SELECT pending_reset_cleanup, rollback_json FROM task_runtime_finalizations WHERE task_id = 'task-finalize'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(row, (1, "{\"rolledBack\":true}".to_string()));
-    }
-
-    #[test]
-    fn todo_guides_migration_maps_user_rows_to_lilia() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        create_reset_baseline_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO task_todos
-               (id, task_id, text, done, "order", source, created_at, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
-            params!["todo-1", "task-1", "旧用户 Todo", 0, 0, "user", 1, 1],
-        )
-        .unwrap();
-        conn.execute_batch(&format!(
-            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
-        ))
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        let row: (String, String, Option<String>) = conn
-            .query_row(
-                "SELECT source, priority, guide_status FROM task_todos WHERE id = 'todo-1'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            row,
-            (
-                "lilia".to_string(),
-                "normal".to_string(),
-                Some("pending".to_string()),
-            ),
-        );
-    }
-
-    #[test]
-    fn todo_attachments_migration_defaults_existing_rows() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        create_reset_baseline_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO task_todos
-               (id, task_id, text, done, "order", source, created_at, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
-            params!["todo-attachments", "task-1", "旧 Todo", 0, 0, "user", 1, 1],
-        )
-        .unwrap();
-        conn.execute_batch(&format!(
-            "PRAGMA user_version = {RESET_BASELINE_SCHEMA_VERSION};"
-        ))
-        .unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        let attachments_json: String = conn
-            .query_row(
-                "SELECT attachments_json FROM task_todos WHERE id = 'todo-attachments'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(attachments_json, "[]");
-    }
-
-    #[test]
-    fn task_list_indexes_migration_creates_composite_index() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        create_reset_baseline_schema(&conn);
-        conn.execute_batch("PRAGMA user_version = 5;").unwrap();
-
-        ensure_current_schema(&mut conn).unwrap();
-
-        let index_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_project_archived_order'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(index_count, 1);
-    }
-
-    #[test]
-    fn project_milestones_migration_creates_roadmap_tables() {
+    fn database_below_break_baseline_is_rebuilt_from_current_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             r#"
@@ -960,109 +409,40 @@ mod tests {
               id         TEXT PRIMARY KEY,
               name       TEXT NOT NULL,
               cwd        TEXT,
-              created_at INTEGER NOT NULL,
-              sort_order INTEGER NOT NULL DEFAULT 0,
-              pinned     INTEGER NOT NULL DEFAULT 0
+              created_at INTEGER NOT NULL
             );
-            CREATE TABLE tasks (
-              id          TEXT PRIMARY KEY,
-              project_id  TEXT,
-              session_id  TEXT NOT NULL,
-              title       TEXT NOT NULL,
-              title_source TEXT NOT NULL DEFAULT 'auto'
-                            CHECK (title_source IN ('auto','manual')),
-              status      TEXT NOT NULL DEFAULT 'waiting'
-                            CHECK (status IN
-                              ('draft','waiting','running','blocked','done','cancelled')),
-              created_at  INTEGER NOT NULL,
-              parent_id   TEXT,
-              archived    INTEGER NOT NULL DEFAULT 0,
-              sort_order  INTEGER NOT NULL DEFAULT 0,
-              pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE task_agent_sessions (
-              task_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              session_id      TEXT NOT NULL,
-              updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
-            );
-            CREATE TABLE task_runtime_states (
-              task_id         TEXT PRIMARY KEY,
-              turn_id         TEXT NOT NULL,
-              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              phase           TEXT NOT NULL CHECK (phase IN
-                                ('running','interrupted_pending_finish','reset_pending_finish')),
-              process_session_id TEXT,
-              runtime_epoch   TEXT NOT NULL,
-              context_json    TEXT,
-              updated_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_pending_turns (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              content         TEXT NOT NULL,
-              composer_json   TEXT NOT NULL,
-              project_cwd     TEXT NOT NULL,
-              attachments_json TEXT NOT NULL DEFAULT '[]',
-              workflow_json   TEXT,
-              runtime_command_json TEXT,
-              runtime_options_json TEXT,
-              message_json    TEXT NOT NULL,
-              turn_id         TEXT NOT NULL,
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
-              guide_id        TEXT,
-              created_at      INTEGER NOT NULL
-            );
-            PRAGMA user_version = 18;
+            INSERT INTO projects (id, name, cwd, created_at)
+              VALUES ('legacy-project', '旧项目', NULL, 1);
             "#,
         )
+        .unwrap();
+        conn.execute_batch(&format!(
+            "PRAGMA user_version = {};",
+            RESET_BASELINE_SCHEMA_VERSION - 1
+        ))
         .unwrap();
 
         ensure_current_schema(&mut conn).unwrap();
 
-        conn.execute(
-            "INSERT INTO projects (id, name, cwd, created_at, sort_order, pinned) VALUES ('project-1', '项目', NULL, 1, 0, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO tasks (id, project_id, session_id, title, status, created_at) VALUES ('task-1', 'project-1', 'task-1', '任务', 'waiting', 1)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO milestones (id, project_id, title, created_at) VALUES ('mile-1', 'project-1', 'M1', 1)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO task_milestone_links (task_id, milestone_id) VALUES ('task-1', 'mile-1')",
-            [],
-        )
-        .unwrap();
-
-        let status: String = conn
+        let project_count: i64 = conn
             .query_row(
-                "SELECT status FROM milestones WHERE id = 'mile-1'",
+                "SELECT COUNT(*) FROM projects",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(status, "upcoming");
+        assert_eq!(project_count, 0);
 
-        let link_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM task_milestone_links WHERE milestone_id = 'mile-1'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(link_count, 1);
+        conn.execute(
+            "INSERT INTO tasks (id, session_id, title, status, created_at) VALUES ('task-1', 'task-1', '任务', 'waiting', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_agent_sessions (task_id, backend, session_id, updated_at) VALUES ('task-1', 'codex', 'thread-1', 1)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

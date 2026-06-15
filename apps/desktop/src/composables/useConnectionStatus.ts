@@ -93,7 +93,6 @@ export function useConnectionStatus(options: UseConnectionStatusOptions = {}) {
   const nodeAvailable = computed(() => report.value?.nodeAvailable ?? false);
   const codexCliAvailable = computed(() => report.value?.codexCliAvailable ?? false);
   const codexAppServer = computed(() => report.value?.codexAppServer ?? null);
-  const ccSwitch = computed(() => report.value?.ccSwitch ?? null);
 
   function statusFor(backend: ChatBackendKind): BackendEnvStatus | null {
     return report.value?.backends?.[backend] ?? null;
@@ -111,7 +110,6 @@ export function useConnectionStatus(options: UseConnectionStatusOptions = {}) {
     nodeAvailable,
     codexCliAvailable,
     codexAppServer,
-    ccSwitch,
     statusFor,
     routerFor,
   };

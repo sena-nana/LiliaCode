@@ -10,6 +10,7 @@ import {
   listProjectArchitectureChanges,
   rollbackProjectArchitecture,
 } from "../../services/chat";
+import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import MarkdownMermaid from "./MarkdownMermaid.vue";
 
 const props = defineProps<{
@@ -18,6 +19,7 @@ const props = defineProps<{
   projectCwd: string | null;
 }>();
 
+const { activeBackend } = useConnectionStatus({ probe: false });
 const graph = ref<ProjectArchitectureGraph | null>(null);
 const changes = ref<ProjectArchitectureChangeRecord[]>([]);
 const loading = ref(false);
@@ -57,7 +59,7 @@ async function rollbackPreviousVersion() {
   rollingBack.value = true;
   error.value = "";
   try {
-    await rollbackProjectArchitecture(props.projectId, props.taskId, "claude");
+    await rollbackProjectArchitecture(props.projectId, props.taskId, activeBackend.value);
     await loadArchitecture();
   } catch (err) {
     error.value = String(err);

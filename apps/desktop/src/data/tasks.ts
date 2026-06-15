@@ -3,7 +3,6 @@
  *
  * - OrphanConversation = `project_id IS NULL` 的 task，同一张表。
  * - 草稿（draft）留在前端内存，不落库；`promote` 后才 INSERT。
- * - 导出保持与旧版相同的函数签名，内部维护 reactive ref 缓存。
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";

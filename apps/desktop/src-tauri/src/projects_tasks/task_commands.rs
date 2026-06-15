@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::codex_history::spawn_codex_thread_archive_sync;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::{BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN};
+use crate::BACKEND_CODEX;
 
 use super::events::emit_tasks_changed;
 use super::ordering::next_task_sort_order;
@@ -299,8 +299,7 @@ fn codex_thread_ids_for_task_archive(
            JOIN tasks t ON t.id = s.task_id
            WHERE t.id = ?1
              AND t.archived = 0
-             AND s.backend = ?2
-             AND s.runtime_channel = ?3"#,
+             AND s.backend = ?2"#,
         task_id,
         "task_archive: 查询 Codex thread 失败",
     )
@@ -318,7 +317,6 @@ fn codex_thread_ids_for_project_archive(
            WHERE t.project_id = ?1
              AND t.archived = 0
              AND s.backend = ?2
-             AND s.runtime_channel = ?3
            ORDER BY t.sort_order ASC, t.created_at ASC"#,
         project_id,
         "task_archive_project: 查询 Codex thread 失败",
@@ -335,9 +333,7 @@ fn codex_thread_ids_for_archive(
         .prepare(sql)
         .map_err(|e| format!("{context}：prepare 失败：{e}"))?;
     let rows = stmt
-        .query_map(params![id, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN], |row| {
-            row.get::<_, String>(0)
-        })
+        .query_map(params![id, BACKEND_CODEX], |row| row.get::<_, String>(0))
         .map_err(|e| format!("{context}：query 失败：{e}"))?;
     let mut out = Vec::new();
     for row in rows {
@@ -389,11 +385,9 @@ mod tests {
             CREATE TABLE task_agent_sessions (
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
+              PRIMARY KEY (task_id, backend)
             );
             "#,
         )
@@ -420,18 +414,12 @@ mod tests {
         .unwrap();
     }
 
-    fn insert_session(
-        conn: &rusqlite::Connection,
-        task_id: &str,
-        backend: &str,
-        runtime_channel: &str,
-        session_id: &str,
-    ) {
+    fn insert_session(conn: &rusqlite::Connection, task_id: &str, backend: &str, session_id: &str) {
         conn.execute(
             r#"INSERT INTO task_agent_sessions
-               (task_id, backend, runtime_channel, session_id, updated_at)
-               VALUES (?1, ?2, ?3, ?4, 1)"#,
-            params![task_id, backend, runtime_channel, session_id],
+               (task_id, backend, session_id, updated_at)
+               VALUES (?1, ?2, ?3, 1)"#,
+            params![task_id, backend, session_id],
         )
         .unwrap();
     }
@@ -451,35 +439,17 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         create_archive_schema(&conn);
         insert_task(&conn, "claude-task", "project-1", false);
-        insert_task(&conn, "mutsuki-task", "project-1", false);
         insert_task(&conn, "archived-task", "project-1", true);
         insert_task(&conn, "missing-session", "project-1", false);
         insert_session(
             &conn,
             "claude-task",
             crate::BACKEND_CLAUDE,
-            RUNTIME_CHANNEL_BUILTIN,
             "claude-session",
         );
-        insert_session(
-            &conn,
-            "mutsuki-task",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
-            "thread-mutsuki",
-        );
-        insert_session(
-            &conn,
-            "archived-task",
-            BACKEND_CODEX,
-            RUNTIME_CHANNEL_BUILTIN,
-            "thread-archived",
-        );
+        insert_session(&conn, "archived-task", BACKEND_CODEX, "thread-archived");
 
         assert!(codex_thread_ids_for_task_archive(&conn, "claude-task")
-            .unwrap()
-            .is_empty());
-        assert!(codex_thread_ids_for_task_archive(&conn, "mutsuki-task")
             .unwrap()
             .is_empty());
         assert!(codex_thread_ids_for_task_archive(&conn, "archived-task")
@@ -507,34 +477,10 @@ mod tests {
         insert_task(&conn, "task-2", "project-1", false);
         insert_task(&conn, "task-3", "project-2", false);
         insert_task(&conn, "task-4", "project-1", true);
-        insert_session(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            RUNTIME_CHANNEL_BUILTIN,
-            "thread-1",
-        );
-        insert_session(
-            &conn,
-            "task-2",
-            BACKEND_CODEX,
-            RUNTIME_CHANNEL_BUILTIN,
-            "thread-2",
-        );
-        insert_session(
-            &conn,
-            "task-3",
-            BACKEND_CODEX,
-            RUNTIME_CHANNEL_BUILTIN,
-            "thread-other-project",
-        );
-        insert_session(
-            &conn,
-            "task-4",
-            BACKEND_CODEX,
-            RUNTIME_CHANNEL_BUILTIN,
-            "thread-already-archived",
-        );
+        insert_session(&conn, "task-1", BACKEND_CODEX, "thread-1");
+        insert_session(&conn, "task-2", BACKEND_CODEX, "thread-2");
+        insert_session(&conn, "task-3", BACKEND_CODEX, "thread-other-project");
+        insert_session(&conn, "task-4", BACKEND_CODEX, "thread-already-archived");
 
         assert_eq!(
             codex_thread_ids_for_task_archive(&conn, "task-1").unwrap(),

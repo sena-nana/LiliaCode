@@ -16,13 +16,11 @@ pub(crate) use config::{
     load_agent_interaction_settings, load_assistant_ai_config,
 };
 pub(crate) use connection::resolve_connection_for;
-pub(crate) use types::{AssistantAIConfig, BackendConnectionPlan, CodexProfileSettings};
+pub(crate) use types::{
+    AssistantAIConfig, BackendConnectionPlan, CodexProfileSettings, ConnectionMode,
+};
 
 #[cfg(test)]
 pub(crate) use codex_probe::*;
-#[cfg(test)]
-pub(crate) use config::*;
-#[cfg(test)]
-pub(crate) use connection::*;
 #[cfg(test)]
 pub(crate) use types::*;

@@ -24,14 +24,14 @@ export function backendLabel(backend: ChatBackendKind): string {
 }
 
 export function routeLabel(mode: RouterMode): string {
-  return mode === "direct" ? "直连" : "CC-Switch";
+  return mode === "codex-account" ? "官方账号" : "API";
 }
 
 export function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
   const issue = status?.issues.join(" ") ||
     "Codex app-server 不满足 Lilia 所需的流式事件、工具审批和 AskUser 协议能力。";
   if (status?.failureKind === "providerIncompatible") {
-    return `${issue} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。`;
+    return `${issue} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。`;
   }
   if (status?.failureKind === "missingCli") {
     return `${issue} 请安装 Codex CLI：npm i -g @openai/codex，并重新打开终端或 Lilia 以刷新 PATH。`;
@@ -68,7 +68,7 @@ export function runtimeDiagnostic(
       return {
         tone: "err",
         title: "Codex CLI 缺失",
-        hint: "未找到 codex CLI。请安装 Codex CLI：npm i -g @openai/codex，并重新打开终端或 Lilia 以刷新 PATH。",
+        hint: "未找到 codex CLI。请安装 Codex CLI：npm i -g @openai/codex，并重新打开终端或 Lilia 以刷新 PATH；使用官方账号模式前请先运行 codex login。",
       };
     }
     if (!report.codexAppServer.supportsRequiredProtocol) {
@@ -83,13 +83,13 @@ export function runtimeDiagnostic(
     return {
       tone: "ok",
       title: "Claude 运行时可用",
-      hint: "Lilia 将通过本机 Node 运行 Claude Agent SDK；如发送失败，请检查 ANTHROPIC_API_KEY 或直连密钥配置。",
+      hint: "Lilia 将通过本机 Node 运行 Claude Agent SDK；如发送失败，请检查 ANTHROPIC_API_KEY 或 API 密钥配置。",
     };
   }
   return {
     tone: "ok",
     title: "Codex 运行时可用",
-    hint: "已找到满足 Lilia 协议要求的 Codex CLI 和 app-server。",
+    hint: "已找到满足 Lilia 协议要求的 Codex CLI 和 app-server；官方账号模式会复用 codex CLI 登录态。",
   };
 }
 
@@ -97,7 +97,6 @@ export function connectionDiagnostic(
   backend: ChatBackendKind,
   status: BackendEnvStatus | null,
   routerMode: RouterMode,
-  ccSwitchBaseUrl: string | null,
 ): ProviderDiagnostic | null {
   if (!status) {
     return {
@@ -107,42 +106,47 @@ export function connectionDiagnostic(
     };
   }
   const label = backendLabel(backend);
-  if (status.connectionMode === "cc-switch") {
-    const codexTail = backend === "codex"
-      ? "Codex 请求会走 /responses，请确认当前上游 provider 支持 OpenAI Responses API 与当前 Codex 模型。"
-      : "请求会转发到 CC-Switch 当前选中的上游 provider。";
+  if (status.connectionMode === "codex-account") {
     return {
       tone: "ok",
-      title: "CC-Switch 可达",
-      hint: `本地端口可达（${status.effectiveUrl ?? ccSwitchBaseUrl ?? "-"}）。${codexTail}`,
+      title: "Codex 官方账号",
+      hint: "将通过 codex CLI app-server 复用本机官方账号登录态；如首次使用，请先在终端运行 codex login。",
     };
   }
-  if (status.connectionMode === "direct" || status.connectionMode === "custom") {
-    const urlText = status.connectionMode === "custom" ? "自定义 URL" : "官方 API";
-    if (status.hasApiKey) {
-      return {
-        tone: "ok",
-        title: `${label} 直连已配置`,
-        hint: `将通过${urlText} ${status.effectiveUrl ?? DIRECT_DEFAULT_URLS[backend]} 发送请求。`,
-      };
-    }
+  if (status.connectionMode === "custom") {
     return {
-      tone: "warn",
-      title: `${label} 直连缺少 API key`,
-      hint: `当前选择直连，但未保存 ${backend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"} 或设置页密钥。请填写 API key 后保存。`,
+      tone: status.hasApiKey ? "ok" : "warn",
+      title: `${label} 自定义 API 来源`,
+      hint: status.hasApiKey
+        ? `将通过 ${status.effectiveUrl ?? "-"} 发送请求，已保存密钥。`
+        : `将通过 ${status.effectiveUrl ?? "-"} 发送请求，未设置密钥；仅适用于本地代理或不需要鉴权的兼容来源。`,
     };
   }
-  if (routerMode === "direct") {
+  if (status.connectionMode === "api" && status.hasApiKey) {
+    return {
+      tone: "ok",
+      title: `${label} API 已配置`,
+      hint: `将通过官方 API ${status.effectiveUrl ?? DIRECT_DEFAULT_URLS[backend]} 发送请求。`,
+    };
+  }
+  if (status.connectionMode === "api") {
     return {
       tone: "warn",
-      title: `${label} 直连未配置`,
-      hint: "当前选择直连。请填写 API key；Base URL 留空时使用官方 API。",
+      title: `${label} API 缺少 API key`,
+      hint: `当前选择 API，但未保存 ${backend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"} 或设置页密钥。请填写 API key 后保存。`,
+    };
+  }
+  if (routerMode === "codex-account") {
+    return {
+      tone: "warn",
+      title: "Codex 官方账号未就绪",
+      hint: "当前选择官方账号模式。请确认 Codex CLI 可用，并在终端运行 codex login。",
     };
   }
   return {
     tone: "warn",
-    title: "CC-Switch 不可达",
-    hint: `代理 ${ccSwitchBaseUrl ?? "-"} 不可达。请启动 CC-Switch，或切到直连并填写 API key。`,
+    title: `${label} API 未配置`,
+    hint: "当前选择 API。请填写 API key；Base URL 留空时使用官方 API，也可以填写本地代理或兼容 API 地址。",
   };
 }
 
@@ -153,9 +157,8 @@ export function providerReady(
 ): boolean {
   if (!report || !status || !report.nodeAvailable) return false;
   if (backend === "codex" && !report.codexAppServer.supportsRequiredProtocol) return false;
-  if (status.connectionMode === "cc-switch") return true;
-  if (status.connectionMode === "direct" || status.connectionMode === "custom") {
-    return status.hasApiKey;
-  }
+  if (status.connectionMode === "codex-account") return backend === "codex";
+  if (status.connectionMode === "custom") return true;
+  if (status.connectionMode === "api") return status.hasApiKey;
   return false;
 }

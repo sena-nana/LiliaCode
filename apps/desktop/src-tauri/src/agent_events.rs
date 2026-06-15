@@ -35,6 +35,11 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         payload: JsonValue,
     },
+    QuotaUsageRequest {
+        id: String,
+        #[serde(default)]
+        payload: JsonValue,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -92,6 +97,11 @@ impl AgentRuntimeEvent {
                     backend,
                     payload,
                 })
+            }
+            "quota_usage_request" => {
+                let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+                let payload = value.get("payload").cloned().unwrap_or(JsonValue::Null);
+                Some(Self::QuotaUsageRequest { id, payload })
             }
             "done" => {
                 let session_id = value
@@ -438,6 +448,17 @@ mod tests {
                     "title": "Codex 想确认一下",
                     "questions": []
                 }),
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "quota_usage_request",
+                "id": "quota-1",
+                "payload": { "days": 7, "scope": "tools" }
+            })),
+            Some(AgentRuntimeEvent::QuotaUsageRequest {
+                id: "quota-1".to_string(),
+                payload: json!({ "days": 7, "scope": "tools" }),
             })
         );
         assert_eq!(

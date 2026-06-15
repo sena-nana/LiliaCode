@@ -1,6 +1,7 @@
 import {
   Bot,
   FolderCog,
+  Gauge,
   Info,
   Network,
   PanelTop,
@@ -15,6 +16,7 @@ export type SettingsTabKey =
   | "providers"
   | "assistant"
   | "agent"
+  | "quota"
   | "project"
   | "about";
 
@@ -49,6 +51,11 @@ export const SETTINGS_TABS: SettingsTab[] = [
     key: "agent",
     label: "Agent",
     icon: Bot,
+  },
+  {
+    key: "quota",
+    label: "额度",
+    icon: Gauge,
   },
   {
     key: "project",

@@ -78,6 +78,8 @@ export function createInteractionBroker({
   let askUserSeq = 1;
   const codexPending = new Map();
   let codexSeq = 1;
+  const quotaUsagePending = new Map();
+  let quotaUsageSeq = 1;
   const architecturePending = new Map();
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
@@ -237,6 +239,18 @@ export function createInteractionBroker({
     });
   }
 
+  function requestQuotaUsage(payload = {}) {
+    const id = `quota-${quotaUsageSeq++}`;
+    protocol.emit({
+      type: "quota_usage_request",
+      id,
+      payload,
+    });
+    return new Promise((resolve) => {
+      quotaUsagePending.set(id, resolve);
+    });
+  }
+
   function handleControlLine(line) {
     let msg;
     try {
@@ -280,6 +294,18 @@ export function createInteractionBroker({
       settingsUpdateHandler?.(msg);
       return;
     }
+    if (msg.type === "quota_usage_result") {
+      if (typeof msg.id !== "string") return;
+      const resolve = quotaUsagePending.get(msg.id);
+      if (!resolve) return;
+      quotaUsagePending.delete(msg.id);
+      resolve({
+        ok: msg.ok === true,
+        result: msg.result ?? null,
+        error: typeof msg.error === "string" ? msg.error : null,
+      });
+      return;
+    }
     if (msg.type === "lilia_iab_result") {
       liliaIabResultHandler?.(msg.snapshot);
     }
@@ -291,6 +317,7 @@ export function createInteractionBroker({
     requestCodexInteraction,
     requestMcpElicitation,
     requestArchitectureChange,
+    requestQuotaUsage,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
@@ -302,6 +329,7 @@ export function createInteractionBroker({
       consent: consentPending.size,
       askUser: askUserPending.size,
       codex: codexPending.size,
+      quotaUsage: quotaUsagePending.size,
       architecture: architecturePending.size,
     }),
   };

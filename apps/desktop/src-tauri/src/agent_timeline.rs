@@ -299,6 +299,7 @@ pub fn list(conn: &Connection, task_id: &str) -> Result<Vec<AgentTimelineEvent>,
 }
 
 pub fn clear(conn: &Connection, task_id: &str) -> Result<usize, String> {
+    let _ = crate::quota_usage::clear_task_usage(conn, task_id);
     conn.execute(
         "DELETE FROM agent_timeline_events WHERE task_id = ?1",
         params![task_id],

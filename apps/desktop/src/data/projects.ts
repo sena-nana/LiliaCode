@@ -1,7 +1,5 @@
 /**
  * 项目 store：所有数据经 Tauri IPC 走 SQLite 持久化。
- *
- * 导出保持与旧版相同的函数签名（仅 `createProject` 参数微调），
  * 内部维护 `PROJECTS` reactive ref 作为 UI 缓存。
  */
 import { invoke } from "@tauri-apps/api/core";

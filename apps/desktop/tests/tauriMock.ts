@@ -404,7 +404,7 @@ let liliaIabSeq = 0;
 let nextLiliaIabDelivery: "runner" | "message" = "message";
 let activeBackend: "claude" | "codex" = "claude";
 type MockProviderBackend = "claude" | "codex";
-type MockRouterMode = "cc-switch" | "direct";
+type MockRouterMode = "api" | "codex-account";
 type MockProviderConfig = {
   backend: MockProviderBackend;
   baseUrl: string | null;
@@ -415,11 +415,9 @@ let providerConfigs: Record<MockProviderBackend, MockProviderConfig> = {
   codex: { backend: "codex", baseUrl: null, hasApiKey: false },
 };
 let routerModes: Record<MockProviderBackend, MockRouterMode> = {
-  claude: "cc-switch",
-  codex: "cc-switch",
+  claude: "api",
+  codex: "codex-account",
 };
-let ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
-let ccSwitchReachable = true;
 let nodeAvailable = true;
 
 function createMockLiliaIabSnapshot(args: Record<string, unknown>) {
@@ -528,7 +526,6 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
-    agentRuntimeChannel: "builtin" as "builtin" | "mutsuki_core",
     codexProfile: {
       profile: "default",
       model: null,
@@ -600,6 +597,8 @@ let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
 let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
 let windowScaleFactor = 1;
 let agentTimelineDelayMs = 0;
+let quotaUsageStatsOverride: Record<string, unknown> | null = null;
+let codexAccountQuotaStatusOverride: Record<string, unknown> | null = null;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -615,6 +614,180 @@ function cloneMilestone(row: MilestoneRow): MilestoneRow {
 
 function cloneTaskMilestoneLink(row: TaskMilestoneLinkRow): TaskMilestoneLinkRow {
   return { ...row };
+}
+
+function dayStart(timestamp: number) {
+  const dayMs = 86_400_000;
+  return Math.floor(timestamp / dayMs) * dayMs;
+}
+
+function createMockQuotaUsageStats(input: Record<string, unknown> = {}) {
+  const days = input.days === 30 ? 30 : 7;
+  const backend = input.backend === "claude" || input.backend === "codex" ? input.backend : "all";
+  const rangeEnd = dayStart(Date.now()) + 86_400_000;
+  const rangeStart = rangeEnd - days * 86_400_000;
+  const daily = Array.from({ length: days }, (_, index) => {
+    const day = rangeStart + index * 86_400_000;
+    const active = index >= days - 3;
+    const inputTokens = active ? (index + 1) * 100 : 0;
+    const outputTokens = active ? (index + 1) * 40 : 0;
+    const cacheReadTokens = active ? index * 12 : 0;
+    const cacheCreationTokens = active ? index * 5 : 0;
+    return {
+      dayStart: day,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens,
+      knownCostUsd: active && backend !== "codex" ? 0.01 * (index + 1) : null,
+      costRecordCount: active && backend !== "codex" ? 1 : 0,
+      recordCount: active ? 1 : 0,
+    };
+  });
+  const totals = daily.reduce(
+    (acc, row) => ({
+      inputTokens: acc.inputTokens + row.inputTokens,
+      outputTokens: acc.outputTokens + row.outputTokens,
+      cacheReadTokens: acc.cacheReadTokens + row.cacheReadTokens,
+      cacheCreationTokens: acc.cacheCreationTokens + row.cacheCreationTokens,
+      totalTokens: acc.totalTokens + row.totalTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0 },
+  );
+  const backendRows = backend === "all"
+    ? [
+      { backend: "claude", ratio: 0.6, cost: 0.12, costRecords: 2, records: 2 },
+      { backend: "codex", ratio: 0.4, cost: null, costRecords: 0, records: 1 },
+    ]
+    : [{ backend, ratio: 1, cost: backend === "claude" ? 0.12 : null, costRecords: backend === "claude" ? 2 : 0, records: 2 }];
+  const backends = backendRows.map((row) => ({
+    backend: row.backend,
+    inputTokens: Math.round(totals.inputTokens * row.ratio),
+    outputTokens: Math.round(totals.outputTokens * row.ratio),
+    cacheReadTokens: Math.round(totals.cacheReadTokens * row.ratio),
+    cacheCreationTokens: Math.round(totals.cacheCreationTokens * row.ratio),
+    totalTokens: Math.round(totals.totalTokens * row.ratio),
+    knownCostUsd: row.cost,
+    costRecordCount: row.costRecords,
+    recordCount: row.records,
+  }));
+  const totalRecordCount = daily.reduce((sum, row) => sum + row.recordCount, 0);
+  const costRecordCount = backends.reduce((sum, row) => sum + row.costRecordCount, 0);
+  const knownCostUsd = backends.reduce(
+    (sum, row) => sum + (typeof row.knownCostUsd === "number" ? row.knownCostUsd : 0),
+    0,
+  );
+  return {
+    days,
+    backend,
+    rangeStart,
+    rangeEnd,
+    totals,
+    cost: {
+      knownCostUsd: costRecordCount > 0 ? knownCostUsd : null,
+      costRecordCount,
+      totalRecordCount,
+    },
+    daily,
+    backends,
+    recent: backends.map((row, index) => ({
+      eventId: `usage-${row.backend}-${index}`,
+      taskId: `task-${index + 1}`,
+      turnId: `turn-${index + 1}`,
+      backend: row.backend,
+      sessionId: row.backend === "codex" ? "thread-1" : "claude-session",
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheCreationTokens: row.cacheCreationTokens,
+      totalTokens: row.totalTokens,
+      knownCostUsd: row.knownCostUsd,
+      createdAt: rangeEnd - (index + 1) * 3_600_000,
+    })),
+    projects: [
+      {
+        projectId: "project-lilia",
+        projectName: "Lilia",
+        projectCwd: "C:\\Files\\workspace\\Lilia",
+        ...totals,
+        knownCostUsd: costRecordCount > 0 ? knownCostUsd : null,
+        costRecordCount,
+        recordCount: totalRecordCount,
+      },
+    ],
+    conversations: [
+      {
+        taskId: "task-1",
+        taskTitle: "额度统计",
+        taskStatus: "running",
+        projectId: "project-lilia",
+        projectName: "Lilia",
+        ...totals,
+        knownCostUsd: costRecordCount > 0 ? knownCostUsd : null,
+        costRecordCount,
+        recordCount: totalRecordCount,
+      },
+    ],
+    tools: [
+      {
+        key: "command::",
+        label: "命令",
+        kind: "command",
+        subkind: null,
+        toolName: null,
+        callCount: 6,
+        sharePercent: 60,
+      },
+      {
+        key: "search:grep:",
+        label: "内容搜索",
+        kind: "search",
+        subkind: "grep",
+        toolName: null,
+        callCount: 4,
+        sharePercent: 40,
+      },
+    ],
+  };
+}
+
+function createMockCodexAccountQuotaStatus() {
+  if (routerModes.codex !== "codex-account") {
+    return {
+      available: false,
+      connectionMode: routerModes.codex,
+      limitId: null,
+      limitName: null,
+      planType: null,
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return {
+    available: true,
+    connectionMode: "codex-account",
+    limitId: "codex",
+    limitName: "Codex",
+    planType: "pro",
+    rateLimitReachedType: null,
+    fiveHour: {
+      usedPercent: 25,
+      windowDurationMins: 300,
+      resetsAt: nowSeconds + 3 * 60 * 60,
+    },
+    weekly: {
+      usedPercent: 40,
+      windowDurationMins: 10080,
+      resetsAt: nowSeconds + 4 * 86_400,
+    },
+    fetchedAt: Date.now(),
+    error: null,
+  };
 }
 
 function getProjectRoadmap(projectId: string): ProjectRoadmapRow {
@@ -766,12 +939,12 @@ function cloneProviderConfig(backend: MockProviderBackend) {
 function mockBackendEnvStatus(backend: MockProviderBackend) {
   const mode = routerModes[backend];
   const config = providerConfigs[backend];
-  if (mode === "cc-switch") {
+  if (mode === "codex-account" && backend === "codex") {
     return {
       backend,
-      hasApiKey: ccSwitchReachable,
-      connectionMode: ccSwitchReachable ? "cc-switch" : "unconfigured",
-      effectiveUrl: ccSwitchReachable ? ccSwitchConfig.baseUrl : null,
+      hasApiKey: false,
+      connectionMode: "codex-account",
+      effectiveUrl: null,
     };
   }
   const hasUrl = typeof config.baseUrl === "string" && config.baseUrl.trim().length > 0;
@@ -779,7 +952,7 @@ function mockBackendEnvStatus(backend: MockProviderBackend) {
   return {
     backend,
     hasApiKey: hasKey,
-    connectionMode: hasKey || hasUrl ? (hasUrl ? "custom" : "direct") : "unconfigured",
+    connectionMode: hasKey || hasUrl ? (hasUrl ? "custom" : "api") : "unconfigured",
     effectiveUrl: hasUrl ? config.baseUrl : hasKey ? directDefaultUrl(backend) : null,
   };
 }
@@ -930,11 +1103,9 @@ export function resetTauriMockData() {
     codex: { backend: "codex", baseUrl: null, hasApiKey: false },
   };
   routerModes = {
-    claude: "cc-switch",
-    codex: "cc-switch",
+    claude: "api",
+    codex: "codex-account",
   };
-  ccSwitchConfig = { baseUrl: "http://127.0.0.1:15721" };
-  ccSwitchReachable = true;
   nodeAvailable = true;
   codexAppServerStatus = {
     version: "codex-cli 0.128.0",
@@ -990,6 +1161,8 @@ export function resetTauriMockData() {
   webviewDragDropHandlers = [];
   windowScaleFactor = 1;
   agentTimelineDelayMs = 0;
+  quotaUsageStatsOverride = null;
+  codexAccountQuotaStatusOverride = null;
   mockCurrentWindow.label = "main";
   mockCurrentWindow.isMaximized.mockClear();
   mockCurrentWindow.onResized.mockClear();
@@ -1360,8 +1533,13 @@ export function setMockActiveBackend(backend: "claude" | "codex") {
   activeBackend = backend;
 }
 
-export function setMockRouterMode(backend: "claude" | "codex", mode: "cc-switch" | "direct") {
-  routerModes[backend] = mode;
+export function setMockRouterMode(
+  backend: "claude" | "codex",
+  mode: "api" | "codex-account" | "direct" | "cc-switch",
+) {
+  routerModes[backend] = backend === "codex" && mode === "codex-account"
+    ? "codex-account"
+    : "api";
 }
 
 export function setMockProviderConfig(
@@ -1375,8 +1553,12 @@ export function setMockProviderConfig(
   };
 }
 
-export function setMockCCSwitchReachable(reachable: boolean) {
-  ccSwitchReachable = reachable;
+export function setMockQuotaUsageStats(stats: Record<string, unknown> | null) {
+  quotaUsageStatsOverride = stats ? { ...stats } : null;
+}
+
+export function setMockCodexAccountQuotaStatus(stats: Record<string, unknown> | null) {
+  codexAccountQuotaStatusOverride = stats ? { ...stats } : null;
 }
 
 export function setMockNodeAvailable(available: boolean) {
@@ -1653,7 +1835,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "milestone_update": {
       const id = String(args.id);
       const title = typeof args.title === "string" ? args.title.trim() : null;
+      const description = typeof args.description === "string" ? args.description.trim() : null;
       const status = typeof args.status === "string" ? args.status : null;
+      const dueDate = typeof args.dueDate === "number"
+        ? args.dueDate
+        : args.clearDueDate === true
+          ? null
+          : undefined;
       if (title !== null && !title) throw new Error("milestone_update: 标题不能为空");
       if (status !== null && !MILESTONE_STATUSES.includes(status as MockMilestoneStatus)) {
         throw new Error(`milestone_update: 无效状态：${status}`);
@@ -1665,7 +1853,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         return {
           ...milestone,
           title: title ?? milestone.title,
+          description: description ?? milestone.description,
           status: (status ?? milestone.status) as MockMilestoneStatus,
+          dueDate: dueDate === undefined ? milestone.dueDate : dueDate,
         };
       });
       if (!changed) throw new Error("milestone_update: milestone 不存在");
@@ -1881,12 +2071,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "automation_list_workflows":
       return automations.map(cloneAutomationWorkflow);
 
-    case "automation_get_workflow": {
-      const id = String(args.id);
-      const workflow = automations.find((item) => item.id === id);
-      return workflow ? cloneAutomationWorkflow(workflow) : null;
-    }
-
     case "automation_save_draft": {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
@@ -2087,10 +2271,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           ...codexAppServerStatus,
           issues: [...codexAppServerStatus.issues],
         },
-        ccSwitch: {
-          reachable: ccSwitchReachable,
-          baseUrl: ccSwitchConfig.baseUrl,
-        },
         routerModes: {
           ...routerModes,
         },
@@ -2274,17 +2454,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "cc_switch_get_config":
-      return { ...ccSwitchConfig };
-
-    case "cc_switch_set_config":
-      ccSwitchConfig = {
-        baseUrl: typeof args.config?.baseUrl === "string" && args.config.baseUrl.trim()
-          ? args.config.baseUrl.trim()
-          : null,
-      };
-      return undefined;
-
     case "router_get_mode": {
       const backend = normalizeBackend(args.backend);
       return routerModes[backend];
@@ -2292,7 +2461,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "router_set_mode": {
       const backend = normalizeBackend(args.backend);
-      routerModes[backend] = args.mode === "direct" ? "direct" : "cc-switch";
+      routerModes[backend] = backend === "codex" && args.mode === "codex-account"
+        ? "codex-account"
+        : "api";
       return undefined;
     }
 
@@ -2310,6 +2481,16 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       timelineEvents[taskId] = [];
       return count;
     }
+
+    case "quota_usage_get_stats":
+      return quotaUsageStatsOverride ?? createMockQuotaUsageStats(
+        args.input && typeof args.input === "object" && !Array.isArray(args.input)
+          ? args.input as Record<string, unknown>
+          : {},
+      );
+
+    case "quota_usage_get_codex_account_status":
+      return codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
 
     case "chat_get_composer_state": {
       const taskId = String(args.taskId);
@@ -2336,11 +2517,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             : queuedCount > 0
               ? "queued"
               : "idle",
-        runtimeChannel: running ? agentInteractionSettings.agentRuntimeChannel : null,
         backend: running ? activeBackend : null,
         turnId: running ? currentChatTurnId(taskId) : null,
         queuedCount,
-        pendingControlCount: 0,
         pendingRollback: false,
         pendingResetCleanup: false,
         rollback: null,
@@ -2492,7 +2671,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const settings = args.settings as {
         nonInterruptMode?: unknown;
         debug?: unknown;
-        agentRuntimeChannel?: unknown;
         codexProfile?: {
           profile?: unknown;
           model?: unknown;
@@ -2510,7 +2688,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
-        agentRuntimeChannel: settings?.agentRuntimeChannel === "mutsuki_core" ? "mutsuki_core" : "builtin",
         codexProfile: {
           profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
           model: typeof codexProfile?.model === "string" && codexProfile.model.trim()
@@ -3085,14 +3262,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         restoredAttachments: [],
         removedEventIds: [],
       };
-    }
-
-    case "chat_reset_session": {
-      const taskId = String(args.taskId);
-      resetMockQueuedGuides(chatQueued[taskId]);
-      chatQueued[taskId] = [];
-      chatRunning[taskId] = false;
-      return undefined;
     }
 
     case "plugin:event|listen": {

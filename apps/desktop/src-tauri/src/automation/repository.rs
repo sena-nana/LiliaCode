@@ -6,8 +6,7 @@ use uuid::Uuid;
 use super::{signals::manual_signal, validate_workflow_graph};
 use crate::automation::types::{
     AutomationDraft, AutomationRun, AutomationRunNodeState, AutomationRunStatus,
-    AutomationSaveDraftInput, AutomationScopeFilter, AutomationWorkflow,
-    AutomationWorkflowVersion,
+    AutomationSaveDraftInput, AutomationScopeFilter, AutomationWorkflow, AutomationWorkflowVersion,
 };
 use crate::util::now_millis;
 
@@ -111,7 +110,7 @@ pub(crate) fn workflow_by_id(
         row_to_workflow,
     )
     .optional()
-    .map_err(|e| format!("automation_get_workflow: {e}"))
+    .map_err(|e| format!("automation_workflow_by_id: {e}"))
 }
 
 pub(crate) fn save_draft(

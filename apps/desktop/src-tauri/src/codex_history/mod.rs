@@ -23,7 +23,7 @@ use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::{BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN};
+use crate::BACKEND_CODEX;
 
 use self::bulk::persist_history_events_batch;
 use self::preview::preview_events_from_inputs;
@@ -176,9 +176,7 @@ pub(crate) fn sync_thread_title_blocking<R: Runtime>(
         return Ok(());
     };
     let conn = store.conn()?;
-    let Some(thread_id) =
-        load_persisted_resume_session_id(&conn, task_id, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN)
-    else {
+    let Some(thread_id) = load_persisted_resume_session_id(&conn, task_id, BACKEND_CODEX) else {
         return Ok(());
     };
     let payload = rename_thread_payload(&thread_id, title)?;
@@ -373,7 +371,6 @@ fn remember_codex_thread_session(
         chat_store,
         task_id,
         BACKEND_CODEX,
-        RUNTIME_CHANNEL_BUILTIN,
         thread_id,
         "Codex attach",
     );
@@ -595,7 +592,6 @@ pub(crate) fn codex_thread_attach_blocking(
 mod tests {
     use super::*;
     use crate::chat::state::{persist_runtime_state, session_key, RunningTurn};
-    use crate::RUNTIME_CHANNEL_MUTSUKI_CORE;
 
     fn create_task_agent_sessions_schema(conn: &rusqlite::Connection) {
         conn.execute_batch(
@@ -612,31 +608,20 @@ mod tests {
             CREATE TABLE task_agent_sessions (
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
+              PRIMARY KEY (task_id, backend)
             );
             CREATE TABLE task_runtime_states (
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
               runtime_epoch   TEXT NOT NULL,
               context_json    TEXT,
               updated_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_runtime_control_events (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              name            TEXT NOT NULL,
-              attributes_json TEXT NOT NULL DEFAULT '{}',
-              payload_json    TEXT,
-              created_at      INTEGER NOT NULL
             );
             CREATE TABLE task_pending_turns (
               id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -649,8 +634,6 @@ mod tests {
               runtime_command_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );
@@ -671,13 +654,13 @@ mod tests {
                 .sdk_sessions
                 .lock()
                 .unwrap()
-                .get(&session_key(RUNTIME_CHANNEL_BUILTIN, backend, task_id))
+                .get(&session_key(backend, task_id))
                 .cloned(),
             Some(expected.to_string())
         );
         let session_id: String = conn
             .query_row(
-                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2 AND runtime_channel = 'builtin'",
+                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2",
                 params![task_id, backend],
                 |row| row.get(0),
             )
@@ -769,15 +752,8 @@ mod tests {
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_agent_sessions
-               (task_id, backend, runtime_channel, session_id, updated_at)
-               VALUES ('task-1', 'codex', 'builtin', 'thread-1', 2)"#,
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            r#"INSERT INTO task_agent_sessions
-               (task_id, backend, runtime_channel, session_id, updated_at)
-               VALUES ('task-1', 'codex', 'mutsuki_core', 'thread-mutsuki-core', 3)"#,
+               (task_id, backend, session_id, updated_at)
+               VALUES ('task-1', 'codex', 'thread-1', 2)"#,
             [],
         )
         .unwrap();
@@ -786,9 +762,8 @@ mod tests {
             &store,
             "task-1",
             &RunningTurn {
-                turn_id: "turn-mutsuki-core".to_string(),
+                turn_id: "turn-builtin".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             "running",
             None,
@@ -814,7 +789,6 @@ mod tests {
                     created_at: 1,
                 },
                 turn_id: "turn-1".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
                 guide_id: None,
             }]),
         );
@@ -822,7 +796,7 @@ mod tests {
         let states = query_codex_thread_runtime_states(&conn, &store).unwrap();
 
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].thread_id, "thread-mutsuki-core");
+        assert_eq!(states[0].thread_id, "thread-1");
         assert_eq!(states[0].task_title, "Codex task");
         assert!(states[0].running);
         assert!(states[0].queued);

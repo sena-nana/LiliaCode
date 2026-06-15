@@ -1,9 +1,8 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Manager, Runtime};
 use uuid::Uuid;
 
@@ -14,10 +13,7 @@ use crate::chat::types::{
     ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow, ProviderRuntimeOptions,
 };
 use crate::store::LiliaStore;
-use crate::{
-    agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS,
-    RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
-};
+use crate::{agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingChatTurn {
@@ -32,7 +28,6 @@ pub(crate) struct PendingChatTurn {
     /// queue 时就分配好 turn_id，user message + agent turn 共享同一个 turn_id
     /// → 同一个 turn_seq；这是把"按 turn 隔离"的排序契约推到入口的关键。
     pub(crate) turn_id: String,
-    pub(crate) runtime_channel: String,
     pub(crate) guide_id: Option<String>,
 }
 
@@ -40,20 +35,6 @@ pub(crate) struct PendingChatTurn {
 pub(crate) struct RunningTurn {
     pub(crate) turn_id: String,
     pub(crate) backend: String,
-    pub(crate) runtime_channel: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeControlEvent {
-    pub(crate) name: String,
-    pub(crate) attributes: BTreeMap<String, String>,
-    pub(crate) payload: Option<JsonValue>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeControlDelivery {
-    pub(crate) persisted_id: Option<i64>,
-    pub(crate) event: RuntimeControlEvent,
 }
 
 // ---------- 进程内状态 ----------
@@ -61,7 +42,7 @@ pub(crate) struct RuntimeControlDelivery {
 #[derive(Default)]
 pub(crate) struct ChatStore {
     pub(crate) composers: Mutex<HashMap<String, ChatComposerState>>,
-    /// SDK session id：key = "{runtime_channel}:{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
+    /// SDK session id：key = "{backend}:{task_id}"，第一次发送为空，done 后写入用于 resume。
     pub(crate) sdk_sessions: Mutex<HashMap<String, String>>,
     pub(crate) running_tasks: Mutex<HashMap<String, bool>>,
     pub(crate) pending_turns: Mutex<HashMap<String, VecDeque<PendingChatTurn>>>,
@@ -69,24 +50,13 @@ pub(crate) struct ChatStore {
     pub(crate) running_process_sessions: Mutex<HashMap<String, String>>,
     pub(crate) interrupted_turns: Mutex<HashMap<String, RunningTurn>>,
     pub(crate) reset_turns: Mutex<HashMap<String, RunningTurn>>,
-    pub(crate) runtime_control_events: Mutex<HashMap<String, Vec<RuntimeControlEvent>>>,
     pub(crate) pending_rollbacks: Mutex<HashMap<String, ChatRollbackResult>>,
     pub(crate) pending_reset_cleanups: Mutex<HashSet<String>>,
     pub(crate) runtime_epoch: Mutex<Option<String>>,
 }
 
-pub(crate) fn normalize_runtime_channel(value: &str) -> &'static str {
-    match value {
-        RUNTIME_CHANNEL_MUTSUKI_CORE => RUNTIME_CHANNEL_MUTSUKI_CORE,
-        _ => RUNTIME_CHANNEL_BUILTIN,
-    }
-}
-
-pub(crate) fn session_key(runtime_channel: &str, backend: &str, task_id: &str) -> String {
-    format!(
-        "{}:{backend}:{task_id}",
-        normalize_runtime_channel(runtime_channel)
-    )
+pub(crate) fn session_key(backend: &str, task_id: &str) -> String {
+    format!("{backend}:{task_id}")
 }
 
 pub(crate) fn runtime_epoch(store: &ChatStore) -> String {
@@ -124,12 +94,11 @@ pub(crate) fn persist_runtime_state(
     };
     conn.execute(
         r#"INSERT INTO task_runtime_states
-           (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, context_json, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+           (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, context_json, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
            ON CONFLICT(task_id) DO UPDATE SET
              turn_id = excluded.turn_id,
              backend = excluded.backend,
-             runtime_channel = excluded.runtime_channel,
              phase = excluded.phase,
              process_session_id = COALESCE(excluded.process_session_id, task_runtime_states.process_session_id),
              runtime_epoch = excluded.runtime_epoch,
@@ -139,7 +108,6 @@ pub(crate) fn persist_runtime_state(
             task_id,
             turn.turn_id,
             normalize_backend(&turn.backend),
-            normalize_runtime_channel(&turn.runtime_channel),
             phase,
             process_session_id.map(str::trim).filter(|value| !value.is_empty()),
             runtime_epoch(chat_store),
@@ -152,11 +120,6 @@ pub(crate) fn persist_runtime_state(
 }
 
 pub(crate) fn clear_runtime_state(conn: &Connection, task_id: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM task_runtime_control_events WHERE task_id = ?1",
-        params![task_id],
-    )
-    .map_err(|e| format!("清理 runtime control events 失败：{e}"))?;
     conn.execute(
         "DELETE FROM task_runtime_states WHERE task_id = ?1",
         params![task_id],
@@ -174,17 +137,6 @@ pub(crate) fn clear_runtime_finalization(conn: &Connection, task_id: &str) -> Re
     .map_err(|e| format!("清理 runtime finalization 失败：{e}"))
 }
 
-pub(crate) fn clear_runtime_finalization_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    task_id: &str,
-) -> Result<(), String> {
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return Ok(());
-    };
-    let conn = store.conn()?;
-    clear_runtime_finalization(&conn, task_id)
-}
-
 pub(crate) fn load_runtime_state(
     conn: &Connection,
     chat_store: &ChatStore,
@@ -192,7 +144,7 @@ pub(crate) fn load_runtime_state(
 ) -> Result<Option<PersistedRuntimeState>, String> {
     let epoch = runtime_epoch(chat_store);
     conn.query_row(
-        r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+        r#"SELECT task_id, turn_id, backend, phase, process_session_id, runtime_epoch
                   , context_json
            FROM task_runtime_states
            WHERE task_id = ?1 AND runtime_epoch = ?2"#,
@@ -203,12 +155,11 @@ pub(crate) fn load_runtime_state(
                 turn: RunningTurn {
                     turn_id: row.get(1)?,
                     backend: row.get(2)?,
-                    runtime_channel: row.get(3)?,
                 },
-                phase: row.get(4)?,
-                process_session_id: row.get(5)?,
-                runtime_epoch: row.get(6)?,
-                context_json: row.get(7)?,
+                phase: row.get(3)?,
+                process_session_id: row.get(4)?,
+                runtime_epoch: row.get(5)?,
+                context_json: row.get(6)?,
             })
         },
     )
@@ -221,7 +172,7 @@ pub(crate) fn load_any_runtime_state(
     task_id: &str,
 ) -> Result<Option<PersistedRuntimeState>, String> {
     conn.query_row(
-        r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+        r#"SELECT task_id, turn_id, backend, phase, process_session_id, runtime_epoch
                   , context_json
            FROM task_runtime_states
            WHERE task_id = ?1
@@ -234,12 +185,11 @@ pub(crate) fn load_any_runtime_state(
                 turn: RunningTurn {
                     turn_id: row.get(1)?,
                     backend: row.get(2)?,
-                    runtime_channel: row.get(3)?,
                 },
-                phase: row.get(4)?,
-                process_session_id: row.get(5)?,
-                runtime_epoch: row.get(6)?,
-                context_json: row.get(7)?,
+                phase: row.get(3)?,
+                process_session_id: row.get(4)?,
+                runtime_epoch: row.get(5)?,
+                context_json: row.get(6)?,
             })
         },
     )
@@ -250,7 +200,7 @@ pub(crate) fn load_any_runtime_state(
 pub(crate) fn list_runtime_states(conn: &Connection) -> Result<Vec<PersistedRuntimeState>, String> {
     let mut stmt = conn
         .prepare(
-            r#"SELECT task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch
+            r#"SELECT task_id, turn_id, backend, phase, process_session_id, runtime_epoch
                       , context_json
                FROM task_runtime_states
                ORDER BY updated_at DESC"#,
@@ -263,12 +213,11 @@ pub(crate) fn list_runtime_states(conn: &Connection) -> Result<Vec<PersistedRunt
                 turn: RunningTurn {
                     turn_id: row.get(1)?,
                     backend: row.get(2)?,
-                    runtime_channel: row.get(3)?,
                 },
-                phase: row.get(4)?,
-                process_session_id: row.get(5)?,
-                runtime_epoch: row.get(6)?,
-                context_json: row.get(7)?,
+                phase: row.get(3)?,
+                process_session_id: row.get(4)?,
+                runtime_epoch: row.get(5)?,
+                context_json: row.get(6)?,
             })
         })
         .map_err(|e| format!("读取 runtime states 失败：{e}"))?;
@@ -397,15 +346,9 @@ pub(crate) fn load_persisted_resume_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
-    runtime_channel: &str,
 ) -> Option<String> {
-    if let Ok(Some(session_id)) =
-        load_task_agent_session_id(conn, task_id, backend, runtime_channel)
-    {
+    if let Ok(Some(session_id)) = load_task_agent_session_id(conn, task_id, backend) {
         return Some(session_id);
-    }
-    if normalize_runtime_channel(runtime_channel) != RUNTIME_CHANNEL_BUILTIN {
-        return None;
     }
     agent_timeline::latest_session_id(conn, task_id, backend)
         .ok()
@@ -416,15 +359,13 @@ fn load_task_agent_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
-    runtime_channel: &str,
 ) -> Result<Option<String>, String> {
-    let runtime_channel = normalize_runtime_channel(runtime_channel);
     let session_id = conn
         .query_row(
             r#"SELECT session_id
                FROM task_agent_sessions
-               WHERE task_id = ?1 AND backend = ?2 AND runtime_channel = ?3"#,
-            params![task_id, backend, runtime_channel],
+               WHERE task_id = ?1 AND backend = ?2"#,
+            params![task_id, backend],
             |row| row.get::<_, String>(0),
         )
         .optional()
@@ -439,28 +380,20 @@ pub(crate) fn persist_agent_session_id(
     conn: &Connection,
     task_id: &str,
     backend: &str,
-    runtime_channel: &str,
     session_id: &str,
 ) -> Result<(), String> {
-    let runtime_channel = normalize_runtime_channel(runtime_channel);
     let trimmed = session_id.trim();
     if trimmed.is_empty() {
         return Ok(());
     }
     conn.execute(
         r#"INSERT INTO task_agent_sessions
-           (task_id, backend, runtime_channel, session_id, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5)
-           ON CONFLICT(task_id, backend, runtime_channel) DO UPDATE SET
+           (task_id, backend, session_id, updated_at)
+           VALUES (?1, ?2, ?3, ?4)
+           ON CONFLICT(task_id, backend) DO UPDATE SET
              session_id = excluded.session_id,
              updated_at = excluded.updated_at"#,
-        params![
-            task_id,
-            backend,
-            runtime_channel,
-            trimmed,
-            now_millis() as i64
-        ],
+        params![task_id, backend, trimmed, now_millis() as i64],
     )
     .map(|_| ())
     .map_err(|e| format!("写入 agent session checkpoint 失败：{e}"))
@@ -471,16 +404,15 @@ pub(crate) fn remember_agent_session(
     chat_store: &ChatStore,
     task_id: &str,
     backend: &str,
-    runtime_channel: &str,
     session_id: &str,
     log_context: &str,
 ) {
-    chat_store.sdk_sessions.lock().unwrap().insert(
-        session_key(runtime_channel, backend, task_id),
-        session_id.to_string(),
-    );
-    if let Err(err) = persist_agent_session_id(conn, task_id, backend, runtime_channel, session_id)
-    {
+    chat_store
+        .sdk_sessions
+        .lock()
+        .unwrap()
+        .insert(session_key(backend, task_id), session_id.to_string());
+    if let Err(err) = persist_agent_session_id(conn, task_id, backend, session_id) {
         eprintln!("[agent-session] persist {log_context} checkpoint failed: {err}");
     }
 }
@@ -503,10 +435,8 @@ pub(crate) fn clear_task_runtime_state_for_reset<R: Runtime>(
     task_id: &str,
 ) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    for runtime_channel in [RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE] {
-        sessions.remove(&session_key(runtime_channel, BACKEND_CLAUDE, task_id));
-        sessions.remove(&session_key(runtime_channel, BACKEND_CODEX, task_id));
-    }
+    sessions.remove(&session_key(BACKEND_CLAUDE, task_id));
+    sessions.remove(&session_key(BACKEND_CODEX, task_id));
     drop(sessions);
 
     if let Some(store) = app.try_state::<LiliaStore>() {
@@ -651,8 +581,8 @@ pub(crate) fn persist_pending_turn(
     conn.execute(
         r#"INSERT INTO task_pending_turns
            (task_id, content, composer_json, project_cwd, attachments_json, workflow_json,
-            runtime_command_json, runtime_options_json, message_json, turn_id, runtime_channel, guide_id, created_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"#,
+            runtime_command_json, runtime_options_json, message_json, turn_id, guide_id, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
         params![
             task_id,
             turn.content,
@@ -664,7 +594,6 @@ pub(crate) fn persist_pending_turn(
             runtime_options_json,
             message_json,
             turn.turn_id,
-            normalize_runtime_channel(&turn.runtime_channel),
             turn.guide_id,
             now_millis() as i64
         ],
@@ -714,11 +643,8 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
     let turn_id: String = row
         .get(9)
         .map_err(|e| format!("读取 pending turn turn_id 失败：{e}"))?;
-    let runtime_channel: String = row
-        .get(10)
-        .map_err(|e| format!("读取 pending turn runtime_channel 失败：{e}"))?;
     let guide_id: Option<String> = row
-        .get(11)
+        .get(10)
         .map_err(|e| format!("读取 pending turn guide_id 失败：{e}"))?;
     Ok((
         id,
@@ -741,7 +667,6 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
                 .transpose()?,
             message: deserialize_pending_turn_field(&message_json, "message")?,
             turn_id,
-            runtime_channel,
             guide_id,
         },
     ))
@@ -754,7 +679,7 @@ pub(crate) fn take_next_persisted_pending_turn(
     let row = conn
         .query_row(
             r#"SELECT id, content, composer_json, project_cwd, attachments_json, workflow_json,
-                      runtime_command_json, runtime_options_json, message_json, turn_id, runtime_channel, guide_id
+                      runtime_command_json, runtime_options_json, message_json, turn_id, guide_id
                FROM task_pending_turns
                WHERE task_id = ?1
                ORDER BY id ASC
@@ -817,7 +742,6 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
     runtime_options: Option<ProviderRuntimeOptions>,
     message: ChatMessage,
     turn_id: String,
-    runtime_channel: String,
     guide_id: Option<String>,
 ) -> usize {
     let turn = PendingChatTurn {
@@ -830,7 +754,6 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
         runtime_options,
         message,
         turn_id,
-        runtime_channel,
         guide_id,
     };
     if let Some(lilia_store) = app.try_state::<LiliaStore>() {
@@ -885,23 +808,6 @@ pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<Strin
         .remove(task_id)
         .map(|queue| queue.into_iter().filter_map(|turn| turn.guide_id).collect())
         .unwrap_or_default()
-}
-
-pub(crate) fn clear_pending_turns_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-) -> Vec<String> {
-    let mut guide_ids = clear_pending_turns(store, task_id);
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            match clear_persisted_pending_turns(&conn, task_id) {
-                Ok(mut persisted) => guide_ids.append(&mut persisted),
-                Err(err) => eprintln!("[chat-runtime] clear persisted pending turns failed: {err}"),
-            }
-        }
-    }
-    guide_ids
 }
 
 pub(crate) fn clear_persisted_pending_turns_for_app<R: Runtime>(
@@ -979,217 +885,7 @@ pub(crate) fn clear_running_handles(store: &ChatStore, task_id: &str) -> Option<
     store.running_turns.lock().unwrap().remove(task_id)
 }
 
-pub(crate) fn record_runtime_control_event(
-    store: &ChatStore,
-    task_id: &str,
-    name: impl Into<String>,
-    attributes: BTreeMap<String, String>,
-    payload: Option<JsonValue>,
-) {
-    store
-        .runtime_control_events
-        .lock()
-        .unwrap()
-        .entry(task_id.to_string())
-        .or_default()
-        .push(RuntimeControlEvent {
-            name: name.into(),
-            attributes,
-            payload,
-        });
-}
-
-pub(crate) fn persist_runtime_control_event(
-    conn: &Connection,
-    task_id: &str,
-    event: &RuntimeControlEvent,
-) -> Result<(), String> {
-    let attributes_json = serde_json::to_string(&event.attributes)
-        .map_err(|e| format!("runtime control attributes 序列化失败：{e}"))?;
-    let payload_json = event
-        .payload
-        .as_ref()
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|e| format!("runtime control payload 序列化失败：{e}"))?;
-    conn.execute(
-        r#"INSERT INTO task_runtime_control_events
-           (task_id, name, attributes_json, payload_json, created_at)
-           VALUES (?1, ?2, ?3, ?4, ?5)"#,
-        params![
-            task_id,
-            event.name,
-            attributes_json,
-            payload_json,
-            now_millis() as i64
-        ],
-    )
-    .map(|_| ())
-    .map_err(|e| format!("写入 runtime control event 失败：{e}"))
-}
-
-pub(crate) fn persist_runtime_control_event_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    task_id: &str,
-    event: &RuntimeControlEvent,
-) -> bool {
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return false;
-    };
-    match store
-        .conn()
-        .and_then(|conn| persist_runtime_control_event(&conn, task_id, event))
-    {
-        Ok(()) => true,
-        Err(err) => {
-            eprintln!("[chat-runtime] persist runtime control event failed: {err}");
-            false
-        }
-    }
-}
-
 #[cfg(test)]
-pub(crate) fn list_runtime_control_events(
-    conn: &Connection,
-    task_id: &str,
-) -> Result<Vec<RuntimeControlEvent>, String> {
-    list_persisted_runtime_control_events(conn, task_id).map(|events| {
-        events
-            .into_iter()
-            .map(|delivery| delivery.event)
-            .collect::<Vec<_>>()
-    })
-}
-
-pub(crate) fn list_persisted_runtime_control_events(
-    conn: &Connection,
-    task_id: &str,
-) -> Result<Vec<RuntimeControlDelivery>, String> {
-    let mut stmt = conn
-        .prepare(
-            r#"SELECT id, name, attributes_json, payload_json
-               FROM task_runtime_control_events
-               WHERE task_id = ?1
-               ORDER BY id ASC"#,
-        )
-        .map_err(|e| format!("prepare runtime control events 失败：{e}"))?;
-    let rows = stmt
-        .query_map(params![task_id], |row| {
-            let attributes_text: String = row.get(2)?;
-            let payload_text: Option<String> = row.get(3)?;
-            let attributes = serde_json::from_str::<BTreeMap<String, String>>(&attributes_text)
-                .unwrap_or_default();
-            let payload =
-                payload_text.and_then(|text| serde_json::from_str::<JsonValue>(&text).ok());
-            Ok(RuntimeControlDelivery {
-                persisted_id: Some(row.get(0)?),
-                event: RuntimeControlEvent {
-                    name: row.get(1)?,
-                    attributes,
-                    payload,
-                },
-            })
-        })
-        .map_err(|e| format!("query runtime control events 失败：{e}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("读取 runtime control events 失败：{e}"))
-}
-
-pub(crate) fn clear_runtime_control_event_ids(
-    conn: &Connection,
-    ids: &[i64],
-) -> Result<(), String> {
-    for id in ids {
-        conn.execute(
-            "DELETE FROM task_runtime_control_events WHERE id = ?1",
-            params![id],
-        )
-        .map_err(|e| format!("清理 runtime control event 失败：{e}"))?;
-    }
-    Ok(())
-}
-
-pub(crate) fn clear_runtime_control_event_ids_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    ids: &[i64],
-) -> Result<(), String> {
-    if ids.is_empty() {
-        return Ok(());
-    }
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return Ok(());
-    };
-    let conn = store.conn()?;
-    clear_runtime_control_event_ids(&conn, ids)
-}
-
-#[cfg(test)]
-pub(crate) fn clear_runtime_control_events(conn: &Connection, task_id: &str) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM task_runtime_control_events WHERE task_id = ?1",
-        params![task_id],
-    )
-    .map(|_| ())
-    .map_err(|e| format!("清理 runtime control events 失败：{e}"))
-}
-
-pub(crate) fn count_runtime_control_events(
-    conn: &Connection,
-    task_id: &str,
-) -> Result<usize, String> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM task_runtime_control_events WHERE task_id = ?1",
-        params![task_id],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|count| count.max(0) as usize)
-    .map_err(|e| format!("统计 runtime control events 失败：{e}"))
-}
-
-pub(crate) fn take_runtime_control_events(
-    store: &ChatStore,
-    task_id: &str,
-) -> Vec<RuntimeControlEvent> {
-    store
-        .runtime_control_events
-        .lock()
-        .unwrap()
-        .remove(task_id)
-        .unwrap_or_default()
-}
-
-pub(crate) fn take_runtime_control_deliveries_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-    skip_persisted_ids: &HashSet<i64>,
-) -> Vec<RuntimeControlDelivery> {
-    let mut events = take_runtime_control_events(store, task_id)
-        .into_iter()
-        .map(|event| RuntimeControlDelivery {
-            persisted_id: None,
-            event,
-        })
-        .collect::<Vec<_>>();
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            match list_persisted_runtime_control_events(&conn, task_id) {
-                Ok(persisted) => {
-                    events.extend(persisted.into_iter().filter(|delivery| {
-                        !delivery
-                            .persisted_id
-                            .is_some_and(|id| skip_persisted_ids.contains(&id))
-                    }));
-                }
-                Err(err) => {
-                    eprintln!("[chat-runtime] load persisted runtime control events failed: {err}");
-                }
-            }
-        }
-    }
-    events
-}
-
 pub(crate) fn set_pending_rollback(store: &ChatStore, task_id: &str, rollback: ChatRollbackResult) {
     store
         .pending_rollbacks
@@ -1198,6 +894,7 @@ pub(crate) fn set_pending_rollback(store: &ChatStore, task_id: &str, rollback: C
         .insert(task_id.to_string(), rollback);
 }
 
+#[cfg(test)]
 pub(crate) fn persist_pending_rollback(
     conn: &Connection,
     task_id: &str,
@@ -1216,22 +913,6 @@ pub(crate) fn persist_pending_rollback(
     )
     .map(|_| ())
     .map_err(|e| format!("写入 runtime rollback 失败：{e}"))
-}
-
-pub(crate) fn set_pending_rollback_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-    rollback: ChatRollbackResult,
-) {
-    set_pending_rollback(store, task_id, rollback.clone());
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            if let Err(err) = persist_pending_rollback(&conn, task_id, &rollback) {
-                eprintln!("[chat-runtime] persist pending rollback failed: {err}");
-            }
-        }
-    }
 }
 
 pub(crate) fn take_pending_rollback(
@@ -1294,6 +975,7 @@ pub(crate) fn clear_persisted_pending_rollback(
     .map_err(|e| format!("清理 runtime rollback 失败：{e}"))
 }
 
+#[cfg(test)]
 pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
     store
         .pending_reset_cleanups
@@ -1302,6 +984,7 @@ pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
         .insert(task_id.to_string());
 }
 
+#[cfg(test)]
 pub(crate) fn persist_pending_reset_cleanup(
     conn: &Connection,
     task_id: &str,
@@ -1317,21 +1000,6 @@ pub(crate) fn persist_pending_reset_cleanup(
     )
     .map(|_| ())
     .map_err(|e| format!("写入 runtime reset cleanup 失败：{e}"))
-}
-
-pub(crate) fn mark_pending_reset_cleanup_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-) {
-    mark_pending_reset_cleanup(store, task_id);
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            if let Err(err) = persist_pending_reset_cleanup(&conn, task_id) {
-                eprintln!("[chat-runtime] persist pending reset cleanup failed: {err}");
-            }
-        }
-    }
 }
 
 pub(crate) fn take_pending_reset_cleanup(store: &ChatStore, task_id: &str) -> bool {
@@ -1399,13 +1067,6 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
         .get(task_id)
         .map(|queue| queue.len())
         .unwrap_or(0);
-    let pending_control_count = store
-        .runtime_control_events
-        .lock()
-        .unwrap()
-        .get(task_id)
-        .map(|events| events.len())
-        .unwrap_or(0);
     let pending_rollback = store
         .pending_rollbacks
         .lock()
@@ -1439,13 +1100,9 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
     ChatRuntimeSnapshot {
         task_id: task_id.to_string(),
         phase: phase.to_string(),
-        runtime_channel: running_turn
-            .as_ref()
-            .map(|turn| turn.runtime_channel.clone()),
         backend: running_turn.as_ref().map(|turn| turn.backend.clone()),
         turn_id: running_turn.map(|turn| turn.turn_id),
         queued_count,
-        pending_control_count,
         pending_rollback,
         pending_reset_cleanup,
         rollback: None,
@@ -1459,9 +1116,6 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
 ) -> ChatRuntimeSnapshot {
     let mut snapshot = chat_runtime_snapshot(store, task_id);
     if let Some(conn) = conn {
-        if let Ok(count) = count_runtime_control_events(conn, task_id) {
-            snapshot.pending_control_count += count;
-        }
         if let Ok(count) = count_pending_turns(conn, task_id) {
             snapshot.queued_count += count;
         }
@@ -1494,7 +1148,6 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
             } else {
                 snapshot.phase = "abandoned".to_string();
             }
-            snapshot.runtime_channel = Some(abandoned.turn.runtime_channel);
             snapshot.backend = Some(abandoned.turn.backend);
             snapshot.turn_id = Some(abandoned.turn.turn_id);
         }
@@ -1506,7 +1159,6 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
     } else {
         persisted.phase
     };
-    snapshot.runtime_channel = Some(persisted.turn.runtime_channel);
     snapshot.backend = Some(persisted.turn.backend);
     snapshot.turn_id = Some(persisted.turn.turn_id);
     snapshot
