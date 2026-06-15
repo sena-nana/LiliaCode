@@ -17,6 +17,12 @@ import type {
   QuotaUsageStatsDays,
 } from "@lilia/contracts";
 import { getCodexAccountQuotaStatus, getQuotaUsageStats } from "../../services/chat";
+import {
+  formatDateTime,
+  formatPercent,
+  formatUnixSeconds,
+  quotaWindowLabel,
+} from "../../utils/quotaDisplay";
 
 type BackendOption = { value: QuotaUsageStatsBackendFilter; label: string };
 type DaysOption = { value: QuotaUsageStatsDays; label: string };
@@ -103,42 +109,11 @@ function formatRecordCost(value: number | null) {
   return value === null ? "--" : formatCost(value);
 }
 
-function formatPercent(value: number) {
-  return `${new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: value >= 10 ? 0 : 1,
-  }).format(Math.max(0, Math.min(100, value)))}%`;
-}
-
 function formatDay(value: number) {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date(value));
-}
-
-function formatDateTime(value: number) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatUnixSeconds(value: number | null | undefined) {
-  if (!value || value <= 0) return "--";
-  return formatDateTime(value * 1000);
-}
-
-function quotaWindowLabel(window: CodexAccountQuotaWindow | null | undefined) {
-  if (!window) return "暂无数据";
-  const duration = window.windowDurationMins;
-  const durationText = duration
-    ? duration >= 1440
-      ? `${Math.round(duration / 1440)} 天窗口`
-      : `${Math.round(duration / 60)} 小时窗口`
-    : "官方窗口";
-  return `${durationText} · 剩余 ${formatPercent(100 - window.usedPercent)}`;
 }
 
 function chartX(index: number, count: number) {
