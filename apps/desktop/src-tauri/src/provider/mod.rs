@@ -23,8 +23,4 @@ pub(crate) use types::{
 #[cfg(test)]
 pub(crate) use codex_probe::*;
 #[cfg(test)]
-pub(crate) use config::*;
-#[cfg(test)]
-pub(crate) use connection::*;
-#[cfg(test)]
 pub(crate) use types::*;

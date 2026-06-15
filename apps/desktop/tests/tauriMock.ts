@@ -2063,12 +2063,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "automation_list_workflows":
       return automations.map(cloneAutomationWorkflow);
 
-    case "automation_get_workflow": {
-      const id = String(args.id);
-      const workflow = automations.find((item) => item.id === id);
-      return workflow ? cloneAutomationWorkflow(workflow) : null;
-    }
-
     case "automation_save_draft": {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
@@ -3260,14 +3254,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         restoredAttachments: [],
         removedEventIds: [],
       };
-    }
-
-    case "chat_reset_session": {
-      const taskId = String(args.taskId);
-      resetMockQueuedGuides(chatQueued[taskId]);
-      chatQueued[taskId] = [];
-      chatRunning[taskId] = false;
-      return undefined;
     }
 
     case "plugin:event|listen": {

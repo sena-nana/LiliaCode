@@ -276,11 +276,6 @@ export function setAgentInteractionSettings(
   return invoke<void>("agent_interaction_set_settings", { settings });
 }
 
-/** 让下一次发送从全新 SDK session 开始（同时清掉前端可见的消息历史）。 */
-export function resetSession(taskId: string): Promise<void> {
-  return invoke<void>("chat_reset_session", { taskId });
-}
-
 export function ackRestoredRollback(taskId: string): Promise<void> {
   return invoke<void>("chat_ack_restored_rollback", { taskId });
 }

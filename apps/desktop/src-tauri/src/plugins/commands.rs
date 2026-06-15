@@ -8,9 +8,9 @@ use super::claude_mcp::{
     claude_mcp_config_path, create_claude_mcp_server, delete_claude_mcp_server,
     set_claude_mcp_server_enabled, update_claude_mcp_server,
 };
-use super::claude_plugins::{list_claude_plugins, set_claude_plugin_enabled};
+use super::claude_plugins::set_claude_plugin_enabled;
 use super::claude_skills::{
-    create_claude_skill, delete_claude_skill, list_claude_skills, set_claude_skill_enabled,
+    create_claude_skill, delete_claude_skill, set_claude_skill_enabled,
 };
 use super::codex_mcp::{
     codex_config_path, create_codex_mcp_server, delete_codex_mcp_server,
@@ -18,7 +18,7 @@ use super::codex_mcp::{
 };
 use super::runtime::overview;
 use super::types::{
-    PluginMcpServer, PluginMcpServerInput, PluginPackage, PluginSkill, PluginsOverview,
+    PluginMcpServer, PluginMcpServerInput, PluginSkill, PluginsOverview,
 };
 
 const BACKEND_CLAUDE: &str = "claude";
@@ -43,15 +43,6 @@ fn plugin_backend(value: &str) -> Result<PluginBackend, String> {
 #[tauri::command]
 pub fn plugins_overview(app: AppHandle, project_cwd: Option<String>) -> PluginsOverview {
     overview(&app, project_cwd.as_deref())
-}
-
-#[tauri::command]
-pub fn plugins_list_skills(
-    app: AppHandle,
-    scope: String,
-    project_cwd: Option<String>,
-) -> Vec<PluginSkill> {
-    list_claude_skills(&app, &scope, project_cwd.as_deref()).0
 }
 
 #[tauri::command]
@@ -84,11 +75,6 @@ pub fn plugins_set_skill_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     set_claude_skill_enabled(&app, &scope, project_cwd.as_deref(), &name, enabled)
-}
-
-#[tauri::command]
-pub fn plugins_list_packages(app: AppHandle, scope: String) -> Vec<PluginPackage> {
-    list_claude_plugins(&app, &scope).0
 }
 
 #[tauri::command]

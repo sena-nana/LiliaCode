@@ -38,14 +38,6 @@ export function uniqueTrimmedStrings(value: unknown): string[] {
     : [];
 }
 
-export function uniqueTrimmedLines(value: string): string[] {
-  return uniqueTrimmedStrings(value.split(/\r?\n/));
-}
-
-export function sameOrderedStrings(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
-}
-
 export function normalizeAgentInteractionSettings(
   input: Partial<AgentInteractionSettings> | null | undefined,
 ): AgentInteractionSettings {

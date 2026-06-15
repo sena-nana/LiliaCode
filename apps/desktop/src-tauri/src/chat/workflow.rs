@@ -1,42 +1,8 @@
-use std::collections::BTreeSet;
-use std::sync::OnceLock;
-
 use crate::chat::types::{ChatRuntimeCommand, ChatWorkflow};
 
+#[cfg(test)]
 const LILIA_AGENT_PROTOCOL_MANIFEST: &str =
     include_str!("../../../../../packages/contracts/src/lilia-agent-protocol.json");
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LiliaProtocolManifest {
-    workflow: Vec<LiliaProtocolManifestEntry>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LiliaProtocolManifestEntry {
-    kind: String,
-}
-
-#[derive(Default)]
-struct LiliaProtocolManifestIndex {
-    workflow: BTreeSet<String>,
-}
-
-fn protocol_manifest() -> &'static LiliaProtocolManifestIndex {
-    static MANIFEST: OnceLock<LiliaProtocolManifestIndex> = OnceLock::new();
-    MANIFEST.get_or_init(|| {
-        let manifest: LiliaProtocolManifest = serde_json::from_str(LILIA_AGENT_PROTOCOL_MANIFEST)
-            .expect("lilia-agent-protocol.json must be valid");
-        LiliaProtocolManifestIndex {
-            workflow: manifest
-                .workflow
-                .into_iter()
-                .map(|entry| entry.kind)
-                .collect(),
-        }
-    })
-}
 
 pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<String> {
     let kind = match workflow? {
@@ -71,22 +37,22 @@ pub(crate) fn automation_run_id(workflow: Option<&ChatWorkflow>) -> Option<Strin
     }
 }
 
-pub(crate) fn parse_workflow_kind(value: &str) -> Option<String> {
-    protocol_manifest()
-        .workflow
-        .contains(value)
-        .then(|| value.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct TestLiliaProtocolManifest {
         workflow: Vec<LiliaProtocolManifestEntry>,
         runtime_command: Vec<LiliaProtocolManifestEntry>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LiliaProtocolManifestEntry {
+        kind: String,
     }
 
     #[test]
@@ -100,13 +66,6 @@ mod tests {
             Some("automation")
         );
         assert_eq!(automation_run_id(Some(&workflow)).as_deref(), Some("run-1"));
-        assert_eq!(
-            parse_workflow_kind("automation").as_deref(),
-            Some("automation")
-        );
-        assert_eq!(parse_workflow_kind("lilia_session_fork"), None);
-        assert_eq!(parse_workflow_kind("lilia_session_management"), None);
-        assert_eq!(parse_workflow_kind("lilia_provider_settings"), None);
         assert_eq!(workflow_kind(None), None);
     }
 

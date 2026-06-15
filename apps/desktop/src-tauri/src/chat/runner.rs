@@ -111,12 +111,6 @@ pub(crate) struct RunnerSession {
     finished: bool,
 }
 
-impl RunnerSession {
-    pub(crate) fn terminate(&self) -> Result<bool, String> {
-        process_registry().terminate(&self.process_session_id)
-    }
-}
-
 pub(crate) fn reattach_runner_session<R: Runtime>(
     app_handle: &AppHandle<R>,
     task_id: String,
