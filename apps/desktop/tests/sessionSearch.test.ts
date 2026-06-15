@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { searchSessions } from "../src/services/sessionSearch";
-import { allTasksReady } from "../src/data/tasks";
-import { projectsReady } from "../src/data/projects";
 
 describe("sessionSearch", () => {
 
-  it("合并子串与相似度结果并按分值从高到低排序", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
+  it("合并子串与相似度结果并按分值从高到低排序", () => {
     const res = searchSessions("tsconfig");
     expect(res.length).toBeGreaterThan(0);
     for (const r of res) {
@@ -22,8 +19,7 @@ describe("sessionSearch", () => {
     expect(scores).toEqual(sorted);
   });
 
-  it("project-task 走 /projects 路由，orphan 走 /chats 路由", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
+  it("project-task 走 /projects 路由，orphan 走 /chats 路由", () => {
     const res = searchSessions("Claude");
     const task = res.find((r) => r.kind === "project-task");
     const orphan = res.find((r) => r.kind === "orphan");

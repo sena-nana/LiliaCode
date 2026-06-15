@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
 import { createDraftOrphan, createDraftTask } from "../src/services/tasksStore";
 import {
   failNextMockConversationSuggestions,
@@ -69,7 +67,6 @@ function expectComposerFocused(view: ReturnType<typeof render>) {
 
 describe("TaskDetail conversation suggestions", () => {
   it("项目空白草稿会在输入框卡片内加载并展示新对话建议", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
@@ -84,7 +81,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("GitHub 建议会展示可扫描来源且点击仍填入 prompt", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     setMockConversationSuggestions([
       {
         id: "sg-github-pr",
@@ -120,7 +116,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("点击刷新入口会强制刷新新对话建议", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
@@ -141,7 +136,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("没有可用建议时显示轻量状态且不影响输入", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     setMockConversationSuggestions([]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
@@ -158,7 +152,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("建议加载失败时显示轻量状态且不影响输入", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     failNextMockConversationSuggestions("suggestions unavailable");
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
@@ -175,7 +168,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("主窗口项目草稿进入对话后自动聚焦输入框", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
@@ -185,7 +177,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("收集箱空白草稿不加载也不展示建议", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftOrphan();
     const view = await renderOrphanDraftTaskDetail(draft.id);
 
@@ -201,7 +192,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("主窗口收集箱草稿进入对话后自动聚焦输入框", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     const draft = createDraftOrphan();
     const view = await renderOrphanDraftTaskDetail(draft.id);
 
@@ -211,7 +201,6 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("统一侧栏模式下收集箱草稿可在输入框下方切换到项目草稿并保留输入", async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     const draft = createDraftOrphan();
     const view = await renderRouterView(`/chats/${draft.id}`);

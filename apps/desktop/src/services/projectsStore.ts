@@ -1,7 +1,7 @@
 /**
  * 项目相关 store：listProjects / getProject / createProject / deriveProjectName。
  *
- * 所有数据经 Tauri IPC 走 SQLite 持久化；签名保持稳定，UI 不动。
+ * 所有数据经 Tauri IPC 走 SQLite 持久化。
  * 组件**只**从 `services/` 导入。
  */
 

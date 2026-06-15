@@ -8,8 +8,7 @@ import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady, TASKS } from "../src/data/tasks";
+import { TASKS } from "../src/data/tasks";
 import {
   emitMockTimelineEvent,
   emitTauriEvent,
@@ -163,8 +162,7 @@ async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: num
 }
 
 describe("SecondaryPanel project tree expansion", () => {
-  beforeEach(async () => {
-    await Promise.all([projectsReady, allTasksReady]);
+  beforeEach(() => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
@@ -254,7 +252,6 @@ describe("SecondaryPanel project chat navigation", () => {
   let unlistenAgentInteraction: (() => void) | null = null;
 
   beforeEach(async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
@@ -664,8 +661,7 @@ describe("SecondaryPanel project chat navigation", () => {
 });
 
 describe("SecondaryPanel project tree drag", () => {
-  beforeEach(async () => {
-    await Promise.all([projectsReady, allTasksReady]);
+  beforeEach(() => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
