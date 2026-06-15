@@ -9,8 +9,8 @@ import {
   setMockGitHubPollSequence,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
-  setMockCCSwitchReachable,
   setMockProviderConfig,
+  setMockQuotaUsageStats,
   setMockRouterMode,
 } from "./tauriMock";
 
@@ -30,6 +30,43 @@ function lastInvokeInput(command: string): Record<string, unknown> | undefined {
   const call = [...mockInvoke.mock.calls].reverse().find(([cmd]) => cmd === command);
   const input = call?.[1];
   return input && typeof input === "object" ? input as Record<string, unknown> : undefined;
+}
+
+function emptyQuotaStats() {
+  const dayMs = 86_400_000;
+  const rangeEnd = Math.floor(Date.now() / dayMs) * dayMs + dayMs;
+  const rangeStart = rangeEnd - 7 * dayMs;
+  return {
+    days: 7,
+    backend: "all",
+    rangeStart,
+    rangeEnd,
+    totals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: 0,
+    },
+    cost: {
+      knownCostUsd: null,
+      costRecordCount: 0,
+      totalRecordCount: 0,
+    },
+    daily: Array.from({ length: 7 }, (_, index) => ({
+      dayStart: rangeStart + index * dayMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: 0,
+      knownCostUsd: null,
+      costRecordCount: 0,
+      recordCount: 0,
+    })),
+    backends: [],
+    recent: [],
+  };
 }
 
 describe("Settings provider switch", () => {
@@ -67,6 +104,36 @@ describe("Settings provider switch", () => {
       "true",
     );
     expect(localStorage.getItem("lilia.sidebarDisplayMode")).toBe("unified");
+  });
+
+  it("额度页显示近 7 天 Token 和成本统计", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(view.getByRole("heading", { level: 1, name: "额度" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+        input: { days: 7, backend: "all" },
+      }, undefined);
+    });
+    expect(await view.findByText("总 Token")).toBeInTheDocument();
+    expect(view.getByRole("img", { name: "每日 Token 趋势" })).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("quota_usage_get_stats")).toMatchObject({
+        input: { days: 7, backend: "codex" },
+      });
+    });
+  });
+
+  it("额度页无新增记录时显示空态", async () => {
+    setMockQuotaUsageStats(emptyQuotaStats());
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
+    expect(view.getByText("无新增记录")).toBeInTheDocument();
   });
 
   it("点击 Codex 会写入全局 active provider", async () => {
@@ -108,32 +175,31 @@ describe("Settings provider switch", () => {
     expect(next.getByRole("button", { name: "显示首次启动清单" })).toBeInTheDocument();
   });
 
-  it("连接页不会把已有直连模式强制覆盖成 CC-Switch", async () => {
-    setMockRouterMode("claude", "direct");
+  it("连接页默认使用 API/官方账号，不再展示 CC-Switch 专用配置", async () => {
+    setMockActiveBackend("codex");
 
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByRole("radio", { name: "直连" })).toHaveAttribute(
+      expect(view.getByRole("radio", { name: "官方账号" })).toHaveAttribute(
         "aria-checked",
         "true",
       );
     });
+    expect(view.queryByText("CC-Switch")).not.toBeInTheDocument();
     expect(
       mockInvoke.mock.calls.some(([cmd, args]) =>
         cmd === "router_set_mode" &&
         typeof args === "object" &&
         args !== null &&
-        "backend" in args &&
-        args.backend === "claude" &&
         "mode" in args &&
         args.mode === "cc-switch"
       ),
     ).toBe(false);
   });
 
-  it("直连模式可以保存 Base URL 和 API key，空 key 保存保留已有密钥", async () => {
-    setMockRouterMode("claude", "direct");
+  it("API 模式可以保存 Base URL 和 API key，空 key 保存保留已有密钥", async () => {
+    setMockRouterMode("claude", "api");
     setMockProviderConfig("claude", { baseUrl: "https://api.anthropic.com", hasApiKey: true });
 
     const view = await renderSettings("/settings?tab=providers");
@@ -171,13 +237,17 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("直连模式可以显式清除已保存的 API key", async () => {
-    setMockRouterMode("codex", "direct");
+  it("Codex 切换到 API 模式后可以显式清除已保存的 API key", async () => {
+    setMockRouterMode("codex", "api");
     setMockActiveBackend("codex");
     setMockProviderConfig("codex", { hasApiKey: true });
 
     const view = await renderSettings("/settings?tab=providers");
-    await fireEvent.click(await view.findByRole("button", { name: "清除" }));
+    await waitFor(() => {
+      expect(view.getByText("密钥已保存")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "清除" })).toBeEnabled();
+    });
+    await fireEvent.click(view.getByRole("button", { name: "清除" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("provider_set_config")).toMatchObject({
@@ -240,15 +310,16 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("CC-Switch 不可达时提示启动代理或切直连", async () => {
-    setMockCCSwitchReachable(false);
+  it("自定义 API 来源未设置密钥时不显示未配置", async () => {
+    setMockRouterMode("claude", "api");
+    setMockProviderConfig("claude", { baseUrl: "http://127.0.0.1:15721", hasApiKey: false });
 
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("CC-Switch 不可达")).toBeInTheDocument();
-      expect(view.getAllByText(/请启动 CC-Switch/).length).toBeGreaterThan(0);
-      expect(view.getAllByText(/切到直连/).length).toBeGreaterThan(0);
+      expect(view.getByText("Claude 自定义 API 来源")).toBeInTheDocument();
+      expect(view.getAllByText(/未设置密钥/).length).toBeGreaterThan(0);
+      expect(view.queryByText(/未配置/)).not.toBeInTheDocument();
     });
   });
 

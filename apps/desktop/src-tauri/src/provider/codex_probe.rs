@@ -357,7 +357,7 @@ pub(crate) fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<S
     };
     if status.failure_kind.as_deref() == Some(CODEX_FAILURE_PROVIDER_INCOMPATIBLE) {
         return Some(format!(
-            "{detail} 请确认 CC-Switch 当前选中的上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。"
+            "{detail} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。"
         ));
     }
 

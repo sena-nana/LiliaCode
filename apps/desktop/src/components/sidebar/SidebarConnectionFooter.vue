@@ -25,7 +25,7 @@ function codexRuntimeIssueText(): string {
   const status = codexAppServer.value;
   const issue = status?.issues.join(" ") || "Codex app-server 环境不满足。";
   if (status?.failureKind === "providerIncompatible") {
-    return `${issue} 请确认上游 provider 支持 OpenAI Responses API 与 Codex 模型白名单。点击进入设置。`;
+    return `${issue} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。点击进入设置。`;
   }
   return `${issue} 点击进入设置。`;
 }
@@ -61,7 +61,10 @@ const connectionTooltip = computed(() => {
   const s = activeStatus.value;
   if (!s) return "正在检测 agent 连接…";
   if (s.connectionMode === "unconfigured") {
-    return `${backendLabel.value} 未连接。CC-Switch 代理不可达。点击进入设置。`;
+    return `${backendLabel.value} API 未配置。点击进入设置。`;
+  }
+  if (s.connectionMode === "codex-account") {
+    return "Codex · 官方账号";
   }
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });

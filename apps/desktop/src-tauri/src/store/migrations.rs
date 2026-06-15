@@ -104,6 +104,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_pending_turns_runtime_options",
         apply: migrate_task_pending_turns_runtime_options,
     },
+    SchemaMigration {
+        version: 23,
+        name: "agent_usage_records",
+        apply: migrate_agent_usage_records,
+    },
 ];
 
 fn migrate_todo_guides(conn: &Connection) -> Result<(), String> {
@@ -529,6 +534,8 @@ fn migrate_mutsuki_core_runtime_channel(conn: &Connection) -> Result<(), String>
           project_cwd     TEXT NOT NULL,
           attachments_json TEXT NOT NULL DEFAULT '[]',
           workflow_json   TEXT,
+          runtime_command_json TEXT,
+          runtime_options_json TEXT,
           message_json    TEXT NOT NULL,
           turn_id         TEXT NOT NULL,
           runtime_channel TEXT NOT NULL DEFAULT 'builtin'
@@ -694,6 +701,38 @@ fn migrate_project_architecture(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移 project_architecture 失败：{e}"))
+}
+
+fn migrate_agent_usage_records(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE agent_usage_records (
+          event_id              TEXT PRIMARY KEY,
+          task_id               TEXT NOT NULL,
+          turn_id               TEXT,
+          backend               TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          session_id            TEXT,
+          input_tokens          INTEGER NOT NULL DEFAULT 0,
+          output_tokens         INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+          cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens          INTEGER NOT NULL DEFAULT 0,
+          known_cost_usd        REAL,
+          raw_usage_json        TEXT NOT NULL,
+          created_at            INTEGER NOT NULL,
+          updated_at            INTEGER NOT NULL,
+          FOREIGN KEY (event_id) REFERENCES agent_timeline_events(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_agent_usage_records_created_at
+          ON agent_usage_records(created_at);
+        CREATE INDEX idx_agent_usage_records_backend_created
+          ON agent_usage_records(backend, created_at);
+        CREATE INDEX idx_agent_usage_records_task
+          ON agent_usage_records(task_id, created_at);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 迁移 agent_usage_records 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

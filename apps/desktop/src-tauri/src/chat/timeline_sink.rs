@@ -100,10 +100,13 @@ pub(crate) fn persist_and_emit_input<R: Runtime>(
     input: AgentTimelineEventInput,
 ) {
     let store = app_handle.state::<LiliaStore>();
-    match store
-        .conn()
-        .and_then(|conn| agent_timeline::insert(&conn, input))
-    {
+    match store.conn().and_then(|conn| {
+        let saved = agent_timeline::insert(&conn, input)?;
+        if let Err(err) = crate::quota_usage::record_from_timeline_event(&conn, &saved) {
+            eprintln!("[quota-usage] persist failed: {err}");
+        }
+        Ok(saved)
+    }) {
         Ok(saved) => {
             let _ = app_handle.emit("agent:timeline", &saved);
             crate::automation::emit_timeline_signal(app_handle, &saved);
