@@ -501,9 +501,34 @@ export type SuggestionItemIncludesGitHubActivityTypeTest = Assert<
         title: "PR #1: 接入 GitHub 活动";
         url: "https://github.com/sena-nana/LiliaCode/pull/1";
       }];
+      localGitContexts: [];
       summary: "跟进 PR";
       reason: "近期 PR 有新活动。";
       prompt: "请继续跟进 PR #1。";
+      generatedAt: 1;
+    },
+    SuggestionItem
+  >
+>;
+
+export type SuggestionItemIncludesLocalGitContextTypeTest = Assert<
+  Extends<
+    {
+      id: "sg-local-1";
+      projectId: "project-1";
+      taskIds: [];
+      source: "local-git";
+      githubActivities: [];
+      localGitContexts: [{
+        id: "local-git-current";
+        branch: "feature/local-git";
+        status: "dirty: 2 changed files";
+        changedFiles: ["M apps/desktop/src-tauri/src/conversation_suggestions.rs"];
+        recentCommits: ["abc1234 add suggestions"];
+      }];
+      summary: "跟进本地变更";
+      reason: "当前分支有未提交变更。";
+      prompt: "请基于 feature/local-git 的未提交变更继续处理。";
       generatedAt: 1;
     },
     SuggestionItem
@@ -518,6 +543,7 @@ export type SuggestionItemIncludesClaudeNativeSourceTypeTest = Assert<
       taskIds: ["task-1"];
       source: "claude";
       githubActivities: [];
+      localGitContexts: [];
       summary: "继续检查建议展示";
       reason: "Claude 根据上一轮对话预测的下一条提示。";
       prompt: "请继续检查 Claude 原生建议展示。";

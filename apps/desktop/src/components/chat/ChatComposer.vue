@@ -421,9 +421,20 @@ function suggestionGitHubSourceLabel(suggestion: SuggestionItem): string {
   return extraCount > 0 ? `${source} +${extraCount}` : source;
 }
 
+function suggestionSourceLabel(suggestion: SuggestionItem): string {
+  const githubLabel = suggestionGitHubSourceLabel(suggestion);
+  if (githubLabel) return githubLabel;
+  const [context] = suggestion.localGitContexts;
+  if (!context) return "";
+  const branch = context.branch.trim();
+  const source = branch ? `本地 Git · ${branch}` : "本地 Git";
+  const extraCount = suggestion.localGitContexts.length - 1;
+  return extraCount > 0 ? `${source} +${extraCount}` : source;
+}
+
 const suggestionViewRows = computed(() =>
   suggestionRows.value.map((suggestion) => {
-    const sourceLabel = suggestionGitHubSourceLabel(suggestion);
+    const sourceLabel = suggestionSourceLabel(suggestion);
     return {
       suggestion,
       sourceLabel,

@@ -32,6 +32,8 @@ const PROMPT_LIMIT: usize = 600;
 const UNFINISHED_SIGNAL_LIMIT: usize = 5;
 const GITHUB_EVENT_FETCH_LIMIT: usize = 30;
 const GITHUB_ACTIVITY_LIMIT: usize = 6;
+const LOCAL_GIT_COMMIT_LIMIT: usize = 3;
+const LOCAL_GIT_FILE_LIMIT: usize = 12;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -64,6 +66,8 @@ pub(crate) struct SuggestionItem {
     pub(crate) task_ids: Vec<String>,
     pub(crate) source: SuggestionItemSource,
     pub(crate) github_activities: Vec<SuggestionGitHubActivityRef>,
+    #[serde(default)]
+    pub(crate) local_git_contexts: Vec<SuggestionLocalGitContextRef>,
     pub(crate) summary: String,
     pub(crate) reason: String,
     pub(crate) prompt: String,
@@ -75,6 +79,7 @@ pub(crate) struct SuggestionItem {
 pub(crate) enum SuggestionItemSource {
     Task,
     Github,
+    LocalGit,
     Claude,
 }
 
@@ -86,6 +91,16 @@ pub(crate) struct SuggestionGitHubActivityRef {
     pub(crate) kind: String,
     pub(crate) title: String,
     pub(crate) url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionLocalGitContextRef {
+    pub(crate) id: String,
+    pub(crate) branch: String,
+    pub(crate) status: String,
+    pub(crate) changed_files: Vec<String>,
+    pub(crate) recent_commits: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,12 +153,19 @@ struct GitHubActivitySample {
 }
 
 #[derive(Debug, Clone)]
+struct LocalGitContextSample {
+    context: SuggestionLocalGitContextRef,
+    fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
 struct SuggestionScope {
     project_id: Option<String>,
     project_name: Option<String>,
     tasks: Vec<TaskSample>,
     github_repo: Option<GitHubRepoRef>,
     github_activities: Vec<GitHubActivitySample>,
+    local_git_contexts: Vec<LocalGitContextSample>,
     latest_updated_at: i64,
 }
 
@@ -253,6 +275,7 @@ pub(crate) fn save_claude_prompt_suggestion<R: Runtime>(
         task_ids: vec![task_id.to_string()],
         source: SuggestionItemSource::Claude,
         github_activities: Vec::new(),
+        local_git_contexts: Vec::new(),
         summary: summarize_claude_prompt_suggestion(&prompt),
         reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
         prompt,
@@ -380,8 +403,14 @@ fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> String {
         .map(|activity| activity.fingerprint.as_str())
         .collect::<Vec<_>>()
         .join("||");
+    let local_git_fingerprint = scope
+        .local_git_contexts
+        .iter()
+        .map(|context| context.fingerprint.as_str())
+        .collect::<Vec<_>>()
+        .join("||");
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
         scope.project_id.as_deref().unwrap_or("__recent__"),
         source_label(&model.source),
         model.backend.as_deref().unwrap_or("assistant-ai"),
@@ -393,7 +422,8 @@ fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> String {
             .as_ref()
             .map(|repo| repo.full_name.as_str())
             .unwrap_or("__no_github_repo__"),
-        github_fingerprint
+        github_fingerprint,
+        local_git_fingerprint
     )
 }
 
@@ -420,7 +450,29 @@ fn build_scope(
                 None
             }
         });
-    build_scope_from_parts(conn, requested_project_id, project, github_context)
+    let local_git_contexts = if github_context.is_none() {
+        project
+            .cwd
+            .as_deref()
+            .and_then(|cwd| match load_local_git_context(cwd) {
+                Ok(context) => context,
+                Err(err) => {
+                    eprintln!("[conversation-suggestions] local git context skipped: {err}");
+                    None
+                }
+            })
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    build_scope_from_parts(
+        conn,
+        requested_project_id,
+        project,
+        github_context,
+        local_git_contexts,
+    )
 }
 
 fn build_scope_from_parts(
@@ -428,6 +480,7 @@ fn build_scope_from_parts(
     requested_project_id: Option<&str>,
     project: ProjectContext,
     github_context: Option<(GitHubRepoRef, Vec<GitHubActivitySample>)>,
+    local_git_contexts: Vec<LocalGitContextSample>,
 ) -> Result<Option<SuggestionScope>, String> {
     let tasks = if let Some(project_id) = requested_project_id {
         load_task_samples(conn, Some(project_id), TASK_CANDIDATE_LIMIT)?
@@ -443,7 +496,12 @@ fn build_scope_from_parts(
         Some((repo, activities)) => (Some(repo), activities),
         None => (None, Vec::new()),
     };
-    if tasks.is_empty() && github_activities.is_empty() {
+    let local_git_contexts = if github_activities.is_empty() {
+        local_git_contexts
+    } else {
+        Vec::new()
+    };
+    if tasks.is_empty() && github_activities.is_empty() && local_git_contexts.is_empty() {
         return Ok(None);
     }
     let latest_updated_at = tasks
@@ -460,6 +518,7 @@ fn build_scope_from_parts(
         tasks,
         github_repo,
         github_activities,
+        local_git_contexts,
         latest_updated_at,
     }))
 }
@@ -732,6 +791,98 @@ fn normalize_push_event(
         details,
         fingerprint,
     })
+}
+
+fn load_local_git_context(cwd: &str) -> Result<Option<LocalGitContextSample>, String> {
+    if git_command_stdout(cwd, ["rev-parse", "--is-inside-work-tree"])?.as_deref() != Some("true") {
+        return Ok(None);
+    }
+    let Some(branch) = local_git_branch(cwd)? else {
+        return Ok(None);
+    };
+    let recent_commits = git_command_stdout(cwd, ["log", "-n", "3", "--pretty=format:%h %s"])?
+        .unwrap_or_default()
+        .lines()
+        .map(compact_line)
+        .filter(|line| !line.is_empty())
+        .take(LOCAL_GIT_COMMIT_LIMIT)
+        .collect::<Vec<_>>();
+    let changed_files = git_command_stdout(
+        cwd,
+        ["status", "--porcelain=v1", "--untracked-files=normal"],
+    )?
+    .unwrap_or_default()
+    .lines()
+    .filter_map(parse_local_git_status_line)
+    .take(LOCAL_GIT_FILE_LIMIT)
+    .collect::<Vec<_>>();
+    if recent_commits.is_empty() && changed_files.is_empty() {
+        return Ok(None);
+    }
+    let status = if changed_files.is_empty() {
+        "clean".to_string()
+    } else {
+        format!("dirty: {} changed files", changed_files.len())
+    };
+    let fingerprint = format!(
+        "{}|{}|{}",
+        branch,
+        recent_commits.join(" / "),
+        changed_files.join(" / ")
+    );
+    Ok(Some(LocalGitContextSample {
+        context: SuggestionLocalGitContextRef {
+            id: "local-git-current".to_string(),
+            branch,
+            status,
+            changed_files,
+            recent_commits,
+        },
+        fingerprint,
+    }))
+}
+
+fn local_git_branch(cwd: &str) -> Result<Option<String>, String> {
+    let branch =
+        git_command_stdout(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])?.unwrap_or_default();
+    if !branch.is_empty() && branch != "HEAD" {
+        return Ok(Some(branch));
+    }
+    git_command_stdout(cwd, ["rev-parse", "--short", "HEAD"])
+}
+
+fn git_command_stdout<const N: usize>(
+    cwd: &str,
+    args: [&str; N],
+) -> Result<Option<String>, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()
+        .map_err(|e| format!("读取本地 Git 上下文失败：{e}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!value.is_empty()).then_some(value))
+}
+
+fn parse_local_git_status_line(line: &str) -> Option<String> {
+    if line.len() < 4 {
+        return None;
+    }
+    let status = line.get(0..2)?.trim();
+    let path = line.get(3..)?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let status = if status.is_empty() {
+        "modified"
+    } else {
+        status
+    };
+    Some(format!("{status} {path}"))
 }
 
 fn load_task_samples(
@@ -1151,12 +1302,13 @@ fn effective_base_url(backend: &str, plan: &BackendConnectionPlan) -> Option<Str
 
 fn build_generation_prompt(scope: &SuggestionScope) -> String {
     let mut lines = vec![
-        "你是 LiliaCode 的新对话建议助手。只能基于下方任务未完成信号或 GitHub 近期活动提出继续处理建议。".to_string(),
-        "只返回 JSON 数组，可返回 []，最多 3 项。每项字段必须是 taskIds、githubActivityIds、summary、reason、prompt。不要 markdown。".to_string(),
-        "taskIds 必须引用下方任务 id；githubActivityIds 必须引用下方 GitHub 活动 id。每项至少引用一个有效 taskId 或 githubActivityId。".to_string(),
+        "你是 LiliaCode 的新对话建议助手。只能基于下方任务未完成信号、GitHub 近期活动或本地 Git 上下文提出继续处理建议。".to_string(),
+        "只返回 JSON 数组，可返回 []，最多 3 项。每项字段必须是 taskIds、githubActivityIds、localGitContextIds、summary、reason、prompt。不要 markdown。".to_string(),
+        "taskIds 必须引用下方任务 id；githubActivityIds 必须引用下方 GitHub 活动 id；localGitContextIds 必须引用下方本地 Git 上下文 id。每项至少引用一个有效 taskId、githubActivityId 或 localGitContextId。".to_string(),
         "summary 控制在 20 个中文字左右；reason 控制在 80 个中文字左右；prompt 是可直接填入对话框的中文提示词，控制在 300 个中文字左右。".to_string(),
-        "不要提出泛化建议、体验优化、新方向、代码审查或测试补齐，除非它们被未完成信号或具体 GitHub 活动明确指向。没有明确可继续处理的信号时返回 []。".to_string(),
+        "不要提出泛化建议、体验优化、新方向、代码审查或测试补齐，除非它们被未完成信号、具体 GitHub 活动或本地 Git 状态明确指向。没有明确可继续处理的信号时返回 []。".to_string(),
         "基于 GitHub 活动的建议必须引用具体 PR、Issue 或 Push，并让 prompt 包含仓库、编号/分支或 commit 摘要等具体上下文。".to_string(),
+        "基于本地 Git 的建议必须引用当前 branch，并让 prompt 包含最近提交、变更文件或未提交状态等具体上下文。".to_string(),
         format!(
             "scopeProjectId: {}",
             scope.project_id.as_deref().unwrap_or("recent-projects")
@@ -1209,6 +1361,26 @@ fn build_generation_prompt(scope: &SuggestionScope) -> String {
             lines.push(format!(
                 "活动细节: {}",
                 truncate_chars(&compact_line(detail), SAMPLE_TEXT_LIMIT)
+            ));
+        }
+    }
+    for context in &scope.local_git_contexts {
+        lines.push(format!(
+            "\n本地 Git 上下文 {} | branch: {} | status: {}",
+            context.context.id,
+            truncate_chars(&compact_line(&context.context.branch), SAMPLE_TEXT_LIMIT),
+            truncate_chars(&compact_line(&context.context.status), SAMPLE_TEXT_LIMIT)
+        ));
+        for commit in &context.context.recent_commits {
+            lines.push(format!(
+                "最近提交: {}",
+                truncate_chars(&compact_line(commit), SAMPLE_TEXT_LIMIT)
+            ));
+        }
+        for file in &context.context.changed_files {
+            lines.push(format!(
+                "变更文件: {}",
+                truncate_chars(&compact_line(file), SAMPLE_TEXT_LIMIT)
             ));
         }
     }
@@ -1311,6 +1483,8 @@ struct RawSuggestion {
     task_ids: Vec<String>,
     #[serde(default, rename = "githubActivityIds")]
     github_activity_ids: Vec<String>,
+    #[serde(default, rename = "localGitContextIds")]
+    local_git_context_ids: Vec<String>,
     summary: Option<String>,
     reason: Option<String>,
     prompt: Option<String>,
@@ -1339,6 +1513,11 @@ fn materialize_items(raw: Vec<RawSuggestion>, scope: &SuggestionScope) -> Vec<Su
         .iter()
         .map(|activity| (activity.id.clone(), activity))
         .collect::<HashMap<_, _>>();
+    let local_git_context_by_id = scope
+        .local_git_contexts
+        .iter()
+        .map(|context| (context.context.id.clone(), context))
+        .collect::<HashMap<_, _>>();
     raw.into_iter()
         .filter_map(|item| {
             let task_ids = item
@@ -1358,7 +1537,14 @@ fn materialize_items(raw: Vec<RawSuggestion>, scope: &SuggestionScope) -> Vec<Su
                     url: activity.url.clone(),
                 })
                 .collect::<Vec<_>>();
-            if task_ids.is_empty() && github_activities.is_empty() {
+            let local_git_contexts = item
+                .local_git_context_ids
+                .into_iter()
+                .filter_map(|context_id| local_git_context_by_id.get(&context_id).copied())
+                .map(|context| context.context.clone())
+                .collect::<Vec<_>>();
+            if task_ids.is_empty() && github_activities.is_empty() && local_git_contexts.is_empty()
+            {
                 return None;
             }
             let summary = truncate_chars(&compact_line(&item.summary?), SUMMARY_LIMIT);
@@ -1371,12 +1557,17 @@ fn materialize_items(raw: Vec<RawSuggestion>, scope: &SuggestionScope) -> Vec<Su
                 id: format!("sg-{}", Uuid::new_v4()),
                 project_id: scope.project_id.clone(),
                 source: if task_ids.is_empty() {
-                    SuggestionItemSource::Github
+                    if github_activities.is_empty() {
+                        SuggestionItemSource::LocalGit
+                    } else {
+                        SuggestionItemSource::Github
+                    }
                 } else {
                     SuggestionItemSource::Task
                 },
                 task_ids,
                 github_activities,
+                local_git_contexts,
                 summary,
                 reason,
                 prompt,
@@ -1491,6 +1682,25 @@ mod tests {
         }
     }
 
+    fn sample_local_git_context(branch: &str) -> LocalGitContextSample {
+        LocalGitContextSample {
+            context: SuggestionLocalGitContextRef {
+                id: "local-git-current".to_string(),
+                branch: branch.to_string(),
+                status: "dirty: 2 changed files".to_string(),
+                changed_files: vec![
+                    "M apps/desktop/src-tauri/src/conversation_suggestions.rs".to_string(),
+                    "?? packages/contracts/src/suggestions.ts".to_string(),
+                ],
+                recent_commits: vec![
+                    "abc1234 add suggestions".to_string(),
+                    "def5678 wire composer".to_string(),
+                ],
+            },
+            fingerprint: format!("{branch}|abc1234 add suggestions|M conversation_suggestions.rs"),
+        }
+    }
+
     fn insert_task(conn: &Connection, id: &str, project_id: &str, archived: bool) {
         conn.execute(
             "INSERT INTO tasks (id, project_id, session_id, title, status, created_at, archived) VALUES (?1, ?2, ?1, ?3, 'running', 1, ?4)",
@@ -1574,6 +1784,7 @@ mod tests {
             latest_updated_at: 1,
             github_repo: None,
             github_activities: Vec::new(),
+            local_git_contexts: Vec::new(),
             tasks: vec![TaskSample {
                 id: "t1".to_string(),
                 title: "x".repeat(200),
@@ -1603,7 +1814,8 @@ mod tests {
         insert_todo(&conn, "done", "已完成事项", true, 0);
 
         let scope =
-            build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None).unwrap();
+            build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
+                .unwrap();
 
         assert!(scope.is_none());
     }
@@ -1616,9 +1828,10 @@ mod tests {
         insert_event(&conn, "todo-task", 20, "继续做权限检查");
         insert_todo(&conn, "todo-task", "补齐权限失败回退", false, 0);
 
-        let scope = build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None)
-            .unwrap()
-            .unwrap();
+        let scope =
+            build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
+                .unwrap()
+                .unwrap();
         let prompt = build_generation_prompt(&scope);
 
         assert_eq!(scope.tasks.len(), 1);
@@ -1644,9 +1857,10 @@ mod tests {
             ]),
         );
 
-        let scope = build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None)
-            .unwrap()
-            .unwrap();
+        let scope =
+            build_scope_from_parts(&conn, Some("p1"), empty_project_context(), None, Vec::new())
+                .unwrap()
+                .unwrap();
         let signals = &scope.tasks[0].unfinished_signals;
 
         assert_eq!(signals, &vec!["todo: 继续同步 pending 状态".to_string()]);
@@ -1742,12 +1956,14 @@ mod tests {
                 sample_github_repo(),
                 vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
             )),
+            vec![sample_local_git_context("feature/local-git")],
         )
         .unwrap()
         .unwrap();
 
         assert!(scope.tasks.is_empty());
         assert_eq!(scope.github_activities.len(), 1);
+        assert!(scope.local_git_contexts.is_empty());
     }
 
     #[test]
@@ -1758,6 +1974,7 @@ mod tests {
             latest_updated_at: 1,
             github_repo: Some(sample_github_repo()),
             github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
+            local_git_contexts: Vec::new(),
             tasks: Vec::new(),
         };
 
@@ -1769,6 +1986,52 @@ mod tests {
     }
 
     #[test]
+    fn scope_can_use_local_git_context_without_unfinished_tasks() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+        insert_task(&conn, "done", "p1", false);
+        insert_event(&conn, "done", 20, "最近对话");
+        insert_todo(&conn, "done", "已完成事项", true, 0);
+
+        let scope = build_scope_from_parts(
+            &conn,
+            Some("p1"),
+            empty_project_context(),
+            None,
+            vec![sample_local_git_context("feature/local-git")],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(scope.tasks.is_empty());
+        assert!(scope.github_activities.is_empty());
+        assert_eq!(scope.local_git_contexts.len(), 1);
+    }
+
+    #[test]
+    fn prompt_includes_local_git_context_ids() {
+        let scope = SuggestionScope {
+            project_id: Some("p1".to_string()),
+            project_name: Some("Lilia".to_string()),
+            latest_updated_at: 1,
+            github_repo: None,
+            github_activities: Vec::new(),
+            local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+            tasks: Vec::new(),
+        };
+
+        let prompt = build_generation_prompt(&scope);
+
+        assert!(prompt.contains("localGitContextIds"));
+        assert!(prompt.contains("本地 Git 上下文 local-git-current"));
+        assert!(prompt.contains("branch: feature/local-git"));
+        assert!(prompt.contains("最近提交: abc1234 add suggestions"));
+        assert!(
+            prompt.contains("变更文件: M apps/desktop/src-tauri/src/conversation_suggestions.rs")
+        );
+    }
+
+    #[test]
     fn materialize_allows_github_only_suggestions() {
         let scope = SuggestionScope {
             project_id: Some("p1".to_string()),
@@ -1776,12 +2039,14 @@ mod tests {
             latest_updated_at: 1,
             github_repo: Some(sample_github_repo()),
             github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
+            local_git_contexts: Vec::new(),
             tasks: Vec::new(),
         };
         let raw = vec![
             RawSuggestion {
                 task_ids: Vec::new(),
                 github_activity_ids: vec!["missing".to_string()],
+                local_git_context_ids: Vec::new(),
                 summary: Some("无效活动".to_string()),
                 reason: Some("引用不存在的 GitHub 活动".to_string()),
                 prompt: Some("请处理不存在的活动。".to_string()),
@@ -1789,6 +2054,7 @@ mod tests {
             RawSuggestion {
                 task_ids: Vec::new(),
                 github_activity_ids: vec!["gh-pr-1".to_string()],
+                local_git_context_ids: Vec::new(),
                 summary: Some("跟进 PR 活动".to_string()),
                 reason: Some("近期 PR 打开后需要继续确认实现范围。".to_string()),
                 prompt: Some(
@@ -1807,6 +2073,48 @@ mod tests {
     }
 
     #[test]
+    fn materialize_allows_local_git_only_suggestions() {
+        let scope = SuggestionScope {
+            project_id: Some("p1".to_string()),
+            project_name: None,
+            latest_updated_at: 1,
+            github_repo: None,
+            github_activities: Vec::new(),
+            local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+            tasks: Vec::new(),
+        };
+        let raw = vec![
+            RawSuggestion {
+                task_ids: Vec::new(),
+                github_activity_ids: Vec::new(),
+                local_git_context_ids: vec!["missing".to_string()],
+                summary: Some("无效本地上下文".to_string()),
+                reason: Some("引用不存在的本地 Git 上下文。".to_string()),
+                prompt: Some("请处理不存在的上下文。".to_string()),
+            },
+            RawSuggestion {
+                task_ids: Vec::new(),
+                github_activity_ids: Vec::new(),
+                local_git_context_ids: vec!["local-git-current".to_string()],
+                summary: Some("跟进本地变更".to_string()),
+                reason: Some("当前分支有未提交变更需要继续处理。".to_string()),
+                prompt: Some(
+                    "请基于 feature/local-git 分支最近提交和未提交变更继续处理本地 Git 上下文。"
+                        .to_string(),
+                ),
+            },
+        ];
+
+        let items = materialize_items(raw, &scope);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source, SuggestionItemSource::LocalGit);
+        assert!(items[0].task_ids.is_empty());
+        assert!(items[0].github_activities.is_empty());
+        assert_eq!(items[0].local_git_contexts[0].id, "local-git-current");
+    }
+
+    #[test]
     fn claude_native_suggestions_are_project_scoped_and_ttl_limited() {
         let now = 10_000;
         let item = SuggestionItem {
@@ -1815,6 +2123,7 @@ mod tests {
             task_ids: vec!["task-1".to_string()],
             source: SuggestionItemSource::Claude,
             github_activities: Vec::new(),
+            local_git_contexts: Vec::new(),
             summary: "继续检查建议展示".to_string(),
             reason: "Claude 根据上一轮对话预测的下一条提示。".to_string(),
             prompt: "请继续检查 Claude 原生建议展示。".to_string(),
@@ -1872,6 +2181,7 @@ mod tests {
             latest_updated_at: 1,
             github_repo: None,
             github_activities: Vec::new(),
+            local_git_contexts: Vec::new(),
             tasks: vec![TaskSample {
                 id: "t1".to_string(),
                 title: "任务 t1".to_string(),
@@ -1889,6 +2199,7 @@ mod tests {
             RawSuggestion {
                 task_ids: Vec::new(),
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("泛化建议".to_string()),
                 reason: Some("没有任务锚点".to_string()),
                 prompt: Some("请随便优化一下。".to_string()),
@@ -1896,6 +2207,7 @@ mod tests {
             RawSuggestion {
                 task_ids: vec!["missing".to_string()],
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("错误锚点".to_string()),
                 reason: Some("引用不存在任务".to_string()),
                 prompt: Some("请处理不存在任务。".to_string()),
@@ -1903,6 +2215,7 @@ mod tests {
             RawSuggestion {
                 task_ids: vec!["t1".to_string()],
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("继续一".to_string()),
                 reason: Some("锚定未完成信号一".to_string()),
                 prompt: Some("请继续处理一。".to_string()),
@@ -1910,6 +2223,7 @@ mod tests {
             RawSuggestion {
                 task_ids: vec!["t1".to_string()],
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("继续二".to_string()),
                 reason: Some("锚定未完成信号二".to_string()),
                 prompt: Some("请继续处理二。".to_string()),
@@ -1917,6 +2231,7 @@ mod tests {
             RawSuggestion {
                 task_ids: vec!["t1".to_string()],
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("继续三".to_string()),
                 reason: Some("锚定未完成信号三".to_string()),
                 prompt: Some("请继续处理三。".to_string()),
@@ -1924,6 +2239,7 @@ mod tests {
             RawSuggestion {
                 task_ids: vec!["t1".to_string()],
                 github_activity_ids: Vec::new(),
+                local_git_context_ids: Vec::new(),
                 summary: Some("继续四".to_string()),
                 reason: Some("超过数量上限".to_string()),
                 prompt: Some("请继续处理四。".to_string()),
@@ -1954,6 +2270,7 @@ mod tests {
             latest_updated_at: 20,
             github_repo: None,
             github_activities: Vec::new(),
+            local_git_contexts: Vec::new(),
             tasks: vec![TaskSample {
                 id: "t1".to_string(),
                 title: "任务 t1".to_string(),
@@ -1987,10 +2304,36 @@ mod tests {
             latest_updated_at: 0,
             github_repo: Some(sample_github_repo()),
             github_activities: vec![sample_github_activity("gh-pr-1", "PR #1: 第一版")],
+            local_git_contexts: Vec::new(),
             tasks: Vec::new(),
         };
         let first = build_cache_key(&scope, &model);
         scope.github_activities[0] = sample_github_activity("gh-pr-1", "PR #1: 第二版");
+        let second = build_cache_key(&scope, &model);
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn cache_key_changes_when_local_git_context_changes() {
+        let model = ModelRequest {
+            source: SuggestionSource::AssistantAi,
+            backend: None,
+            model: "mini".to_string(),
+            base_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+        };
+        let mut scope = SuggestionScope {
+            project_id: Some("p1".to_string()),
+            project_name: None,
+            latest_updated_at: 0,
+            github_repo: None,
+            github_activities: Vec::new(),
+            local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+            tasks: Vec::new(),
+        };
+        let first = build_cache_key(&scope, &model);
+        scope.local_git_contexts[0] = sample_local_git_context("feature/next");
         let second = build_cache_key(&scope, &model);
 
         assert_ne!(first, second);
@@ -2009,6 +2352,7 @@ mod tests {
             task_ids: vec!["t1".to_string()],
             source: SuggestionItemSource::Task,
             github_activities: Vec::new(),
+            local_git_contexts: Vec::new(),
             summary: "继续测试".to_string(),
             reason: "缓存命中需要稳定判断".to_string(),
             prompt: "请验证建议缓存命中。".to_string(),
