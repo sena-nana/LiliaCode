@@ -298,11 +298,9 @@ export type ChatRuntimePhase =
 export interface ChatRuntimeSnapshot {
   taskId: string;
   phase: ChatRuntimePhase;
-  runtimeChannel: AgentRuntimeChannel | null;
   backend: ChatBackendKind | null;
   turnId: string | null;
   queuedCount: number;
-  pendingControlCount: number;
   pendingRollback: boolean;
   pendingResetCleanup: boolean;
   rollback?: ChatRollbackResult | null;
@@ -311,8 +309,6 @@ export interface ChatRuntimeSnapshot {
 export type PermissionMode = "full" | "ask" | "readonly";
 
 export type ChatBackendKind = "claude" | "codex";
-
-export type AgentRuntimeChannel = "builtin" | "mutsuki_core";
 
 export interface ChatComposerState {
   taskId: string;
@@ -367,6 +363,5 @@ export interface ToolConsentResponsePayload {
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
-  agentRuntimeChannel: AgentRuntimeChannel;
   codexProfile: CodexProfileSettings;
 }

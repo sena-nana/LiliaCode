@@ -549,7 +549,6 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
     {
       nonInterruptMode: false;
       debug: true;
-      agentRuntimeChannel: "mutsuki_core";
       codexProfile: CodexProfileSettings;
     },
     AgentInteractionSettings

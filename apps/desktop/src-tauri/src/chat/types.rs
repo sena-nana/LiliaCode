@@ -307,9 +307,7 @@ pub(crate) enum ChatRuntimeCommand {
         include_system_messages: Option<bool>,
     },
     #[serde(rename = "lilia_provider_settings")]
-    LiliaProviderSettings {
-        action: String,
-    },
+    LiliaProviderSettings { action: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -364,11 +362,9 @@ pub(crate) struct ChatRollbackResult {
 pub(crate) struct ChatRuntimeSnapshot {
     pub(crate) task_id: String,
     pub(crate) phase: String,
-    pub(crate) runtime_channel: Option<String>,
     pub(crate) backend: Option<String>,
     pub(crate) turn_id: Option<String>,
     pub(crate) queued_count: usize,
-    pub(crate) pending_control_count: usize,
     pub(crate) pending_rollback: bool,
     pub(crate) pending_reset_cleanup: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

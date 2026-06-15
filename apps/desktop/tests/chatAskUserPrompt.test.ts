@@ -733,7 +733,6 @@ describe("chat AskUser prompt", () => {
     replaceMockTimelineEvents("t-002", [persistedToolConsentEvent()]);
     setMockRuntimeSnapshot("t-002", {
       phase: "abandoned",
-      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-tool",
     });
@@ -949,7 +948,6 @@ describe("chat AskUser prompt", () => {
     it("持久化 rollback 草稿在冷启动时恢复出草稿内容并 ack", async () => {
       setMockRuntimeSnapshot("t-002", {
         phase: "idle",
-        runtimeChannel: null,
         backend: null,
         turnId: null,
         pendingRollback: true,

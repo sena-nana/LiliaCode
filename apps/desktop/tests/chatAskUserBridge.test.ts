@@ -199,7 +199,6 @@ describe("chat AskUser bridge service", () => {
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: false,
       debug: false,
-      agentRuntimeChannel: "builtin",
       codexProfile: {
         profile: "default",
         model: null,
@@ -210,13 +209,11 @@ describe("chat AskUser bridge service", () => {
 
     await setAgentInteractionSettings({
       nonInterruptMode: true,
-      agentRuntimeChannel: "mutsuki_core",
     });
 
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: true,
       debug: false,
-      agentRuntimeChannel: "mutsuki_core",
       codexProfile: {
         profile: "default",
         model: null,

@@ -8,7 +8,6 @@ import {
 const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
   nonInterruptMode: false,
   debug: false,
-  agentRuntimeChannel: "builtin",
   codexProfile: {
     profile: "default",
     model: null,
@@ -54,7 +53,6 @@ export function normalizeAgentInteractionSettings(
   return {
     nonInterruptMode: input?.nonInterruptMode === true,
     debug: input?.debug === true,
-    agentRuntimeChannel: normalizeRuntimeChannel(input?.agentRuntimeChannel),
     codexProfile: {
       profile: normalizeProfile(codexProfile?.profile),
       model: normalizeNullableText(codexProfile?.model),
@@ -67,10 +65,6 @@ export function normalizeAgentInteractionSettings(
       excludeTurns: uniqueTrimmedStrings(codexProfile?.excludeTurns),
     },
   };
-}
-
-function normalizeRuntimeChannel(value: unknown): AgentInteractionSettings["agentRuntimeChannel"] {
-  return value === "mutsuki_core" ? "mutsuki_core" : "builtin";
 }
 
 function normalizeJsonObject(value: unknown): Record<string, unknown> | null {
@@ -126,7 +120,6 @@ export async function updateAgentInteractionSettings(
   if (
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&
-    next.agentRuntimeChannel === previous.agentRuntimeChannel &&
     sameCodexProfile(next.codexProfile, previous.codexProfile)
   ) {
     return previous;
@@ -146,7 +139,6 @@ export function useAgentInteractionSettings() {
     settings: readonly(settings),
     nonInterruptMode: computed(() => settings.value.nonInterruptMode),
     debug: computed(() => settings.value.debug),
-    agentRuntimeChannel: computed(() => settings.value.agentRuntimeChannel),
     load: loadAgentInteractionSettings,
     update: updateAgentInteractionSettings,
   };

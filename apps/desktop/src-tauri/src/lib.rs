@@ -33,8 +33,6 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
-pub(crate) const RUNTIME_CHANNEL_BUILTIN: &str = "builtin";
-pub(crate) const RUNTIME_CHANNEL_MUTSUKI_CORE: &str = "mutsuki_core";
 pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
     ("gpt-5.5", "GPT-5.5"),
     ("gpt-5.4", "GPT-5.4"),
@@ -77,32 +75,12 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                 let restored = chat::state::restore_active_runtime_sessions(&conn, &chat_store);
                 for persisted in restored {
                     let app_handle = app.clone();
-                    std::thread::spawn(move || match persisted.turn.runtime_channel.as_str() {
-                        RUNTIME_CHANNEL_MUTSUKI_CORE => {
-                            if let Err(err) = chat::mutsuki_core_runtime::resume_supervised_turn(
-                                app_handle.clone(),
-                                persisted.clone(),
-                            ) {
-                                handle_runtime_restore_failure(
-                                    &app_handle,
-                                    &persisted,
-                                    "MutsukiCore",
-                                    err,
-                                );
-                            }
-                        }
-                        _ => {
-                            if let Err(err) = chat::runner::resume_persisted_node_agent_runner(
-                                app_handle.clone(),
-                                persisted.clone(),
-                            ) {
-                                handle_runtime_restore_failure(
-                                    &app_handle,
-                                    &persisted,
-                                    "builtin",
-                                    err,
-                                );
-                            }
+                    std::thread::spawn(move || {
+                        if let Err(err) = chat::runner::resume_persisted_node_agent_runner(
+                            app_handle.clone(),
+                            persisted.clone(),
+                        ) {
+                            handle_runtime_restore_failure(&app_handle, &persisted, "builtin", err);
                         }
                     });
                 }

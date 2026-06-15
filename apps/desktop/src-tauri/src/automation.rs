@@ -186,10 +186,20 @@ fn agent_turn_is_still_recoverable(
     chat_store: &ChatStore,
     task_id: &str,
 ) -> Result<bool, String> {
-    if chat_store.running_turns.lock().unwrap().contains_key(task_id) {
+    if chat_store
+        .running_turns
+        .lock()
+        .unwrap()
+        .contains_key(task_id)
+    {
         return Ok(true);
     }
-    if chat_store.pending_turns.lock().unwrap().contains_key(task_id) {
+    if chat_store
+        .pending_turns
+        .lock()
+        .unwrap()
+        .contains_key(task_id)
+    {
         return Ok(true);
     }
     let pending_count: i64 = conn
@@ -940,7 +950,7 @@ mod tests {
     use super::*;
     use crate::automation::types::{AutomationNodePosition, AutomationScopeFilter};
     use crate::chat::state::{ChatStore, RunningTurn};
-    use crate::{BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN};
+    use crate::BACKEND_CODEX;
     use rusqlite::Connection;
 
     fn node(id: &str, kind: &str) -> AutomationNode {
@@ -1175,7 +1185,6 @@ mod tests {
             RunningTurn {
                 turn_id: "turn-1".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
