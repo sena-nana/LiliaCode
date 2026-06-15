@@ -137,17 +137,6 @@ pub(crate) fn clear_runtime_finalization(conn: &Connection, task_id: &str) -> Re
     .map_err(|e| format!("清理 runtime finalization 失败：{e}"))
 }
 
-pub(crate) fn clear_runtime_finalization_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    task_id: &str,
-) -> Result<(), String> {
-    let Some(store) = app.try_state::<LiliaStore>() else {
-        return Ok(());
-    };
-    let conn = store.conn()?;
-    clear_runtime_finalization(&conn, task_id)
-}
-
 pub(crate) fn load_runtime_state(
     conn: &Connection,
     chat_store: &ChatStore,
@@ -821,23 +810,6 @@ pub(crate) fn clear_pending_turns(store: &ChatStore, task_id: &str) -> Vec<Strin
         .unwrap_or_default()
 }
 
-pub(crate) fn clear_pending_turns_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-) -> Vec<String> {
-    let mut guide_ids = clear_pending_turns(store, task_id);
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            match clear_persisted_pending_turns(&conn, task_id) {
-                Ok(mut persisted) => guide_ids.append(&mut persisted),
-                Err(err) => eprintln!("[chat-runtime] clear persisted pending turns failed: {err}"),
-            }
-        }
-    }
-    guide_ids
-}
-
 pub(crate) fn clear_persisted_pending_turns_for_app<R: Runtime>(
     app: &AppHandle<R>,
     task_id: &str,
@@ -913,6 +885,7 @@ pub(crate) fn clear_running_handles(store: &ChatStore, task_id: &str) -> Option<
     store.running_turns.lock().unwrap().remove(task_id)
 }
 
+#[cfg(test)]
 pub(crate) fn set_pending_rollback(store: &ChatStore, task_id: &str, rollback: ChatRollbackResult) {
     store
         .pending_rollbacks
@@ -921,6 +894,7 @@ pub(crate) fn set_pending_rollback(store: &ChatStore, task_id: &str, rollback: C
         .insert(task_id.to_string(), rollback);
 }
 
+#[cfg(test)]
 pub(crate) fn persist_pending_rollback(
     conn: &Connection,
     task_id: &str,
@@ -939,22 +913,6 @@ pub(crate) fn persist_pending_rollback(
     )
     .map(|_| ())
     .map_err(|e| format!("写入 runtime rollback 失败：{e}"))
-}
-
-pub(crate) fn set_pending_rollback_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-    rollback: ChatRollbackResult,
-) {
-    set_pending_rollback(store, task_id, rollback.clone());
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            if let Err(err) = persist_pending_rollback(&conn, task_id, &rollback) {
-                eprintln!("[chat-runtime] persist pending rollback failed: {err}");
-            }
-        }
-    }
 }
 
 pub(crate) fn take_pending_rollback(
@@ -1017,6 +975,7 @@ pub(crate) fn clear_persisted_pending_rollback(
     .map_err(|e| format!("清理 runtime rollback 失败：{e}"))
 }
 
+#[cfg(test)]
 pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
     store
         .pending_reset_cleanups
@@ -1025,6 +984,7 @@ pub(crate) fn mark_pending_reset_cleanup(store: &ChatStore, task_id: &str) {
         .insert(task_id.to_string());
 }
 
+#[cfg(test)]
 pub(crate) fn persist_pending_reset_cleanup(
     conn: &Connection,
     task_id: &str,
@@ -1040,21 +1000,6 @@ pub(crate) fn persist_pending_reset_cleanup(
     )
     .map(|_| ())
     .map_err(|e| format!("写入 runtime reset cleanup 失败：{e}"))
-}
-
-pub(crate) fn mark_pending_reset_cleanup_for_app<R: Runtime>(
-    app: &AppHandle<R>,
-    store: &ChatStore,
-    task_id: &str,
-) {
-    mark_pending_reset_cleanup(store, task_id);
-    if let Some(lilia_store) = app.try_state::<LiliaStore>() {
-        if let Ok(conn) = lilia_store.conn() {
-            if let Err(err) = persist_pending_reset_cleanup(&conn, task_id) {
-                eprintln!("[chat-runtime] persist pending reset cleanup failed: {err}");
-            }
-        }
-    }
 }
 
 pub(crate) fn take_pending_reset_cleanup(store: &ChatStore, task_id: &str) -> bool {

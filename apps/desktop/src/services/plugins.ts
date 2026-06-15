@@ -30,16 +30,6 @@ export function pluginsOverview(projectCwd?: string | null): Promise<PluginsOver
   });
 }
 
-export function listSkills(
-  scope: PluginScope,
-  projectCwd?: string | null,
-): Promise<PluginSkill[]> {
-  return invoke<PluginSkill[]>("plugins_list_skills", {
-    scope,
-    projectCwd: projectCwd ?? null,
-  });
-}
-
 export function createSkill(
   scope: PluginScope,
   projectCwd: string | null,
@@ -78,10 +68,6 @@ export function setSkillEnabled(
     name,
     enabled,
   });
-}
-
-export function listPackages(scope: PluginScope): Promise<PluginPackage[]> {
-  return invoke<PluginPackage[]>("plugins_list_packages", { scope });
 }
 
 export function setPackageEnabled(

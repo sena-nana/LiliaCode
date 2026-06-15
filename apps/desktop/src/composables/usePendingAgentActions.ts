@@ -9,15 +9,6 @@ import type {
   ToolConsentUpdatedInput,
 } from "../services/chat";
 
-export type PendingAgentActionKind =
-  | "tool_consent"
-  | "ask_user"
-  | "plan_approval"
-  | "mcp_elicitation"
-  | "permission_approval"
-  | "architecture_change"
-  | "title_update";
-
 export type PendingAgentAction =
   | {
       kind: "tool_consent";

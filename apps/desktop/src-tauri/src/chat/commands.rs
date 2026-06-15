@@ -8,14 +8,12 @@ use crate::chat::slash_commands::{
     emit_slash_command_done, execute_slash_command, persist_and_emit_slash_command_result,
 };
 use crate::chat::state::{
-    clear_pending_turns, clear_pending_turns_for_app, clear_persisted_pending_rollback,
-    clear_persisted_pending_turns_for_app, clear_running_handles,
-    clear_runtime_finalization_for_app, clear_task_runtime_state_for_reset, default_composer,
-    mark_pending_reset_cleanup_for_app, model_options_for_backend, new_chat_message_id,
-    normalize_composer_for_backend, now_millis, queue_pending_turn_for_app,
-    reset_cleared_guide_queue, set_guide_status_for_app, should_persist_user_message,
-    stop_running_turn, ChatStore, RunningTurn,
+    clear_persisted_pending_rollback, default_composer, model_options_for_backend,
+    new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn_for_app,
+    set_guide_status_for_app, should_persist_user_message, stop_running_turn, ChatStore,
 };
+#[cfg(test)]
+use crate::chat::state::{clear_pending_turns, RunningTurn};
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
@@ -24,6 +22,7 @@ use crate::chat::types::{
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
 
+#[cfg(test)]
 #[derive(Debug, Default, Eq, PartialEq)]
 pub(crate) struct ResetSessionPlan {
     pub(crate) cleared_guide_ids: Vec<String>,
@@ -298,6 +297,7 @@ pub(crate) fn control_event_attributes(
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn plan_reset_session(
     store: &ChatStore,
     task_id: &str,
@@ -403,47 +403,5 @@ pub fn chat_set_composer_state(
     attach_stdin_delivery(&mut attributes, &write_result);
     if let Err(err) = write_result {
         eprintln!("[chat] runtime settings update failed: {err}");
-    }
-}
-
-#[tauri::command]
-pub fn chat_reset_session(task_id: String, chat_store: State<'_, ChatStore>, app: AppHandle) {
-    mark_pending_reset_cleanup_for_app(&app, &chat_store, &task_id);
-    let running_turn = {
-        let turns = chat_store.running_turns.lock().unwrap();
-        turns.get(&task_id).cloned()
-    };
-    let mut plan = plan_reset_session(&chat_store, &task_id, running_turn.as_ref());
-    plan.cleared_guide_ids
-        .append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
-    plan.stopped_running = match stop_running_turn(&app, &chat_store, &task_id, false, true) {
-        Ok(stopped) => stopped,
-        Err(err) => {
-            eprintln!("[chat] reset running turn failed: {err}");
-            false
-        }
-    };
-    reset_cleared_guide_queue(&app, plan.cleared_guide_ids);
-    chat_store
-        .interrupted_turns
-        .lock()
-        .unwrap()
-        .remove(&task_id);
-    if !plan.stopped_running {
-        chat_store.reset_turns.lock().unwrap().remove(&task_id);
-        chat_store
-            .pending_reset_cleanups
-            .lock()
-            .unwrap()
-            .remove(&task_id);
-        if let Err(err) = clear_runtime_finalization_for_app(&app, &task_id) {
-            eprintln!("[chat] clear pending reset finalization failed: {err}");
-        }
-    }
-    if plan.immediate_cleanup {
-        chat_store.running_tasks.lock().unwrap().remove(&task_id);
-        clear_running_handles(&chat_store, &task_id);
-        let _ = clear_pending_turns_for_app(&app, &chat_store, &task_id);
-        clear_task_runtime_state_for_reset(&app, &chat_store, &task_id);
     }
 }

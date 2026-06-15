@@ -11,36 +11,52 @@ let unlistenInteraction: (() => void) | null = null;
 let unlistenConversationActivity: (() => void) | null = null;
 let unlistenMainNavigate: (() => void) | null = null;
 let unlistenPopupNavigate: (() => void) | null = null;
+let disposed = false;
 
 const router = useRouter();
 const appWindow = getCurrentWindow();
 const isMainWindow = appWindow.label === "main";
 const isPopupWindow = appWindow.label.startsWith("popup-");
 
+function keepCleanup(cleanup: () => void): (() => void) | null {
+  if (disposed) {
+    cleanup();
+    return null;
+  }
+  return cleanup;
+}
+
 onMounted(async () => {
-  unlistenInteraction = await installAgentInteractionBridge();
-  unlistenConversationActivity = await installConversationActivityBridge();
+  unlistenInteraction = keepCleanup(await installAgentInteractionBridge());
+  if (!unlistenInteraction) return;
+
+  unlistenConversationActivity = keepCleanup(await installConversationActivityBridge());
+  if (!unlistenConversationActivity) return;
 
   if (isMainWindow) {
-    unlistenMainNavigate = await listen<{ route: string }>("lilia:main:navigate", (event) => {
+    const mainNavigateCleanup = await listen<{ route: string }>("lilia:main:navigate", (event) => {
       const route = event.payload.route;
       if (typeof route === "string" && route.startsWith("/")) {
         void router.push(route);
       }
     });
+    unlistenMainNavigate = keepCleanup(mainNavigateCleanup);
+    if (!unlistenMainNavigate) return;
   }
 
   if (isPopupWindow) {
-    unlistenPopupNavigate = await listen<{ route: string }>("lilia:popup:navigate", (event) => {
+    const popupNavigateCleanup = await listen<{ route: string }>("lilia:popup:navigate", (event) => {
       const route = event.payload.route;
       if (typeof route === "string" && route.startsWith("/popup/")) {
         void router.replace(route);
       }
     });
+    unlistenPopupNavigate = keepCleanup(popupNavigateCleanup);
   }
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   unlistenInteraction?.();
   unlistenConversationActivity?.();
   unlistenMainNavigate?.();

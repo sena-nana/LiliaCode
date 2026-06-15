@@ -154,6 +154,10 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
       if (seq === popupContextSeq && taskId === props.taskId && projectId === props.projectId) {
         popupContextHydrating.value = false;
         popupContextHydrated.value = true;
+        const routeState = resolveConversationRouteState(projectId, taskId);
+        if (routeState.isLostDraft) {
+          void router.replace(popupNewDraftRoute(projectId));
+        }
       }
     }
   }
@@ -209,17 +213,6 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     () => props.projectId,
     (projectId) => {
       if (projectId) void rememberPopupLastProject(projectId);
-    },
-    { immediate: true },
-  );
-
-  watch(
-    () => [props.variant, props.projectId, props.taskId, popupContextHydrated.value] as const,
-    ([variant, projectId, _taskId, contextHydrated]) => {
-      if (variant !== "popup") return;
-      if (contextHydrated && conversationRouteState.value.isLostDraft) {
-        void router.replace(popupNewDraftRoute(projectId));
-      }
     },
     { immediate: true },
   );
