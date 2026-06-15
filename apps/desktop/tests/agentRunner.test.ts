@@ -50,6 +50,9 @@ import {
   createCodexAppServer,
 } from "../agent-runner/codex/appServer.mjs";
 import {
+  readCodexAccountQuotaStatus,
+} from "../agent-runner/codex/accountQuota.mjs";
+import {
   archiveCodexThread,
   cleanCodexThreadBackgroundTerminals,
   codexHistoryTimelineInputs,
@@ -2223,6 +2226,94 @@ describe("Codex app-server mapping", () => {
     expect(calls[0][2]).toMatchObject({ success: true });
     const output = JSON.parse(calls[0][2].contentItems[0].text);
     expect(output.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
+  });
+
+  function mockQuotaServer(
+    read: (attempt: number) => unknown,
+  ): { server: any; requests: string[] } {
+    const requests: string[] = [];
+    let readAttempts = 0;
+    return {
+      requests,
+      server: {
+        request: async (method: string) => {
+          requests.push(method);
+          if (method === "initialize") return {};
+          if (method === "account/rateLimits/read") {
+            readAttempts += 1;
+            return read(readAttempts);
+          }
+          throw new Error(`unexpected method ${method}`);
+        },
+        notify: () => {},
+        close: () => {},
+      },
+    };
+  }
+
+  it("Codex account quota reads Spark quota from named Codex rate limit", async () => {
+    const { server, requests } = mockQuotaServer(() => ({
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          planType: "pro",
+          primary: { usedPercent: 14, windowDurationMins: 300, resetsAt: 10 },
+          secondary: { usedPercent: 14, windowDurationMins: 10080, resetsAt: 20 },
+        },
+        codex_bengalfox: {
+          limitId: "codex_bengalfox",
+          limitName: "GPT-5.3-Codex-Spark",
+          planType: "pro",
+          primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 30 },
+          secondary: { usedPercent: 18, windowDurationMins: 10080, resetsAt: 40 },
+        },
+      },
+    }));
+
+    const status = await readCodexAccountQuotaStatus({
+      createServer: () => server as any,
+    });
+
+    expect(requests).toEqual(["initialize", "account/rateLimits/read"]);
+    expect(status.fiveHour?.usedPercent).toBe(14);
+    expect(status.weekly?.usedPercent).toBe(14);
+    expect(status.sparkFiveHour?.usedPercent).toBe(0);
+    expect(status.sparkWeekly?.usedPercent).toBe(18);
+  });
+
+  it("Codex account quota retries transient wham usage fetch failures", async () => {
+    const { server, requests } = mockQuotaServer((attempt) => {
+      if (attempt === 1) {
+        throw new Error(
+          "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)",
+        );
+      }
+      return {
+        rateLimitsByLimitId: {
+          codex: {
+            limitId: "codex",
+            planType: "pro",
+            primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 10 },
+            secondary: { usedPercent: 34, windowDurationMins: 10080, resetsAt: 20 },
+          },
+        },
+      };
+    });
+
+    const status = await readCodexAccountQuotaStatus({
+      createServer: () => server as any,
+      retries: 1,
+      retryDelayMs: 0,
+    });
+
+    expect(requests).toEqual([
+      "initialize",
+      "account/rateLimits/read",
+      "account/rateLimits/read",
+    ]);
+    expect(status.error).toBeNull();
+    expect(status.fiveHour?.usedPercent).toBe(12);
+    expect(status.weekly?.usedPercent).toBe(34);
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {

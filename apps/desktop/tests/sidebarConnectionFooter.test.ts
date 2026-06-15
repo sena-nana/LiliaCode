@@ -50,6 +50,16 @@ function officialQuota(overrides: Record<string, unknown> = {}) {
       windowDurationMins: 10080,
       resetsAt: 1_800_300_000,
     },
+    sparkFiveHour: {
+      usedPercent: 12,
+      windowDurationMins: 300,
+      resetsAt: 1_800_060_000,
+    },
+    sparkWeekly: {
+      usedPercent: 80,
+      windowDurationMins: 10080,
+      resetsAt: 1_800_360_000,
+    },
     fetchedAt: 1_800_000_000_000,
     error: null,
     ...overrides,
@@ -110,12 +120,19 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(view.queryByText("周额度")).not.toBeInTheDocument();
     expect(view.getByText("5h · 剩余 58%")).toBeInTheDocument();
     expect(view.getByText("7d · 剩余 9%")).toBeInTheDocument();
+    expect(view.queryByText("Spark额度")).not.toBeInTheDocument();
+    expect(view.getByText("5h · 剩余 88% · Spark")).toBeInTheDocument();
+    expect(view.getByText("7d · 剩余 20% · Spark")).toBeInTheDocument();
     expect(view.getByText("刷新 01/15 16:00")).toBeInTheDocument();
     expect(view.getByText("刷新 01/19 03:20")).toBeInTheDocument();
+    expect(view.getByText("刷新 01/16 08:40")).toBeInTheDocument();
+    expect(view.getByText("刷新 01/19 20:00")).toBeInTheDocument();
     const meters = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
-    expect(meters).toHaveLength(2);
+    expect(meters).toHaveLength(4);
     expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
     expect(meters[1]).toHaveStyle({ "--quota-progress": "9" });
+    expect(meters[2]).toHaveStyle({ "--quota-progress": "88" });
+    expect(meters[3]).toHaveStyle({ "--quota-progress": "20" });
   });
 
   it("keeps the quota popover error state when the official quota call fails", async () => {
@@ -125,6 +142,8 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       available: false,
       fiveHour: null,
       weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
       error: "Codex 官方额度接口未返回可识别的额度数据。",
     }));
 

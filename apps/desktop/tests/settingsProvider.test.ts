@@ -167,7 +167,12 @@ describe("Settings provider switch", () => {
     expect(view.getByText("40%")).toBeInTheDocument();
     expect(view.getByText("剩余 75%")).toBeInTheDocument();
     expect(view.getByText("剩余 60%")).toBeInTheDocument();
-    expect(view.getAllByText(/^重置 /)).toHaveLength(2);
+    expect(view.getByText("Spark额度")).toBeInTheDocument();
+    expect(view.getByText("15%")).toBeInTheDocument();
+    expect(view.getByText("70%")).toBeInTheDocument();
+    expect(view.getByText("剩余 85%")).toBeInTheDocument();
+    expect(view.getByText("剩余 30%")).toBeInTheDocument();
+    expect(view.getAllByText(/^重置 /)).toHaveLength(4);
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
@@ -206,6 +211,8 @@ describe("Settings provider switch", () => {
       rateLimitReachedType: null,
       fiveHour: null,
       weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
       fetchedAt: Date.now(),
       error: "Codex 未登录",
     });

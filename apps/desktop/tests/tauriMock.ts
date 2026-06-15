@@ -763,6 +763,8 @@ function createMockCodexAccountQuotaStatus() {
       rateLimitReachedType: null,
       fiveHour: null,
       weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
       fetchedAt: Date.now(),
       error: null,
     };
@@ -784,6 +786,16 @@ function createMockCodexAccountQuotaStatus() {
       usedPercent: 40,
       windowDurationMins: 10080,
       resetsAt: nowSeconds + 4 * 86_400,
+    },
+    sparkFiveHour: {
+      usedPercent: 15,
+      windowDurationMins: 300,
+      resetsAt: nowSeconds + 2 * 60 * 60,
+    },
+    sparkWeekly: {
+      usedPercent: 70,
+      windowDurationMins: 10080,
+      resetsAt: nowSeconds + 2 * 86_400,
     },
     fetchedAt: Date.now(),
     error: null,

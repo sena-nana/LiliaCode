@@ -198,6 +198,8 @@ pub struct CodexAccountQuotaStatus {
     pub rate_limit_reached_type: Option<String>,
     pub five_hour: Option<CodexAccountQuotaWindow>,
     pub weekly: Option<CodexAccountQuotaWindow>,
+    pub spark_five_hour: Option<CodexAccountQuotaWindow>,
+    pub spark_weekly: Option<CodexAccountQuotaWindow>,
     pub fetched_at: i64,
     pub error: Option<String>,
 }
@@ -246,6 +248,8 @@ fn codex_account_quota_unavailable(
         rate_limit_reached_type: None,
         five_hour: None,
         weekly: None,
+        spark_five_hour: None,
+        spark_weekly: None,
         fetched_at: now_millis(),
         error,
     }

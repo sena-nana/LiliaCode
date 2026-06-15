@@ -102,12 +102,20 @@ const isCodexOfficialAccount = computed(() =>
 );
 
 const quotaRows = computed(() => [
-  { key: "fiveHour", window: officialQuota.value?.fiveHour },
-  { key: "weekly", window: officialQuota.value?.weekly },
+  { key: "fiveHour", window: officialQuota.value?.fiveHour, suffix: "" },
+  { key: "weekly", window: officialQuota.value?.weekly, suffix: "" },
 ] as const);
+const sparkQuotaRows = computed(() => [
+  { key: "sparkFiveHour", window: officialQuota.value?.sparkFiveHour, suffix: "Spark" },
+  { key: "sparkWeekly", window: officialQuota.value?.sparkWeekly, suffix: "Spark" },
+] as const);
+const quotaDetailRows = computed(() => [
+  ...quotaRows.value,
+  ...sparkQuotaRows.value.filter((row) => row.window),
+]);
 
 const shouldShowQuotaRings = computed(() =>
-  isCodexOfficialAccount.value && officialQuota.value?.available === true,
+  isCodexOfficialAccount.value && Boolean(officialQuota.value?.fiveHour || officialQuota.value?.weekly),
 );
 
 function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
@@ -120,6 +128,8 @@ function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
     rateLimitReachedType: null,
     fiveHour: null,
     weekly: null,
+    sparkFiveHour: null,
+    sparkWeekly: null,
     fetchedAt: Date.now(),
     error: String(error),
   };
@@ -148,9 +158,10 @@ function quotaWindowShortLabel(window: CodexAccountQuotaWindow | null | undefine
   return `${mins}m`;
 }
 
-function quotaRemainingLine(window: CodexAccountQuotaWindow | null | undefined): string {
+function quotaRemainingLine(window: CodexAccountQuotaWindow | null | undefined, suffix = ""): string {
   if (!window) return "额度 · 暂无数据";
-  return `${quotaWindowShortLabel(window)} · 剩余 ${formatPercent(quotaRemainingPercent(window))}`;
+  const base = `${quotaWindowShortLabel(window)} · 剩余 ${formatPercent(quotaRemainingPercent(window))}`;
+  return suffix ? `${base} · ${suffix}` : base;
 }
 
 async function loadOfficialQuota() {
@@ -265,7 +276,7 @@ onMounted(() => {
       class="sb-conn-popover"
     >
       <span v-if="officialQuota?.available" class="sb-conn-popover__quota-list">
-        <span v-for="row in quotaRows" :key="row.key" class="sb-conn-popover__quota-row">
+        <span v-for="row in quotaDetailRows" :key="row.key" class="sb-conn-popover__quota-row">
           <span
             class="sb-conn-popover__quota-meter"
             :class="quotaRingTone(row.window)"
@@ -275,7 +286,7 @@ onMounted(() => {
             <span />
           </span>
           <span class="sb-conn-popover__quota-foot">
-            <span>{{ quotaRemainingLine(row.window) }}</span>
+            <span>{{ quotaRemainingLine(row.window, row.suffix) }}</span>
             <span>刷新 {{ formatUnixSeconds(row.window?.resetsAt) }}</span>
           </span>
         </span>

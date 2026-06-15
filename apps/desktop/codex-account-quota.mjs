@@ -18,6 +18,8 @@ main().catch((err) => {
     rateLimitReachedType: null,
     fiveHour: null,
     weekly: null,
+    sparkFiveHour: null,
+    sparkWeekly: null,
     fetchedAt: Date.now(),
     error: err?.message || String(err),
   });
