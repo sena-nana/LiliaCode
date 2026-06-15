@@ -54,7 +54,6 @@ const OP_INTERRUPT_REQUEST: &str = "lilia.runtime.interrupt_request";
 const OP_RESET_REQUEST: &str = "lilia.runtime.reset_request";
 const OP_STOP_MARKS_READ: &str = "lilia.runtime.stop_marks_read";
 const OP_SESSION_CHECKPOINT: &str = "lilia.runtime.session_checkpoint";
-pub(crate) const OP_QUOTA_QUERY_USAGE: &str = "lilia.quota.query_usage";
 const CONTROL_PAYLOAD_SCHEMA_ID: &str = "lilia.runtime.control";
 const RUNTIME_SCHEDULER_MAX_TICKS: usize = 30_000;
 const RUNTIME_SCHEDULER_IDLE_TICK_LIMIT: usize = 18_750;
@@ -492,43 +491,6 @@ impl<R: Runtime> LiliaRuntimeBackend<R> {
         })
     }
 
-    fn invoke_quota_query_usage(
-        &mut self,
-        payload: JsonValue,
-        events: &mut dyn BackendEventSink,
-    ) -> RuntimeResult<BackendPayload> {
-        let result = (|| {
-            let input: crate::quota_usage::QuotaUsageQueryInput =
-                serde_json::from_value(payload.clone()).map_err(|e| e.to_string())?;
-            let store = self
-                .app
-                .try_state::<crate::store::LiliaStore>()
-                .ok_or_else(|| "LiliaStore is not available".to_string())?;
-            let conn = store.conn()?;
-            crate::quota_usage::query_usage(&conn, input, now_millis())
-        })();
-        match result {
-            Ok(value) => Ok(BackendPayload::Json(json!({
-                "ok": true,
-                "operation": OP_QUOTA_QUERY_USAGE,
-                "result": value,
-            }))),
-            Err(message) => {
-                events.record_backend_event(
-                    Some(&self.context.agent_id),
-                    "quota.query_usage.error",
-                    BTreeMap::new(),
-                    Some(runtime_backend_error(OP_QUOTA_QUERY_USAGE.to_string())),
-                );
-                Ok(BackendPayload::Json(json!({
-                    "ok": false,
-                    "operation": OP_QUOTA_QUERY_USAGE,
-                    "error": message,
-                })))
-            }
-        }
-    }
-
     fn take_output(&mut self) -> Option<RunnerOutput> {
         self.output.take()
     }
@@ -918,7 +880,6 @@ impl<R: Runtime> OperationBackend for LiliaRuntimeBackend<R> {
                     "lilia.chat".to_string(),
                     "lilia.runner".to_string(),
                     "lilia.runner.control".to_string(),
-                    "lilia.quota".to_string(),
                 ],
                 metadata: BTreeMap::new(),
             },
@@ -1021,7 +982,6 @@ impl<R: Runtime> OperationBackend for LiliaRuntimeBackend<R> {
                     "payload": payload,
                 })))
             }
-            OP_QUOTA_QUERY_USAGE => self.invoke_quota_query_usage(payload, events),
             _ => Err(operation_not_found_failure(&key.op_id)),
         }
     }
@@ -1032,45 +992,6 @@ impl<R: Runtime> OperationBackend for LiliaRuntimeBackend<R> {
             .find(|operation| operation.key == *key)
             .map(|operation| operation.status.clone())
             .unwrap_or(OperationStatus::NotFound)
-    }
-}
-
-pub(crate) fn invoke_lilia_runtime_operation<R: Runtime>(
-    app: &AppHandle<R>,
-    task_id: &str,
-    turn_id: &str,
-    backend: &str,
-    operation: &str,
-    payload: JsonValue,
-) -> Result<JsonValue, String> {
-    let context = RuntimeTurnContext {
-        task_id: task_id.to_string(),
-        turn_id: turn_id.to_string(),
-        backend: backend.to_string(),
-        project_cwd: String::new(),
-        prompt_length: 0,
-        attachment_count: 0,
-        workflow_type: None,
-        automation_run_id: None,
-        source_id: format!("lilia:{backend}:tool"),
-        agent_id: format!("lilia-{backend}-agent"),
-        resume_session_id: None,
-        permission: "ask".to_string(),
-        composer_runtime_workspace_roots: Vec::new(),
-    };
-    let mut backend = LiliaRuntimeBackend::new(app.clone(), context.clone(), None, None)?;
-    let key = backend
-        .operations
-        .iter()
-        .find(|operation_snapshot| operation_snapshot.descriptor.op_id == operation)
-        .map(|operation_snapshot| operation_snapshot.key.clone())
-        .ok_or_else(|| format!("runtime operation not found: {operation}"))?;
-    let mut runtime = AgentRuntime::new();
-    match backend.invoke(&context.agent_id, &key, payload, &mut runtime) {
-        Ok(BackendPayload::Json(value)) => Ok(value),
-        Ok(BackendPayload::Envelope(envelope)) => serde_json::to_value(envelope)
-            .map_err(|e| format!("runtime envelope serialize failed: {e}")),
-        Err(err) => Err(format_runtime_error(err.error())),
     }
 }
 
@@ -1279,12 +1200,6 @@ fn runtime_operations() -> Vec<OperationSnapshot> {
             "Register session checkpoint writes isolated by runtime channel.",
             false,
         ),
-        (
-            OP_QUOTA_QUERY_USAGE,
-            "Query quota usage",
-            "Query Lilia quota usage summaries through the runtime operation bus.",
-            true,
-        ),
     ]
     .into_iter()
     .map(|(op_id, name, description, is_tool)| operation_snapshot(op_id, name, description, is_tool))
@@ -1304,8 +1219,8 @@ fn operation_snapshot(
             description: description.to_string(),
             plugin_id: PLUGIN_ID.to_string(),
             func_qualname: format!("{STRATEGY_ID}.{op_id}"),
-            parameters_schema: operation_parameters_schema(op_id),
-            return_schema: operation_return_schema(op_id),
+            parameters_schema: json!({ "type": "object" }),
+            return_schema: json!({ "type": "object" }),
             perms_rule_id: None,
             requires_capabilities: Vec::new(),
             is_tool,
@@ -1318,42 +1233,6 @@ fn operation_snapshot(
             handler_id: format!("{PLUGIN_ID}:{op_id}:0"),
         },
     }
-}
-
-fn operation_parameters_schema(op_id: &str) -> JsonValue {
-    if op_id != OP_QUOTA_QUERY_USAGE {
-        return json!({ "type": "object" });
-    }
-    json!({
-        "type": "object",
-        "properties": {
-            "days": { "type": "integer", "enum": [7, 30], "default": 7 },
-            "backend": { "type": "string", "enum": ["all", "claude", "codex"], "default": "all" },
-            "scope": {
-                "type": "string",
-                "enum": ["summary", "projects", "conversations", "tools", "all"],
-                "default": "all"
-            }
-        },
-        "additionalProperties": false
-    })
-}
-
-fn operation_return_schema(op_id: &str) -> JsonValue {
-    if op_id != OP_QUOTA_QUERY_USAGE {
-        return json!({ "type": "object" });
-    }
-    json!({
-        "type": "object",
-        "properties": {
-            "ok": { "type": "boolean" },
-            "operation": { "type": "string" },
-            "result": { "type": "object" },
-            "error": { "type": "string" }
-        },
-        "required": ["ok", "operation"],
-        "additionalProperties": true
-    })
 }
 
 fn runtime_sources(context: &RuntimeTurnContext) -> Vec<SourceSnapshot> {
@@ -1684,22 +1563,12 @@ mod tests {
                 OP_INTERRUPT_REQUEST,
                 OP_RESET_REQUEST,
                 OP_STOP_MARKS_READ,
-                OP_SESSION_CHECKPOINT,
-                OP_QUOTA_QUERY_USAGE
+                OP_SESSION_CHECKPOINT
             ]
         );
         assert!(operations
             .iter()
             .all(|op| op.status == OperationStatus::Active));
-        let quota = operations
-            .iter()
-            .find(|op| op.descriptor.op_id == OP_QUOTA_QUERY_USAGE)
-            .unwrap();
-        assert!(quota.descriptor.is_tool);
-        assert_eq!(
-            quota.descriptor.parameters_schema["properties"]["scope"]["enum"][4],
-            json!("all")
-        );
     }
 
     #[test]

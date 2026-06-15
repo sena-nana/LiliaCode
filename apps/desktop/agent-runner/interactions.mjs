@@ -86,8 +86,8 @@ export function createInteractionBroker({
   let askUserSeq = 1;
   const codexPending = new Map();
   let codexSeq = 1;
-  const runtimeOperationPending = new Map();
-  let runtimeOperationSeq = 1;
+  const quotaUsagePending = new Map();
+  let quotaUsageSeq = 1;
   const architecturePending = new Map();
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
@@ -247,16 +247,15 @@ export function createInteractionBroker({
     });
   }
 
-  function requestRuntimeOperation(operation, payload = {}) {
-    const id = `runtime-op-${runtimeOperationSeq++}`;
+  function requestQuotaUsage(payload = {}) {
+    const id = `quota-${quotaUsageSeq++}`;
     protocol.emit({
-      type: "runtime_operation_request",
+      type: "quota_usage_request",
       id,
-      operation,
       payload,
     });
     return new Promise((resolve) => {
-      runtimeOperationPending.set(id, { operation, resolve });
+      quotaUsagePending.set(id, resolve);
     });
   }
 
@@ -303,14 +302,13 @@ export function createInteractionBroker({
       settingsUpdateHandler?.(msg);
       return;
     }
-    if (msg.type === "runtime_operation_result") {
+    if (msg.type === "quota_usage_result") {
       if (typeof msg.id !== "string") return;
-      const pending = runtimeOperationPending.get(msg.id);
-      if (!pending) return;
-      runtimeOperationPending.delete(msg.id);
-      pending.resolve({
+      const resolve = quotaUsagePending.get(msg.id);
+      if (!resolve) return;
+      quotaUsagePending.delete(msg.id);
+      resolve({
         ok: msg.ok === true,
-        operation: typeof msg.operation === "string" ? msg.operation : pending.operation,
         result: msg.result ?? null,
         error: typeof msg.error === "string" ? msg.error : null,
       });
@@ -327,7 +325,7 @@ export function createInteractionBroker({
     requestCodexInteraction,
     requestMcpElicitation,
     requestArchitectureChange,
-    requestRuntimeOperation,
+    requestQuotaUsage,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
@@ -339,7 +337,7 @@ export function createInteractionBroker({
       consent: consentPending.size,
       askUser: askUserPending.size,
       codex: codexPending.size,
-      runtimeOperation: runtimeOperationPending.size,
+      quotaUsage: quotaUsagePending.size,
       architecture: architecturePending.size,
     }),
   };

@@ -825,39 +825,25 @@ fn handle_runner_runtime_event<R: Runtime>(
                 session.event_ctx.automation_run_id.clone(),
             );
         }
-        AgentRuntimeEvent::RuntimeOperationRequest {
-            id,
-            operation,
-            payload,
-        } => {
+        AgentRuntimeEvent::QuotaUsageRequest { id, payload } => {
             record_runner_lifecycle(
                 observer,
-                "runtime_operation_requested",
+                "quota_usage_requested",
                 serde_json::json!({
                     "requestId": id,
-                    "operation": operation,
                 }),
             );
-            let result = crate::chat::mutsuki_core_runtime::invoke_lilia_runtime_operation(
-                app_handle,
-                &session.task_id,
-                &session.turn_id,
-                &session.backend,
-                operation,
-                payload.clone(),
-            );
+            let result = handle_quota_usage_request(app_handle, payload.clone());
             let response = match result {
                 Ok(value) => serde_json::json!({
-                    "type": "runtime_operation_result",
+                    "type": "quota_usage_result",
                     "id": id,
-                    "operation": operation,
                     "ok": true,
                     "result": value,
                 }),
                 Err(err) => serde_json::json!({
-                    "type": "runtime_operation_result",
+                    "type": "quota_usage_result",
                     "id": id,
-                    "operation": operation,
                     "ok": false,
                     "error": err,
                 }),
@@ -865,10 +851,9 @@ fn handle_runner_runtime_event<R: Runtime>(
             if let Err(err) = write_runner_stdin_payload(&session.process_session_id, response) {
                 record_runner_lifecycle(
                     observer,
-                    "runtime_operation_response_failed",
+                    "quota_usage_response_failed",
                     serde_json::json!({
                         "requestId": id,
-                        "operation": operation,
                         "error": err,
                     }),
                 );
@@ -1098,13 +1083,26 @@ pub(crate) fn resume_persisted_node_agent_runner<R: Runtime>(
     Ok(())
 }
 
+fn handle_quota_usage_request<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    payload: JsonValue,
+) -> Result<JsonValue, String> {
+    let input: crate::quota_usage::QuotaUsageQueryInput =
+        serde_json::from_value(payload).map_err(|e| e.to_string())?;
+    let store = app_handle
+        .try_state::<LiliaStore>()
+        .ok_or_else(|| "LiliaStore is not available".to_string())?;
+    let conn = store.conn()?;
+    crate::quota_usage::query_usage(&conn, input, crate::util::now_millis())
+}
+
 fn runner_event_kind(event: &AgentRuntimeEvent) -> &'static str {
     match event {
         AgentRuntimeEvent::ToolUse { .. } => "tool_use",
         AgentRuntimeEvent::TodoList { .. } => "todo_list",
         AgentRuntimeEvent::Timeline { .. } => "timeline",
         AgentRuntimeEvent::InteractionRequest { .. } => "interaction_request",
-        AgentRuntimeEvent::RuntimeOperationRequest { .. } => "runtime_operation_request",
+        AgentRuntimeEvent::QuotaUsageRequest { .. } => "quota_usage_request",
         AgentRuntimeEvent::Done { .. } => "done",
         AgentRuntimeEvent::PromptSuggestion { .. } => "prompt_suggestion",
         AgentRuntimeEvent::Error { .. } => "error",
