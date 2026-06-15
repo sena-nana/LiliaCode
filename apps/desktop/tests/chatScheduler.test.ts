@@ -97,6 +97,26 @@ async function sendText(view: ReturnType<typeof render>, text: string) {
   await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
 }
 
+async function setActiveBackendForTest(backend: "claude" | "codex") {
+  setMockActiveBackend(backend);
+  await useConnectionStatus({ probe: false }).setActiveBackend(backend);
+}
+
+function expectIabMessageSend(backend: "claude" | "codex") {
+  const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+  expect(send?.[1]).toMatchObject({
+    content: expect.stringContaining("Lilia IAB 页面交互结果"),
+    attachments: [expect.objectContaining({
+      name: "IAB 截图.png",
+      path: expect.stringContaining("iab-snapshots"),
+    })],
+    composer: expect.objectContaining({ backend }),
+  });
+  expect(send?.[1].content).toContain("https://example.com/debug");
+  expect(send?.[1].content).toContain("Debug Page");
+  expect(send?.[1].content).toContain("按钮点击后卡住");
+}
+
 function setChatDropBounds(view: ReturnType<typeof render>) {
   const page = view.container.querySelector(".chat-page") as HTMLElement | null;
   if (!page) throw new Error("未找到聊天页面");
@@ -197,8 +217,7 @@ describe("chat scheduler", () => {
   });
 
   it("Lilia IAB 运行中回送时只注入 runner，不降级发送消息", async () => {
-    setMockActiveBackend("codex");
-    await useConnectionStatus({ probe: false }).setActiveBackend("codex");
+    await setActiveBackendForTest("codex");
     setMockChatRunning("t-002", true);
     setNextMockLiliaIabDelivery("runner");
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
@@ -220,8 +239,7 @@ describe("chat scheduler", () => {
   });
 
   it("Lilia IAB 空闲回送降级为带截图附件的用户消息", async () => {
-    setMockActiveBackend("codex");
-    await useConnectionStatus({ probe: false }).setActiveBackend("codex");
+    await setActiveBackendForTest("codex");
     setNextMockLiliaIabDelivery("message");
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
     const view = await renderTaskDetail();
@@ -237,20 +255,54 @@ describe("chat scheduler", () => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
-    expect(send?.[1]).toMatchObject({
-      content: expect.stringContaining("Lilia IAB 页面交互结果"),
-      attachments: [expect.objectContaining({
-        name: "IAB 截图.png",
-        path: expect.stringContaining("iab-snapshots"),
-      })],
-      composer: expect.objectContaining({
-        backend: "codex",
-      }),
+    expectIabMessageSend("codex");
+    promptSpy.mockRestore();
+  });
+
+  it("Claude 后端可以打开 Lilia IAB", async () => {
+    await setActiveBackendForTest("claude");
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("https://example.com/debug");
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打开 Lilia IAB" })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "回送 IAB 截图" })).toBeInTheDocument();
     });
-    expect(send?.[1].content).toContain("https://example.com/debug");
-    expect(send?.[1].content).toContain("Debug Page");
-    expect(send?.[1].content).toContain("按钮点击后卡住");
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "打开 Lilia IAB" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "lilia_iab_open")).toBe(true);
+    });
+    const open = mockInvoke.mock.calls.find(([cmd]) => cmd === "lilia_iab_open");
+    expect(open?.[1]).toMatchObject({
+      taskId: "t-002",
+      url: "https://example.com/debug",
+    });
+    expect(view.queryByText("当前后端尚未实现 Lilia IAB。")).toBeNull();
+    expect(promptSpy).toHaveBeenCalledWith("IAB URL", "about:blank");
+    promptSpy.mockRestore();
+  });
+
+  it("Claude 后端回送 IAB 截图会降级为普通用户消息附件", async () => {
+    await setActiveBackendForTest("claude");
+    setNextMockLiliaIabDelivery("message");
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("按钮点击后卡住");
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "回送 IAB 截图" })).toBeInTheDocument();
+    });
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "回送 IAB 截图" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    expectIabMessageSend("claude");
+    expect(view.queryByText("当前后端尚未实现 Lilia IAB 结果回送。")).toBeNull();
+    expect(promptSpy).toHaveBeenCalledWith("IAB 备注");
     promptSpy.mockRestore();
   });
 
