@@ -34,6 +34,7 @@ import {
 } from "./permissions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { runClaudeSessionManagementRuntimeCommand } from "../sessionManagement.mjs";
+import { handleExperimentalProviderOptions } from "../providerOptions.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -915,6 +916,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
 }
 
 export async function runClaude(cmd, context) {
+  handleExperimentalProviderOptions(cmd, context, "claude");
   const { cwd } = cmd;
   const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
   if (await runClaudeSessionForkRuntimeCommand(cmd, context, workingDir)) return;
