@@ -86,6 +86,8 @@ export function createInteractionBroker({
   let askUserSeq = 1;
   const codexPending = new Map();
   let codexSeq = 1;
+  const runtimeOperationPending = new Map();
+  let runtimeOperationSeq = 1;
   const architecturePending = new Map();
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
@@ -245,6 +247,19 @@ export function createInteractionBroker({
     });
   }
 
+  function requestRuntimeOperation(operation, payload = {}) {
+    const id = `runtime-op-${runtimeOperationSeq++}`;
+    protocol.emit({
+      type: "runtime_operation_request",
+      id,
+      operation,
+      payload,
+    });
+    return new Promise((resolve) => {
+      runtimeOperationPending.set(id, { operation, resolve });
+    });
+  }
+
   function handleControlLine(line) {
     let msg;
     try {
@@ -288,6 +303,19 @@ export function createInteractionBroker({
       settingsUpdateHandler?.(msg);
       return;
     }
+    if (msg.type === "runtime_operation_result") {
+      if (typeof msg.id !== "string") return;
+      const pending = runtimeOperationPending.get(msg.id);
+      if (!pending) return;
+      runtimeOperationPending.delete(msg.id);
+      pending.resolve({
+        ok: msg.ok === true,
+        operation: typeof msg.operation === "string" ? msg.operation : pending.operation,
+        result: msg.result ?? null,
+        error: typeof msg.error === "string" ? msg.error : null,
+      });
+      return;
+    }
     if (msg.type === "lilia_iab_result") {
       liliaIabResultHandler?.(msg.snapshot);
     }
@@ -299,6 +327,7 @@ export function createInteractionBroker({
     requestCodexInteraction,
     requestMcpElicitation,
     requestArchitectureChange,
+    requestRuntimeOperation,
     handleControlLine,
     handleSettingsUpdate: (handler) => {
       settingsUpdateHandler = typeof handler === "function" ? handler : null;
@@ -310,6 +339,7 @@ export function createInteractionBroker({
       consent: consentPending.size,
       askUser: askUserPending.size,
       codex: codexPending.size,
+      runtimeOperation: runtimeOperationPending.size,
       architecture: architecturePending.size,
     }),
   };

@@ -8,6 +8,17 @@ export interface QuotaUsageStatsInput {
   backend?: QuotaUsageStatsBackendFilter;
 }
 
+export type QuotaUsageQueryScope =
+  | "summary"
+  | "projects"
+  | "conversations"
+  | "tools"
+  | "all";
+
+export interface QuotaUsageQueryInput extends QuotaUsageStatsInput {
+  scope?: QuotaUsageQueryScope;
+}
+
 export interface QuotaUsageTokenTotals {
   inputTokens: number;
   outputTokens: number;
@@ -46,6 +57,36 @@ export interface QuotaUsageRecentRecord extends QuotaUsageTokenTotals {
   createdAt: number;
 }
 
+export interface QuotaUsageProjectSummary extends QuotaUsageTokenTotals {
+  projectId: string | null;
+  projectName: string;
+  projectCwd: string | null;
+  knownCostUsd: number | null;
+  costRecordCount: number;
+  recordCount: number;
+}
+
+export interface QuotaUsageConversationSummary extends QuotaUsageTokenTotals {
+  taskId: string;
+  taskTitle: string;
+  taskStatus: string;
+  projectId: string | null;
+  projectName: string | null;
+  knownCostUsd: number | null;
+  costRecordCount: number;
+  recordCount: number;
+}
+
+export interface QuotaUsageToolSummary {
+  key: string;
+  label: string;
+  kind: string;
+  subkind: string | null;
+  toolName: string | null;
+  callCount: number;
+  sharePercent: number;
+}
+
 export interface QuotaUsageStats {
   days: QuotaUsageStatsDays;
   backend: QuotaUsageStatsBackendFilter;
@@ -56,6 +97,9 @@ export interface QuotaUsageStats {
   daily: QuotaUsageDailyBucket[];
   backends: QuotaUsageBackendSummary[];
   recent: QuotaUsageRecentRecord[];
+  projects: QuotaUsageProjectSummary[];
+  conversations: QuotaUsageConversationSummary[];
+  tools: QuotaUsageToolSummary[];
 }
 
 export interface CodexAccountQuotaWindow {

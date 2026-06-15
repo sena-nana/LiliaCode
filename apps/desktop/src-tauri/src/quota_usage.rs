@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::process::Command;
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime, State};
@@ -43,6 +43,14 @@ struct UsageRecord {
 pub struct QuotaUsageStatsInput {
     pub days: Option<i64>,
     pub backend: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaUsageQueryInput {
+    pub days: Option<i64>,
+    pub backend: Option<String>,
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -110,6 +118,52 @@ pub struct QuotaUsageRecentRecord {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct QuotaUsageProjectSummary {
+    pub project_id: Option<String>,
+    pub project_name: String,
+    pub project_cwd: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub total_tokens: i64,
+    pub known_cost_usd: Option<f64>,
+    pub cost_record_count: i64,
+    pub record_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaUsageConversationSummary {
+    pub task_id: String,
+    pub task_title: String,
+    pub task_status: String,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub total_tokens: i64,
+    pub known_cost_usd: Option<f64>,
+    pub cost_record_count: i64,
+    pub record_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaUsageToolSummary {
+    pub key: String,
+    pub label: String,
+    pub kind: String,
+    pub subkind: Option<String>,
+    pub tool_name: Option<String>,
+    pub call_count: i64,
+    pub share_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QuotaUsageStats {
     pub days: i64,
     pub backend: String,
@@ -120,6 +174,9 @@ pub struct QuotaUsageStats {
     pub daily: Vec<QuotaUsageDailyBucket>,
     pub backends: Vec<QuotaUsageBackendSummary>,
     pub recent: Vec<QuotaUsageRecentRecord>,
+    pub projects: Vec<QuotaUsageProjectSummary>,
+    pub conversations: Vec<QuotaUsageConversationSummary>,
+    pub tools: Vec<QuotaUsageToolSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,6 +335,54 @@ fn usage_backend_summary(backend: String, summary: AggregatedUsage) -> QuotaUsag
     let totals = summary.token_totals();
     QuotaUsageBackendSummary {
         backend,
+        input_tokens: totals.input_tokens,
+        output_tokens: totals.output_tokens,
+        cache_read_tokens: totals.cache_read_tokens,
+        cache_creation_tokens: totals.cache_creation_tokens,
+        total_tokens: totals.total_tokens,
+        known_cost_usd: summary.known_cost(),
+        cost_record_count: summary.cost_record_count,
+        record_count: summary.record_count,
+    }
+}
+
+fn usage_project_summary(
+    project_id: Option<String>,
+    project_name: String,
+    project_cwd: Option<String>,
+    summary: AggregatedUsage,
+) -> QuotaUsageProjectSummary {
+    let totals = summary.token_totals();
+    QuotaUsageProjectSummary {
+        project_id,
+        project_name,
+        project_cwd,
+        input_tokens: totals.input_tokens,
+        output_tokens: totals.output_tokens,
+        cache_read_tokens: totals.cache_read_tokens,
+        cache_creation_tokens: totals.cache_creation_tokens,
+        total_tokens: totals.total_tokens,
+        known_cost_usd: summary.known_cost(),
+        cost_record_count: summary.cost_record_count,
+        record_count: summary.record_count,
+    }
+}
+
+fn usage_conversation_summary(
+    task_id: String,
+    task_title: String,
+    task_status: String,
+    project_id: Option<String>,
+    project_name: Option<String>,
+    summary: AggregatedUsage,
+) -> QuotaUsageConversationSummary {
+    let totals = summary.token_totals();
+    QuotaUsageConversationSummary {
+        task_id,
+        task_title,
+        task_status,
+        project_id,
+        project_name,
         input_tokens: totals.input_tokens,
         output_tokens: totals.output_tokens,
         cache_read_tokens: totals.cache_read_tokens,
@@ -488,6 +593,16 @@ fn normalize_backend_filter(value: Option<String>) -> String {
     }
 }
 
+fn normalize_scope(value: Option<String>) -> String {
+    match value.as_deref() {
+        Some("summary") => "summary".to_string(),
+        Some("projects") => "projects".to_string(),
+        Some("conversations") => "conversations".to_string(),
+        Some("tools") => "tools".to_string(),
+        _ => "all".to_string(),
+    }
+}
+
 fn day_start(timestamp: i64) -> i64 {
     timestamp.div_euclid(DAY_MS) * DAY_MS
 }
@@ -528,6 +643,299 @@ fn load_usage_records(
         out.push(row_to_usage_record(row)?);
     }
     Ok(out)
+}
+
+#[derive(Debug, Clone)]
+struct TaskUsageContext {
+    task_title: String,
+    task_status: String,
+    project_id: Option<String>,
+    project_name: Option<String>,
+    project_cwd: Option<String>,
+}
+
+fn load_task_contexts(
+    conn: &Connection,
+    records: &[UsageRecord],
+) -> Result<BTreeMap<String, TaskUsageContext>, String> {
+    let mut contexts = BTreeMap::new();
+    if records.is_empty() {
+        return Ok(contexts);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT t.title, t.status, t.project_id, p.name, p.cwd
+               FROM tasks t
+               LEFT JOIN projects p ON p.id = t.project_id
+               WHERE t.id = ?1"#,
+        )
+        .map_err(|e| format!("quota_usage_get_stats: prepare task context 失败：{e}"))?;
+
+    for record in records {
+        if contexts.contains_key(&record.task_id) {
+            continue;
+        }
+        let row: Option<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
+            .query_row(params![&record.task_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .optional()
+            .map_err(|e| format!("quota_usage_get_stats: task context 失败：{e}"))?;
+        let (title, status, project_id, project_name, project_cwd) =
+            row.unwrap_or(("未知对话".to_string(), "waiting".to_string(), None, None, None));
+        contexts.insert(
+            record.task_id.clone(),
+            TaskUsageContext {
+                task_title: if title.trim().is_empty() {
+                    "未命名对话".to_string()
+                } else {
+                    title
+                },
+                task_status: status,
+                project_id,
+                project_name,
+                project_cwd,
+            },
+        );
+    }
+    Ok(contexts)
+}
+
+fn load_project_summaries(
+    records: &[UsageRecord],
+    contexts: &BTreeMap<String, TaskUsageContext>,
+) -> Vec<QuotaUsageProjectSummary> {
+    #[derive(Default)]
+    struct ProjectBucket {
+        project_id: Option<String>,
+        project_name: String,
+        project_cwd: Option<String>,
+        usage: AggregatedUsage,
+    }
+
+    let mut buckets: BTreeMap<String, ProjectBucket> = BTreeMap::new();
+    for record in records {
+        let context = contexts.get(&record.task_id);
+        let project_id = context.and_then(|value| value.project_id.clone());
+        let key = project_id
+            .clone()
+            .unwrap_or_else(|| "__unassigned__".to_string());
+        let bucket = buckets.entry(key).or_insert_with(|| ProjectBucket {
+            project_id: project_id.clone(),
+            project_name: if project_id.is_some() {
+                let project_name = context.and_then(|value| value.project_name.clone());
+                if project_name.as_deref().unwrap_or("").trim().is_empty() {
+                    "未命名项目".to_string()
+                } else {
+                    project_name.unwrap()
+                }
+            } else {
+                "未归属项目".to_string()
+            },
+            project_cwd: context.and_then(|value| value.project_cwd.clone()),
+            usage: AggregatedUsage::default(),
+        });
+        bucket.usage.add_record(record);
+    }
+
+    let mut out: Vec<_> = buckets
+        .into_values()
+        .map(|bucket| {
+            usage_project_summary(
+                bucket.project_id,
+                bucket.project_name,
+                bucket.project_cwd,
+                bucket.usage,
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.total_tokens
+            .cmp(&a.total_tokens)
+            .then_with(|| b.record_count.cmp(&a.record_count))
+            .then_with(|| a.project_name.cmp(&b.project_name))
+    });
+    out
+}
+
+fn load_conversation_summaries(
+    records: &[UsageRecord],
+    contexts: &BTreeMap<String, TaskUsageContext>,
+) -> Vec<QuotaUsageConversationSummary> {
+    #[derive(Default)]
+    struct ConversationBucket {
+        task_id: String,
+        task_title: String,
+        task_status: String,
+        project_id: Option<String>,
+        project_name: Option<String>,
+        usage: AggregatedUsage,
+    }
+
+    let mut buckets: BTreeMap<String, ConversationBucket> = BTreeMap::new();
+    for record in records {
+        let context = contexts.get(&record.task_id);
+        let bucket = buckets
+            .entry(record.task_id.clone())
+            .or_insert_with(|| ConversationBucket {
+                task_id: record.task_id.clone(),
+                task_title: context
+                    .map(|value| value.task_title.clone())
+                    .unwrap_or_else(|| "未知对话".to_string()),
+                task_status: context
+                    .map(|value| value.task_status.clone())
+                    .unwrap_or_else(|| "waiting".to_string()),
+                project_id: context.and_then(|value| value.project_id.clone()),
+                project_name: context.and_then(|value| value.project_name.clone()),
+                usage: AggregatedUsage::default(),
+            });
+        bucket.usage.add_record(record);
+    }
+
+    let mut out: Vec<_> = buckets
+        .into_values()
+        .map(|bucket| {
+            usage_conversation_summary(
+                bucket.task_id,
+                bucket.task_title,
+                bucket.task_status,
+                bucket.project_id,
+                bucket.project_name,
+                bucket.usage,
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.total_tokens
+            .cmp(&a.total_tokens)
+            .then_with(|| b.record_count.cmp(&a.record_count))
+            .then_with(|| a.task_title.cmp(&b.task_title))
+    });
+    out
+}
+
+fn load_tool_summaries(
+    conn: &Connection,
+    range_start: i64,
+    range_end: i64,
+    backend: &str,
+) -> Result<Vec<QuotaUsageToolSummary>, String> {
+    let mut sql = String::from(
+        r#"SELECT kind, payload, COUNT(*)
+           FROM agent_timeline_events
+           WHERE created_at >= ?1 AND created_at < ?2
+             AND kind IN (
+               'command','file_read','file_change','search','web_fetch',
+               'subagent','plan','todo_list','ask_user','architecture_change','tool','mcp'
+             )"#,
+    );
+    if backend != "all" {
+        sql.push_str(" AND backend = ?3");
+    }
+    sql.push_str(" GROUP BY kind, payload");
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("quota_usage_get_stats: prepare tool stats 失败：{e}"))?;
+    let mut rows = if backend == "all" {
+        stmt.query(params![range_start, range_end])
+    } else {
+        stmt.query(params![range_start, range_end, backend])
+    }
+    .map_err(|e| format!("quota_usage_get_stats: query tool stats 失败：{e}"))?;
+
+    let mut counts: BTreeMap<String, (String, Option<String>, Option<String>, i64)> =
+        BTreeMap::new();
+    let mut total = 0_i64;
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| format!("quota_usage_get_stats: 读取 tool stats 失败：{e}"))?
+    {
+        let kind: String = row
+            .get(0)
+            .map_err(|e| format!("quota_usage_get_stats: tool kind 失败：{e}"))?;
+        let payload_text: String = row
+            .get(1)
+            .map_err(|e| format!("quota_usage_get_stats: tool payload 失败：{e}"))?;
+        let count: i64 = row
+            .get(2)
+            .map_err(|e| format!("quota_usage_get_stats: tool count 失败：{e}"))?;
+        let payload = serde_json::from_str::<JsonValue>(&payload_text).unwrap_or(JsonValue::Null);
+        let subkind = string_field(&payload, &["subkind"]);
+        let tool_name = string_field(&payload, &["toolName", "tool", "hookName", "name"]);
+        let key = [
+            kind.as_str(),
+            subkind.as_deref().unwrap_or(""),
+            tool_name.as_deref().unwrap_or(""),
+        ]
+        .join(":");
+        let entry = counts
+            .entry(key)
+            .or_insert_with(|| (kind.clone(), subkind.clone(), tool_name.clone(), 0));
+        entry.3 += count;
+        total += count;
+    }
+
+    let mut out: Vec<_> = counts
+        .into_iter()
+        .map(|(key, (kind, subkind, tool_name, call_count))| {
+            let label = quota_tool_label(&kind, subkind.as_deref(), tool_name.as_deref());
+            QuotaUsageToolSummary {
+                key,
+                label,
+                kind,
+                subkind,
+                tool_name,
+                call_count,
+                share_percent: if total > 0 {
+                    (call_count as f64 / total as f64) * 100.0
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.call_count
+            .cmp(&a.call_count)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    Ok(out)
+}
+
+fn quota_tool_label(kind: &str, subkind: Option<&str>, tool_name: Option<&str>) -> String {
+    if let Some(tool) = tool_name.filter(|value| !value.trim().is_empty()) {
+        return tool.to_string();
+    }
+    match (kind, subkind) {
+        ("command", Some("lilia_edit_exec")) => "执行已编辑命令".to_string(),
+        ("command", _) => "命令".to_string(),
+        ("file_read", _) => "读取文件".to_string(),
+        ("file_change", Some("write")) => "写入文件".to_string(),
+        ("file_change", Some("multi_edit")) => "批量修改".to_string(),
+        ("file_change", _) => "修改文件".to_string(),
+        ("search", Some("web")) => "网络搜索".to_string(),
+        ("search", Some("grep")) => "内容搜索".to_string(),
+        ("search", Some("glob")) => "文件查找".to_string(),
+        ("search", _) => "搜索".to_string(),
+        ("web_fetch", _) => "抓取网页".to_string(),
+        ("subagent", _) => "子代理".to_string(),
+        ("plan", _) => "计划".to_string(),
+        ("todo_list", _) => "待办".to_string(),
+        ("ask_user", _) => "询问用户".to_string(),
+        ("architecture_change", _) => "架构变更".to_string(),
+        ("mcp", _) => "MCP 工具".to_string(),
+        ("tool", Some("hook")) => "Hook".to_string(),
+        ("tool", _) => "工具".to_string(),
+        _ => kind.to_string(),
+    }
 }
 
 fn row_to_usage_record(row: &Row<'_>) -> Result<UsageRecord, String> {
@@ -587,6 +995,10 @@ pub(crate) fn stats(
     let range_end = day_start(now) + DAY_MS;
     let range_start = range_end - days * DAY_MS;
     let records = load_usage_records(conn, range_start, range_end, &backend)?;
+    let task_contexts = load_task_contexts(conn, &records)?;
+    let projects = load_project_summaries(&records, &task_contexts);
+    let conversations = load_conversation_summaries(&records, &task_contexts);
+    let tools = load_tool_summaries(conn, range_start, range_end, &backend)?;
 
     let mut total = AggregatedUsage::default();
     let mut daily: BTreeMap<i64, AggregatedUsage> = (0..days)
@@ -651,7 +1063,60 @@ pub(crate) fn stats(
         daily,
         backends,
         recent,
+        projects,
+        conversations,
+        tools,
     })
+}
+
+pub(crate) fn query_usage(
+    conn: &Connection,
+    input: QuotaUsageQueryInput,
+    now: i64,
+) -> Result<JsonValue, String> {
+    let scope = normalize_scope(input.scope);
+    let result = stats(
+        conn,
+        QuotaUsageStatsInput {
+            days: input.days,
+            backend: input.backend,
+        },
+        now,
+    )?;
+    let value = serde_json::to_value(&result)
+        .map_err(|e| format!("quota_usage_query: 序列化查询结果失败：{e}"))?;
+    if scope == "all" {
+        return Ok(value);
+    }
+    let mut obj = serde_json::Map::new();
+    for key in [
+        "days",
+        "backend",
+        "rangeStart",
+        "rangeEnd",
+        "totals",
+        "cost",
+    ] {
+        if let Some(field) = value.get(key) {
+            obj.insert(key.to_string(), field.clone());
+        }
+    }
+    match scope.as_str() {
+        "summary" => {
+            for key in ["daily", "backends", "recent"] {
+                if let Some(field) = value.get(key) {
+                    obj.insert(key.to_string(), field.clone());
+                }
+            }
+        }
+        "projects" | "conversations" | "tools" => {
+            if let Some(field) = value.get(scope.as_str()) {
+                obj.insert(scope.clone(), field.clone());
+            }
+        }
+        _ => {}
+    }
+    Ok(JsonValue::Object(obj))
 }
 
 #[tauri::command]
@@ -699,6 +1164,42 @@ mod tests {
     fn create_usage_schema(conn: &Connection) {
         conn.execute_batch(
             r#"
+            CREATE TABLE projects (
+              id         TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              cwd        TEXT,
+              created_at INTEGER NOT NULL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              pinned     INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE tasks (
+              id          TEXT PRIMARY KEY,
+              project_id  TEXT,
+              session_id  TEXT NOT NULL,
+              title       TEXT NOT NULL,
+              title_source TEXT NOT NULL DEFAULT 'auto',
+              status      TEXT NOT NULL DEFAULT 'waiting',
+              created_at  INTEGER NOT NULL,
+              parent_id   TEXT,
+              archived    INTEGER NOT NULL DEFAULT 0,
+              sort_order  INTEGER NOT NULL DEFAULT 0,
+              pinned      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE agent_timeline_events (
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL,
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
+            );
             CREATE TABLE agent_usage_records (
               event_id              TEXT PRIMARY KEY,
               task_id               TEXT NOT NULL,
@@ -719,6 +1220,10 @@ mod tests {
               ON agent_usage_records(created_at);
             CREATE INDEX idx_agent_usage_records_backend_created
               ON agent_usage_records(backend, created_at);
+            INSERT INTO projects (id, name, cwd, created_at)
+              VALUES ('project-1', 'Lilia', 'C:/repo', 1);
+            INSERT INTO tasks (id, project_id, session_id, title, status, created_at)
+              VALUES ('task-1', 'project-1', 'task-1', '额度统计', 'running', 1);
             "#,
         )
         .unwrap();
@@ -891,6 +1396,98 @@ mod tests {
         assert_eq!(codex.cost.known_cost_usd, None);
         assert_eq!(codex.backends.len(), 1);
         assert_eq!(codex.backends[0].backend, BACKEND_CODEX);
+        assert_eq!(all.projects.len(), 1);
+        assert_eq!(all.projects[0].project_name, "Lilia");
+        assert_eq!(all.conversations.len(), 1);
+        assert_eq!(all.conversations[0].task_title, "额度统计");
+    }
+
+    #[test]
+    fn stats_counts_tool_activity_without_token_attribution() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_usage_schema(&conn);
+        let day = DAY_MS;
+        conn.execute(
+            r#"INSERT INTO agent_timeline_events
+               (id, task_id, turn_id, backend, kind, status, title, payload, created_at, updated_at, turn_seq, intra_turn_order)
+               VALUES (?1, 'task-1', 'turn-1', 'claude', ?2, 'success', ?3, ?4, ?5, ?5, 0, ?6)"#,
+            params![
+                "tool-1",
+                "command",
+                "Bash",
+                json!({ "toolName": "Bash" }).to_string(),
+                day * 10 + 2,
+                0
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO agent_timeline_events
+               (id, task_id, turn_id, backend, kind, status, title, payload, created_at, updated_at, turn_seq, intra_turn_order)
+               VALUES (?1, 'task-1', 'turn-1', 'claude', ?2, 'success', ?3, ?4, ?5, ?5, 0, ?6)"#,
+            params![
+                "tool-2",
+                "search",
+                "Grep",
+                json!({ "subkind": "grep" }).to_string(),
+                day * 10 + 3,
+                1
+            ],
+        )
+        .unwrap();
+
+        let all = stats(
+            &conn,
+            QuotaUsageStatsInput {
+                days: Some(7),
+                backend: Some(BACKEND_CLAUDE.to_string()),
+            },
+            day * 12 + 5,
+        )
+        .unwrap();
+
+        assert_eq!(all.tools.len(), 2);
+        assert!(all
+            .tools
+            .iter()
+            .any(|tool| tool.label == "Bash" && tool.call_count == 1));
+        assert!(all
+            .tools
+            .iter()
+            .any(|tool| tool.label == "内容搜索" && tool.call_count == 1));
+        assert!(all.tools.iter().all(|tool| tool.share_percent == 50.0));
+    }
+
+    #[test]
+    fn query_usage_scope_returns_requested_slice() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_usage_schema(&conn);
+        let day = DAY_MS;
+        record_from_timeline_event(
+            &conn,
+            &timeline_event(
+                "claude-1",
+                BACKEND_CLAUDE,
+                json!({ "totalCostUsd": 0.1, "usage": { "input_tokens": 100, "output_tokens": 10 } }),
+                day * 10 + 1,
+            ),
+        )
+        .unwrap();
+
+        let value = query_usage(
+            &conn,
+            QuotaUsageQueryInput {
+                days: Some(7),
+                backend: Some(BACKEND_CLAUDE.to_string()),
+                scope: Some("projects".to_string()),
+            },
+            day * 12 + 5,
+        )
+        .unwrap();
+
+        assert!(value.get("projects").is_some());
+        assert!(value.get("conversations").is_none());
+        assert_eq!(value["backend"], json!(BACKEND_CLAUDE));
     }
 
     #[test]

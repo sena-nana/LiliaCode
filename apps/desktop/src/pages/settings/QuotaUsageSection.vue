@@ -31,6 +31,13 @@ type OfficialQuotaWindowRow = {
   label: string;
   window: CodexAccountQuotaWindow | null | undefined;
 };
+type QuotaBreakdownItem = {
+  key: string;
+  label: string;
+  value: number;
+  meta: string;
+  color: string;
+};
 
 const backendOptions: BackendOption[] = [
   { value: "all", label: "全部" },
@@ -70,6 +77,33 @@ const maxDailyTokens = computed(() =>
 const sortedBackends = computed(() =>
   [...(stats.value?.backends ?? [])].sort((a, b) => b.totalTokens - a.totalTokens),
 );
+const projectBreakdown = computed(() =>
+  topBreakdown(
+    stats.value?.projects ?? [],
+    (row) => row.projectId ?? "__unassigned__",
+    (row) => row.projectName,
+    (row) => row.totalTokens,
+    (row) => `${formatCompactNumber(row.totalTokens)} tokens`,
+  ),
+);
+const conversationBreakdown = computed(() =>
+  topBreakdown(
+    stats.value?.conversations ?? [],
+    (row) => row.taskId,
+    (row) => row.taskTitle,
+    (row) => row.totalTokens,
+    (row) => `${formatCompactNumber(row.totalTokens)} tokens`,
+  ),
+);
+const toolBreakdown = computed(() =>
+  topBreakdown(
+    stats.value?.tools ?? [],
+    (row) => row.key,
+    (row) => row.label,
+    (row) => row.callCount,
+    (row) => `${formatNumber(row.callCount)} 次`,
+  ),
+);
 const costText = computed(() => {
   const coverage = stats.value?.cost;
   if (!coverage || coverage.totalRecordCount === 0 || coverage.knownCostUsd === null) return "--";
@@ -107,6 +141,30 @@ function formatCost(value: number) {
 
 function formatRecordCost(value: number | null) {
   return value === null ? "--" : formatCost(value);
+}
+
+function topBreakdown<T>(
+  rows: T[],
+  keyOf: (row: T) => string,
+  labelOf: (row: T) => string,
+  valueOf: (row: T) => number,
+  metaOf: (row: T) => string,
+): QuotaBreakdownItem[] {
+  const palette = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--text)", "var(--text-muted)"];
+  const normalized = rows
+    .map((row) => ({
+      key: keyOf(row),
+      label: labelOf(row),
+      value: Math.max(0, valueOf(row)),
+      meta: metaOf(row),
+    }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+  return normalized.map((row, index) => ({
+    ...row,
+    color: palette[index % palette.length],
+  }));
 }
 
 function formatDay(value: number) {
@@ -153,6 +211,18 @@ function stackSegments(bucket: QuotaUsageDailyBucket) {
 function backendPercent(tokens: number) {
   if (totalTokens.value <= 0) return 0;
   return Math.max(4, Math.round((tokens / totalTokens.value) * 100));
+}
+
+function pieStyle(items: QuotaBreakdownItem[]) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (total <= 0) return { background: "var(--bg-subtle)" };
+  let cursor = 0;
+  const stops = items.map((item) => {
+    const start = cursor;
+    cursor += (item.value / total) * 100;
+    return `${item.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+  });
+  return { background: `conic-gradient(${stops.join(", ")})` };
 }
 
 async function loadStats() {
@@ -412,6 +482,80 @@ onMounted(() => {
       </div>
     </div>
 
+    <div class="quota-breakdowns">
+      <section class="quota-breakdown" aria-label="项目消耗">
+        <div class="quota-breakdown__head">
+          <strong>项目消耗</strong>
+          <span>按 Token</span>
+        </div>
+        <div class="quota-breakdown__body">
+          <div class="quota-pie" :style="pieStyle(projectBreakdown)" aria-hidden="true" />
+          <div class="quota-breakdown__list">
+            <div
+              v-for="item in projectBreakdown"
+              :key="item.key"
+              class="quota-breakdown__row"
+            >
+              <i :style="{ background: item.color }" />
+              <span>{{ item.label }}</span>
+              <strong>{{ item.meta }}</strong>
+            </div>
+            <div v-if="projectBreakdown.length === 0" class="quota-breakdown__empty">
+              暂无项目消耗
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="quota-breakdown" aria-label="对话消耗">
+        <div class="quota-breakdown__head">
+          <strong>对话消耗</strong>
+          <span>按 Token</span>
+        </div>
+        <div class="quota-breakdown__body">
+          <div class="quota-pie" :style="pieStyle(conversationBreakdown)" aria-hidden="true" />
+          <div class="quota-breakdown__list">
+            <div
+              v-for="item in conversationBreakdown"
+              :key="item.key"
+              class="quota-breakdown__row"
+            >
+              <i :style="{ background: item.color }" />
+              <span>{{ item.label }}</span>
+              <strong>{{ item.meta }}</strong>
+            </div>
+            <div v-if="conversationBreakdown.length === 0" class="quota-breakdown__empty">
+              暂无对话消耗
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="quota-breakdown" aria-label="工具活跃度">
+        <div class="quota-breakdown__head">
+          <strong>工具活跃度</strong>
+          <span>按调用次数统计</span>
+        </div>
+        <div class="quota-breakdown__body">
+          <div class="quota-pie" :style="pieStyle(toolBreakdown)" aria-hidden="true" />
+          <div class="quota-breakdown__list">
+            <div
+              v-for="item in toolBreakdown"
+              :key="item.key"
+              class="quota-breakdown__row"
+            >
+              <i :style="{ background: item.color }" />
+              <span>{{ item.label }}</span>
+              <strong>{{ item.meta }}</strong>
+            </div>
+            <div v-if="toolBreakdown.length === 0" class="quota-breakdown__empty">
+              暂无工具调用
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <div v-if="stats?.recent.length" class="quota-recent">
       <div
         v-for="record in stats.recent"
@@ -649,6 +793,93 @@ onMounted(() => {
   gap: 8px;
 }
 
+.quota-breakdowns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quota-breakdown {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.quota-breakdown__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quota-breakdown__head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.quota-breakdown__head span,
+.quota-breakdown__empty {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-breakdown__body {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.quota-pie {
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 12px var(--bg);
+}
+
+.quota-breakdown__list {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.quota-breakdown__row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.quota-breakdown__row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.quota-breakdown__row span,
+.quota-breakdown__row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-breakdown__row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .quota-backend-row {
   display: grid;
   gap: 6px;
@@ -745,6 +976,10 @@ onMounted(() => {
   }
 
   .quota-official__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quota-breakdowns {
     grid-template-columns: 1fr;
   }
 

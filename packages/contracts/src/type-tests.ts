@@ -363,6 +363,43 @@ export type QuotaUsageStatsTypeTest = Assert<
         knownCostUsd: 0.12;
         createdAt: 1;
       }];
+      projects: [{
+        projectId: "project-1";
+        projectName: "Lilia";
+        projectCwd: "C:/repo";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      conversations: [{
+        taskId: "task-1";
+        taskTitle: "额度统计";
+        taskStatus: "running";
+        projectId: "project-1";
+        projectName: "Lilia";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      tools: [{
+        key: "command::";
+        label: "命令";
+        kind: "command";
+        subkind: null;
+        toolName: null;
+        callCount: 1;
+        sharePercent: 100;
+      }];
     },
     QuotaUsageStats
   >

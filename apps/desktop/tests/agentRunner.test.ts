@@ -733,7 +733,10 @@ describe("Claude helpers", () => {
       createTool,
       requestAskUser: async () => ({ cancelled: true, answers: {} }),
     });
-    expect(normal.tools.map((tool: any) => tool.name)).toEqual(["ask_user_question"]);
+    expect(normal.tools.map((tool: any) => tool.name)).toEqual([
+      "ask_user_question",
+      "query_quota_usage",
+    ]);
 
     const child = createLiliaAskUserServer({
       createServer,
@@ -748,6 +751,7 @@ describe("Claude helpers", () => {
 
     expect(child.tools.map((tool: any) => tool.name)).toEqual([
       "ask_user_question",
+      "query_quota_usage",
       "query_conversation_context",
     ]);
     expect(createdTools.some((args) => args[0] === "query_conversation_context")).toBe(true);
@@ -2021,6 +2025,57 @@ describe("Codex app-server mapping", () => {
     });
   });
 
+  it("Codex quota tool delegates to Lilia runtime operation bus", async () => {
+    const calls: any[] = [];
+    const runtimeCalls: any[] = [];
+    const handled = await maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "quota-1",
+        method: "item/tool/call",
+        params: {
+          tool: "QueryQuotaUsage",
+          arguments: {
+            days: 30,
+            backend: "codex",
+            scope: "tools",
+          },
+        },
+      },
+      {
+        interactions: {
+          requestRuntimeOperation: async (operation: string, payload: any) => {
+            runtimeCalls.push({ operation, payload });
+            return {
+              ok: true,
+              result: {
+                ok: true,
+                operation,
+                result: {
+                  days: payload.days,
+                  backend: payload.backend,
+                  tools: [{ key: "command::", label: "命令", callCount: 2 }],
+                },
+              },
+            };
+          },
+        },
+      } as any,
+    );
+
+    expect(handled).toBe(true);
+    expect(runtimeCalls).toEqual([{
+      operation: "lilia.quota.query_usage",
+      payload: { days: 30, backend: "codex", scope: "tools" },
+    }]);
+    expect(calls[0][1]).toBe("quota-1");
+    expect(calls[0][2]).toMatchObject({ success: true });
+    const output = JSON.parse(calls[0][2].contentItems[0].text);
+    expect(output.result.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
+  });
+
   it("Codex 子对话工具调用可查询父对话上下文", async () => {
     const calls: any[] = [];
     const handled = await maybeHandleCodexServerRequest(
@@ -2659,7 +2714,7 @@ describe("Codex app-server mapping", () => {
     expect(calls[0].params.additionalContext).toContain("C:/shot.png");
   });
 
-  it("resume thread still registers Lilia AskUser dynamic tool without app-server plan-tool params", async () => {
+  it("resume thread still registers Lilia dynamic tools without app-server plan-tool params", async () => {
     const calls: any[] = [];
     const server = {
       request: async (method: string, params: any) => {
@@ -2678,7 +2733,10 @@ describe("Codex app-server mapping", () => {
       method: "thread/resume",
       params: {
         threadId: "thread-1",
-        dynamicTools: [expect.objectContaining({ name: "AskUserQuestion" })],
+        dynamicTools: expect.arrayContaining([
+          expect.objectContaining({ name: "AskUserQuestion" }),
+          expect.objectContaining({ name: "QueryQuotaUsage" }),
+        ]),
       },
     });
     expect(calls[0].params.includePlanTool).toBeUndefined();
