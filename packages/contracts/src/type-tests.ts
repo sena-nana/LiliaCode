@@ -26,6 +26,7 @@ import type {
   ProjectArchitectureChange,
   ProjectArchitectureInteractionPayload,
   ProviderRuntimeOptions,
+  CodexAccountQuotaStatus,
   QuotaUsageStats,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
@@ -364,6 +365,32 @@ export type QuotaUsageStatsTypeTest = Assert<
       }];
     },
     QuotaUsageStats
+  >
+>;
+
+export type CodexAccountQuotaStatusTypeTest = Assert<
+  Extends<
+    {
+      available: true;
+      connectionMode: "codex-account";
+      limitId: "codex";
+      limitName: "Codex";
+      planType: "pro";
+      rateLimitReachedType: null;
+      fiveHour: {
+        usedPercent: 25;
+        windowDurationMins: 300;
+        resetsAt: 1;
+      };
+      weekly: {
+        usedPercent: 40;
+        windowDurationMins: 10080;
+        resetsAt: 2;
+      };
+      fetchedAt: 3;
+      error: null;
+    },
+    CodexAccountQuotaStatus
   >
 >;
 

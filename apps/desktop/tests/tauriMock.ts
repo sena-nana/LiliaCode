@@ -599,6 +599,7 @@ let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = n
 let windowScaleFactor = 1;
 let agentTimelineDelayMs = 0;
 let quotaUsageStatsOverride: Record<string, unknown> | null = null;
+let codexAccountQuotaStatusOverride: Record<string, unknown> | null = null;
 
 function cloneProject(row: ProjectRow): ProjectRow {
   return { ...row };
@@ -705,6 +706,44 @@ function createMockQuotaUsageStats(input: Record<string, unknown> = {}) {
       knownCostUsd: row.knownCostUsd,
       createdAt: rangeEnd - (index + 1) * 3_600_000,
     })),
+  };
+}
+
+function createMockCodexAccountQuotaStatus() {
+  if (routerModes.codex !== "codex-account") {
+    return {
+      available: false,
+      connectionMode: routerModes.codex,
+      limitId: null,
+      limitName: null,
+      planType: null,
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  }
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return {
+    available: true,
+    connectionMode: "codex-account",
+    limitId: "codex",
+    limitName: "Codex",
+    planType: "pro",
+    rateLimitReachedType: null,
+    fiveHour: {
+      usedPercent: 25,
+      windowDurationMins: 300,
+      resetsAt: nowSeconds + 3 * 60 * 60,
+    },
+    weekly: {
+      usedPercent: 40,
+      windowDurationMins: 10080,
+      resetsAt: nowSeconds + 4 * 86_400,
+    },
+    fetchedAt: Date.now(),
+    error: null,
   };
 }
 
@@ -1080,6 +1119,7 @@ export function resetTauriMockData() {
   windowScaleFactor = 1;
   agentTimelineDelayMs = 0;
   quotaUsageStatsOverride = null;
+  codexAccountQuotaStatusOverride = null;
   mockCurrentWindow.label = "main";
   mockCurrentWindow.isMaximized.mockClear();
   mockCurrentWindow.onResized.mockClear();
@@ -1472,6 +1512,10 @@ export function setMockProviderConfig(
 
 export function setMockQuotaUsageStats(stats: Record<string, unknown> | null) {
   quotaUsageStatsOverride = stats ? { ...stats } : null;
+}
+
+export function setMockCodexAccountQuotaStatus(stats: Record<string, unknown> | null) {
+  codexAccountQuotaStatusOverride = stats ? { ...stats } : null;
 }
 
 export function setMockNodeAvailable(available: boolean) {
@@ -2399,6 +2443,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           ? args.input as Record<string, unknown>
           : {},
       );
+
+    case "quota_usage_get_codex_account_status":
+      return codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
 
     case "chat_get_composer_state": {
       const taskId = String(args.taskId);
