@@ -15,8 +15,6 @@ import type {
   AssistantAIConfig,
   AssistantAITestResult,
   BackendEnvStatus,
-  CCSwitchConfig,
-  CCSwitchStatus,
   ChatBackendKind,
   ChatAttachment,
   ChatContextSearchResult,
@@ -59,6 +57,9 @@ import type {
   ProjectArchitectureGraph,
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
+  CodexAccountQuotaStatus,
+  QuotaUsageStats,
+  QuotaUsageStatsInput,
 } from "@lilia/contracts";
 
 export type {
@@ -86,8 +87,6 @@ export type {
   HistoryImportSearchResult,
   ConnectionMode,
   BackendEnvStatus,
-  CCSwitchConfig,
-  CCSwitchStatus,
   EnvStatusReport,
   ProviderConfig,
   RouterMode,
@@ -110,6 +109,9 @@ export type {
   ProjectArchitectureGraph,
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
+  CodexAccountQuotaStatus,
+  QuotaUsageStats,
+  QuotaUsageStatsInput,
 };
 
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
@@ -274,11 +276,6 @@ export function setAgentInteractionSettings(
   return invoke<void>("agent_interaction_set_settings", { settings });
 }
 
-/** 让下一次发送从全新 SDK session 开始（同时清掉前端可见的消息历史）。 */
-export function resetSession(taskId: string): Promise<void> {
-  return invoke<void>("chat_reset_session", { taskId });
-}
-
 export function ackRestoredRollback(taskId: string): Promise<void> {
   return invoke<void>("chat_ack_restored_rollback", { taskId });
 }
@@ -304,14 +301,6 @@ export function getActiveBackend(): Promise<ChatBackendKind> {
 
 export function setActiveBackend(backend: ChatBackendKind): Promise<void> {
   return invoke<void>("provider_set_active_backend", { backend });
-}
-
-export function getCCSwitchConfig(): Promise<CCSwitchConfig> {
-  return invoke<CCSwitchConfig>("cc_switch_get_config");
-}
-
-export function setCCSwitchConfig(config: CCSwitchConfig): Promise<void> {
-  return invoke<void>("cc_switch_set_config", { config });
 }
 
 export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {
@@ -357,6 +346,16 @@ export function setConversationSuggestionSettings(
   settings: SuggestionSettings,
 ): Promise<void> {
   return invoke<void>("conversation_suggestions_set_settings", { settings });
+}
+
+export function getQuotaUsageStats(
+  input: QuotaUsageStatsInput = {},
+): Promise<QuotaUsageStats> {
+  return invoke<QuotaUsageStats>("quota_usage_get_stats", { input });
+}
+
+export function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
+  return invoke<CodexAccountQuotaStatus>("quota_usage_get_codex_account_status");
 }
 
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {

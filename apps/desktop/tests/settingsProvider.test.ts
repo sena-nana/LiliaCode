@@ -9,8 +9,9 @@ import {
   setMockGitHubPollSequence,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
-  setMockCCSwitchReachable,
+  setMockCodexAccountQuotaStatus,
   setMockProviderConfig,
+  setMockQuotaUsageStats,
   setMockRouterMode,
 } from "./tauriMock";
 
@@ -24,6 +25,52 @@ async function renderSettings(initialRoute = "/settings") {
       plugins: [router],
     },
   });
+}
+
+function lastInvokeInput(command: string): Record<string, unknown> | undefined {
+  const call = [...mockInvoke.mock.calls].reverse().find(([cmd]) => cmd === command);
+  const input = call?.[1];
+  return input && typeof input === "object" ? input as Record<string, unknown> : undefined;
+}
+
+function emptyQuotaStats() {
+  const dayMs = 86_400_000;
+  const rangeEnd = Math.floor(Date.now() / dayMs) * dayMs + dayMs;
+  const rangeStart = rangeEnd - 7 * dayMs;
+  return {
+    days: 7,
+    backend: "all",
+    rangeStart,
+    rangeEnd,
+    totals: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: 0,
+    },
+    cost: {
+      knownCostUsd: null,
+      costRecordCount: 0,
+      totalRecordCount: 0,
+    },
+    daily: Array.from({ length: 7 }, (_, index) => ({
+      dayStart: rangeStart + index * dayMs,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: 0,
+      knownCostUsd: null,
+      costRecordCount: 0,
+      recordCount: 0,
+    })),
+    backends: [],
+    recent: [],
+    projects: [],
+    conversations: [],
+    tools: [],
+  };
 }
 
 describe("Settings provider switch", () => {
@@ -61,6 +108,99 @@ describe("Settings provider switch", () => {
       "true",
     );
     expect(localStorage.getItem("lilia.sidebarDisplayMode")).toBe("unified");
+  });
+
+  it("额度页显示近 7 天 Token 和成本统计", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(view.getByRole("heading", { level: 1, name: "额度" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+        input: { days: 7, backend: "all" },
+      }, undefined);
+    });
+    expect(await view.findByText("总 Token")).toBeInTheDocument();
+    expect(view.getByRole("img", { name: "每日 Token 趋势" })).toBeInTheDocument();
+    expect(view.getByText("项目消耗")).toBeInTheDocument();
+    expect(view.getByText("对话消耗")).toBeInTheDocument();
+    expect(view.getByText("工具活跃度")).toBeInTheDocument();
+    expect(view.getByText("按调用次数统计")).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("quota_usage_get_stats")).toMatchObject({
+        input: { days: 7, backend: "codex" },
+      });
+    });
+  });
+
+  it("额度页无新增记录时显示空态", async () => {
+    setMockQuotaUsageStats(emptyQuotaStats());
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
+    expect(view.getByText("无新增记录")).toBeInTheDocument();
+  });
+
+  it("额度页在 Codex 官方账号模式显示官方 5 小时和周限额", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
+    expect(view.getByText("5 小时限额")).toBeInTheDocument();
+    expect(view.getByText("周限额")).toBeInTheDocument();
+    expect(view.getByText("25%")).toBeInTheDocument();
+    expect(view.getByText("40%")).toBeInTheDocument();
+    expect(view.getAllByText(/^重置 /)).toHaveLength(2);
+  });
+
+  it("额度页在 Codex API 模式隐藏官方额度", async () => {
+    setMockRouterMode("codex", "api");
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+    });
+    expect(view.queryByText("Codex 官方额度")).not.toBeInTheDocument();
+  });
+
+  it("额度页刷新按钮同时刷新本地统计和官方额度", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+    await view.findByText("Codex 官方额度");
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+        input: { days: 7, backend: "all" },
+      }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+    });
+  });
+
+  it("额度页官方额度失败不影响本地统计", async () => {
+    setMockCodexAccountQuotaStatus({
+      available: false,
+      connectionMode: "codex-account",
+      limitId: "codex",
+      limitName: null,
+      planType: "pro",
+      rateLimitReachedType: null,
+      fiveHour: null,
+      weekly: null,
+      fetchedAt: Date.now(),
+      error: "Codex 未登录",
+    });
+
+    const view = await renderSettings("/settings?tab=quota");
+
+    expect(await view.findByText("总 Token")).toBeInTheDocument();
+    expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
+    expect(view.getByText("暂无官方额度数据")).toBeInTheDocument();
+    expect(view.getByText("Codex 未登录")).toBeInTheDocument();
   });
 
   it("点击 Codex 会写入全局 active provider", async () => {
@@ -102,32 +242,31 @@ describe("Settings provider switch", () => {
     expect(next.getByRole("button", { name: "显示首次启动清单" })).toBeInTheDocument();
   });
 
-  it("连接页不会把已有直连模式强制覆盖成 CC-Switch", async () => {
-    setMockRouterMode("claude", "direct");
+  it("连接页默认使用 API/官方账号，不再展示 CC-Switch 专用配置", async () => {
+    setMockActiveBackend("codex");
 
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByRole("radio", { name: "直连" })).toHaveAttribute(
+      expect(view.getByRole("radio", { name: "官方账号" })).toHaveAttribute(
         "aria-checked",
         "true",
       );
     });
+    expect(view.queryByText("CC-Switch")).not.toBeInTheDocument();
     expect(
       mockInvoke.mock.calls.some(([cmd, args]) =>
         cmd === "router_set_mode" &&
         typeof args === "object" &&
         args !== null &&
-        "backend" in args &&
-        args.backend === "claude" &&
         "mode" in args &&
         args.mode === "cc-switch"
       ),
     ).toBe(false);
   });
 
-  it("直连模式可以保存 Base URL 和 API key，空 key 保存保留已有密钥", async () => {
-    setMockRouterMode("claude", "direct");
+  it("API 模式可以保存 Base URL 和 API key，空 key 保存保留已有密钥", async () => {
+    setMockRouterMode("claude", "api");
     setMockProviderConfig("claude", { baseUrl: "https://api.anthropic.com", hasApiKey: true });
 
     const view = await renderSettings("/settings?tab=providers");
@@ -140,17 +279,15 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"baseUrl\":\"https://anthropic.example/v1\"") &&
-          JSON.stringify(args.config).includes("\"apiKey\":null") &&
-          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: {
+          baseUrl: "https://anthropic.example/v1",
+          apiKey: null,
+        },
+      });
+      expect(lastInvokeInput("provider_set_config")?.config).not.toMatchObject({
+        clearApiKey: true,
+      });
     });
     await waitFor(() => {
       expect(view.getByRole("button", { name: "保存" })).toBeEnabled();
@@ -161,36 +298,28 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: { apiKey: "sk-new" },
+      });
     });
   });
 
-  it("直连模式可以显式清除已保存的 API key", async () => {
-    setMockRouterMode("codex", "direct");
+  it("Codex 切换到 API 模式后可以显式清除已保存的 API key", async () => {
+    setMockRouterMode("codex", "api");
     setMockActiveBackend("codex");
     setMockProviderConfig("codex", { hasApiKey: true });
 
     const view = await renderSettings("/settings?tab=providers");
-    await fireEvent.click(await view.findByRole("button", { name: "清除" }));
+    await waitFor(() => {
+      expect(view.getByText("密钥已保存")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "清除" })).toBeEnabled();
+    });
+    await fireEvent.click(view.getByRole("button", { name: "清除" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "provider_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("provider_set_config")).toMatchObject({
+        config: { clearApiKey: true },
+      });
       expect(view.getByText("未保存密钥")).toBeInTheDocument();
     });
   });
@@ -248,15 +377,16 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("CC-Switch 不可达时提示启动代理或切直连", async () => {
-    setMockCCSwitchReachable(false);
+  it("自定义 API 来源未设置密钥时不显示未配置", async () => {
+    setMockRouterMode("claude", "api");
+    setMockProviderConfig("claude", { baseUrl: "http://127.0.0.1:15721", hasApiKey: false });
 
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("CC-Switch 不可达")).toBeInTheDocument();
-      expect(view.getAllByText(/请启动 CC-Switch/).length).toBeGreaterThan(0);
-      expect(view.getAllByText(/切到直连/).length).toBeGreaterThan(0);
+      expect(view.getByText("Claude 自定义 API 来源")).toBeInTheDocument();
+      expect(view.getAllByText(/未设置密钥/).length).toBeGreaterThan(0);
+      expect(view.queryByText(/未配置/)).not.toBeInTheDocument();
     });
   });
 
@@ -321,7 +451,7 @@ describe("Settings provider switch", () => {
     expect(view.container.querySelector(".ui-textarea")).toBeNull();
   });
 
-  it("Agent 设置页可以切换运行时通道", async () => {
+  it("Agent 设置页只显示内置协议相关设置", async () => {
     const view = await renderSettings("/settings?tab=agent");
 
     await waitFor(() => {
@@ -329,30 +459,8 @@ describe("Settings provider switch", () => {
         mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
       ).toBe(true);
     });
-    await waitFor(() => {
-      expect(view.getByRole("radio", { name: "内置" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-    });
 
-    await fireEvent.click(view.getByRole("radio", { name: "MutsukiCore" }));
-
-    await waitFor(() => {
-      expect(view.getByRole("radio", { name: "MutsukiCore" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "agent_interaction_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"agentRuntimeChannel\":\"mutsuki_core\"")
-        ),
-      ).toBe(true);
-    });
+    expect(view.queryByText("Agent 交互")).toBeInTheDocument();
   });
 
   it("项目设置页不再显示 Codex 项目默认高级字段", async () => {
@@ -372,15 +480,9 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("radio", { name: "当前 Provider" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "conversation_suggestions_set_settings" &&
-          typeof args === "object" &&
-          args !== null &&
-          "settings" in args &&
-          JSON.stringify(args.settings).includes("\"source\":\"provider\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("conversation_suggestions_set_settings")).toMatchObject({
+        settings: { source: "provider" },
+      });
     });
   });
 
@@ -394,16 +496,12 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":null") &&
-          !JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { apiKey: null },
+      });
+      expect(lastInvokeInput("assistant_ai_set_config")?.config).not.toMatchObject({
+        clearApiKey: true,
+      });
     });
     expect(view.getByText("密钥已保存")).toBeInTheDocument();
   });
@@ -416,29 +514,17 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"apiKey\":\"sk-new\"")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { apiKey: "sk-new" },
+      });
     });
 
     await fireEvent.click(view.getByRole("button", { name: "清除" }));
 
     await waitFor(() => {
-      expect(
-        mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "assistant_ai_set_config" &&
-          typeof args === "object" &&
-          args !== null &&
-          "config" in args &&
-          JSON.stringify(args.config).includes("\"clearApiKey\":true")
-        ),
-      ).toBe(true);
+      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+        config: { clearApiKey: true },
+      });
       expect(view.getByText("未保存密钥")).toBeInTheDocument();
     });
   });

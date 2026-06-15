@@ -26,6 +26,8 @@ import type {
   ProjectArchitectureChange,
   ProjectArchitectureInteractionPayload,
   ProviderRuntimeOptions,
+  CodexAccountQuotaStatus,
+  QuotaUsageStats,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -306,6 +308,129 @@ export type ProviderRuntimeOptionsTypeTest = Assert<
   >
 >;
 
+export type QuotaUsageStatsTypeTest = Assert<
+  Extends<
+    {
+      days: 7;
+      backend: "all";
+      rangeStart: 1;
+      rangeEnd: 2;
+      totals: {
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+      };
+      cost: {
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        totalRecordCount: 2;
+      };
+      daily: [{
+        dayStart: 1;
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 2;
+      }];
+      backends: [{
+        backend: "claude";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      recent: [{
+        eventId: "event-1";
+        taskId: "task-1";
+        turnId: "turn-1";
+        backend: "claude";
+        sessionId: "session-1";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        createdAt: 1;
+      }];
+      projects: [{
+        projectId: "project-1";
+        projectName: "Lilia";
+        projectCwd: "C:/repo";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      conversations: [{
+        taskId: "task-1";
+        taskTitle: "额度统计";
+        taskStatus: "running";
+        projectId: "project-1";
+        projectName: "Lilia";
+        inputTokens: 100;
+        outputTokens: 50;
+        cacheReadTokens: 10;
+        cacheCreationTokens: 5;
+        totalTokens: 165;
+        knownCostUsd: 0.12;
+        costRecordCount: 1;
+        recordCount: 1;
+      }];
+      tools: [{
+        key: "command::";
+        label: "命令";
+        kind: "command";
+        subkind: null;
+        toolName: null;
+        callCount: 1;
+        sharePercent: 100;
+      }];
+    },
+    QuotaUsageStats
+  >
+>;
+
+export type CodexAccountQuotaStatusTypeTest = Assert<
+  Extends<
+    {
+      available: true;
+      connectionMode: "codex-account";
+      limitId: "codex";
+      limitName: "Codex";
+      planType: "pro";
+      rateLimitReachedType: null;
+      fiveHour: {
+        usedPercent: 25;
+        windowDurationMins: 300;
+        resetsAt: 1;
+      };
+      weekly: {
+        usedPercent: 40;
+        windowDurationMins: 10080;
+        resetsAt: 2;
+      };
+      fetchedAt: 3;
+      error: null;
+    },
+    CodexAccountQuotaStatus
+  >
+>;
+
 export type AutomationRunWorkflowTypeTest = Assert<
   Extends<
     {
@@ -424,7 +549,6 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
     {
       nonInterruptMode: false;
       debug: true;
-      agentRuntimeChannel: "mutsuki_core";
       codexProfile: CodexProfileSettings;
     },
     AgentInteractionSettings

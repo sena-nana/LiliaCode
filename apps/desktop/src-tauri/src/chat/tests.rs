@@ -10,9 +10,7 @@ mod agent_event_sink_tests {
     use crate::agent_timeline::AgentTimelineEventInput;
     use crate::chat::commands::{
         agent_interaction_response_payload, attach_stdin_delivery,
-        composer_runtime_settings_update_payload, control_event_attributes, plan_reset_session,
-        record_mutsuki_core_control_event, stage_mutsuki_core_interrupt_turn,
-        stage_mutsuki_core_turn_stop, MutsukiCoreTurnStopKind, ResetSessionPlan,
+        composer_runtime_settings_update_payload, plan_reset_session, ResetSessionPlan,
     };
     use crate::chat::runner::build_runner_stdin_payload;
     use crate::chat::slash_commands::{execute_slash_command, list_slash_commands};
@@ -20,9 +18,7 @@ mod agent_event_sink_tests {
     use crate::chat::timeline_sink::*;
     use crate::chat::types::*;
     use crate::provider::*;
-    use crate::{
-        BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
-    };
+    use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
     fn turn_context() -> AgentTurnContext {
         AgentTurnContext {
@@ -257,101 +253,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn runtime_control_event_queue_is_drained() {
-        let store = ChatStore::default();
-        record_runtime_control_event(
-            &store,
-            "task-1",
-            "interaction_response",
-            control_event_attributes([("requestId", "ask-1".to_string())]),
-            None,
-        );
-
-        let drained = take_runtime_control_events(&store, "task-1");
-
-        assert_eq!(drained.len(), 1);
-        assert_eq!(drained[0].name, "interaction_response");
-        assert_eq!(
-            drained[0].attributes.get("requestId").map(String::as_str),
-            Some("ask-1")
-        );
-        assert!(take_runtime_control_events(&store, "task-1").is_empty());
-    }
-
-    #[test]
-    fn runtime_control_events_roundtrip_through_persistent_queue() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
-        let event = RuntimeControlEvent {
-            name: "interaction_response".to_string(),
-            attributes: control_event_attributes([
-                ("requestId", "ask-1".to_string()),
-                ("kind", "ask_user".to_string()),
-            ]),
-            payload: Some(json!({
-                "type": "interaction_response",
-                "id": "ask-1",
-                "kind": "ask_user",
-                "result": { "cancelled": false, "answers": {} },
-            })),
-        };
-
-        persist_runtime_control_event(&conn, "task-1", &event).unwrap();
-        let restored = list_runtime_control_events(&conn, "task-1").unwrap();
-
-        assert_eq!(restored.len(), 1);
-        assert_eq!(restored[0].name, "interaction_response");
-        assert_eq!(
-            restored[0].attributes.get("requestId").map(String::as_str),
-            Some("ask-1")
-        );
-        assert_eq!(restored[0].payload, event.payload);
-
-        clear_runtime_control_events(&conn, "task-1").unwrap();
-        assert!(list_runtime_control_events(&conn, "task-1")
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn runtime_control_event_ids_clear_only_acked_rows() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
-        let first = RuntimeControlEvent {
-            name: "interaction_response".to_string(),
-            attributes: control_event_attributes([("requestId", "ask-1".to_string())]),
-            payload: Some(json!({ "type": "interaction_response", "id": "ask-1" })),
-        };
-        let second = RuntimeControlEvent {
-            name: "permission_update".to_string(),
-            attributes: control_event_attributes([("permission", "readonly".to_string())]),
-            payload: Some(json!({ "type": "settings_update", "permission": "readonly" })),
-        };
-
-        persist_runtime_control_event(&conn, "task-1", &first).unwrap();
-        persist_runtime_control_event(&conn, "task-1", &second).unwrap();
-        let deliveries = list_persisted_runtime_control_events(&conn, "task-1").unwrap();
-
-        assert_eq!(deliveries.len(), 2);
-        clear_runtime_control_event_ids(&conn, &[deliveries[0].persisted_id.unwrap()]).unwrap();
-        let remaining = list_persisted_runtime_control_events(&conn, "task-1").unwrap();
-
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].event.name, "permission_update");
-    }
-
-    #[test]
-    fn clearing_runtime_state_also_clears_persisted_control_events() {
+    fn clearing_runtime_state_removes_persisted_runtime_state() {
         let store = ChatStore::default();
         let conn = Connection::open_in_memory().unwrap();
         create_resume_schema(&conn);
@@ -363,7 +265,6 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         persist_runtime_state(
             &conn,
@@ -375,23 +276,9 @@ mod agent_event_sink_tests {
             None,
         )
         .unwrap();
-        persist_runtime_control_event(
-            &conn,
-            "task-1",
-            &RuntimeControlEvent {
-                name: "reset_requested".to_string(),
-                attributes: control_event_attributes([("mode", "session_reset".to_string())]),
-                payload: None,
-            },
-        )
-        .unwrap();
-
         clear_runtime_state(&conn, "task-1").unwrap();
 
         assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
-        assert!(list_runtime_control_events(&conn, "task-1")
-            .unwrap()
-            .is_empty());
     }
 
     #[test]
@@ -419,7 +306,6 @@ mod agent_event_sink_tests {
             .expect("persisted pending turn");
         assert_eq!(restored.content, "content queued");
         assert_eq!(restored.turn_id, turn.turn_id);
-        assert_eq!(restored.runtime_channel, RUNTIME_CHANNEL_BUILTIN);
         assert_eq!(restored.guide_id.as_deref(), Some("guide-1"));
         let Some(ChatWorkflow::Automation { automation_run_id }) = restored.workflow else {
             panic!("unexpected workflow");
@@ -490,101 +376,6 @@ mod agent_event_sink_tests {
             failed.get("stdinError").map(String::as_str),
             Some("broken pipe")
         );
-    }
-
-    #[test]
-    fn record_mutsuki_core_control_event_only_records_mutsuki_core_running_turn() {
-        let store = ChatStore::default();
-        store.running_turns.lock().unwrap().insert(
-            "builtin-task".to_string(),
-            RunningTurn {
-                turn_id: "turn-builtin".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
-            },
-        );
-        store.running_turns.lock().unwrap().insert(
-            "mutsuki-core-task".to_string(),
-            RunningTurn {
-                turn_id: "turn-mutsuki-core".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-            },
-        );
-
-        record_mutsuki_core_control_event(
-            &store,
-            "builtin-task",
-            "permission_update",
-            control_event_attributes([("permission", "full".to_string())]),
-            None,
-        );
-        record_mutsuki_core_control_event(
-            &store,
-            "mutsuki-core-task",
-            "permission_update",
-            control_event_attributes([("permission", "full".to_string())]),
-            Some(json!({ "type": "settings_update", "permission": "full" })),
-        );
-
-        assert!(take_runtime_control_events(&store, "builtin-task").is_empty());
-        let drained = take_runtime_control_events(&store, "mutsuki-core-task");
-        assert_eq!(drained.len(), 1);
-        assert_eq!(drained[0].name, "permission_update");
-        assert_eq!(
-            drained[0].attributes.get("turnId").map(String::as_str),
-            Some("turn-mutsuki-core")
-        );
-        assert_eq!(
-            drained[0].attributes.get("backend").map(String::as_str),
-            Some(BACKEND_CODEX)
-        );
-        assert_eq!(
-            drained[0].payload,
-            Some(json!({ "type": "settings_update", "permission": "full" }))
-        );
-    }
-
-    #[test]
-    fn mutsuki_core_interaction_response_is_recorded_as_control_event() {
-        let store = ChatStore::default();
-        store.running_turns.lock().unwrap().insert(
-            "task-1".to_string(),
-            RunningTurn {
-                turn_id: "turn-mutsuki-core".to_string(),
-                backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-            },
-        );
-        let payload = agent_interaction_response_payload(
-            "permission-1".to_string(),
-            "permission_approval".to_string(),
-            json!({ "action": "cancel", "permissions": {}, "scope": "turn" }),
-        );
-
-        record_mutsuki_core_control_event(
-            &store,
-            "task-1",
-            "interaction_response",
-            control_event_attributes([
-                ("requestId", "permission-1".to_string()),
-                ("kind", "permission_approval".to_string()),
-            ]),
-            Some(payload.clone()),
-        );
-
-        let drained = take_runtime_control_events(&store, "task-1");
-        assert_eq!(drained.len(), 1);
-        assert_eq!(drained[0].name, "interaction_response");
-        assert_eq!(
-            drained[0].attributes.get("requestId").map(String::as_str),
-            Some("permission-1")
-        );
-        assert_eq!(
-            drained[0].attributes.get("turnId").map(String::as_str),
-            Some("turn-mutsuki-core")
-        );
-        assert_eq!(drained[0].payload, Some(payload));
     }
 
     #[test]
@@ -700,15 +491,18 @@ mod agent_event_sink_tests {
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
             "type": "session_fork",
             "excludeTurns": false,
-        })).is_err());
+        }))
+        .is_err());
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
             "type": "session_management",
             "action": "list",
-        })).is_err());
+        }))
+        .is_err());
         assert!(serde_json::from_value::<ChatWorkflow>(json!({
             "type": "runtime_settings",
             "action": "diagnose",
-        })).is_err());
+        }))
+        .is_err());
 
         let fork = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "session_fork",
@@ -834,15 +628,25 @@ mod agent_event_sink_tests {
         .unwrap();
         let provider = runtime_options.provider.as_ref().expect("provider options");
         assert_eq!(
-            provider.codex.as_ref().and_then(|value| value.reasoning_effort.as_deref()),
+            provider
+                .codex
+                .as_ref()
+                .and_then(|value| value.reasoning_effort.as_deref()),
             Some("high")
         );
         assert_eq!(
-            provider.claude.as_ref().and_then(|value| value.additional_directories.as_ref()).unwrap(),
+            provider
+                .claude
+                .as_ref()
+                .and_then(|value| value.additional_directories.as_ref())
+                .unwrap(),
             &vec!["D:/shared".to_string()]
         );
         assert_eq!(
-            provider.claude.as_ref().and_then(|value| value.continue_session),
+            provider
+                .claude
+                .as_ref()
+                .and_then(|value| value.continue_session),
             Some(true)
         );
         let provider_settings_json = serde_json::to_value(&provider_settings).unwrap();
@@ -878,8 +682,12 @@ mod agent_event_sink_tests {
             provider_settings_json["provider"]["claude"]["abortAfterMs"],
             json!(3000)
         );
-        assert!(provider_settings_json["provider"]["claude"].get("continue_session").is_none());
-        assert!(provider_settings_json["provider"]["codex"].get("reasoning_effort").is_none());
+        assert!(provider_settings_json["provider"]["claude"]
+            .get("continue_session")
+            .is_none());
+        assert!(provider_settings_json["provider"]["codex"]
+            .get("reasoning_effort")
+            .is_none());
 
         let slash = serde_json::from_value::<ChatWorkflow>(json!({
             "type": "slash_command",
@@ -1099,7 +907,10 @@ mod agent_event_sink_tests {
         assert_eq!(payload["runtimeCommand"]["action"], json!("update"));
         assert!(payload["runtimeCommand"].get("common").is_none());
         assert!(payload["runtimeCommand"].get("runtimeOptions").is_none());
-        assert_eq!(payload["runtimeOptions"]["common"]["permission"], json!("readonly"));
+        assert_eq!(
+            payload["runtimeOptions"]["common"]["permission"],
+            json!("readonly")
+        );
         assert_eq!(
             payload["runtimeOptions"]["provider"]["codex"]["reasoningEffort"],
             json!("high")
@@ -1323,7 +1134,6 @@ mod agent_event_sink_tests {
                 created_at: 100,
             },
             turn_id: format!("turn-{id}"),
-            runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             guide_id: None,
         }
     }
@@ -1357,7 +1167,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-running".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store
@@ -1395,7 +1204,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -1427,7 +1235,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -1459,7 +1266,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-stop".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store.interrupted_turns.lock().unwrap().insert(
@@ -1467,7 +1273,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-stop".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
 
@@ -1503,7 +1308,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CLAUDE.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
             },
         );
         store
@@ -1543,7 +1347,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-interrupt".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         store
@@ -1649,7 +1452,6 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-reset".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
         let rollback = ChatRollbackResult {
             rolled_back: true,
@@ -1749,162 +1551,6 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn mutsuki_core_turn_stop_stages_interrupt_and_returns_guide_ids() {
-        let store = ChatStore::default();
-        let running_turn = RunningTurn {
-            turn_id: "turn-1".to_string(),
-            backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-        };
-        store
-            .running_turns
-            .lock()
-            .unwrap()
-            .insert("task-1".to_string(), running_turn.clone());
-        store
-            .pending_turns
-            .lock()
-            .unwrap()
-            .entry("task-1".to_string())
-            .or_default()
-            .push_back(PendingChatTurn {
-                guide_id: Some("guide-1".to_string()),
-                ..pending_turn("queued")
-            });
-
-        let cleared = stage_mutsuki_core_turn_stop(
-            &store,
-            "task-1",
-            &running_turn,
-            MutsukiCoreTurnStopKind::Interrupt,
-        );
-
-        assert_eq!(cleared, vec!["guide-1".to_string()]);
-        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
-        assert_eq!(
-            store
-                .interrupted_turns
-                .lock()
-                .unwrap()
-                .get("task-1")
-                .map(|turn| turn.turn_id.as_str()),
-            Some("turn-1")
-        );
-        assert!(store.reset_turns.lock().unwrap().get("task-1").is_none());
-    }
-
-    #[test]
-    fn mutsuki_core_turn_stop_stages_reset_without_interrupt_mark() {
-        let store = ChatStore::default();
-        let running_turn = RunningTurn {
-            turn_id: "turn-reset".to_string(),
-            backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-        };
-        store
-            .pending_turns
-            .lock()
-            .unwrap()
-            .entry("task-1".to_string())
-            .or_default()
-            .push_back(PendingChatTurn {
-                guide_id: Some("guide-reset".to_string()),
-                ..pending_turn("queued")
-            });
-
-        let cleared = stage_mutsuki_core_turn_stop(
-            &store,
-            "task-1",
-            &running_turn,
-            MutsukiCoreTurnStopKind::Reset,
-        );
-
-        assert_eq!(cleared, vec!["guide-reset".to_string()]);
-        assert!(store.pending_turns.lock().unwrap().get("task-1").is_none());
-        assert!(store
-            .interrupted_turns
-            .lock()
-            .unwrap()
-            .get("task-1")
-            .is_none());
-        assert_eq!(
-            store
-                .reset_turns
-                .lock()
-                .unwrap()
-                .get("task-1")
-                .map(|turn| turn.turn_id.as_str()),
-            Some("turn-reset")
-        );
-    }
-
-    #[test]
-    fn mutsuki_core_interrupt_turn_reset_stashes_pending_rollback() {
-        let store = ChatStore::default();
-        let running_turn = RunningTurn {
-            turn_id: "turn-reset".to_string(),
-            backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-        };
-        let rollback = ChatRollbackResult {
-            rolled_back: true,
-            restored_content: "restore".to_string(),
-            restored_attachments: Vec::new(),
-            removed_event_ids: vec!["evt-1".to_string()],
-        };
-
-        let (_cleared, result) = stage_mutsuki_core_interrupt_turn(
-            &store,
-            "task-1",
-            &running_turn,
-            MutsukiCoreTurnStopKind::Reset,
-            Some(rollback.clone()),
-        );
-
-        assert!(!result.rolled_back);
-        assert!(result.restored_content.is_empty());
-        assert!(result.restored_attachments.is_empty());
-        assert!(result.removed_event_ids.is_empty());
-        let stored = take_pending_rollback(&store, "task-1").expect("pending rollback");
-        assert!(stored.rolled_back);
-        assert_eq!(stored.restored_content, rollback.restored_content);
-        assert_eq!(
-            stored.restored_attachments.len(),
-            rollback.restored_attachments.len()
-        );
-        assert_eq!(stored.removed_event_ids, rollback.removed_event_ids);
-    }
-
-    #[test]
-    fn mutsuki_core_interrupt_turn_interrupt_does_not_stash_rollback() {
-        let store = ChatStore::default();
-        let running_turn = RunningTurn {
-            turn_id: "turn-interrupt".to_string(),
-            backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-        };
-
-        let (_cleared, result) = stage_mutsuki_core_interrupt_turn(
-            &store,
-            "task-1",
-            &running_turn,
-            MutsukiCoreTurnStopKind::Interrupt,
-            Some(ChatRollbackResult {
-                rolled_back: true,
-                restored_content: "ignored".to_string(),
-                restored_attachments: Vec::new(),
-                removed_event_ids: vec!["evt-ignored".to_string()],
-            }),
-        );
-
-        assert!(!result.rolled_back);
-        assert!(result.restored_content.is_empty());
-        assert!(result.restored_attachments.is_empty());
-        assert!(result.removed_event_ids.is_empty());
-        assert!(take_pending_rollback(&store, "task-1").is_none());
-    }
-
-    #[test]
     fn reset_session_plan_without_running_turn_clears_queue_and_requests_immediate_cleanup() {
         let store = ChatStore::default();
         store
@@ -1932,52 +1578,11 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn reset_session_plan_for_mutsuki_core_running_turn_stages_reset() {
-        let store = ChatStore::default();
-        let running_turn = RunningTurn {
-            turn_id: "turn-reset".to_string(),
-            backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
-        };
-        store
-            .pending_turns
-            .lock()
-            .unwrap()
-            .entry("task-1".to_string())
-            .or_default()
-            .push_back(PendingChatTurn {
-                guide_id: Some("guide-mutsuki-core".to_string()),
-                ..pending_turn("queued")
-            });
-
-        let plan = plan_reset_session(&store, "task-1", Some(&running_turn));
-
-        assert_eq!(
-            plan,
-            ResetSessionPlan {
-                cleared_guide_ids: vec!["guide-mutsuki-core".to_string()],
-                stopped_running: true,
-                immediate_cleanup: false,
-            }
-        );
-        assert_eq!(
-            store
-                .reset_turns
-                .lock()
-                .unwrap()
-                .get("task-1")
-                .map(|turn| turn.turn_id.as_str()),
-            Some("turn-reset")
-        );
-    }
-
-    #[test]
     fn reset_session_plan_for_builtin_running_turn_defers_to_stop_running_turn() {
         let store = ChatStore::default();
         let running_turn = RunningTurn {
             turn_id: "turn-builtin".to_string(),
             backend: BACKEND_CLAUDE.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
         };
         store
             .pending_turns
@@ -2013,11 +1618,9 @@ mod agent_event_sink_tests {
 
         assert_eq!(snapshot.task_id, "task-1");
         assert_eq!(snapshot.phase, "idle");
-        assert!(snapshot.runtime_channel.is_none());
         assert!(snapshot.backend.is_none());
         assert!(snapshot.turn_id.is_none());
         assert_eq!(snapshot.queued_count, 0);
-        assert_eq!(snapshot.pending_control_count, 0);
         assert!(!snapshot.pending_rollback);
         assert!(!snapshot.pending_reset_cleanup);
     }
@@ -2030,7 +1633,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-1".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         store
@@ -2043,25 +1645,12 @@ mod agent_event_sink_tests {
                 guide_id: Some("guide-1".to_string()),
                 ..pending_turn("queued")
             });
-        record_runtime_control_event(
-            &store,
-            "task-1",
-            "interrupt_requested",
-            control_event_attributes([("mode", "user_interrupt".to_string())]),
-            None,
-        );
-
         let snapshot = chat_runtime_snapshot(&store, "task-1");
 
         assert_eq!(snapshot.phase, "running_and_queued");
-        assert_eq!(
-            snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
-        );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-1"));
         assert_eq!(snapshot.queued_count, 1);
-        assert_eq!(snapshot.pending_control_count, 1);
     }
 
     #[test]
@@ -2072,7 +1661,6 @@ mod agent_event_sink_tests {
             RunningTurn {
                 turn_id: "turn-reset".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
         );
         mark_pending_reset_cleanup(&store, "task-1");
@@ -2107,7 +1695,6 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-persisted".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
 
         persist_runtime_state(
@@ -2130,45 +1717,8 @@ mod agent_event_sink_tests {
         let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
 
         assert_eq!(snapshot.phase, "running_and_queued");
-        assert_eq!(
-            snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
-        );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-persisted"));
-    }
-
-    #[test]
-    fn runtime_snapshot_counts_persisted_control_events() {
-        let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
-        persist_runtime_control_event(
-            &conn,
-            "task-1",
-            &RuntimeControlEvent {
-                name: "permission_update".to_string(),
-                attributes: control_event_attributes([("permission", "readonly".to_string())]),
-                payload: Some(json!({ "type": "settings_update", "permission": "readonly" })),
-            },
-        )
-        .unwrap();
-        record_runtime_control_event(
-            &store,
-            "task-1",
-            "interrupt_requested",
-            control_event_attributes([("mode", "user_interrupt".to_string())]),
-            None,
-        );
-
-        let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
-
-        assert_eq!(snapshot.pending_control_count, 2);
     }
 
     #[test]
@@ -2183,8 +1733,8 @@ mod agent_event_sink_tests {
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
+               (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -2192,10 +1742,6 @@ mod agent_event_sink_tests {
         let snapshot = chat_runtime_snapshot_with_persisted(Some(&conn), &store, "task-1");
 
         assert_eq!(snapshot.phase, "abandoned");
-        assert_eq!(
-            snapshot.runtime_channel.as_deref(),
-            Some(RUNTIME_CHANNEL_MUTSUKI_CORE)
-        );
         assert_eq!(snapshot.backend.as_deref(), Some(BACKEND_CODEX));
         assert_eq!(snapshot.turn_id.as_deref(), Some("turn-old"));
     }
@@ -2212,8 +1758,8 @@ mod agent_event_sink_tests {
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
+               (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -2234,8 +1780,8 @@ mod agent_event_sink_tests {
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-old', 'codex', 'mutsuki_core', 'running', 'stale-epoch', 1)"#,
+               (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-old', 'codex', 'running', 'stale-epoch', 1)"#,
             [],
         )
         .unwrap();
@@ -2243,7 +1789,6 @@ mod agent_event_sink_tests {
             &conn,
             "task-1",
             &PendingChatTurn {
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
                 ..pending_turn("recover")
             },
         )
@@ -2254,7 +1799,6 @@ mod agent_event_sink_tests {
             .expect("recoverable turn");
 
         assert_eq!(turn.turn_id, "turn-recover");
-        assert_eq!(turn.runtime_channel, RUNTIME_CHANNEL_MUTSUKI_CORE);
         assert!(load_any_runtime_state(&conn, "task-1").unwrap().is_none());
         assert_eq!(count_pending_turns(&conn, "task-1").unwrap(), 0);
     }
@@ -2276,7 +1820,6 @@ mod agent_event_sink_tests {
             &RunningTurn {
                 turn_id: "turn-live".to_string(),
                 backend: BACKEND_CODEX.to_string(),
-                runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
             },
             "running",
             None,
@@ -2297,7 +1840,6 @@ mod agent_event_sink_tests {
         let running_turn = RunningTurn {
             turn_id: "turn-live".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_MUTSUKI_CORE.to_string(),
         };
 
         persist_runtime_state(
@@ -2434,13 +1976,12 @@ mod agent_event_sink_tests {
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
             rusqlite::params![
                 "task-1",
                 "turn-live",
                 "codex",
-                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2486,13 +2027,12 @@ mod agent_event_sink_tests {
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
             rusqlite::params![
                 "task-1",
                 "turn-restore",
                 "codex",
-                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2562,13 +2102,12 @@ mod agent_event_sink_tests {
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
             rusqlite::params![
                 "task-1",
                 "turn-dead",
                 "codex",
-                "mutsuki_core",
                 "running",
                 process_session_id.clone(),
                 "stale-epoch",
@@ -2596,7 +2135,7 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn restore_active_runtime_sessions_preserves_runtime_channel_for_resume_dispatch() {
+    fn restore_active_runtime_sessions_preserves_backend_for_resume_dispatch() {
         let store = ChatStore::default();
         let conn = Connection::open_in_memory().unwrap();
         create_resume_schema(&conn);
@@ -2629,35 +2168,37 @@ mod agent_event_sink_tests {
         let proc_builtin =
             crate::chat::runner::start_test_process_session(child_1, &json!({"boot": true}))
                 .unwrap();
-        let proc_mutsuki_core =
+        let proc_second =
             crate::chat::runner::start_test_process_session(child_2, &json!({"boot": true}))
                 .unwrap();
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-builtin', 'claude', 'builtin', 'running', ?1, 'stale-1', 1)"#,
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-claude', 'claude', 'running', ?1, 'stale-1', 1)"#,
             rusqlite::params![proc_builtin.clone()],
         )
         .unwrap();
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-2', 'turn-mutsuki-core', 'codex', 'mutsuki_core', 'running', ?1, 'stale-2', 2)"#,
-            rusqlite::params![proc_mutsuki_core.clone()],
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-2', 'turn-codex', 'codex', 'running', ?1, 'stale-2', 2)"#,
+            rusqlite::params![proc_second.clone()],
         )
         .unwrap();
 
         let restored = restore_active_runtime_sessions(&conn, &store);
 
         assert_eq!(restored.len(), 2);
-        assert!(restored.iter().any(|state| state.task_id == "task-1"
-            && state.turn.runtime_channel == RUNTIME_CHANNEL_BUILTIN));
-        assert!(restored.iter().any(|state| state.task_id == "task-2"
-            && state.turn.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE));
+        assert!(restored
+            .iter()
+            .any(|state| state.task_id == "task-1" && state.turn.backend == BACKEND_CLAUDE));
+        assert!(restored
+            .iter()
+            .any(|state| state.task_id == "task-2" && state.turn.backend == BACKEND_CODEX));
 
         crate::chat::runner::remove_test_process_session(&proc_builtin);
-        crate::chat::runner::remove_test_process_session(&proc_mutsuki_core);
+        crate::chat::runner::remove_test_process_session(&proc_second);
     }
 
     #[test]
@@ -2685,8 +2226,8 @@ mod agent_event_sink_tests {
 
         conn.execute(
             r#"INSERT INTO task_runtime_states
-               (task_id, turn_id, backend, runtime_channel, phase, process_session_id, runtime_epoch, updated_at)
-               VALUES ('task-1', 'turn-finished', 'claude', 'builtin', 'running', ?1, 'stale-x', 1)"#,
+               (task_id, turn_id, backend, phase, process_session_id, runtime_epoch, updated_at)
+               VALUES ('task-1', 'turn-finished', 'claude', 'running', ?1, 'stale-x', 1)"#,
             rusqlite::params![process_session_id.clone()],
         )
         .unwrap();
@@ -2761,31 +2302,20 @@ mod agent_event_sink_tests {
             CREATE TABLE task_agent_sessions (
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
+              PRIMARY KEY (task_id, backend)
             );
             CREATE TABLE task_runtime_states (
               task_id         TEXT PRIMARY KEY,
               turn_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               phase           TEXT NOT NULL CHECK (phase IN
                                 ('running','interrupted_pending_finish','reset_pending_finish')),
               process_session_id TEXT,
               runtime_epoch   TEXT NOT NULL,
               context_json    TEXT,
               updated_at      INTEGER NOT NULL
-            );
-            CREATE TABLE task_runtime_control_events (
-              id              INTEGER PRIMARY KEY AUTOINCREMENT,
-              task_id         TEXT NOT NULL,
-              name            TEXT NOT NULL,
-              attributes_json TEXT NOT NULL DEFAULT '{}',
-              payload_json    TEXT,
-              created_at      INTEGER NOT NULL
             );
             CREATE TABLE task_runtime_finalizations (
               task_id               TEXT PRIMARY KEY,
@@ -2806,8 +2336,6 @@ mod agent_event_sink_tests {
               runtime_options_json TEXT,
               message_json    TEXT NOT NULL,
               turn_id         TEXT NOT NULL,
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );
@@ -2861,12 +2389,7 @@ mod agent_event_sink_tests {
 
     fn assert_resume_session(conn: &Connection, backend: &str, expected: Option<&str>) {
         assert_eq!(
-            load_persisted_resume_session_id(
-                conn,
-                "task-1",
-                backend,
-                crate::RUNTIME_CHANNEL_BUILTIN
-            ),
+            load_persisted_resume_session_id(conn, "task-1", backend),
             expected.map(|sid| sid.to_string())
         );
     }
@@ -2899,21 +2422,11 @@ mod agent_event_sink_tests {
         .unwrap();
 
         assert_eq!(
-            load_persisted_resume_session_id(
-                &conn,
-                "task-1",
-                BACKEND_CODEX,
-                crate::RUNTIME_CHANNEL_BUILTIN,
-            ),
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CODEX),
             Some("codex-thread".to_string())
         );
         assert_eq!(
-            load_persisted_resume_session_id(
-                &conn,
-                "task-1",
-                BACKEND_CLAUDE,
-                crate::RUNTIME_CHANNEL_BUILTIN,
-            ),
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CLAUDE),
             None
         );
     }
@@ -2924,76 +2437,29 @@ mod agent_event_sink_tests {
         create_resume_schema(&conn);
         insert_resume_task(&conn);
 
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CLAUDE,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "claude-session",
-        )
-        .unwrap();
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "codex-thread",
-        )
-        .unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
 
         assert_resume_session(&conn, BACKEND_CLAUDE, Some("claude-session"));
         assert_resume_session(&conn, BACKEND_CODEX, Some("codex-thread"));
     }
 
     #[test]
-    fn persisted_resume_session_id_isolated_by_runtime_channel() {
+    fn persisted_resume_session_id_uses_latest_backend_checkpoint() {
         let conn = Connection::open_in_memory().unwrap();
         create_resume_schema(&conn);
         insert_resume_task(&conn);
         insert_codex_timeline_session(&conn, "codex-turn", "timeline-thread", 200);
 
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "builtin-thread",
-        )
-        .unwrap();
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
-            "mutsuki-core-thread",
-        )
-        .unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "builtin-thread").unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "updated-thread").unwrap();
 
         assert_eq!(
-            load_persisted_resume_session_id(
-                &conn,
-                "task-1",
-                BACKEND_CODEX,
-                crate::RUNTIME_CHANNEL_BUILTIN,
-            ),
-            Some("builtin-thread".to_string())
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CODEX),
+            Some("updated-thread".to_string())
         );
         assert_eq!(
-            load_persisted_resume_session_id(
-                &conn,
-                "task-1",
-                BACKEND_CODEX,
-                crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
-            ),
-            Some("mutsuki-core-thread".to_string())
-        );
-        assert_eq!(
-            load_persisted_resume_session_id(
-                &conn,
-                "task-1",
-                BACKEND_CLAUDE,
-                crate::RUNTIME_CHANNEL_MUTSUKI_CORE,
-            ),
+            load_persisted_resume_session_id(&conn, "task-1", BACKEND_CLAUDE),
             None
         );
     }
@@ -3004,14 +2470,7 @@ mod agent_event_sink_tests {
         create_resume_schema(&conn);
         insert_resume_task(&conn);
         insert_codex_timeline_session(&conn, "codex-turn-old", "timeline-thread", 100);
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "checkpoint-thread",
-        )
-        .unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "checkpoint-thread").unwrap();
 
         assert_resume_session(&conn, BACKEND_CODEX, Some("checkpoint-thread"));
     }
@@ -3031,22 +2490,8 @@ mod agent_event_sink_tests {
         let conn = Connection::open_in_memory().unwrap();
         create_resume_schema(&conn);
         insert_resume_task(&conn);
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CLAUDE,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "claude-session",
-        )
-        .unwrap();
-        persist_agent_session_id(
-            &conn,
-            "task-1",
-            BACKEND_CODEX,
-            crate::RUNTIME_CHANNEL_BUILTIN,
-            "codex-thread",
-        )
-        .unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
+        persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
 
         clear_agent_sessions_for_task(&conn, "task-1").unwrap();
 

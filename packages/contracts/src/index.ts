@@ -6,6 +6,7 @@ export * from "./lilia-iab";
 export * from "./provider";
 export * from "./plugins";
 export * from "./history-import";
+export * from "./quota";
 export * from "./ask-user";
 export * from "./agent-interaction";
 export * from "./timeline";

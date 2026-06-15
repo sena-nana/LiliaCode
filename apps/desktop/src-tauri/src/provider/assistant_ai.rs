@@ -7,7 +7,12 @@ use super::credentials::normalize_secret;
 use super::types::{AssistantAIConfig, AssistantAITestResult};
 
 pub(crate) fn test_connection(mut config: AssistantAIConfig) -> AssistantAITestResult {
-    if config.api_key.as_deref().and_then(normalize_secret).is_none() {
+    if config
+        .api_key
+        .as_deref()
+        .and_then(normalize_secret)
+        .is_none()
+    {
         config.api_key = assistant_ai_secret().ok().flatten();
     }
     let base = config

@@ -46,6 +46,71 @@ fn load_milestone_project_id(
     .ok_or_else(|| "milestone_set_tasks: milestone 不存在".to_string())
 }
 
+fn update_milestone_core(
+    conn: &rusqlite::Connection,
+    id: &str,
+    title: Option<&str>,
+    description: Option<&str>,
+    status: Option<&str>,
+    due_date_update: Option<Option<i64>>,
+) -> Result<(), String> {
+    if title.is_none() && description.is_none() && status.is_none() && due_date_update.is_none() {
+        return Ok(());
+    }
+
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM milestones WHERE id = ?1",
+            params![id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|e| format!("milestone_update: 查询 milestone 失败：{e}"))?
+        .is_some();
+    if !exists {
+        return Err("milestone_update: milestone 不存在".to_string());
+    }
+
+    if let Some(next_title) = title {
+        let trimmed = next_title.trim();
+        if trimmed.is_empty() {
+            return Err("milestone_update: 标题不能为空".to_string());
+        }
+        conn.execute(
+            "UPDATE milestones SET title = ?1 WHERE id = ?2",
+            params![trimmed, id],
+        )
+        .map_err(|e| format!("milestone_update(title): {e}"))?;
+    }
+
+    if let Some(next_description) = description {
+        conn.execute(
+            "UPDATE milestones SET description = ?1 WHERE id = ?2",
+            params![next_description.trim(), id],
+        )
+        .map_err(|e| format!("milestone_update(description): {e}"))?;
+    }
+
+    if let Some(next_status) = status {
+        validate_status(next_status)?;
+        conn.execute(
+            "UPDATE milestones SET status = ?1 WHERE id = ?2",
+            params![next_status, id],
+        )
+        .map_err(|e| format!("milestone_update(status): {e}"))?;
+    }
+
+    if let Some(next_due_date) = due_date_update {
+        conn.execute(
+            "UPDATE milestones SET due_date = ?1 WHERE id = ?2",
+            params![next_due_date, id],
+        )
+        .map_err(|e| format!("milestone_update(due_date): {e}"))?;
+    }
+
+    Ok(())
+}
+
 fn set_milestone_tasks_core(
     conn: &mut rusqlite::Connection,
     milestone_id: &str,
@@ -206,48 +271,26 @@ pub fn milestone_create(
 pub fn milestone_update(
     id: String,
     title: Option<String>,
+    description: Option<String>,
     status: Option<String>,
+    due_date: Option<i64>,
+    clear_due_date: Option<bool>,
     store: State<'_, LiliaStore>,
 ) -> Result<(), String> {
-    if title.is_none() && status.is_none() {
-        return Ok(());
-    }
     let conn = store.conn()?;
-    let exists = conn
-        .query_row(
-            "SELECT 1 FROM milestones WHERE id = ?1",
-            params![id.as_str()],
-            |_| Ok(()),
-        )
-        .optional()
-        .map_err(|e| format!("milestone_update: 查询 milestone 失败：{e}"))?
-        .is_some();
-    if !exists {
-        return Err("milestone_update: milestone 不存在".to_string());
-    }
-
-    if let Some(next_title) = title {
-        let trimmed = next_title.trim();
-        if trimmed.is_empty() {
-            return Err("milestone_update: 标题不能为空".to_string());
-        }
-        conn.execute(
-            "UPDATE milestones SET title = ?1 WHERE id = ?2",
-            params![trimmed, id.as_str()],
-        )
-        .map_err(|e| format!("milestone_update(title): {e}"))?;
-    }
-
-    if let Some(next_status) = status {
-        validate_status(&next_status)?;
-        conn.execute(
-            "UPDATE milestones SET status = ?1 WHERE id = ?2",
-            params![next_status, id.as_str()],
-        )
-        .map_err(|e| format!("milestone_update(status): {e}"))?;
-    }
-
-    Ok(())
+    let due_date_update = if clear_due_date.unwrap_or(false) {
+        Some(None)
+    } else {
+        due_date.map(Some)
+    };
+    update_milestone_core(
+        &conn,
+        id.as_str(),
+        title.as_deref(),
+        description.as_deref(),
+        status.as_deref(),
+        due_date_update,
+    )
 }
 
 #[tauri::command]
@@ -368,5 +411,37 @@ mod tests {
         for task_id in ["t3", "t4"] {
             assert!(set_milestone_tasks_core(&mut conn, "m1", vec![task_id.to_string()]).is_err());
         }
+    }
+
+    #[test]
+    fn update_milestone_core_updates_description_and_due_date() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+
+        update_milestone_core(
+            &conn,
+            "m1",
+            None,
+            Some("  可验证的交付边界  "),
+            None,
+            Some(Some(1_781_596_800_000)),
+        )
+        .unwrap();
+
+        let (description, due_date): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT description, due_date FROM milestones WHERE id = 'm1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(description, "可验证的交付边界");
+        assert_eq!(due_date, Some(1_781_596_800_000));
+
+        update_milestone_core(&conn, "m1", None, None, None, Some(None)).unwrap();
+        let due_date: Option<i64> = conn
+            .query_row("SELECT due_date FROM milestones WHERE id = 'm1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(due_date, None);
     }
 }

@@ -162,7 +162,7 @@ async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: num
 }
 
 describe("SecondaryPanel project tree expansion", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
@@ -435,7 +435,6 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "reset_pending_finish",
-      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-reset",
       pendingResetCleanup: true,
@@ -455,7 +454,6 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "abandoned",
-      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-old",
     });
@@ -474,7 +472,6 @@ describe("SecondaryPanel project chat navigation", () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
     setMockRuntimeSnapshot("t-003", {
       phase: "abandoned",
-      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-old",
     });
@@ -542,7 +539,6 @@ describe("SecondaryPanel project chat navigation", () => {
     });
     setMockRuntimeSnapshot("t-003", {
       phase: "running",
-      runtimeChannel: "mutsuki_core",
       backend: "codex",
       turnId: "turn-project",
     });
@@ -661,7 +657,7 @@ describe("SecondaryPanel project chat navigation", () => {
 });
 
 describe("SecondaryPanel project tree drag", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();

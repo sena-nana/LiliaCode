@@ -20,7 +20,7 @@ use crate::projects_tasks::events::emit_tasks_changed;
 use crate::projects_tasks::TaskRow;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::{BACKEND_CLAUDE, RUNTIME_CHANNEL_BUILTIN};
+use crate::BACKEND_CLAUDE;
 
 use self::utility::run_claude_history_utility;
 
@@ -178,7 +178,6 @@ fn remember_claude_session(
         chat_store,
         task_id,
         BACKEND_CLAUDE,
-        RUNTIME_CHANNEL_BUILTIN,
         session_id,
         "Claude attach",
     );
@@ -369,11 +368,9 @@ mod tests {
             CREATE TABLE task_agent_sessions (
               task_id         TEXT NOT NULL,
               backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              runtime_channel TEXT NOT NULL DEFAULT 'builtin'
-                              CHECK (runtime_channel IN ('builtin','mutsuki_core')),
               session_id      TEXT NOT NULL,
               updated_at      INTEGER NOT NULL,
-              PRIMARY KEY (task_id, backend, runtime_channel)
+              PRIMARY KEY (task_id, backend)
             );
             "#,
         )
@@ -392,13 +389,13 @@ mod tests {
                 .sdk_sessions
                 .lock()
                 .unwrap()
-                .get(&session_key(RUNTIME_CHANNEL_BUILTIN, backend, task_id))
+                .get(&session_key(backend, task_id))
                 .cloned(),
             Some(expected.to_string())
         );
         let session_id: String = conn
             .query_row(
-                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2 AND runtime_channel = 'builtin'",
+                "SELECT session_id FROM task_agent_sessions WHERE task_id = ?1 AND backend = ?2",
                 params![task_id, backend],
                 |row| row.get(0),
             )

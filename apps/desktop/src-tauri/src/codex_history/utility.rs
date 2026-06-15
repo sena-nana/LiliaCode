@@ -7,6 +7,7 @@ use tauri::{AppHandle, Runtime};
 use crate::chat::runner::locate_agent_runner;
 use crate::provider::{
     build_codex_app_server_probe_status, resolve_connection_for, validate_backend_ready_for_send,
+    ConnectionMode,
 };
 use crate::BACKEND_CODEX;
 
@@ -38,6 +39,11 @@ pub(super) fn run_codex_history_utility(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("LILIA_CODEX_CLI_PATH", codex_path);
+    if connection.mode == ConnectionMode::CodexAccount {
+        cmd.env_remove("OPENAI_BASE_URL");
+        cmd.env_remove("OPENAI_API_KEY");
+        cmd.env_remove("CODEX_API_KEY");
+    }
     if let Some(url) = connection.base_url {
         cmd.env("OPENAI_BASE_URL", url);
     }

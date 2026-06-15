@@ -18,9 +18,15 @@ import {
   isLiliaArchitectureTool,
 } from "../architecture.mjs";
 import {
+  codexQueryQuotaUsageDynamicTool,
+  createQuotaUsageHandler,
+  isLiliaQuotaTool,
+} from "../quotaUsage.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
+import { handleExperimentalProviderOptions } from "../providerOptions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
@@ -307,7 +313,7 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   assignCodexSettingsParams(common, settings, cmd);
   assignCodexAdvancedThreadParams(common, settings);
   common.sandbox = mapCodexSandboxMode(permission);
-  const dynamicTools = [codexAskUserDynamicTool];
+  const dynamicTools = [codexAskUserDynamicTool, codexQueryQuotaUsageDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
   }
@@ -531,6 +537,7 @@ function readCodexRuntimeSettingsCommand(cmd) {
   const codex = isRecord(provider.codex)
     ? provider.codex
     : {};
+  const ignoredProviderKeys = isRecord(provider.claude) ? Object.keys(provider.claude) : [];
   const updates = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
@@ -558,7 +565,11 @@ function readCodexRuntimeSettingsCommand(cmd) {
   if (action === "update" && Object.keys(updates).length === 0) {
     throw new Error("Lilia provider settings update requires at least one supported setting");
   }
-  return { action, updates };
+  return {
+    action,
+    updates,
+    ignoredProviderKeys,
+  };
 }
 
 function codexSettingsCmdFromRuntimeCommand(cmd, command) {
@@ -1457,6 +1468,7 @@ async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
         action: command.action,
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         params,
       },
       sourceId: `codex:provider-settings:diagnose:${threadId}`,
@@ -1484,6 +1496,7 @@ async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
         method: "thread/settings/update",
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         params,
       },
       sourceId: `codex:provider-settings:update:${threadId}`,
@@ -1501,6 +1514,7 @@ async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
         method: "thread/settings/update",
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         error: err?.message || String(err),
       },
       sourceId: `codex:provider-settings:error:${threadId}`,
@@ -1742,6 +1756,8 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
         ctx,
         backend: "codex",
       })(input);
+    } else if (isLiliaQuotaTool(toolName)) {
+      output = await createQuotaUsageHandler(ctx.interactions?.requestQuotaUsage)(input);
     } else {
       return false;
     }
@@ -1893,6 +1909,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
 }
 
 export async function runCodex(cmd, context) {
+  handleExperimentalProviderOptions(cmd, context, "codex");
   const runtimeExtensions = readCodexRuntimeExtensions(cmd);
   await runCodexAppServer(cmd, runtimeExtensions, context);
 }

@@ -37,10 +37,6 @@ export function listAutomations(): Promise<AutomationWorkflow[]> {
   return invoke<AutomationWorkflow[]>("automation_list_workflows");
 }
 
-export function getAutomation(id: string): Promise<AutomationWorkflow | null> {
-  return invoke<AutomationWorkflow | null>("automation_get_workflow", { id });
-}
-
 export function saveAutomationDraft(
   input: AutomationSaveDraftInput,
 ): Promise<AutomationWorkflow> {

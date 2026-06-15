@@ -197,7 +197,8 @@ fn load_graph(conn: &Connection, project_id: &str) -> Result<ProjectArchitecture
 }
 
 fn serialize_json<T: Serialize>(value: &T, label: &str) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|e| format!("project_architecture: {label} 序列化失败：{e}"))
+    serde_json::to_string(value)
+        .map_err(|e| format!("project_architecture: {label} 序列化失败：{e}"))
 }
 
 fn trim_text(value: &str, fallback: &str) -> String {
@@ -248,7 +249,9 @@ fn dedupe_trimmed(items: Vec<String>) -> Vec<String> {
     out
 }
 
-fn normalize_change(mut change: ProjectArchitectureChange) -> Result<ProjectArchitectureChange, String> {
+fn normalize_change(
+    mut change: ProjectArchitectureChange,
+) -> Result<ProjectArchitectureChange, String> {
     match &mut change {
         ProjectArchitectureChange::UpsertNode { node } => normalize_node(node)?,
         ProjectArchitectureChange::RemoveNode { node_id } => {
@@ -335,7 +338,12 @@ fn write_graph(conn: &Connection, graph: &ProjectArchitectureGraph) -> Result<()
              version = excluded.version,
              graph_json = excluded.graph_json,
              updated_at = excluded.updated_at"#,
-        params![graph.project_id, graph.version, graph_json, graph.updated_at],
+        params![
+            graph.project_id,
+            graph.version,
+            graph_json,
+            graph.updated_at
+        ],
     )
     .map(|_| ())
     .map_err(|e| format!("project_architecture: 写入图失败：{e}"))
@@ -420,7 +428,9 @@ pub(crate) fn apply_project_architecture_changes_core(
     }
     let reason = input.reason.trim().to_string();
     let now = now_millis();
-    let id = input.request_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let id = input
+        .request_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let tx = conn
         .transaction()
         .map_err(|e| format!("project_architecture_apply: 开启事务失败：{e}"))?;
@@ -445,7 +455,10 @@ pub(crate) fn apply_project_architecture_changes_core(
     )?;
     tx.commit()
         .map_err(|e| format!("project_architecture_apply: 提交事务失败：{e}"))?;
-    Ok(ProjectArchitectureApplyResult { graph: after, event })
+    Ok(ProjectArchitectureApplyResult {
+        graph: after,
+        event,
+    })
 }
 
 pub(crate) fn reject_project_architecture_changes_core(
@@ -458,7 +471,9 @@ pub(crate) fn reject_project_architecture_changes_core(
     let changes = normalize_changes(input.changes)?;
     let reason = input.reason.trim().to_string();
     let now = now_millis();
-    let id = input.request_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let id = input
+        .request_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let tx = conn
         .transaction()
         .map_err(|e| format!("project_architecture_reject: 开启事务失败：{e}"))?;
@@ -484,7 +499,9 @@ pub(crate) fn reject_project_architecture_changes_core(
     Ok(event)
 }
 
-fn row_to_change_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectArchitectureChangeRecord> {
+fn row_to_change_record(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ProjectArchitectureChangeRecord> {
     let id: String = row.get(0)?;
     let project_id: String = row.get(1)?;
     let task_id: String = row.get(2)?;
@@ -508,7 +525,10 @@ fn row_to_change_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectArch
         .as_deref()
         .map(graph_from_json)
         .transpose()?;
-    let before_version = before_graph.as_ref().map(|graph| graph.version).unwrap_or(0);
+    let before_version = before_graph
+        .as_ref()
+        .map(|graph| graph.version)
+        .unwrap_or(0);
     let after_version = after_graph.as_ref().map(|graph| graph.version);
     Ok(ProjectArchitectureChangeRecord {
         event: ProjectArchitectureChangeEvent {
@@ -596,9 +616,18 @@ pub fn project_architecture_rollback(
     backend: String,
     store: State<'_, LiliaStore>,
 ) -> Result<ProjectArchitectureRollbackResult, String> {
-    validate_backend(&backend)?;
     let mut conn = store.conn()?;
-    ensure_project_exists(&conn, &project_id)?;
+    rollback_project_architecture_core(&mut conn, project_id, task_id, backend)
+}
+
+pub(crate) fn rollback_project_architecture_core(
+    conn: &mut Connection,
+    project_id: String,
+    task_id: String,
+    backend: String,
+) -> Result<ProjectArchitectureRollbackResult, String> {
+    validate_backend(&backend)?;
+    ensure_project_exists(&*conn, &project_id)?;
     let now = now_millis();
     let tx = conn
         .transaction()
@@ -743,7 +772,9 @@ mod tests {
             &mut conn,
             input(vec![
                 ProjectArchitectureChange::UpsertNode { node: node("ui") },
-                ProjectArchitectureChange::UpsertNode { node: node("store") },
+                ProjectArchitectureChange::UpsertNode {
+                    node: node("store"),
+                },
                 ProjectArchitectureChange::UpsertEdge {
                     edge: edge("ui-store", "ui", "store"),
                 },
@@ -777,13 +808,17 @@ mod tests {
         create_schema(&conn);
         apply_project_architecture_changes_core(
             &mut conn,
-            input(vec![ProjectArchitectureChange::UpsertNode { node: node("api") }]),
+            input(vec![ProjectArchitectureChange::UpsertNode {
+                node: node("api"),
+            }]),
         )
         .unwrap();
 
         let records = {
             let mut stmt = conn
-                .prepare("SELECT before_graph_json, after_graph_json FROM project_architecture_changes")
+                .prepare(
+                    "SELECT before_graph_json, after_graph_json FROM project_architecture_changes",
+                )
                 .unwrap();
             stmt.query_row([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -800,12 +835,16 @@ mod tests {
         create_schema(&conn);
         apply_project_architecture_changes_core(
             &mut conn,
-            input(vec![ProjectArchitectureChange::UpsertNode { node: node("api") }]),
+            input(vec![ProjectArchitectureChange::UpsertNode {
+                node: node("api"),
+            }]),
         )
         .unwrap();
         apply_project_architecture_changes_core(
             &mut conn,
-            input(vec![ProjectArchitectureChange::UpsertNode { node: node("ui") }]),
+            input(vec![ProjectArchitectureChange::UpsertNode {
+                node: node("ui"),
+            }]),
         )
         .unwrap();
 
@@ -835,5 +874,38 @@ mod tests {
         assert_eq!(graph.version, 3);
         assert_eq!(graph.nodes.len(), 1);
         assert_eq!(graph.nodes[0].id, "api");
+    }
+
+    #[test]
+    fn rollback_history_uses_requested_backend_for_claude_and_codex() {
+        for backend in ["claude", "codex"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            create_schema(&conn);
+            apply_project_architecture_changes_core(
+                &mut conn,
+                input(vec![ProjectArchitectureChange::UpsertNode {
+                    node: node("api"),
+                }]),
+            )
+            .unwrap();
+
+            let result = rollback_project_architecture_core(
+                &mut conn,
+                "p1".to_string(),
+                "t1".to_string(),
+                backend.to_string(),
+            )
+            .unwrap();
+
+            assert_eq!(result.event.as_ref().unwrap().backend, backend);
+            let history_backend: String = conn
+                .query_row(
+                    "SELECT backend FROM project_architecture_changes WHERE status = 'rolled_back'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(history_backend, backend);
+        }
     }
 }

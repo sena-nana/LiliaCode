@@ -189,10 +189,6 @@ export function markFirstQueuedUserMessageSuccessful(
   });
 }
 
-export function canRetryTimelineEvent(event: AgentTimelineEvent): boolean {
-  return retryContextForTimelineEvent(event, []) !== null;
-}
-
 export function retryContextForTimelineEvent(
   event: AgentTimelineEvent,
   timelineEvents: AgentTimelineEvent[],

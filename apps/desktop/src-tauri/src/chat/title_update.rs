@@ -16,6 +16,7 @@ use crate::projects_tasks::events::emit_tasks_changed;
 use crate::provider::{
     assistant_ai_secret, backend_api_key_env, backend_direct_url, load_active_backend,
     load_assistant_ai_config, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
+    ConnectionMode,
 };
 use crate::store::LiliaStore;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -306,6 +307,9 @@ fn provider_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Opti
         load_active_backend(app)
     };
     let plan: BackendConnectionPlan = resolve_connection_for(app, &backend);
+    if plan.mode == ConnectionMode::CodexAccount {
+        return None;
+    }
     let api_key = plan
         .api_key
         .or_else(|| env::var(backend_api_key_env(&backend)).ok())?

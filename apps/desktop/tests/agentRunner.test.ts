@@ -34,6 +34,7 @@ import {
   buildCodexBatchApplyPrompt,
   buildCodexFixSuggestionPrompt,
   buildCodexPlanRevisionPrompt,
+  runCodex,
   runCodexAppServer,
   maybeHandleCodexServerRequest,
   startCodexAppServerThread,
@@ -733,7 +734,10 @@ describe("Claude helpers", () => {
       createTool,
       requestAskUser: async () => ({ cancelled: true, answers: {} }),
     });
-    expect(normal.tools.map((tool: any) => tool.name)).toEqual(["ask_user_question"]);
+    expect(normal.tools.map((tool: any) => tool.name)).toEqual([
+      "ask_user_question",
+      "query_quota_usage",
+    ]);
 
     const child = createLiliaAskUserServer({
       createServer,
@@ -748,6 +752,7 @@ describe("Claude helpers", () => {
 
     expect(child.tools.map((tool: any) => tool.name)).toEqual([
       "ask_user_question",
+      "query_quota_usage",
       "query_conversation_context",
     ]);
     expect(createdTools.some((args) => args[0] === "query_conversation_context")).toBe(true);
@@ -1510,6 +1515,21 @@ describe("Claude helpers", () => {
     });
     expect(seenOptions.abortController).toBeInstanceOf(AbortController);
     expect(seenOptions.abortAfterMs).toBeUndefined();
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Claude provider settings applied",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "provider_settings",
+          action: "update",
+          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
+          optionKeys: expect.arrayContaining(["allowedTools", "disallowedTools"]),
+        }),
+      }),
+    }));
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.payload?.unsupportedKeys
@@ -1519,6 +1539,146 @@ describe("Claude helpers", () => {
       sessionId: "claude-provider-settings",
       subtype: "success",
     });
+  });
+
+  it("Claude provider settings diagnose emits diagnostics without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-existing",
+      runtimeCommand: {
+        type: "runtime_settings",
+        action: "diagnose",
+      },
+      runtimeOptions: {
+        common: { model: "claude-opus-4-5", permission: "readonly" },
+        provider: {
+          claude: {
+            allowedTools: ["Read"],
+            unknownClaudeOption: true,
+          },
+          codex: {
+            reasoningEffort: "high",
+          },
+        },
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Claude provider settings diagnostics",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "provider_settings",
+          action: "diagnose",
+          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
+          ignoredProviderKeys: ["reasoningEffort"],
+          unsupportedKeys: ["unknownClaudeOption"],
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-existing",
+      subtype: "success",
+    });
+  });
+
+  it("Claude experimental provider options emit diagnostics or stop by fallback", async () => {
+    const diagnostic = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "hello",
+      runtimeOptions: {
+        experimentalProviderOptions: [{
+          provider: "claude",
+          capability: "future-output-mode",
+          payload: { enabled: true },
+          fallback: "diagnostic",
+        }],
+      },
+    }, claudeRunnerContext(diagnostic.protocol, {
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-experimental-diagnostic",
+            uuid: "claude-experimental-diagnostic-result",
+          };
+        })();
+      },
+    }));
+
+    expect(queryCalled).toBe(true);
+    expect(diagnostic.json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Ignored experimental provider option",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "experimental_provider_option",
+          capability: "future-output-mode",
+          fallback: "diagnostic",
+          payloadKeys: ["enabled"],
+        }),
+      }),
+    }));
+
+    const unsupported = captureProtocol();
+    let unsupportedQueryCalled = false;
+    await expect(runClaude({
+      cwd: "C:/repo",
+      prompt: "hello",
+      runtimeOptions: {
+        experimentalProviderOptions: [{
+          provider: "claude",
+          capability: "future-session-store",
+          payload: {},
+          fallback: "unsupported",
+        }],
+      },
+    }, claudeRunnerContext(unsupported.protocol, {
+      createClaudeQuery: () => {
+        unsupportedQueryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }))).rejects.toThrow("claude experimental provider capability is unsupported: future-session-store");
+
+    expect(unsupportedQueryCalled).toBe(false);
+    expect(unsupported.json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Unsupported experimental provider option",
+        payload: expect.objectContaining({
+          backend: "claude",
+          capability: "future-session-store",
+          fallback: "unsupported",
+        }),
+      }),
+    }));
   });
 
   it("Claude config diagnostics reports safe Lilia and runtime facts without SDK query", async () => {
@@ -2019,6 +2179,50 @@ describe("Codex app-server mapping", () => {
         "选哪个方案？": "B",
       },
     });
+  });
+
+  it("Codex quota tool delegates to Lilia internal quota plugin", async () => {
+    const calls: any[] = [];
+    const quotaCalls: any[] = [];
+    const handled = await maybeHandleCodexServerRequest(
+      {
+        respond: (...args: any[]) => calls.push(["respond", ...args]),
+      } as any,
+      {
+        id: "quota-1",
+        method: "item/tool/call",
+        params: {
+          tool: "QueryQuotaUsage",
+          arguments: {
+            days: 30,
+            backend: "codex",
+            scope: "tools",
+          },
+        },
+      },
+      {
+        interactions: {
+          requestQuotaUsage: async (payload: any) => {
+            quotaCalls.push(payload);
+            return {
+              ok: true,
+              result: {
+                days: payload.days,
+                backend: payload.backend,
+                tools: [{ key: "command::", label: "命令", callCount: 2 }],
+              },
+            };
+          },
+        },
+      } as any,
+    );
+
+    expect(handled).toBe(true);
+    expect(quotaCalls).toEqual([{ days: 30, backend: "codex", scope: "tools" }]);
+    expect(calls[0][1]).toBe("quota-1");
+    expect(calls[0][2]).toMatchObject({ success: true });
+    const output = JSON.parse(calls[0][2].contentItems[0].text);
+    expect(output.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {
@@ -2659,7 +2863,7 @@ describe("Codex app-server mapping", () => {
     expect(calls[0].params.additionalContext).toContain("C:/shot.png");
   });
 
-  it("resume thread still registers Lilia AskUser dynamic tool without app-server plan-tool params", async () => {
+  it("resume thread still registers Lilia dynamic tools without app-server plan-tool params", async () => {
     const calls: any[] = [];
     const server = {
       request: async (method: string, params: any) => {
@@ -2678,7 +2882,10 @@ describe("Codex app-server mapping", () => {
       method: "thread/resume",
       params: {
         threadId: "thread-1",
-        dynamicTools: [expect.objectContaining({ name: "AskUserQuestion" })],
+        dynamicTools: expect.arrayContaining([
+          expect.objectContaining({ name: "AskUserQuestion" }),
+          expect.objectContaining({ name: "QueryQuotaUsage" }),
+        ]),
       },
     });
     expect(calls[0].params.includePlanTool).toBeUndefined();
@@ -3912,6 +4119,9 @@ describe("Codex app-server mapping", () => {
       runtimeOptions: {
         common: { model: "gpt-5.6", permission: "readonly" },
         provider: {
+          claude: {
+            allowedTools: ["Read"],
+          },
           codex: {
             profile: "deep",
             reasoningEffort: "high",
@@ -3949,6 +4159,7 @@ describe("Codex app-server mapping", () => {
       },
     });
     expect(updateCalls.at(-1)?.params.responsesapiClientMetadata).toEqual({ surface: "lilia" });
+    expect(updateCalls.at(-1)?.params.allowedTools).toBeUndefined();
     expect(json()).toContainEqual(expect.objectContaining({
       type: "timeline",
       event: expect.objectContaining({
@@ -3960,6 +4171,7 @@ describe("Codex app-server mapping", () => {
           subkind: "provider_settings",
           action: "update",
           method: "thread/settings/update",
+          ignoredProviderKeys: ["allowedTools"],
         }),
       }),
     }));
@@ -4100,6 +4312,54 @@ describe("Codex app-server mapping", () => {
     })).rejects.toThrow("Lilia provider settings update requires at least one supported setting");
 
     expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+  });
+
+  it("Codex experimental provider options stop before app-server when fallback is unsupported", async () => {
+    const { protocol, json } = captureProtocol();
+    let serverCreated = false;
+
+    await expect(runCodex({
+      backend: "codex",
+      prompt: "hello",
+      permission: "ask",
+      runtimeOptions: {
+        experimentalProviderOptions: [{
+          provider: "codex",
+          capability: "future-remote-environment",
+          payload: { environmentId: "env-1" },
+          fallback: "unsupported",
+        }],
+      },
+    }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => {
+        serverCreated = true;
+        throw new Error("server should not start");
+      },
+      env: {},
+      cwd: () => "C:/repo",
+    } as any)).rejects.toThrow(
+      "codex experimental provider capability is unsupported: future-remote-environment",
+    );
+
+    expect(serverCreated).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Unsupported experimental provider option",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "experimental_provider_option",
+          capability: "future-remote-environment",
+          fallback: "unsupported",
+          payloadKeys: ["environmentId"],
+        }),
+      }),
+    }));
   });
 
   it("normalizes Codex review commit target for app-server schema", async () => {

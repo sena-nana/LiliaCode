@@ -131,6 +131,10 @@ function startCommitFixSuggestion() {
   else closeFixSuggestionMenu();
 }
 
+function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
+  return backend === "codex" || backend === "claude";
+}
+
 function syncDocumentListeners(open: boolean) {
   if (open) {
     document.addEventListener("pointerdown", onDocPointer, true);
@@ -303,7 +307,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <button
-          v-if="state.backend === 'codex' || state.backend === 'claude'"
+          v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"
           class="chat-chip chat-chip--icon"
           :class="{ 'is-disabled': sessionForkDisabled }"
@@ -315,7 +319,7 @@ onBeforeUnmount(() => {
           <GitFork :size="14" aria-hidden="true" />
         </button>
         <button
-          v-if="state.backend === 'codex'"
+          v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"
           class="chat-chip chat-chip--icon"
           :disabled="actionsBlocked"
@@ -326,7 +330,7 @@ onBeforeUnmount(() => {
           <Globe :size="14" aria-hidden="true" />
         </button>
         <button
-          v-if="state.backend === 'codex'"
+          v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"
           class="chat-chip chat-chip--icon"
           :disabled="actionsBlocked"
@@ -337,7 +341,7 @@ onBeforeUnmount(() => {
           <Camera :size="14" aria-hidden="true" />
         </button>
         <button
-          v-if="state.backend === 'codex' || state.backend === 'claude'"
+          v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"
           class="chat-chip chat-chip--icon"
           :class="{ 'is-disabled': compactDisabled }"

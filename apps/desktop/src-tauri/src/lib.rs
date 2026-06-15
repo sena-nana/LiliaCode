@@ -17,6 +17,7 @@ mod popup_windows;
 mod project_shell;
 mod projects_tasks;
 mod provider;
+mod quota_usage;
 mod settings_store;
 mod store;
 mod todos;
@@ -32,8 +33,6 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
-pub(crate) const RUNTIME_CHANNEL_BUILTIN: &str = "builtin";
-pub(crate) const RUNTIME_CHANNEL_MUTSUKI_CORE: &str = "mutsuki_core";
 pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
     ("gpt-5.5", "GPT-5.5"),
     ("gpt-5.4", "GPT-5.4"),
@@ -76,32 +75,12 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
                 let restored = chat::state::restore_active_runtime_sessions(&conn, &chat_store);
                 for persisted in restored {
                     let app_handle = app.clone();
-                    std::thread::spawn(move || match persisted.turn.runtime_channel.as_str() {
-                        RUNTIME_CHANNEL_MUTSUKI_CORE => {
-                            if let Err(err) = chat::mutsuki_core_runtime::resume_supervised_turn(
-                                app_handle.clone(),
-                                persisted.clone(),
-                            ) {
-                                handle_runtime_restore_failure(
-                                    &app_handle,
-                                    &persisted,
-                                    "MutsukiCore",
-                                    err,
-                                );
-                            }
-                        }
-                        _ => {
-                            if let Err(err) = chat::runner::resume_persisted_node_agent_runner(
-                                app_handle.clone(),
-                                persisted.clone(),
-                            ) {
-                                handle_runtime_restore_failure(
-                                    &app_handle,
-                                    &persisted,
-                                    "builtin",
-                                    err,
-                                );
-                            }
+                    std::thread::spawn(move || {
+                        if let Err(err) = chat::runner::resume_persisted_node_agent_runner(
+                            app_handle.clone(),
+                            persisted.clone(),
+                        ) {
+                            handle_runtime_restore_failure(&app_handle, &persisted, "builtin", err);
                         }
                     });
                 }
@@ -203,7 +182,6 @@ pub fn run() {
             chat::commands::chat_get_runtime_snapshot,
             chat::commands::chat_ack_restored_rollback,
             chat::commands::chat_set_composer_state,
-            chat::commands::chat_reset_session,
             history_import::history_import_search,
             history_import::history_import_preview,
             history_import::history_import_attach,
@@ -216,8 +194,6 @@ pub fn run() {
             provider::provider_set_config,
             provider::provider_get_active_backend,
             provider::provider_set_active_backend,
-            provider::cc_switch_get_config,
-            provider::cc_switch_set_config,
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_test_connection,
@@ -250,11 +226,9 @@ pub fn run() {
             project_shell::system_open_url,
             project_shell::system_open_in_vscode,
             plugins::plugins_overview,
-            plugins::plugins_list_skills,
             plugins::plugins_create_skill,
             plugins::plugins_delete_skill,
             plugins::plugins_set_skill_enabled,
-            plugins::plugins_list_packages,
             plugins::plugins_set_package_enabled,
             plugins::plugins_create_mcp_server,
             plugins::plugins_update_mcp_server,
@@ -295,8 +269,9 @@ pub fn run() {
             projects_tasks::task_reparent,
             agent_timeline::agent_timeline_list,
             agent_timeline::agent_timeline_clear_task,
+            quota_usage::quota_usage_get_stats,
+            quota_usage::quota_usage_get_codex_account_status,
             automation::commands::automation_list_workflows,
-            automation::commands::automation_get_workflow,
             automation::commands::automation_save_draft,
             automation::commands::automation_publish,
             automation::commands::automation_set_enabled,

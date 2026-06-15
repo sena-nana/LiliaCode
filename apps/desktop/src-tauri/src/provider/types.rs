@@ -10,14 +10,8 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) non_interrupt_mode: bool,
     #[serde(default)]
     pub(crate) debug: bool,
-    #[serde(default = "default_agent_runtime_channel")]
-    pub(crate) agent_runtime_channel: String,
     #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
-}
-
-fn default_agent_runtime_channel() -> String {
-    crate::RUNTIME_CHANNEL_BUILTIN.to_string()
 }
 
 fn default_codex_profile_name() -> String {
@@ -75,20 +69,6 @@ pub(crate) struct ProviderConfig {
     pub(crate) clear_api_key: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CCSwitchConfig {
-    pub(crate) base_url: Option<String>,
-}
-
-impl Default for CCSwitchConfig {
-    fn default() -> Self {
-        CCSwitchConfig {
-            base_url: Some(super::config::CC_SWITCH_DEFAULT_URL.to_string()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AssistantAIConfig {
@@ -121,13 +101,6 @@ pub(crate) struct BackendEnvStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CCSwitchStatus {
-    pub(crate) reachable: bool,
-    pub(crate) base_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CodexAppServerStatus {
     pub(crate) version: Option<String>,
     pub(crate) available: bool,
@@ -142,25 +115,24 @@ pub(crate) struct EnvStatusReport {
     pub(crate) node_available: bool,
     pub(crate) codex_cli_available: bool,
     pub(crate) codex_app_server: CodexAppServerStatus,
-    pub(crate) cc_switch: CCSwitchStatus,
     pub(crate) router_modes: HashMap<String, String>,
     pub(crate) backends: HashMap<String, BackendEnvStatus>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectionMode {
-    CcSwitch,
+    Api,
     CustomBaseUrl,
-    Direct,
+    CodexAccount,
     Unconfigured,
 }
 
 impl ConnectionMode {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            ConnectionMode::CcSwitch => "cc-switch",
+            ConnectionMode::Api => "api",
             ConnectionMode::CustomBaseUrl => "custom",
-            ConnectionMode::Direct => "direct",
+            ConnectionMode::CodexAccount => "codex-account",
             ConnectionMode::Unconfigured => "unconfigured",
         }
     }
