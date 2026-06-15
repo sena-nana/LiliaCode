@@ -26,11 +26,11 @@ describe("quota display helpers", () => {
       usedPercent: 25,
       windowDurationMins: 300,
       resetsAt: null,
-    })).toBe("5 小时窗口 · 剩余 75%");
+    })).toBe("剩余 75%");
     expect(quotaWindowLabel({
       usedPercent: 90,
       windowDurationMins: 10080,
       resetsAt: null,
-    })).toBe("7 天窗口 · 剩余 10%");
+    })).toBe("剩余 10%");
   });
 });

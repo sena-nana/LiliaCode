@@ -99,8 +99,10 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     await fireEvent.mouseEnter(provider);
 
     expect(await view.findByRole("tooltip")).toHaveTextContent("Codex 官方账号");
-    expect(view.getByText("5 小时额度")).toBeInTheDocument();
-    expect(view.getByText("周额度")).toBeInTheDocument();
+    expect(view.queryByText("5 小时额度")).not.toBeInTheDocument();
+    expect(view.queryByText("周额度")).not.toBeInTheDocument();
+    expect(view.getByText("剩余 58%")).toBeInTheDocument();
+    expect(view.getByText("剩余 9%")).toBeInTheDocument();
     expect(view.getByText(/已用 42%/)).toBeInTheDocument();
     expect(view.getByText(/已用 91%/)).toBeInTheDocument();
   });

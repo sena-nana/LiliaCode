@@ -104,8 +104,8 @@ const isCodexOfficialAccount = computed(() =>
 );
 
 const quotaRows = computed(() => [
-  { key: "fiveHour", label: "5 小时额度", badge: "5h", window: officialQuota.value?.fiveHour },
-  { key: "weekly", label: "周额度", badge: "周", window: officialQuota.value?.weekly },
+  { key: "fiveHour", window: officialQuota.value?.fiveHour },
+  { key: "weekly", window: officialQuota.value?.weekly },
 ] as const);
 
 const shouldShowQuotaRings = computed(() =>
@@ -248,7 +248,6 @@ onMounted(() => {
           :class="quotaRingTone(row.window)"
           :style="quotaRingStyle(row.window)"
         >
-          <span>{{ row.badge }}</span>
         </span>
       </span>
     </template>
@@ -274,7 +273,6 @@ onMounted(() => {
       <span class="sb-conn-popover__quota-list">
         <span v-for="row in quotaRows" :key="row.key" class="sb-conn-popover__quota-row">
           <span class="sb-conn-popover__quota-main">
-            <strong>{{ row.label }}</strong>
             <small>{{ quotaWindowLabel(row.window) }}</small>
           </span>
           <span class="sb-conn-popover__quota-side">

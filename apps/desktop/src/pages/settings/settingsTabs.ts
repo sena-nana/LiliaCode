@@ -1,5 +1,6 @@
 import {
   Bot,
+  Download,
   FolderCog,
   Gauge,
   Info,
@@ -17,6 +18,8 @@ export type SettingsTabKey =
   | "assistant"
   | "agent"
   | "quota"
+  | "plugins"
+  | "import"
   | "project"
   | "about";
 
@@ -56,6 +59,16 @@ export const SETTINGS_TABS: SettingsTab[] = [
     key: "quota",
     label: "额度",
     icon: Gauge,
+  },
+  {
+    key: "plugins",
+    label: "插件 / 技能",
+    icon: Sparkles,
+  },
+  {
+    key: "import",
+    label: "导入对话",
+    icon: Download,
   },
   {
     key: "project",
