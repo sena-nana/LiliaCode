@@ -35,9 +35,8 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         payload: JsonValue,
     },
-    RuntimeOperationRequest {
+    QuotaUsageRequest {
         id: String,
-        operation: String,
         #[serde(default)]
         payload: JsonValue,
     },
@@ -99,22 +98,10 @@ impl AgentRuntimeEvent {
                     payload,
                 })
             }
-            "runtime_operation_request" => {
+            "quota_usage_request" => {
                 let id = value.get("id").and_then(|v| v.as_str())?.to_string();
-                let operation = value
-                    .get("operation")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if operation.trim().is_empty() {
-                    return None;
-                }
                 let payload = value.get("payload").cloned().unwrap_or(JsonValue::Null);
-                Some(Self::RuntimeOperationRequest {
-                    id,
-                    operation,
-                    payload,
-                })
+                Some(Self::QuotaUsageRequest { id, payload })
             }
             "done" => {
                 let session_id = value
@@ -465,14 +452,12 @@ mod tests {
         );
         assert_eq!(
             AgentRuntimeEvent::from_runner_json(&json!({
-                "type": "runtime_operation_request",
-                "id": "runtime-op-1",
-                "operation": "lilia.quota.query_usage",
+                "type": "quota_usage_request",
+                "id": "quota-1",
                 "payload": { "days": 7, "scope": "tools" }
             })),
-            Some(AgentRuntimeEvent::RuntimeOperationRequest {
-                id: "runtime-op-1".to_string(),
-                operation: "lilia.quota.query_usage".to_string(),
+            Some(AgentRuntimeEvent::QuotaUsageRequest {
+                id: "quota-1".to_string(),
                 payload: json!({ "days": 7, "scope": "tools" }),
             })
         );

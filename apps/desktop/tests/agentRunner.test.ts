@@ -2025,9 +2025,9 @@ describe("Codex app-server mapping", () => {
     });
   });
 
-  it("Codex quota tool delegates to Lilia runtime operation bus", async () => {
+  it("Codex quota tool delegates to Lilia internal quota plugin", async () => {
     const calls: any[] = [];
-    const runtimeCalls: any[] = [];
+    const quotaCalls: any[] = [];
     const handled = await maybeHandleCodexServerRequest(
       {
         respond: (...args: any[]) => calls.push(["respond", ...args]),
@@ -2046,18 +2046,14 @@ describe("Codex app-server mapping", () => {
       },
       {
         interactions: {
-          requestRuntimeOperation: async (operation: string, payload: any) => {
-            runtimeCalls.push({ operation, payload });
+          requestQuotaUsage: async (payload: any) => {
+            quotaCalls.push(payload);
             return {
               ok: true,
               result: {
-                ok: true,
-                operation,
-                result: {
-                  days: payload.days,
-                  backend: payload.backend,
-                  tools: [{ key: "command::", label: "命令", callCount: 2 }],
-                },
+                days: payload.days,
+                backend: payload.backend,
+                tools: [{ key: "command::", label: "命令", callCount: 2 }],
               },
             };
           },
@@ -2066,14 +2062,11 @@ describe("Codex app-server mapping", () => {
     );
 
     expect(handled).toBe(true);
-    expect(runtimeCalls).toEqual([{
-      operation: "lilia.quota.query_usage",
-      payload: { days: 30, backend: "codex", scope: "tools" },
-    }]);
+    expect(quotaCalls).toEqual([{ days: 30, backend: "codex", scope: "tools" }]);
     expect(calls[0][1]).toBe("quota-1");
     expect(calls[0][2]).toMatchObject({ success: true });
     const output = JSON.parse(calls[0][2].contentItems[0].text);
-    expect(output.result.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
+    expect(output.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {

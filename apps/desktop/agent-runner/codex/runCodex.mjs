@@ -1748,7 +1748,7 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
         backend: "codex",
       })(input);
     } else if (isLiliaQuotaTool(toolName)) {
-      output = await createQuotaUsageHandler(ctx.interactions?.requestRuntimeOperation)(input);
+      output = await createQuotaUsageHandler(ctx.interactions?.requestQuotaUsage)(input);
     } else {
       return false;
     }

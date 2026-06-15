@@ -86,7 +86,7 @@ export function createLiliaAskUserServer({
   createServer = createSdkMcpServer,
   createTool = tool,
   requestAskUser,
-  requestRuntimeOperation,
+  requestQuotaUsage,
   conversationContext = null,
   architectureHandler = null,
 }) {
@@ -100,9 +100,9 @@ export function createLiliaAskUserServer({
     ),
     createTool(
       "query_quota_usage",
-      "Query Lilia quota usage summaries through the Lilia runtime operation bus.",
+      "Query Lilia quota usage summaries through the Lilia internal quota plugin.",
       queryQuotaUsageInputSchema,
-      createQuotaUsageHandler(requestRuntimeOperation),
+      createQuotaUsageHandler(requestQuotaUsage),
       { alwaysLoad: true },
     ),
   ];
@@ -725,7 +725,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   };
   const liliaAskUserServer = createLiliaAskUserServer({
     requestAskUser: context.interactions.requestAskUser,
-    requestRuntimeOperation: context.interactions.requestRuntimeOperation,
+    requestQuotaUsage: context.interactions.requestQuotaUsage,
     conversationContext: cmd.conversationContext,
     architectureHandler: createArchitectureChangeHandler({ cmd, ctx, backend: "claude" }),
     createServer: context.createSdkMcpServer || createSdkMcpServer,

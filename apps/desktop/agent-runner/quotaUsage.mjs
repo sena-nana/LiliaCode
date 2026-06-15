@@ -1,8 +1,6 @@
 import { z } from "zod/v4";
 import { isRecord, stringOrNull } from "./utils.mjs";
 
-export const LILIA_QUOTA_QUERY_OPERATION = "lilia.quota.query_usage";
-
 export const LILIA_QUOTA_TOOL_NAMES = new Set([
   "QueryQuotaUsage",
   "query_quota_usage",
@@ -35,7 +33,7 @@ export const queryQuotaUsageJsonSchema = {
 
 export const codexQueryQuotaUsageDynamicTool = {
   name: "QueryQuotaUsage",
-  description: "Query Lilia quota usage summaries through the Lilia runtime operation bus.",
+  description: "Query Lilia quota usage summaries through the Lilia internal quota plugin.",
   inputSchema: queryQuotaUsageJsonSchema,
 };
 
@@ -52,27 +50,25 @@ function normalizeQuotaUsageInput(input) {
   };
 }
 
-export function createQuotaUsageHandler(requestRuntimeOperation) {
+export function createQuotaUsageHandler(requestQuotaUsage) {
   return async function handleQueryQuotaUsage(input) {
-    if (typeof requestRuntimeOperation !== "function") {
+    if (typeof requestQuotaUsage !== "function") {
       return {
         ok: false,
-        error: "Lilia runtime operation bus is not available.",
+        error: "Lilia internal quota plugin is not available.",
       };
     }
     const payload = normalizeQuotaUsageInput(input);
-    const response = await requestRuntimeOperation(LILIA_QUOTA_QUERY_OPERATION, payload);
+    const response = await requestQuotaUsage(payload);
     if (response?.ok !== true) {
       return {
         ok: false,
-        operation: LILIA_QUOTA_QUERY_OPERATION,
-        error: response?.error || "Lilia quota runtime operation failed.",
+        error: response?.error || "Lilia internal quota plugin failed.",
       };
     }
     return response.result ?? {
       ok: false,
-      operation: LILIA_QUOTA_QUERY_OPERATION,
-      error: "Lilia quota runtime operation returned no result.",
+      error: "Lilia internal quota plugin returned no result.",
     };
   };
 }
