@@ -224,10 +224,6 @@ export function useTaskComposerController(options: {
 
   async function onOpenLiliaIab() {
     if (!context.hasContext.value) return;
-    if (composerForView.value.backend !== "codex") {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前后端尚未实现 Lilia IAB。"));
-      return;
-    }
     const raw = window.prompt("IAB URL", "about:blank");
     if (raw === null) return;
     const url = raw.trim() || "about:blank";
@@ -253,10 +249,6 @@ export function useTaskComposerController(options: {
 
   async function onSubmitLiliaIab() {
     if (!context.hasContext.value) return;
-    if (composerForView.value.backend !== "codex") {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前后端尚未实现 Lilia IAB 结果回送。"));
-      return;
-    }
     const note = window.prompt("IAB 备注")?.trim() ?? "";
     try {
       const result = await submitLiliaIab(props.taskId, note);
