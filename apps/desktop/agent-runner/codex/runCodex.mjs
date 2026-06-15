@@ -537,6 +537,7 @@ function readCodexProviderSettingsRuntimeCommand(cmd) {
   const codex = isRecord(provider.codex)
     ? provider.codex
     : {};
+  const ignoredProviderKeys = isRecord(provider.claude) ? Object.keys(provider.claude) : [];
   const updates = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
@@ -564,7 +565,11 @@ function readCodexProviderSettingsRuntimeCommand(cmd) {
   if (action === "update" && Object.keys(updates).length === 0) {
     throw new Error("Lilia provider settings update requires at least one supported setting");
   }
-  return { action, updates };
+  return {
+    action,
+    updates,
+    ignoredProviderKeys,
+  };
 }
 
 function codexSettingsCmdFromRuntimeCommand(cmd, command) {
@@ -1463,6 +1468,7 @@ async function runCodexProviderSettingsRuntimeCommand(server, threadId, cmd, ctx
         action: command.action,
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         params,
       },
       sourceId: `codex:provider-settings:diagnose:${threadId}`,
@@ -1490,6 +1496,7 @@ async function runCodexProviderSettingsRuntimeCommand(server, threadId, cmd, ctx
         method: "thread/settings/update",
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         params,
       },
       sourceId: `codex:provider-settings:update:${threadId}`,
@@ -1507,6 +1514,7 @@ async function runCodexProviderSettingsRuntimeCommand(server, threadId, cmd, ctx
         method: "thread/settings/update",
         threadId,
         settingsKeys,
+        ignoredProviderKeys: command.ignoredProviderKeys,
         error: err?.message || String(err),
       },
       sourceId: `codex:provider-settings:error:${threadId}`,
