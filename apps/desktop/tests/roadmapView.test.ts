@@ -72,4 +72,31 @@ describe("RoadmapView", () => {
     expect(linkedTask).not.toBeChecked();
     expect(view.getAllByText("1/1 done").length).toBeGreaterThan(0);
   });
+
+  it("能编辑 milestone 描述和截止日期", async () => {
+    const view = await renderRoadmap();
+
+    const description = await view.findByLabelText("首发可用路线图 描述");
+    await fireEvent.update(description, "先让路线图可以落地跟踪");
+    await fireEvent.change(description);
+
+    await waitFor(() => {
+      expect(view.getByLabelText("首发可用路线图 描述")).toHaveValue("先让路线图可以落地跟踪");
+    });
+
+    const dueDate = view.getByLabelText("首发可用路线图 截止日期");
+    await fireEvent.update(dueDate, "2026-06-30");
+    await fireEvent.change(dueDate);
+
+    await waitFor(() => {
+      expect(view.getByLabelText("首发可用路线图 截止日期")).toHaveValue("2026-06-30");
+    });
+
+    await fireEvent.update(dueDate, "");
+    await fireEvent.change(dueDate);
+
+    await waitFor(() => {
+      expect(view.getByLabelText("首发可用路线图 截止日期")).toHaveValue("");
+    });
+  });
 });

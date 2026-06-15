@@ -1835,7 +1835,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "milestone_update": {
       const id = String(args.id);
       const title = typeof args.title === "string" ? args.title.trim() : null;
+      const description = typeof args.description === "string" ? args.description.trim() : null;
       const status = typeof args.status === "string" ? args.status : null;
+      const dueDate = typeof args.dueDate === "number"
+        ? args.dueDate
+        : args.clearDueDate === true
+          ? null
+          : undefined;
       if (title !== null && !title) throw new Error("milestone_update: 标题不能为空");
       if (status !== null && !MILESTONE_STATUSES.includes(status as MockMilestoneStatus)) {
         throw new Error(`milestone_update: 无效状态：${status}`);
@@ -1847,7 +1853,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         return {
           ...milestone,
           title: title ?? milestone.title,
+          description: description ?? milestone.description,
           status: (status ?? milestone.status) as MockMilestoneStatus,
+          dueDate: dueDate === undefined ? milestone.dueDate : dueDate,
         };
       });
       if (!changed) throw new Error("milestone_update: milestone 不存在");

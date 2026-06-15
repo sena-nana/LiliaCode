@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { Milestone, MilestoneStatus, ProjectRoadmap, TaskMilestoneLink } from "@lilia/contracts";
+import type { Milestone, MilestoneUpdatePatch, ProjectRoadmap, TaskMilestoneLink } from "@lilia/contracts";
 
 export const MILESTONES = ref<Record<string, Milestone[]>>({});
 export const MILESTONE_LINKS = ref<Record<string, TaskMilestoneLink[]>>({});
@@ -68,9 +68,18 @@ export async function createMilestone(projectId: string, title: string): Promise
 export async function updateMilestone(
   projectId: string,
   id: string,
-  patch: { title?: string; status?: MilestoneStatus },
+  patch: MilestoneUpdatePatch,
 ): Promise<void> {
-  await invoke("milestone_update", { id, ...patch });
+  const { dueDate, ...rest } = patch;
+  await invoke("milestone_update", {
+    id,
+    ...rest,
+    ...(dueDate === undefined
+      ? {}
+      : dueDate === null
+        ? { clearDueDate: true }
+        : { dueDate }),
+  });
   await ensureProjectRoadmapLoaded(projectId, true);
 }
 

@@ -55,6 +55,13 @@ export interface Milestone {
   createdAt: number;
 }
 
+export interface MilestoneUpdatePatch {
+  title?: string;
+  description?: string;
+  status?: MilestoneStatus;
+  dueDate?: number | null;
+}
+
 export interface TaskMilestoneLink {
   taskId: string;
   milestoneId: string;
