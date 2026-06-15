@@ -317,6 +317,28 @@ const LILIA_GOAL_STATUSES = new Set([
 ]);
 const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
 const LILIA_PROVIDER_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
+  "allowedTools",
+  "disallowedTools",
+  "additionalDirectories",
+  "settingSources",
+  "permissionPromptToolName",
+  "resumeSessionAt",
+  "sessionId",
+  "managedSettings",
+  "sandbox",
+  "outputFormat",
+  "sessionStore",
+  "maxTurns",
+  "maxBudgetUsd",
+  "abortAfterMs",
+  "includeHookEvents",
+  "forwardSubagentText",
+  "agentProgressSummaries",
+  "continue",
+  "tools",
+  "settings",
+]);
 const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
   "lilia_review",
   "lilia_fix_suggestion",
@@ -414,6 +436,9 @@ function readClaudeProviderSettingsRuntimeCommand(command, runtimeOptions = {}) 
   const claude = isRecord(provider.claude)
     ? provider.claude
     : {};
+  const ignoredProviderKeys = isRecord(provider.codex) ? Object.keys(provider.codex) : [];
+  const unsupportedKeys = Object.keys(claude)
+    .filter((key) => !CLAUDE_PROVIDER_SETTING_KEYS.has(key));
   const supported = {};
   const options = {};
   const model = stringOrNull(common.model)?.trim();
@@ -459,7 +484,14 @@ function readClaudeProviderSettingsRuntimeCommand(command, runtimeOptions = {}) 
   if (action === "update" && Object.keys(supported).length === 0 && Object.keys(options).length === 0) {
     throw new Error("Lilia provider settings update requires at least one valid setting");
   }
-  return { action, supported, options };
+  return {
+    action,
+    supported,
+    options,
+    settingsKeys: [...Object.keys(supported), ...Object.keys(options)],
+    ignoredProviderKeys,
+    unsupportedKeys,
+  };
 }
 
 async function runClaudeLocalLiliaWorkflow(cmd, context) {
@@ -578,6 +610,46 @@ function applyClaudeProviderSettingsRuntimeCommand(cmd) {
   return settings;
 }
 
+function emitClaudeProviderSettingsTimeline(context, settings, status = "info") {
+  const failed = status === "error";
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status,
+    title: failed
+      ? "Claude provider settings failed"
+      : settings.action === "diagnose"
+        ? "Claude provider settings diagnostics"
+        : "Claude provider settings applied",
+    summary: settings.settingsKeys.length
+      ? `当前可识别 ${settings.settingsKeys.length} 项 Claude provider settings`
+      : "当前没有可应用的 Claude provider settings 更新",
+    payload: {
+      backend: "claude",
+      subkind: "provider_settings",
+      action: settings.action,
+      settingsKeys: settings.settingsKeys,
+      commonKeys: Object.keys(settings.supported),
+      optionKeys: Object.keys(settings.options),
+      ...(settings.ignoredProviderKeys.length ? { ignoredProviderKeys: settings.ignoredProviderKeys } : {}),
+      ...(settings.unsupportedKeys.length ? { unsupportedKeys: settings.unsupportedKeys } : {}),
+      native: true,
+    },
+    sourceId: `claude:provider-settings:${settings.action}:${Date.now()}`,
+  });
+}
+
+function runClaudeProviderSettingsRuntimeCommand(cmd, context) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  const settings = readClaudeProviderSettingsRuntimeCommand(
+    command,
+    isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
+  );
+  if (!settings || settings.action !== "diagnose") return false;
+  emitClaudeProviderSettingsTimeline(context, settings, "info");
+  emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
+  return true;
+}
+
 function normalizeClaudeMcpElicitationPayload(request, ctx) {
   if (!isRecord(request)) return null;
   const serverName = stringOrNull(request.serverName) || stringOrNull(request.mcp_server_name);
@@ -684,6 +756,9 @@ async function runClaudeCompactWorkflow(cmd, context, workingDir) {
 
 async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const providerSettings = applyClaudeProviderSettingsRuntimeCommand(cmd);
+  if (providerSettings?.action === "update") {
+    emitClaudeProviderSettingsTimeline(context, providerSettings, "success");
+  }
   const { prompt, model, resumeSessionId } = cmd;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
@@ -922,6 +997,7 @@ export async function runClaude(cmd, context) {
   if (await runClaudeSessionForkRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir)) return;
+  if (await runClaudeProviderSettingsRuntimeCommand(cmd, context)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);
 }

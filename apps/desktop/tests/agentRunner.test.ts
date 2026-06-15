@@ -1515,6 +1515,21 @@ describe("Claude helpers", () => {
     });
     expect(seenOptions.abortController).toBeInstanceOf(AbortController);
     expect(seenOptions.abortAfterMs).toBeUndefined();
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Claude provider settings applied",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "provider_settings",
+          action: "update",
+          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
+          optionKeys: expect.arrayContaining(["allowedTools", "disallowedTools"]),
+        }),
+      }),
+    }));
     expect(json().some((line) =>
       line.type === "timeline" &&
       line.event.payload?.unsupportedKeys
@@ -1522,6 +1537,61 @@ describe("Claude helpers", () => {
     expect(json()).toContainEqual({
       type: "done",
       sessionId: "claude-provider-settings",
+      subtype: "success",
+    });
+  });
+
+  it("Claude provider settings diagnose emits diagnostics without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-existing",
+      runtimeCommand: {
+        type: "lilia_provider_settings",
+        action: "diagnose",
+      },
+      runtimeOptions: {
+        common: { model: "claude-opus-4-5", permission: "readonly" },
+        provider: {
+          claude: {
+            allowedTools: ["Read"],
+            unknownClaudeOption: true,
+          },
+          codex: {
+            reasoningEffort: "high",
+          },
+        },
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Claude provider settings diagnostics",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "provider_settings",
+          action: "diagnose",
+          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
+          ignoredProviderKeys: ["reasoningEffort"],
+          unsupportedKeys: ["unknownClaudeOption"],
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-existing",
       subtype: "success",
     });
   });
@@ -4049,6 +4119,9 @@ describe("Codex app-server mapping", () => {
       runtimeOptions: {
         common: { model: "gpt-5.6", permission: "readonly" },
         provider: {
+          claude: {
+            allowedTools: ["Read"],
+          },
           codex: {
             profile: "deep",
             reasoningEffort: "high",
@@ -4086,6 +4159,7 @@ describe("Codex app-server mapping", () => {
       },
     });
     expect(updateCalls.at(-1)?.params.responsesapiClientMetadata).toEqual({ surface: "lilia" });
+    expect(updateCalls.at(-1)?.params.allowedTools).toBeUndefined();
     expect(json()).toContainEqual(expect.objectContaining({
       type: "timeline",
       event: expect.objectContaining({
@@ -4097,6 +4171,7 @@ describe("Codex app-server mapping", () => {
           subkind: "provider_settings",
           action: "update",
           method: "thread/settings/update",
+          ignoredProviderKeys: ["allowedTools"],
         }),
       }),
     }));
