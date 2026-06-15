@@ -26,6 +26,7 @@ import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
+import { handleExperimentalProviderOptions } from "../providerOptions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
@@ -1900,6 +1901,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
 }
 
 export async function runCodex(cmd, context) {
+  handleExperimentalProviderOptions(cmd, context, "codex");
   const runtimeExtensions = readCodexRuntimeExtensions(cmd);
   await runCodexAppServer(cmd, runtimeExtensions, context);
 }
