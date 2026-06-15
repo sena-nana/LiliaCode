@@ -89,7 +89,9 @@ export function useTaskComposerController(options: {
   );
   const agentInteractionSettings = useAgentInteractionSettings();
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
-  const { activeBackend } = useConnectionStatus({ probe: !context.isPopup.value });
+  const { activeBackend } = useConnectionStatus({
+    probe: !context.isPopup.value && !context.conversationRouteState.value.isLiveDraft,
+  });
   let loadSeq = 0;
   let runtimeEventSeq = 0;
   let composerLoad: Promise<ChatComposerState | null> | null = null;

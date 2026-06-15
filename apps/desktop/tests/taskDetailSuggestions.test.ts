@@ -75,6 +75,12 @@ describe("TaskDetail conversation suggestions", () => {
         .toBe(true);
       expect(view.getByRole("button", { name: "补齐建议缓存测试" })).toBeInTheDocument();
     });
+    expect(mockInvoke.mock.calls.some(([cmd, args]) =>
+      cmd === "agent_timeline_list" && args?.taskId === draft.id
+    )).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd, args]) =>
+      cmd === "chat_get_runtime_snapshot" && args?.taskId === draft.id
+    )).toBe(false);
     const suggestions = view.getByLabelText("新对话建议");
     expect(suggestions.closest(".chat-composer")).not.toBeNull();
     expect(view.getByRole("button", { name: "刷新新对话建议" })).toBeInTheDocument();

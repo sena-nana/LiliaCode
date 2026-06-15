@@ -1,11 +1,13 @@
-import { render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
 import { createLiliaRouter } from "../src/router";
 import {
   emitTauriEvent,
+  mockInvoke,
   mockListenerCount,
+  setMockAgentTimelineDelay,
   setMockCurrentWindowLabel,
 } from "./tauriMock";
 
@@ -76,6 +78,32 @@ describe("App main navigation events", () => {
       expect(mockListenerCount("automation:run-updated")).toBe(1);
       expect(mockListenerCount("automation:run-finished")).toBe(1);
     });
+  });
+
+  it("自动化页点击新对话会先渲染草稿聊天，不等待 timeline 和 runtime", async () => {
+    const view = await renderApp("main", "/automations");
+
+    await waitFor(() => {
+      expect(view.getByTestId("automation-flow")).toBeInTheDocument();
+    });
+    mockInvoke.mockClear();
+    setMockAgentTimelineDelay(1_000);
+
+    await fireEvent.click(view.getAllByRole("button", { name: "新对话" })[0]);
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.path).toMatch(/^\/chats\/o-draft-/);
+      expect(view.getByText("今天想做什么？")).toBeInTheDocument();
+      expect(view.getByRole("textbox")).toBeInTheDocument();
+    });
+
+    const draftId = String(view.router.currentRoute.value.params.taskId);
+    expect(mockInvoke.mock.calls.some(([cmd, args]) =>
+      cmd === "agent_timeline_list" && args?.taskId === draftId
+    )).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd, args]) =>
+      cmd === "chat_get_runtime_snapshot" && args?.taskId === draftId
+    )).toBe(false);
   });
 
   it("主窗口收到主导航事件时会打开目标路由", async () => {
