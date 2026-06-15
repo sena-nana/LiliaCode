@@ -424,6 +424,16 @@ export type CodexAccountQuotaStatusTypeTest = Assert<
         windowDurationMins: 10080;
         resetsAt: 2;
       };
+      sparkFiveHour: {
+        usedPercent: 15;
+        windowDurationMins: 300;
+        resetsAt: 4;
+      };
+      sparkWeekly: {
+        usedPercent: 70;
+        windowDurationMins: 10080;
+        resetsAt: 5;
+      };
       fetchedAt: 3;
       error: null;
     },
