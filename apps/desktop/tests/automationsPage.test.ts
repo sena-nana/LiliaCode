@@ -57,6 +57,10 @@ describe("Automations page", () => {
     const fitView = vi.fn();
     vi.mocked(useVueFlow).mockReturnValue({ fitView, zoomIn, zoomOut } as never);
     const view = render(Automations);
+
+    await waitFor(() => {
+      expect(view.getByRole("complementary", { name: "自动化列表" })).toBeInTheDocument();
+    });
     const list = view.getByRole("complementary", { name: "自动化列表" });
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
 

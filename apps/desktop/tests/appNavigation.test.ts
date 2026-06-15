@@ -1,6 +1,6 @@
 import { render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
 import { createLiliaRouter } from "../src/router";
 import {
@@ -8,6 +8,25 @@ import {
   mockListenerCount,
   setMockCurrentWindowLabel,
 } from "./tauriMock";
+
+const vueFlowImportState = vi.hoisted(() => ({
+  loaded: false,
+}));
+
+vi.mock("@vue-flow/core", async () => {
+  vueFlowImportState.loaded = true;
+  const { defineComponent, h } = await import("vue");
+  return {
+    Handle: defineComponent({ name: "Handle", setup: () => () => h("span") }),
+    Position: { Left: "left", Right: "right" },
+    VueFlow: defineComponent({
+      name: "VueFlow",
+      setup: (_, { slots }) => () =>
+        h("div", { "data-testid": "automation-flow" }, slots.default?.()),
+    }),
+    useVueFlow: () => ({ fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() }),
+  };
+});
 
 async function renderApp(windowLabel: string, initialRoute = "/") {
   setMockCurrentWindowLabel(windowLabel);
@@ -38,6 +57,27 @@ async function renderApp(windowLabel: string, initialRoute = "/") {
 }
 
 describe("App main navigation events", () => {
+  it("自动化页面只在进入路由后加载重 UI 并注册事件监听", async () => {
+    const view = await renderApp("main");
+
+    expect(view.router.currentRoute.value.fullPath).toBe("/");
+    expect(vueFlowImportState.loaded).toBe(false);
+    expect(mockListenerCount("automation:changed")).toBe(0);
+    expect(mockListenerCount("automation:run-started")).toBe(0);
+    expect(mockListenerCount("automation:run-updated")).toBe(0);
+    expect(mockListenerCount("automation:run-finished")).toBe(0);
+
+    await view.router.push("/automations");
+
+    await waitFor(() => {
+      expect(vueFlowImportState.loaded).toBe(true);
+      expect(mockListenerCount("automation:changed")).toBe(1);
+      expect(mockListenerCount("automation:run-started")).toBe(1);
+      expect(mockListenerCount("automation:run-updated")).toBe(1);
+      expect(mockListenerCount("automation:run-finished")).toBe(1);
+    });
+  });
+
   it("主窗口收到主导航事件时会打开目标路由", async () => {
     const view = await renderApp("main");
 
