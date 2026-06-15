@@ -7,8 +7,6 @@ import { installAgentInteractionBridge } from "../src/composables/useAgentIntera
 import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
-import { projectsReady } from "../src/data/projects";
-import { allTasksReady } from "../src/data/tasks";
 import { setAgentInteractionSettings } from "../src/services/chat";
 import {
   emitTauriEvent,
@@ -330,7 +328,6 @@ let unlistenInteraction: (() => void) | null = null;
 
 describe("chat AskUser prompt", () => {
   beforeEach(async () => {
-    await Promise.all([projectsReady, allTasksReady]);
     unlistenInteraction = await installAgentInteractionBridge();
   });
 

@@ -26,7 +26,7 @@ const contentSegments = computed(() =>
 const previewAttachments = computed(() =>
   props.message.attachments.filter((attachment) => isImageAttachment(attachment)),
 );
-const legacyAttachments = computed(() => {
+const unreferencedAttachments = computed(() => {
   const referenced = new Set(contentSegments.value
     .filter((segment): segment is { type: "attachment"; attachment: ChatAttachment } =>
       segment.type === "attachment"
@@ -118,7 +118,7 @@ function attachmentIcon(attachment: ChatAttachment) {
       />
     </div>
     <div
-      v-if="previewAttachments.length || legacyAttachments.length"
+      v-if="previewAttachments.length || unreferencedAttachments.length"
       class="chat-bubble__attachments"
       aria-label="消息附件"
     >
@@ -138,7 +138,7 @@ function attachmentIcon(attachment: ChatAttachment) {
         />
       </button>
       <span
-        v-for="attachment in legacyAttachments"
+        v-for="attachment in unreferencedAttachments"
         :key="attachment.id"
         class="chat-attachment-chip chat-attachment-chip--bubble"
         :title="attachment.path"
