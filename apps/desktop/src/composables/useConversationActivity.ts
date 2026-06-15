@@ -139,6 +139,10 @@ function runtimePhaseToConversationActivity(
   return null;
 }
 
+function isDraftConversationId(taskId: string): boolean {
+  return taskId.startsWith("t-draft-") || taskId.startsWith("o-draft-");
+}
+
 function readTimelinePayloadString(event: AgentTimelineEvent, key: string): string | null {
   const payload = event.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -183,7 +187,9 @@ function timelineRequiresActionRequestIds(events: AgentTimelineEvent[]): string[
 
 export async function hydrateConversationActivities(taskIds: string[]): Promise<void> {
   const pendingTaskIds = Array.from(new Set(taskIds.filter(Boolean))).filter((taskId) =>
-    !hydratedTaskIds.has(taskId) && !states[taskId]
+    !isDraftConversationId(taskId) &&
+    !hydratedTaskIds.has(taskId) &&
+    !states[taskId]
   );
   if (pendingTaskIds.length === 0) return;
 
