@@ -825,6 +825,55 @@ fn handle_runner_runtime_event<R: Runtime>(
                 session.event_ctx.automation_run_id.clone(),
             );
         }
+        AgentRuntimeEvent::RuntimeOperationRequest {
+            id,
+            operation,
+            payload,
+        } => {
+            record_runner_lifecycle(
+                observer,
+                "runtime_operation_requested",
+                serde_json::json!({
+                    "requestId": id,
+                    "operation": operation,
+                }),
+            );
+            let result = crate::chat::mutsuki_core_runtime::invoke_lilia_runtime_operation(
+                app_handle,
+                &session.task_id,
+                &session.turn_id,
+                &session.backend,
+                operation,
+                payload.clone(),
+            );
+            let response = match result {
+                Ok(value) => serde_json::json!({
+                    "type": "runtime_operation_result",
+                    "id": id,
+                    "operation": operation,
+                    "ok": true,
+                    "result": value,
+                }),
+                Err(err) => serde_json::json!({
+                    "type": "runtime_operation_result",
+                    "id": id,
+                    "operation": operation,
+                    "ok": false,
+                    "error": err,
+                }),
+            };
+            if let Err(err) = write_runner_stdin_payload(&session.process_session_id, response) {
+                record_runner_lifecycle(
+                    observer,
+                    "runtime_operation_response_failed",
+                    serde_json::json!({
+                        "requestId": id,
+                        "operation": operation,
+                        "error": err,
+                    }),
+                );
+            }
+        }
         AgentRuntimeEvent::Done { session_id, .. } => {
             if let Some(sid) = session_id {
                 session.last_session_id = Some(sid.clone());
@@ -1055,6 +1104,7 @@ fn runner_event_kind(event: &AgentRuntimeEvent) -> &'static str {
         AgentRuntimeEvent::TodoList { .. } => "todo_list",
         AgentRuntimeEvent::Timeline { .. } => "timeline",
         AgentRuntimeEvent::InteractionRequest { .. } => "interaction_request",
+        AgentRuntimeEvent::RuntimeOperationRequest { .. } => "runtime_operation_request",
         AgentRuntimeEvent::Done { .. } => "done",
         AgentRuntimeEvent::PromptSuggestion { .. } => "prompt_suggestion",
         AgentRuntimeEvent::Error { .. } => "error",

@@ -16,6 +16,10 @@ import {
   queryConversationContextInputSchema,
 } from "../conversationContext.mjs";
 import {
+  createQuotaUsageHandler,
+  queryQuotaUsageInputSchema,
+} from "../quotaUsage.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readClaudeRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
@@ -82,6 +86,7 @@ export function createLiliaAskUserServer({
   createServer = createSdkMcpServer,
   createTool = tool,
   requestAskUser,
+  requestRuntimeOperation,
   conversationContext = null,
   architectureHandler = null,
 }) {
@@ -91,6 +96,13 @@ export function createLiliaAskUserServer({
       "Ask the human user one or more multiple-choice questions through Lilia.",
       askUserQuestionInputSchema,
       createClaudeAskUserHandler(requestAskUser),
+      { alwaysLoad: true },
+    ),
+    createTool(
+      "query_quota_usage",
+      "Query Lilia quota usage summaries through the Lilia runtime operation bus.",
+      queryQuotaUsageInputSchema,
+      createQuotaUsageHandler(requestRuntimeOperation),
       { alwaysLoad: true },
     ),
   ];
@@ -713,6 +725,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   };
   const liliaAskUserServer = createLiliaAskUserServer({
     requestAskUser: context.interactions.requestAskUser,
+    requestRuntimeOperation: context.interactions.requestRuntimeOperation,
     conversationContext: cmd.conversationContext,
     architectureHandler: createArchitectureChangeHandler({ cmd, ctx, backend: "claude" }),
     createServer: context.createSdkMcpServer || createSdkMcpServer,

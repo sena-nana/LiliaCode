@@ -67,6 +67,9 @@ function emptyQuotaStats() {
     })),
     backends: [],
     recent: [],
+    projects: [],
+    conversations: [],
+    tools: [],
   };
 }
 
@@ -118,6 +121,10 @@ describe("Settings provider switch", () => {
     });
     expect(await view.findByText("总 Token")).toBeInTheDocument();
     expect(view.getByRole("img", { name: "每日 Token 趋势" })).toBeInTheDocument();
+    expect(view.getByText("项目消耗")).toBeInTheDocument();
+    expect(view.getByText("对话消耗")).toBeInTheDocument();
+    expect(view.getByText("工具活跃度")).toBeInTheDocument();
+    expect(view.getByText("按调用次数统计")).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
 

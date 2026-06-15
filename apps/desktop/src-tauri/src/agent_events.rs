@@ -35,6 +35,12 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         payload: JsonValue,
     },
+    RuntimeOperationRequest {
+        id: String,
+        operation: String,
+        #[serde(default)]
+        payload: JsonValue,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -90,6 +96,23 @@ impl AgentRuntimeEvent {
                     id,
                     kind,
                     backend,
+                    payload,
+                })
+            }
+            "runtime_operation_request" => {
+                let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+                let operation = value
+                    .get("operation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if operation.trim().is_empty() {
+                    return None;
+                }
+                let payload = value.get("payload").cloned().unwrap_or(JsonValue::Null);
+                Some(Self::RuntimeOperationRequest {
+                    id,
+                    operation,
                     payload,
                 })
             }
@@ -438,6 +461,19 @@ mod tests {
                     "title": "Codex 想确认一下",
                     "questions": []
                 }),
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "runtime_operation_request",
+                "id": "runtime-op-1",
+                "operation": "lilia.quota.query_usage",
+                "payload": { "days": 7, "scope": "tools" }
+            })),
+            Some(AgentRuntimeEvent::RuntimeOperationRequest {
+                id: "runtime-op-1".to_string(),
+                operation: "lilia.quota.query_usage".to_string(),
+                payload: json!({ "days": 7, "scope": "tools" }),
             })
         );
         assert_eq!(

@@ -18,6 +18,11 @@ import {
   isLiliaArchitectureTool,
 } from "../architecture.mjs";
 import {
+  codexQueryQuotaUsageDynamicTool,
+  createQuotaUsageHandler,
+  isLiliaQuotaTool,
+} from "../quotaUsage.mjs";
+import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
@@ -307,7 +312,7 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   assignCodexSettingsParams(common, settings, cmd);
   assignCodexAdvancedThreadParams(common, settings);
   common.sandbox = mapCodexSandboxMode(permission);
-  const dynamicTools = [codexAskUserDynamicTool];
+  const dynamicTools = [codexAskUserDynamicTool, codexQueryQuotaUsageDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
   }
@@ -1742,6 +1747,8 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
         ctx,
         backend: "codex",
       })(input);
+    } else if (isLiliaQuotaTool(toolName)) {
+      output = await createQuotaUsageHandler(ctx.interactions?.requestRuntimeOperation)(input);
     } else {
       return false;
     }

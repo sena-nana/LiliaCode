@@ -706,6 +706,50 @@ function createMockQuotaUsageStats(input: Record<string, unknown> = {}) {
       knownCostUsd: row.knownCostUsd,
       createdAt: rangeEnd - (index + 1) * 3_600_000,
     })),
+    projects: [
+      {
+        projectId: "project-lilia",
+        projectName: "Lilia",
+        projectCwd: "C:\\Files\\workspace\\Lilia",
+        ...totals,
+        knownCostUsd: costRecordCount > 0 ? knownCostUsd : null,
+        costRecordCount,
+        recordCount: totalRecordCount,
+      },
+    ],
+    conversations: [
+      {
+        taskId: "task-1",
+        taskTitle: "额度统计",
+        taskStatus: "running",
+        projectId: "project-lilia",
+        projectName: "Lilia",
+        ...totals,
+        knownCostUsd: costRecordCount > 0 ? knownCostUsd : null,
+        costRecordCount,
+        recordCount: totalRecordCount,
+      },
+    ],
+    tools: [
+      {
+        key: "command::",
+        label: "命令",
+        kind: "command",
+        subkind: null,
+        toolName: null,
+        callCount: 6,
+        sharePercent: 60,
+      },
+      {
+        key: "search:grep:",
+        label: "内容搜索",
+        kind: "search",
+        subkind: "grep",
+        toolName: null,
+        callCount: 4,
+        sharePercent: 40,
+      },
+    ],
   };
 }
 
