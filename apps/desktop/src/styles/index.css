@@ -143,6 +143,10 @@ body {
   color: var(--text);
 }
 
+body.body--transparent-popup {
+  background: transparent;
+}
+
 /* ---- 代码 / 等宽 ---- */
 code,
 kbd,

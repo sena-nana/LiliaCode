@@ -106,7 +106,9 @@ describe("Popup shell", () => {
     expect(view.container.querySelector(".secondary-panel")).not.toBeInTheDocument();
     expect(view.container.querySelector(".chat-sidebar")).not.toBeInTheDocument();
     expect(view.container.querySelector(".chat-page")).not.toBeInTheDocument();
-    expect(view.getByText("对话状态")).toBeInTheDocument();
+    expect(view.queryByText("对话状态")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".conversation-status-float__count")).not.toBeInTheDocument();
+    expect(view.container.querySelector(".sb-conn")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(view.getByRole("button", { name: /接入 Claude Code 会话发现/ }))
@@ -148,18 +150,27 @@ describe("Popup shell", () => {
   it("对话状态悬浮窗顶部控件支持置顶、透明度、新对话和关闭", async () => {
     localStorage.removeItem("lilia.conversationStatus.alwaysOnTop");
     localStorage.removeItem("lilia.conversationStatus.opacity");
+    localStorage.removeItem("lilia.conversationStatus.geometry");
     const view = await renderPopup("/popup/status");
 
     await waitFor(() => {
       expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenCalledWith(false);
     });
 
+    const titlebarButtons = view.container.querySelectorAll(".conversation-status-float__titlebar .titlebar__btn");
+    expect(titlebarButtons[0]).toHaveAttribute("aria-label", "置顶");
+
     await fireEvent.click(view.getByRole("button", { name: "置顶" }));
     expect(mockCurrentWindow.setAlwaysOnTop).toHaveBeenLastCalledWith(true);
     expect(localStorage.getItem("lilia.conversationStatus.alwaysOnTop")).toBe("1");
 
-    await fireEvent.click(view.getByRole("button", { name: "92" }));
+    await fireEvent.click(view.getByRole("button", { name: /窗口透明度/ }));
+    const opacitySlider = view.getByRole("slider", { name: "窗口透明度" });
+    expect(opacitySlider).toHaveAttribute("min", "0.4");
+    await fireEvent.update(opacitySlider, "0.92");
     expect(localStorage.getItem("lilia.conversationStatus.opacity")).toBe("0.92");
+    await fireEvent.update(opacitySlider, "0.4");
+    expect(localStorage.getItem("lilia.conversationStatus.opacity")).toBe("0.40");
 
     await fireEvent.click(view.getByRole("button", { name: "新对话" }));
     expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
@@ -169,6 +180,44 @@ describe("Popup shell", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "关闭对话悬浮窗" }));
     expect(mockCurrentWindow.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("对话状态悬浮窗会记忆窗口大小和位置", async () => {
+    localStorage.setItem("lilia.conversationStatus.geometry", JSON.stringify({
+      x: 120,
+      y: 140,
+      width: 420,
+      height: 480,
+    }));
+
+    await renderPopup("/popup/status");
+
+    await waitFor(() => {
+      expect(mockCurrentWindow.setSize).toHaveBeenCalledWith(expect.objectContaining({
+        width: 420,
+        height: 480,
+      }));
+      expect(mockCurrentWindow.setPosition).toHaveBeenCalledWith(expect.objectContaining({
+        x: 120,
+        y: 140,
+      }));
+      expect(mockCurrentWindow.onResized).toHaveBeenCalled();
+      expect(mockCurrentWindow.onMoved).toHaveBeenCalled();
+    });
+
+    mockCurrentWindow.outerPosition.mockResolvedValueOnce({ x: 188, y: 212 });
+    mockCurrentWindow.innerSize.mockResolvedValueOnce({ width: 366, height: 444 });
+    const onResized = mockCurrentWindow.onResized.mock.calls[0]?.[0] as (() => void) | undefined;
+    onResized?.();
+
+    await waitFor(() => {
+      expect(localStorage.getItem("lilia.conversationStatus.geometry")).toBe(JSON.stringify({
+        x: 188,
+        y: 212,
+        width: 366,
+        height: 444,
+      }));
+    });
   });
 
   it("弹窗打开已有对话时可用单条查询补齐当前上下文", async () => {
