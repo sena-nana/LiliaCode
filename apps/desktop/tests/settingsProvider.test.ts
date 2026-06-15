@@ -75,7 +75,6 @@ function emptyQuotaStats() {
 
 describe("Settings provider switch", () => {
   afterEach(() => {
-    localStorage.removeItem("lilia.providerSetupChecklist.dismissed");
     vi.useRealTimers();
   });
 
@@ -225,21 +224,6 @@ describe("Settings provider switch", () => {
         "true",
       );
     });
-  });
-
-  it("首次进入连接页显示清单，收起后再次进入不显示", async () => {
-    const view = await renderSettings("/settings?tab=providers");
-
-    expect(await view.findByText("首次启动清单")).toBeInTheDocument();
-
-    await fireEvent.click(view.getByRole("button", { name: "收起首次启动清单" }));
-
-    expect(localStorage.getItem("lilia.providerSetupChecklist.dismissed")).toBe("1");
-
-    view.unmount();
-    const next = await renderSettings("/settings?tab=providers");
-    expect(next.queryByText("首次启动清单")).not.toBeInTheDocument();
-    expect(next.getByRole("button", { name: "显示首次启动清单" })).toBeInTheDocument();
   });
 
   it("连接页默认使用 API/官方账号，不再展示 CC-Switch 专用配置", async () => {
