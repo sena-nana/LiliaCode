@@ -10,7 +10,6 @@ import {
 import type {
   ChatBackendKind,
   CodexAccountQuotaStatus,
-  CodexAccountQuotaWindow,
   QuotaUsageDailyBucket,
   QuotaUsageStats,
   QuotaUsageStatsBackendFilter,
@@ -26,11 +25,6 @@ import {
 
 type BackendOption = { value: QuotaUsageStatsBackendFilter; label: string };
 type DaysOption = { value: QuotaUsageStatsDays; label: string };
-type OfficialQuotaWindowRow = {
-  key: "fiveHour" | "weekly";
-  label: string;
-  window: CodexAccountQuotaWindow | null | undefined;
-};
 type QuotaBreakdownItem = {
   key: string;
   label: string;
@@ -66,9 +60,9 @@ const refreshing = computed(() => loading.value || quotaLoading.value);
 const showOfficialQuota = computed(() =>
   officialQuota.value?.connectionMode === "codex-account",
 );
-const officialQuotaWindows = computed<OfficialQuotaWindowRow[]>(() => [
-  { key: "fiveHour", label: "5 小时限额", window: officialQuota.value?.fiveHour },
-  { key: "weekly", label: "周限额", window: officialQuota.value?.weekly },
+const officialQuotaWindows = computed(() => [
+  { key: "fiveHour", window: officialQuota.value?.fiveHour },
+  { key: "weekly", window: officialQuota.value?.weekly },
 ]);
 const hasOfficialQuotaWindow = computed(() => officialQuotaWindows.value.some((row) => row.window));
 const maxDailyTokens = computed(() =>
@@ -359,7 +353,6 @@ onMounted(() => {
           :key="row.key"
           class="quota-official-window"
         >
-          <span>{{ row.label }}</span>
           <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
           <small>{{ quotaWindowLabel(row.window) }}</small>
           <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>

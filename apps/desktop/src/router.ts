@@ -13,9 +13,7 @@ const TaskDetail = () => import("./pages/TaskDetail.vue");
 const MainTaskDetail = defineAsyncComponent(() => import("./pages/TaskDetail.vue"));
 const PopupDraftBoot = () => import("./pages/PopupDraftBoot.vue");
 const Settings = () => import("./pages/Settings.vue");
-const Plugins = () => import("./pages/Plugins.vue");
 const Automations = () => import("./pages/Automations.vue");
-const ConversationImport = () => import("./pages/ConversationImport.vue");
 const ProjectsOverview = () => import("./pages/project/ProjectsOverview.vue");
 const ProjectShell = () => import("./pages/project/ProjectShell.vue");
 const SessionsView = () => import("./pages/project/SessionsView.vue");
@@ -135,9 +133,15 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
             props: true,
           },
           { path: "settings", component: Settings },
-          { path: "plugins", component: Plugins },
+          { path: "plugins", redirect: { path: "/settings", query: { tab: "plugins" } } },
           { path: "automations", component: Automations },
-          { path: "import", component: ConversationImport },
+          {
+            path: "import",
+            redirect: (to) => ({
+              path: "/settings",
+              query: { ...to.query, tab: "import" },
+            }),
+          },
         ],
       },
       { path: "/:pathMatch(.*)*", redirect: "/" },

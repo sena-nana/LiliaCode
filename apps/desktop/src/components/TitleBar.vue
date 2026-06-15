@@ -77,7 +77,6 @@ const crumbs = computed<Crumb[]>(() => {
   }
 
   if (route.path === "/settings") return [{ text: "设置" }];
-  if (route.path === "/plugins") return [{ text: "插件 / 技能" }];
   if (route.path === "/automations") return [{ text: "自动化" }];
 
   return [{ text: "Lilia" }];
