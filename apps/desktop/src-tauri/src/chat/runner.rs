@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
-use mutsuki_runtime_host::{JsonlProcessPoll, JsonlProcessRegistry, JsonlProcessStdinStatus};
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -14,16 +13,18 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::agent_events::{AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_extensions::TodoMirrorExtension;
+use crate::chat::process_registry::{
+    JsonlProcessPoll, JsonlProcessRegistry, JsonlProcessStdinStatus,
+};
 #[cfg(test)]
 use crate::chat::state::take_next_pending_turn;
 use crate::chat::state::{
     clear_runtime_state_for_app, clear_task_runtime_state_for_reset, finish_running_turn_handles,
-    is_turn_marked_reset, load_persisted_resume_session_id, normalize_runtime_channel,
-    persist_agent_session_id, persist_and_emit_interrupted_timeline_event,
-    persist_runtime_state_for_app, session_key, set_guide_status_for_app,
-    should_emit_runner_exit_error, should_persist_user_message, take_next_pending_turn_for_app,
-    take_next_recoverable_pending_turn, take_pending_finalization_for_app, ChatStore,
-    PersistedRuntimeState, RunningTurn,
+    is_turn_marked_reset, load_persisted_resume_session_id, persist_agent_session_id,
+    persist_and_emit_interrupted_timeline_event, persist_runtime_state_for_app, session_key,
+    set_guide_status_for_app, should_emit_runner_exit_error, should_persist_user_message,
+    take_next_pending_turn_for_app, take_next_recoverable_pending_turn,
+    take_pending_finalization_for_app, ChatStore, PersistedRuntimeState, RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
@@ -42,9 +43,7 @@ use crate::provider::{
     CodexProfileSettings, ConnectionMode,
 };
 use crate::store::LiliaStore;
-use crate::{
-    plugins, BACKEND_CLAUDE, BACKEND_CODEX, RUNTIME_CHANNEL_BUILTIN, RUNTIME_CHANNEL_MUTSUKI_CORE,
-};
+use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX};
 
 pub(crate) struct RunnerInvocation {
     pub(crate) task_id: String,
@@ -56,7 +55,6 @@ pub(crate) struct RunnerInvocation {
     pub(crate) runtime_command: Option<ChatRuntimeCommand>,
     pub(crate) runtime_options: Option<ProviderRuntimeOptions>,
     pub(crate) turn_id: String,
-    pub(crate) runtime_channel: String,
     pub(crate) resume_session_id: Option<String>,
     pub(crate) queued_count: usize,
     pub(crate) script_path: PathBuf,
@@ -269,36 +267,6 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
     runtime_options: Option<ProviderRuntimeOptions>,
     turn_id: String,
 ) {
-    let runtime_channel = load_agent_interaction_settings(&app).agent_runtime_channel;
-    let runtime_channel = normalize_runtime_channel(&runtime_channel).to_string();
-    spawn_agent_turn_with_channel(
-        app,
-        task_id,
-        content,
-        composer,
-        project_cwd,
-        attachments,
-        workflow,
-        runtime_command,
-        runtime_options,
-        turn_id,
-        runtime_channel,
-    );
-}
-
-fn spawn_agent_turn_with_channel<R: Runtime>(
-    app: AppHandle<R>,
-    task_id: String,
-    content: String,
-    composer: ChatComposerState,
-    project_cwd: String,
-    attachments: Vec<ChatAttachment>,
-    workflow: Option<ChatWorkflow>,
-    runtime_command: Option<ChatRuntimeCommand>,
-    runtime_options: Option<ProviderRuntimeOptions>,
-    turn_id: String,
-    runtime_channel: String,
-) {
     let backend = composer.backend.clone();
     let resume_session_id = {
         let store = app.state::<ChatStore>();
@@ -306,14 +274,14 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
             .sdk_sessions
             .lock()
             .unwrap()
-            .get(&session_key(&runtime_channel, &backend, &task_id))
+            .get(&session_key(&backend, &task_id))
             .cloned();
         session
     }
     .or_else(|| {
         let store = app.try_state::<LiliaStore>()?;
         let conn = store.conn().ok()?;
-        load_persisted_resume_session_id(&conn, &task_id, &backend, &runtime_channel)
+        load_persisted_resume_session_id(&conn, &task_id, &backend)
     });
 
     let script_path = locate_agent_runner(&app);
@@ -330,7 +298,6 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
         runtime_command,
         runtime_options,
         turn_id,
-        runtime_channel,
         resume_session_id,
         queued_count: 0,
         script_path,
@@ -358,23 +325,7 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
         let mut invocation = invocation;
         invocation.queued_count = queued_count;
 
-        if invocation.runtime_channel == RUNTIME_CHANNEL_MUTSUKI_CORE {
-            if let Err(err) =
-                crate::chat::mutsuki_core_runtime::supervise_turn(app_handle.clone(), invocation)
-            {
-                persist_and_emit_error_timeline_event(
-                    &app_handle,
-                    &task_id_for_thread,
-                    &backend_for_thread,
-                    None,
-                    format!("MutsukiCore runtime 初始化失败：{err}"),
-                );
-            }
-            return;
-        }
-
         let turn_id_for_finish = invocation.turn_id.clone();
-        let runtime_channel_for_finish = invocation.runtime_channel.clone();
         let automation_run_id_for_finish = automation_run_id(invocation.workflow.as_ref());
         let result = run_node_agent_runner(&app_handle, invocation);
         let mut runner_ok = true;
@@ -407,7 +358,6 @@ fn spawn_agent_turn_with_channel<R: Runtime>(
             app_handle,
             task_id_for_thread,
             backend_for_thread,
-            runtime_channel_for_finish,
             output.last_session_id,
             agent_success,
             None,
@@ -448,7 +398,7 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
             automation_run_id(turn.workflow.as_ref()).as_deref(),
         );
     }
-    spawn_agent_turn_with_channel(
+    spawn_agent_turn(
         app,
         task_id,
         turn.content,
@@ -459,7 +409,6 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
         turn.runtime_command,
         turn.runtime_options,
         turn.turn_id,
-        turn.runtime_channel,
     );
     Ok(true)
 }
@@ -487,7 +436,6 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let runtime_options_for_thread = invocation.runtime_options;
     let automation_run_id_for_thread = automation_run_id(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
-    let runtime_channel_for_thread = invocation.runtime_channel;
     let resume_session_id = invocation.resume_session_id;
     let queued_count = invocation.queued_count;
     let script_path = invocation.script_path;
@@ -598,7 +546,6 @@ pub(crate) fn start_runner_session<R: Runtime>(
         let running_turn = RunningTurn {
             turn_id: turn_id_for_thread.clone(),
             backend: backend_for_thread.clone(),
-            runtime_channel: runtime_channel_for_thread.clone(),
         };
         store
             .running_process_sessions
@@ -1063,7 +1010,6 @@ pub(crate) fn resume_persisted_node_agent_runner<R: Runtime>(
     let task_id = persisted.task_id.clone();
     let turn_id = persisted.turn.turn_id.clone();
     let backend = persisted.turn.backend.clone();
-    let runtime_channel = persisted.turn.runtime_channel.clone();
     let output = resume_node_agent_runner(
         &app_handle,
         task_id.clone(),
@@ -1075,7 +1021,6 @@ pub(crate) fn resume_persisted_node_agent_runner<R: Runtime>(
         app_handle,
         task_id,
         backend,
-        runtime_channel,
         output.last_session_id,
         !output.interrupted && !output.reset,
         None,
@@ -1378,26 +1323,25 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
     app_handle: AppHandle<R>,
     task_id: String,
     backend: String,
-    runtime_channel: String,
     last_session_id: Option<String>,
     advance_queue: bool,
     rollback: Option<ChatRollbackResult>,
 ) {
     // 记下 session id 供下一轮 resume。
-    if normalize_runtime_channel(&runtime_channel) == RUNTIME_CHANNEL_BUILTIN {
-        if let Some(sid) = last_session_id.clone() {
-            let store = app_handle.state::<ChatStore>();
-            store.sdk_sessions.lock().unwrap().insert(
-                session_key(&runtime_channel, &backend, &task_id),
-                sid.clone(),
-            );
-            if let Some(store) = app_handle.try_state::<LiliaStore>() {
-                match store.conn().and_then(|conn| {
-                    persist_agent_session_id(&conn, &task_id, &backend, &runtime_channel, &sid)
-                }) {
-                    Ok(()) => {}
-                    Err(err) => eprintln!("[agent-session] persist checkpoint failed: {err}"),
-                }
+    if let Some(sid) = last_session_id.clone() {
+        let store = app_handle.state::<ChatStore>();
+        store
+            .sdk_sessions
+            .lock()
+            .unwrap()
+            .insert(session_key(&backend, &task_id), sid.clone());
+        if let Some(store) = app_handle.try_state::<LiliaStore>() {
+            match store
+                .conn()
+                .and_then(|conn| persist_agent_session_id(&conn, &task_id, &backend, &sid))
+            {
+                Ok(()) => {}
+                Err(err) => eprintln!("[agent-session] persist checkpoint failed: {err}"),
             }
         }
     }
@@ -1439,7 +1383,7 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
                 None,
             );
         }
-        spawn_agent_turn_with_channel(
+        spawn_agent_turn(
             app_handle,
             task_id,
             turn.content,
@@ -1450,7 +1394,6 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
             turn.runtime_command,
             turn.runtime_options,
             turn.turn_id,
-            runtime_channel,
         );
     }
 }
@@ -1744,7 +1687,6 @@ fn clip_context_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RUNTIME_CHANNEL_BUILTIN;
 
     #[derive(Default)]
     struct CollectingLifecycleObserver {
@@ -1884,7 +1826,6 @@ mod tests {
                     created_at: 1,
                 },
                 turn_id: "turn-next".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
                 guide_id: Some("guide-next".to_string()),
             });
 
@@ -1929,7 +1870,6 @@ mod tests {
                     created_at: 1,
                 },
                 turn_id: "turn-queued".to_string(),
-                runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
                 guide_id: Some("guide-queued".to_string()),
             });
 

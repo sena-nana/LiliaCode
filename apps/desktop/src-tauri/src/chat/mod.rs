@@ -1,6 +1,6 @@
 pub(crate) mod attachments;
 pub(crate) mod commands;
-pub(crate) mod mutsuki_core_runtime;
+mod process_registry;
 pub(crate) mod runner;
 pub(crate) mod slash_commands;
 pub(crate) mod state;

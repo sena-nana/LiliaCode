@@ -543,13 +543,6 @@ fn dispatch_agent_turn<R: Runtime>(
     {
         let mut running = store.running_tasks.lock().unwrap();
         if running.contains_key(&task_id) {
-            let runtime_channel = store
-                .running_turns
-                .lock()
-                .unwrap()
-                .get(&task_id)
-                .map(|turn| turn.runtime_channel.clone())
-                .unwrap_or_else(|| crate::RUNTIME_CHANNEL_BUILTIN.to_string());
             drop(running);
             let queued_count = queue_pending_turn_for_app(
                 app,
@@ -564,7 +557,6 @@ fn dispatch_agent_turn<R: Runtime>(
                 None,
                 message.clone(),
                 turn_id.clone(),
-                runtime_channel,
                 None,
             );
             if should_persist_user_message(&message.content, &workflow, &None) {

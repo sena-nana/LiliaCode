@@ -451,7 +451,7 @@ describe("Settings provider switch", () => {
     expect(view.container.querySelector(".ui-textarea")).toBeNull();
   });
 
-  it("Agent 设置页可以切换运行时通道", async () => {
+  it("Agent 设置页只显示内置协议相关设置", async () => {
     const view = await renderSettings("/settings?tab=agent");
 
     await waitFor(() => {
@@ -459,24 +459,8 @@ describe("Settings provider switch", () => {
         mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
       ).toBe(true);
     });
-    await waitFor(() => {
-      expect(view.getByRole("radio", { name: "内置" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-    });
 
-    await fireEvent.click(view.getByRole("radio", { name: "MutsukiCore" }));
-
-    await waitFor(() => {
-      expect(view.getByRole("radio", { name: "MutsukiCore" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
-        settings: { agentRuntimeChannel: "mutsuki_core" },
-      });
-    });
+    expect(view.queryByText("Agent 交互")).toBeInTheDocument();
   });
 
   it("项目设置页不再显示 Codex 项目默认高级字段", async () => {

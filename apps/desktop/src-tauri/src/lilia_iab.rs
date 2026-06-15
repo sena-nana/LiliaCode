@@ -14,7 +14,7 @@ use crate::chat::state::{now_millis, ChatStore, RunningTurn};
 use crate::chat::types::ChatAttachment;
 use crate::popup_windows::focus_window;
 use crate::store;
-use crate::{BACKEND_CODEX, BG, RUNTIME_CHANNEL_BUILTIN};
+use crate::{BACKEND_CODEX, BG};
 
 const IAB_WIDTH: f64 = 1180.0;
 const IAB_HEIGHT: f64 = 760.0;
@@ -329,9 +329,7 @@ fn submit_result(snapshot: LiliaIabSnapshot, stdin_forwarded: bool) -> LiliaIabS
 }
 
 fn can_forward_lilia_iab_to_codex_runner(running: Option<&RunningTurn>) -> bool {
-    running.is_some_and(|turn| {
-        turn.backend == BACKEND_CODEX && turn.runtime_channel == RUNTIME_CHANNEL_BUILTIN
-    })
+    running.is_some_and(|turn| turn.backend == BACKEND_CODEX)
 }
 
 fn forward_lilia_iab_to_running_backend(
@@ -443,24 +441,17 @@ mod tests {
     }
 
     #[test]
-    fn iab_forwarding_requires_builtin_codex_running_turn() {
-        let codex_builtin = RunningTurn {
+    fn iab_forwarding_requires_codex_running_turn() {
+        let codex_turn = RunningTurn {
             turn_id: "turn-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
-            runtime_channel: RUNTIME_CHANNEL_BUILTIN.to_string(),
         };
-        let claude_builtin = RunningTurn {
+        let claude_turn = RunningTurn {
             backend: "claude".to_string(),
-            ..codex_builtin.clone()
+            ..codex_turn.clone()
         };
-        let codex_mutsuki = RunningTurn {
-            runtime_channel: "mutsuki_core".to_string(),
-            ..codex_builtin.clone()
-        };
-
-        assert!(can_forward_lilia_iab_to_codex_runner(Some(&codex_builtin)));
-        assert!(!can_forward_lilia_iab_to_codex_runner(Some(&claude_builtin)));
-        assert!(!can_forward_lilia_iab_to_codex_runner(Some(&codex_mutsuki)));
+        assert!(can_forward_lilia_iab_to_codex_runner(Some(&codex_turn)));
+        assert!(!can_forward_lilia_iab_to_codex_runner(Some(&claude_turn)));
         assert!(!can_forward_lilia_iab_to_codex_runner(None));
     }
 }

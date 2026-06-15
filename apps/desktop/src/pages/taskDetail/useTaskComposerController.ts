@@ -287,7 +287,6 @@ export function useTaskComposerController(options: {
     if (!context.hasContext.value || !isTurnRunning.value) return;
     try {
       const result = await interruptTurn(props.taskId);
-      if (agentInteractionSettings.agentRuntimeChannel.value === "mutsuki_core") return;
       if (!result.rolledBack) return;
       isTurnRunning.value = false;
       for (const eventId of result.removedEventIds) {
@@ -385,9 +384,8 @@ export function useTaskComposerController(options: {
 
   function runtimeAbandonedMessage(snapshot: Awaited<ReturnType<typeof getRuntimeSnapshot>>): string {
     const backend = snapshot.backend ?? "agent";
-    const runtime = snapshot.runtimeChannel ?? "unknown";
     const turn = snapshot.turnId ? `，turn=${snapshot.turnId}` : "";
-    return `上次 ${backend} 运行未正常结束，${runtime} runtime 已放弃旧执行态${turn}。你可以重新发送或重置会话。`;
+    return `上次 ${backend} 运行未正常结束，旧执行态已放弃${turn}。你可以重新发送或重置会话。`;
   }
 
   function restoreDraftFromRollback(rollback: { restoredContent: string; restoredAttachments: ChatAttachment[] }) {

@@ -116,7 +116,7 @@ The list below tracks the current real integration surface. Only capabilities th
 - [ ] Roadmap and milestones (partial): the project Roadmap page can aggregate the current project's task state into a first-release milestone, progress, status distribution, current focus, and recently completed tasks; persisted Milestone / TaskMilestoneLink data sources are not yet integrated.
 - [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
 - [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
-- [ ] MutsukiCore integration: the experimental local channel is available as `MutsukiCore`; remote task execution and mobile access are not yet available.
+- [x] Built-in Lilia protocol: keep a single built-in runtime path.
 
 ## Project Structure
 

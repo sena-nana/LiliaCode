@@ -526,7 +526,6 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
-    agentRuntimeChannel: "builtin" as "builtin" | "mutsuki_core",
     codexProfile: {
       profile: "default",
       model: null,
@@ -2516,11 +2515,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             : queuedCount > 0
               ? "queued"
               : "idle",
-        runtimeChannel: running ? agentInteractionSettings.agentRuntimeChannel : null,
         backend: running ? activeBackend : null,
         turnId: running ? currentChatTurnId(taskId) : null,
         queuedCount,
-        pendingControlCount: 0,
         pendingRollback: false,
         pendingResetCleanup: false,
         rollback: null,
@@ -2672,7 +2669,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const settings = args.settings as {
         nonInterruptMode?: unknown;
         debug?: unknown;
-        agentRuntimeChannel?: unknown;
         codexProfile?: {
           profile?: unknown;
           model?: unknown;
@@ -2690,7 +2686,6 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
-        agentRuntimeChannel: settings?.agentRuntimeChannel === "mutsuki_core" ? "mutsuki_core" : "builtin",
         codexProfile: {
           profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
           model: typeof codexProfile?.model === "string" && codexProfile.model.trim()
