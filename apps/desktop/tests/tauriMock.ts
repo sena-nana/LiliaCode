@@ -1249,6 +1249,12 @@ export function finishMockAutomationRun(runId: string) {
   emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
 }
 
+export function clearMockAutomations() {
+  automations = [];
+  automationRuns = [];
+  automationRunNodes = {};
+}
+
 export function seedMockAutomationRun() {
   const workflow = automations[0];
   if (!workflow) return;
@@ -2271,6 +2277,20 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         snapshot: workflow.draft,
         createdAt: Date.now(),
       };
+    }
+
+    case "automation_delete_workflow": {
+      const id = String(args.id);
+      const before = automations.length;
+      automations = automations.filter((item) => item.id !== id);
+      if (automations.length === before) throw new Error("自动化不存在");
+      const deletedRunIds = automationRuns
+        .filter((run) => run.workflowId === id)
+        .map((run) => run.id);
+      automationRuns = automationRuns.filter((run) => run.workflowId !== id);
+      for (const runId of deletedRunIds) delete automationRunNodes[runId];
+      emitTauriEvent("automation:changed", { workflowId: id });
+      return undefined;
     }
 
     case "automation_set_enabled": {

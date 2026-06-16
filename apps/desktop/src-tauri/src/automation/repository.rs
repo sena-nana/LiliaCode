@@ -207,6 +207,29 @@ pub(crate) fn save_draft(
     workflow_by_id(conn, &id)?.ok_or_else(|| "automation_save_draft: 保存后读取失败".to_string())
 }
 
+pub(crate) fn delete_workflow(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        r#"DELETE FROM automation_run_nodes
+           WHERE run_id IN (SELECT id FROM automation_runs WHERE workflow_id = ?1)"#,
+        params![id],
+    )
+    .map_err(|e| format!("automation_delete_workflow: delete run nodes 失败：{e}"))?;
+    conn.execute("DELETE FROM automation_runs WHERE workflow_id = ?1", params![id])
+        .map_err(|e| format!("automation_delete_workflow: delete runs 失败：{e}"))?;
+    conn.execute(
+        "DELETE FROM automation_workflow_versions WHERE workflow_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("automation_delete_workflow: delete versions 失败：{e}"))?;
+    let deleted = conn
+        .execute("DELETE FROM automation_workflows WHERE id = ?1", params![id])
+        .map_err(|e| format!("automation_delete_workflow: {e}"))?;
+    if deleted == 0 {
+        return Err("automation_delete_workflow: 自动化不存在".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn publish_workflow(
     conn: &Connection,
     id: &str,

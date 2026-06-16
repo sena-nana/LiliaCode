@@ -2,7 +2,7 @@ import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { useVueFlow } from "@vue-flow/core";
 import { describe, expect, it, vi } from "vitest";
 import Automations from "../src/pages/Automations.vue";
-import { finishMockAutomationRun, mockInvoke } from "./tauriMock";
+import { clearMockAutomations, finishMockAutomationRun, mockInvoke } from "./tauriMock";
 
 const vueFlowMock = vi.hoisted(() => ({
   useVueFlow: vi.fn(() => ({ fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() })),
@@ -69,15 +69,15 @@ describe("Automations page", () => {
     vi.mocked(useVueFlow).mockReturnValue({ fitView, zoomIn, zoomOut } as never);
     const view = renderAutomations();
 
-    await waitFor(() => {
-      expect(view.getByRole("complementary", { name: "自动化检查器" })).toBeInTheDocument();
-    });
+    await view.findByRole("complementary", { name: "自动化检查器" }, { timeout: 5000 });
     const list = view.getByRole("complementary", { name: "自动化列表" });
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
 
     await waitFor(() => {
       expect(within(list).getByRole("button", { name: /任务完成后复盘/ })).toBeInTheDocument();
     });
+    expect(within(list).queryByRole("heading", { name: "自动化" })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: "新建自动化" })).not.toBeInTheDocument();
 
     expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
     expect(within(view.getByTestId("automation-flow")).getByText("任务变化")).toBeInTheDocument();
@@ -99,9 +99,56 @@ describe("Automations page", () => {
     expect(within(inspector).getByRole("button", { name: "task_status_changed" })).toBeInTheDocument();
     expect(within(inspector).getByText("运行历史")).toBeInTheDocument();
 
-    await fireEvent.click(within(list).getByRole("button", { name: "新建自动化" }));
-    expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("新自动化");
-    expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
+    await fireEvent.click(view.getByRole("button", { name: "新建自动化" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+      });
+      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("未命名自动化");
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+    });
+    expect(view.getByRole("button", { name: "添加事件触发" })).toBeEnabled();
+
+    const newWorkflowRow = within(list).getByRole("button", { name: /未命名自动化/ });
+    await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "删除" }));
+    expect(within(newWorkflowRow).getByRole("button", { name: "确认删除" })).toBeInTheDocument();
+    await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "确认删除" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-2" });
+      expect(within(list).queryByRole("button", { name: /未命名自动化/ })).not.toBeInTheDocument();
+      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+    });
+  });
+
+  it("没有自动化或删除最后一项后自动创建空白自动化", async () => {
+    clearMockAutomations();
+    const view = renderAutomations();
+    const list = view.getByRole("complementary", { name: "自动化列表" });
+
+    await waitFor(() => {
+      expect(within(list).queryByText("没有自动化")).not.toBeInTheDocument();
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("未命名自动化");
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+        nodes: [],
+        edges: [],
+      });
+    });
+
+    const row = within(list).getByRole("button", { name: /未命名自动化/ });
+    await fireEvent.click(within(row).getByRole("button", { name: "删除" }));
+    await fireEvent.click(within(row).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-1" });
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+        nodes: [],
+        edges: [],
+      });
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+    });
   });
 
   it("暴露 Agent、工具和手动运行 Payload 配置", async () => {

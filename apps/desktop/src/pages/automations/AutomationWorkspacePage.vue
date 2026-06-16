@@ -17,6 +17,7 @@ import {
   Save,
   ToggleLeft,
   ToggleRight,
+  Trash2,
   Wrench,
   Zap,
 } from "lucide-vue-next";
@@ -53,6 +54,7 @@ const NODE_ICONS: Record<AutomationNodeKind, unknown> = {
 const projectRows = ref<Project[]>([]);
 const selectedWorkflowId = ref<string | null>(null);
 const errorText = ref<string | null>(null);
+const confirmingDeleteWorkflowId = ref<string | null>(null);
 const unlisteners = ref<Array<() => void>>([]);
 const { fitView, zoomIn, zoomOut } = useVueFlow();
 
@@ -98,6 +100,7 @@ const {
   selectedWorkflow,
   refreshWorkflows,
   newWorkflow,
+  deleteWorkflow,
   saveDraft,
   publishCurrent,
   toggleEnabled,
@@ -139,9 +142,27 @@ const {
 
 function selectWorkflow(workflow: Parameters<typeof workspace.selectWorkflow>[0]) {
   workspace.selectWorkflow(workflow);
+  confirmingDeleteWorkflowId.value = null;
   window.setTimeout(() => {
     void fitView({ padding: 0.2 });
   }, 0);
+}
+
+async function onDeleteWorkflowClick(event: Event, workflow: AutomationWorkflow) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (confirmingDeleteWorkflowId.value !== workflow.id) {
+    confirmingDeleteWorkflowId.value = workflow.id;
+    return;
+  }
+  confirmingDeleteWorkflowId.value = null;
+  await deleteWorkflow(workflow.id);
+}
+
+function onWorkflowRowLeave(workflowId: string) {
+  if (confirmingDeleteWorkflowId.value === workflowId) {
+    confirmingDeleteWorkflowId.value = null;
+  }
 }
 
 function selectRunNodeState(state: Parameters<typeof runsController.selectRunNodeState>[0]) {
@@ -236,28 +257,36 @@ onBeforeUnmount(() => {
   <section class="automations-page">
     <Teleport to="#automation-sidebar-host">
       <div class="automations-page__sidebar">
-        <header class="automations-page__head">
-          <h1 class="automations-page__title">自动化</h1>
-          <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" @click="newWorkflow">
-            <Plus :size="15" aria-hidden="true" />
-          </button>
-        </header>
         <div v-if="loading" class="automations-page__notice">
           <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
           读取中
         </div>
-        <div v-else-if="!workflowRows.length" class="automations-page__notice">没有自动化</div>
-        <div v-else class="automations-page__list ui-list">
+        <div v-else class="automations-page__list sb-tree">
           <button
             v-for="workflow in workflowRows"
             :key="workflow.id"
             type="button"
-            class="automations-page__row ui-list-item"
+            class="automations-page__row sb-tree__row sb-tree__row--unified"
             :class="{ 'is-active': workflow.id === selectedWorkflowId }"
+            :title="workflow.name"
             @click="selectWorkflow(workflow)"
+            @mouseleave="onWorkflowRowLeave(workflow.id)"
           >
-            <span class="automations-page__row-title">{{ workflow.name }}</span>
-            <span class="automations-page__row-meta">{{ workflowMeta(workflow) }}</span>
+            <span class="automations-page__row-title sb-tree__name">{{ workflow.name }}</span>
+            <span class="automations-page__row-meta sb-tree__project-label">{{ workflowMeta(workflow) }}</span>
+            <span class="sb-tree__hover-tools" @click.stop>
+              <button
+                type="button"
+                class="sb-icon-btn"
+                :class="{ 'is-confirming': confirmingDeleteWorkflowId === workflow.id }"
+                :title="confirmingDeleteWorkflowId === workflow.id ? '确认删除，再点一次' : '删除'"
+                :aria-label="confirmingDeleteWorkflowId === workflow.id ? '确认删除' : '删除'"
+                @click="onDeleteWorkflowClick($event, workflow)"
+              >
+                <template v-if="confirmingDeleteWorkflowId === workflow.id">确认</template>
+                <Trash2 v-else :size="13" aria-hidden="true" />
+              </button>
+            </span>
           </button>
         </div>
       </div>
@@ -323,6 +352,10 @@ onBeforeUnmount(() => {
 
       <div class="automations-page__canvas">
         <div class="automations-page__palette" aria-label="节点库">
+          <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" :disabled="saving" @click="newWorkflow">
+            <Plus :size="14" aria-hidden="true" />
+          </button>
+          <span class="automations-page__palette-divider" aria-hidden="true" />
           <button
             v-for="(label, kind) in NODE_KIND_LABELS"
             :key="kind"

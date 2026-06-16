@@ -68,6 +68,7 @@ const emptyLists = new Set([
 const noops = new Set([
   "agent_interaction_set_settings",
   "assistant_ai_set_config",
+  "automation_delete_workflow",
   "chat_ack_restored_rollback",
   "chat_respond_agent_interaction",
   "chat_respond_title_update",
