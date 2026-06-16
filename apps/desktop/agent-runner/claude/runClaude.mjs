@@ -355,6 +355,25 @@ function emitClaudeWorkflowDone(context, sessionId = null) {
   context.protocol.emit({ type: "done", sessionId, subtype: "success" });
 }
 
+function claudeUsageTokenCount(usage) {
+  if (!isRecord(usage)) return null;
+  const keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
+  const total = keys.reduce((sum, key) => {
+    const value = Number(usage[key]);
+    return Number.isFinite(value) && value > 0 ? sum + value : sum;
+  }, 0);
+  return total > 0 ? total : null;
+}
+
+function emitClaudeContextUsage(context, usage) {
+  const usedTokens = claudeUsageTokenCount(usage);
+  if (usedTokens === null) return;
+  context.protocol.emitContextUsage?.({
+    usedTokens,
+    source: "claude",
+  });
+}
+
 function emitClaudeLocalWorkflowTimeline(context, workflow, config) {
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -891,6 +910,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
             sweepActiveClaudeTools(ctx, status, msg?.session_id);
             finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
             emitClaudeTextResultFallback(ctx, msg, status, fragmentsEmitted, lastSessionId);
+            emitClaudeContextUsage(context, msg.usage);
             context.protocol.emitTimeline({
               kind: "turn",
               status,

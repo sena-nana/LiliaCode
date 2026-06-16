@@ -3,6 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   ChatAttachment,
+  ChatContextUsage,
   ChatComposerState,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
@@ -38,6 +39,7 @@ import {
   openLiliaIab,
   onAgentTimeline,
   onAgentTimelineBatch,
+  onContextUsage,
   onDone,
   onTurnStarted,
   sendMessage,
@@ -68,6 +70,7 @@ export function useTaskComposerController(options: {
 }) {
   const { props, context, timeline, attachments } = options;
   const composer = ref<ChatComposerState | null>(null);
+  const contextUsage = ref<ChatContextUsage | null>(null);
   const isTurnRunning = ref(false);
   const userSendScrollKey = ref(0);
   const restoreDraftKey = ref(0);
@@ -459,6 +462,7 @@ export function useTaskComposerController(options: {
       }
       clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
       if (runtimeSeqBeforeLoad === runtimeEventSeq) {
+        contextUsage.value = runtimeSnapshot?.contextUsage ?? null;
         isTurnRunning.value = runtimeSnapshot
           ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
           : false;
@@ -519,12 +523,17 @@ export function useTaskComposerController(options: {
         }
         void guideDispatch.scheduleGuideInsertion("idle");
       }),
+      onContextUsage((e) => {
+        if (e.taskId !== props.taskId) return;
+        contextUsage.value = e;
+      }),
     ]);
   }
 
   function resetForRouteChange() {
     isTurnRunning.value = false;
     composer.value = null;
+    contextUsage.value = null;
   }
 
   function canAcceptInteractiveDrop(): boolean {
@@ -553,6 +562,7 @@ export function useTaskComposerController(options: {
   return {
     composer,
     composerForView,
+    contextUsage,
     isTurnRunning,
     userSendScrollKey,
     restoreDraftKey,

@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatContextUsage,
   ChatRuntimeCommand,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
@@ -60,6 +61,7 @@ defineProps<{
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
+  contextUsage: ChatContextUsage | null;
   attachments: ChatAttachment[];
   appendAttachmentsToEndKey: number;
   pendingAsk: PendingAsk | null;
@@ -196,6 +198,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
                   :compact-disabled="hasBlockingPendingAction"
+                  :context-usage="contextUsage"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"

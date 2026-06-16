@@ -9,8 +9,9 @@ use uuid::Uuid;
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatMessage, ChatModelOption, ChatRollbackResult,
-    ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow, ProviderRuntimeOptions,
+    ChatAttachment, ChatComposerState, ChatContextUsage, ChatMessage, ChatModelOption,
+    ChatRollbackResult, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow,
+    ProviderRuntimeOptions,
 };
 use crate::store::LiliaStore;
 use crate::{agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
@@ -52,11 +53,35 @@ pub(crate) struct ChatStore {
     pub(crate) reset_turns: Mutex<HashMap<String, RunningTurn>>,
     pub(crate) pending_rollbacks: Mutex<HashMap<String, ChatRollbackResult>>,
     pub(crate) pending_reset_cleanups: Mutex<HashSet<String>>,
+    pub(crate) context_usage: Mutex<HashMap<String, ChatContextUsage>>,
     pub(crate) runtime_epoch: Mutex<Option<String>>,
 }
 
 pub(crate) fn session_key(backend: &str, task_id: &str) -> String {
     format!("{backend}:{task_id}")
+}
+
+pub(crate) fn set_context_usage(store: &ChatStore, usage: ChatContextUsage) {
+    let key = session_key(&usage.backend, &usage.task_id);
+    store.context_usage.lock().unwrap().insert(key, usage);
+}
+
+pub(crate) fn latest_context_usage(
+    store: &ChatStore,
+    task_id: &str,
+    backend: Option<&str>,
+) -> Option<ChatContextUsage> {
+    let usages = store.context_usage.lock().unwrap();
+    if let Some(backend) = backend {
+        if let Some(usage) = usages.get(&session_key(backend, task_id)) {
+            return Some(usage.clone());
+        }
+    }
+    usages
+        .values()
+        .filter(|usage| usage.task_id == task_id)
+        .max_by_key(|usage| usage.updated_at)
+        .cloned()
 }
 
 pub(crate) fn runtime_epoch(store: &ChatStore) -> String {
@@ -1097,14 +1122,19 @@ pub(crate) fn chat_runtime_snapshot(store: &ChatStore, task_id: &str) -> ChatRun
         "idle"
     };
 
+    let backend = running_turn.as_ref().map(|turn| turn.backend.clone());
+    let turn_id = running_turn.map(|turn| turn.turn_id);
+    let context_usage = latest_context_usage(store, task_id, backend.as_deref());
+
     ChatRuntimeSnapshot {
         task_id: task_id.to_string(),
         phase: phase.to_string(),
-        backend: running_turn.as_ref().map(|turn| turn.backend.clone()),
-        turn_id: running_turn.map(|turn| turn.turn_id),
+        backend,
+        turn_id,
         queued_count,
         pending_rollback,
         pending_reset_cleanup,
+        context_usage,
         rollback: None,
     }
 }
@@ -1150,6 +1180,8 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
             }
             snapshot.backend = Some(abandoned.turn.backend);
             snapshot.turn_id = Some(abandoned.turn.turn_id);
+            snapshot.context_usage =
+                latest_context_usage(store, task_id, snapshot.backend.as_deref());
         }
         return snapshot;
     };
@@ -1161,6 +1193,7 @@ pub(crate) fn chat_runtime_snapshot_with_persisted(
     };
     snapshot.backend = Some(persisted.turn.backend);
     snapshot.turn_id = Some(persisted.turn.turn_id);
+    snapshot.context_usage = latest_context_usage(store, task_id, snapshot.backend.as_deref());
     snapshot
 }
 
@@ -1368,4 +1401,36 @@ pub(crate) fn persist_and_emit_interrupted_timeline_event<R: Runtime>(
             updated_at: Some(now),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_snapshot_includes_latest_context_usage() {
+        let store = ChatStore::default();
+        set_context_usage(
+            &store,
+            ChatContextUsage {
+                task_id: "task-1".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                used_tokens: 4096,
+                limit_tokens: Some(8192),
+                used_percent: Some(50.0),
+                source: "runtime".to_string(),
+                updated_at: 100,
+                unavailable_reason: None,
+            },
+        );
+
+        let snapshot = chat_runtime_snapshot_with_persisted(None, &store, "task-1");
+
+        let usage = snapshot.context_usage.expect("context usage");
+        assert_eq!(usage.task_id, "task-1");
+        assert_eq!(usage.backend, BACKEND_CODEX);
+        assert_eq!(usage.used_tokens, 4096);
+        assert_eq!(usage.limit_tokens, Some(8192));
+        assert_eq!(usage.used_percent, Some(50.0));
+    }
 }

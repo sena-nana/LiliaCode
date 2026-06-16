@@ -295,6 +295,17 @@ export type ChatRuntimePhase =
   | "reset_pending_finish"
   | "abandoned";
 
+export interface ChatContextUsage {
+  taskId: string;
+  backend: ChatBackendKind;
+  usedTokens: number;
+  limitTokens: number | null;
+  usedPercent: number | null;
+  source: string;
+  updatedAt: number;
+  unavailableReason?: string | null;
+}
+
 export interface ChatRuntimeSnapshot {
   taskId: string;
   phase: ChatRuntimePhase;
@@ -303,6 +314,7 @@ export interface ChatRuntimeSnapshot {
   queuedCount: number;
   pendingRollback: boolean;
   pendingResetCleanup: boolean;
+  contextUsage: ChatContextUsage | null;
   rollback?: ChatRollbackResult | null;
 }
 

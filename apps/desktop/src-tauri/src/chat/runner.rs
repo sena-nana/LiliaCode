@@ -22,9 +22,10 @@ use crate::chat::state::{
     clear_runtime_state_for_app, clear_task_runtime_state_for_reset, finish_running_turn_handles,
     is_turn_marked_reset, load_persisted_resume_session_id, persist_agent_session_id,
     persist_and_emit_interrupted_timeline_event, persist_runtime_state_for_app, session_key,
-    set_guide_status_for_app, should_emit_runner_exit_error, should_persist_user_message,
-    take_next_pending_turn_for_app, take_next_recoverable_pending_turn,
-    take_pending_finalization_for_app, ChatStore, PersistedRuntimeState, RunningTurn,
+    set_context_usage, set_guide_status_for_app, should_emit_runner_exit_error,
+    should_persist_user_message, take_next_pending_turn_for_app,
+    take_next_recoverable_pending_turn, take_pending_finalization_for_app, ChatStore,
+    PersistedRuntimeState, RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
@@ -33,9 +34,9 @@ use crate::chat::timeline_sink::{
 };
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
-    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatRollbackResult,
-    ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent, ProviderRuntimeOptions,
-    TurnStartedEvent,
+    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatContextUsage,
+    ChatRollbackResult, ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent,
+    ProviderRuntimeOptions, TurnStartedEvent,
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
@@ -800,6 +801,45 @@ fn handle_runner_runtime_event<R: Runtime>(
                 );
             }
         }
+        AgentRuntimeEvent::ContextUsage {
+            used_tokens,
+            limit_tokens,
+            used_percent,
+            source,
+            unavailable_reason,
+        } => {
+            let computed_percent = limit_tokens.and_then(|limit| {
+                if limit == 0 {
+                    None
+                } else {
+                    Some(((*used_tokens as f64 / limit as f64) * 100.0).clamp(0.0, 100.0))
+                }
+            });
+            let usage = ChatContextUsage {
+                task_id: session.task_id.clone(),
+                backend: session.backend.clone(),
+                used_tokens: *used_tokens,
+                limit_tokens: *limit_tokens,
+                used_percent: used_percent
+                    .or(computed_percent)
+                    .map(|percent| percent.clamp(0.0, 100.0)),
+                source: source.clone().unwrap_or_else(|| "runtime".to_string()),
+                updated_at: crate::util::now_millis() as u64,
+                unavailable_reason: unavailable_reason.clone(),
+            };
+            record_runner_lifecycle(
+                observer,
+                "context_usage_updated",
+                serde_json::json!({
+                    "usedTokens": usage.used_tokens,
+                    "hasLimit": usage.limit_tokens.is_some(),
+                    "hasPercent": usage.used_percent.is_some(),
+                }),
+            );
+            let store = app_handle.state::<ChatStore>();
+            set_context_usage(&store, usage.clone());
+            let _ = app_handle.emit("chat:context-usage", usage);
+        }
         AgentRuntimeEvent::Done { session_id, .. } => {
             if let Some(sid) = session_id {
                 session.last_session_id = Some(sid.clone());
@@ -1042,6 +1082,7 @@ fn runner_event_kind(event: &AgentRuntimeEvent) -> &'static str {
         AgentRuntimeEvent::Timeline { .. } => "timeline",
         AgentRuntimeEvent::InteractionRequest { .. } => "interaction_request",
         AgentRuntimeEvent::QuotaUsageRequest { .. } => "quota_usage_request",
+        AgentRuntimeEvent::ContextUsage { .. } => "context_usage",
         AgentRuntimeEvent::Done { .. } => "done",
         AgentRuntimeEvent::PromptSuggestion { .. } => "prompt_suggestion",
         AgentRuntimeEvent::Error { .. } => "error",
@@ -1732,6 +1773,16 @@ mod tests {
                 subtype: None,
             }),
             "done"
+        );
+        assert_eq!(
+            runner_event_kind(&AgentRuntimeEvent::ContextUsage {
+                used_tokens: 4096,
+                limit_tokens: Some(8192),
+                used_percent: Some(50.0),
+                source: Some("runtime".to_string()),
+                unavailable_reason: None,
+            }),
+            "context_usage"
         );
     }
 
