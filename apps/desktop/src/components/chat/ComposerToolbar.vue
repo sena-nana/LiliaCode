@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
-  Camera,
   CodeXml,
   FileQuestion,
   GitBranch,
@@ -57,7 +56,6 @@ const emit = defineEmits<{
     runtimeOptions?: ProviderRuntimeOptions | null,
   ];
   openLiliaIab: [];
-  submitLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -539,17 +537,6 @@ onBeforeUnmount(() => {
           @click="emit('openLiliaIab')"
         >
           <Globe :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :disabled="actionsBlocked"
-          title="回送 IAB 截图"
-          aria-label="回送 IAB 截图"
-          @click="emit('submitLiliaIab')"
-        >
-          <Camera :size="14" aria-hidden="true" />
         </button>
       </div>
 

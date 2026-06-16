@@ -1075,7 +1075,7 @@ describe("ChatComposer", () => {
     promptSpy.mockRestore();
   });
 
-  it("Codex 后端可从工具栏打开和回送 IAB", async () => {
+  it("Codex 后端可从工具栏打开 IAB 且不暴露回送截图入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
@@ -1084,18 +1084,16 @@ describe("ChatComposer", () => {
     });
 
     const openButton = view.getByRole("button", { name: "打开 Lilia IAB" });
-    const submitButton = view.getByRole("button", { name: "回送 IAB 截图" });
     expect(openButton).not.toBeDisabled();
-    expect(submitButton).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
 
     await fireEvent.click(openButton);
-    await fireEvent.click(submitButton);
 
     expect(view.emitted("open-lilia-iab")?.length).toBe(1);
-    expect(view.emitted("submit-lilia-iab")?.length).toBe(1);
+    expect(view.emitted("submit-lilia-iab")).toBeUndefined();
   });
 
-  it("Claude 和 Codex 后端保留 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
+  it("Claude 和 Codex 后端保留打开 IAB 入口，运行中不暴露回送截图入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -1104,7 +1102,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
-    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
 
     await view.rerender({
       state: codexState,
@@ -1113,7 +1111,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
-    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
   });
 
   it("compact 入口在运行中或禁用状态时禁用", async () => {

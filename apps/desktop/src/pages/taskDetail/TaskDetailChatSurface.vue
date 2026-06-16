@@ -102,7 +102,6 @@ const emit = defineEmits<{
     runtimeOptions?: ProviderRuntimeOptions | null,
   ];
   "open-lilia-iab": [];
-  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
@@ -215,7 +214,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-session-fork="emit('start-session-fork')"
                   @apply-lilia-provider-settings="(runtimeCommand, runtimeOptions) => emit('apply-lilia-provider-settings', runtimeCommand, runtimeOptions)"
                   @open-lilia-iab="emit('open-lilia-iab')"
-                  @submit-lilia-iab="emit('submit-lilia-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

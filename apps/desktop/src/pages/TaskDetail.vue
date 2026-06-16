@@ -397,7 +397,6 @@ watch(
     @start-session-fork="composerController.onStartSessionFork"
     @apply-lilia-provider-settings="composerController.onApplyLiliaProviderSettings"
     @open-lilia-iab="composerController.onOpenLiliaIab"
-    @submit-lilia-iab="composerController.onSubmitLiliaIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"
     @start-lilia-batch-apply="composerController.onStartLiliaBatchApply"
     @interrupt="composerController.onInterrupt"
