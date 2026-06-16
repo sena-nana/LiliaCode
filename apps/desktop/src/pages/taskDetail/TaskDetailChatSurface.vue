@@ -7,11 +7,9 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatContextUsage,
-  ChatRuntimeCommand,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
-  ProviderRuntimeOptions,
   Project,
   SuggestionItem,
 } from "@lilia/contracts";
@@ -97,10 +95,6 @@ const emit = defineEmits<{
   ];
   "start-lilia-compact": [];
   "start-session-fork": [];
-  "apply-lilia-provider-settings": [
-    runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-  ];
   "open-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
@@ -212,7 +206,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-lilia-fix-suggestion="(content, outgoingAttachments, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, target)"
                   @start-lilia-compact="emit('start-lilia-compact')"
                   @start-session-fork="emit('start-session-fork')"
-                  @apply-lilia-provider-settings="(runtimeCommand, runtimeOptions) => emit('apply-lilia-provider-settings', runtimeCommand, runtimeOptions)"
                   @open-lilia-iab="emit('open-lilia-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"

@@ -16,11 +16,9 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatContextUsage,
-  ChatRuntimeCommand,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
   PermissionMode,
-  ProviderRuntimeOptions,
   SuggestionItem,
 } from "@lilia/contracts";
 import type { PendingAsk } from "../../composables/useAskUser";
@@ -84,10 +82,6 @@ const emit = defineEmits<{
   ];
   "start-lilia-compact": [];
   "start-session-fork": [];
-  "apply-lilia-provider-settings": [
-    runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-  ];
   "open-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
@@ -919,7 +913,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
         :context-usage="contextUsageForToolbar"
         :session-fork-disabled="sending === true || hasPending"
-        :provider-settings-disabled="sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -929,7 +922,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         @start-lilia-fix-suggestion="startLiliaFixSuggestion"
         @start-lilia-compact="emit('start-lilia-compact')"
         @start-session-fork="emit('start-session-fork')"
-        @apply-lilia-provider-settings="(runtimeCommand, runtimeOptions) => emit('apply-lilia-provider-settings', runtimeCommand, runtimeOptions)"
         @open-lilia-iab="emit('open-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"

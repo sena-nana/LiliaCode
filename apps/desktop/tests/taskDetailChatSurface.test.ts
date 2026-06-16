@@ -58,28 +58,18 @@ function renderSurface() {
           },
         }),
         ChatComposer: defineComponent({
-          emits: ["start-lilia-fix-suggestion", "apply-lilia-provider-settings"],
+          emits: ["start-lilia-fix-suggestion"],
           setup(_, { emit }) {
             return () =>
-              h("div", [
-                h("button", {
-                  type: "button",
-                  onClick: () => emit(
-                    "start-lilia-fix-suggestion",
-                    "优先给最小修复",
-                    [],
-                    { type: "uncommittedChanges" },
-                  ),
-                }, "stub fix suggestion"),
-                h("button", {
-                  type: "button",
-                  onClick: () => emit(
-                    "apply-lilia-provider-settings",
-                    { type: "runtime_settings", action: "diagnose" },
-                    { provider: { codex: {} } },
-                  ),
-                }, "stub provider settings"),
-              ]);
+              h("button", {
+                type: "button",
+                onClick: () => emit(
+                  "start-lilia-fix-suggestion",
+                  "优先给最小修复",
+                  [],
+                  { type: "uncommittedChanges" },
+                ),
+              }, "stub fix suggestion");
           },
         }),
         TodoFloat: defineComponent({
@@ -120,14 +110,4 @@ describe("TaskDetailChatSurface", () => {
     ]);
   });
 
-  it("forwards provider runtime settings events from the composer", async () => {
-    const view = renderSurface();
-
-    await fireEvent.click(view.getByRole("button", { name: "stub provider settings" }));
-
-    expect(view.emitted("apply-lilia-provider-settings")?.[0]).toEqual([
-      { type: "runtime_settings", action: "diagnose" },
-      { provider: { codex: {} } },
-    ]);
-  });
 });
