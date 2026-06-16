@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { TerminalSquare } from "lucide-vue-next";
-import type { ChatSlashCommandSearchResult } from "@lilia/contracts";
+import { CodeXml, FileQuestion, GitBranch, GitCommit, TerminalSquare } from "lucide-vue-next";
+import type {
+  ComposerSlashCommandItem,
+  ComposerSlashTargetItem,
+  ComposerWorkflowSlashKind,
+} from "./useComposerSlashCommands";
 
 defineProps<{
-  results: ChatSlashCommandSearchResult[];
+  results: ComposerSlashCommandItem[];
+  targetItems: ComposerSlashTargetItem[];
+  activeWorkflowKind: ComposerWorkflowSlashKind | null;
   activeIndex: number;
   loading: boolean;
   error: string | null;
@@ -11,11 +17,27 @@ defineProps<{
 
 const emit = defineEmits<{
   activate: [index: number];
-  select: [result: ChatSlashCommandSearchResult];
+  select: [result: ComposerSlashCommandItem];
+  selectTarget: [target: ComposerSlashTargetItem];
 }>();
 
-function sourceLabel(source: ChatSlashCommandSearchResult["command"]["source"]): string {
-  return source === "project" ? "项目" : "内置";
+function sourceLabel(result: ComposerSlashCommandItem): string {
+  if (result.kind === "workflow") return "工作流";
+  return result.command.source === "project" ? "项目" : "内置";
+}
+
+function workflowTitle(kind: ComposerWorkflowSlashKind | null): string {
+  return kind === "fix_suggestion" ? "修复建议" : "代码审查";
+}
+
+function targetIcon(target: ComposerSlashTargetItem) {
+  return target.id === "commit" ? GitCommit : GitBranch;
+}
+
+function commandIcon(result: ComposerSlashCommandItem) {
+  if (result.workflowKind === "review") return CodeXml;
+  if (result.workflowKind === "fix_suggestion") return FileQuestion;
+  return TerminalSquare;
 }
 </script>
 
@@ -25,7 +47,32 @@ function sourceLabel(source: ChatSlashCommandSearchResult["command"]["source"]):
     role="listbox"
     aria-label="斜杠命令"
   >
-    <p v-if="loading && !results.length" class="chat-composer__context-note">
+    <div v-if="activeWorkflowKind" class="chat-composer__context-list">
+      <button
+        v-for="(target, index) in targetItems"
+        :key="target.id"
+        type="button"
+        class="chat-composer__context-item chat-composer__slash-item"
+        :class="{ 'is-active': index === activeIndex }"
+        role="option"
+        :aria-selected="index === activeIndex"
+        @mousedown.prevent
+        @mouseenter="emit('activate', index)"
+        @click="emit('selectTarget', target)"
+      >
+        <span class="chat-composer__context-icon" aria-hidden="true">
+          <component :is="targetIcon(target)" :size="14" />
+        </span>
+        <span class="chat-composer__context-main">
+          <span class="chat-composer__context-name">{{ target.label }}</span>
+          <span class="chat-composer__context-path">{{ target.hint }}</span>
+        </span>
+        <span class="chat-composer__context-meta">
+          {{ workflowTitle(activeWorkflowKind) }}
+        </span>
+      </button>
+    </div>
+    <p v-else-if="loading && !results.length" class="chat-composer__context-note">
       正在搜索命令…
     </p>
     <p v-else-if="error && !results.length" class="chat-composer__context-note is-error">
@@ -45,14 +92,14 @@ function sourceLabel(source: ChatSlashCommandSearchResult["command"]["source"]):
         @click="emit('select', result)"
       >
         <span class="chat-composer__context-icon" aria-hidden="true">
-          <TerminalSquare :size="14" />
+          <component :is="commandIcon(result)" :size="14" />
         </span>
         <span class="chat-composer__context-main">
           <span class="chat-composer__context-name">/{{ result.command.name }}</span>
           <span class="chat-composer__context-path">{{ result.command.title }}</span>
         </span>
         <span class="chat-composer__context-meta">
-          {{ sourceLabel(result.command.source) }}
+          {{ sourceLabel(result) }}
         </span>
       </button>
     </div>

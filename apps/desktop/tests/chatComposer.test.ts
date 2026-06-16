@@ -689,37 +689,45 @@ describe("ChatComposer", () => {
     });
   });
 
-  it("Codex 后端可从工具栏发起未提交改动审查", async () => {
+  it("输入 /re 后可通过斜杠命令选择未提交改动审查", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
         attachments: [],
+        projectCwd,
       },
     });
+    const input = view.getByRole("textbox") as HTMLElement;
 
-    const reviewButton = view.getByRole("button", { name: "代码审查" });
-    expect(reviewButton).not.toBeDisabled();
-    await fireEvent.click(reviewButton);
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await setComposerText(view, "/re");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+
+    expect(view.getByRole("option", { name: /未提交改动/ })).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "",
       [],
       { type: "uncommittedChanges" },
     ]);
+    expect(view.emitted("execute-slash-command")).toBeUndefined();
+    expect(composerText(input)).toBe("");
   });
 
-  it("Codex review 会把输入框内容作为补充说明发出", async () => {
+  it("Codex review 斜杠命令会把输入框其他内容作为补充说明发出", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
         attachments: [],
+        projectCwd,
       },
     });
-    await setComposerText(view, "重点看权限边界");
+    await setComposerText(view, "重点看权限边界\n/re");
+    await flushContextSearch();
 
-    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "重点看权限边界",
@@ -728,7 +736,7 @@ describe("ChatComposer", () => {
     ]);
   });
 
-  it("Codex review 支持对比分支和指定提交目标", async () => {
+  it("Codex review 斜杠命令支持对比分支和指定提交目标", async () => {
     const promptSpy = vi.spyOn(window, "prompt");
     promptSpy.mockReturnValueOnce("main");
     promptSpy.mockReturnValueOnce("abc123");
@@ -736,13 +744,18 @@ describe("ChatComposer", () => {
       props: {
         state: codexState,
         attachments: [],
+        projectCwd,
       },
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /对比分支/ }));
-    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
+    await setComposerText(view, "/re");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(view.getByRole("option", { name: /对比分支/ }));
+    await setComposerText(view, "/re");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]?.[2]).toEqual({
       type: "baseBranch",
@@ -752,20 +765,22 @@ describe("ChatComposer", () => {
       type: "commit",
       sha: "abc123",
     });
+    promptSpy.mockRestore();
   });
 
-  it("Claude 和 Codex 后端可从工具栏发起修复建议", async () => {
+  it("输入 /fi 后可通过斜杠命令发起修复建议", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
+        projectCwd,
       },
     });
 
-    const fixButton = view.getByRole("button", { name: "修复建议" });
-    expect(fixButton).not.toBeDisabled();
-    await fireEvent.click(fixButton);
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await setComposerText(view, "/fi");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "",
@@ -776,9 +791,12 @@ describe("ChatComposer", () => {
     await view.rerender({
       state: codexState,
       attachments: [],
+      projectCwd,
     });
-    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await setComposerText(view, "/fi");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
     expect(view.emitted("start-lilia-fix-suggestion")?.[1]).toEqual([
       "",
       [],
@@ -791,12 +809,14 @@ describe("ChatComposer", () => {
       props: {
         state: codexState,
         attachments: [],
+        projectCwd,
       },
     });
-    await setComposerText(view, "优先给最小修复");
+    await setComposerText(view, "优先给最小修复\n/fi");
+    await flushContextSearch();
 
-    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
@@ -813,13 +833,18 @@ describe("ChatComposer", () => {
       props: {
         state: codexState,
         attachments: [],
+        projectCwd,
       },
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /对比分支/ }));
-    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /指定提交/ }));
+    await setComposerText(view, "/fi");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /对比分支/ }));
+    await setComposerText(view, "/fi");
+    await flushContextSearch();
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]?.[2]).toEqual({
       type: "baseBranch",
@@ -832,61 +857,31 @@ describe("ChatComposer", () => {
     promptSpy.mockRestore();
   });
 
-  it("Claude 和 Codex 后端显示代码审查入口，运行中时禁用", async () => {
+  it("工具栏不再显示代码审查和修复建议入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
         attachments: [],
-      },
-    });
-
-    expect(view.getByRole("button", { name: "代码审查" })).not.toBeDisabled();
-
-    await view.rerender({
-      state: codexState,
-      attachments: [],
-      sending: true,
-    });
-
-    expect(view.getByRole("button", { name: "代码审查" })).toBeDisabled();
-  });
-
-  it("运行中时禁用修复建议入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: baseState,
-        sending: true,
-        attachments: [],
-      },
-    });
-
-    expect(view.getByRole("button", { name: "修复建议" })).toBeDisabled();
-  });
-
-  it("阻塞 pending 交互时禁用代码审查入口", async () => {
-    const view = render(ChatComposer, {
-      props: {
-        state: codexState,
-        attachments: [],
-        pendingAsk: pendingAsk(singleAskWithOtherSpec),
       },
     });
 
     expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
-    expect(view.queryByRole("menuitem", { name: /未提交改动/ })).toBeNull();
-    expect(view.emitted("start-lilia-review")).toBeUndefined();
+    expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
   });
 
-  it("阻塞 pending 交互时隐藏修复建议入口", async () => {
+  it("阻塞 pending 交互时不显示斜杠 workflow 入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
         attachments: [],
         pendingAsk: pendingAsk(singleAskWithOtherSpec),
+        projectCwd,
       },
     });
 
-    expect(view.queryByRole("button", { name: "修复建议" })).toBeNull();
+    expect(view.queryByRole("button", { name: "代码审查" })).toBeNull();
+    expect(view.queryByRole("listbox", { name: "斜杠命令" })).toBeNull();
+    expect(view.emitted("start-lilia-review")).toBeUndefined();
     expect(view.emitted("start-lilia-fix-suggestion")).toBeUndefined();
   });
 

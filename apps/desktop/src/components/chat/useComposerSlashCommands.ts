@@ -1,5 +1,9 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from "vue";
-import type { ChatSlashCommandSearchResult, ChatSlashCommandWorkflow } from "@lilia/contracts";
+import type {
+  ChatSlashCommandSearchResult,
+  ChatSlashCommandWorkflow,
+  LiliaReviewTarget,
+} from "@lilia/contracts";
 import { searchSlashCommands } from "../../services/chat";
 import { textPart, type MentionRange } from "./composerParts";
 import type { useComposerRichInput } from "./useComposerRichInput";
@@ -7,6 +11,55 @@ import type { useComposerRichInput } from "./useComposerRichInput";
 const SLASH_COMMAND_LIMIT = 12;
 
 type ComposerRichInput = ReturnType<typeof useComposerRichInput>;
+export type ComposerWorkflowSlashKind = "review" | "fix_suggestion";
+
+export interface ComposerSlashCommandItem {
+  kind: "command" | "workflow";
+  command: ChatSlashCommandSearchResult["command"];
+  matchedBy: ChatSlashCommandSearchResult["matchedBy"];
+  workflowKind?: ComposerWorkflowSlashKind;
+}
+
+export interface ComposerSlashTargetItem {
+  id: "uncommitted" | "branch" | "commit";
+  label: string;
+  hint: string;
+}
+
+const WORKFLOW_COMMANDS: ComposerSlashCommandItem[] = [
+  {
+    kind: "workflow",
+    workflowKind: "review",
+    matchedBy: "name",
+    command: {
+      id: "workflow:lilia_review",
+      name: "review",
+      title: "代码审查",
+      description: "对指定代码范围做审查。",
+      source: "native",
+      parameters: [],
+    },
+  },
+  {
+    kind: "workflow",
+    workflowKind: "fix_suggestion",
+    matchedBy: "name",
+    command: {
+      id: "workflow:lilia_fix_suggestion",
+      name: "fix",
+      title: "修复建议",
+      description: "生成修复建议。",
+      source: "native",
+      parameters: [],
+    },
+  },
+];
+
+const TARGET_ITEMS: ComposerSlashTargetItem[] = [
+  { id: "uncommitted", label: "未提交改动", hint: "当前工作区未提交改动" },
+  { id: "branch", label: "对比分支...", hint: "输入要对比的分支" },
+  { id: "commit", label: "指定提交...", hint: "输入要审查的提交" },
+];
 
 export function readSlashCommandRange(text: string, cursor: number): MentionRange | null {
   const end = Math.min(Math.max(cursor, 0), text.length);
@@ -23,8 +76,10 @@ export function useComposerSlashCommands(options: {
   projectCwd: ComputedRef<string | null | undefined>;
   hasPending: ComputedRef<boolean>;
   executeCommand: (workflow: ChatSlashCommandWorkflow) => void;
+  startWorkflow: (kind: ComposerWorkflowSlashKind, target: LiliaReviewTarget) => void;
 }) {
-  const results = ref<ChatSlashCommandSearchResult[]>([]);
+  const results = ref<ComposerSlashCommandItem[]>([]);
+  const activeWorkflowKind = ref<ComposerWorkflowSlashKind | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const activeIndex = ref(0);
@@ -43,13 +98,15 @@ export function useComposerSlashCommands(options: {
     return range ? `${range.start}:${range.end}:${range.query}` : null;
   });
   const panelOpen = computed(() =>
-    slashRange.value !== null &&
+    (activeWorkflowKind.value !== null || slashRange.value !== null) &&
     slashKey.value !== suppressedKey.value
   );
   const activeResult = computed(() => results.value[activeIndex.value] ?? null);
+  const activeTarget = computed(() => TARGET_ITEMS[activeIndex.value] ?? null);
 
   function clear() {
     results.value = [];
+    activeWorkflowKind.value = null;
     loading.value = false;
     error.value = null;
     activeIndex.value = 0;
@@ -57,10 +114,30 @@ export function useComposerSlashCommands(options: {
 
   function noteInputChanged() {
     suppressedKey.value = null;
+    activeWorkflowKind.value = null;
+  }
+
+  function localWorkflowResults(query: string): ComposerSlashCommandItem[] {
+    const normalized = query.trim().toLowerCase();
+    return WORKFLOW_COMMANDS
+      .map((item) => {
+        if (!normalized || item.command.name.includes(normalized)) {
+          return { ...item, matchedBy: "name" as const };
+        }
+        if (item.command.title.toLowerCase().includes(normalized)) {
+          return { ...item, matchedBy: "title" as const };
+        }
+        if (item.command.description.toLowerCase().includes(normalized)) {
+          return { ...item, matchedBy: "description" as const };
+        }
+        return null;
+      })
+      .filter((item): item is ComposerSlashCommandItem => item !== null);
   }
 
   async function refresh(range: MentionRange | null) {
     const seq = ++searchSeq;
+    if (activeWorkflowKind.value) return;
     if (!panelOpen.value || !range) {
       clear();
       return;
@@ -69,16 +146,25 @@ export function useComposerSlashCommands(options: {
     error.value = null;
     try {
       const cwd = options.projectCwd.value?.trim();
-      const nextResults = cwd
-        ? await searchSlashCommands(cwd, range.query.trim(), SLASH_COMMAND_LIMIT)
+      const query = range.query.trim();
+      const workflowResults = localWorkflowResults(query);
+      const backendResults = cwd
+        ? await searchSlashCommands(cwd, query, SLASH_COMMAND_LIMIT)
         : [];
       if (seq !== searchSeq) return;
-      results.value = nextResults;
+      results.value = [
+        ...workflowResults,
+        ...backendResults.map((result): ComposerSlashCommandItem => ({
+          kind: "command",
+          command: result.command,
+          matchedBy: result.matchedBy,
+        })),
+      ].slice(0, SLASH_COMMAND_LIMIT);
       activeIndex.value = 0;
-      error.value = cwd ? null : "没有可搜索的项目目录";
+      error.value = cwd || workflowResults.length > 0 ? null : "没有可搜索的项目目录";
     } catch (err) {
       if (seq !== searchSeq) return;
-      results.value = [];
+      results.value = localWorkflowResults(range.query.trim());
       error.value = `命令搜索失败：${String(err)}`;
     } finally {
       if (seq === searchSeq) loading.value = false;
@@ -86,20 +172,28 @@ export function useComposerSlashCommands(options: {
   }
 
   function moveActive(delta: number) {
-    if (results.value.length === 0) return;
+    const count = activeWorkflowKind.value ? TARGET_ITEMS.length : results.value.length;
+    if (count === 0) return;
     activeIndex.value =
-      (activeIndex.value + delta + results.value.length) %
-      results.value.length;
+      (activeIndex.value + delta + count) % count;
   }
 
   function activateResult(index: number) {
     activeIndex.value = index;
   }
 
-  function selectResult(result: ChatSlashCommandSearchResult | null = activeResult.value) {
+  function selectResult(result: ComposerSlashCommandItem | null = activeResult.value) {
     if (!result) return;
     const range = slashRange.value;
     if (!range) return;
+    if (result.kind === "workflow" && result.workflowKind) {
+      activeWorkflowKind.value = result.workflowKind;
+      results.value = [];
+      activeIndex.value = 0;
+      loading.value = false;
+      error.value = null;
+      return;
+    }
     options.richInput.replaceRange(range.start, range.end, [textPart("")]);
     suppressedKey.value = null;
     clear();
@@ -109,6 +203,28 @@ export function useComposerSlashCommands(options: {
       source: result.command.source,
       arguments: {},
     });
+  }
+
+  function targetFromItem(item: ComposerSlashTargetItem): LiliaReviewTarget | null {
+    if (item.id === "uncommitted") return { type: "uncommittedChanges" };
+    if (item.id === "branch") {
+      const branch = window.prompt("对比分支")?.trim();
+      return branch ? { type: "baseBranch", branch } : null;
+    }
+    const sha = window.prompt("指定提交")?.trim();
+    return sha ? { type: "commit", sha } : null;
+  }
+
+  function selectTarget(item: ComposerSlashTargetItem | null = activeTarget.value) {
+    const kind = activeWorkflowKind.value;
+    if (!kind || !item) return;
+    const target = targetFromItem(item);
+    if (!target) return;
+    const range = slashRange.value;
+    if (range) options.richInput.replaceRange(range.start, range.end, [textPart("")]);
+    suppressedKey.value = null;
+    clear();
+    options.startWorkflow(kind, target);
   }
 
   function suppressPanel() {
@@ -129,6 +245,11 @@ export function useComposerSlashCommands(options: {
       return true;
     }
     if (e.key === "Enter" || e.key === "Tab") {
+      if (activeWorkflowKind.value) {
+        e.preventDefault();
+        selectTarget(activeTarget.value);
+        return true;
+      }
       if (activeResult.value) {
         e.preventDefault();
         selectResult(activeResult.value);
@@ -142,6 +263,12 @@ export function useComposerSlashCommands(options: {
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      if (activeWorkflowKind.value) {
+        activeWorkflowKind.value = null;
+        activeIndex.value = 0;
+        void refresh(slashRange.value);
+        return true;
+      }
       suppressPanel();
       return true;
     }
@@ -169,11 +296,14 @@ export function useComposerSlashCommands(options: {
   return {
     panelOpen,
     results,
+    targetItems: TARGET_ITEMS,
+    activeWorkflowKind,
     activeIndex,
     loading,
     error,
     handleKeydown,
     selectResult,
+    selectTarget,
     activateResult,
     clear,
     noteInputChanged,

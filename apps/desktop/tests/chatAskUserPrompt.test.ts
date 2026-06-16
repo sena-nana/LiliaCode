@@ -86,6 +86,12 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
   return input;
 }
 
+async function flushSlashCommands() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 async function enableNonInterruptMode() {
   await setAgentInteractionSettings({ nonInterruptMode: true });
   mockInvoke.mockClear();
@@ -104,7 +110,7 @@ async function renderCodexTaskDetail(taskId = "t-002", options: { clearMockCalls
   }));
   const view = await renderTaskDetail(taskId);
   await waitFor(() => {
-    expect(view.getByRole("button", { name: "代码审查" })).not.toBeDisabled();
+    expect(view.getByRole("textbox")).toBeInTheDocument();
   });
   if (clearMockCalls) mockInvoke.mockClear();
   return view;
@@ -783,9 +789,10 @@ describe("chat AskUser prompt", () => {
   it("Codex review 和 fix suggestion 从用户入口透传完整 workflow 到发送命令", async () => {
     const view = await renderCodexTaskDetail();
 
-    await setComposerText(view, "重点看权限边界");
-    await fireEvent.click(view.getByRole("button", { name: "代码审查" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await setComposerText(view, "重点看权限边界\n/review");
+    await flushSlashCommands();
+    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     await expectLatestChatSend({
       content: "重点看权限边界",
@@ -799,9 +806,10 @@ describe("chat AskUser prompt", () => {
 
     finishCodexWorkflow("thread-review");
 
-    await setComposerText(view, "优先给最小修复");
-    await fireEvent.click(view.getByRole("button", { name: "修复建议" }));
-    await fireEvent.click(view.getByRole("menuitem", { name: /未提交改动/ }));
+    await setComposerText(view, "优先给最小修复\n/fix");
+    await flushSlashCommands();
+    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     await expectLatestChatSend({
       content: "优先给最小修复",
