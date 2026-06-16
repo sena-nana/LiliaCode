@@ -91,13 +91,13 @@ Use `docs/github/release-template.md` as the source template when preparing the 
 
 ## Icons
 
-The Tauri icon source is `apps/desktop/src-tauri/icons/icon-source.png`. To regenerate the full PNG or ICO set, run:
+The Tauri icon source is `apps/desktop/src-tauri/icons/icon.png`. To regenerate the desktop PNG or ICO set with the Tauri CLI, run:
 
 ```bash
 yarn icons:generate
 ```
 
-For macOS `.icns` or a full size set, run:
+`icons:tauri` is kept as the same generation entrypoint:
 
 ```bash
 yarn icons:tauri
