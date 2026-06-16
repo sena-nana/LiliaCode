@@ -49,6 +49,30 @@ function Resize-Bitmap([System.Drawing.Bitmap]$src, [int]$w, [int]$h) {
     return $dst
 }
 
+function Resize-BitmapMultiStep([System.Drawing.Bitmap]$src, [int]$targetSize) {
+    $current = Resize-Bitmap $src 256 256
+
+    foreach ($step in @(128, 64)) {
+        if ($targetSize -lt $step) {
+            $next = Resize-Bitmap $current $step $step
+            $current.Dispose()
+            $current = $next
+        }
+    }
+
+    if ($current.Width -ne $targetSize) {
+        $next = Resize-Bitmap $current $targetSize $targetSize
+        $current.Dispose()
+        $current = $next
+    }
+
+    return $current
+}
+
+function New-SmallIconBitmap([System.Drawing.Bitmap]$src, [int]$size) {
+    return Resize-BitmapMultiStep $src $size
+}
+
 function Save-Png([System.Drawing.Bitmap]$bmp, [string]$path) {
     $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     Write-Output "  -> $path"
@@ -59,9 +83,8 @@ Write-Output "Generating Lilia icons from $sourcePath"
 $source = Read-Bitmap $sourcePath
 Write-Output "  source: $($source.Width) x $($source.Height)"
 
-# 1024：icon-source.png + icon.png
+# 1024：保留 icon-source.png，只生成运行时使用的 icon.png
 $icon1024 = Resize-Bitmap $source 1024 1024
-Save-Png $icon1024 (Join-Path $iconsDir "icon-source.png")
 Save-Png $icon1024 (Join-Path $iconsDir "icon.png")
 
 $icon256 = Resize-Bitmap $source 256 256
@@ -70,14 +93,18 @@ Save-Png $icon256 (Join-Path $iconsDir "128x128@2x.png")
 $icon128 = Resize-Bitmap $source 128 128
 Save-Png $icon128 (Join-Path $iconsDir "128x128.png")
 
-$icon32 = Resize-Bitmap $source 32 32
+$icon32 = New-SmallIconBitmap $source 32
 Save-Png $icon32 (Join-Path $iconsDir "32x32.png")
 
 # ---- 手写一个多尺寸 ICO（嵌入 PNG 项）----
 $icoSizes = @(16, 32, 48, 64, 128, 256)
 $icoBitmaps = @{}
 foreach ($sz in $icoSizes) {
-    $icoBitmaps[$sz] = Resize-Bitmap $source $sz $sz
+    if ($sz -le 64) {
+        $icoBitmaps[$sz] = New-SmallIconBitmap $source $sz
+    } else {
+        $icoBitmaps[$sz] = Resize-Bitmap $source $sz $sz
+    }
 }
 
 $pngBytesPerSize = @{}
