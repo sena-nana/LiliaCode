@@ -110,7 +110,12 @@
   background:
     linear-gradient(var(--border-soft) 1px, transparent 1px),
     linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-position:
+    var(--automation-canvas-grid-x, 0) var(--automation-canvas-grid-y, 0),
+    var(--automation-canvas-grid-x, 0) var(--automation-canvas-grid-y, 0);
+  background-size:
+    var(--automation-canvas-grid-size, 24px) var(--automation-canvas-grid-size, 24px),
+    var(--automation-canvas-grid-size, 24px) var(--automation-canvas-grid-size, 24px);
 }
 
 .automations-page__canvas .vue-flow {
@@ -241,26 +246,15 @@
   height: 94px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background:
-    linear-gradient(var(--border-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-soft) 1px, transparent 1px),
-    color-mix(in srgb, var(--bg-subtle) 94%, transparent);
-  background-size: 12px 12px;
+  background: var(--bg-subtle);
   overflow: hidden;
 }
 
 .automations-page__minimap-node {
   position: absolute;
-  min-width: 8px;
-  min-height: 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   background: var(--bg-elev);
-}
-
-.automations-page__minimap-node.is-selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .automations-page__minimap-node.is-running,
@@ -274,6 +268,13 @@
 
 .automations-page__minimap-node.is-failed {
   border-color: var(--err);
+}
+
+.automations-page__minimap-viewport {
+  position: absolute;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-faint) 22%, transparent);
+  pointer-events: none;
 }
 
 .automations-page__inspector-body {
