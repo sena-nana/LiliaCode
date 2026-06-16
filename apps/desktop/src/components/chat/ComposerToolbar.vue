@@ -10,7 +10,6 @@ import {
   Globe,
   ListChecks,
   Paperclip,
-  SlidersHorizontal,
   ShieldCheck,
   Square,
 } from "lucide-vue-next";
@@ -18,10 +17,8 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatContextUsage,
-  ChatRuntimeCommand,
   LiliaReviewTarget,
   PermissionMode,
-  ProviderRuntimeOptions,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
 import { attachmentImageSrc } from "./imageViewer";
@@ -38,7 +35,6 @@ const props = defineProps<{
   compactDisabled: boolean;
   contextUsage?: ChatContextUsage | null;
   sessionForkDisabled: boolean;
-  providerSettingsDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -51,10 +47,6 @@ const emit = defineEmits<{
   startLiliaFixSuggestion: [target: LiliaReviewTarget];
   startLiliaCompact: [];
   startSessionFork: [];
-  applyLiliaProviderSettings: [
-    runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-  ];
   openLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
@@ -64,8 +56,6 @@ const reviewOpen = ref(false);
 const reviewRoot = ref<HTMLElement | null>(null);
 const fixSuggestionOpen = ref(false);
 const fixSuggestionRoot = ref<HTMLElement | null>(null);
-const providerSettingsOpen = ref(false);
-const providerSettingsRoot = ref<HTMLElement | null>(null);
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 
 function closeReviewMenu() {
@@ -74,10 +64,6 @@ function closeReviewMenu() {
 
 function closeFixSuggestionMenu() {
   fixSuggestionOpen.value = false;
-}
-
-function closeProviderSettingsMenu() {
-  providerSettingsOpen.value = false;
 }
 
 function toggleReviewMenu() {
@@ -90,11 +76,6 @@ function toggleFixSuggestionMenu() {
   fixSuggestionOpen.value = !fixSuggestionOpen.value;
 }
 
-function toggleProviderSettingsMenu() {
-  if (props.providerSettingsDisabled || props.actionsBlocked) return;
-  providerSettingsOpen.value = !providerSettingsOpen.value;
-}
-
 function onDocPointer(e: PointerEvent) {
   if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
   if (
@@ -102,12 +83,6 @@ function onDocPointer(e: PointerEvent) {
     !fixSuggestionRoot.value.contains(e.target as Node)
   ) {
     closeFixSuggestionMenu();
-  }
-  if (
-    providerSettingsRoot.value &&
-    !providerSettingsRoot.value.contains(e.target as Node)
-  ) {
-    closeProviderSettingsMenu();
   }
 }
 
@@ -118,10 +93,6 @@ function onKey(e: KeyboardEvent) {
   }
   if (e.key === "Escape" && fixSuggestionOpen.value) {
     closeFixSuggestionMenu();
-    e.stopPropagation();
-  }
-  if (e.key === "Escape" && providerSettingsOpen.value) {
-    closeProviderSettingsMenu();
     e.stopPropagation();
   }
 }
@@ -158,66 +129,6 @@ function startCommitFixSuggestion() {
   const sha = window.prompt("指定提交")?.trim();
   if (sha) startFixSuggestion({ type: "commit", sha });
   else closeFixSuggestionMenu();
-}
-
-function runtimeOptionsForCurrentComposer(): ProviderRuntimeOptions {
-  const options: ProviderRuntimeOptions = {
-    common: {
-      permission: props.state.permission,
-    },
-    provider: props.state.backend === "codex" ? { codex: {} } : { claude: {} },
-  };
-  const model = props.state.model.trim();
-  if (model) options.common!.model = model;
-  return options;
-}
-
-function diagnoseProviderSettings() {
-  closeProviderSettingsMenu();
-  emit(
-    "applyLiliaProviderSettings",
-    { type: "runtime_settings", action: "diagnose" },
-    runtimeOptionsForCurrentComposer(),
-  );
-}
-
-function updateProviderSettings() {
-  closeProviderSettingsMenu();
-  const model = window.prompt("Provider model", props.state.model)?.trim();
-  if (model === undefined) return;
-  const permission = window.prompt("权限：full / ask / readonly", props.state.permission)?.trim();
-  if (permission === undefined) return;
-  if (permission && !["full", "ask", "readonly"].includes(permission)) return;
-
-  const runtimeOptions = runtimeOptionsForCurrentComposer();
-  runtimeOptions.common ??= {};
-  if (model) runtimeOptions.common.model = model;
-  if (permission) runtimeOptions.common.permission = permission as PermissionMode;
-
-  if (props.state.backend === "codex") {
-    const reasoningEffort = window.prompt("Codex reasoning effort（留空不修改）", "")?.trim();
-    if (reasoningEffort === undefined) return;
-    runtimeOptions.provider = {
-      codex: reasoningEffort ? { reasoningEffort } : {},
-    };
-  } else {
-    const rawMaxTurns = window.prompt("Claude max turns（留空不修改）", "")?.trim();
-    if (rawMaxTurns === undefined) return;
-    let maxTurns: number | undefined;
-    if (rawMaxTurns) {
-      maxTurns = Number.parseInt(rawMaxTurns, 10);
-      if (!Number.isFinite(maxTurns) || maxTurns <= 0) return;
-    }
-    runtimeOptions.provider = {
-      claude: maxTurns ? { maxTurns } : {},
-    };
-  }
-
-  emit(
-    "applyLiliaProviderSettings",
-    { type: "runtime_settings", action: "update" },
-    runtimeOptions,
-  );
 }
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
@@ -312,9 +223,9 @@ function syncDocumentListeners(open: boolean) {
 }
 
 watch(
-  [reviewOpen, fixSuggestionOpen, providerSettingsOpen],
-  ([review, fixSuggestion, providerSettings]) => {
-    syncDocumentListeners(review || fixSuggestion || providerSettings);
+  [reviewOpen, fixSuggestionOpen],
+  ([review, fixSuggestion]) => {
+    syncDocumentListeners(review || fixSuggestion);
   },
 );
 
@@ -484,49 +395,6 @@ onBeforeUnmount(() => {
         >
           <GitFork :size="14" aria-hidden="true" />
         </button>
-        <div
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          ref="providerSettingsRoot"
-          class="chat-review-menu"
-        >
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': providerSettingsOpen, 'is-disabled': providerSettingsDisabled }"
-            :disabled="providerSettingsDisabled || actionsBlocked"
-            title="Provider runtime 设置"
-            aria-label="Provider runtime 设置"
-            :aria-haspopup="true"
-            :aria-expanded="providerSettingsOpen"
-            @click="toggleProviderSettingsMenu"
-          >
-            <SlidersHorizontal :size="14" aria-hidden="true" />
-          </button>
-          <div
-            v-if="providerSettingsOpen"
-            class="dd__menu dd__menu--top chat-review-menu__menu"
-            role="menu"
-          >
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="diagnoseProviderSettings"
-            >
-              <SlidersHorizontal :size="14" aria-hidden="true" />
-              <span class="dd__item-label">诊断当前设置</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="updateProviderSettings"
-            >
-              <ShieldCheck :size="14" aria-hidden="true" />
-              <span class="dd__item-label">更新 runtime 设置...</span>
-            </button>
-          </div>
-        </div>
         <button
           v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"

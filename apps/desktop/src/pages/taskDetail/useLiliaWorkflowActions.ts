@@ -144,20 +144,6 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
-  async function onApplyLiliaProviderSettings(
-    runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
-    runtimeOptions?: ProviderRuntimeOptions | null,
-  ) {
-    await options.sendAgentMessage({
-      turn: {
-        content: "",
-        outgoingAttachments: [],
-      },
-      runtimeCommand,
-      runtimeOptions: runtimeOptions ?? null,
-    });
-  }
-
   return {
     onStartLiliaReview,
     onStartLiliaFixSuggestion,
@@ -167,7 +153,5 @@ export function useLiliaWorkflowActions(options: {
     onSetLiliaGoal,
     onRefreshLiliaGoal,
     onClearLiliaGoal,
-    onApplyLiliaProviderSettings,
-    onApplyRuntimeSettings: onApplyLiliaProviderSettings,
   };
 }

@@ -395,7 +395,6 @@ watch(
     @start-lilia-fix-suggestion="composerController.onStartLiliaFixSuggestion"
     @start-lilia-compact="composerController.onStartLiliaCompact"
     @start-session-fork="composerController.onStartSessionFork"
-    @apply-lilia-provider-settings="composerController.onApplyLiliaProviderSettings"
     @open-lilia-iab="composerController.onOpenLiliaIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"
     @start-lilia-batch-apply="composerController.onStartLiliaBatchApply"
