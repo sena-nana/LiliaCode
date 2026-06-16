@@ -89,7 +89,6 @@ const emit = defineEmits<{
     runtimeOptions?: ProviderRuntimeOptions | null,
   ];
   "open-lilia-iab": [];
-  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -932,7 +931,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         @start-session-fork="emit('start-session-fork')"
         @apply-lilia-provider-settings="(runtimeCommand, runtimeOptions) => emit('apply-lilia-provider-settings', runtimeCommand, runtimeOptions)"
         @open-lilia-iab="emit('open-lilia-iab')"
-        @submit-lilia-iab="emit('submit-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

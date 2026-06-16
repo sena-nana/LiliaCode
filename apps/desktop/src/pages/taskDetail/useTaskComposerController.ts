@@ -44,7 +44,6 @@ import {
   onTurnStarted,
   sendMessage,
   setComposerState,
-  submitLiliaIab,
 } from "../../services/chat";
 import type { SendMessageInput } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
@@ -236,37 +235,6 @@ export function useTaskComposerController(options: {
       await openLiliaIab(props.taskId, url);
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打开 IAB 失败：${String(err)}`));
-    }
-  }
-
-  function liliaIabMessage(snapshot: Awaited<ReturnType<typeof submitLiliaIab>>["snapshot"]): string {
-    const lines = [
-      "Lilia IAB 页面交互结果",
-      `URL: ${snapshot.url}`,
-      snapshot.title ? `标题: ${snapshot.title}` : null,
-      snapshot.note ? `备注: ${snapshot.note}` : null,
-      `截图状态: ${snapshot.status}`,
-      snapshot.screenshotPath ? `截图: ${snapshot.screenshotPath}` : null,
-      snapshot.warning ? `截图警告: ${snapshot.warning}` : null,
-    ].filter((line): line is string => Boolean(line));
-    return lines.join("\n");
-  }
-
-  async function onSubmitLiliaIab() {
-    if (!context.hasContext.value) return;
-    const note = window.prompt("IAB 备注")?.trim() ?? "";
-    try {
-      const result = await submitLiliaIab(props.taskId, note);
-      if (result.delivery === "runner" && result.stdinForwarded) return;
-      await sendAgentMessage({
-        turn: {
-          content: liliaIabMessage(result.snapshot),
-          outgoingAttachments: result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
-          titleContent: result.snapshot.note || result.snapshot.title || result.snapshot.url,
-        },
-      });
-    } catch (err) {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`回送 IAB 结果失败：${String(err)}`));
     }
   }
 
@@ -584,7 +552,6 @@ export function useTaskComposerController(options: {
     onSend,
     onExecuteSlashCommand,
     onOpenLiliaIab,
-    onSubmitLiliaIab,
     ...liliaWorkflowActions,
     onInsertGuide,
     onInsertDraftText,
