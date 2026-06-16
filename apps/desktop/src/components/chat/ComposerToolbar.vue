@@ -6,7 +6,6 @@ import {
   FileQuestion,
   GitBranch,
   GitCommit,
-  GitFork,
   Globe,
   ListChecks,
   Paperclip,
@@ -34,7 +33,6 @@ const props = defineProps<{
   fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
   contextUsage?: ChatContextUsage | null;
-  sessionForkDisabled: boolean;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -46,7 +44,6 @@ const emit = defineEmits<{
   startLiliaReview: [target: LiliaReviewTarget];
   startLiliaFixSuggestion: [target: LiliaReviewTarget];
   startLiliaCompact: [];
-  startSessionFork: [];
   openLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
@@ -383,18 +380,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :class="{ 'is-disabled': sessionForkDisabled }"
-          :disabled="sessionForkDisabled || actionsBlocked"
-          title="分叉当前会话"
-          aria-label="分叉当前会话"
-          @click="emit('startSessionFork')"
-        >
-          <GitFork :size="14" aria-hidden="true" />
-        </button>
         <button
           v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"

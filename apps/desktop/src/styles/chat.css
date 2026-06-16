@@ -1492,7 +1492,21 @@
 
 .timeline-card--final-reply__actions {
   display: flex;
+  align-items: center;
+  gap: 6px;
   justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.timeline-card--final-reply__actions:not(.has-visible-action) {
+  height: 0;
+  margin-top: 0;
+  overflow: visible;
+}
+
+.timeline-card--final-reply:hover .timeline-card--final-reply__actions:not(.has-visible-action),
+.timeline-card--final-reply:focus-within .timeline-card--final-reply__actions:not(.has-visible-action) {
+  height: 28px;
   margin-top: 8px;
 }
 
@@ -1514,6 +1528,29 @@
 
 .timeline-card--final-reply__action:hover {
   border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.timeline-card--final-reply__action--ghost {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.timeline-card--final-reply:hover .timeline-card--final-reply__action--ghost,
+.timeline-card--final-reply:focus-within .timeline-card--final-reply__action--ghost,
+.timeline-card--final-reply__action--ghost:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-card--final-reply__action--ghost:hover {
+  border-color: transparent;
+  background: transparent;
   color: var(--text);
 }
 
