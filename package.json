@@ -24,7 +24,7 @@
     "predocs:preview": "node scripts/check-package-manager.mjs",
     "docs:preview": "yarn check:package-manager && vitepress preview docs",
     "release:check": "yarn check:package-manager && node scripts/verify-release.mjs",
-    "icons:generate": "yarn check:package-manager && pwsh -File scripts/generate-icon.ps1",
+    "icons:generate": "yarn check:package-manager && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn check:package-manager && yarn --cwd apps/desktop tauri icon src-tauri/icons/icon-source.png",
     "prebuild": "node scripts/check-package-manager.mjs",
     "build": "yarn check:package-manager && yarn --cwd apps/desktop build",
