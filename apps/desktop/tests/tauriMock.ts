@@ -2654,6 +2654,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         queuedCount,
         pendingRollback: false,
         pendingResetCleanup: false,
+        contextUsage: null,
         rollback: null,
         ...(runtimeSnapshotOverrides[taskId] ?? {}),
       };

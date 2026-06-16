@@ -93,6 +93,7 @@ const {
 } = attachmentController;
 const {
   composerForView,
+  contextUsage,
   isTurnRunning,
   userSendScrollKey,
   restoreDraftKey,
@@ -369,6 +370,7 @@ watch(
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
     :composer-state="composerForView"
+    :context-usage="contextUsage"
     :attachments="attachments"
     :append-attachments-to-end-key="droppedAttachmentAppendKey"
     :pending-ask="nonInterruptMode ? null : pendingAskUser"

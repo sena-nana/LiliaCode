@@ -8,6 +8,7 @@ import type {
   AgentInteractionSettings,
   ChatAttachment,
   ChatContextSearchResult,
+  ChatRuntimeSnapshot,
   ChatMessage,
   ChatRuntimeCommand,
   ChatSlashCommandSearchResult,
@@ -306,6 +307,32 @@ export type ProviderRuntimeOptionsTypeTest = Assert<
       }];
     },
     ProviderRuntimeOptions
+  >
+>;
+
+export type ChatRuntimeSnapshotContextUsageTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      phase: "running";
+      backend: "codex";
+      turnId: "turn-1";
+      queuedCount: 0;
+      pendingRollback: false;
+      pendingResetCleanup: false;
+      contextUsage: {
+        taskId: "task-1";
+        backend: "codex";
+        usedTokens: 1024;
+        limitTokens: 8192;
+        usedPercent: 12.5;
+        source: "runtime";
+        updatedAt: 1;
+        unavailableReason: null;
+      };
+      rollback: null;
+    },
+    ChatRuntimeSnapshot
   >
 >;
 

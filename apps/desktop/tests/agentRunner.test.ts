@@ -826,6 +826,12 @@ describe("Claude helpers", () => {
             subtype: "success",
             session_id: "claude-session-1",
             uuid: "result-1",
+            usage: {
+              input_tokens: 1200,
+              cache_creation_input_tokens: 300,
+              cache_read_input_tokens: 500,
+              output_tokens: 50,
+            },
           };
           yield {
             type: "prompt_suggestion",
@@ -842,6 +848,11 @@ describe("Claude helpers", () => {
       type: "prompt_suggestion",
       suggestion: "请继续检查 Claude 原生建议展示。",
       uuid: "suggestion-1",
+    });
+    expect(json()).toContainEqual({
+      type: "context_usage",
+      usedTokens: 2000,
+      source: "claude",
     });
   });
 

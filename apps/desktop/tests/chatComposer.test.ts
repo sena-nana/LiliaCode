@@ -898,8 +898,10 @@ describe("ChatComposer", () => {
       },
     });
 
-    const compactButton = view.getByRole("button", { name: "压缩上下文" });
+    expect(view.queryByTitle("压缩上下文")).toBeNull();
+    const compactButton = view.getByRole("button", { name: /压缩上下文/ });
     expect(compactButton).not.toBeDisabled();
+    expect(compactButton).toHaveClass("chat-composer__context-action");
     await fireEvent.click(compactButton);
 
     expect(view.emitted("start-lilia-compact")?.length).toBe(1);
@@ -908,8 +910,61 @@ describe("ChatComposer", () => {
       state: codexState,
       attachments: [],
     });
-    await fireEvent.click(view.getByRole("button", { name: "压缩上下文" }));
+    await fireEvent.click(view.getByRole("button", { name: /压缩上下文/ }));
     expect(view.emitted("start-lilia-compact")?.length).toBe(2);
+  });
+
+  it("上下文圆环展示已用比例和具体占用信息", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        contextUsage: {
+          taskId: "task-1",
+          backend: "claude",
+          usedTokens: 7168,
+          limitTokens: 8192,
+          usedPercent: 87.5,
+          source: "runtime",
+          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+          unavailableReason: null,
+        },
+      },
+    });
+
+    const compactButton = view.getByRole("button", { name: /已用 7,168 tokens/ });
+    expect(compactButton).toHaveClass("chat-context-ring--warn");
+    expect(compactButton).toHaveStyle({ "--quota-progress": "87.5" });
+    const contextCard = view.getByRole("tooltip");
+    expect(contextCard).toHaveTextContent("已用");
+    expect(contextCard).toHaveTextContent("占用");
+    expect(contextCard).toHaveTextContent("87.5%");
+  });
+
+  it("上下文圆环无比例时显示空态但仍可触发压缩", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        contextUsage: {
+          taskId: "task-1",
+          backend: "claude",
+          usedTokens: 2048,
+          limitTokens: null,
+          usedPercent: null,
+          source: "runtime",
+          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+          unavailableReason: "provider 未返回上下文上限",
+        },
+      },
+    });
+
+    const compactButton = view.getByRole("button", { name: /占用比例未知/ });
+    expect(compactButton).toHaveClass("chat-context-ring--empty");
+    expect(compactButton).toHaveStyle({ "--quota-progress": "0" });
+    expect(view.getByRole("tooltip")).toHaveTextContent("provider 未返回上下文上限");
+    await fireEvent.click(compactButton);
+    expect(view.emitted("start-lilia-compact")?.length).toBe(1);
   });
 
   it("Claude 和 Codex 后端可从同一工具栏入口分叉当前会话", async () => {
@@ -1070,7 +1125,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
 
     await view.rerender({
       state: baseState,
@@ -1078,7 +1133,7 @@ describe("ChatComposer", () => {
       sending: false,
       compactDisabled: true,
     });
-    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
   });
 
   it("Codex 后端不再从工具栏清理后台终端", async () => {

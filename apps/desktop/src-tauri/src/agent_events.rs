@@ -40,6 +40,17 @@ pub enum AgentRuntimeEvent {
         #[serde(default)]
         payload: JsonValue,
     },
+    ContextUsage {
+        used_tokens: u64,
+        #[serde(default)]
+        limit_tokens: Option<u64>,
+        #[serde(default)]
+        used_percent: Option<f64>,
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        unavailable_reason: Option<String>,
+    },
     Done {
         session_id: Option<String>,
         subtype: Option<String>,
@@ -103,6 +114,29 @@ impl AgentRuntimeEvent {
                 let payload = value.get("payload").cloned().unwrap_or(JsonValue::Null);
                 Some(Self::QuotaUsageRequest { id, payload })
             }
+            "context_usage" => {
+                let used_tokens = json_u64_field(value, &["usedTokens", "used_tokens"])?;
+                let limit_tokens = json_u64_field(value, &["limitTokens", "limit_tokens"]);
+                let used_percent = json_f64_field(value, &["usedPercent", "used_percent"]);
+                let source = value
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .map(|source| source.trim().to_string())
+                    .filter(|source| !source.is_empty());
+                let unavailable_reason = value
+                    .get("unavailableReason")
+                    .or_else(|| value.get("unavailable_reason"))
+                    .and_then(|v| v.as_str())
+                    .map(|reason| reason.trim().to_string())
+                    .filter(|reason| !reason.is_empty());
+                Some(Self::ContextUsage {
+                    used_tokens,
+                    limit_tokens,
+                    used_percent,
+                    source,
+                    unavailable_reason,
+                })
+            }
             "done" => {
                 let session_id = value
                     .get("sessionId")
@@ -143,6 +177,20 @@ impl AgentRuntimeEvent {
             _ => None,
         }
     }
+}
+
+fn json_u64_field(value: &JsonValue, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| {
+        value.get(*key).and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+        })
+    })
+}
+
+fn json_f64_field(value: &JsonValue, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(|v| v.as_f64()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,6 +507,22 @@ mod tests {
             Some(AgentRuntimeEvent::QuotaUsageRequest {
                 id: "quota-1".to_string(),
                 payload: json!({ "days": 7, "scope": "tools" }),
+            })
+        );
+        assert_eq!(
+            AgentRuntimeEvent::from_runner_json(&json!({
+                "type": "context_usage",
+                "usedTokens": 4096,
+                "limitTokens": 8192,
+                "usedPercent": 50.0,
+                "source": "runtime"
+            })),
+            Some(AgentRuntimeEvent::ContextUsage {
+                used_tokens: 4096,
+                limit_tokens: Some(8192),
+                used_percent: Some(50.0),
+                source: Some("runtime".to_string()),
+                unavailable_reason: None,
             })
         );
         assert_eq!(

@@ -15,6 +15,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatContextUsage,
   ChatRuntimeCommand,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
@@ -57,6 +58,7 @@ const props = defineProps<{
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
   compactDisabled?: boolean;
+  contextUsage?: ChatContextUsage | null;
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
@@ -197,6 +199,9 @@ const {
 
 const attachmentsForView = computed(() => props.attachments ?? []);
 const appendAttachmentsToEndKey = computed(() => props.appendAttachmentsToEndKey ?? 0);
+const contextUsageForToolbar = computed(() =>
+  props.contextUsage?.backend === props.state.backend ? props.contextUsage : null,
+);
 
 const richInput = useComposerRichInput({
   attachments: attachmentsForView,
@@ -913,6 +918,7 @@ defineExpose({ focusInput, getDraftSnapshot });
         :review-disabled="sending === true || hasPending"
         :fix-suggestion-disabled="sending === true || hasPending"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
+        :context-usage="contextUsageForToolbar"
         :session-fork-disabled="sending === true || hasPending"
         :provider-settings-disabled="sending === true || hasPending"
         :send-title="sendTitle"
