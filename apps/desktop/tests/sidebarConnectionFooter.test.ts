@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import SidebarConnectionFooter from "../src/components/sidebar/SidebarConnectionFooter.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
+import { formatUnixSeconds } from "../src/utils/quotaDisplay";
 import {
   mockInvoke,
   setMockActiveBackend,
@@ -66,6 +67,10 @@ function officialQuota(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function refreshText(resetsAt: number): string {
+  return `刷新 ${formatUnixSeconds(resetsAt)}`;
+}
+
 describe("SidebarConnectionFooter provider quota badge", () => {
   it("does not show quota rings for Claude", async () => {
     setMockActiveBackend("claude");
@@ -123,10 +128,10 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(view.queryByText("Spark额度")).not.toBeInTheDocument();
     expect(view.getByText("5h · 剩余 88% · Spark")).toBeInTheDocument();
     expect(view.getByText("7d · 剩余 20% · Spark")).toBeInTheDocument();
-    expect(view.getByText("刷新 01/15 16:00")).toBeInTheDocument();
-    expect(view.getByText("刷新 01/19 03:20")).toBeInTheDocument();
-    expect(view.getByText("刷新 01/16 08:40")).toBeInTheDocument();
-    expect(view.getByText("刷新 01/19 20:00")).toBeInTheDocument();
+    expect(view.getByText(refreshText(1_800_000_000))).toBeInTheDocument();
+    expect(view.getByText(refreshText(1_800_300_000))).toBeInTheDocument();
+    expect(view.getByText(refreshText(1_800_060_000))).toBeInTheDocument();
+    expect(view.getByText(refreshText(1_800_360_000))).toBeInTheDocument();
     const meters = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
     expect(meters).toHaveLength(4);
     expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
