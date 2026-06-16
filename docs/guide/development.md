@@ -93,13 +93,13 @@ GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 
 ## 图标
 
-Tauri 图标的设计稿是 `apps/desktop/src-tauri/icons/icon-source.png`。要重新生成全套 PNG 或 ICO 时运行：
+Tauri 图标的设计稿是 `apps/desktop/src-tauri/icons/icon.png`。要用 Tauri CLI 重新生成桌面 PNG 或 ICO 时运行：
 
 ```bash
 yarn icons:generate
 ```
 
-如需 macOS `.icns` 或全套尺寸，运行：
+`icons:tauri` 保留为同一套生成入口：
 
 ```bash
 yarn icons:tauri

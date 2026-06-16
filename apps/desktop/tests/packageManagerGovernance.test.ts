@@ -16,12 +16,18 @@ describe("package manager governance", () => {
       readRepoFile("README.md"),
       readRepoFile("docs/guide/development.md"),
     ].join("\n");
+    const iconScript = readRepoFile("scripts/generate-icons.mjs");
 
     expect(packageJson.scripts["icons:generate"]).toMatch(/^yarn check:package-manager && /);
     expect(packageJson.scripts["icons:tauri"]).toMatch(/^yarn check:package-manager && /);
     expect(publicInstructions).toContain("yarn icons:generate");
     expect(publicInstructions).toContain("yarn icons:tauri");
     expect(publicInstructions).not.toContain("pwsh -File scripts/generate-icon.ps1");
+    expect(publicInstructions).not.toContain("icon-source.png");
+    expect(packageJson.scripts["icons:generate"]).toContain("node scripts/generate-icons.mjs");
+    expect(packageJson.scripts["icons:tauri"]).toContain("node scripts/generate-icons.mjs");
+    expect(iconScript).toContain("tauri");
+    expect(iconScript).toContain("src-tauri/icons/icon.png");
     expect(publicInstructions).not.toContain(
       "yarn tauri icon apps/desktop/src-tauri/icons/icon-source.png",
     );

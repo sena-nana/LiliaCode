@@ -181,7 +181,7 @@ yarn release:check --tag vX.Y.Z
 
 Pushing a `v*` tag runs `yarn verify` and `yarn release:check --tag <tag>`, builds the Windows Tauri installer, and uploads a draft GitHub Release. Keep the release as a draft until the Windows installer has been downloaded and manually verified for install, launch, basic window operation, and uninstall. Current release artifacts are Windows-only, unsigned, do not include the Tauri updater, and are upgraded manually by downloading and installing a newer package.
 
-The Tauri icon source is [apps/desktop/src-tauri/icons/icon-source.png](apps/desktop/src-tauri/icons/icon-source.png). To regenerate the full PNG / ICO set, run `yarn icons:generate`. For macOS `.icns` or a full size set, run `yarn icons:tauri`.
+The Tauri icon source is [apps/desktop/src-tauri/icons/icon.png](apps/desktop/src-tauri/icons/icon.png). To regenerate the desktop PNG / ICO set through the Tauri CLI, run `yarn icons:generate`. `yarn icons:tauri` is kept as the same generation entrypoint.
 
 ## Thanks
 
