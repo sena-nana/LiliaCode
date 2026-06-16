@@ -9,8 +9,8 @@ use tauri::{AppHandle, Runtime, State};
 use crate::agent_timeline::AgentTimelineEvent;
 use crate::chat::runner::locate_agent_runner;
 use crate::provider::{
-    build_codex_app_server_probe_status, resolve_connection_for, validate_backend_ready_for_send,
-    ConnectionMode,
+    build_codex_app_server_probe_status_cached, resolve_connection_for,
+    validate_backend_ready_for_send, ConnectionMode,
 };
 use crate::store::LiliaStore;
 use crate::util::now_millis;
@@ -1148,7 +1148,7 @@ pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuota
     if let Err(err) = validate_backend_ready_for_send(BACKEND_CODEX) {
         return codex_account_quota_unavailable("codex-account", Some(err));
     }
-    let codex_app_server = build_codex_app_server_probe_status();
+    let codex_app_server = build_codex_app_server_probe_status_cached(false);
     let Some(codex_path) = codex_app_server.path else {
         let detail = if codex_app_server.public.issues.is_empty() {
             "未找到满足要求的 Codex CLI，无法读取官方额度。".to_string()
