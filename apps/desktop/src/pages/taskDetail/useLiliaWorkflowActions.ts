@@ -144,7 +144,7 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
-  async function onApplyRuntimeSettings(
+  async function onApplyLiliaProviderSettings(
     runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
     runtimeOptions?: ProviderRuntimeOptions | null,
   ) {
@@ -167,6 +167,7 @@ export function useLiliaWorkflowActions(options: {
     onSetLiliaGoal,
     onRefreshLiliaGoal,
     onClearLiliaGoal,
-    onApplyRuntimeSettings,
+    onApplyLiliaProviderSettings,
+    onApplyRuntimeSettings: onApplyLiliaProviderSettings,
   };
 }
