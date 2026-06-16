@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { stringOrNull } from "../utils.mjs";
 
@@ -16,6 +17,22 @@ export function isWindowsCommandScript(binary, platform = process.platform) {
   return platform === "win32" && /\.(cmd|bat)$/i.test(binary);
 }
 
+export function resolveWindowsCommandScript(
+  binary,
+  {
+    platform = process.platform,
+    fileExists = existsSync,
+  } = {},
+) {
+  if (platform !== "win32") return null;
+  if (isWindowsCommandScript(binary, platform)) return binary;
+  if (/\.[^\\/]+$/i.test(binary)) return null;
+  for (const candidate of [`${binary}.cmd`, `${binary}.bat`]) {
+    if (fileExists(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function windowsCommandLineToken(value) {
   const text = String(value);
   if (!/[\s"&|<>^]/.test(text)) return text;
@@ -26,14 +43,43 @@ export function windowsCommandLine(binary, args) {
   return [binary, ...args].map(windowsCommandLineToken).join(" ");
 }
 
+export function codexAppServerSpawnCommand(
+  binary,
+  {
+    env = process.env,
+    platform = process.platform,
+    fileExists = existsSync,
+  } = {},
+) {
+  const commandScript = resolveWindowsCommandScript(binary, { platform, fileExists });
+  if (!commandScript) return { command: binary, args: ["app-server"] };
+  return {
+    command: env.ComSpec || "cmd.exe",
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      windowsCommandLine(commandScript, ["app-server"]),
+    ],
+  };
+}
+
 export function spawnCodexAppServer(binary, options) {
-  if (!isWindowsCommandScript(binary)) return spawn(binary, ["app-server"], options);
-  return spawn(process.env.ComSpec || "cmd.exe", [
-    "/d",
-    "/s",
-    "/c",
-    windowsCommandLine(binary, ["app-server"]),
-  ], options);
+  const { command, args } = codexAppServerSpawnCommand(binary);
+  return spawn(command, args, options);
+}
+
+export function codexAppServerExitError(stderr, code, signal) {
+  const status = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+  const detail = stderr.trim();
+  if (detail) return new Error(`Codex app-server exited (${status}): ${detail}`);
+  return new Error(
+    `Codex app-server exited (${status})，但没有输出 stderr；请检查 Codex CLI 配置或认证状态。`,
+  );
+}
+
+export function codexAppServerClosedError() {
+  return new Error("Codex app-server request was cancelled because Lilia closed the app-server.");
 }
 
 export function createCodexAppServer({
@@ -56,22 +102,35 @@ export function createCodexAppServer({
   let seq = 1;
   let stderr = "";
   let closed = false;
+  let closeRequested = false;
+  let closeTimer = null;
+  let closeForceKillMs = 30_000;
+  let shutdownStarted = false;
   child.stderr?.on("data", (chunk) => {
     stderr += chunk.toString("utf8");
   });
   child.once("error", (err) => {
     closed = true;
+    clearCloseTimer();
     for (const { reject } of pending.values()) {
       reject(err);
     }
     pending.clear();
   });
-  child.once("exit", () => {
+  child.once("exit", (code, signal) => {
     closed = true;
+    if (closeRequested) {
+      return;
+    }
     for (const { reject } of pending.values()) {
-      reject(new Error(`Codex app-server exited: ${stderr.trim()}`));
+      reject(codexAppServerExitError(stderr, code, signal));
     }
     pending.clear();
+  });
+  child.once("close", () => {
+    closed = true;
+    clearCloseTimer();
+    if (closeRequested) rejectPendingRequests();
   });
   rl.on("line", (line) => {
     let msg;
@@ -89,6 +148,7 @@ export function createCodexAppServer({
       pending.delete(msg.id);
       if (msg.error) entry.reject(new Error(msg.error.message || "Codex app-server request failed"));
       else entry.resolve(msg.result ?? null);
+      if (closeRequested && pending.size === 0) shutdown({ forceKillMs: closeForceKillMs });
       return;
     }
     notifications.push(msg);
@@ -113,12 +173,63 @@ export function createCodexAppServer({
   function drainNotifications() {
     return notifications.splice(0, notifications.length);
   }
-  function close() {
-    rl.close();
+
+  function clearCloseTimer() {
+    if (!closeTimer) return;
+    clearTimeout(closeTimer);
+    closeTimer = null;
+  }
+
+  function rejectPendingRequests() {
+    for (const { reject } of pending.values()) {
+      reject(codexAppServerClosedError());
+    }
+    pending.clear();
+  }
+
+  function shutdown({ forceKillMs = 30_000, cancelPending = false } = {}) {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    closeRequested = true;
+    closed = true;
+    clearCloseTimer();
+    if (cancelPending) rejectPendingRequests();
     try {
-      child.kill();
+      child.stdin?.end?.();
     } catch {
       // noop
+    }
+    if (forceKillMs <= 0) {
+      try {
+        child.kill();
+      } catch {
+        // noop
+      }
+      return;
+    }
+    closeTimer = setTimeout(() => {
+      if (pending.size > 0) rejectPendingRequests();
+      try {
+        child.kill();
+      } catch {
+        // noop
+      }
+    }, forceKillMs);
+    closeTimer.unref?.();
+  }
+
+  function close({ forceKillMs = 30_000 } = {}) {
+    if (closeRequested) return;
+    closeRequested = true;
+    closed = true;
+    closeForceKillMs = forceKillMs;
+    if (pending.size === 0 || forceKillMs <= 0) {
+      shutdown({ forceKillMs, cancelPending: pending.size > 0 });
+    } else {
+      closeTimer = setTimeout(() => {
+        shutdown({ forceKillMs: 0, cancelPending: true });
+      }, forceKillMs);
+      closeTimer.unref?.();
     }
   }
   return { binary, child, request, notify, respond, drainNotifications, close };
