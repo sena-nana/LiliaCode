@@ -249,6 +249,8 @@ pub fn run() {
             projects_tasks::milestone_list,
             projects_tasks::milestone_create,
             projects_tasks::milestone_update,
+            projects_tasks::milestone_delete,
+            projects_tasks::milestone_reorder,
             projects_tasks::milestone_set_tasks,
             projects_tasks::project_architecture_get,
             projects_tasks::project_architecture_list_changes,

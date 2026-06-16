@@ -1955,6 +1955,25 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
+    case "milestone_delete": {
+      const id = String(args.id);
+      const before = milestones.length;
+      milestones = milestones.filter((milestone) => milestone.id !== id);
+      taskMilestoneLinks = taskMilestoneLinks.filter((link) => link.milestoneId !== id);
+      return milestones.length !== before;
+    }
+
+    case "milestone_reorder": {
+      const projectId = String(args.projectId);
+      const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
+      milestones = milestones.map((milestone) => {
+        if (milestone.projectId !== projectId) return milestone;
+        const index = orderedIds.indexOf(milestone.id);
+        return index >= 0 ? { ...milestone, order: index } : milestone;
+      });
+      return undefined;
+    }
+
     case "milestone_set_tasks": {
       const milestoneId = String(args.milestoneId);
       const taskIds = Array.isArray(args.taskIds) ? Array.from(new Set(args.taskIds.map(String))) : [];

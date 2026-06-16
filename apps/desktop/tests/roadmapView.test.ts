@@ -99,4 +99,59 @@ describe("RoadmapView", () => {
       expect(view.getByLabelText("首发可用路线图 截止日期")).toHaveValue("");
     });
   });
+
+  it("能删除 milestone 并清理本地任务关联", async () => {
+    const view = await renderRoadmap();
+
+    await view.findByText("首发可用路线图");
+    await fireEvent.click(view.getByRole("button", { name: "删除 首发可用路线图" }));
+
+    await waitFor(() => {
+      expect(view.queryByText("首发可用路线图")).not.toBeInTheDocument();
+    });
+    expect(view.getByText("暂无路线图")).toBeInTheDocument();
+    expect(view.getByLabelText("路线图完成度")).toHaveTextContent("0%");
+    expect(view.queryByText("接入 Claude Code 会话发现")).not.toBeInTheDocument();
+  });
+
+  it("能通过上移下移重排 milestone", async () => {
+    setMockRoadmap([
+      {
+        id: "m-001",
+        projectId: "lilia",
+        title: "第一阶段",
+        description: "",
+        status: "in-progress",
+        dueDate: null,
+        order: 0,
+        createdAt: 5000,
+      },
+      {
+        id: "m-002",
+        projectId: "lilia",
+        title: "第二阶段",
+        description: "",
+        status: "upcoming",
+        dueDate: null,
+        order: 1,
+        createdAt: 6000,
+      },
+    ]);
+    const view = await renderRoadmap();
+
+    await view.findByText("第一阶段");
+    await fireEvent.click(view.getByRole("button", { name: "第一阶段 下移" }));
+
+    await waitFor(() => {
+      const headings = view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+      expect(headings).toEqual(["第二阶段", "第一阶段"]);
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "第一阶段 上移" }));
+
+    await waitFor(() => {
+      const headings = view.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+      expect(headings).toEqual(["第一阶段", "第二阶段"]);
+    });
+  });
 });

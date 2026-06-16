@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
+import { ArrowDown, ArrowUp, Trash2 } from "lucide-vue-next";
 import {
   ensureProjectTasksLoaded,
   isProjectTasksLoaded,
@@ -8,10 +9,12 @@ import {
 } from "../../services/tasksStore";
 import {
   createMilestone,
+  deleteMilestone,
   ensureProjectRoadmapLoaded,
   isProjectRoadmapLoaded,
   listProjectMilestoneLinks,
   listProjectMilestones,
+  reorderMilestones,
   setMilestoneTasks,
   updateMilestone,
 } from "../../services/milestonesStore";
@@ -184,6 +187,20 @@ async function changeMilestoneDueDate(milestone: Milestone, event: Event) {
   );
 }
 
+async function removeMilestone(milestone: Milestone) {
+  await saveMilestoneChange(milestone.id, () => deleteMilestone(props.projectId, milestone.id));
+}
+
+async function moveMilestone(milestoneId: string, direction: -1 | 1) {
+  const currentIds = milestones.value.map((milestone) => milestone.id);
+  const index = currentIds.indexOf(milestoneId);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= currentIds.length) return;
+  const nextIds = [...currentIds];
+  [nextIds[index], nextIds[nextIndex]] = [nextIds[nextIndex], nextIds[index]];
+  await saveMilestoneChange(milestoneId, () => reorderMilestones(props.projectId, nextIds));
+}
+
 async function toggleMilestoneTask(
   milestoneId: string,
   currentTaskIds: Set<string>,
@@ -284,21 +301,53 @@ watch(
               <span class="roadmap-milestone__index">M{{ view.index + 1 }}</span>
               <h3>{{ view.milestone.title }}</h3>
             </div>
-            <select
-              class="roadmap-milestone__status-select"
-              :value="view.milestone.status"
-              :disabled="isSaving(view.milestone.id)"
-              :aria-label="`${view.milestone.title} 状态`"
-              @change="changeMilestoneStatus(view.milestone.id, $event)"
-            >
-              <option
-                v-for="option in milestoneStatusOptions"
-                :key="option.value"
-                :value="option.value"
+            <div class="roadmap-milestone__actions">
+              <button
+                type="button"
+                class="ui-button ui-icon-button"
+                :disabled="isSaving(view.milestone.id) || view.index === 0"
+                :aria-label="`${view.milestone.title} 上移`"
+                title="上移"
+                @click="moveMilestone(view.milestone.id, -1)"
               >
-                {{ option.label }}
-              </option>
-            </select>
+                <ArrowUp :size="14" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                class="ui-button ui-icon-button"
+                :disabled="isSaving(view.milestone.id) || view.index === milestoneViews.length - 1"
+                :aria-label="`${view.milestone.title} 下移`"
+                title="下移"
+                @click="moveMilestone(view.milestone.id, 1)"
+              >
+                <ArrowDown :size="14" aria-hidden="true" />
+              </button>
+              <select
+                class="roadmap-milestone__status-select"
+                :value="view.milestone.status"
+                :disabled="isSaving(view.milestone.id)"
+                :aria-label="`${view.milestone.title} 状态`"
+                @change="changeMilestoneStatus(view.milestone.id, $event)"
+              >
+                <option
+                  v-for="option in milestoneStatusOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="ui-button ui-icon-button ui-button--danger"
+                :disabled="isSaving(view.milestone.id)"
+                :aria-label="`删除 ${view.milestone.title}`"
+                title="删除"
+                @click="removeMilestone(view.milestone)"
+              >
+                <Trash2 :size="14" aria-hidden="true" />
+              </button>
+            </div>
           </header>
 
           <div class="roadmap-milestone__details">
