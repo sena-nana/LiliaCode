@@ -36,7 +36,6 @@
   border-left: 1px solid var(--border);
 }
 
-.automations-page__head,
 .automations-page__inspector-head {
   min-height: 52px;
   padding: 10px 12px;
@@ -55,33 +54,22 @@
 
 .automations-page__list {
   min-height: 0;
-  overflow: auto;
-  padding: 8px;
-  gap: 4px;
+  padding: 6px 4px;
 }
 
 .automations-page__row {
-  width: 100%;
-  min-height: 48px;
-  padding: 8px 10px;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 3px;
-  text-align: left;
+  flex: 0 0 auto;
 }
 
 .automations-page__row-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .automations-page__row-meta {
-  color: var(--text-muted);
+  max-width: 92px;
+  color: var(--text-faint);
   font-size: 11px;
+  font-weight: 500;
 }
 
 .automations-page__main {
@@ -224,6 +212,13 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-subtle) 94%, transparent);
+}
+
+.automations-page__palette-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px;
+  background: var(--border);
 }
 
 .automations-page__canvas-controls {

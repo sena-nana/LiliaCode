@@ -276,6 +276,7 @@ pub fn run() {
             automation::commands::automation_list_workflows,
             automation::commands::automation_save_draft,
             automation::commands::automation_publish,
+            automation::commands::automation_delete_workflow,
             automation::commands::automation_set_enabled,
             automation::commands::automation_run_once,
             automation::commands::automation_resume_run,
