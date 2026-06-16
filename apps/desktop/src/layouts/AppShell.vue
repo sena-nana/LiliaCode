@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
+import { ArrowLeft } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 import SettingsSidebar from "./SettingsSidebar.vue";
@@ -37,10 +38,14 @@ const route = useRoute();
 const router = useRouter();
 const sidebarCollapsed = ref(loadSidebarCollapsed());
 const isSettingsRoute = computed(() => route.path === "/settings");
-const effectiveSidebarCollapsed = computed(
-  () => !isSettingsRoute.value && sidebarCollapsed.value,
+const isAutomationsRoute = computed(() => route.path === "/automations");
+const isSidebarReplacementRoute = computed(() =>
+  isSettingsRoute.value || isAutomationsRoute.value
 );
-const previousSettingsRoute = ref<string | null>(null);
+const effectiveSidebarCollapsed = computed(
+  () => !isSidebarReplacementRoute.value && sidebarCollapsed.value,
+);
+const previousSidebarReplacementRoute = ref<string | null>(null);
 const sidebarWidth = useResizablePane({
   storageKey: WIDTH_STORAGE_KEY,
   minWidth: MIN_WIDTH,
@@ -51,28 +56,37 @@ const sidebarWidth = useResizablePane({
 });
 
 function toggleSidebarCollapsed() {
-  if (isSettingsRoute.value) return;
+  if (isSidebarReplacementRoute.value) return;
   sidebarCollapsed.value = !sidebarCollapsed.value;
   writeStorage(COLLAPSED_STORAGE_KEY, sidebarCollapsed.value ? "1" : "0");
 }
 
-function isSettingsReturnCandidate(path: string): boolean {
+function isSidebarReturnCandidate(path: string): boolean {
   return path.startsWith("/") &&
     !path.startsWith("/popup/") &&
-    !path.startsWith("/settings");
+    !path.startsWith("/settings") &&
+    !path.startsWith("/automations");
 }
 
-const settingsReturnTo = computed(() =>
-  previousSettingsRoute.value && isSettingsReturnCandidate(previousSettingsRoute.value)
-    ? previousSettingsRoute.value
+const sidebarReturnTo = computed(() =>
+  previousSidebarReplacementRoute.value &&
+    isSidebarReturnCandidate(previousSidebarReplacementRoute.value)
+    ? previousSidebarReplacementRoute.value
     : "/",
 );
 
 const removeBeforeEach = router.beforeEach((to, from) => {
-  if (to.path === "/settings" && isSettingsReturnCandidate(from.fullPath)) {
-    previousSettingsRoute.value = from.fullPath;
+  if (
+    (to.path === "/settings" || to.path === "/automations") &&
+    isSidebarReturnCandidate(from.fullPath)
+  ) {
+    previousSidebarReplacementRoute.value = from.fullPath;
   }
 });
+
+function goBackFromAutomation() {
+  router.push(sidebarReturnTo.value);
+}
 
 onBeforeUnmount(() => {
   removeBeforeEach();
@@ -86,18 +100,39 @@ onBeforeUnmount(() => {
       'is-resizing': sidebarWidth.isResizing.value,
       'is-sidebar-collapsed': effectiveSidebarCollapsed,
       'is-settings-mode': isSettingsRoute,
+      'is-automations-mode': isAutomationsRoute,
     }"
     :style="{ '--sidebar-width': effectiveSidebarCollapsed ? '0px' : sidebarWidth.width.value + 'px' }"
   >
     <TitleBar
       :left-sidebar-collapsed="effectiveSidebarCollapsed"
-      :sidebar-toggles-disabled="isSettingsRoute"
+      :sidebar-toggles-disabled="isSidebarReplacementRoute"
       @toggle-left-sidebar="toggleSidebarCollapsed"
     />
     <SettingsSidebar
       v-if="isSettingsRoute"
-      :return-to="settingsReturnTo"
+      :return-to="sidebarReturnTo"
     />
+    <aside
+      v-else-if="isAutomationsRoute"
+      class="secondary-panel automations-sidebar"
+      aria-label="自动化列表"
+    >
+      <div class="settings-sidebar__head">
+        <button
+          type="button"
+          class="settings-sidebar__back"
+          aria-label="返回"
+          title="返回"
+          @click="goBackFromAutomation"
+        >
+          <ArrowLeft :size="15" aria-hidden="true" />
+          <span>返回</span>
+        </button>
+        <div id="automation-sidebar-actions" />
+      </div>
+      <div id="automation-sidebar-host" class="automations-sidebar__host" />
+    </aside>
     <SecondaryPanel v-else />
     <div
       class="shell__resizer"

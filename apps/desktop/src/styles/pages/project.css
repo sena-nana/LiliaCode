@@ -354,6 +354,14 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
+.roadmap-milestone__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .roadmap-milestone__title-wrap {
   min-width: 0;
   display: flex;

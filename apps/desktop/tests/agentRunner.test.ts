@@ -47,7 +47,10 @@ import {
   withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
 import {
+  codexAppServerSpawnCommand,
+  codexAppServerBinary,
   createCodexAppServer,
+  resolveWindowsCommandScript,
 } from "../agent-runner/codex/appServer.mjs";
 import {
   readCodexAccountQuotaStatus,
@@ -823,6 +826,12 @@ describe("Claude helpers", () => {
             subtype: "success",
             session_id: "claude-session-1",
             uuid: "result-1",
+            usage: {
+              input_tokens: 1200,
+              cache_creation_input_tokens: 300,
+              cache_read_input_tokens: 500,
+              output_tokens: 50,
+            },
           };
           yield {
             type: "prompt_suggestion",
@@ -839,6 +848,11 @@ describe("Claude helpers", () => {
       type: "prompt_suggestion",
       suggestion: "请继续检查 Claude 原生建议展示。",
       uuid: "suggestion-1",
+    });
+    expect(json()).toContainEqual({
+      type: "context_usage",
+      usedTokens: 2000,
+      source: "claude",
     });
   });
 
@@ -1800,6 +1814,45 @@ describe("Codex app-server mapping", () => {
     expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
   });
 
+  it("trusts injected Codex CLI path", () => {
+    expect(codexAppServerBinary({ LILIA_CODEX_CLI_PATH: "C:/bin/codex.cmd" }))
+      .toBe("C:/bin/codex.cmd");
+  });
+
+  it("keeps a clear error when Codex CLI path is not injected", () => {
+    expect(() => codexAppServerBinary({})).toThrow("未找到满足协议要求的 codex CLI");
+  });
+
+  it("resolves Windows npm extensionless Codex shim to cmd script", () => {
+    expect(resolveWindowsCommandScript("C:/Users/me/AppData/Roaming/npm/codex", {
+      platform: "win32",
+      fileExists: (path: string) => path === "C:/Users/me/AppData/Roaming/npm/codex.cmd",
+    })).toBe("C:/Users/me/AppData/Roaming/npm/codex.cmd");
+    expect(resolveWindowsCommandScript("C:/bin/codex.exe", {
+      platform: "win32",
+      fileExists: () => true,
+    })).toBeNull();
+    expect(resolveWindowsCommandScript("C:/Users/me/AppData/Roaming/npm/codex", {
+      platform: "linux",
+      fileExists: () => true,
+    })).toBeNull();
+  });
+
+  it("runs Windows command scripts through cmd.exe", () => {
+    expect(codexAppServerSpawnCommand("C:/Program Files/node/codex.cmd", {
+      env: { ComSpec: "C:/Windows/System32/cmd.exe" } as any,
+      platform: "win32",
+    })).toEqual({
+      command: "C:/Windows/System32/cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        "\"C:/Program Files/node/codex.cmd\" app-server",
+      ],
+    });
+  });
+
   it("serializes Codex app-server request params, including null for no-arg methods", async () => {
     const writes: string[] = [];
     const stdout = new PassThrough();
@@ -1825,7 +1878,7 @@ describe("Codex app-server mapping", () => {
 
     await expect(server.request("memory/reset")).resolves.toEqual({ ok: true });
     await expect(server.request("config/read", { cwd: "C:/repo" })).resolves.toEqual({ ok: true });
-    server.close();
+    server.close({ forceKillMs: 0 });
 
     expect(JSON.parse(writes[0])).toEqual({
       id: 1,
@@ -1837,6 +1890,193 @@ describe("Codex app-server mapping", () => {
       method: "config/read",
       params: { cwd: "C:/repo" },
     });
+  });
+
+  it("keeps app-server exit errors actionable when stderr is empty", async () => {
+    const child: any = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = { write: () => true };
+    child.kill = () => {};
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    child.emit("exit", 1, null);
+
+    await expect(request).rejects.toThrow(
+      "Codex app-server exited (code 1)，但没有输出 stderr；请检查 Codex CLI 配置或认证状态。",
+    );
+  });
+
+  it("includes app-server stderr when pending requests fail on exit", async () => {
+    const child: any = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = { write: () => true };
+    child.kill = () => {};
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    child.stderr.write("auth failed\n");
+    child.emit("exit", 2, null);
+
+    await expect(request).rejects.toThrow("Codex app-server exited (code 2): auth failed");
+  });
+
+  it("does not surface SIGTERM as an app-server failure after Lilia force-closes the server", async () => {
+    const child: any = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = { write: () => true, end: () => {} };
+    child.kill = () => {
+      queueMicrotask(() => {
+        child.emit("exit", null, "SIGTERM");
+        child.emit("close");
+      });
+      return true;
+    };
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    server.close({ forceKillMs: 0 });
+
+    await expect(request).rejects.toThrow(
+      "Codex app-server request was cancelled because Lilia closed the app-server.",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("allows an in-flight app-server response to settle when close is requested", async () => {
+    const stdout = new PassThrough();
+    const child: any = new EventEmitter();
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    let stdinEnded = false;
+    child.stdin = {
+      write: (line: string) => {
+        const payload = JSON.parse(line);
+        queueMicrotask(() => {
+          stdout.write(`${JSON.stringify({ id: payload.id, result: { threads: [] } })}\n`);
+        });
+        return true;
+      },
+      end: () => {
+        stdinEnded = true;
+        setTimeout(() => {
+          child.emit("exit", 0, null);
+          child.emit("close");
+        }, 0);
+      },
+    };
+    child.kill = () => {
+      child.emit("exit", null, "SIGTERM");
+      return true;
+    };
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    server.close();
+    expect(stdinEnded).toBe(false);
+
+    await expect(request).resolves.toEqual({ threads: [] });
+    expect(stdinEnded).toBe(true);
+  });
+
+  it("keeps stdin open while a large app-server response is still pending", async () => {
+    const stdout = new PassThrough();
+    const child: any = new EventEmitter();
+    let stdinEnded = false;
+    let resolveResponse: (() => void) | null = null;
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    child.stdin = {
+      write: (line: string) => {
+        const payload = JSON.parse(line);
+        resolveResponse = () => {
+          stdout.write(`${JSON.stringify({
+            id: payload.id,
+            result: { data: Array.from({ length: 500 }, (_, index) => ({ id: `thread-${index}` })) },
+          })}\n`);
+        };
+        return true;
+      },
+      end: () => {
+        stdinEnded = true;
+        child.emit("exit", 0, null);
+        child.emit("close");
+      },
+    };
+    child.kill = () => {
+      child.emit("exit", null, "SIGTERM");
+      child.emit("close");
+      return true;
+    };
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    server.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(stdinEnded).toBe(false);
+    resolveResponse?.();
+    const result = await request;
+
+    expect(result.data).toHaveLength(500);
+    expect(stdinEnded).toBe(true);
+  });
+
+  it("keeps pending requests until stdout is drained after process exit", async () => {
+    const stdout = new PassThrough();
+    const child: any = new EventEmitter();
+    child.stdout = stdout;
+    child.stderr = new PassThrough();
+    child.stdin = {
+      write: (line: string) => {
+        const payload = JSON.parse(line);
+        queueMicrotask(() => {
+          child.emit("exit", 0, null);
+          stdout.write(`${JSON.stringify({ id: payload.id, result: { threads: ["large"] } })}\n`);
+          child.emit("close");
+        });
+        return true;
+      },
+      end: () => {},
+    };
+    child.kill = () => {
+      child.emit("exit", null, "SIGTERM");
+      child.emit("close");
+      return true;
+    };
+    const server = createCodexAppServer({
+      env: {},
+      resolveBinary: () => "codex",
+      spawnServer: () => child,
+    });
+
+    const request = server.request("thread/list", {});
+    server.close();
+
+    await expect(request).resolves.toEqual({ threads: ["large"] });
   });
 
   it("normalizes app-server turn and plan events", () => {
@@ -3302,6 +3542,21 @@ describe("Codex app-server mapping", () => {
       server,
     });
 
+    const startupEvent = json().find((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Codex runtime starting"
+    );
+    expect(startupEvent).toMatchObject({
+      event: {
+        status: "info",
+        sourceId: "codex:runtime:start",
+        payload: {
+          backend: "codex",
+          subkind: "runtime_start",
+        },
+      },
+    });
     expect(calls.some((call) => call.method === "review/start")).toBe(false);
     expect(calls.findIndex((call) => call.method === "thread/settings/update"))
       .toBeLessThan(calls.findIndex((call) => call.method === "turn/start"));

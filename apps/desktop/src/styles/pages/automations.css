@@ -2,26 +2,51 @@
   height: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   background: var(--bg);
   overflow: hidden;
 }
 
-.automations-page__sidebar,
+.automations-sidebar {
+  gap: 10px;
+}
+
+.automations-sidebar .settings-sidebar__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.automations-sidebar .settings-sidebar__back {
+  width: auto;
+  flex: 1;
+}
+
+.automations-sidebar__host {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+}
+
+.automations-page__sidebar {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
 .automations-page__inspector {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   background: var(--bg-subtle);
 }
 
 .automations-page__inspector {
-  border-right: 0;
   border-left: 1px solid var(--border);
 }
 
-.automations-page__head,
 .automations-page__inspector-head {
   min-height: 52px;
   padding: 10px 12px;
@@ -40,33 +65,22 @@
 
 .automations-page__list {
   min-height: 0;
-  overflow: auto;
-  padding: 8px;
-  gap: 4px;
+  padding: 6px 4px;
 }
 
 .automations-page__row {
-  width: 100%;
-  min-height: 48px;
-  padding: 8px 10px;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 3px;
-  text-align: left;
+  flex: 0 0 auto;
 }
 
 .automations-page__row-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .automations-page__row-meta {
-  color: var(--text-muted);
+  max-width: 92px;
+  color: var(--text-faint);
   font-size: 11px;
+  font-weight: 500;
 }
 
 .automations-page__main {
@@ -76,46 +90,28 @@
   flex-direction: column;
 }
 
-.automations-page__toolbar {
-  min-height: 52px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .automations-page__name {
-  width: min(360px, 40vw);
-}
-
-.automations-page__toolbar-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.automations-page__run-config {
-  min-height: 76px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-}
-
-.automations-page__run-config label {
-  padding-top: 7px;
-  color: var(--text-muted);
+  width: clamp(120px, 16vw, 160px);
+  height: 28px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
   font-size: 12px;
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.automations-page__run-config textarea {
-  min-height: 58px;
-  resize: vertical;
+.automations-page__name:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+
+.automations-page__name.is-editing {
+  border-color: var(--accent);
+  background: var(--bg);
 }
 
 .automations-page__canvas {
@@ -125,7 +121,12 @@
   background:
     linear-gradient(var(--border-soft) 1px, transparent 1px),
     linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-position:
+    var(--automation-canvas-grid-x, 0) var(--automation-canvas-grid-y, 0),
+    var(--automation-canvas-grid-x, 0) var(--automation-canvas-grid-y, 0);
+  background-size:
+    var(--automation-canvas-grid-size, 24px) var(--automation-canvas-grid-size, 24px),
+    var(--automation-canvas-grid-size, 24px) var(--automation-canvas-grid-size, 24px);
 }
 
 .automations-page__canvas .vue-flow {
@@ -198,30 +199,46 @@
   pointer-events: none;
 }
 
-.automations-page__palette {
+.automations-page__corner-actions {
   position: absolute;
-  left: 12px;
-  top: 12px;
   z-index: 5;
   display: flex;
-  gap: 4px;
-  padding: 4px;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-subtle) 94%, transparent);
+  border-radius: 7px;
+  background: var(--bg-elev);
+}
+
+.automations-page__corner-actions .ui-icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.automations-page__palette {
+  left: 12px;
+  top: 12px;
 }
 
 .automations-page__canvas-controls {
-  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.automations-page__workflow-actions {
   right: 12px;
   top: 12px;
-  z-index: 5;
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-subtle) 94%, transparent);
+}
+
+.automations-page__canvas-error {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  right: 12px;
+  z-index: 6;
+  max-width: 560px;
+  margin-inline: auto;
 }
 
 .automations-page__minimap {
@@ -233,26 +250,15 @@
   height: 94px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background:
-    linear-gradient(var(--border-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-soft) 1px, transparent 1px),
-    color-mix(in srgb, var(--bg-subtle) 94%, transparent);
-  background-size: 12px 12px;
+  background: var(--bg-subtle);
   overflow: hidden;
 }
 
 .automations-page__minimap-node {
   position: absolute;
-  min-width: 8px;
-  min-height: 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   background: var(--bg-elev);
-}
-
-.automations-page__minimap-node.is-selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .automations-page__minimap-node.is-running,
@@ -266,6 +272,13 @@
 
 .automations-page__minimap-node.is-failed {
   border-color: var(--err);
+}
+
+.automations-page__minimap-viewport {
+  position: absolute;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-faint) 22%, transparent);
+  pointer-events: none;
 }
 
 .automations-page__inspector-body {
@@ -457,7 +470,7 @@
 
 @media (max-width: 980px) {
   .automations-page {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .automations-page__inspector {

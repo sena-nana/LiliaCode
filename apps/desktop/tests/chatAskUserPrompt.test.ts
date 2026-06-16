@@ -857,7 +857,7 @@ describe("chat AskUser prompt", () => {
   it("Codex compact 入口以 workflow 进入发送命令", async () => {
     const view = await renderCodexTaskDetail();
 
-    await fireEvent.click(view.getByRole("button", { name: "压缩上下文" }));
+    await fireEvent.click(view.getByRole("button", { name: /压缩上下文/ }));
     await expectLatestChatSend({
       content: "",
       workflow: { type: "lilia_compact" },

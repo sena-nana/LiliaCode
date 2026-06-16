@@ -8,5 +8,7 @@ export {
   listProjectMilestoneLinks,
   createMilestone,
   updateMilestone,
+  deleteMilestone,
+  reorderMilestones,
   setMilestoneTasks,
 } from "../data/milestones";

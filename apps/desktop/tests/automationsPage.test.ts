@@ -2,10 +2,16 @@ import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { useVueFlow } from "@vue-flow/core";
 import { describe, expect, it, vi } from "vitest";
 import Automations from "../src/pages/Automations.vue";
-import { finishMockAutomationRun, mockInvoke } from "./tauriMock";
+import { clearMockAutomations, finishMockAutomationRun, mockInvoke } from "./tauriMock";
 
 const vueFlowMock = vi.hoisted(() => ({
-  useVueFlow: vi.fn(() => ({ fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() })),
+  useVueFlow: vi.fn(() => ({
+    fitView: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    dimensions: { value: { width: 740, height: 470 } },
+    viewport: { value: { x: 0, y: 0, zoom: 1 } },
+  })),
 }));
 
 vi.mock("@vue-flow/core", async () => {
@@ -50,32 +56,74 @@ function lastInvokeInput(command: string) {
     .at(-1)?.[1];
 }
 
+function renderAutomations() {
+  document.getElementById("automation-sidebar-host")?.closest("aside")?.remove();
+  const sidebar = document.createElement("aside");
+  sidebar.setAttribute("aria-label", "自动化列表");
+  const actions = document.createElement("div");
+  actions.id = "automation-sidebar-actions";
+  sidebar.appendChild(actions);
+  const host = document.createElement("div");
+  host.id = "automation-sidebar-host";
+  sidebar.appendChild(host);
+  document.body.appendChild(sidebar);
+  return render(Automations);
+}
+
+function workflowNameInput(view: ReturnType<typeof renderAutomations>) {
+  return within(view.getByRole("group", { name: "自动化操作" })).getByRole("textbox", {
+    name: "自动化名称",
+  });
+}
+
+async function editWorkflowName(view: ReturnType<typeof renderAutomations>, value: string) {
+  const input = workflowNameInput(view);
+  await fireEvent.pointerDown(input);
+  await fireEvent.update(input, value);
+  return input;
+}
+
 describe("Automations page", () => {
   it("展示全局自动化列表、节点画布和检查器", async () => {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();
     const fitView = vi.fn();
-    vi.mocked(useVueFlow).mockReturnValue({ fitView, zoomIn, zoomOut } as never);
-    const view = render(Automations);
+    vi.mocked(useVueFlow).mockReturnValue({
+      fitView,
+      zoomIn,
+      zoomOut,
+      dimensions: { value: { width: 740, height: 470 } },
+      viewport: { value: { x: 18, y: -12, zoom: 1.5 } },
+    } as never);
+    const view = renderAutomations();
 
-    await waitFor(() => {
-      expect(view.getByRole("complementary", { name: "自动化列表" })).toBeInTheDocument();
-    });
+    await view.findByRole("complementary", { name: "自动化检查器" }, { timeout: 5000 });
     const list = view.getByRole("complementary", { name: "自动化列表" });
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
 
     await waitFor(() => {
       expect(within(list).getByRole("button", { name: /任务完成后复盘/ })).toBeInTheDocument();
     });
+    expect(within(list).queryByRole("heading", { name: "自动化" })).not.toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "新建自动化" })).toBeInTheDocument();
 
-    expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+    expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
+    expect(workflowNameInput(view)).toHaveAttribute("readonly");
     expect(within(view.getByTestId("automation-flow")).getByText("任务变化")).toBeInTheDocument();
     expect(within(view.getByTestId("automation-flow")).getByText("复盘 Agent")).toBeInTheDocument();
     expect(view.getByRole("group", { name: "画布控制" })).toBeInTheDocument();
+    expect(view.getByRole("group", { name: "画布控制" }).closest(".automations-page__canvas")).toHaveStyle({
+      "--automation-canvas-grid-x": "18px",
+      "--automation-canvas-grid-y": "-12px",
+      "--automation-canvas-grid-size": "36px",
+    });
     expect(view.getByRole("img", { name: "节点小地图" })).toBeInTheDocument();
+    const minimap = view.getByRole("img", { name: "节点小地图" });
+    expect(minimap.querySelector(".automations-page__minimap-viewport")).not.toBeNull();
+    expect(minimap.querySelector(".automations-page__minimap-node.is-selected")).toBeNull();
     expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
     expect(view.getByRole("button", { name: "添加人工确认" })).toBeEnabled();
-    expect(view.getByRole("textbox", { name: "手动 Payload" })).toBeInTheDocument();
+    expect(view.queryByRole("textbox", { name: "手动 Payload" })).not.toBeInTheDocument();
     await fireEvent.click(view.getByRole("button", { name: "放大画布" }));
     await fireEvent.click(view.getByRole("button", { name: "缩小画布" }));
     await fireEvent.click(view.getByRole("button", { name: "适应视图" }));
@@ -87,13 +135,64 @@ describe("Automations page", () => {
     expect(within(inspector).getByRole("button", { name: "task_created" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "task_status_changed" })).toBeInTheDocument();
     expect(within(inspector).getByText("运行历史")).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "新建自动化" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+      });
+      expect(workflowNameInput(view)).toHaveValue("未命名自动化");
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+    });
+    expect(view.getByRole("button", { name: "添加事件触发" })).toBeEnabled();
+
+    const newWorkflowRow = within(list).getByRole("button", { name: /未命名自动化/ });
+    await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "删除" }));
+    expect(within(newWorkflowRow).getByRole("button", { name: "确认删除" })).toBeInTheDocument();
+    await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "确认删除" }));
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-2" });
+      expect(within(list).queryByRole("button", { name: /未命名自动化/ })).not.toBeInTheDocument();
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
+    });
   });
 
-  it("暴露 Agent、工具和手动运行 Payload 配置", async () => {
-    const view = render(Automations);
+  it("没有自动化或删除最后一项后自动创建空白自动化", async () => {
+    clearMockAutomations();
+    const view = renderAutomations();
+    const list = view.getByRole("complementary", { name: "自动化列表" });
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(within(list).queryByText("没有自动化")).not.toBeInTheDocument();
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+      expect(workflowNameInput(view)).toHaveValue("未命名自动化");
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+        nodes: [],
+        edges: [],
+      });
+    });
+
+    const row = within(list).getByRole("button", { name: /未命名自动化/ });
+    await fireEvent.click(within(row).getByRole("button", { name: "删除" }));
+    await fireEvent.click(within(row).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-1" });
+      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+        name: "未命名自动化",
+        nodes: [],
+        edges: [],
+      });
+      expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
+    });
+  });
+
+  it("暴露 Agent、工具配置并支持手动运行", async () => {
+    const view = renderAutomations();
+
+    await waitFor(() => {
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     const flow = view.getByTestId("automation-flow");
@@ -132,25 +231,24 @@ describe("Automations page", () => {
     });
 
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
-    await fireEvent.update(view.getByRole("textbox", { name: "手动 Payload" }), '{"reason":"smoke"}');
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("automation_run_once")).toEqual({
         id: "auto-1",
-        input: { payload: { reason: "smoke" } },
+        input: {},
       });
     });
   });
 
   it("保存草稿、发布、启停并手动运行后显示运行历史和节点状态", async () => {
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
-    await fireEvent.update(view.getByRole("textbox", { name: "自动化名称" }), "自动复盘");
+    await editWorkflowName(view, "自动复盘");
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
     await fireEvent.click(within(inspector).getByRole("button", { name: "Lilia" }));
     await fireEvent.click(within(inspector).getByRole("button", { name: "running" }));
@@ -214,10 +312,10 @@ describe("Automations page", () => {
   });
 
   it("人工节点等待用户确认后可以继续运行", async () => {
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     await fireEvent.click(view.getByRole("button", { name: "添加人工确认" }));

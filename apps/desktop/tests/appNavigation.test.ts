@@ -28,7 +28,13 @@ vi.mock("@vue-flow/core", async () => {
       setup: (_, { slots }) => () =>
         h("div", { "data-testid": "automation-flow" }, slots.default?.()),
     }),
-    useVueFlow: () => ({ fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() }),
+    useVueFlow: () => ({
+      fitView: vi.fn(),
+      zoomIn: vi.fn(),
+      zoomOut: vi.fn(),
+      dimensions: { value: { width: 740, height: 470 } },
+      viewport: { value: { x: 0, y: 0, zoom: 1 } },
+    }),
   };
 });
 

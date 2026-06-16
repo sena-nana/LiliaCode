@@ -50,6 +50,8 @@ yarn verify
 
 如果启用 Corepack 后 `yarn --version` 仍显示 `1.x`，请显式通过 Corepack 运行命令，例如 `corepack yarn install` 和 `corepack yarn dev`。仓库脚本和 workspace 脚本都会执行同一个包管理器检查，让贡献者统一走 Corepack 管理的 Yarn 路径。
 
+`yarn dev` 是普通浏览器预览模式，Vite 会为 `@tauri-apps/api/*` 接入内存态轻量 mock，让页面可以在没有 Tauri shell 的情况下浏览基础项目、对话、设置和插件页面。`yarn tauri:dev`、`yarn build`、`yarn tauri:build` 不启用这套 mock，仍然通过现有 Tauri command 与 Rust/SQLite 后端通信。
+
 ## 文档站
 
 ```bash

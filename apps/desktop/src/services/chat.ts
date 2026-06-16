@@ -20,6 +20,7 @@ import type {
   ChatContextSearchResult,
   ChatSlashCommandSearchResult,
   ChatComposerState,
+  ChatContextUsage,
   ChatRuntimeCommand,
   ChatRuntimeSnapshot,
   ChatWorkflow,
@@ -73,6 +74,7 @@ export type {
   ChatAttachment,
   ChatInterruptResult,
   ChatContextSearchResult,
+  ChatContextUsage,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
   ChatRuntimeCommand,
@@ -405,6 +407,10 @@ export function onTurnStarted(handler: (e: TurnStartedEvent) => void): Promise<U
 
 export function onDone(handler: (e: DoneEvent) => void): Promise<UnlistenFn> {
   return listen<DoneEvent>("chat:done", (event) => handler(event.payload));
+}
+
+export function onContextUsage(handler: (e: ChatContextUsage) => void): Promise<UnlistenFn> {
+  return listen<ChatContextUsage>("chat:context-usage", (event) => handler(event.payload));
 }
 
 export function onAgentTimeline(

@@ -15,6 +15,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatContextUsage,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
   PermissionMode,
@@ -55,6 +56,7 @@ const props = defineProps<{
   /** 上一轮还在 streaming 时为 true，发送会进入调度队列。 */
   sending?: boolean;
   compactDisabled?: boolean;
+  contextUsage?: ChatContextUsage | null;
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
   suggestions?: SuggestionItem[];
@@ -79,9 +81,7 @@ const emit = defineEmits<{
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
-  "start-session-fork": [];
   "open-lilia-iab": [];
-  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -191,6 +191,9 @@ const {
 
 const attachmentsForView = computed(() => props.attachments ?? []);
 const appendAttachmentsToEndKey = computed(() => props.appendAttachmentsToEndKey ?? 0);
+const contextUsageForToolbar = computed(() =>
+  props.contextUsage?.backend === props.state.backend ? props.contextUsage : null,
+);
 
 const richInput = useComposerRichInput({
   attachments: attachmentsForView,
@@ -907,7 +910,7 @@ defineExpose({ focusInput, getDraftSnapshot });
         :review-disabled="sending === true || hasPending"
         :fix-suggestion-disabled="sending === true || hasPending"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
-        :session-fork-disabled="sending === true || hasPending"
+        :context-usage="contextUsageForToolbar"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -916,9 +919,7 @@ defineExpose({ focusInput, getDraftSnapshot });
         @start-lilia-review="startLiliaReview"
         @start-lilia-fix-suggestion="startLiliaFixSuggestion"
         @start-lilia-compact="emit('start-lilia-compact')"
-        @start-session-fork="emit('start-session-fork')"
         @open-lilia-iab="emit('open-lilia-iab')"
-        @submit-lilia-iab="emit('submit-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

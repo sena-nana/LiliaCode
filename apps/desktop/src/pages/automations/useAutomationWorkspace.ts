@@ -1,6 +1,7 @@
 import { computed, ref, type Ref } from "vue";
 import type { AutomationScopeFilter, AutomationWorkflow, ChatBackendKind } from "@lilia/contracts";
 import {
+  deleteAutomation,
   listAutomations,
   publishAutomation,
   saveAutomationDraft,
@@ -11,7 +12,7 @@ import type { AutomationFlowEdge, AutomationFlowNode } from "./types";
 
 export function useAutomationWorkspace(options: {
   selectedWorkflowId: Ref<string | null>;
-  applyWorkflow: (workflow: AutomationWorkflow | null) => { scope: AutomationScopeFilter };
+  applyWorkflow: (workflow: AutomationWorkflow | null) => AutomationWorkflow["draft"];
   automationNodes: () => AutomationFlowNode["data"]["node"][];
   automationEdges: () => {
     id: AutomationFlowEdge["id"];
@@ -31,6 +32,7 @@ export function useAutomationWorkspace(options: {
   const loading = ref(false);
   const saving = ref(false);
   const publishing = ref(false);
+  let blankWorkflowCreation: Promise<AutomationWorkflow> | null = null;
 
   const selectedWorkflow = computed(() =>
     workflowRows.value.find((workflow) => workflow.id === selectedWorkflowId.value) ?? null,
@@ -40,9 +42,13 @@ export function useAutomationWorkspace(options: {
     loading.value = true;
     options.setError("");
     try {
-      workflowRows.value = await listAutomations();
-      if (!selectedWorkflowId.value && workflowRows.value.length) {
-        selectedWorkflowId.value = workflowRows.value[0].id;
+      const rows = await listAutomations();
+      workflowRows.value = rows.length ? rows : [await createBlankWorkflow()];
+      if (
+        !selectedWorkflowId.value ||
+        !workflowRows.value.some((workflow) => workflow.id === selectedWorkflowId.value)
+      ) {
+        selectedWorkflowId.value = workflowRows.value[0]?.id ?? null;
       }
       applySelectedWorkflow();
       void options.refreshRuns().catch((err) => {
@@ -77,12 +83,38 @@ export function useAutomationWorkspace(options: {
     });
   }
 
-  function newWorkflow() {
-    selectedWorkflowId.value = null;
-    options.resetRunSelection();
-    workflowName.value = "新自动化";
-    const draft = options.applyWorkflow(null);
-    scope.value = { ...draft.scope };
+  async function createBlankWorkflow() {
+    if (blankWorkflowCreation) return blankWorkflowCreation;
+    const blankScope = { ...DEFAULT_SCOPE };
+    blankWorkflowCreation = saveAutomationDraft({
+      id: null,
+      name: "未命名自动化",
+      scope: blankScope,
+      nodes: [],
+      edges: [],
+    }).finally(() => {
+      blankWorkflowCreation = null;
+    });
+    return blankWorkflowCreation;
+  }
+
+  async function newWorkflow() {
+    saving.value = true;
+    options.setError("");
+    try {
+      const saved = await createBlankWorkflow();
+      workflowRows.value = [saved, ...workflowRows.value.filter((workflow) => workflow.id !== saved.id)];
+      selectedWorkflowId.value = saved.id;
+      options.resetRunSelection();
+      applySelectedWorkflow();
+      void options.refreshRuns().catch((err) => {
+        options.setError(String(err));
+      });
+    } catch (err) {
+      options.setError(String(err));
+    } finally {
+      saving.value = false;
+    }
   }
 
   async function saveDraft() {
@@ -132,6 +164,17 @@ export function useAutomationWorkspace(options: {
     }
   }
 
+  async function deleteWorkflow(id: string) {
+    options.setError("");
+    try {
+      await deleteAutomation(id);
+      if (selectedWorkflowId.value === id) selectedWorkflowId.value = null;
+      await refreshWorkflows();
+    } catch (err) {
+      options.setError(String(err));
+    }
+  }
+
   function toggleScopeList(key: "projectIds" | "taskStatuses" | "eventKinds", value: string) {
     const current = scope.value[key];
     scope.value = {
@@ -163,6 +206,7 @@ export function useAutomationWorkspace(options: {
     refreshWorkflows,
     selectWorkflow,
     newWorkflow,
+    deleteWorkflow,
     saveDraft,
     publishCurrent,
     toggleEnabled,

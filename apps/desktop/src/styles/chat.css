@@ -445,7 +445,8 @@
 }
 
 .architecture-panel__item-head span,
-.architecture-panel__change-status {
+.architecture-panel__change-status,
+.architecture-panel__change-backend {
   flex: 0 0 auto;
   color: var(--text-faint);
   font-size: 11px;
@@ -458,12 +459,38 @@
 
 .architecture-panel__change {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  gap: 6px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.architecture-panel__change-head,
+.architecture-panel__change-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.architecture-panel__change-status {
+  font-weight: 700;
+}
+
+.architecture-panel__change-backend {
+  padding-left: 6px;
+  border-left: 1px solid var(--border-soft);
+}
+
+.architecture-panel__change p {
+  margin: 0;
+  min-width: 0;
+}
+
+.architecture-panel__change-meta {
+  flex-wrap: wrap;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 .debug-panel {
@@ -1465,7 +1492,21 @@
 
 .timeline-card--final-reply__actions {
   display: flex;
+  align-items: center;
+  gap: 6px;
   justify-content: flex-start;
+  margin-top: 8px;
+}
+
+.timeline-card--final-reply__actions:not(.has-visible-action) {
+  height: 0;
+  margin-top: 0;
+  overflow: visible;
+}
+
+.timeline-card--final-reply:hover .timeline-card--final-reply__actions:not(.has-visible-action),
+.timeline-card--final-reply:focus-within .timeline-card--final-reply__actions:not(.has-visible-action) {
+  height: 28px;
   margin-top: 8px;
 }
 
@@ -1487,6 +1528,29 @@
 
 .timeline-card--final-reply__action:hover {
   border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.timeline-card--final-reply__action--ghost {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.timeline-card--final-reply:hover .timeline-card--final-reply__action--ghost,
+.timeline-card--final-reply:focus-within .timeline-card--final-reply__action--ghost,
+.timeline-card--final-reply__action--ghost:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.timeline-card--final-reply__action--ghost:hover {
+  border-color: transparent;
+  background: transparent;
   color: var(--text);
 }
 
@@ -2487,6 +2551,146 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.chat-composer__entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chat-composer__context-action {
+  --quota-progress: 0;
+  --quota-ring-color: var(--accent);
+  --quota-ring-track: color-mix(in srgb, var(--accent) 18%, transparent);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.chat-composer__context-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-composer__context-action:disabled,
+.chat-composer__context-action.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chat-composer__context-action svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  overflow: visible;
+}
+
+.chat-composer__context-action circle {
+  fill: none;
+  stroke-width: 2.2;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-width 0.12s ease, stroke-opacity 0.12s ease;
+}
+
+button.chat-composer__context-action:hover:not(:disabled),
+button.chat-composer__context-action:active:not(:disabled) {
+  background: transparent;
+}
+
+.chat-composer__context-action:hover:not(:disabled) .chat-context-ring__track {
+  stroke-opacity: 0.95;
+}
+
+.chat-composer__context-action:hover:not(:disabled) .chat-context-ring__value {
+  stroke-width: 2.8;
+}
+
+.chat-context-ring__track {
+  stroke: var(--quota-ring-track);
+  stroke-opacity: 0.72;
+}
+
+.chat-context-ring__value {
+  stroke: var(--quota-ring-color);
+  stroke-linecap: round;
+  stroke-dasharray: var(--quota-progress) calc(100 - var(--quota-progress));
+  stroke-dashoffset: calc(var(--quota-progress) - 100);
+}
+
+.chat-context-ring--warn {
+  --quota-ring-color: var(--warn);
+  --quota-ring-track: color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.chat-context-ring--error {
+  --quota-ring-color: var(--err);
+  --quota-ring-track: color-mix(in srgb, var(--err) 20%, transparent);
+}
+
+.chat-context-ring--empty {
+  --quota-ring-color: var(--text-faint);
+  --quota-ring-track: color-mix(in srgb, var(--text-faint) 18%, transparent);
+  color: var(--text-faint);
+}
+
+.chat-composer__context-card {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  width: 230px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.chat-composer__context-wrap:hover .chat-composer__context-card,
+.chat-composer__context-wrap:focus-within .chat-composer__context-card {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.chat-composer__context-card-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+}
+
+.chat-composer__context-card-list dt {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.chat-composer__context-card-list dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .chat-composer__send {

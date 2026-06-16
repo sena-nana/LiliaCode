@@ -93,6 +93,7 @@ const {
 } = attachmentController;
 const {
   composerForView,
+  contextUsage,
   isTurnRunning,
   userSendScrollKey,
   restoreDraftKey,
@@ -369,6 +370,7 @@ watch(
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
     :composer-state="composerForView"
+    :context-usage="contextUsage"
     :attachments="attachments"
     :append-attachments-to-end-key="droppedAttachmentAppendKey"
     :pending-ask="nonInterruptMode ? null : pendingAskUser"
@@ -394,7 +396,6 @@ watch(
     @start-lilia-compact="composerController.onStartLiliaCompact"
     @start-session-fork="composerController.onStartSessionFork"
     @open-lilia-iab="composerController.onOpenLiliaIab"
-    @submit-lilia-iab="composerController.onSubmitLiliaIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"
     @start-lilia-batch-apply="composerController.onStartLiliaBatchApply"
     @interrupt="composerController.onInterrupt"

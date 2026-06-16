@@ -167,6 +167,28 @@ fn set_milestone_tasks_core(
         .collect())
 }
 
+fn delete_milestone_core(conn: &rusqlite::Connection, id: &str) -> Result<bool, String> {
+    let deleted = conn
+        .execute("DELETE FROM milestones WHERE id = ?1", params![id])
+        .map_err(|e| format!("milestone_delete: 删除 milestone 失败：{e}"))?;
+    Ok(deleted > 0)
+}
+
+fn reorder_milestones_core(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    ordered_ids: Vec<String>,
+) -> Result<(), String> {
+    for (index, id) in ordered_ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE milestones SET sort_order = ?1 WHERE id = ?2 AND project_id = ?3",
+            params![index as i64, id, project_id],
+        )
+        .map_err(|e| format!("milestone_reorder: 更新顺序失败：{e}"))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn milestone_list(
     project_id: String,
@@ -294,6 +316,22 @@ pub fn milestone_update(
 }
 
 #[tauri::command]
+pub fn milestone_delete(id: String, store: State<'_, LiliaStore>) -> Result<bool, String> {
+    let conn = store.conn()?;
+    delete_milestone_core(&conn, id.as_str())
+}
+
+#[tauri::command]
+pub fn milestone_reorder(
+    project_id: String,
+    ordered_ids: Vec<String>,
+    store: State<'_, LiliaStore>,
+) -> Result<(), String> {
+    let conn = store.conn()?;
+    reorder_milestones_core(&conn, project_id.as_str(), ordered_ids)
+}
+
+#[tauri::command]
 pub fn milestone_set_tasks(
     milestone_id: String,
     task_ids: Vec<String>,
@@ -365,7 +403,10 @@ mod tests {
                 ('t4', 'p1', 't4', 'T4', 'waiting', 4, 2);
             UPDATE tasks SET archived = 1 WHERE id = 't4';
             INSERT INTO milestones (id, project_id, title, status, sort_order, created_at)
-              VALUES ('m1', 'p1', 'M1', 'upcoming', 0, 1);
+              VALUES
+                ('m1', 'p1', 'M1', 'upcoming', 0, 1),
+                ('m2', 'p1', 'M2', 'upcoming', 1, 2),
+                ('m3', 'p2', 'M3', 'upcoming', 0, 1);
             "#,
         )
         .unwrap();
@@ -440,8 +481,72 @@ mod tests {
 
         update_milestone_core(&conn, "m1", None, None, None, Some(None)).unwrap();
         let due_date: Option<i64> = conn
-            .query_row("SELECT due_date FROM milestones WHERE id = 'm1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT due_date FROM milestones WHERE id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(due_date, None);
+    }
+
+    #[test]
+    fn delete_milestone_removes_links_without_touching_tasks() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+        conn.execute(
+            "INSERT INTO task_milestone_links (task_id, milestone_id) VALUES ('t1', 'm1')",
+            [],
+        )
+        .unwrap();
+
+        assert!(delete_milestone_core(&conn, "m1").unwrap());
+        assert!(!delete_milestone_core(&conn, "missing").unwrap());
+
+        let link_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_milestone_links WHERE milestone_id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let task_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(link_count, 0);
+        assert_eq!(task_count, 1);
+    }
+
+    #[test]
+    fn reorder_milestones_updates_only_current_project_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+
+        reorder_milestones_core(
+            &conn,
+            "p1",
+            vec!["m2".to_string(), "m1".to_string(), "m3".to_string()],
+        )
+        .unwrap();
+
+        let rows = conn
+            .prepare("SELECT id FROM milestones WHERE project_id = 'p1' ORDER BY sort_order ASC")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(rows, vec!["m2", "m1"]);
+
+        let p2_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM milestones WHERE id = 'm3'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(p2_order, 0);
     }
 }

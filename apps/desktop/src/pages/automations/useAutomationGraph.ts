@@ -26,26 +26,6 @@ export function useAutomationGraph(options: {
   const hasTriggerNode = computed(() =>
     nodes.value.some((node) => node.data.node.kind === "trigger"),
   );
-  const minimapNodes = computed(() => {
-    if (!nodes.value.length) return [];
-    const xs = nodes.value.map((node) => node.position.x);
-    const ys = nodes.value.map((node) => node.position.y);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    const maxX = Math.max(...xs) + 184;
-    const maxY = Math.max(...ys) + 78;
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    return nodes.value.map((node) => ({
-      id: node.id,
-      left: `${((node.position.x - minX) / width) * 100}%`,
-      top: `${((node.position.y - minY) / height) * 100}%`,
-      width: `${Math.max(8, (184 / width) * 100)}%`,
-      height: `${Math.max(8, (78 / height) * 100)}%`,
-      selected: node.id === selectedNodeId.value,
-      status: nodeStatus(node.id),
-    }));
-  });
 
   function defaultWorkflowDraft() {
     const trigger = createAutomationNode("trigger", 80, 100);
@@ -271,7 +251,6 @@ export function useAutomationGraph(options: {
     edges,
     selectedNode,
     hasTriggerNode,
-    minimapNodes,
     applyWorkflow,
     addNode,
     updateSelectedConfig,
