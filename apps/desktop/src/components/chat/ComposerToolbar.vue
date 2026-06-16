@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed } from "vue";
 import {
   ArrowUp,
-  CodeXml,
-  FileQuestion,
-  GitBranch,
-  GitCommit,
   Globe,
   ListChecks,
   Paperclip,
@@ -16,7 +12,6 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatContextUsage,
-  LiliaReviewTarget,
   PermissionMode,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
@@ -29,8 +24,6 @@ const props = defineProps<{
   canInterrupt: boolean;
   canSubmitEntry: boolean;
   actionsBlocked: boolean;
-  reviewDisabled: boolean;
-  fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
   contextUsage?: ChatContextUsage | null;
   sendTitle: string;
@@ -41,92 +34,13 @@ const emit = defineEmits<{
   pickAttachments: [];
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
-  startLiliaReview: [target: LiliaReviewTarget];
-  startLiliaFixSuggestion: [target: LiliaReviewTarget];
   startLiliaCompact: [];
   openLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
 
-const reviewOpen = ref(false);
-const reviewRoot = ref<HTMLElement | null>(null);
-const fixSuggestionOpen = ref(false);
-const fixSuggestionRoot = ref<HTMLElement | null>(null);
 const numberFormatter = new Intl.NumberFormat("zh-CN");
-
-function closeReviewMenu() {
-  reviewOpen.value = false;
-}
-
-function closeFixSuggestionMenu() {
-  fixSuggestionOpen.value = false;
-}
-
-function toggleReviewMenu() {
-  if (props.reviewDisabled || props.actionsBlocked) return;
-  reviewOpen.value = !reviewOpen.value;
-}
-
-function toggleFixSuggestionMenu() {
-  if (props.fixSuggestionDisabled || props.actionsBlocked) return;
-  fixSuggestionOpen.value = !fixSuggestionOpen.value;
-}
-
-function onDocPointer(e: PointerEvent) {
-  if (reviewRoot.value && !reviewRoot.value.contains(e.target as Node)) closeReviewMenu();
-  if (
-    fixSuggestionRoot.value &&
-    !fixSuggestionRoot.value.contains(e.target as Node)
-  ) {
-    closeFixSuggestionMenu();
-  }
-}
-
-function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape" && reviewOpen.value) {
-    closeReviewMenu();
-    e.stopPropagation();
-  }
-  if (e.key === "Escape" && fixSuggestionOpen.value) {
-    closeFixSuggestionMenu();
-    e.stopPropagation();
-  }
-}
-
-function startReview(target: LiliaReviewTarget) {
-  closeReviewMenu();
-  emit("startLiliaReview", target);
-}
-
-function startFixSuggestion(target: LiliaReviewTarget) {
-  closeFixSuggestionMenu();
-  emit("startLiliaFixSuggestion", target);
-}
-
-function startBranchReview() {
-  const branch = window.prompt("对比分支")?.trim();
-  if (branch) startReview({ type: "baseBranch", branch });
-  else closeReviewMenu();
-}
-
-function startCommitReview() {
-  const sha = window.prompt("指定提交")?.trim();
-  if (sha) startReview({ type: "commit", sha });
-  else closeReviewMenu();
-}
-
-function startBranchFixSuggestion() {
-  const branch = window.prompt("对比分支")?.trim();
-  if (branch) startFixSuggestion({ type: "baseBranch", branch });
-  else closeFixSuggestionMenu();
-}
-
-function startCommitFixSuggestion() {
-  const sha = window.prompt("指定提交")?.trim();
-  if (sha) startFixSuggestion({ type: "commit", sha });
-  else closeFixSuggestionMenu();
-}
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
@@ -209,27 +123,6 @@ const contextUsageRows = computed(() => {
   return rows;
 });
 
-function syncDocumentListeners(open: boolean) {
-  if (open) {
-    document.addEventListener("pointerdown", onDocPointer, true);
-    document.addEventListener("keydown", onKey);
-  } else {
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onKey);
-  }
-}
-
-watch(
-  [reviewOpen, fixSuggestionOpen],
-  ([review, fixSuggestion]) => {
-    syncDocumentListeners(review || fixSuggestion);
-  },
-);
-
-onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onKey);
-});
 </script>
 
 <template>
@@ -284,102 +177,6 @@ onBeforeUnmount(() => {
         >
           <ListChecks :size="14" aria-hidden="true" />
         </button>
-        <div ref="reviewRoot" class="chat-review-menu">
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': reviewOpen, 'is-disabled': reviewDisabled }"
-            :disabled="reviewDisabled || actionsBlocked"
-            title="代码审查"
-            aria-label="代码审查"
-            :aria-haspopup="true"
-            :aria-expanded="reviewOpen"
-            @click="toggleReviewMenu"
-          >
-            <CodeXml :size="14" aria-hidden="true" />
-          </button>
-          <div
-            v-if="reviewOpen"
-            class="dd__menu dd__menu--top chat-review-menu__menu"
-            role="menu"
-          >
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startReview({ type: 'uncommittedChanges' })"
-            >
-              <GitBranch :size="14" aria-hidden="true" />
-              <span class="dd__item-label">未提交改动</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startBranchReview"
-            >
-              <GitBranch :size="14" aria-hidden="true" />
-              <span class="dd__item-label">对比分支...</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startCommitReview"
-            >
-              <GitCommit :size="14" aria-hidden="true" />
-              <span class="dd__item-label">指定提交...</span>
-            </button>
-          </div>
-        </div>
-        <div ref="fixSuggestionRoot" class="chat-review-menu">
-          <button
-            type="button"
-            class="chat-chip chat-chip--icon"
-            :class="{ 'is-open': fixSuggestionOpen, 'is-disabled': fixSuggestionDisabled }"
-            :disabled="fixSuggestionDisabled || actionsBlocked"
-            title="修复建议"
-            aria-label="修复建议"
-            :aria-haspopup="true"
-            :aria-expanded="fixSuggestionOpen"
-            @click="toggleFixSuggestionMenu"
-          >
-            <FileQuestion :size="14" aria-hidden="true" />
-          </button>
-          <div
-            v-if="fixSuggestionOpen"
-            class="dd__menu dd__menu--top chat-review-menu__menu"
-            role="menu"
-          >
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startFixSuggestion({ type: 'uncommittedChanges' })"
-            >
-              <GitBranch :size="14" aria-hidden="true" />
-              <span class="dd__item-label">未提交改动</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startBranchFixSuggestion"
-            >
-              <GitBranch :size="14" aria-hidden="true" />
-              <span class="dd__item-label">对比分支...</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item"
-              role="menuitem"
-              @click="startCommitFixSuggestion"
-            >
-              <GitCommit :size="14" aria-hidden="true" />
-              <span class="dd__item-label">指定提交...</span>
-            </button>
-          </div>
-        </div>
         <button
           v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"

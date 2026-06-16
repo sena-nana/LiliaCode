@@ -38,7 +38,9 @@ import {
   contextInlinePath,
   useComposerContextSearch,
 } from "./useComposerContextSearch";
-import { useComposerSlashCommands } from "./useComposerSlashCommands";
+import {
+  useComposerSlashCommands,
+} from "./useComposerSlashCommands";
 import { useComposerPaste } from "./useComposerPaste";
 import { useComposerRichInput } from "./useComposerRichInput";
 import {
@@ -219,6 +221,10 @@ const slashCommands = useComposerSlashCommands({
     richInput.resetInput();
     clearComposerContextState();
   },
+  startWorkflow: (kind, target) =>
+    kind === "review"
+      ? startLiliaReview(target)
+      : startLiliaFixSuggestion(target),
 });
 
 clearComposerContextState = () => {
@@ -890,11 +896,14 @@ defineExpose({ focusInput, getDraftSnapshot });
       <ComposerSlashCommandPanel
         v-if="slashCommands.panelOpen.value"
         :results="slashCommands.results.value"
+        :target-items="slashCommands.targetItems"
+        :active-workflow-kind="slashCommands.activeWorkflowKind.value"
         :active-index="slashCommands.activeIndex.value"
         :loading="slashCommands.loading.value"
         :error="slashCommands.error.value"
         @activate="slashCommands.activateResult"
         @select="slashCommands.selectResult"
+        @select-target="slashCommands.selectTarget"
       />
     </Transition>
 
@@ -907,8 +916,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         :can-interrupt="canInterrupt"
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
-        :review-disabled="sending === true || hasPending"
-        :fix-suggestion-disabled="sending === true || hasPending"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
         :context-usage="contextUsageForToolbar"
         :send-title="sendTitle"
@@ -916,8 +923,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         @pick-attachments="emit('pick-attachments')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
-        @start-lilia-review="startLiliaReview"
-        @start-lilia-fix-suggestion="startLiliaFixSuggestion"
         @start-lilia-compact="emit('start-lilia-compact')"
         @open-lilia-iab="emit('open-lilia-iab')"
         @submit-entry="submitEntry"
