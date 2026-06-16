@@ -805,6 +805,39 @@ defineExpose({ focusInput, getDraftSnapshot });
       </button>
     </div>
 
+    <Transition name="chat-composer-stack">
+      <ComposerContextPanel
+        v-if="contextSearch.panelOpen.value"
+        :results="contextSearch.results.value"
+        :active-index="contextSearch.activeIndex.value"
+        :loading="contextSearch.loading.value"
+        :error="contextSearch.error.value"
+        :missing-path="contextSearch.missingPath.value"
+        :show-missing-path="contextSearch.showMissingPath.value"
+        :is-large-directory="isLargeDirectory"
+        :attachment-meta-label="attachmentMetaLabel"
+        :context-inline-path="contextInlinePath"
+        :context-attachment-icon="contextAttachmentIcon"
+        @activate="contextSearch.activateResult"
+        @select="contextSearch.selectResult"
+      />
+    </Transition>
+
+    <Transition name="chat-composer-stack">
+      <ComposerSlashCommandPanel
+        v-if="slashCommands.panelOpen.value"
+        :results="slashCommands.results.value"
+        :target-items="slashCommands.targetItems"
+        :active-workflow-kind="slashCommands.activeWorkflowKind.value"
+        :active-index="slashCommands.activeIndex.value"
+        :loading="slashCommands.loading.value"
+        :error="slashCommands.error.value"
+        @activate="slashCommands.activateResult"
+        @select="slashCommands.selectResult"
+        @select-target="slashCommands.selectTarget"
+      />
+    </Transition>
+
     <div
       class="chat-composer__entry-row"
       :class="{ 'chat-composer__entry-row--pending': hasPending }"
@@ -873,39 +906,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         />
       </Transition>
     </div>
-
-    <Transition name="chat-composer-stack">
-      <ComposerContextPanel
-        v-if="contextSearch.panelOpen.value"
-        :results="contextSearch.results.value"
-        :active-index="contextSearch.activeIndex.value"
-        :loading="contextSearch.loading.value"
-        :error="contextSearch.error.value"
-        :missing-path="contextSearch.missingPath.value"
-        :show-missing-path="contextSearch.showMissingPath.value"
-        :is-large-directory="isLargeDirectory"
-        :attachment-meta-label="attachmentMetaLabel"
-        :context-inline-path="contextInlinePath"
-        :context-attachment-icon="contextAttachmentIcon"
-        @activate="contextSearch.activateResult"
-        @select="contextSearch.selectResult"
-      />
-    </Transition>
-
-    <Transition name="chat-composer-stack">
-      <ComposerSlashCommandPanel
-        v-if="slashCommands.panelOpen.value"
-        :results="slashCommands.results.value"
-        :target-items="slashCommands.targetItems"
-        :active-workflow-kind="slashCommands.activeWorkflowKind.value"
-        :active-index="slashCommands.activeIndex.value"
-        :loading="slashCommands.loading.value"
-        :error="slashCommands.error.value"
-        @activate="slashCommands.activateResult"
-        @select="slashCommands.selectResult"
-        @select-target="slashCommands.selectTarget"
-      />
-    </Transition>
 
     <Transition name="chat-composer-stack">
       <ComposerToolbar

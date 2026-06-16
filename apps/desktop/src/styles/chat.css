@@ -2441,7 +2441,7 @@
 
 .chat-composer__context-list {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   gap: 1px;
 }
 
@@ -3456,7 +3456,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 .chat-composer-stack-leave-to {
   max-height: 0;
   opacity: 0;
-  transform: translateY(-3px);
+  transform: translateY(3px);
 }
 
 .chat-composer-stack-enter-to,
