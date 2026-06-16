@@ -64,9 +64,22 @@ describe("useLiliaWorkflowActions", () => {
     };
 
     const view = setupWorkflowActions();
-    await view.actions.onApplyRuntimeSettings(command, runtimeOptions);
+    await view.actions.onApplyLiliaProviderSettings(command, runtimeOptions);
     expect(view.runtimeSent).toEqual([command]);
     expect(view.runtimeOptionsSent.at(-1)).toEqual(runtimeOptions);
+    expect(view.sent).toEqual([]);
+  });
+
+  it("keeps runtime settings alias for existing callers", async () => {
+    const command: ChatRuntimeCommand = {
+      type: "runtime_settings",
+      action: "diagnose",
+    };
+
+    const view = setupWorkflowActions();
+    await view.actions.onApplyRuntimeSettings(command);
+    expect(view.runtimeSent).toEqual([command]);
+    expect(view.runtimeOptionsSent.at(-1)).toBeNull();
     expect(view.sent).toEqual([]);
   });
 });
