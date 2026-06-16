@@ -50,16 +50,27 @@ function lastInvokeInput(command: string) {
     .at(-1)?.[1];
 }
 
+function renderAutomations() {
+  document.getElementById("automation-sidebar-host")?.closest("aside")?.remove();
+  const sidebar = document.createElement("aside");
+  sidebar.setAttribute("aria-label", "自动化列表");
+  const host = document.createElement("div");
+  host.id = "automation-sidebar-host";
+  sidebar.appendChild(host);
+  document.body.appendChild(sidebar);
+  return render(Automations);
+}
+
 describe("Automations page", () => {
   it("展示全局自动化列表、节点画布和检查器", async () => {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();
     const fitView = vi.fn();
     vi.mocked(useVueFlow).mockReturnValue({ fitView, zoomIn, zoomOut } as never);
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("complementary", { name: "自动化列表" })).toBeInTheDocument();
+      expect(view.getByRole("complementary", { name: "自动化检查器" })).toBeInTheDocument();
     });
     const list = view.getByRole("complementary", { name: "自动化列表" });
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
@@ -87,10 +98,14 @@ describe("Automations page", () => {
     expect(within(inspector).getByRole("button", { name: "task_created" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "task_status_changed" })).toBeInTheDocument();
     expect(within(inspector).getByText("运行历史")).toBeInTheDocument();
+
+    await fireEvent.click(within(list).getByRole("button", { name: "新建自动化" }));
+    expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("新自动化");
+    expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
   });
 
   it("暴露 Agent、工具和手动运行 Payload 配置", async () => {
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
       expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
@@ -144,7 +159,7 @@ describe("Automations page", () => {
   });
 
   it("保存草稿、发布、启停并手动运行后显示运行历史和节点状态", async () => {
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
       expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
@@ -214,7 +229,7 @@ describe("Automations page", () => {
   });
 
   it("人工节点等待用户确认后可以继续运行", async () => {
-    const view = render(Automations);
+    const view = renderAutomations();
 
     await waitFor(() => {
       expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
