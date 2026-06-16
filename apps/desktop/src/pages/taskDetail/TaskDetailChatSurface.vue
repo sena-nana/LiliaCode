@@ -15,6 +15,7 @@ import type {
 } from "@lilia/contracts";
 import ChatTranscript from "../../components/chat/ChatTranscript.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatSuggestions from "../../components/chat/ChatSuggestions.vue";
 import ComposerProjectPicker from "../../components/chat/ComposerProjectPicker.vue";
 import ChatSidebarHost from "../../components/chat/ChatSidebarHost.vue";
 import ImageViewer from "../../components/chat/ImageViewer.vue";
@@ -33,7 +34,7 @@ import type {
 } from "../../services/chat";
 import type { TaskTodo } from "../../services/todos";
 
-defineProps<{
+const props = defineProps<{
   taskId: string;
   projectId?: string;
   isPopup: boolean;
@@ -67,6 +68,7 @@ defineProps<{
   viewingImage: ChatImageViewerSource | null;
   suggestions: SuggestionItem[];
   suggestionsStatus: "idle" | "loading" | "empty" | "error";
+  suggestionsLoadingText: string;
   suggestionsVisible: boolean;
   showDraftProjectPicker?: boolean;
   draftProjectPickerProjects?: Project[];
@@ -117,6 +119,7 @@ const emit = defineEmits<{
 
 const chatPageRef = ref<HTMLElement | null>(null);
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
+const composerDraftEmpty = ref(true);
 
 function focusComposer() {
   composerRef.value?.focusInput();
@@ -130,6 +133,10 @@ defineExpose({ chatPageRef, focusComposer, getComposerDraftSnapshot });
 
 function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
   emit("send", content, outgoingAttachments);
+}
+
+function selectSuggestion(suggestion: SuggestionItem) {
+  composerRef.value?.fillSuggestionPrompt(suggestion.prompt);
 }
 </script>
 
@@ -172,6 +179,16 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
             @start-session-fork="emit('start-session-fork')"
           >
+            <template #empty-actions>
+              <ChatSuggestions
+                :suggestions="suggestions"
+                :suggestions-status="suggestionsStatus"
+                :suggestions-loading-text="suggestionsLoadingText"
+                :suggestions-visible="suggestionsVisible && composerDraftEmpty"
+                @select="selectSuggestion"
+                @refresh-suggestions="emit('refresh-suggestions')"
+              />
+            </template>
             <template #controls>
               <div class="chat-controls">
                 <TodoFloat
@@ -196,9 +213,6 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :context-usage="contextUsage"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
-                  :suggestions="suggestions"
-                  :suggestions-status="suggestionsStatus"
-                  :suggestions-visible="suggestionsVisible"
                   :restore-draft-key="restoreDraftKey"
                   :restore-draft-content="restoreDraftContent"
                   :insert-draft-text-key="insertDraftTextKey"
@@ -217,7 +231,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"
-                  @refresh-suggestions="emit('refresh-suggestions')"
+                  @draft-empty-change="composerDraftEmpty = $event"
                 />
                 <ComposerProjectPicker
                   v-if="showDraftProjectPicker"

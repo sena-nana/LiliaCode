@@ -9,7 +9,6 @@ import {
   Folder,
   Image,
   Paperclip,
-  RefreshCcw,
 } from "lucide-vue-next";
 import type {
   AskUserResult,
@@ -19,7 +18,6 @@ import type {
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
   PermissionMode,
-  SuggestionItem,
 } from "@lilia/contracts";
 import type { PendingAsk } from "../../composables/useAskUser";
 import type {
@@ -61,9 +59,6 @@ const props = defineProps<{
   contextUsage?: ChatContextUsage | null;
   pendingAsk?: PendingAsk | null;
   toolConsent?: ToolConsentRequest | null;
-  suggestions?: SuggestionItem[];
-  suggestionsStatus?: "idle" | "loading" | "empty" | "error";
-  suggestionsVisible?: boolean;
   restoreDraftKey?: number;
   restoreDraftContent?: string;
   insertDraftTextKey?: number;
@@ -96,7 +91,7 @@ const emit = defineEmits<{
     updatedInput?: ToolConsentUpdatedInput,
   ];
   "open-image": [image: ChatImageViewerSource];
-  "refresh-suggestions": [];
+  "draft-empty-change": [empty: boolean];
   interrupt: [];
 }>();
 
@@ -378,89 +373,14 @@ function patch(next: Partial<ChatComposerState>) {
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
 
-const suggestionRows = computed(() => props.suggestions ?? []);
-const suggestionStatus = computed(() => props.suggestionsStatus ?? "idle");
-const showSuggestions = computed(() =>
-  !hasPending.value &&
-  richInput.isEmpty.value &&
-  props.suggestionsVisible === true &&
-  (suggestionRows.value.length > 0 || suggestionStatus.value !== "idle"),
-);
-const suggestionStatusText = computed(() => {
-  if (suggestionRows.value.length > 0) return "";
-  switch (suggestionStatus.value) {
-    case "loading":
-      return "正在更新建议…";
-    case "empty":
-      return "暂无可用建议";
-    case "error":
-      return "建议暂时不可用";
-    default:
-      return "";
-  }
-});
-
-type SuggestionGitHubActivity = SuggestionItem["githubActivities"][number];
-
-function githubActivityAnchor(activity: SuggestionGitHubActivity): string {
-  const title = activity.title.trim();
-  if (activity.kind === "pull_request") {
-    const number = title.match(/#(\d+)/)?.[1];
-    return number ? `PR #${number}` : "PR";
-  }
-  if (activity.kind === "issue") {
-    const number = title.match(/#(\d+)/)?.[1];
-    return number ? `Issue #${number}` : "Issue";
-  }
-  if (activity.kind === "push") {
-    const branch = title.match(/^Push\s+([^:]+):/i)?.[1]?.trim();
-    return branch ? `Push ${branch}` : "Push";
-  }
-  return title || activity.kind || "GitHub";
-}
-
-function suggestionGitHubSourceLabel(suggestion: SuggestionItem): string {
-  const githubActivities = suggestion.githubActivities ?? [];
-  const [activity] = githubActivities;
-  if (!activity) return "";
-  const source = [
-    activity.repoFullName.trim(),
-    githubActivityAnchor(activity),
-  ].filter(Boolean).join(" · ");
-  const extraCount = githubActivities.length - 1;
-  return extraCount > 0 ? `${source} +${extraCount}` : source;
-}
-
-function suggestionSourceLabel(suggestion: SuggestionItem): string {
-  const githubLabel = suggestionGitHubSourceLabel(suggestion);
-  if (githubLabel) return githubLabel;
-  const localGitContexts = suggestion.localGitContexts ?? [];
-  const [context] = localGitContexts;
-  if (!context) return "";
-  const branch = context.branch.trim();
-  const source = branch ? `本地 Git · ${branch}` : "本地 Git";
-  const extraCount = localGitContexts.length - 1;
-  return extraCount > 0 ? `${source} +${extraCount}` : source;
-}
-
-const suggestionViewRows = computed(() =>
-  suggestionRows.value.map((suggestion) => {
-    const sourceLabel = suggestionSourceLabel(suggestion);
-    return {
-      suggestion,
-      sourceLabel,
-      title: sourceLabel ? `${suggestion.reason}\n${sourceLabel}` : suggestion.reason,
-    };
-  }),
-);
-
-function fillSuggestion(suggestion: SuggestionItem) {
+function fillSuggestionPrompt(prompt: string) {
   richInput.replaceRange(
     0,
     richInput.serializedText.value.length,
-    [textPart(suggestion.prompt)],
+    [textPart(prompt)],
   );
   clearComposerContextState();
+  focusInput();
 }
 
 function blockActionsBriefly() {
@@ -658,6 +578,12 @@ watch(inputValue, () => {
 watch(interactionPhaseKey, blockActionsBriefly);
 
 watch(
+  () => !hasPending.value && richInput.isEmpty.value,
+  (empty) => emit("draft-empty-change", empty),
+  { immediate: true },
+);
+
+watch(
   () => props.restoreDraftKey ?? 0,
   (key, previousKey) => {
     if (key === previousKey || key <= 0 || hasPending.value) return;
@@ -708,7 +634,7 @@ onBeforeUnmount(() => {
   }
 });
 
-defineExpose({ focusInput, getDraftSnapshot });
+defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
 </script>
 
 <template>
@@ -759,51 +685,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         @begin-command-edit="beginCommandEdit"
       />
     </Transition>
-
-    <div
-      v-if="showSuggestions"
-      class="chat-suggestions"
-      aria-label="新对话建议"
-    >
-      <div class="chat-suggestions__items">
-        <template v-if="suggestionRows.length > 0">
-          <button
-            v-for="row in suggestionViewRows"
-            :key="row.suggestion.id"
-            type="button"
-            class="chat-suggestion"
-            :class="{ 'chat-suggestion--with-source': row.sourceLabel }"
-            :title="row.title"
-            @click="fillSuggestion(row.suggestion)"
-          >
-            <span class="chat-suggestion__summary">{{ row.suggestion.summary }}</span>
-            <span
-              v-if="row.sourceLabel"
-              class="chat-suggestion__source"
-            >
-              {{ row.sourceLabel }}
-            </span>
-          </button>
-        </template>
-        <div
-          v-else-if="suggestionStatusText"
-          class="chat-suggestions__status"
-          role="status"
-        >
-          {{ suggestionStatusText }}
-        </div>
-      </div>
-      <button
-        type="button"
-        class="chat-suggestions__refresh"
-        aria-label="刷新新对话建议"
-        :disabled="suggestionStatus === 'loading'"
-        @mousedown.prevent
-        @click="suggestionStatus !== 'loading' && emit('refresh-suggestions')"
-      >
-        <RefreshCcw class="chat-suggestions__refresh-icon" aria-hidden="true" />
-      </button>
-    </div>
 
     <Transition name="chat-composer-stack">
       <ComposerContextPanel

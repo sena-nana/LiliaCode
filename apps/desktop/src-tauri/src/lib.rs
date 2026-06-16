@@ -211,6 +211,7 @@ pub fn run() {
             provider::router_get_mode,
             provider::router_set_mode,
             conversation_suggestions::conversation_suggestions_get,
+            conversation_suggestions::conversation_suggestions_get_sources,
             conversation_suggestions::conversation_suggestions_get_settings,
             conversation_suggestions::conversation_suggestions_set_settings,
             project_shell::project_get_settings,

@@ -85,6 +85,20 @@ pub(crate) struct SuggestionLocalGitContextRef {
     pub(crate) recent_commits: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionSourceProbe {
+    pub(crate) sources: Vec<SuggestionItemSource>,
+    pub(crate) local_git: Option<SuggestionLocalGitProbe>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestionLocalGitProbe {
+    pub(crate) has_recent_commits: bool,
+    pub(crate) has_changed_files: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct TaskSample {
     pub(super) id: String,

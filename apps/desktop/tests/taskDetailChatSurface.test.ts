@@ -48,6 +48,7 @@ function renderSurface() {
       viewingImage: null,
       suggestions: [],
       suggestionsStatus: "idle",
+      suggestionsLoadingText: "正在寻找灵感",
       suggestionsVisible: false,
     },
     global: {

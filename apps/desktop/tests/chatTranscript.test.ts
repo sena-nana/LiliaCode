@@ -161,6 +161,28 @@ function timelineEvent(
   };
 }
 
+describe("ChatTranscript empty state", () => {
+  it("renders empty headline with empty actions slot in the same empty container", () => {
+    const view = render(ChatTranscript, {
+      props: {
+        timelineEvents: [],
+        emptyHeadline: "今天想做什么？",
+        isThinking: false,
+      },
+      slots: {
+        "empty-actions": "<div data-testid=\"empty-actions\">actions</div>",
+        controls: "<div data-testid=\"composer\">composer</div>",
+      },
+    });
+
+    const empty = view.container.querySelector(".chat-empty");
+    expect(empty).toBeInstanceOf(HTMLElement);
+    expect(empty).toHaveTextContent("今天想做什么？");
+    expect(empty?.querySelector("[data-testid='empty-actions']")).toBeInstanceOf(HTMLElement);
+    expect(view.container.querySelector(".chat-controls-wrap [data-testid='empty-actions']")).toBeNull();
+  });
+});
+
 async function flushScrollMapFrame() {
   await vi.advanceTimersByTimeAsync(20);
   await Promise.resolve();

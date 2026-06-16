@@ -8,7 +8,8 @@ use super::generation::{compact_line, truncate_chars};
 use super::github_context::load_github_activity_context;
 use super::local_git::load_local_git_context;
 use super::types::{
-    GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, ProjectContext, SuggestionScope,
+    GitHubActivitySample, GitHubRepoRef, LocalGitContextSample, ProjectContext,
+    SuggestionItemSource, SuggestionLocalGitProbe, SuggestionScope, SuggestionSourceProbe,
     TaskSample, MAX_TASKS_PER_SCOPE, SAMPLE_TEXT_LIMIT, TASK_CANDIDATE_LIMIT,
     UNFINISHED_SIGNAL_LIMIT,
 };
@@ -100,6 +101,32 @@ pub(super) fn build_scope_from_parts(
         local_git_contexts,
         latest_updated_at,
     }))
+}
+
+pub(super) fn summarize_scope_sources(scope: &SuggestionScope) -> SuggestionSourceProbe {
+    let mut sources = Vec::new();
+    if !scope.tasks.is_empty() {
+        sources.push(SuggestionItemSource::Task);
+    }
+    if !scope.github_activities.is_empty() {
+        sources.push(SuggestionItemSource::Github);
+    }
+    let local_git = if scope.local_git_contexts.is_empty() {
+        None
+    } else {
+        sources.push(SuggestionItemSource::LocalGit);
+        Some(SuggestionLocalGitProbe {
+            has_recent_commits: scope
+                .local_git_contexts
+                .iter()
+                .any(|context| !context.context.recent_commits.is_empty()),
+            has_changed_files: scope
+                .local_git_contexts
+                .iter()
+                .any(|context| !context.context.changed_files.is_empty()),
+        })
+    };
+    SuggestionSourceProbe { sources, local_git }
 }
 
 fn load_project_context(

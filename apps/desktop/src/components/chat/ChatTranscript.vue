@@ -320,7 +320,12 @@ onBeforeUnmount(() => {
       @keyup="onSelectionInteractionEnd"
     >
       <div v-if="isEmpty" class="chat-empty">
-        {{ emptyHeadline }}
+        <div class="chat-empty__headline">
+          {{ emptyHeadline }}
+        </div>
+        <div class="chat-empty__actions">
+          <slot name="empty-actions" />
+        </div>
       </div>
       <template v-else>
         <AgentTimeline

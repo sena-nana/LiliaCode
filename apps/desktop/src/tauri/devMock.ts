@@ -199,6 +199,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return { ok: true, error: null, models: ["mock-assistant"], modelMatched: true } as T;
     case "conversation_suggestions_get_settings":
       return { enabled: false, maxItems: 5 } as T;
+    case "conversation_suggestions_get_sources":
+      return { sources: [], localGit: null } as T;
     case "chat_get_composer_state":
       return { taskId: text(args, "taskId"), backend: "codex", model: "gpt-5.4", planMode: false, permission: "ask" } as T;
     case "chat_get_runtime_snapshot":

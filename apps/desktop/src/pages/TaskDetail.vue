@@ -22,7 +22,11 @@ import {
 import { useTaskTimeline } from "./taskDetail/useTaskTimeline";
 import { createDraftTask } from "../services/tasksStore";
 import { listProjects } from "../services/projectsStore";
-import { getConversationSuggestions } from "../services/chat";
+import {
+  getConversationSuggestions,
+  getConversationSuggestionSources,
+  type ConversationSuggestionSources,
+} from "../services/chat";
 
 const props = withDefaults(defineProps<{
   projectId?: string;
@@ -49,6 +53,7 @@ const suggestions = ref<SuggestionItem[]>([]);
 const { sidebarDisplayMode } = useSidebarDisplayMode();
 type SuggestionsStatus = "idle" | "loading" | "empty" | "error";
 const suggestionsStatus = ref<SuggestionsStatus>("idle");
+const suggestionsLoadingText = ref("正在寻找灵感");
 let suggestionsSeq = 0;
 
 const conversation = useTaskConversationContext(routeProps);
@@ -154,11 +159,19 @@ async function loadSuggestions(forceRefresh = false) {
   if (!shouldLoadSuggestions.value) {
     suggestions.value = [];
     suggestionsStatus.value = "idle";
+    suggestionsLoadingText.value = "正在寻找灵感";
     return;
   }
   const seq = ++suggestionsSeq;
   suggestionsStatus.value = "loading";
+  suggestionsLoadingText.value = "正在寻找灵感";
   try {
+    const loadingText = await loadSuggestionLoadingText(
+      props.projectId ?? null,
+      forceRefresh,
+    );
+    if (seq !== suggestionsSeq) return;
+    suggestionsLoadingText.value = loadingText;
     const next = await getConversationSuggestions(props.projectId ?? null, forceRefresh);
     if (seq === suggestionsSeq) {
       suggestions.value = next;
@@ -171,6 +184,56 @@ async function loadSuggestions(forceRefresh = false) {
       suggestionsStatus.value = "error";
     }
   }
+}
+
+async function loadSuggestionLoadingText(
+  projectId: string | null,
+  forceRefresh: boolean,
+): Promise<string> {
+  try {
+    return suggestionLoadingText(
+      await getConversationSuggestionSources(projectId, forceRefresh),
+    );
+  } catch (err) {
+    console.error("[conversation-suggestions] load sources failed", err);
+    return "正在寻找灵感";
+  }
+}
+
+function suggestionLoadingText(probe: ConversationSuggestionSources): string {
+  const sources = new Set(probe.sources);
+  if (sources.has("claude")) return "正在读取 Claude 建议";
+  const labels: string[] = [];
+  if (sources.has("task")) labels.push("历史任务");
+  if (sources.has("github")) labels.push("GitHub 活动");
+  if (sources.has("local-git")) {
+    labels.push(localGitLoadingLabel(probe.localGit));
+  }
+  if (labels.length === 0) return "正在寻找灵感";
+  return `正在检查${joinSuggestionSourceLabels(labels)}`;
+}
+
+function localGitLoadingLabel(localGit: ConversationSuggestionSources["localGit"]): string {
+  if (localGit?.hasRecentCommits && localGit.hasChangedFiles) {
+    return "本地提交和未提交变更";
+  }
+  if (localGit?.hasRecentCommits) return "本地提交";
+  if (localGit?.hasChangedFiles) return "未提交变更";
+  return "本地 Git 上下文";
+}
+
+function joinSuggestionSourceLabels(labels: string[]): string {
+  if (labels.length <= 1) return labelAfterVerb(labels[0] ?? "");
+  if (labels.length === 2) return `${labels[0]}和${labelAfterConjunction(labels[1])}`;
+  return `${labels.slice(0, -1).join("、")}和${labelAfterConjunction(labels[labels.length - 1])}`;
+}
+
+function labelAfterVerb(label: string): string {
+  return /^[A-Za-z]/.test(label) ? ` ${label}` : label;
+}
+
+function labelAfterConjunction(label: string): string {
+  return /^[A-Za-z]/.test(label) ? ` ${label}` : label;
 }
 
 async function moveCurrentDraftToProject(projectId: string) {
@@ -260,6 +323,7 @@ watch(
     suggestionsSeq += 1;
     suggestions.value = [];
     suggestionsStatus.value = "idle";
+    suggestionsLoadingText.value = "正在寻找灵感";
     conversation.prepareForRouteChange();
     composerController.resetForRouteChange();
     timeline.resetTimeline();
@@ -285,6 +349,7 @@ watch(
       suggestionsSeq += 1;
       suggestions.value = [];
       suggestionsStatus.value = "idle";
+      suggestionsLoadingText.value = "正在寻找灵感";
       return;
     }
     void loadSuggestions(false);
@@ -378,6 +443,7 @@ watch(
     :viewing-image="viewingImage"
     :suggestions="suggestions"
     :suggestions-status="suggestionsStatus"
+    :suggestions-loading-text="suggestionsLoadingText"
     :suggestions-visible="shouldLoadSuggestions"
     :show-draft-project-picker="shouldShowDraftProjectPicker"
     :draft-project-picker-projects="draftProjectPickerProjects"
