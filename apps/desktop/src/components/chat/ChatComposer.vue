@@ -81,7 +81,6 @@ const emit = defineEmits<{
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
-  "start-session-fork": [];
   "open-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
@@ -912,7 +911,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         :fix-suggestion-disabled="sending === true || hasPending"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
         :context-usage="contextUsageForToolbar"
-        :session-fork-disabled="sending === true || hasPending"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -921,7 +919,6 @@ defineExpose({ focusInput, getDraftSnapshot });
         @start-lilia-review="startLiliaReview"
         @start-lilia-fix-suggestion="startLiliaFixSuggestion"
         @start-lilia-compact="emit('start-lilia-compact')"
-        @start-session-fork="emit('start-session-fork')"
         @open-lilia-iab="emit('open-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"

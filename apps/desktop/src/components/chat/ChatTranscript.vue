@@ -24,6 +24,7 @@ const props = defineProps<{
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
   canStartLiliaBatchApply?: boolean;
+  canStartSessionFork?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +33,7 @@ const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "insert-draft-text": [text: string];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
+  "start-session-fork": [];
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -330,11 +332,13 @@ onBeforeUnmount(() => {
           :show-expired-pending-actions="showExpiredPendingActions"
           :can-retry-event="canRetryEvent"
           :can-start-lilia-batch-apply="canStartLiliaBatchApply"
+          :can-start-session-fork="canStartSessionFork"
           @event-toggled="onTimelineEventToggled"
           @resolve-pending-action="emit('resolvePendingAgentAction', $event)"
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
           @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
+          @start-session-fork="emit('start-session-fork')"
         />
       </template>
       <div class="chat-controls-wrap">
