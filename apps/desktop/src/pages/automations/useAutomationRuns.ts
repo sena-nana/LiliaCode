@@ -13,7 +13,6 @@ export function useAutomationRuns(options: {
   selectedWorkflowId: Ref<string | null>;
   setError: (message: string) => void;
 }) {
-  const manualRunPayloadText = ref("");
   const running = ref(false);
   const resuming = ref(false);
   const runs = ref<AutomationRunSummary[]>([]);
@@ -59,11 +58,7 @@ export function useAutomationRuns(options: {
     running.value = true;
     options.setError("");
     try {
-      const payload = parseManualRunPayload();
-      const run = await runAutomationOnce(
-        options.selectedWorkflowId.value,
-        payload ? { payload } : {},
-      );
+      const run = await runAutomationOnce(options.selectedWorkflowId.value);
       applyRunSummary(automationRunToSummary(run));
       selectedRunId.value = run.id;
       await refreshSelectedRun();
@@ -123,18 +118,7 @@ export function useAutomationRuns(options: {
     runs.value = [run, ...existing].sort((left, right) => right.startedAt - left.startedAt);
   }
 
-  function parseManualRunPayload(): Record<string, unknown> | undefined {
-    const payloadText = manualRunPayloadText.value.trim();
-    if (!payloadText) return undefined;
-    const payload = JSON.parse(payloadText) as unknown;
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error("手动 Payload 必须是 JSON object");
-    }
-    return payload as Record<string, unknown>;
-  }
-
   return {
-    manualRunPayloadText,
     running,
     resuming,
     runs,
