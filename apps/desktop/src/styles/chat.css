@@ -2207,7 +2207,7 @@
 
 .chat-suggestions .chat-suggestions__inspire,
 .chat-suggestions .chat-suggestions__retry {
-  height: 1.2em;
+  height: auto;
   border: 0;
   border-radius: 0;
   padding: 0;
