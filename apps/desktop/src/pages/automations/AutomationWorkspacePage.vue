@@ -55,6 +55,7 @@ const projectRows = ref<Project[]>([]);
 const selectedWorkflowId = ref<string | null>(null);
 const errorText = ref<string | null>(null);
 const confirmingDeleteWorkflowId = ref<string | null>(null);
+const editingWorkflowName = ref(false);
 const unlisteners = ref<Array<() => void>>([]);
 const { fitView, zoomIn, zoomOut } = useVueFlow();
 
@@ -109,7 +110,6 @@ const {
 } = workspace;
 
 const {
-  manualRunPayloadText,
   running,
   resuming,
   runs,
@@ -163,6 +163,17 @@ function onWorkflowRowLeave(workflowId: string) {
   if (confirmingDeleteWorkflowId.value === workflowId) {
     confirmingDeleteWorkflowId.value = null;
   }
+}
+
+function startWorkflowNameEdit(event: PointerEvent) {
+  editingWorkflowName.value = true;
+  const input = event.currentTarget as HTMLInputElement;
+  input.focus();
+  input.select();
+}
+
+function stopWorkflowNameEdit() {
+  editingWorkflowName.value = false;
 }
 
 function selectRunNodeState(state: Parameters<typeof runsController.selectRunNodeState>[0]) {
@@ -293,65 +304,8 @@ onBeforeUnmount(() => {
     </Teleport>
 
     <main class="automations-page__main">
-      <header class="automations-page__toolbar">
-        <input
-          v-model="workflowName"
-          class="automations-page__name"
-          aria-label="自动化名称"
-          placeholder="自动化名称"
-        />
-        <div class="automations-page__toolbar-actions">
-          <button type="button" class="ui-button ui-button--ghost" :disabled="saving" @click="saveDraft">
-            <Save :size="14" aria-hidden="true" />
-            <span>{{ saving ? "保存中" : "保存草稿" }}</span>
-          </button>
-          <button type="button" class="ui-button ui-button--ghost" :disabled="publishing" @click="publishCurrent">
-            <Check :size="14" aria-hidden="true" />
-            <span>{{ publishing ? "发布中" : "发布" }}</span>
-          </button>
-          <button
-            type="button"
-            class="ui-button ui-button--ghost"
-            :disabled="!selectedWorkflow"
-            @click="toggleEnabled"
-          >
-            <ToggleRight v-if="selectedWorkflow?.enabled" :size="14" aria-hidden="true" />
-            <ToggleLeft v-else :size="14" aria-hidden="true" />
-            <span>{{ selectedWorkflow?.enabled ? "停用" : "启用" }}</span>
-          </button>
-          <button
-            type="button"
-            class="ui-button ui-button--primary"
-            :disabled="running || !selectedWorkflow?.publishedVersionId"
-            @click="runCurrent"
-          >
-            <Play :size="14" aria-hidden="true" />
-            <span>{{ running ? "运行中" : "手动运行" }}</span>
-          </button>
-        </div>
-      </header>
-
-      <div class="automations-page__run-config">
-        <label for="automation-manual-payload">手动 Payload</label>
-        <textarea
-          id="automation-manual-payload"
-          v-model="manualRunPayloadText"
-          class="ui-input ui-textarea"
-          placeholder='{"source":"manual"}'
-          spellcheck="false"
-        />
-      </div>
-
-      <div v-if="errorText" class="conn-banner conn-banner--err">
-        <Braces :size="16" aria-hidden="true" />
-        <div>
-          <div class="conn-banner__title">自动化操作失败</div>
-          <div class="conn-banner__hint">{{ errorText }}</div>
-        </div>
-      </div>
-
       <div class="automations-page__canvas">
-        <div class="automations-page__palette" aria-label="节点库">
+        <div class="automations-page__corner-actions automations-page__palette" aria-label="节点库">
           <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" :disabled="saving" @click="newWorkflow">
             <Plus :size="14" aria-hidden="true" />
           </button>
@@ -369,7 +323,62 @@ onBeforeUnmount(() => {
             <component :is="NODE_ICONS[kind as AutomationNodeKind]" :size="14" aria-hidden="true" />
           </button>
         </div>
-        <div class="automations-page__canvas-controls" role="group" aria-label="画布控制">
+        <div class="automations-page__corner-actions automations-page__workflow-actions" role="group" aria-label="自动化操作">
+          <input
+            v-model="workflowName"
+            class="automations-page__name"
+            :class="{ 'is-editing': editingWorkflowName }"
+            aria-label="自动化名称"
+            placeholder="自动化名称"
+            :readonly="!editingWorkflowName"
+            @pointerdown="startWorkflowNameEdit"
+            @blur="stopWorkflowNameEdit"
+            @keydown.enter.prevent="stopWorkflowNameEdit"
+            @keydown.esc.prevent="stopWorkflowNameEdit"
+          />
+          <button
+            type="button"
+            class="ui-button ui-icon-button"
+            :title="saving ? '保存中' : '保存草稿'"
+            :aria-label="saving ? '保存中' : '保存草稿'"
+            :disabled="saving"
+            @click="saveDraft"
+          >
+            <Save :size="14" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-icon-button"
+            :title="publishing ? '发布中' : '发布'"
+            :aria-label="publishing ? '发布中' : '发布'"
+            :disabled="publishing"
+            @click="publishCurrent"
+          >
+            <Check :size="14" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-icon-button"
+            :title="selectedWorkflow?.enabled ? '停用' : '启用'"
+            :aria-label="selectedWorkflow?.enabled ? '停用' : '启用'"
+            :disabled="!selectedWorkflow"
+            @click="toggleEnabled"
+          >
+            <ToggleRight v-if="selectedWorkflow?.enabled" :size="14" aria-hidden="true" />
+            <ToggleLeft v-else :size="14" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="ui-button ui-icon-button ui-button--primary"
+            :title="running ? '运行中' : '手动运行'"
+            :aria-label="running ? '运行中' : '手动运行'"
+            :disabled="running || !selectedWorkflow?.publishedVersionId"
+            @click="runCurrent"
+          >
+            <Play :size="14" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="automations-page__corner-actions automations-page__canvas-controls" role="group" aria-label="画布控制">
           <button type="button" class="ui-button ui-icon-button" title="放大" aria-label="放大画布" @click="zoomCanvasIn">
             <Plus :size="14" aria-hidden="true" />
           </button>
@@ -379,6 +388,13 @@ onBeforeUnmount(() => {
           <button type="button" class="ui-button ui-icon-button" title="适应视图" aria-label="适应视图" @click="fitCanvas">
             <Maximize2 :size="14" aria-hidden="true" />
           </button>
+        </div>
+        <div v-if="errorText" class="conn-banner conn-banner--err automations-page__canvas-error">
+          <Braces :size="16" aria-hidden="true" />
+          <div>
+            <div class="conn-banner__title">自动化操作失败</div>
+            <div class="conn-banner__hint">{{ errorText }}</div>
+          </div>
         </div>
         <div class="automations-page__minimap" role="img" aria-label="节点小地图">
           <span

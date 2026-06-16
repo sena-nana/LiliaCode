@@ -79,46 +79,28 @@
   flex-direction: column;
 }
 
-.automations-page__toolbar {
-  min-height: 52px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .automations-page__name {
-  width: min(360px, 40vw);
-}
-
-.automations-page__toolbar-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.automations-page__run-config {
-  min-height: 76px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-}
-
-.automations-page__run-config label {
-  padding-top: 7px;
-  color: var(--text-muted);
+  width: clamp(120px, 16vw, 160px);
+  height: 28px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
   font-size: 12px;
-  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.automations-page__run-config textarea {
-  min-height: 58px;
-  resize: vertical;
+.automations-page__name:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+}
+
+.automations-page__name.is-editing {
+  border-color: var(--accent);
+  background: var(--bg);
 }
 
 .automations-page__canvas {
@@ -201,37 +183,53 @@
   pointer-events: none;
 }
 
-.automations-page__palette {
+.automations-page__corner-actions {
   position: absolute;
-  left: 12px;
-  top: 12px;
   z-index: 5;
   display: flex;
-  gap: 4px;
-  padding: 4px;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-subtle) 94%, transparent);
+  border-radius: 7px;
+  background: var(--bg-elev);
+}
+
+.automations-page__corner-actions .ui-icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.automations-page__palette {
+  left: 12px;
+  top: 12px;
 }
 
 .automations-page__palette-divider {
   align-self: stretch;
   width: 1px;
-  margin: 2px;
+  margin: 3px 2px;
   background: var(--border);
 }
 
 .automations-page__canvas-controls {
-  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.automations-page__workflow-actions {
   right: 12px;
   top: 12px;
-  z-index: 5;
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-subtle) 94%, transparent);
+}
+
+.automations-page__canvas-error {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  right: 12px;
+  z-index: 6;
+  max-width: 560px;
+  margin-inline: auto;
 }
 
 .automations-page__minimap {

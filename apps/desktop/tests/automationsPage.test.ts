@@ -61,6 +61,19 @@ function renderAutomations() {
   return render(Automations);
 }
 
+function workflowNameInput(view: ReturnType<typeof renderAutomations>) {
+  return within(view.getByRole("group", { name: "自动化操作" })).getByRole("textbox", {
+    name: "自动化名称",
+  });
+}
+
+async function editWorkflowName(view: ReturnType<typeof renderAutomations>, value: string) {
+  const input = workflowNameInput(view);
+  await fireEvent.pointerDown(input);
+  await fireEvent.update(input, value);
+  return input;
+}
+
 describe("Automations page", () => {
   it("展示全局自动化列表、节点画布和检查器", async () => {
     const zoomIn = vi.fn();
@@ -79,14 +92,15 @@ describe("Automations page", () => {
     expect(within(list).queryByRole("heading", { name: "自动化" })).not.toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: "新建自动化" })).not.toBeInTheDocument();
 
-    expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+    expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
+    expect(workflowNameInput(view)).toHaveAttribute("readonly");
     expect(within(view.getByTestId("automation-flow")).getByText("任务变化")).toBeInTheDocument();
     expect(within(view.getByTestId("automation-flow")).getByText("复盘 Agent")).toBeInTheDocument();
     expect(view.getByRole("group", { name: "画布控制" })).toBeInTheDocument();
     expect(view.getByRole("img", { name: "节点小地图" })).toBeInTheDocument();
     expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
     expect(view.getByRole("button", { name: "添加人工确认" })).toBeEnabled();
-    expect(view.getByRole("textbox", { name: "手动 Payload" })).toBeInTheDocument();
+    expect(view.queryByRole("textbox", { name: "手动 Payload" })).not.toBeInTheDocument();
     await fireEvent.click(view.getByRole("button", { name: "放大画布" }));
     await fireEvent.click(view.getByRole("button", { name: "缩小画布" }));
     await fireEvent.click(view.getByRole("button", { name: "适应视图" }));
@@ -104,7 +118,7 @@ describe("Automations page", () => {
       expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
         name: "未命名自动化",
       });
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("未命名自动化");
+      expect(workflowNameInput(view)).toHaveValue("未命名自动化");
       expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
     });
     expect(view.getByRole("button", { name: "添加事件触发" })).toBeEnabled();
@@ -116,7 +130,7 @@ describe("Automations page", () => {
     await waitFor(() => {
       expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-2" });
       expect(within(list).queryByRole("button", { name: /未命名自动化/ })).not.toBeInTheDocument();
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
   });
 
@@ -128,7 +142,7 @@ describe("Automations page", () => {
     await waitFor(() => {
       expect(within(list).queryByText("没有自动化")).not.toBeInTheDocument();
       expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("未命名自动化");
+      expect(workflowNameInput(view)).toHaveValue("未命名自动化");
       expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
         name: "未命名自动化",
         nodes: [],
@@ -151,11 +165,11 @@ describe("Automations page", () => {
     });
   });
 
-  it("暴露 Agent、工具和手动运行 Payload 配置", async () => {
+  it("暴露 Agent、工具配置并支持手动运行", async () => {
     const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     const flow = view.getByTestId("automation-flow");
@@ -194,13 +208,12 @@ describe("Automations page", () => {
     });
 
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
-    await fireEvent.update(view.getByRole("textbox", { name: "手动 Payload" }), '{"reason":"smoke"}');
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("automation_run_once")).toEqual({
         id: "auto-1",
-        input: { payload: { reason: "smoke" } },
+        input: {},
       });
     });
   });
@@ -209,10 +222,10 @@ describe("Automations page", () => {
     const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
-    await fireEvent.update(view.getByRole("textbox", { name: "自动化名称" }), "自动复盘");
+    await editWorkflowName(view, "自动复盘");
     const inspector = view.getByRole("complementary", { name: "自动化检查器" });
     await fireEvent.click(within(inspector).getByRole("button", { name: "Lilia" }));
     await fireEvent.click(within(inspector).getByRole("button", { name: "running" }));
@@ -279,7 +292,7 @@ describe("Automations page", () => {
     const view = renderAutomations();
 
     await waitFor(() => {
-      expect(view.getByRole("textbox", { name: "自动化名称" })).toHaveValue("任务完成后复盘");
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     await fireEvent.click(view.getByRole("button", { name: "添加人工确认" }));
