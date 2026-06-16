@@ -60,6 +60,9 @@ function renderAutomations() {
   document.getElementById("automation-sidebar-host")?.closest("aside")?.remove();
   const sidebar = document.createElement("aside");
   sidebar.setAttribute("aria-label", "自动化列表");
+  const actions = document.createElement("div");
+  actions.id = "automation-sidebar-actions";
+  sidebar.appendChild(actions);
   const host = document.createElement("div");
   host.id = "automation-sidebar-host";
   sidebar.appendChild(host);
@@ -102,7 +105,7 @@ describe("Automations page", () => {
       expect(within(list).getByRole("button", { name: /任务完成后复盘/ })).toBeInTheDocument();
     });
     expect(within(list).queryByRole("heading", { name: "自动化" })).not.toBeInTheDocument();
-    expect(within(list).queryByRole("button", { name: "新建自动化" })).not.toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "新建自动化" })).toBeInTheDocument();
 
     expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     expect(workflowNameInput(view)).toHaveAttribute("readonly");

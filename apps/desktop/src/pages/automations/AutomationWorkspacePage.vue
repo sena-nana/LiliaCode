@@ -391,14 +391,22 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Teleport>
+    <Teleport to="#automation-sidebar-actions">
+      <button
+        type="button"
+        class="ui-button ui-icon-button"
+        title="新建自动化"
+        aria-label="新建自动化"
+        :disabled="saving"
+        @click="newWorkflow"
+      >
+        <Plus :size="14" aria-hidden="true" />
+      </button>
+    </Teleport>
 
     <main class="automations-page__main">
       <div class="automations-page__canvas" :style="canvasBackgroundStyle">
         <div class="automations-page__corner-actions automations-page__palette" aria-label="节点库">
-          <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" :disabled="saving" @click="newWorkflow">
-            <Plus :size="14" aria-hidden="true" />
-          </button>
-          <span class="automations-page__palette-divider" aria-hidden="true" />
           <button
             v-for="(label, kind) in NODE_KIND_LABELS"
             :key="kind"
