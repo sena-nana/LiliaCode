@@ -83,10 +83,9 @@ function permissionPayload(value: unknown): PermissionApprovalPayload | null {
   const providerContext = row.providerContext && typeof row.providerContext === "object" && !Array.isArray(row.providerContext)
     ? row.providerContext as PermissionApprovalPayload["providerContext"]
     : undefined;
-  const requestedAccess = row.requestedAccess ?? row.permissions ?? {};
   return {
     reason: typeof row.reason === "string" ? row.reason : null,
-    requestedAccess,
+    requestedAccess: row.requestedAccess ?? {},
     scopeSuggestion: row.scopeSuggestion,
     providerContext,
   };

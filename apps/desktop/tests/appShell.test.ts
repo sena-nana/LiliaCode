@@ -119,13 +119,19 @@ describe("AppShell left sidebar collapse", () => {
     });
   });
 
-  it("侧栏导入入口进入主窗口导入页", async () => {
-    const view = await renderAppShell();
+  it("导入和插件入口收敛到设置分类", async () => {
+    const view = await renderAppShell("/settings");
 
-    await fireEvent.click(view.getByRole("link", { name: "从 Claude / Codex 导入对话" }));
+    expect(view.queryByRole("link", { name: "从 Claude / Codex 导入对话" })).not.toBeInTheDocument();
+    expect(view.queryByRole("link", { name: "插件 / 技能" })).not.toBeInTheDocument();
 
+    await fireEvent.click(view.getByRole("button", { name: /导入对话/ }));
     await waitFor(() => {
-      expect(view.router.currentRoute.value.fullPath).toBe("/import");
+      expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=import");
+    });
+    await fireEvent.click(view.getByRole("button", { name: /插件 \/ 技能/ }));
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/settings?tab=plugins");
     });
   });
 

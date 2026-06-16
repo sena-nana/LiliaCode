@@ -78,7 +78,6 @@ export interface PermissionApprovalPayload {
 export interface PermissionApprovalResult {
   action: "approve" | "decline" | "cancel";
   grantedAccess?: unknown;
-  permissions?: unknown;
   scope?: unknown;
   strictAutoReview?: boolean;
   providerContext?: unknown;

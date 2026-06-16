@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use uuid::Uuid;
@@ -6,7 +7,8 @@ use uuid::Uuid;
 use super::{signals::manual_signal, validate_workflow_graph};
 use crate::automation::types::{
     AutomationDraft, AutomationRun, AutomationRunNodeState, AutomationRunStatus,
-    AutomationSaveDraftInput, AutomationScopeFilter, AutomationWorkflow, AutomationWorkflowVersion,
+    AutomationRunSummary, AutomationSaveDraftInput, AutomationScopeFilter, AutomationWorkflow,
+    AutomationWorkflowVersion,
 };
 use crate::util::now_millis;
 
@@ -60,6 +62,58 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationRun> {
         started_at: row.get(6)?,
         finished_at: row.get(7)?,
         error: row.get(8)?,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutomationRunTriggerSummary {
+    #[serde(default = "default_manual_trigger_kind")]
+    kind: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
+    event_kind: Option<String>,
+}
+
+impl Default for AutomationRunTriggerSummary {
+    fn default() -> Self {
+        Self {
+            kind: default_manual_trigger_kind(),
+            project_id: None,
+            task_id: None,
+            backend: None,
+            event_kind: None,
+        }
+    }
+}
+
+fn default_manual_trigger_kind() -> String {
+    "manual".to_string()
+}
+
+fn row_to_run_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationRunSummary> {
+    let status: String = row.get(3)?;
+    let trigger_json: String = row.get(4)?;
+    let trigger =
+        serde_json::from_str::<AutomationRunTriggerSummary>(&trigger_json).unwrap_or_default();
+    Ok(AutomationRunSummary {
+        id: row.get(0)?,
+        workflow_id: row.get(1)?,
+        workflow_version_id: row.get(2)?,
+        status: AutomationRunStatus::from_str(&status),
+        trigger_kind: trigger.kind,
+        project_id: trigger.project_id,
+        task_id: trigger.task_id,
+        backend: trigger.backend,
+        event_kind: trigger.event_kind,
+        started_at: row.get(5)?,
+        finished_at: row.get(6)?,
+        error: row.get(7)?,
     })
 }
 
@@ -203,12 +257,12 @@ pub(crate) fn version_by_id(
 pub(crate) fn list_runs(
     conn: &Connection,
     workflow_id: Option<&str>,
-) -> Result<Vec<AutomationRun>, String> {
+) -> Result<Vec<AutomationRunSummary>, String> {
     let sql = if workflow_id.is_some() {
-        r#"SELECT id, workflow_id, workflow_version_id, status, trigger_json, scope_json, started_at, finished_at, error
+        r#"SELECT id, workflow_id, workflow_version_id, status, trigger_json, started_at, finished_at, error
            FROM automation_runs WHERE workflow_id = ?1 ORDER BY started_at DESC LIMIT 100"#
     } else {
-        r#"SELECT id, workflow_id, workflow_version_id, status, trigger_json, scope_json, started_at, finished_at, error
+        r#"SELECT id, workflow_id, workflow_version_id, status, trigger_json, started_at, finished_at, error
            FROM automation_runs ORDER BY started_at DESC LIMIT 100"#
     };
     let mut stmt = conn
@@ -217,14 +271,14 @@ pub(crate) fn list_runs(
     let mut out = Vec::new();
     if let Some(workflow_id) = workflow_id {
         let rows = stmt
-            .query_map(params![workflow_id], row_to_run)
+            .query_map(params![workflow_id], row_to_run_summary)
             .map_err(|e| format!("automation_list_runs: query 失败：{e}"))?;
         for row in rows {
             out.push(row.map_err(|e| format!("automation_list_runs: row 失败：{e}"))?);
         }
     } else {
         let rows = stmt
-            .query_map([], row_to_run)
+            .query_map([], row_to_run_summary)
             .map_err(|e| format!("automation_list_runs: query 失败：{e}"))?;
         for row in rows {
             out.push(row.map_err(|e| format!("automation_list_runs: row 失败：{e}"))?);

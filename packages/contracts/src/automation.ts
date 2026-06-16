@@ -105,6 +105,21 @@ export interface AutomationRun {
   error: string | null;
 }
 
+export interface AutomationRunSummary {
+  id: string;
+  workflowId: string;
+  workflowVersionId: string;
+  status: AutomationRunStatus;
+  triggerKind: AutomationTriggerKind;
+  projectId?: string | null;
+  taskId?: string | null;
+  backend?: ChatBackendKind | null;
+  eventKind?: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  error: string | null;
+}
+
 export interface AutomationRunNodeState {
   id: string;
   runId: string;

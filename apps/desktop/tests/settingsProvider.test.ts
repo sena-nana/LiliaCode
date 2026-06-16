@@ -75,13 +75,13 @@ function emptyQuotaStats() {
 
 describe("Settings provider switch", () => {
   afterEach(() => {
-    localStorage.removeItem("lilia.providerSetupChecklist.dismissed");
     vi.useRealTimers();
   });
 
   it("非法 tab 默认显示外观分类", async () => {
     const invalid = await renderSettings("/settings?tab=unknown");
-    expect(invalid.getByRole("heading", { level: 1, name: "外观" })).toBeInTheDocument();
+    expect(invalid.getByRole("heading", { level: 2, name: "外观" })).toBeInTheDocument();
+    expect(invalid.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     expect(invalid.queryByLabelText("弹出窗口快捷键")).not.toBeInTheDocument();
     expect(invalid.queryByRole("radio", { name: "Codex" })).not.toBeInTheDocument();
   });
@@ -89,8 +89,21 @@ describe("Settings provider switch", () => {
   it("旧 Codex 会话 tab 回落到外观分类", async () => {
     const view = await renderSettings("/settings?tab=codex-sessions");
 
-    expect(view.getByRole("heading", { level: 1, name: "外观" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { level: 2, name: "外观" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     expect(view.queryByText("Codex 会话管理")).not.toBeInTheDocument();
+  });
+
+  it("插件技能和导入对话保持原页面主内容布局", async () => {
+    const plugins = await renderSettings("/settings?tab=plugins");
+    expect(plugins.container.querySelector(".plugins-page")).toBeInTheDocument();
+    expect(plugins.queryByRole("heading", { level: 1, name: "插件 / 技能" }))
+      .not.toBeInTheDocument();
+
+    const imports = await renderSettings("/settings?tab=import");
+    expect(imports.container.querySelector(".conversation-import-page")).toBeInTheDocument();
+    expect(imports.queryByRole("heading", { level: 1, name: "导入对话" }))
+      .not.toBeInTheDocument();
   });
 
   it("外观页可以切换侧边栏样式并写入本地偏好", async () => {
@@ -113,7 +126,7 @@ describe("Settings provider switch", () => {
   it("额度页显示近 7 天 Token 和成本统计", async () => {
     const view = await renderSettings("/settings?tab=quota");
 
-    expect(view.getByRole("heading", { level: 1, name: "额度" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
         input: { days: 7, backend: "all" },
@@ -144,15 +157,22 @@ describe("Settings provider switch", () => {
     expect(view.getByText("无新增记录")).toBeInTheDocument();
   });
 
-  it("额度页在 Codex 官方账号模式显示官方 5 小时和周限额", async () => {
+  it("额度页在 Codex 官方账号模式显示官方额度", async () => {
     const view = await renderSettings("/settings?tab=quota");
 
     expect(await view.findByText("Codex 官方额度")).toBeInTheDocument();
-    expect(view.getByText("5 小时限额")).toBeInTheDocument();
-    expect(view.getByText("周限额")).toBeInTheDocument();
+    expect(view.queryByText("5 小时限额")).not.toBeInTheDocument();
+    expect(view.queryByText("周限额")).not.toBeInTheDocument();
     expect(view.getByText("25%")).toBeInTheDocument();
     expect(view.getByText("40%")).toBeInTheDocument();
-    expect(view.getAllByText(/^重置 /)).toHaveLength(2);
+    expect(view.getByText("剩余 75%")).toBeInTheDocument();
+    expect(view.getByText("剩余 60%")).toBeInTheDocument();
+    expect(view.getByText("Spark额度")).toBeInTheDocument();
+    expect(view.getByText("15%")).toBeInTheDocument();
+    expect(view.getByText("70%")).toBeInTheDocument();
+    expect(view.getByText("剩余 85%")).toBeInTheDocument();
+    expect(view.getByText("剩余 30%")).toBeInTheDocument();
+    expect(view.getAllByText(/^重置 /)).toHaveLength(4);
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
@@ -191,6 +211,8 @@ describe("Settings provider switch", () => {
       rateLimitReachedType: null,
       fiveHour: null,
       weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
       fetchedAt: Date.now(),
       error: "Codex 未登录",
     });
@@ -225,21 +247,6 @@ describe("Settings provider switch", () => {
         "true",
       );
     });
-  });
-
-  it("首次进入连接页显示清单，收起后再次进入不显示", async () => {
-    const view = await renderSettings("/settings?tab=providers");
-
-    expect(await view.findByText("首次启动清单")).toBeInTheDocument();
-
-    await fireEvent.click(view.getByRole("button", { name: "收起首次启动清单" }));
-
-    expect(localStorage.getItem("lilia.providerSetupChecklist.dismissed")).toBe("1");
-
-    view.unmount();
-    const next = await renderSettings("/settings?tab=providers");
-    expect(next.queryByText("首次启动清单")).not.toBeInTheDocument();
-    expect(next.getByRole("button", { name: "显示首次启动清单" })).toBeInTheDocument();
   });
 
   it("连接页默认使用 API/官方账号，不再展示 CC-Switch 专用配置", async () => {

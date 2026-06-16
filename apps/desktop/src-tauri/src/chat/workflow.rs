@@ -23,9 +23,9 @@ pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<String> {
 
 pub(crate) fn runtime_command_kind(command: Option<&ChatRuntimeCommand>) -> Option<String> {
     let kind = match command? {
-        ChatRuntimeCommand::LiliaSessionFork { .. } => "lilia_session_fork",
-        ChatRuntimeCommand::LiliaSessionManagement { .. } => "lilia_session_management",
-        ChatRuntimeCommand::LiliaProviderSettings { .. } => "lilia_provider_settings",
+        ChatRuntimeCommand::SessionFork { .. } => "session_fork",
+        ChatRuntimeCommand::SessionManagement { .. } => "session_management",
+        ChatRuntimeCommand::RuntimeSettings { .. } => "runtime_settings",
     };
     Some(kind.to_string())
 }
@@ -113,10 +113,10 @@ mod tests {
             },
         ];
         let runtime_commands = [
-            ChatRuntimeCommand::LiliaSessionFork {
+            ChatRuntimeCommand::SessionFork {
                 exclude_turns: None,
             },
-            ChatRuntimeCommand::LiliaSessionManagement {
+            ChatRuntimeCommand::SessionManagement {
                 action: "rename".to_string(),
                 session_id: None,
                 title: None,
@@ -127,7 +127,7 @@ mod tests {
                 search_term: None,
                 include_system_messages: None,
             },
-            ChatRuntimeCommand::LiliaProviderSettings {
+            ChatRuntimeCommand::RuntimeSettings {
                 action: "update".to_string(),
             },
         ];

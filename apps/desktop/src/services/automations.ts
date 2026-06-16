@@ -6,6 +6,7 @@ import type {
   AutomationRunOnceInput,
   AutomationResumeRunInput,
   AutomationSaveDraftInput,
+  AutomationRunSummary,
   AutomationWorkflow,
   AutomationWorkflowVersion,
 } from "@lilia/contracts";
@@ -16,6 +17,7 @@ export type {
   AutomationRunOnceInput,
   AutomationResumeRunInput,
   AutomationSaveDraftInput,
+  AutomationRunSummary,
   AutomationWorkflow,
   AutomationWorkflowVersion,
 };
@@ -67,8 +69,8 @@ export function resumeAutomationRun(
 
 export function listAutomationRuns(
   workflowId?: string | null,
-): Promise<AutomationRun[]> {
-  return invoke<AutomationRun[]>("automation_list_runs", {
+): Promise<AutomationRunSummary[]> {
+  return invoke<AutomationRunSummary[]>("automation_list_runs", {
     workflowId: workflowId ?? null,
   });
 }
@@ -93,4 +95,21 @@ export function onAutomationRunUpdated(
     listen<AutomationRunEvent>("automation:run-updated", (event) => handler(event.payload)),
     listen<AutomationRunEvent>("automation:run-finished", (event) => handler(event.payload)),
   ]);
+}
+
+export function automationRunToSummary(run: AutomationRun): AutomationRunSummary {
+  return {
+    id: run.id,
+    workflowId: run.workflowId,
+    workflowVersionId: run.workflowVersionId,
+    status: run.status,
+    triggerKind: run.trigger.kind,
+    projectId: run.trigger.projectId ?? null,
+    taskId: run.trigger.taskId ?? null,
+    backend: run.trigger.backend ?? null,
+    eventKind: run.trigger.eventKind ?? null,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    error: run.error,
+  };
 }

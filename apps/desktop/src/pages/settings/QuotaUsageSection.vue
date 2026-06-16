@@ -10,7 +10,6 @@ import {
 import type {
   ChatBackendKind,
   CodexAccountQuotaStatus,
-  CodexAccountQuotaWindow,
   QuotaUsageDailyBucket,
   QuotaUsageStats,
   QuotaUsageStatsBackendFilter,
@@ -26,11 +25,6 @@ import {
 
 type BackendOption = { value: QuotaUsageStatsBackendFilter; label: string };
 type DaysOption = { value: QuotaUsageStatsDays; label: string };
-type OfficialQuotaWindowRow = {
-  key: "fiveHour" | "weekly";
-  label: string;
-  window: CodexAccountQuotaWindow | null | undefined;
-};
 type QuotaBreakdownItem = {
   key: string;
   label: string;
@@ -66,11 +60,19 @@ const refreshing = computed(() => loading.value || quotaLoading.value);
 const showOfficialQuota = computed(() =>
   officialQuota.value?.connectionMode === "codex-account",
 );
-const officialQuotaWindows = computed<OfficialQuotaWindowRow[]>(() => [
-  { key: "fiveHour", label: "5 小时限额", window: officialQuota.value?.fiveHour },
-  { key: "weekly", label: "周限额", window: officialQuota.value?.weekly },
+const officialQuotaWindows = computed(() => [
+  { key: "fiveHour", window: officialQuota.value?.fiveHour },
+  { key: "weekly", window: officialQuota.value?.weekly },
 ]);
-const hasOfficialQuotaWindow = computed(() => officialQuotaWindows.value.some((row) => row.window));
+const sparkQuotaWindows = computed(() => [
+  { key: "sparkFiveHour", window: officialQuota.value?.sparkFiveHour },
+  { key: "sparkWeekly", window: officialQuota.value?.sparkWeekly },
+]);
+const officialQuotaGroups = computed(() => [
+  { key: "codex", label: "", rows: officialQuotaWindows.value },
+  { key: "spark", label: "Spark额度", rows: sparkQuotaWindows.value.filter((row) => row.window) },
+].filter((group) => group.rows.some((row) => row.window)));
+const hasOfficialQuotaWindow = computed(() => officialQuotaGroups.value.length > 0);
 const maxDailyTokens = computed(() =>
   Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
 );
@@ -259,6 +261,8 @@ async function loadOfficialQuota() {
         rateLimitReachedType: null,
         fiveHour: null,
         weekly: null,
+        sparkFiveHour: null,
+        sparkWeekly: null,
         fetchedAt: Date.now(),
         error: String(err),
       };
@@ -353,19 +357,25 @@ onMounted(() => {
           {{ quotaLoading ? "读取中" : `查询 ${formatDateTime(officialQuota?.fetchedAt ?? Date.now())}` }}
         </span>
       </div>
-      <div v-if="hasOfficialQuotaWindow" class="quota-official__grid">
-        <div
-          v-for="row in officialQuotaWindows"
-          :key="row.key"
-          class="quota-official-window"
-        >
-          <span>{{ row.label }}</span>
-          <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
-          <small>{{ quotaWindowLabel(row.window) }}</small>
-          <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
+      <div
+        v-for="group in officialQuotaGroups"
+        :key="group.key"
+        class="quota-official__section"
+      >
+        <strong v-if="group.label">{{ group.label }}</strong>
+        <div class="quota-official__grid">
+          <div
+            v-for="row in group.rows"
+            :key="row.key"
+            class="quota-official-window"
+          >
+            <strong>{{ row.window ? formatPercent(row.window.usedPercent) : "--" }}</strong>
+            <small>{{ quotaWindowLabel(row.window) }}</small>
+            <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
+          </div>
         </div>
       </div>
-      <div v-else class="quota-official__empty">
+      <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
         暂无官方额度数据
       </div>
       <div v-if="officialQuota?.error" class="quota-official__error">
@@ -693,6 +703,16 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.quota-official__section {
+  display: grid;
+  gap: 7px;
+}
+
+.quota-official__section > strong {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .quota-official-window {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AlertTriangle, MessageSquarePlus, X } from "lucide-vue-next";
 import type { Project } from "@lilia/contracts";
@@ -28,6 +28,7 @@ import SidebarConnectionFooter from "../components/sidebar/SidebarConnectionFoot
 import SidebarProjectAddMenu from "../components/sidebar/SidebarProjectAddMenu.vue";
 import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.vue";
 import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
+import { preloadTaskDetailPage } from "../router";
 
 const router = useRouter();
 const route = useRoute();
@@ -39,6 +40,12 @@ const searchActive = ref(false);
 const unifiedLoaded = ref(false);
 const { sidebarDisplayMode } = useSidebarDisplayMode();
 const isUnifiedMode = computed(() => sidebarDisplayMode.value === "unified");
+let activityHydrationTimer: number | null = null;
+
+type IdleWindow = typeof globalThis & {
+  requestIdleCallback?: (callback: () => void) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 function reportProjectError(message: string) {
   projectError.value = message;
@@ -46,6 +53,35 @@ function reportProjectError(message: string) {
 
 function dismissError() {
   projectError.value = null;
+}
+
+function runWhenIdle(callback: () => void): number {
+  const idleWindow = globalThis as IdleWindow;
+  if (typeof idleWindow.requestIdleCallback === "function") {
+    return idleWindow.requestIdleCallback(callback);
+  }
+  return globalThis.setTimeout(callback, 1);
+}
+
+function cancelIdleRun(handle: number) {
+  const idleWindow = globalThis as IdleWindow;
+  if (typeof idleWindow.cancelIdleCallback === "function") {
+    idleWindow.cancelIdleCallback(handle);
+    return;
+  }
+  globalThis.clearTimeout(handle);
+}
+
+function scheduleConversationActivityHydration(taskIds: string[]) {
+  if (activityHydrationTimer !== null) {
+    cancelIdleRun(activityHydrationTimer);
+    activityHydrationTimer = null;
+  }
+  if (taskIds.length === 0) return;
+  activityHydrationTimer = runWhenIdle(() => {
+    activityHydrationTimer = null;
+    void hydrateConversationActivities(taskIds);
+  });
 }
 
 const {
@@ -154,10 +190,22 @@ watch(
 watch(
   () => sidebarTaskIds.value.join("\x1f"),
   () => {
-    void hydrateConversationActivities(sidebarTaskIds.value);
+    scheduleConversationActivityHydration(sidebarTaskIds.value);
   },
   { immediate: true },
 );
+
+onMounted(() => {
+  runWhenIdle(() => {
+    void preloadTaskDetailPage();
+  });
+});
+
+onBeforeUnmount(() => {
+  if (activityHydrationTimer === null) return;
+  cancelIdleRun(activityHydrationTimer);
+  activityHydrationTimer = null;
+});
 
 function newChat() {
   const draft = createDraftOrphan();

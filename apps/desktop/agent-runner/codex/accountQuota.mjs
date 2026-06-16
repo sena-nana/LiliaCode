@@ -6,6 +6,8 @@ const FIVE_HOUR_MINUTES = 300;
 const WEEKLY_MINUTES = 10080;
 const FIVE_HOUR_TOLERANCE = 90;
 const WEEKLY_TOLERANCE = 1440;
+const RATE_LIMIT_READ_RETRIES = 2;
+const RATE_LIMIT_READ_RETRY_DELAY_MS = 500;
 
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -27,7 +29,7 @@ function durationNear(window, target, tolerance) {
     Math.abs(window.windowDurationMins - target) <= tolerance;
 }
 
-function normalizeRateLimitSnapshot(value) {
+function normalizeLimitSnapshot(value) {
   if (!isRecord(value)) return null;
   const primary = normalizeWindow(value.primary);
   const secondary = normalizeWindow(value.secondary);
@@ -47,26 +49,89 @@ function normalizeRateLimitSnapshot(value) {
     rateLimitReachedType: stringOrNull(value.rateLimitReachedType),
     fiveHour,
     weekly,
+  };
+}
+
+function readLimitSnapshot(result, limitId) {
+  if (!isRecord(result)) return null;
+  const byLimitId = isRecord(result.rateLimitsByLimitId) ? result.rateLimitsByLimitId : null;
+  if (byLimitId && isRecord(byLimitId[limitId])) return byLimitId[limitId];
+  if (limitId === "codex" && isRecord(result.rateLimits)) return result.rateLimits;
+  return null;
+}
+
+function isSparkLimit(key, value) {
+  if (!isRecord(value)) return false;
+  const text = [
+    key,
+    stringOrNull(value.limitId),
+    stringOrNull(value.limitName),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return text.includes("spark");
+}
+
+function readSparkLimitSnapshot(result) {
+  if (!isRecord(result)) return null;
+  const byLimitId = isRecord(result.rateLimitsByLimitId) ? result.rateLimitsByLimitId : null;
+  if (!byLimitId) return null;
+  if (isRecord(byLimitId.spark)) return byLimitId.spark;
+  return Object.entries(byLimitId)
+    .find(([key, value]) => isSparkLimit(key, value))?.[1] ?? null;
+}
+
+function normalizeRateLimitSnapshot(result) {
+  const codex = normalizeLimitSnapshot(readLimitSnapshot(result, "codex"));
+  const spark = normalizeLimitSnapshot(readSparkLimitSnapshot(result));
+  if (!codex && !spark) return null;
+  return {
+    available: Boolean(codex?.available || spark?.available),
+    connectionMode: "codex-account",
+    limitId: codex?.limitId ?? null,
+    limitName: codex?.limitName ?? null,
+    planType: codex?.planType ?? spark?.planType ?? null,
+    rateLimitReachedType: codex?.rateLimitReachedType ?? spark?.rateLimitReachedType ?? null,
+    fiveHour: codex?.fiveHour ?? null,
+    weekly: codex?.weekly ?? null,
+    sparkFiveHour: spark?.fiveHour ?? null,
+    sparkWeekly: spark?.weekly ?? null,
     fetchedAt: Date.now(),
     error: null,
   };
 }
 
-function readCodexLimitSnapshot(result) {
-  if (!isRecord(result)) return null;
-  const byLimitId = isRecord(result.rateLimitsByLimitId) ? result.rateLimitsByLimitId : null;
-  if (byLimitId && isRecord(byLimitId.codex)) return byLimitId.codex;
-  return isRecord(result.rateLimits) ? result.rateLimits : null;
+function sleep(ms) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+async function requestRateLimits(server, { retries = RATE_LIMIT_READ_RETRIES, retryDelayMs = RATE_LIMIT_READ_RETRY_DELAY_MS } = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await server.request("account/rateLimits/read");
+    } catch (err) {
+      lastError = err;
+      if (attempt >= retries) break;
+      await sleep(retryDelayMs);
+    }
+  }
+  throw lastError;
 }
 
 export async function readCodexAccountQuotaStatus(
-  { createServer = createCodexAppServer } = {},
+  {
+    createServer = createCodexAppServer,
+    retries = RATE_LIMIT_READ_RETRIES,
+    retryDelayMs = RATE_LIMIT_READ_RETRY_DELAY_MS,
+  } = {},
 ) {
   const server = createServer();
   try {
     await initializeCodexAppServer(server);
-    const result = await server.request("account/rateLimits/read");
-    const snapshot = normalizeRateLimitSnapshot(readCodexLimitSnapshot(result));
+    const result = await requestRateLimits(server, { retries, retryDelayMs });
+    const snapshot = normalizeRateLimitSnapshot(result);
     if (snapshot) return snapshot;
     return {
       available: false,
@@ -77,6 +142,8 @@ export async function readCodexAccountQuotaStatus(
       rateLimitReachedType: null,
       fiveHour: null,
       weekly: null,
+      sparkFiveHour: null,
+      sparkWeekly: null,
       fetchedAt: Date.now(),
       error: "Codex 官方额度接口未返回可识别的额度数据。",
     };

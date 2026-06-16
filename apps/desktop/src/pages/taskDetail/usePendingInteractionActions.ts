@@ -291,7 +291,7 @@ export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId:
         requestId,
         payload: {
           reason: typeof payload.reason === "string" ? payload.reason : null,
-          requestedAccess: payload.requestedAccess ?? payload.permissions,
+          requestedAccess: payload.requestedAccess ?? {},
           scopeSuggestion: payload.scopeSuggestion,
           providerContext: payload.providerContext && typeof payload.providerContext === "object" && !Array.isArray(payload.providerContext)
             ? payload.providerContext as Record<string, unknown>

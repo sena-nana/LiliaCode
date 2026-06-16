@@ -139,6 +139,9 @@ const shouldLoadSuggestions = computed(() =>
   !!props.projectId &&
   isIdleEmptyDraft.value,
 );
+const isLiveDraftRoute = computed(() =>
+  conversationRouteState.value.isLiveDraft,
+);
 const draftProjectPickerProjects = computed(() => listProjects());
 const shouldShowDraftProjectPicker = computed(() =>
   sidebarDisplayMode.value === "unified" &&
@@ -210,11 +213,12 @@ function syncArchitecturePanelRegistration() {
 }
 
 onMounted(async () => {
-  if (!props.projectId) await conversation.ensureOrphanCwd();
   unlisteners.push(await attachmentController.installDragDropListener());
   unlisteners.push(...await composerController.installRuntimeListeners());
   if (conversation.isPopup.value) {
     await composerController.loadAgentInteractionSettings();
+  } else if (isLiveDraftRoute.value) {
+    void composerController.loadAgentInteractionSettings();
   } else {
     await Promise.all([
       conversation.hydrateMainContext(),
@@ -260,8 +264,8 @@ watch(
     timeline.resetTimeline();
     attachmentController.resetAttachments();
     timeline.resubscribeDebugTimeline();
-    if (!props.projectId) await conversation.ensureOrphanCwd();
     if (!conversation.isPopup.value) {
+      if (isLiveDraftRoute.value) return;
       await conversation.hydrateMainContext();
       await composerController.loadAll();
     }

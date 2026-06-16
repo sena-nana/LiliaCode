@@ -5,7 +5,6 @@ import {
   KeyRound,
   Loader2,
   Network,
-  Plug,
   RotateCw,
   Save,
   Trash2,
@@ -23,12 +22,9 @@ import {
   setProviderConfig,
   setRouterMode,
 } from "../../services/chat";
-import ProviderSetupChecklist from "./ProviderSetupChecklist.vue";
 import {
   DIRECT_DEFAULT_URLS,
-  backendLabel,
   connectionDiagnostic,
-  routeLabel,
   runtimeDiagnostic,
 } from "./providerDiagnostics";
 
@@ -63,7 +59,6 @@ const routerModes = ref<Record<ChatBackendKind, RouterMode>>({
 });
 
 const selectedBackend = computed(() => activeBackend.value);
-const selectedLabel = computed(() => backendLabel(selectedBackend.value));
 const selectedStatus = computed(() => statusFor(selectedBackend.value));
 const selectedRouterMode = computed(() => routerModes.value[selectedBackend.value]);
 const selectedProviderForm = computed(() => providerForms.value[selectedBackend.value]);
@@ -80,8 +75,8 @@ const selectedDiagnostic = computed(() => {
     return { tone: "probing" as const, title: "检查中", hint: "正在读取本机运行时和连接配置。" };
   }
   const runtime = selectedRuntime.value;
-  if (runtime && runtime.tone === "err") return runtime;
-  return selectedConnection.value ?? runtime;
+  if (runtime) return runtime;
+  return selectedConnection.value;
 });
 const apiDefaultUrl = computed(() => DIRECT_DEFAULT_URLS[selectedBackend.value]);
 const apiKeyEnv = computed(() =>
@@ -228,14 +223,6 @@ onMounted(async () => {
       </span>
     </h2>
 
-    <ProviderSetupChecklist
-      :backend="selectedBackend"
-      :report="report"
-      :status="selectedStatus"
-      :router-mode="selectedRouterMode"
-      :probing="probing"
-    />
-
     <div class="settings-row">
       <div class="settings-row__label">使用</div>
       <div class="ui-segmented" role="radiogroup" aria-label="对话后端">
@@ -277,9 +264,6 @@ onMounted(async () => {
           </button>
         </div>
         <span v-else class="settings-row__status-text muted">Claude 使用 API 接入</span>
-        <span class="settings-row__status-text muted">
-          {{ selectedLabel }} 当前使用 {{ routeLabel(selectedRouterMode) }}
-        </span>
       </div>
     </div>
 
@@ -379,8 +363,7 @@ onMounted(async () => {
         class="is-spinning"
         aria-hidden="true"
       />
-      <component
-        :is="selectedDiagnostic.tone === 'ok' ? Plug : AlertTriangle"
+      <AlertTriangle
         v-else
         :size="16"
         aria-hidden="true"
