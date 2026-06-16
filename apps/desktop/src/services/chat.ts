@@ -116,6 +116,16 @@ export type {
   QuotaUsageStatsInput,
 };
 
+export type ConversationSuggestionSourceKind = "task" | "github" | "local-git" | "claude";
+
+export interface ConversationSuggestionSources {
+  sources: ConversationSuggestionSourceKind[];
+  localGit?: {
+    hasRecentCommits: boolean;
+    hasChangedFiles: boolean;
+  } | null;
+}
+
 export interface TurnStartedEvent { taskId: string; queuedCount: number; }
 export interface DoneEvent {
   taskId: string;
@@ -335,6 +345,16 @@ export function getConversationSuggestions(
   forceRefresh = false,
 ): Promise<SuggestionItem[]> {
   return invoke<SuggestionItem[]>("conversation_suggestions_get", {
+    projectId: projectId ?? null,
+    forceRefresh,
+  });
+}
+
+export function getConversationSuggestionSources(
+  projectId?: string | null,
+  forceRefresh = false,
+): Promise<ConversationSuggestionSources> {
+  return invoke<ConversationSuggestionSources>("conversation_suggestions_get_sources", {
     projectId: projectId ?? null,
     forceRefresh,
   });

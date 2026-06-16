@@ -10,7 +10,7 @@ mod types;
 pub(crate) use claude_native::save_claude_prompt_suggestion;
 pub(crate) use types::{SuggestionItem, SuggestionSettings};
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::settings_store::{load_store_value, save_store_value};
 use crate::store::LiliaStore;
@@ -19,12 +19,59 @@ use cache::{build_cache_key, cache_scope_key, load_cache_hit, normalize_settings
 use claude_native::{load_claude_native_suggestions, should_use_claude_native_suggestions};
 use generation::{build_generation_prompt, materialize_items, parse_model_suggestions};
 use model::{request_model, resolve_model_request};
-use scope::build_scope;
-use types::SETTINGS_KEY;
+use scope::{build_scope, summarize_scope_sources};
+use types::{SuggestionItemSource, SuggestionSourceProbe, SETTINGS_KEY};
 
 #[tauri::command]
 pub fn conversation_suggestions_get_settings(app: AppHandle) -> SuggestionSettings {
     normalize_settings(load_store_value(&app, SETTINGS_KEY))
+}
+
+#[tauri::command]
+pub async fn conversation_suggestions_get_sources(
+    app: AppHandle,
+    _store: State<'_, LiliaStore>,
+    project_id: Option<String>,
+    force_refresh: Option<bool>,
+) -> Result<SuggestionSourceProbe, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        conversation_suggestions_get_sources_blocking(app, project_id, force_refresh)
+    })
+    .await
+    .map_err(|err| format!("conversation suggestions sources 任务执行失败：{err}"))?
+}
+
+fn conversation_suggestions_get_sources_blocking(
+    app: AppHandle,
+    project_id: Option<String>,
+    force_refresh: Option<bool>,
+) -> Result<SuggestionSourceProbe, String> {
+    let settings = conversation_suggestions_get_settings(app.clone());
+    if !settings.enabled {
+        return Ok(SuggestionSourceProbe {
+            sources: Vec::new(),
+            local_git: None,
+        });
+    }
+
+    if should_use_claude_native_suggestions(&settings, force_refresh)
+        && load_claude_native_suggestions(&app, project_id.as_deref()).is_some()
+    {
+        return Ok(SuggestionSourceProbe {
+            sources: vec![SuggestionItemSource::Claude],
+            local_git: None,
+        });
+    }
+
+    let store = app.state::<LiliaStore>();
+    let conn = store.conn()?;
+    let Some(scope) = build_scope(&app, &conn, project_id.as_deref())? else {
+        return Ok(SuggestionSourceProbe {
+            sources: Vec::new(),
+            local_git: None,
+        });
+    };
+    Ok(summarize_scope_sources(&scope))
 }
 
 #[tauri::command]
@@ -36,9 +83,21 @@ pub fn conversation_suggestions_set_settings(
 }
 
 #[tauri::command]
-pub fn conversation_suggestions_get(
+pub async fn conversation_suggestions_get(
     app: AppHandle,
-    store: State<'_, LiliaStore>,
+    _store: State<'_, LiliaStore>,
+    project_id: Option<String>,
+    force_refresh: Option<bool>,
+) -> Result<Vec<SuggestionItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        conversation_suggestions_get_blocking(app, project_id, force_refresh)
+    })
+    .await
+    .map_err(|err| format!("conversation suggestions 任务执行失败：{err}"))?
+}
+
+fn conversation_suggestions_get_blocking(
+    app: AppHandle,
     project_id: Option<String>,
     force_refresh: Option<bool>,
 ) -> Result<Vec<SuggestionItem>, String> {
@@ -53,6 +112,7 @@ pub fn conversation_suggestions_get(
         }
     }
 
+    let store = app.state::<LiliaStore>();
     let conn = store.conn()?;
     let Some(scope) = build_scope(&app, &conn, project_id.as_deref())? else {
         return Ok(Vec::new());

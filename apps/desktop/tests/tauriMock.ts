@@ -596,7 +596,9 @@ let conversationSuggestionSettings = {
   source: "assistant-ai" as "assistant-ai" | "provider",
 };
 let conversationSuggestionsOverride: unknown[] | null = null;
+let conversationSuggestionSourcesOverride: unknown | null = null;
 let nextConversationSuggestionsError: string | null = null;
+let conversationSuggestionsDelayMs = 0;
 let projectSettings = {
   cloneParentDir: null as string | null,
   codexDefaults: null as unknown,
@@ -1179,7 +1181,9 @@ export function resetTauriMockData() {
   };
   conversationSuggestionSettings = { enabled: true, source: "assistant-ai" };
   conversationSuggestionsOverride = null;
+  conversationSuggestionSourcesOverride = null;
   nextConversationSuggestionsError = null;
+  conversationSuggestionsDelayMs = 0;
   projectSettings = { cloneParentDir: null, codexDefaults: null, githubBinding: null };
   mockPickedFolderPath = "C:\\Users\\mock";
   githubBindingStatus = {
@@ -1353,6 +1357,14 @@ export function setMockAgentTimelineDelay(delayMs: number) {
 
 export function setMockConversationSuggestions(items: unknown[]) {
   conversationSuggestionsOverride = items;
+}
+
+export function setMockConversationSuggestionSources(sources: unknown) {
+  conversationSuggestionSourcesOverride = sources;
+}
+
+export function setMockConversationSuggestionsDelay(delayMs: number) {
+  conversationSuggestionsDelayMs = delayMs;
 }
 
 export function failNextMockConversationSuggestions(message: string) {
@@ -2470,6 +2482,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "conversation_suggestions_get_settings":
       return { ...conversationSuggestionSettings };
 
+    case "conversation_suggestions_get_sources":
+      if (!conversationSuggestionSettings.enabled) return { sources: [], localGit: null };
+      if (conversationSuggestionSourcesOverride) return conversationSuggestionSourcesOverride;
+      return { sources: ["task"], localGit: null };
+
     case "conversation_suggestions_set_settings": {
       const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
         ? args.settings as Record<string, unknown>
@@ -2483,6 +2500,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "conversation_suggestions_get":
       if (!conversationSuggestionSettings.enabled) return [];
+      if (conversationSuggestionsDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, conversationSuggestionsDelayMs));
+      }
       if (nextConversationSuggestionsError) {
         const message = nextConversationSuggestionsError;
         nextConversationSuggestionsError = null;

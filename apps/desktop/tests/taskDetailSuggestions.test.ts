@@ -9,7 +9,9 @@ import { createDraftOrphan, createDraftTask } from "../src/services/tasksStore";
 import {
   failNextMockConversationSuggestions,
   mockInvoke,
+  setMockConversationSuggestionSources,
   setMockConversationSuggestions,
+  setMockConversationSuggestionsDelay,
 } from "./tauriMock";
 
 async function renderProjectDraftTaskDetail(taskId: string) {
@@ -66,11 +68,13 @@ function expectComposerFocused(view: ReturnType<typeof render>) {
 }
 
 describe("TaskDetail conversation suggestions", () => {
-  it("项目空白草稿会在输入框卡片内加载并展示新对话建议", async () => {
+  it("项目空白草稿会在空态标题下方加载并展示新对话建议", async () => {
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
     await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "conversation_suggestions_get_sources"))
+        .toBe(true);
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "conversation_suggestions_get"))
         .toBe(true);
       expect(view.getByRole("button", { name: "补齐建议缓存测试" })).toBeInTheDocument();
@@ -82,8 +86,9 @@ describe("TaskDetail conversation suggestions", () => {
       cmd === "chat_get_runtime_snapshot" && args?.taskId === draft.id
     )).toBe(false);
     const suggestions = view.getByLabelText("新对话建议");
-    expect(suggestions.closest(".chat-composer")).not.toBeNull();
-    expect(view.getByRole("button", { name: "刷新新对话建议" })).toBeInTheDocument();
+    expect(suggestions.closest(".chat-empty")).not.toBeNull();
+    expect(suggestions.closest(".chat-composer")).toBeNull();
+    expect(view.queryByRole("button", { name: "来点灵感？" })).toBeNull();
   });
 
   it("GitHub 建议会展示可扫描来源且点击仍填入 prompt", async () => {
@@ -121,18 +126,33 @@ describe("TaskDetail conversation suggestions", () => {
     expect(view.getByRole("textbox")).toHaveTextContent("请继续跟进 PR #12 的建议来源展示。");
   });
 
-  it("点击刷新入口会强制刷新新对话建议", async () => {
+  it("点击来点灵感会强制刷新新对话建议并显示来源加载文案", async () => {
+    setMockConversationSuggestions([]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
     await waitFor(() => {
-      expect(view.getByRole("button", { name: "补齐建议缓存测试" })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "来点灵感？" })).toBeInTheDocument();
     });
     mockInvoke.mockClear();
+    setMockConversationSuggestionSources({
+      sources: ["github"],
+      localGit: null,
+    });
+    setMockConversationSuggestionsDelay(80);
 
-    await fireEvent.click(view.getByRole("button", { name: "刷新新对话建议" }));
+    await fireEvent.click(view.getByRole("button", { name: "来点灵感？" }));
 
     await waitFor(() => {
+      expect(view.getByText("正在检查 GitHub 活动")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd, args]) =>
+        cmd === "conversation_suggestions_get_sources" &&
+        args?.projectId === "lilia" &&
+        args?.forceRefresh === true
+      )).toBe(true);
       expect(mockInvoke.mock.calls.some(([cmd, args]) =>
         cmd === "conversation_suggestions_get" &&
         args?.projectId === "lilia" &&
@@ -141,20 +161,47 @@ describe("TaskDetail conversation suggestions", () => {
     });
   });
 
-  it("没有可用建议时显示轻量状态且不影响输入", async () => {
+  it("没有可用建议时显示来点灵感且不影响输入", async () => {
     setMockConversationSuggestions([]);
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
     await waitFor(() => {
-      expect(view.getByText("暂无可用建议")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "来点灵感？" })).toBeInTheDocument();
     });
 
     const input = view.getByRole("textbox");
     await fireEvent.input(input, { target: { textContent: "继续写草稿" } });
 
     expect(input).toHaveTextContent("继续写草稿");
-    expect(view.queryByText("暂无可用建议")).toBeNull();
+    expect(view.queryByRole("button", { name: "来点灵感？" })).toBeNull();
+  });
+
+  it("加载历史任务来源时显示历史任务文案", async () => {
+    setMockConversationSuggestions([]);
+    setMockConversationSuggestionSources({ sources: ["task"], localGit: null });
+    setMockConversationSuggestionsDelay(80);
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expect(view.getByText("正在检查历史任务")).toBeInTheDocument();
+    });
+  });
+
+  it("加载本地 Git 提交和变更来源时显示本地 Git 文案", async () => {
+    setMockConversationSuggestions([]);
+    setMockConversationSuggestionSources({
+      sources: ["local-git"],
+      localGit: { hasRecentCommits: true, hasChangedFiles: true },
+    });
+    setMockConversationSuggestionsDelay(80);
+    const draft = createDraftTask("lilia");
+    const view = await renderProjectDraftTaskDetail(draft.id);
+
+    await waitFor(() => {
+      expect(view.getByText("正在检查本地提交和未提交变更")).toBeInTheDocument();
+    });
   });
 
   it("建议加载失败时显示轻量状态且不影响输入", async () => {
@@ -194,7 +241,7 @@ describe("TaskDetail conversation suggestions", () => {
       .toBe(false);
     expect(view.queryByLabelText("新对话建议")).toBeNull();
     expect(view.queryByRole("button", { name: "补齐建议缓存测试" })).toBeNull();
-    expect(view.queryByRole("button", { name: "刷新新对话建议" })).toBeNull();
+    expect(view.queryByRole("button", { name: "来点灵感？" })).toBeNull();
   });
 
   it("主窗口收集箱草稿进入对话后自动聚焦输入框", async () => {

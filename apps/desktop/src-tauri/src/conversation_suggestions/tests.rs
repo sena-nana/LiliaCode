@@ -7,7 +7,7 @@ use super::generation::{
     build_generation_prompt, materialize_items, parse_model_suggestions, RawSuggestion,
 };
 use super::github_context::{normalize_github_events, parse_github_repo_url};
-use super::scope::{build_scope_from_parts, load_task_samples};
+use super::scope::{build_scope_from_parts, load_task_samples, summarize_scope_sources};
 use super::types::*;
 use rusqlite::{params, Connection};
 use serde_json::{json, Value as JsonValue};
@@ -378,6 +378,76 @@ fn scope_can_use_github_activity_without_unfinished_tasks() {
     assert!(scope.tasks.is_empty());
     assert_eq!(scope.github_activities.len(), 1);
     assert!(scope.local_git_contexts.is_empty());
+}
+
+#[test]
+fn source_probe_reports_task_and_github_sources() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_schema(&conn);
+    insert_task(&conn, "task-1", "p1", false);
+    insert_event(&conn, "task-1", 20, "最近对话");
+    insert_todo(&conn, "task-1", "继续处理建议展示", false, 0);
+
+    let scope = build_scope_from_parts(
+        &conn,
+        Some("p1"),
+        empty_project_context(),
+        Some((
+            sample_github_repo(),
+            vec![sample_github_activity("gh-pr-1", "PR #1: 接入 GitHub 活动")],
+        )),
+        vec![sample_local_git_context("feature/local-git")],
+    )
+    .unwrap()
+    .unwrap();
+
+    let probe = summarize_scope_sources(&scope);
+
+    assert_eq!(
+        probe.sources,
+        vec![SuggestionItemSource::Task, SuggestionItemSource::Github]
+    );
+    assert!(probe.local_git.is_none());
+}
+
+#[test]
+fn source_probe_reports_local_git_details() {
+    let scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: Some("Lilia".to_string()),
+        latest_updated_at: 1,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: vec![sample_local_git_context("feature/local-git")],
+        tasks: Vec::new(),
+    };
+
+    let probe = summarize_scope_sources(&scope);
+    let local_git = probe.local_git.unwrap();
+
+    assert_eq!(probe.sources, vec![SuggestionItemSource::LocalGit]);
+    assert!(local_git.has_recent_commits);
+    assert!(local_git.has_changed_files);
+}
+
+#[test]
+fn source_probe_distinguishes_clean_local_git_context() {
+    let mut context = sample_local_git_context("feature/local-git");
+    context.context.changed_files.clear();
+    let scope = SuggestionScope {
+        project_id: Some("p1".to_string()),
+        project_name: Some("Lilia".to_string()),
+        latest_updated_at: 1,
+        github_repo: None,
+        github_activities: Vec::new(),
+        local_git_contexts: vec![context],
+        tasks: Vec::new(),
+    };
+
+    let local_git = summarize_scope_sources(&scope).local_git.unwrap();
+
+    assert!(local_git.has_recent_commits);
+    assert!(!local_git.has_changed_files);
 }
 
 #[test]
