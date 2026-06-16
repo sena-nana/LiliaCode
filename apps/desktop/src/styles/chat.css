@@ -445,7 +445,8 @@
 }
 
 .architecture-panel__item-head span,
-.architecture-panel__change-status {
+.architecture-panel__change-status,
+.architecture-panel__change-backend {
   flex: 0 0 auto;
   color: var(--text-faint);
   font-size: 11px;
@@ -458,12 +459,38 @@
 
 .architecture-panel__change {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  gap: 6px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.architecture-panel__change-head,
+.architecture-panel__change-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.architecture-panel__change-status {
+  font-weight: 700;
+}
+
+.architecture-panel__change-backend {
+  padding-left: 6px;
+  border-left: 1px solid var(--border-soft);
+}
+
+.architecture-panel__change p {
+  margin: 0;
+  min-width: 0;
+}
+
+.architecture-panel__change-meta {
+  flex-wrap: wrap;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 .debug-panel {

@@ -31,6 +31,12 @@ const hasGraphContent = computed(() =>
 );
 const mermaidSource = computed(() => buildMermaid(graph.value));
 const recentChanges = computed(() => changes.value.slice(0, 8));
+const changeTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 async function loadArchitecture() {
   if (!props.projectId) {
@@ -104,6 +110,17 @@ function changeText(change: ProjectArchitectureChange): string {
 
 function eventSummary(event: ProjectArchitectureChangeRecord): string {
   return event.reason || event.changes.map(changeText).slice(0, 2).join("；") || event.status;
+}
+
+function eventVersionLabel(event: ProjectArchitectureChangeRecord): string {
+  const before = `v${event.beforeVersion}`;
+  const after = event.afterVersion == null ? "无新版本" : `v${event.afterVersion}`;
+  return `版本：${before} -> ${after}`;
+}
+
+function eventTimeLabel(event: ProjectArchitectureChangeRecord): string {
+  if (!event.createdAt) return "时间：未知";
+  return `时间：${changeTimeFormatter.format(new Date(event.createdAt))}`;
 }
 
 onMounted(loadArchitecture);
@@ -184,8 +201,15 @@ watch(() => props.projectId, loadArchitecture);
           :key="event.id ?? `${event.createdAt}`"
           class="architecture-panel__change"
         >
-          <span class="architecture-panel__change-status">{{ event.status }}</span>
-          <span>{{ eventSummary(event) }}</span>
+          <div class="architecture-panel__change-head">
+            <span class="architecture-panel__change-status">{{ event.status }}</span>
+            <span class="architecture-panel__change-backend">backend：{{ event.backend }}</span>
+          </div>
+          <p>{{ eventSummary(event) }}</p>
+          <p class="architecture-panel__change-meta">
+            <span>{{ eventTimeLabel(event) }}</span>
+            <span>{{ eventVersionLabel(event) }}</span>
+          </p>
         </article>
       </section>
     </div>
