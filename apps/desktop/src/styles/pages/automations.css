@@ -11,6 +11,17 @@
   gap: 10px;
 }
 
+.automations-sidebar .settings-sidebar__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.automations-sidebar .settings-sidebar__back {
+  width: auto;
+  flex: 1;
+}
+
 .automations-sidebar__host {
   min-height: 0;
   display: flex;
@@ -208,13 +219,6 @@
 .automations-page__palette {
   left: 12px;
   top: 12px;
-}
-
-.automations-page__palette-divider {
-  align-self: stretch;
-  width: 1px;
-  margin: 3px 2px;
-  background: var(--border);
 }
 
 .automations-page__canvas-controls {

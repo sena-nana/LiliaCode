@@ -129,6 +129,7 @@ onBeforeUnmount(() => {
           <ArrowLeft :size="15" aria-hidden="true" />
           <span>返回</span>
         </button>
+        <div id="automation-sidebar-actions" />
       </div>
       <div id="automation-sidebar-host" class="automations-sidebar__host" />
     </aside>
