@@ -83,6 +83,19 @@ export async function updateMilestone(
   await ensureProjectRoadmapLoaded(projectId, true);
 }
 
+export async function deleteMilestone(projectId: string, id: string): Promise<void> {
+  await invoke("milestone_delete", { id });
+  await ensureProjectRoadmapLoaded(projectId, true);
+}
+
+export async function reorderMilestones(
+  projectId: string,
+  orderedIds: string[],
+): Promise<void> {
+  await invoke("milestone_reorder", { projectId, orderedIds });
+  await ensureProjectRoadmapLoaded(projectId, true);
+}
+
 export async function setMilestoneTasks(
   projectId: string,
   milestoneId: string,
