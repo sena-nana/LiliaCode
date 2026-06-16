@@ -76,13 +76,13 @@ GitHub Actions 会在 pull request 到 `main`、推送到 `main` 或手动触发
 推送到 `main` 后，文档站会继续由 Pages workflow 自动发布。发布 Windows 桌面安装包前，先同步并检查四处版本号：根 `package.json`、`apps/desktop/package.json`、`apps/desktop/src-tauri/Cargo.toml` 和 `apps/desktop/src-tauri/tauri.conf.json`。版本号必须与发布 tag 去掉 `v` 后一致。
 
 ```bash
-yarn release:check --tag vX.Y.Z
+yarn release:check --tag v0.1.0-alpha.1
 ```
 
 检查通过后推送 `v*` tag：
 
 ```bash
-git tag vX.Y.Z && git push origin vX.Y.Z
+git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
 ```
 
 Release workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri 安装包，并上传到 draft GitHub Release。安装包命名按 `LiliaCode_<version>_x64-setup.*` 检查；release draft 会附带首发检查清单和自动生成的变更记录。

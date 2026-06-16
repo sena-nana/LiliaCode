@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 const repoRoot = process.cwd();
-const versionTagPattern = /^v(\d+\.\d+\.\d+)$/;
+const versionTagPattern = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z-]*(?:\.[0-9A-Za-z][0-9A-Za-z-]*)*)?)$/;
 const errors = [];
 
 function readText(relativePath) {
@@ -55,7 +55,7 @@ const tag = getArgValue("--tag") ?? process.env.RELEASE_TAG ?? process.env.GITHU
 const tagMatch = tag?.match(versionTagPattern);
 
 if (!tagMatch) {
-  reportError(`Release tag must match vX.Y.Z, got ${tag ? `"${tag}"` : "nothing"}.`);
+  reportError(`Release tag must match vX.Y.Z or vX.Y.Z-prerelease, got ${tag ? `"${tag}"` : "nothing"}.`);
 } else {
   const expectedVersion = tagMatch[1];
   const rootPackage = readJson("package.json");
