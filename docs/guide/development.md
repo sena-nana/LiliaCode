@@ -91,7 +91,7 @@ GitHub Release 正文可从 `docs/github/release-template.md` 复制后补全。
 
 ## 图标
 
-Tauri 图标的设计稿是 `apps/desktop/src-tauri/icons/icon.svg`，其中 PNG 嵌入在 SVG 容器内。要重新生成全套 PNG 或 ICO 时运行：
+Tauri 图标的设计稿是 `apps/desktop/src-tauri/icons/icon-source.png`。要重新生成全套 PNG 或 ICO 时运行：
 
 ```bash
 yarn icons:generate

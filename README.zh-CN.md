@@ -181,7 +181,7 @@ yarn release:check --tag vX.Y.Z
 
 推送 `v*` tag 后，workflow 会先运行 `yarn verify` 和 `yarn release:check --tag <tag>`，再构建 Windows Tauri 安装包并上传到 draft GitHub Release。正式发布前保持 draft 状态，在 Windows 环境下载安装包并验证安装、启动主窗口、基础窗口操作和卸载流程。当前发布包仅面向 Windows，没有代码签名，不包含 Tauri updater，升级方式是手动下载并安装新版安装包。
 
-Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon.svg](apps/desktop/src-tauri/icons/icon.svg)（PNG 嵌入式 SVG 容器）。要重新生成全套 PNG / ICO 时跑 `yarn icons:generate`。如需 macOS `.icns` 或全套尺寸：`yarn icons:tauri`。
+Tauri 图标的设计稿是 [apps/desktop/src-tauri/icons/icon-source.png](apps/desktop/src-tauri/icons/icon-source.png)。要重新生成全套 PNG / ICO 时跑 `yarn icons:generate`。如需 macOS `.icns` 或全套尺寸：`yarn icons:tauri`。
 
 ## 感谢
 

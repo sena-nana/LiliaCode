@@ -1,9 +1,7 @@
 # Lilia 应用图标生成器
 #
-# 设计：从 apps/desktop/src-tauri/icons/icon.svg（设计稿，PNG 嵌入式 SVG 容器）
-#       栅格化出全套尺寸：1024 / 256 / 128 / 32 PNG + 多尺寸 ICO。
-#       SVG 中的 <image href="data:image/png;base64,..."> 会被解码后用 GDI+
-#       高质量重采样到目标尺寸。
+# 设计：从 apps/desktop/src-tauri/icons/icon-source.png 生成全套尺寸：
+#       1024 / 256 / 128 / 32 PNG + 多尺寸 ICO。
 # 用法：
 #   yarn icons:generate
 # 若想要全平台图标集（含 .icns 等）：
@@ -19,22 +17,22 @@ if (-not (Test-Path $iconsDir)) {
 }
 $iconsDir = (Resolve-Path $iconsDir).Path
 
-$svgPath = Join-Path $iconsDir "icon.svg"
-if (-not (Test-Path $svgPath)) {
-    throw "Source SVG not found: $svgPath"
+$sourcePath = Join-Path $iconsDir "icon-source.png"
+if (-not (Test-Path $sourcePath)) {
+    throw "Source icon not found: $sourcePath"
 }
 
-# ---------- 从 SVG 容器里提取嵌入的 base64 位图 ----------
-function Get-SvgEmbeddedImage([string]$path) {
-    $content = Get-Content -LiteralPath $path -Raw
-    $pattern = 'data:image/(?<fmt>png|jpeg|jpg|webp);base64,(?<data>[A-Za-z0-9+/=]+)'
-    $match = [regex]::Match($content, $pattern)
-    if (-not $match.Success) {
-        throw "icon.svg 没有内嵌的 base64 位图（data:image/...;base64,...）。当前脚本只支持 PNG/JPEG/WebP-embedded SVG 容器；如需渲染纯矢量 SVG 请改走 sharp / inkscape / resvg 等工具链。"
-    }
-    $bytes = [Convert]::FromBase64String($match.Groups['data'].Value)
+# ---------- 读取源图，避免锁住后续要覆盖的 icon-source.png ----------
+function Read-Bitmap([string]$path) {
+    $bytes = [System.IO.File]::ReadAllBytes($path)
     $ms = New-Object System.IO.MemoryStream(, $bytes)
-    return [System.Drawing.Bitmap]::FromStream($ms)
+    $image = [System.Drawing.Image]::FromStream($ms)
+    try {
+        return New-Object System.Drawing.Bitmap($image)
+    } finally {
+        $image.Dispose()
+        $ms.Dispose()
+    }
 }
 
 # ---------- 高质量重采样 ----------
@@ -56,9 +54,9 @@ function Save-Png([System.Drawing.Bitmap]$bmp, [string]$path) {
     Write-Output "  -> $path"
 }
 
-Write-Output "Generating Lilia icons from $svgPath"
+Write-Output "Generating Lilia icons from $sourcePath"
 
-$source = Get-SvgEmbeddedImage $svgPath
+$source = Read-Bitmap $sourcePath
 Write-Output "  source: $($source.Width) x $($source.Height)"
 
 # 1024：icon-source.png + icon.png

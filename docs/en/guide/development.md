@@ -91,7 +91,7 @@ Use `docs/github/release-template.md` as the source template when preparing the 
 
 ## Icons
 
-The Tauri icon source is `apps/desktop/src-tauri/icons/icon.svg`, which embeds PNG data inside an SVG container. To regenerate the full PNG or ICO set, run:
+The Tauri icon source is `apps/desktop/src-tauri/icons/icon-source.png`. To regenerate the full PNG or ICO set, run:
 
 ```bash
 yarn icons:generate
