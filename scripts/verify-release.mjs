@@ -51,6 +51,16 @@ function hasWindowsInstallerTarget(targets) {
   return targets.includes("all") || targets.includes("nsis") || targets.includes("msi");
 }
 
+function hasBundleTarget(targets, target) {
+  if (targets === "all") {
+    return true;
+  }
+  if (Array.isArray(targets)) {
+    return targets.includes("all") || targets.includes(target);
+  }
+  return targets === target;
+}
+
 const tag = getArgValue("--tag") ?? process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME;
 const tagMatch = tag?.match(versionTagPattern);
 
@@ -99,7 +109,14 @@ if (!tagMatch) {
     console.log(`[release:check] Version: ${expectedVersion}`);
     console.log(`[release:check] Release name: ${productName} ${tag}`);
     console.log("[release:check] Asset pattern: LiliaCode_[version]_[arch][setup][ext]");
-    console.log(`[release:check] Expected Windows installers: ${productName}_${expectedVersion}_x64-setup.exe and/or ${productName}_${expectedVersion}_x64.msi`);
+    const installers = [];
+    if (hasBundleTarget(tauriConfig.bundle?.targets, "nsis")) {
+      installers.push(`${productName}_${expectedVersion}_x64-setup.exe`);
+    }
+    if (hasBundleTarget(tauriConfig.bundle?.targets, "msi")) {
+      installers.push(`${productName}_${expectedVersion}_x64.msi`);
+    }
+    console.log(`[release:check] Expected Windows installers: ${installers.join(" and/or ")}`);
   }
 }
 

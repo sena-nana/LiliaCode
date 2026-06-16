@@ -155,7 +155,7 @@ jobs:
           releaseName: LiliaCode ${{ steps.release_ref.outputs.tag }}
           releaseDraft: true
           generateReleaseNotes: true
-          releaseAssetNamePattern: LiliaCode_[version]_[arch][setup][ext]
+          assetNamePattern: LiliaCode_[version]_[arch][setup][ext]
           releaseBody: |
             ## 首发发布检查清单
 

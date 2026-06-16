@@ -83,7 +83,7 @@ After the check passes, push a `v*` tag:
 git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
 ```
 
-The release workflow runs `yarn verify` and `yarn release:check --tag <tag>` first, then builds the Windows Tauri bundle and uploads it to a draft GitHub Release. Installer asset names are checked against `LiliaCode_<version>_x64-setup.*`; the draft release includes a first-release checklist and generated release notes.
+The release workflow runs `yarn verify` and `yarn release:check --tag <tag>` first, then builds the Windows Tauri NSIS bundle and uploads it to a draft GitHub Release. Installer asset names are checked against `LiliaCode_<version>_x64-setup.*`; the draft release includes a first-release checklist and generated release notes.
 
 Before publishing the release, download the installer from the draft Release on Windows and verify install, main-window launch, and uninstall. Current release artifacts are not code signed, so Windows SmartScreen or security software warnings are expected. They also do not include macOS notarization, Linux/macOS installers, or Tauri updater auto-update support. During the first-release phase, users upgrade manually by downloading and installing the newer Windows installer.
 

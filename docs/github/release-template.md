@@ -14,7 +14,6 @@
 ## 安装包
 
 - Windows x64 安装包：`LiliaCode_<version>_x64-setup.exe`
-- 如 workflow 同时生成 MSI：`LiliaCode_<version>_x64.msi`
 
 ## Windows 安装验证
 
