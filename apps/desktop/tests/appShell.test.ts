@@ -119,6 +119,31 @@ describe("AppShell left sidebar collapse", () => {
     });
   });
 
+  it("自动化页替换左侧栏、禁用折叠并返回进入前路由", async () => {
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, "1");
+    const view = await renderAppShell("/projects/lilia");
+    const shell = shellElement(view.container);
+
+    await view.router.push("/automations");
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/automations");
+    });
+
+    const leftToggle = view.getByRole("button", { name: "折叠左侧栏" });
+    expect(shell).toHaveClass("is-automations-mode");
+    expect(shell).not.toHaveClass("is-sidebar-collapsed");
+    expect(leftToggle).toBeDisabled();
+    expect(view.getByRole("complementary", { name: "自动化列表" })).toBeInTheDocument();
+    expect(view.container.querySelector("#automation-sidebar-host")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "新对话" })).not.toBeInTheDocument();
+    expect(localStorage.getItem(COLLAPSED_STORAGE_KEY)).toBe("1");
+
+    await fireEvent.click(view.getByRole("button", { name: "返回" }));
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/projects/lilia");
+    });
+  });
+
   it("导入和插件入口收敛到设置分类", async () => {
     const view = await renderAppShell("/settings");
 

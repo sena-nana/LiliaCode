@@ -234,32 +234,34 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="automations-page">
-    <aside class="automations-page__sidebar" aria-label="自动化列表">
-      <header class="automations-page__head">
-        <h1 class="automations-page__title">自动化</h1>
-        <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" @click="newWorkflow">
-          <Plus :size="15" aria-hidden="true" />
-        </button>
-      </header>
-      <div v-if="loading" class="automations-page__notice">
-        <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
-        读取中
+    <Teleport to="#automation-sidebar-host">
+      <div class="automations-page__sidebar">
+        <header class="automations-page__head">
+          <h1 class="automations-page__title">自动化</h1>
+          <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" @click="newWorkflow">
+            <Plus :size="15" aria-hidden="true" />
+          </button>
+        </header>
+        <div v-if="loading" class="automations-page__notice">
+          <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+          读取中
+        </div>
+        <div v-else-if="!workflowRows.length" class="automations-page__notice">没有自动化</div>
+        <div v-else class="automations-page__list ui-list">
+          <button
+            v-for="workflow in workflowRows"
+            :key="workflow.id"
+            type="button"
+            class="automations-page__row ui-list-item"
+            :class="{ 'is-active': workflow.id === selectedWorkflowId }"
+            @click="selectWorkflow(workflow)"
+          >
+            <span class="automations-page__row-title">{{ workflow.name }}</span>
+            <span class="automations-page__row-meta">{{ workflowMeta(workflow) }}</span>
+          </button>
+        </div>
       </div>
-      <div v-else-if="!workflowRows.length" class="automations-page__notice">没有自动化</div>
-      <div v-else class="automations-page__list ui-list">
-        <button
-          v-for="workflow in workflowRows"
-          :key="workflow.id"
-          type="button"
-          class="automations-page__row ui-list-item"
-          :class="{ 'is-active': workflow.id === selectedWorkflowId }"
-          @click="selectWorkflow(workflow)"
-        >
-          <span class="automations-page__row-title">{{ workflow.name }}</span>
-          <span class="automations-page__row-meta">{{ workflowMeta(workflow) }}</span>
-        </button>
-      </div>
-    </aside>
+    </Teleport>
 
     <main class="automations-page__main">
       <header class="automations-page__toolbar">
