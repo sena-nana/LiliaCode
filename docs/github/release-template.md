@@ -1,4 +1,4 @@
-# LiliaCode vX.Y.Z
+# LiliaCode v0.1.0-alpha.1
 
 ## 发布摘要
 
