@@ -5,7 +5,13 @@ import Automations from "../src/pages/Automations.vue";
 import { clearMockAutomations, finishMockAutomationRun, mockInvoke } from "./tauriMock";
 
 const vueFlowMock = vi.hoisted(() => ({
-  useVueFlow: vi.fn(() => ({ fitView: vi.fn(), zoomIn: vi.fn(), zoomOut: vi.fn() })),
+  useVueFlow: vi.fn(() => ({
+    fitView: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    dimensions: { value: { width: 740, height: 470 } },
+    viewport: { value: { x: 0, y: 0, zoom: 1 } },
+  })),
 }));
 
 vi.mock("@vue-flow/core", async () => {
@@ -79,7 +85,13 @@ describe("Automations page", () => {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();
     const fitView = vi.fn();
-    vi.mocked(useVueFlow).mockReturnValue({ fitView, zoomIn, zoomOut } as never);
+    vi.mocked(useVueFlow).mockReturnValue({
+      fitView,
+      zoomIn,
+      zoomOut,
+      dimensions: { value: { width: 740, height: 470 } },
+      viewport: { value: { x: 18, y: -12, zoom: 1.5 } },
+    } as never);
     const view = renderAutomations();
 
     await view.findByRole("complementary", { name: "自动化检查器" }, { timeout: 5000 });
@@ -97,7 +109,15 @@ describe("Automations page", () => {
     expect(within(view.getByTestId("automation-flow")).getByText("任务变化")).toBeInTheDocument();
     expect(within(view.getByTestId("automation-flow")).getByText("复盘 Agent")).toBeInTheDocument();
     expect(view.getByRole("group", { name: "画布控制" })).toBeInTheDocument();
+    expect(view.getByRole("group", { name: "画布控制" }).closest(".automations-page__canvas")).toHaveStyle({
+      "--automation-canvas-grid-x": "18px",
+      "--automation-canvas-grid-y": "-12px",
+      "--automation-canvas-grid-size": "36px",
+    });
     expect(view.getByRole("img", { name: "节点小地图" })).toBeInTheDocument();
+    const minimap = view.getByRole("img", { name: "节点小地图" });
+    expect(minimap.querySelector(".automations-page__minimap-viewport")).not.toBeNull();
+    expect(minimap.querySelector(".automations-page__minimap-node.is-selected")).toBeNull();
     expect(view.getByRole("button", { name: "添加事件触发" })).toBeDisabled();
     expect(view.getByRole("button", { name: "添加人工确认" })).toBeEnabled();
     expect(view.queryByRole("textbox", { name: "手动 Payload" })).not.toBeInTheDocument();

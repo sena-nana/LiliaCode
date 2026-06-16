@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import "../../styles/pages/automations.css";
 import "@vue-flow/core/dist/style.css";
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Handle, Position, VueFlow, useVueFlow } from "@vue-flow/core";
 import {
   Bot,
@@ -57,7 +57,45 @@ const errorText = ref<string | null>(null);
 const confirmingDeleteWorkflowId = ref<string | null>(null);
 const editingWorkflowName = ref(false);
 const unlisteners = ref<Array<() => void>>([]);
-const { fitView, zoomIn, zoomOut } = useVueFlow();
+const { dimensions, fitView, zoomIn, zoomOut, viewport } = useVueFlow();
+const GRID_SIZE = 24;
+const NODE_WIDTH = 184;
+const NODE_HEIGHT = 78;
+const MINIMAP_SIZE = { width: 148, height: 94 };
+const MINIMAP_PADDING = 8;
+
+interface MinimapRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const canvasBackgroundStyle = computed(() => {
+  const gridSize = GRID_SIZE * viewport.value.zoom;
+  return {
+    "--automation-canvas-grid-size": `${gridSize}px`,
+    "--automation-canvas-grid-x": `${viewport.value.x}px`,
+    "--automation-canvas-grid-y": `${viewport.value.y}px`,
+  };
+});
+
+function percent(value: number, total: number): string {
+  return `${(value / total) * 100}%`;
+}
+
+function rectToStyle(rect: MinimapRect, bounds: MinimapRect, scale: number) {
+  const renderedWidth = bounds.width * scale;
+  const renderedHeight = bounds.height * scale;
+  const offsetX = (MINIMAP_SIZE.width - renderedWidth) / 2;
+  const offsetY = (MINIMAP_SIZE.height - renderedHeight) / 2;
+  return {
+    left: percent(offsetX + (rect.x - bounds.x) * scale, MINIMAP_SIZE.width),
+    top: percent(offsetY + (rect.y - bounds.y) * scale, MINIMAP_SIZE.height),
+    width: percent(rect.width * scale, MINIMAP_SIZE.width),
+    height: percent(rect.height * scale, MINIMAP_SIZE.height),
+  };
+}
 
 function setError(message: string) {
   errorText.value = message || null;
@@ -129,7 +167,6 @@ const {
   edges,
   selectedNode,
   hasTriggerNode,
-  minimapNodes,
   addNode,
   updateSelectedConfig,
   updateSelectedTitle,
@@ -139,6 +176,58 @@ const {
   configBoolean,
   sourceHandlesForNode,
 } = graph;
+
+function nodeStatus(nodeId: string): string | null {
+  return selectedRunNodeStates.value.find((state) => state.nodeId === nodeId)?.status ?? null;
+}
+
+const minimap = computed(() => {
+  if (!nodes.value.length) return { nodes: [], viewport: null };
+  const viewportZoom = Math.max(0.0001, viewport.value.zoom);
+  const viewportRect = dimensions.value.width > 0 && dimensions.value.height > 0
+    ? {
+      x: -viewport.value.x / viewportZoom,
+      y: -viewport.value.y / viewportZoom,
+      width: dimensions.value.width / viewportZoom,
+      height: dimensions.value.height / viewportZoom,
+    }
+    : null;
+  const nodeRects = nodes.value.map((node) => ({
+    id: node.id,
+    status: nodeStatus(node.id),
+    rect: {
+      x: node.position.x,
+      y: node.position.y,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+    },
+  }));
+  const rects = [
+    ...nodeRects.map((node) => node.rect),
+    ...(viewportRect ? [viewportRect] : []),
+  ];
+  const minX = Math.min(...rects.map((rect) => rect.x));
+  const minY = Math.min(...rects.map((rect) => rect.y));
+  const bounds = {
+    x: minX,
+    y: minY,
+    width: Math.max(1, Math.max(...rects.map((rect) => rect.x + rect.width)) - minX),
+    height: Math.max(1, Math.max(...rects.map((rect) => rect.y + rect.height)) - minY),
+  };
+  const scale = Math.min(
+    (MINIMAP_SIZE.width - MINIMAP_PADDING * 2) / bounds.width,
+    (MINIMAP_SIZE.height - MINIMAP_PADDING * 2) / bounds.height,
+  );
+
+  return {
+    nodes: nodeRects.map((node) => ({
+      id: node.id,
+      status: node.status,
+      style: rectToStyle(node.rect, bounds, scale),
+    })),
+    viewport: viewportRect ? rectToStyle(viewportRect, bounds, scale) : null,
+  };
+});
 
 function selectWorkflow(workflow: Parameters<typeof workspace.selectWorkflow>[0]) {
   workspace.selectWorkflow(workflow);
@@ -304,7 +393,7 @@ onBeforeUnmount(() => {
     </Teleport>
 
     <main class="automations-page__main">
-      <div class="automations-page__canvas">
+      <div class="automations-page__canvas" :style="canvasBackgroundStyle">
         <div class="automations-page__corner-actions automations-page__palette" aria-label="节点库">
           <button type="button" class="ui-button ui-icon-button" title="新建自动化" aria-label="新建自动化" :disabled="saving" @click="newWorkflow">
             <Plus :size="14" aria-hidden="true" />
@@ -398,14 +487,16 @@ onBeforeUnmount(() => {
         </div>
         <div class="automations-page__minimap" role="img" aria-label="节点小地图">
           <span
-            v-for="node in minimapNodes"
+            v-for="node in minimap.nodes"
             :key="node.id"
             class="automations-page__minimap-node"
-            :class="[
-              { 'is-selected': node.selected },
-              node.status ? `is-${node.status}` : '',
-            ]"
-            :style="{ left: node.left, top: node.top, width: node.width, height: node.height }"
+            :class="node.status ? `is-${node.status}` : ''"
+            :style="node.style"
+          />
+          <span
+            v-if="minimap.viewport"
+            class="automations-page__minimap-viewport"
+            :style="minimap.viewport"
           />
         </div>
         <VueFlow
