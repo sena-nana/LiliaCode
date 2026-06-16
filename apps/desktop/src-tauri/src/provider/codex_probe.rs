@@ -331,6 +331,19 @@ pub(crate) fn build_codex_app_server_probe_status_cached(
     force_refresh: bool,
 ) -> CodexAppServerProbeStatus {
     let cache = CODEX_APP_SERVER_PROBE_CACHE.get_or_init(|| Mutex::new(None));
+    build_codex_app_server_probe_status_cached_with(cache, force_refresh, || {
+        build_codex_app_server_probe_status()
+    })
+}
+
+fn build_codex_app_server_probe_status_cached_with<F>(
+    cache: &Mutex<Option<CodexAppServerProbeStatus>>,
+    force_refresh: bool,
+    mut probe: F,
+) -> CodexAppServerProbeStatus
+where
+    F: FnMut() -> CodexAppServerProbeStatus,
+{
     if !force_refresh {
         if let Ok(guard) = cache.lock() {
             if let Some(status) = guard.clone() {
@@ -338,7 +351,7 @@ pub(crate) fn build_codex_app_server_probe_status_cached(
             }
         }
     }
-    let status = build_codex_app_server_probe_status();
+    let status = probe();
     if let Ok(mut guard) = cache.lock() {
         *guard = Some(status.clone());
     }
@@ -370,7 +383,7 @@ pub(crate) fn validate_backend_ready_for_send(active_backend: &str) -> Result<()
     if active_backend != BACKEND_CODEX {
         return Ok(());
     }
-    let status = build_codex_app_server_probe_status();
+    let status = build_codex_app_server_probe_status_cached(false);
     if let Some(reason) = codex_send_block_reason(&status.public) {
         return Err(reason);
     }
@@ -380,6 +393,20 @@ pub(crate) fn validate_backend_ready_for_send(active_backend: &str) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    fn supported_status(path: &str) -> CodexAppServerProbeStatus {
+        CodexAppServerProbeStatus {
+            public: CodexAppServerStatus {
+                version: Some("codex 0.128.0".to_string()),
+                available: true,
+                supports_required_protocol: true,
+                failure_kind: None,
+                issues: Vec::new(),
+            },
+            path: Some(path.to_string()),
+        }
+    }
 
     #[test]
     fn parse_codex_cli_version_accepts_missing_patch_and_suffix() {
@@ -462,5 +489,40 @@ mod tests {
             Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE)
         );
         assert!(status.public.issues.join(" ").contains("app-server"));
+    }
+
+    #[test]
+    fn codex_probe_cache_reuses_status_until_force_refresh() {
+        let cache = Mutex::new(None);
+        let calls = Cell::new(0);
+
+        let first = build_codex_app_server_probe_status_cached_with(&cache, false, || {
+            calls.set(calls.get() + 1);
+            supported_status("first")
+        });
+        let second = build_codex_app_server_probe_status_cached_with(&cache, false, || {
+            calls.set(calls.get() + 1);
+            supported_status("second")
+        });
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(first.path.as_deref(), Some("first"));
+        assert_eq!(second.path.as_deref(), Some("first"));
+
+        let refreshed = build_codex_app_server_probe_status_cached_with(&cache, true, || {
+            calls.set(calls.get() + 1);
+            supported_status("second")
+        });
+
+        assert_eq!(calls.get(), 2);
+        assert_eq!(refreshed.path.as_deref(), Some("second"));
+        assert_eq!(
+            cache
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|status| status.path.as_deref()),
+            Some("second")
+        );
     }
 }

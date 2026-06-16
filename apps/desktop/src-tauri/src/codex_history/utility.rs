@@ -6,8 +6,8 @@ use tauri::{AppHandle, Runtime};
 
 use crate::chat::runner::locate_agent_runner;
 use crate::provider::{
-    build_codex_app_server_probe_status, resolve_connection_for, validate_backend_ready_for_send,
-    ConnectionMode,
+    build_codex_app_server_probe_status_cached, resolve_connection_for,
+    validate_backend_ready_for_send, ConnectionMode,
 };
 use crate::BACKEND_CODEX;
 
@@ -28,7 +28,7 @@ pub(super) fn run_codex_history_utility(
     validate_backend_ready_for_send(BACKEND_CODEX)?;
     let script = locate_codex_history_utility(app);
     let connection = resolve_connection_for(app, BACKEND_CODEX);
-    let codex_app_server = build_codex_app_server_probe_status();
+    let codex_app_server = build_codex_app_server_probe_status_cached(false);
     let codex_path = codex_app_server
         .path
         .ok_or_else(|| "未找到满足要求的 Codex CLI，无法读取 Codex 历史".to_string())?;

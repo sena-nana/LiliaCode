@@ -39,8 +39,8 @@ use crate::chat::types::{
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
-    build_codex_app_server_probe_status, load_agent_interaction_settings, resolve_connection_for,
-    CodexProfileSettings, ConnectionMode,
+    build_codex_app_server_probe_status_cached, load_agent_interaction_settings,
+    resolve_connection_for, CodexProfileSettings, ConnectionMode,
 };
 use crate::store::LiliaStore;
 use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX};
@@ -502,7 +502,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
             cmd.env_remove("OPENAI_API_KEY");
             cmd.env_remove("CODEX_API_KEY");
         }
-        let codex_app_server = build_codex_app_server_probe_status();
+        let codex_app_server = build_codex_app_server_probe_status_cached(false);
         if let Some(path) = codex_app_server.path {
             cmd.env("LILIA_CODEX_CLI_PATH", path);
         }

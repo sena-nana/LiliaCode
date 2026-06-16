@@ -1,18 +1,12 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { stringOrNull } from "../utils.mjs";
 
-export function codexAppServerBinary(env = process.env, spawnSyncFn = spawnCodexCandidateSync) {
+export function codexAppServerBinary(env = process.env) {
   const injected = stringOrNull(env.LILIA_CODEX_CLI_PATH)?.trim();
   if (!injected) {
     throw new Error(
       "Codex app-server 环境不满足：Lilia 未找到满足协议要求的 codex CLI。请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。",
-    );
-  }
-  const result = spawnSyncFn(injected, ["--version"], { stdio: "ignore" });
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      "Codex app-server 环境不满足：无法启动 Lilia 检测到的 codex CLI。请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。",
     );
   }
   return injected;
@@ -30,16 +24,6 @@ export function windowsCommandLineToken(value) {
 
 export function windowsCommandLine(binary, args) {
   return [binary, ...args].map(windowsCommandLineToken).join(" ");
-}
-
-export function spawnCodexCandidateSync(binary, args, options = {}) {
-  if (!isWindowsCommandScript(binary)) return spawnSync(binary, args, options);
-  return spawnSync(process.env.ComSpec || "cmd.exe", [
-    "/d",
-    "/s",
-    "/c",
-    windowsCommandLine(binary, args),
-  ], options);
 }
 
 export function spawnCodexAppServer(binary, options) {

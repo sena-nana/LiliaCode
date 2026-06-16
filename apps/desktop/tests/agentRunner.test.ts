@@ -47,6 +47,7 @@ import {
   withCodexElicitation,
 } from "../agent-runner/codex/runCodex.mjs";
 import {
+  codexAppServerBinary,
   createCodexAppServer,
 } from "../agent-runner/codex/appServer.mjs";
 import {
@@ -1800,6 +1801,15 @@ describe("Codex app-server mapping", () => {
     expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
   });
 
+  it("trusts injected Codex CLI path", () => {
+    expect(codexAppServerBinary({ LILIA_CODEX_CLI_PATH: "C:/bin/codex.cmd" }))
+      .toBe("C:/bin/codex.cmd");
+  });
+
+  it("keeps a clear error when Codex CLI path is not injected", () => {
+    expect(() => codexAppServerBinary({})).toThrow("未找到满足协议要求的 codex CLI");
+  });
+
   it("serializes Codex app-server request params, including null for no-arg methods", async () => {
     const writes: string[] = [];
     const stdout = new PassThrough();
@@ -3302,6 +3312,21 @@ describe("Codex app-server mapping", () => {
       server,
     });
 
+    const startupEvent = json().find((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.title === "Codex runtime starting"
+    );
+    expect(startupEvent).toMatchObject({
+      event: {
+        status: "info",
+        sourceId: "codex:runtime:start",
+        payload: {
+          backend: "codex",
+          subkind: "runtime_start",
+        },
+      },
+    });
     expect(calls.some((call) => call.method === "review/start")).toBe(false);
     expect(calls.findIndex((call) => call.method === "thread/settings/update"))
       .toBeLessThan(calls.findIndex((call) => call.method === "turn/start"));
