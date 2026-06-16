@@ -411,19 +411,32 @@ function githubActivityAnchor(activity: SuggestionGitHubActivity): string {
 }
 
 function suggestionGitHubSourceLabel(suggestion: SuggestionItem): string {
-  const [activity] = suggestion.githubActivities;
+  const githubActivities = suggestion.githubActivities ?? [];
+  const [activity] = githubActivities;
   if (!activity) return "";
   const source = [
     activity.repoFullName.trim(),
     githubActivityAnchor(activity),
   ].filter(Boolean).join(" · ");
-  const extraCount = suggestion.githubActivities.length - 1;
+  const extraCount = githubActivities.length - 1;
+  return extraCount > 0 ? `${source} +${extraCount}` : source;
+}
+
+function suggestionSourceLabel(suggestion: SuggestionItem): string {
+  const githubLabel = suggestionGitHubSourceLabel(suggestion);
+  if (githubLabel) return githubLabel;
+  const localGitContexts = suggestion.localGitContexts ?? [];
+  const [context] = localGitContexts;
+  if (!context) return "";
+  const branch = context.branch.trim();
+  const source = branch ? `本地 Git · ${branch}` : "本地 Git";
+  const extraCount = localGitContexts.length - 1;
   return extraCount > 0 ? `${source} +${extraCount}` : source;
 }
 
 const suggestionViewRows = computed(() =>
   suggestionRows.value.map((suggestion) => {
-    const sourceLabel = suggestionGitHubSourceLabel(suggestion);
+    const sourceLabel = suggestionSourceLabel(suggestion);
     return {
       suggestion,
       sourceLabel,

@@ -103,7 +103,7 @@ export function useLiliaWorkflowActions(options: {
         content: "",
         outgoingAttachments: [],
       },
-      runtimeCommand: { type: "lilia_session_fork", excludeTurns: true },
+      runtimeCommand: { type: "session_fork", excludeTurns: true },
     });
   }
 
@@ -144,8 +144,8 @@ export function useLiliaWorkflowActions(options: {
     });
   }
 
-  async function onApplyLiliaProviderSettings(
-    runtimeCommand: Extract<ChatRuntimeCommand, { type: "lilia_provider_settings" }>,
+  async function onApplyRuntimeSettings(
+    runtimeCommand: Extract<ChatRuntimeCommand, { type: "runtime_settings" }>,
     runtimeOptions?: ProviderRuntimeOptions | null,
   ) {
     await options.sendAgentMessage({
@@ -167,6 +167,6 @@ export function useLiliaWorkflowActions(options: {
     onSetLiliaGoal,
     onRefreshLiliaGoal,
     onClearLiliaGoal,
-    onApplyLiliaProviderSettings,
+    onApplyRuntimeSettings,
   };
 }

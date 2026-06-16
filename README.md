@@ -52,8 +52,6 @@ LiliaCode still prioritizes its own recoverable task structure over upstream CLI
 
 ## Getting Claude or Codex Running
 
-After installing and opening LiliaCode, go to Settings -> Connection and follow the first-run checklist at the top of the page. The checklist does not block the main UI, and you can reopen it from the Connection page after dismissing it.
-
 - Run Claude: make sure Node.js 18+ is available, then choose Claude on the Connection page and enter an Anthropic API key. If Base URL is empty, Lilia uses `https://api.anthropic.com`; you can also enter a local proxy or Anthropic-compatible endpoint.
 - Run Codex: install Codex CLI with `npm i -g @openai/codex`, then make sure Lilia can detect `codex app-server`. Lilia requires Codex CLI `0.128.0+` for the app-server protocol it uses; by default it reuses the official account session from `codex login`.
 - Codex API: to bill through an OpenAI API key, switch Codex to API mode on the Connection page and enter `OPENAI_API_KEY`. If Base URL is empty, Lilia uses `https://api.openai.com/v1`.

@@ -9,8 +9,9 @@ import AgentInteractionSection from "./settings/AgentInteractionSection.vue";
 import QuotaUsageSection from "./settings/QuotaUsageSection.vue";
 import ProjectPreferencesSection from "./settings/ProjectPreferencesSection.vue";
 import AboutSection from "./settings/AboutSection.vue";
+import Plugins from "./Plugins.vue";
+import ConversationImport from "./ConversationImport.vue";
 import {
-  SETTINGS_TABS,
   normalizeSettingsTab,
   type SettingsTabKey,
 } from "./settings/settingsTabs";
@@ -22,6 +23,8 @@ const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
   assistant: AssistantAISection,
   agent: AgentInteractionSection,
   quota: QuotaUsageSection,
+  plugins: Plugins,
+  import: ConversationImport,
   project: ProjectPreferencesSection,
   about: AboutSection,
 };
@@ -29,19 +32,14 @@ const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
 const route = useRoute();
 const activeTab = computed(() => normalizeSettingsTab(route.query.tab));
 const activeTabSection = computed(() => SETTINGS_SECTIONS[activeTab.value]);
-const activeTabLabel = computed(
-  () => SETTINGS_TABS.find((tab) => tab.key === activeTab.value)?.label ?? "设置",
+const isFullPageSection = computed(() =>
+  activeTab.value === "plugins" || activeTab.value === "import",
 );
 </script>
 
 <template>
-  <section class="settings-page">
-    <div class="page-header">
-      <div>
-        <h1>{{ activeTabLabel }}</h1>
-      </div>
-    </div>
-
+  <component v-if="isFullPageSection" :is="activeTabSection" />
+  <section v-else class="settings-page">
     <component :is="activeTabSection" />
   </section>
 </template>

@@ -50,6 +50,9 @@ import {
   createCodexAppServer,
 } from "../agent-runner/codex/appServer.mjs";
 import {
+  readCodexAccountQuotaStatus,
+} from "../agent-runner/codex/accountQuota.mjs";
+import {
   archiveCodexThread,
   cleanCodexThreadBackgroundTerminals,
   codexHistoryTimelineInputs,
@@ -377,9 +380,9 @@ describe("runner core", () => {
 
   it("Codex native runtime command 允许空 prompt 进入 Codex 后端", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_fork" },
-      { type: "lilia_session_management", action: "list" },
-      { type: "lilia_provider_settings", action: "diagnose" },
+      { type: "session_fork" },
+      { type: "session_management", action: "list" },
+      { type: "runtime_settings", action: "diagnose" },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -411,7 +414,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "claude",
       turn: runnerTurn(""),
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
       }, {
       protocol,
       env: {},
@@ -427,7 +430,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "claude-fork",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     });
   });
 
@@ -989,7 +992,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -1028,7 +1031,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, {
       protocol,
       platform: "win32",
@@ -1061,18 +1064,18 @@ describe("Claude helpers", () => {
 
   it("handles Claude session management through SDK session APIs", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
-      { type: "lilia_session_management", action: "info", sessionId: "claude-session-1" },
+      { type: "session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
+      { type: "session_management", action: "info", sessionId: "claude-session-1" },
       {
-        type: "lilia_session_management",
+        type: "session_management",
         action: "messages",
         sessionId: "claude-session-1",
         limit: 3,
         cursor: "2",
         includeSystemMessages: true,
       },
-      { type: "lilia_session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
-      { type: "lilia_session_management", action: "delete", sessionId: "claude-session-1" },
+      { type: "session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
+      { type: "session_management", action: "delete", sessionId: "claude-session-1" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -1153,7 +1156,7 @@ describe("Claude helpers", () => {
     await expect(runClaudeSessionManagementRuntimeCommand({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "lilia_session_management", action: "archive", sessionId: "claude-session-1" },
+      runtimeCommand: { type: "session_management", action: "archive", sessionId: "claude-session-1" },
     }, { protocol } as any, "C:/repo")).resolves.toBe(true);
 
     expect(json()).toContainEqual(expect.objectContaining({
@@ -1179,7 +1182,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       runtimeCommand: {
-        type: "lilia_session_management",
+        type: "session_management",
         action: "rename",
         sessionId: "claude-session-1",
         title: "新标题",
@@ -1439,7 +1442,7 @@ describe("Claude helpers", () => {
       model: "claude-sonnet-4-6",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -1489,7 +1492,7 @@ describe("Claude helpers", () => {
       },
     }));
 
-    expect(seenPrompt).toContain("Lilia Claude provider settings runtime command.");
+    expect(seenPrompt).toContain("Lilia Claude runtime settings command.");
     expect(seenOptions).toMatchObject({
       model: "claude-opus-4-5",
       permissionMode: "default",
@@ -1550,7 +1553,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-existing",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "diagnose",
       },
       runtimeOptions: {
@@ -2223,6 +2226,94 @@ describe("Codex app-server mapping", () => {
     expect(calls[0][2]).toMatchObject({ success: true });
     const output = JSON.parse(calls[0][2].contentItems[0].text);
     expect(output.tools[0]).toMatchObject({ label: "命令", callCount: 2 });
+  });
+
+  function mockQuotaServer(
+    read: (attempt: number) => unknown,
+  ): { server: any; requests: string[] } {
+    const requests: string[] = [];
+    let readAttempts = 0;
+    return {
+      requests,
+      server: {
+        request: async (method: string) => {
+          requests.push(method);
+          if (method === "initialize") return {};
+          if (method === "account/rateLimits/read") {
+            readAttempts += 1;
+            return read(readAttempts);
+          }
+          throw new Error(`unexpected method ${method}`);
+        },
+        notify: () => {},
+        close: () => {},
+      },
+    };
+  }
+
+  it("Codex account quota reads Spark quota from named Codex rate limit", async () => {
+    const { server, requests } = mockQuotaServer(() => ({
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          planType: "pro",
+          primary: { usedPercent: 14, windowDurationMins: 300, resetsAt: 10 },
+          secondary: { usedPercent: 14, windowDurationMins: 10080, resetsAt: 20 },
+        },
+        codex_bengalfox: {
+          limitId: "codex_bengalfox",
+          limitName: "GPT-5.3-Codex-Spark",
+          planType: "pro",
+          primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 30 },
+          secondary: { usedPercent: 18, windowDurationMins: 10080, resetsAt: 40 },
+        },
+      },
+    }));
+
+    const status = await readCodexAccountQuotaStatus({
+      createServer: () => server as any,
+    });
+
+    expect(requests).toEqual(["initialize", "account/rateLimits/read"]);
+    expect(status.fiveHour?.usedPercent).toBe(14);
+    expect(status.weekly?.usedPercent).toBe(14);
+    expect(status.sparkFiveHour?.usedPercent).toBe(0);
+    expect(status.sparkWeekly?.usedPercent).toBe(18);
+  });
+
+  it("Codex account quota retries transient wham usage fetch failures", async () => {
+    const { server, requests } = mockQuotaServer((attempt) => {
+      if (attempt === 1) {
+        throw new Error(
+          "failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)",
+        );
+      }
+      return {
+        rateLimitsByLimitId: {
+          codex: {
+            limitId: "codex",
+            planType: "pro",
+            primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 10 },
+            secondary: { usedPercent: 34, windowDurationMins: 10080, resetsAt: 20 },
+          },
+        },
+      };
+    });
+
+    const status = await readCodexAccountQuotaStatus({
+      createServer: () => server as any,
+      retries: 1,
+      retryDelayMs: 0,
+    });
+
+    expect(requests).toEqual([
+      "initialize",
+      "account/rateLimits/read",
+      "account/rateLimits/read",
+    ]);
+    expect(status.error).toBeNull();
+    expect(status.fiveHour?.usedPercent).toBe(12);
+    expect(status.weekly?.usedPercent).toBe(34);
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {
@@ -3856,7 +3947,7 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-      runtimeCommand: { type: "lilia_session_fork" },
+      runtimeCommand: { type: "session_fork" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -3961,9 +4052,9 @@ describe("Codex app-server mapping", () => {
 
   it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "list", searchTerm: "fix", limit: 10 },
-      { type: "lilia_session_management", action: "messages", sessionId: "thread-target", limit: 5 },
-      { type: "lilia_session_management", action: "archive", sessionId: "thread-target", archived: true },
+      { type: "session_management", action: "list", searchTerm: "fix", limit: 10 },
+      { type: "session_management", action: "messages", sessionId: "thread-target", limit: 5 },
+      { type: "session_management", action: "archive", sessionId: "thread-target", archived: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -4044,8 +4135,8 @@ describe("Codex app-server mapping", () => {
 
   it("reports unsupported diagnostic for Codex session tag and delete", async () => {
     for (const runtimeCommand of [
-      { type: "lilia_session_management", action: "tag", sessionId: "thread-target", tag: "release" },
-      { type: "lilia_session_management", action: "delete", sessionId: "thread-target" },
+      { type: "session_management", action: "tag", sessionId: "thread-target", tag: "release" },
+      { type: "session_management", action: "delete", sessionId: "thread-target" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -4113,7 +4204,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -4199,7 +4290,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "lilia_provider_settings",
+        type: "runtime_settings",
         action: "update",
       },
       runtimeOptions: {
@@ -4301,7 +4392,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      runtimeCommand: { type: "lilia_provider_settings", action: "update" },
+      runtimeCommand: { type: "runtime_settings", action: "update" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },

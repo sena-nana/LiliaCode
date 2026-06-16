@@ -25,7 +25,7 @@ function cursorOffset(value) {
 
 function readSessionManagementRuntimeCommand(cmd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "lilia_session_management") return null;
+  if (command?.type !== "session_management") return null;
   const action = stringOrNull(command.action);
   if (!SESSION_MANAGEMENT_ACTIONS.has(action)) {
     throw new Error("Lilia session management runtime command missing a valid action");

@@ -28,6 +28,7 @@ import type {
   ProviderRuntimeOptions,
   CodexAccountQuotaStatus,
   QuotaUsageStats,
+  AutomationRunSummary,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -177,30 +178,30 @@ export type LiliaBatchApplyWorkflowTypeTest = Assert<
   >
 >;
 
-export type LiliaSessionForkRuntimeCommandTypeTest = Assert<
+export type SessionForkRuntimeCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_fork";
+      type: "session_fork";
       excludeTurns: true;
     },
     ChatRuntimeCommand
   >
 >;
 
-export type LiliaSessionForkIsNotWorkflowTypeTest = Assert<
+export type SessionForkIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_fork";
+      type: "session_fork";
       excludeTurns: true;
     },
     ChatWorkflow
   > extends true ? false : true
 >;
 
-export type LiliaSessionManagementRuntimeCommandTypeTest = Assert<
+export type SessionManagementRuntimeCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_management";
+      type: "session_management";
       action: "tag";
       sessionId: "thread-1";
       tag: "release";
@@ -214,30 +215,30 @@ export type LiliaSessionManagementRuntimeCommandTypeTest = Assert<
   >
 >;
 
-export type LiliaSessionManagementIsNotWorkflowTypeTest = Assert<
+export type SessionManagementIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_session_management";
+      type: "session_management";
       action: "list";
     },
     ChatWorkflow
   > extends true ? false : true
 >;
 
-export type LiliaProviderSettingsRuntimeCommandTypeTest = Assert<
+export type RuntimeSettingsCommandTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
     },
     ChatRuntimeCommand
   >
 >;
 
-export type LiliaProviderSettingsRuntimeCommandRejectsInlineOptionsTypeTest = Assert<
+export type RuntimeSettingsCommandRejectsInlineOptionsTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
       common: { model: "gpt-5.5"; permission: "ask" };
       runtimeOptions: ProviderRuntimeOptions;
@@ -246,10 +247,10 @@ export type LiliaProviderSettingsRuntimeCommandRejectsInlineOptionsTypeTest = As
   > extends true ? false : true
 >;
 
-export type LiliaProviderSettingsIsNotWorkflowTypeTest = Assert<
+export type RuntimeSettingsIsNotWorkflowTypeTest = Assert<
   Extends<
     {
-      type: "lilia_provider_settings";
+      type: "runtime_settings";
       action: "update";
     },
     ChatWorkflow
@@ -424,6 +425,16 @@ export type CodexAccountQuotaStatusTypeTest = Assert<
         windowDurationMins: 10080;
         resetsAt: 2;
       };
+      sparkFiveHour: {
+        usedPercent: 15;
+        windowDurationMins: 300;
+        resetsAt: 4;
+      };
+      sparkWeekly: {
+        usedPercent: 70;
+        windowDurationMins: 10080;
+        resetsAt: 5;
+      };
       fetchedAt: 3;
       error: null;
     },
@@ -438,6 +449,26 @@ export type AutomationRunWorkflowTypeTest = Assert<
       automationRunId: "run-1";
     },
     ChatWorkflow
+  >
+>;
+
+export type AutomationRunSummaryTypeTest = Assert<
+  Extends<
+    {
+      id: "run-1";
+      workflowId: "workflow-1";
+      workflowVersionId: "version-1";
+      status: "succeeded";
+      triggerKind: "manual";
+      projectId: null;
+      taskId: "task-1";
+      backend: "claude";
+      eventKind: "timeline_event";
+      startedAt: 1;
+      finishedAt: 2;
+      error: null;
+    },
+    AutomationRunSummary
   >
 >;
 
@@ -501,9 +532,34 @@ export type SuggestionItemIncludesGitHubActivityTypeTest = Assert<
         title: "PR #1: 接入 GitHub 活动";
         url: "https://github.com/sena-nana/LiliaCode/pull/1";
       }];
+      localGitContexts: [];
       summary: "跟进 PR";
       reason: "近期 PR 有新活动。";
       prompt: "请继续跟进 PR #1。";
+      generatedAt: 1;
+    },
+    SuggestionItem
+  >
+>;
+
+export type SuggestionItemIncludesLocalGitContextTypeTest = Assert<
+  Extends<
+    {
+      id: "sg-local-1";
+      projectId: "project-1";
+      taskIds: [];
+      source: "local-git";
+      githubActivities: [];
+      localGitContexts: [{
+        id: "local-git-current";
+        branch: "feature/local-git";
+        status: "dirty: 2 changed files";
+        changedFiles: ["M apps/desktop/src-tauri/src/conversation_suggestions.rs"];
+        recentCommits: ["abc1234 add suggestions"];
+      }];
+      summary: "跟进本地变更";
+      reason: "当前分支有未提交变更。";
+      prompt: "请基于 feature/local-git 的未提交变更继续处理。";
       generatedAt: 1;
     },
     SuggestionItem
@@ -518,6 +574,7 @@ export type SuggestionItemIncludesClaudeNativeSourceTypeTest = Assert<
       taskIds: ["task-1"];
       source: "claude";
       githubActivities: [];
+      localGitContexts: [];
       summary: "继续检查建议展示";
       reason: "Claude 根据上一轮对话预测的下一条提示。";
       prompt: "请继续检查 Claude 原生建议展示。";

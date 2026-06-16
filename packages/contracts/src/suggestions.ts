@@ -1,5 +1,5 @@
 export type SuggestionSource = "provider" | "assistant-ai";
-export type SuggestionItemSource = "task" | "github" | "claude";
+export type SuggestionItemSource = "task" | "github" | "local-git" | "claude";
 
 export interface SuggestionGitHubActivityRef {
   id: string;
@@ -9,12 +9,21 @@ export interface SuggestionGitHubActivityRef {
   url: string | null;
 }
 
+export interface SuggestionLocalGitContextRef {
+  id: string;
+  branch: string;
+  status: string;
+  changedFiles: string[];
+  recentCommits: string[];
+}
+
 export interface SuggestionItem {
   id: string;
   projectId: string | null;
   taskIds: string[];
   source: SuggestionItemSource;
   githubActivities: SuggestionGitHubActivityRef[];
+  localGitContexts: SuggestionLocalGitContextRef[];
   summary: string;
   reason: string;
   prompt: string;

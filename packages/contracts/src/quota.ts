@@ -117,6 +117,8 @@ export interface CodexAccountQuotaStatus {
   rateLimitReachedType: string | null;
   fiveHour: CodexAccountQuotaWindow | null;
   weekly: CodexAccountQuotaWindow | null;
+  sparkFiveHour: CodexAccountQuotaWindow | null;
+  sparkWeekly: CodexAccountQuotaWindow | null;
   fetchedAt: number;
   error: string | null;
 }

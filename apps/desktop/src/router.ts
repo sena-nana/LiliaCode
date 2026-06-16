@@ -4,18 +4,16 @@ import {
   createWebHistory,
   type RouterHistory,
 } from "vue-router";
-import { defineAsyncComponent, defineComponent, h } from "vue";
+import { defineComponent, h } from "vue";
 import AppShell from "./layouts/AppShell.vue";
 
 const PopupShell = () => import("./layouts/PopupShell.vue");
 const ConversationStatusFloat = () => import("./pages/ConversationStatusFloat.vue");
-const TaskDetail = () => import("./pages/TaskDetail.vue");
-const MainTaskDetail = defineAsyncComponent(() => import("./pages/TaskDetail.vue"));
+const loadTaskDetail = () => import("./pages/TaskDetail.vue");
+const TaskDetail = loadTaskDetail;
 const PopupDraftBoot = () => import("./pages/PopupDraftBoot.vue");
 const Settings = () => import("./pages/Settings.vue");
-const Plugins = () => import("./pages/Plugins.vue");
 const Automations = () => import("./pages/Automations.vue");
-const ConversationImport = () => import("./pages/ConversationImport.vue");
 const ProjectsOverview = () => import("./pages/project/ProjectsOverview.vue");
 const ProjectShell = () => import("./pages/project/ProjectShell.vue");
 const SessionsView = () => import("./pages/project/SessionsView.vue");
@@ -126,23 +124,33 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
           // 任务详情是 ProjectShell 的兄弟路由，进入聊天时 ViewTabs 不渲染。
           {
             path: "projects/:projectId/tasks/:taskId",
-            component: MainTaskDetail,
+            component: TaskDetail,
             props: true,
           },
           {
             path: "chats/:taskId",
-            component: MainTaskDetail,
+            component: TaskDetail,
             props: true,
           },
           { path: "settings", component: Settings },
-          { path: "plugins", component: Plugins },
+          { path: "plugins", redirect: { path: "/settings", query: { tab: "plugins" } } },
           { path: "automations", component: Automations },
-          { path: "import", component: ConversationImport },
+          {
+            path: "import",
+            redirect: (to) => ({
+              path: "/settings",
+              query: { ...to.query, tab: "import" },
+            }),
+          },
         ],
       },
       { path: "/:pathMatch(.*)*", redirect: "/" },
     ],
   });
+}
+
+export function preloadTaskDetailPage(): Promise<unknown> {
+  return loadTaskDetail();
 }
 
 export const router = createLiliaRouter();

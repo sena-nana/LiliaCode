@@ -151,6 +151,27 @@ pub struct AutomationRun {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct AutomationRunSummary {
+    pub id: String,
+    pub workflow_id: String,
+    pub workflow_version_id: String,
+    pub status: AutomationRunStatus,
+    pub trigger_kind: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub event_kind: Option<String>,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AutomationRunNodeState {
     pub id: String,
     pub run_id: String,

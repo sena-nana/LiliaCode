@@ -13,8 +13,8 @@
     { "kind": "slash_command", "requiresPrompt": false }
   ],
   "runtimeCommand": [
-    { "kind": "lilia_session_fork", "requiresPrompt": false },
-    { "kind": "lilia_session_management", "requiresPrompt": false },
-    { "kind": "lilia_provider_settings", "requiresPrompt": false }
+    { "kind": "session_fork", "requiresPrompt": false },
+    { "kind": "session_management", "requiresPrompt": false },
+    { "kind": "runtime_settings", "requiresPrompt": false }
   ]
 }

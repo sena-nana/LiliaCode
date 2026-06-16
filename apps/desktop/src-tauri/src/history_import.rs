@@ -17,7 +17,7 @@ use crate::codex_history::{
 use crate::projects_tasks::TaskRow;
 use crate::store::LiliaStore;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HistoryImportProvider {
     Codex,
@@ -467,5 +467,109 @@ impl From<ClaudeSessionAttachResult> for HistoryImportAttachResult {
             event_count: result.event_count,
             history_sync: result.history_sync,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::claude_history::{
+        ClaudeSessionPreview, ClaudeSessionPreviewMessage, ClaudeSessionSummary,
+    };
+    use crate::codex_history::{
+        CodexThreadAttachResult, CodexThreadRuntimeState, CodexThreadSummary,
+    };
+
+    #[test]
+    fn codex_thread_summary_converts_to_history_import_item() {
+        let thread = CodexThreadSummary {
+            id: "thread-1".into(),
+            title: "Thread".into(),
+            status: Some("completed".into()),
+            model: Some("gpt-5.4".into()),
+            source_kind: Some("codex".into()),
+            created_at: Some(1),
+            updated_at: Some(2),
+            archived: false,
+            preview: Some("preview".into()),
+        };
+
+        let item: HistoryImportItem = thread.into();
+
+        assert_eq!(item.id, "thread-1");
+        assert_eq!(item.provider, HistoryImportProvider::Codex);
+        assert_eq!(item.preview.as_deref(), Some("preview"));
+    }
+
+    #[test]
+    fn claude_session_preview_converts_to_history_import_preview() {
+        let preview = ClaudeSessionPreview {
+            session: ClaudeSessionSummary {
+                id: "session-1".into(),
+                title: "Session".into(),
+                status: Some("active".into()),
+                model: Some("claude".into()),
+                source_kind: Some("claude".into()),
+                created_at: Some(1),
+                updated_at: Some(2),
+                archived: false,
+                preview: Some("preview".into()),
+                cwd: Some("C:/repo".into()),
+                project: Some("project-1".into()),
+            },
+            events: Vec::new(),
+            event_count: 0,
+            messages: vec![ClaudeSessionPreviewMessage {
+                id: "msg-1".into(),
+                role: "assistant".into(),
+                summary: Some("hello".into()),
+            }],
+            has_full_preview: true,
+        };
+
+        let imported: HistoryImportPreview = preview.into();
+
+        assert_eq!(imported.item.provider, HistoryImportProvider::Claude);
+        assert_eq!(imported.messages.len(), 1);
+        assert_eq!(imported.messages[0].summary.as_deref(), Some("hello"));
+        assert!(imported.has_full_preview);
+    }
+
+    #[test]
+    fn codex_thread_attach_result_converts_to_history_import_attach_result() {
+        let result = CodexThreadAttachResult {
+            task_id: "task-1".into(),
+            project_id: Some("project-1".into()),
+            thread_id: "thread-1".into(),
+            task: None,
+            event_count: 3,
+            history_sync: Some("queued".into()),
+        };
+
+        let attached: HistoryImportAttachResult = result.into();
+
+        assert_eq!(attached.item_id, "thread-1");
+        assert_eq!(attached.event_count, 3);
+        assert_eq!(attached.history_sync.as_deref(), Some("queued"));
+    }
+
+    #[test]
+    fn codex_runtime_state_converts_to_history_import_runtime_state() {
+        let state = CodexThreadRuntimeState {
+            thread_id: "thread-1".into(),
+            task_id: "task-1".into(),
+            task_title: "Task".into(),
+            project_id: None,
+            running: true,
+            queued: false,
+            pending: true,
+            queued_count: 2,
+        };
+
+        let imported = HistoryImportRuntimeState::from(state);
+
+        assert_eq!(imported.item_id, "thread-1");
+        assert!(imported.running);
+        assert_eq!(imported.queued_count, 2);
     }
 }

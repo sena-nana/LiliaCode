@@ -43,7 +43,7 @@ runner stdin 的稳定形状是：
 }
 ```
 
-旧输入 `lilia_session_fork`、`lilia_session_management`、`lilia_provider_settings` 不再作为 `workflow` 接收。调用方必须发送 `runtimeCommand`，provider 字段必须进入 `runtimeOptions.provider`。
+旧输入 `lilia_session_fork`、`lilia_session_management`、`lilia_provider_settings` 不再作为 `workflow` 或 `runtimeCommand` 接收。调用方必须发送当前 `runtimeCommand`，provider 字段必须进入 `runtimeOptions.provider`。
 
 ## ChatWorkflow
 
@@ -71,9 +71,9 @@ runner stdin 的稳定形状是：
 
 | runtime command | 含义 | provider 映射 |
 |---|---|---|
-| `lilia_session_fork` | 从当前 provider session 分叉新 session。 | Codex 使用 thread fork；Claude 使用 session resume / transcript 能力时由 adapter 映射或 diagnostic。 |
-| `lilia_session_management` | list / info / messages / rename / tag / delete / archive 等 provider session 管理。 | Codex 接 thread list / search / turns / archive / name set；Claude 接 SDK session APIs。 |
-| `lilia_provider_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`；Claude 写本地诊断并把 update 映射到 SDK query options，Codex 写本地诊断并把 update 映射到 `thread/settings/update`。 |
+| `session_fork` | 从当前 provider session 分叉新 session。 | Codex 使用 thread fork；Claude 使用 session resume / transcript 能力时由 adapter 映射或 diagnostic。 |
+| `session_management` | list / info / messages / rename / tag / delete / archive 等 provider session 管理。 | Codex 接 thread list / search / turns / archive / name set；Claude 接 SDK session APIs。 |
+| `runtime_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`；Claude 写本地诊断并把 update 映射到 SDK query options，Codex 写本地诊断并把 update 映射到 `thread/settings/update`。 |
 
 预留 runtime command 边界包括 realtime、remote environment、process session、file search session。接入这些能力时必须新增 runtime command 或 experimental capability，不得扩大 `ChatWorkflow` union。
 

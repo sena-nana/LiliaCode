@@ -1,6 +1,12 @@
 import type { AgentTimelineEvent } from "./timeline";
 import type { Task } from "./task";
 
+/**
+ * Lilia desktop application protocol for importing provider history.
+ * This is not an agent workflow or runtime command; UI calls the
+ * history_import_* Tauri facade directly and provider-specific shapes stay
+ * behind that facade.
+ */
 export type HistoryImportProvider = "codex" | "claude";
 
 export interface HistoryImportSearchInput {

@@ -6,7 +6,7 @@ import type {
   RouterMode,
 } from "@lilia/contracts";
 
-export type DiagnosticTone = "ok" | "warn" | "err" | "probing";
+export type DiagnosticTone = "warn" | "err" | "probing";
 
 export interface ProviderDiagnostic {
   tone: DiagnosticTone;
@@ -21,10 +21,6 @@ export const DIRECT_DEFAULT_URLS: Record<ChatBackendKind, string> = {
 
 export function backendLabel(backend: ChatBackendKind): string {
   return backend === "codex" ? "Codex" : "Claude";
-}
-
-export function routeLabel(mode: RouterMode): string {
-  return mode === "codex-account" ? "官方账号" : "API";
 }
 
 export function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
@@ -79,18 +75,7 @@ export function runtimeDiagnostic(
       };
     }
   }
-  if (backend === "claude") {
-    return {
-      tone: "ok",
-      title: "Claude 运行时可用",
-      hint: "Lilia 将通过本机 Node 运行 Claude Agent SDK；如发送失败，请检查 ANTHROPIC_API_KEY 或 API 密钥配置。",
-    };
-  }
-  return {
-    tone: "ok",
-    title: "Codex 运行时可用",
-    hint: "已找到满足 Lilia 协议要求的 Codex CLI 和 app-server；官方账号模式会复用 codex CLI 登录态。",
-  };
+  return null;
 }
 
 export function connectionDiagnostic(
@@ -107,27 +92,17 @@ export function connectionDiagnostic(
   }
   const label = backendLabel(backend);
   if (status.connectionMode === "codex-account") {
-    return {
-      tone: "ok",
-      title: "Codex 官方账号",
-      hint: "将通过 codex CLI app-server 复用本机官方账号登录态；如首次使用，请先在终端运行 codex login。",
-    };
+    return null;
   }
   if (status.connectionMode === "custom") {
-    return {
-      tone: status.hasApiKey ? "ok" : "warn",
+    return status.hasApiKey ? null : {
+      tone: "warn",
       title: `${label} 自定义 API 来源`,
-      hint: status.hasApiKey
-        ? `将通过 ${status.effectiveUrl ?? "-"} 发送请求，已保存密钥。`
-        : `将通过 ${status.effectiveUrl ?? "-"} 发送请求，未设置密钥；仅适用于本地代理或不需要鉴权的兼容来源。`,
+      hint: `将通过 ${status.effectiveUrl ?? "-"} 发送请求，未设置密钥；仅适用于本地代理或不需要鉴权的兼容来源。`,
     };
   }
   if (status.connectionMode === "api" && status.hasApiKey) {
-    return {
-      tone: "ok",
-      title: `${label} API 已配置`,
-      hint: `将通过官方 API ${status.effectiveUrl ?? DIRECT_DEFAULT_URLS[backend]} 发送请求。`,
-    };
+    return null;
   }
   if (status.connectionMode === "api") {
     return {
@@ -150,15 +125,3 @@ export function connectionDiagnostic(
   };
 }
 
-export function providerReady(
-  backend: ChatBackendKind,
-  report: EnvStatusReport | null,
-  status: BackendEnvStatus | null,
-): boolean {
-  if (!report || !status || !report.nodeAvailable) return false;
-  if (backend === "codex" && !report.codexAppServer.supportsRequiredProtocol) return false;
-  if (status.connectionMode === "codex-account") return backend === "codex";
-  if (status.connectionMode === "custom") return true;
-  if (status.connectionMode === "api") return status.hasApiKey;
-  return false;
-}
