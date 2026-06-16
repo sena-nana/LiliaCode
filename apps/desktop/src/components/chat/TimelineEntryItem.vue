@@ -43,6 +43,7 @@ const props = defineProps<{
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
   canStartLiliaBatchApply?: boolean;
+  canStartSessionFork?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -53,6 +54,7 @@ const emit = defineEmits<{
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
+  "start-session-fork": [];
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
@@ -401,6 +403,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 :show-expired-pending-actions="showExpiredPendingActions"
                 :can-retry-event="canRetryEvent"
                 :can-start-lilia-batch-apply="canStartLiliaBatchApply"
+                :can-start-session-fork="canStartSessionFork"
                 @toggle-event="emit('toggleEvent', $event)"
                 @toggle-group="emit('toggleGroup', $event)"
                 @toggle-process-group="emit('toggleProcessGroup', $event)"
@@ -408,6 +411,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 @retry-event="emit('retry-event', $event)"
                 @open-image="emit('open-image', $event)"
                 @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
+                @start-session-fork="emit('start-session-fork')"
               />
             </ol>
           </div>
@@ -422,8 +426,10 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               :event="entry.event"
               :streaming="isTimelineFinalReplyStreaming(entry.event)"
               :can-start-lilia-batch-apply="canStartLiliaBatchApply"
+              :can-start-session-fork="canStartSessionFork"
               @open-image="emit('open-image', $event)"
               @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
+              @start-session-fork="emit('start-session-fork')"
             />
             <TimelineDeclaredEvent
               v-else

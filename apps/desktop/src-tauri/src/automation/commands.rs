@@ -6,8 +6,8 @@ use super::{
     update_node_state, update_run_status, validate_workflow_graph, waiting_node_state,
 };
 use crate::automation::repository::{
-    list_runs, list_workflows, node_states_for_run, publish_workflow, run_by_id, save_draft,
-    version_by_id, workflow_by_id,
+    delete_workflow, list_runs, list_workflows, node_states_for_run, publish_workflow, run_by_id,
+    save_draft, version_by_id, workflow_by_id,
 };
 use crate::automation::signals::manual_signal;
 use crate::automation::types::{
@@ -49,6 +49,18 @@ pub fn automation_publish<R: Runtime>(
     let version = publish_workflow(&conn, &id)?;
     emit_changed(&app, Some(id));
     Ok(version)
+}
+
+#[tauri::command]
+pub fn automation_delete_workflow<R: Runtime>(
+    id: String,
+    app: AppHandle<R>,
+    store: State<'_, LiliaStore>,
+) -> Result<(), String> {
+    let conn = store.conn()?;
+    delete_workflow(&conn, &id)?;
+    emit_changed(&app, Some(id));
+    Ok(())
 }
 
 #[tauri::command]

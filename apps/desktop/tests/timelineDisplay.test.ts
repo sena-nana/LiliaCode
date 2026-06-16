@@ -59,6 +59,26 @@ function timelineEvent(
   };
 }
 
+function assistantReplyEvent(
+  id: string,
+  content: string,
+  patch: Partial<AgentTimelineEvent> = {},
+): AgentTimelineEvent {
+  return timelineEvent({
+    id,
+    kind: "message",
+    status: "success",
+    title: "Assistant",
+    summary: content,
+    payload: {
+      role: "assistant",
+      content,
+    },
+    turnId: id,
+    ...patch,
+  });
+}
+
 function nextFrame(): Promise<void> {
   return new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
 }
@@ -627,6 +647,53 @@ describe("timeline event expansion", () => {
     });
 
     expect(view.queryByRole("button", { name: "应用建议" })).toBeNull();
+  });
+
+  it("每条非流式 Agent 最终回复都可发起分叉当前会话", async () => {
+    const view = render(AgentTimeline, {
+      props: {
+        canStartSessionFork: true,
+        events: [
+          assistantReplyEvent("reply-fork-1", "第一条回复", { turnSeq: 1 }),
+          assistantReplyEvent("reply-fork-2", "第二条回复", { turnSeq: 2 }),
+        ],
+      },
+    });
+
+    const forkButtons = view.getAllByRole("button", { name: "分叉当前会话" });
+    expect(forkButtons).toHaveLength(2);
+
+    await fireEvent.click(forkButtons[0]);
+
+    expect(view.emitted("start-session-fork")?.length).toBe(1);
+  });
+
+  it("流式最终回复不显示分叉当前会话入口", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        canStartSessionFork: true,
+        events: [
+          assistantReplyEvent("reply-fork-streaming", "正在回复", {
+            status: "running",
+          }),
+        ],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+  });
+
+  it("禁用分叉时最终回复不显示分叉当前会话入口", () => {
+    const view = render(AgentTimeline, {
+      props: {
+        canStartSessionFork: false,
+        events: [
+          assistantReplyEvent("reply-fork-disabled", "普通回复"),
+        ],
+      },
+    });
+
+    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
   });
 
   it("中断错误仍按过程状态渲染", () => {

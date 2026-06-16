@@ -361,6 +361,20 @@ pub(crate) struct ChatRollbackResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ChatContextUsage {
+    pub(crate) task_id: String,
+    pub(crate) backend: String,
+    pub(crate) used_tokens: u64,
+    pub(crate) limit_tokens: Option<u64>,
+    pub(crate) used_percent: Option<f64>,
+    pub(crate) source: String,
+    pub(crate) updated_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ChatRuntimeSnapshot {
     pub(crate) task_id: String,
     pub(crate) phase: String,
@@ -369,6 +383,7 @@ pub(crate) struct ChatRuntimeSnapshot {
     pub(crate) queued_count: usize,
     pub(crate) pending_rollback: bool,
     pub(crate) pending_reset_cleanup: bool,
+    pub(crate) context_usage: Option<ChatContextUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) rollback: Option<ChatRollbackResult>,
 }

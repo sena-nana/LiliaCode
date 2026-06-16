@@ -67,6 +67,28 @@ export function createProtocolEmitter({ write } = {}) {
     emit({ type: "error", message, ...(payload ? { payload } : {}) });
   }
 
+  function emitContextUsage(input) {
+    if (!input || typeof input !== "object") return;
+    const usedTokens = Number(input.usedTokens ?? input.used_tokens);
+    if (!Number.isFinite(usedTokens) || usedTokens < 0) return;
+    const limitValue = Number(input.limitTokens ?? input.limit_tokens);
+    const percentValue = Number(input.usedPercent ?? input.used_percent);
+    const event = {
+      type: "context_usage",
+      usedTokens: Math.trunc(usedTokens),
+      source: stringOrNull(input.source) || "runtime",
+    };
+    if (Number.isFinite(limitValue) && limitValue > 0) {
+      event.limitTokens = Math.trunc(limitValue);
+    }
+    if (Number.isFinite(percentValue)) {
+      event.usedPercent = Math.max(0, Math.min(100, percentValue));
+    }
+    const unavailableReason = stringOrNull(input.unavailableReason ?? input.unavailable_reason);
+    if (unavailableReason) event.unavailableReason = unavailableReason;
+    emit(event);
+  }
+
   function emitAssistantMessageTimeline(text, status, backend = "assistant", extraPayload = null) {
     const content = typeof text === "string" ? text : "";
     const extras = extraPayload && typeof extraPayload === "object" && !Array.isArray(extraPayload)
@@ -87,7 +109,7 @@ export function createProtocolEmitter({ write } = {}) {
     });
   }
 
-  return { emit, emitTimeline, emitError, emitAssistantMessageTimeline };
+  return { emit, emitTimeline, emitError, emitContextUsage, emitAssistantMessageTimeline };
 }
 
 export function claudeTextFragmentSourceId(sessionId, blockKey) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { WandSparkles } from "lucide-vue-next";
+import { GitFork, WandSparkles } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import MarkdownBlock from "./MarkdownBlock.vue";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
@@ -11,9 +11,11 @@ const props = withDefaults(defineProps<{
   event: AgentTimelineEvent;
   streaming?: boolean;
   canStartLiliaBatchApply?: boolean;
+  canStartSessionFork?: boolean;
 }>(), {
   streaming: false,
   canStartLiliaBatchApply: false,
+  canStartSessionFork: false,
 });
 
 const content = computed(() => timelineFinalText(props.event));
@@ -38,10 +40,17 @@ const canApplySuggestion = computed(() =>
   typeof props.event.turnId === "string" &&
   props.event.turnId.length > 0,
 );
+const canStartSessionFork = computed(() =>
+  props.canStartSessionFork &&
+  !props.streaming &&
+  props.event.status === "success" &&
+  props.event.kind === "message",
+);
 
 const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
+  "start-session-fork": [];
 }>();
 
 function startLiliaBatchApply() {
@@ -77,8 +86,23 @@ function startLiliaBatchApply() {
       class="timeline-card--final-reply__cursor chat-bubble__cursor"
       aria-hidden="true"
     />
-    <div v-if="canApplySuggestion" class="timeline-card--final-reply__actions">
+    <div
+      v-if="canApplySuggestion || canStartSessionFork"
+      class="timeline-card--final-reply__actions"
+      :class="{ 'has-visible-action': canApplySuggestion }"
+    >
       <button
+        v-if="canStartSessionFork"
+        type="button"
+        class="timeline-card--final-reply__action timeline-card--final-reply__action--ghost"
+        title="分叉当前会话"
+        aria-label="分叉当前会话"
+        @click="emit('start-session-fork')"
+      >
+        <GitFork :size="14" aria-hidden="true" />
+      </button>
+      <button
+        v-if="canApplySuggestion"
         type="button"
         class="timeline-card--final-reply__action"
         title="应用建议"

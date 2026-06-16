@@ -49,6 +49,10 @@ export function publishAutomation(id: string): Promise<AutomationWorkflowVersion
   return invoke<AutomationWorkflowVersion>("automation_publish", { id });
 }
 
+export function deleteAutomation(id: string): Promise<void> {
+  return invoke<void>("automation_delete_workflow", { id });
+}
+
 export function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
   return invoke<void>("automation_set_enabled", { id, enabled });
 }

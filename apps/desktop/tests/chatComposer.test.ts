@@ -898,8 +898,10 @@ describe("ChatComposer", () => {
       },
     });
 
-    const compactButton = view.getByRole("button", { name: "压缩上下文" });
+    expect(view.queryByTitle("压缩上下文")).toBeNull();
+    const compactButton = view.getByRole("button", { name: /压缩上下文/ });
     expect(compactButton).not.toBeDisabled();
+    expect(compactButton).toHaveClass("chat-composer__context-action");
     await fireEvent.click(compactButton);
 
     expect(view.emitted("start-lilia-compact")?.length).toBe(1);
@@ -908,11 +910,64 @@ describe("ChatComposer", () => {
       state: codexState,
       attachments: [],
     });
-    await fireEvent.click(view.getByRole("button", { name: "压缩上下文" }));
+    await fireEvent.click(view.getByRole("button", { name: /压缩上下文/ }));
     expect(view.emitted("start-lilia-compact")?.length).toBe(2);
   });
 
-  it("Claude 和 Codex 后端可从同一工具栏入口分叉当前会话", async () => {
+  it("上下文圆环展示已用比例和具体占用信息", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        contextUsage: {
+          taskId: "task-1",
+          backend: "claude",
+          usedTokens: 7168,
+          limitTokens: 8192,
+          usedPercent: 87.5,
+          source: "runtime",
+          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+          unavailableReason: null,
+        },
+      },
+    });
+
+    const compactButton = view.getByRole("button", { name: /已用 7,168 tokens/ });
+    expect(compactButton).toHaveClass("chat-context-ring--warn");
+    expect(compactButton).toHaveStyle({ "--quota-progress": "87.5" });
+    const contextCard = view.getByRole("tooltip");
+    expect(contextCard).toHaveTextContent("已用");
+    expect(contextCard).toHaveTextContent("占用");
+    expect(contextCard).toHaveTextContent("87.5%");
+  });
+
+  it("上下文圆环无比例时显示空态但仍可触发压缩", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        contextUsage: {
+          taskId: "task-1",
+          backend: "claude",
+          usedTokens: 2048,
+          limitTokens: null,
+          usedPercent: null,
+          source: "runtime",
+          updatedAt: Date.UTC(2026, 5, 16, 8, 30),
+          unavailableReason: "provider 未返回上下文上限",
+        },
+      },
+    });
+
+    const compactButton = view.getByRole("button", { name: /占用比例未知/ });
+    expect(compactButton).toHaveClass("chat-context-ring--empty");
+    expect(compactButton).toHaveStyle({ "--quota-progress": "0" });
+    expect(view.getByRole("tooltip")).toHaveTextContent("provider 未返回上下文上限");
+    await fireEvent.click(compactButton);
+    expect(view.emitted("start-lilia-compact")?.length).toBe(1);
+  });
+
+  it("Claude 和 Codex 后端不再从工具栏分叉当前会话", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -920,22 +975,18 @@ describe("ChatComposer", () => {
       },
     });
 
-    const claudeForkButton = view.getByRole("button", { name: "分叉当前会话" });
-    expect(claudeForkButton).not.toBeDisabled();
-    await fireEvent.click(claudeForkButton);
+    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
 
     await view.rerender({
       state: codexState,
       attachments: [],
     });
-    const codexForkButton = view.getByRole("button", { name: "分叉当前会话" });
-    expect(codexForkButton).not.toBeDisabled();
-    await fireEvent.click(codexForkButton);
 
-    expect(view.emitted("start-session-fork")?.length).toBe(2);
+    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+    expect(view.emitted("start-session-fork")).toBeUndefined();
   });
 
-  it("Codex 后端可从工具栏打开和回送 IAB", async () => {
+  it("Codex 后端可从工具栏打开 IAB 且不暴露回送截图入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: codexState,
@@ -944,18 +995,16 @@ describe("ChatComposer", () => {
     });
 
     const openButton = view.getByRole("button", { name: "打开 Lilia IAB" });
-    const submitButton = view.getByRole("button", { name: "回送 IAB 截图" });
     expect(openButton).not.toBeDisabled();
-    expect(submitButton).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
 
     await fireEvent.click(openButton);
-    await fireEvent.click(submitButton);
 
     expect(view.emitted("open-lilia-iab")?.length).toBe(1);
-    expect(view.emitted("submit-lilia-iab")?.length).toBe(1);
+    expect(view.emitted("submit-lilia-iab")).toBeUndefined();
   });
 
-  it("Claude 和 Codex 后端保留 IAB 入口，运行中仍可回送当前 Codex turn", async () => {
+  it("Claude 和 Codex 后端保留打开 IAB 入口，运行中不暴露回送截图入口", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -964,7 +1013,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
-    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
 
     await view.rerender({
       state: codexState,
@@ -973,7 +1022,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.getByRole("button", { name: "打开 Lilia IAB" })).not.toBeDisabled();
-    expect(view.getByRole("button", { name: "回送 IAB 截图" })).not.toBeDisabled();
+    expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
   });
 
   it("compact 入口在运行中或禁用状态时禁用", async () => {
@@ -985,7 +1034,7 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
 
     await view.rerender({
       state: baseState,
@@ -993,7 +1042,7 @@ describe("ChatComposer", () => {
       sending: false,
       compactDisabled: true,
     });
-    expect(view.getByRole("button", { name: "压缩上下文" })).toBeDisabled();
+    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
   });
 
   it("Codex 后端不再从工具栏清理后台终端", async () => {

@@ -40,12 +40,14 @@ function renderSurface() {
       showExpiredPendingActions: false,
       canRetryEvent: () => false,
       composerState: codexComposerState,
+      contextUsage: null,
       attachments: [],
       appendAttachmentsToEndKey: 0,
       pendingAsk: null,
       toolConsent: null,
       viewingImage: null,
       suggestions: [],
+      suggestionsStatus: "idle",
       suggestionsVisible: false,
     },
     global: {
@@ -59,17 +61,15 @@ function renderSurface() {
           emits: ["start-lilia-fix-suggestion"],
           setup(_, { emit }) {
             return () =>
-              h("div", [
-                h("button", {
-                  type: "button",
-                  onClick: () => emit(
-                    "start-lilia-fix-suggestion",
-                    "优先给最小修复",
-                    [],
-                    { type: "uncommittedChanges" },
-                  ),
-                }, "stub fix suggestion"),
-              ]);
+              h("button", {
+                type: "button",
+                onClick: () => emit(
+                  "start-lilia-fix-suggestion",
+                  "优先给最小修复",
+                  [],
+                  { type: "uncommittedChanges" },
+                ),
+              }, "stub fix suggestion");
           },
         }),
         TodoFloat: defineComponent({
@@ -109,4 +109,5 @@ describe("TaskDetailChatSurface", () => {
       { type: "uncommittedChanges" },
     ]);
   });
+
 });

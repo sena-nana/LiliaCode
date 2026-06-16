@@ -1249,6 +1249,12 @@ export function finishMockAutomationRun(runId: string) {
   emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
 }
 
+export function clearMockAutomations() {
+  automations = [];
+  automationRuns = [];
+  automationRunNodes = {};
+}
+
 export function seedMockAutomationRun() {
   const workflow = automations[0];
   if (!workflow) return;
@@ -1955,6 +1961,25 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
+    case "milestone_delete": {
+      const id = String(args.id);
+      const before = milestones.length;
+      milestones = milestones.filter((milestone) => milestone.id !== id);
+      taskMilestoneLinks = taskMilestoneLinks.filter((link) => link.milestoneId !== id);
+      return milestones.length !== before;
+    }
+
+    case "milestone_reorder": {
+      const projectId = String(args.projectId);
+      const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
+      milestones = milestones.map((milestone) => {
+        if (milestone.projectId !== projectId) return milestone;
+        const index = orderedIds.indexOf(milestone.id);
+        return index >= 0 ? { ...milestone, order: index } : milestone;
+      });
+      return undefined;
+    }
+
     case "milestone_set_tasks": {
       const milestoneId = String(args.milestoneId);
       const taskIds = Array.isArray(args.taskIds) ? Array.from(new Set(args.taskIds.map(String))) : [];
@@ -2252,6 +2277,20 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         snapshot: workflow.draft,
         createdAt: Date.now(),
       };
+    }
+
+    case "automation_delete_workflow": {
+      const id = String(args.id);
+      const before = automations.length;
+      automations = automations.filter((item) => item.id !== id);
+      if (automations.length === before) throw new Error("自动化不存在");
+      const deletedRunIds = automationRuns
+        .filter((run) => run.workflowId === id)
+        .map((run) => run.id);
+      automationRuns = automationRuns.filter((run) => run.workflowId !== id);
+      for (const runId of deletedRunIds) delete automationRunNodes[runId];
+      emitTauriEvent("automation:changed", { workflowId: id });
+      return undefined;
     }
 
     case "automation_set_enabled": {
@@ -2615,6 +2654,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         queuedCount,
         pendingRollback: false,
         pendingResetCleanup: false,
+        contextUsage: null,
         rollback: null,
         ...(runtimeSnapshotOverrides[taskId] ?? {}),
       };

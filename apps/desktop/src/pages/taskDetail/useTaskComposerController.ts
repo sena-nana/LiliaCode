@@ -3,6 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   ChatAttachment,
+  ChatContextUsage,
   ChatComposerState,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
@@ -38,11 +39,11 @@ import {
   openLiliaIab,
   onAgentTimeline,
   onAgentTimelineBatch,
+  onContextUsage,
   onDone,
   onTurnStarted,
   sendMessage,
   setComposerState,
-  submitLiliaIab,
 } from "../../services/chat";
 import type { SendMessageInput } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
@@ -68,6 +69,7 @@ export function useTaskComposerController(options: {
 }) {
   const { props, context, timeline, attachments } = options;
   const composer = ref<ChatComposerState | null>(null);
+  const contextUsage = ref<ChatContextUsage | null>(null);
   const isTurnRunning = ref(false);
   const userSendScrollKey = ref(0);
   const restoreDraftKey = ref(0);
@@ -233,37 +235,6 @@ export function useTaskComposerController(options: {
       await openLiliaIab(props.taskId, url);
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打开 IAB 失败：${String(err)}`));
-    }
-  }
-
-  function liliaIabMessage(snapshot: Awaited<ReturnType<typeof submitLiliaIab>>["snapshot"]): string {
-    const lines = [
-      "Lilia IAB 页面交互结果",
-      `URL: ${snapshot.url}`,
-      snapshot.title ? `标题: ${snapshot.title}` : null,
-      snapshot.note ? `备注: ${snapshot.note}` : null,
-      `截图状态: ${snapshot.status}`,
-      snapshot.screenshotPath ? `截图: ${snapshot.screenshotPath}` : null,
-      snapshot.warning ? `截图警告: ${snapshot.warning}` : null,
-    ].filter((line): line is string => Boolean(line));
-    return lines.join("\n");
-  }
-
-  async function onSubmitLiliaIab() {
-    if (!context.hasContext.value) return;
-    const note = window.prompt("IAB 备注")?.trim() ?? "";
-    try {
-      const result = await submitLiliaIab(props.taskId, note);
-      if (result.delivery === "runner" && result.stdinForwarded) return;
-      await sendAgentMessage({
-        turn: {
-          content: liliaIabMessage(result.snapshot),
-          outgoingAttachments: result.snapshot.screenshotAttachment ? [result.snapshot.screenshotAttachment] : [],
-          titleContent: result.snapshot.note || result.snapshot.title || result.snapshot.url,
-        },
-      });
-    } catch (err) {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`回送 IAB 结果失败：${String(err)}`));
     }
   }
 
@@ -459,6 +430,7 @@ export function useTaskComposerController(options: {
       }
       clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
       if (runtimeSeqBeforeLoad === runtimeEventSeq) {
+        contextUsage.value = runtimeSnapshot?.contextUsage ?? null;
         isTurnRunning.value = runtimeSnapshot
           ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
           : false;
@@ -519,12 +491,17 @@ export function useTaskComposerController(options: {
         }
         void guideDispatch.scheduleGuideInsertion("idle");
       }),
+      onContextUsage((e) => {
+        if (e.taskId !== props.taskId) return;
+        contextUsage.value = e;
+      }),
     ]);
   }
 
   function resetForRouteChange() {
     isTurnRunning.value = false;
     composer.value = null;
+    contextUsage.value = null;
   }
 
   function canAcceptInteractiveDrop(): boolean {
@@ -553,6 +530,7 @@ export function useTaskComposerController(options: {
   return {
     composer,
     composerForView,
+    contextUsage,
     isTurnRunning,
     userSendScrollKey,
     restoreDraftKey,
@@ -574,7 +552,6 @@ export function useTaskComposerController(options: {
     onSend,
     onExecuteSlashCommand,
     onOpenLiliaIab,
-    onSubmitLiliaIab,
     ...liliaWorkflowActions,
     onInsertGuide,
     onInsertDraftText,

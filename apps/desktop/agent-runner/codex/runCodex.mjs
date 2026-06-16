@@ -1813,6 +1813,19 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
 }
 
 export async function runCodexAppServer(cmd, runtimeExtensions, context) {
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Codex runtime starting",
+    summary: "正在启动 Codex runtime",
+    payload: {
+      backend: "codex",
+      subkind: "runtime_start",
+      resumeSessionId: stringOrNull(cmd.resumeSessionId),
+      cwd: stringOrNull(cmd.cwd),
+    },
+    sourceId: "codex:runtime:start",
+  });
   const server = context.createCodexAppServer
     ? context.createCodexAppServer()
     : createCodexAppServer({ env: context.env || process.env });

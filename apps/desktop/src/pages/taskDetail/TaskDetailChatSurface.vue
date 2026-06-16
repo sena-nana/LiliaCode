@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatContextUsage,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
@@ -58,6 +59,7 @@ defineProps<{
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
+  contextUsage: ChatContextUsage | null;
   attachments: ChatAttachment[];
   appendAttachmentsToEndKey: number;
   pendingAsk: PendingAsk | null;
@@ -94,7 +96,6 @@ const emit = defineEmits<{
   "start-lilia-compact": [];
   "start-session-fork": [];
   "open-lilia-iab": [];
-  "submit-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
@@ -163,11 +164,13 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
             :show-expired-pending-actions="showExpiredPendingActions"
             :can-retry-event="canRetryEvent"
             :can-start-lilia-batch-apply="!isTurnRunning && !hasBlockingPendingAction"
+            :can-start-session-fork="!isTurnRunning && !hasBlockingPendingAction"
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
             @insert-draft-text="emit('insert-draft-text', $event)"
             @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
+            @start-session-fork="emit('start-session-fork')"
           >
             <template #controls>
               <div class="chat-controls">
@@ -190,6 +193,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
                   :compact-disabled="hasBlockingPendingAction"
+                  :context-usage="contextUsage"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
                   :suggestions="suggestions"
@@ -203,9 +207,7 @@ function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
                   @start-lilia-review="(content, outgoingAttachments, target) => emit('start-lilia-review', content, outgoingAttachments, target)"
                   @start-lilia-fix-suggestion="(content, outgoingAttachments, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, target)"
                   @start-lilia-compact="emit('start-lilia-compact')"
-                  @start-session-fork="emit('start-session-fork')"
                   @open-lilia-iab="emit('open-lilia-iab')"
-                  @submit-lilia-iab="emit('submit-lilia-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

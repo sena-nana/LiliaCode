@@ -33,6 +33,7 @@ const props = defineProps<{
   showExpiredPendingActions?: boolean;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
   canStartLiliaBatchApply?: boolean;
+  canStartSessionFork?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -41,6 +42,7 @@ const emit = defineEmits<{
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
+  "start-session-fork": [];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -225,6 +227,7 @@ function pendingState(event: AgentTimelineEvent) {
           :show-expired-pending-actions="showExpiredPendingActions"
           :can-retry-event="canRetryEvent"
           :can-start-lilia-batch-apply="canStartLiliaBatchApply"
+          :can-start-session-fork="canStartSessionFork"
           @toggle-event="toggleEvent"
           @toggle-group="toggleGroup"
           @toggle-process-group="toggleProcessGroup"
@@ -232,6 +235,7 @@ function pendingState(event: AgentTimelineEvent) {
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
           @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
+          @start-session-fork="emit('start-session-fork')"
         />
       </template>
       <li

@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
-  Camera,
   CodeXml,
-  Combine,
   FileQuestion,
   GitBranch,
   GitCommit,
-  GitFork,
   Globe,
   ListChecks,
   Paperclip,
@@ -18,6 +15,7 @@ import {
 import type {
   ChatAttachment,
   ChatComposerState,
+  ChatContextUsage,
   LiliaReviewTarget,
   PermissionMode,
 } from "@lilia/contracts";
@@ -34,7 +32,7 @@ const props = defineProps<{
   reviewDisabled: boolean;
   fixSuggestionDisabled: boolean;
   compactDisabled: boolean;
-  sessionForkDisabled: boolean;
+  contextUsage?: ChatContextUsage | null;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -46,9 +44,7 @@ const emit = defineEmits<{
   startLiliaReview: [target: LiliaReviewTarget];
   startLiliaFixSuggestion: [target: LiliaReviewTarget];
   startLiliaCompact: [];
-  startSessionFork: [];
   openLiliaIab: [];
-  submitLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -57,6 +53,7 @@ const reviewOpen = ref(false);
 const reviewRoot = ref<HTMLElement | null>(null);
 const fixSuggestionOpen = ref(false);
 const fixSuggestionRoot = ref<HTMLElement | null>(null);
+const numberFormatter = new Intl.NumberFormat("zh-CN");
 
 function closeReviewMenu() {
   reviewOpen.value = false;
@@ -134,6 +131,83 @@ function startCommitFixSuggestion() {
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
 }
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, value));
+}
+
+function contextUsageTone(usage: ChatContextUsage | null | undefined): string {
+  const percent = usage?.usedPercent;
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return "chat-context-ring--empty";
+  if (percent >= 100) return "chat-context-ring--error";
+  if (percent >= 85) return "chat-context-ring--warn";
+  return "chat-context-ring--normal";
+}
+
+function formatTokens(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return numberFormatter.format(Math.max(0, Math.trunc(value)));
+}
+
+function formatContextUsageTime(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "未知时间";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+const contextUsageProgressStyle = computed<Record<string, string>>(() => ({
+  "--quota-progress": String(clampPercent(props.contextUsage?.usedPercent ?? 0)),
+}));
+
+function formatContextUsagePercent(usage: ChatContextUsage): string {
+  return typeof usage.usedPercent === "number" && Number.isFinite(usage.usedPercent)
+    ? `${clampPercent(usage.usedPercent).toFixed(1)}%`
+    : "未知";
+}
+
+const contextUsageTitle = computed(() => {
+  const usage = props.contextUsage;
+  if (!usage) return "暂无上下文占用数据，点击压缩上下文";
+  const parts = [
+    `压缩上下文`,
+    `已用 ${formatTokens(usage.usedTokens)} tokens`,
+    usage.limitTokens ? `上限 ${formatTokens(usage.limitTokens)} tokens` : "上限未知",
+    typeof usage.usedPercent === "number" && Number.isFinite(usage.usedPercent)
+      ? `占用 ${clampPercent(usage.usedPercent).toFixed(1)}%`
+      : "占用比例未知",
+    `来源 ${usage.source || "runtime"}`,
+    `更新 ${formatContextUsageTime(usage.updatedAt)}`,
+  ];
+  if (usage.unavailableReason) parts.push(usage.unavailableReason);
+  return parts.join(" · ");
+});
+
+const contextUsageRows = computed(() => {
+  const usage = props.contextUsage;
+  if (!usage) {
+    return [
+      { label: "状态", value: "暂无上下文占用数据" },
+      { label: "操作", value: "点击压缩上下文" },
+    ];
+  }
+  const rows = [
+    { label: "已用", value: `${formatTokens(usage.usedTokens)} tokens` },
+    {
+      label: "上限",
+      value: usage.limitTokens ? `${formatTokens(usage.limitTokens)} tokens` : "未知",
+    },
+    { label: "占用", value: formatContextUsagePercent(usage) },
+    { label: "来源", value: usage.source || "runtime" },
+    { label: "更新", value: formatContextUsageTime(usage.updatedAt) },
+  ];
+  if (usage.unavailableReason) rows.push({ label: "说明", value: usage.unavailableReason });
+  return rows;
+});
 
 function syncDocumentListeners(open: boolean) {
   if (open) {
@@ -310,18 +384,6 @@ onBeforeUnmount(() => {
           v-if="supportsBuiltinAgentActions(state.backend)"
           type="button"
           class="chat-chip chat-chip--icon"
-          :class="{ 'is-disabled': sessionForkDisabled }"
-          :disabled="sessionForkDisabled || actionsBlocked"
-          title="分叉当前会话"
-          aria-label="分叉当前会话"
-          @click="emit('startSessionFork')"
-        >
-          <GitFork :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
           :disabled="actionsBlocked"
           title="打开 Lilia IAB"
           aria-label="打开 Lilia IAB"
@@ -329,42 +391,51 @@ onBeforeUnmount(() => {
         >
           <Globe :size="14" aria-hidden="true" />
         </button>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :disabled="actionsBlocked"
-          title="回送 IAB 截图"
-          aria-label="回送 IAB 截图"
-          @click="emit('submitLiliaIab')"
-        >
-          <Camera :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :class="{ 'is-disabled': compactDisabled }"
-          :disabled="compactDisabled || actionsBlocked"
-          title="压缩上下文"
-          aria-label="压缩上下文"
-          @click="emit('startLiliaCompact')"
-        >
-          <Combine :size="14" aria-hidden="true" />
-        </button>
       </div>
 
-      <button
-        type="button"
-        class="chat-composer__send"
-        :class="{ 'chat-composer__send--interrupt': canInterrupt }"
-        :disabled="actionsBlocked || !canSubmitEntry"
-        :title="sendTitle"
-        :aria-label="sendAriaLabel"
-        @click="emit('submitEntry')"
-      >
-        <component :is="canInterrupt ? Square : ArrowUp" :size="16" aria-hidden="true" />
-      </button>
+      <div class="chat-composer__entry-actions">
+        <div
+          v-if="supportsBuiltinAgentActions(state.backend)"
+          class="chat-composer__context-wrap"
+        >
+          <button
+            type="button"
+            class="chat-composer__context-action"
+            :class="[contextUsageTone(contextUsage), { 'is-disabled': compactDisabled }]"
+            :style="contextUsageProgressStyle"
+            :disabled="compactDisabled || actionsBlocked"
+            :aria-label="contextUsageTitle"
+            @click="emit('startLiliaCompact')"
+          >
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <circle class="chat-context-ring__track" cx="8" cy="8" r="6" pathLength="100" />
+              <circle class="chat-context-ring__value" cx="8" cy="8" r="6" pathLength="100" />
+            </svg>
+          </button>
+          <div
+            class="chat-composer__context-card"
+            role="tooltip"
+          >
+            <dl class="chat-composer__context-card-list">
+              <template v-for="row in contextUsageRows" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.value }}</dd>
+              </template>
+            </dl>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="chat-composer__send"
+          :class="{ 'chat-composer__send--interrupt': canInterrupt }"
+          :disabled="actionsBlocked || !canSubmitEntry"
+          :title="sendTitle"
+          :aria-label="sendAriaLabel"
+          @click="emit('submitEntry')"
+        >
+          <component :is="canInterrupt ? Square : ArrowUp" :size="16" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
