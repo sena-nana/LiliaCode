@@ -159,10 +159,6 @@ export function referenceKindLabel(attachment: ChatAttachment): string {
   return "文件引用";
 }
 
-export function conversationReferenceLabel(reference: ChatConversationReference): string {
-  return serializeConversationReference(reference);
-}
-
 export function serializeAttachmentReference(attachment: ChatAttachment): string {
   return `[${referenceKindLabel(attachment)}: ${attachment.name} | ${attachment.path}]`;
 }
@@ -172,7 +168,7 @@ export function serializeComposerParts(parts: ComposerPart[]): string {
     .map((part) => {
       if (part.type === "text") return part.text;
       if (part.type === "attachment") return serializeAttachmentReference(part.attachment);
-      return conversationReferenceLabel(part.reference);
+      return serializeConversationReference(part.reference);
     })
     .join("");
 }
