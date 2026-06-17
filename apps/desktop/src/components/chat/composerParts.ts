@@ -1,5 +1,6 @@
 import type { ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import { isImageAttachment } from "./imageViewer";
+import { serializeConversationReference } from "../../services/chatConversationReferences";
 
 export const ATTACHMENT_OBJECT_CHAR = "\uFFFC";
 export const CONVERSATION_REFERENCE_OBJECT_CHAR = "\uFFFD";
@@ -159,7 +160,7 @@ export function referenceKindLabel(attachment: ChatAttachment): string {
 }
 
 export function conversationReferenceLabel(reference: ChatConversationReference): string {
-  return `[对话引用: ${reference.title} | ${reference.taskId}]`;
+  return serializeConversationReference(reference);
 }
 
 export function serializeAttachmentReference(attachment: ChatAttachment): string {

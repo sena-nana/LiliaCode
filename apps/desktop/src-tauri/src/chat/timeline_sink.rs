@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::agent_events::{AgentEventEffect, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_timeline;
 use crate::agent_timeline::AgentTimelineEventInput;
-use crate::chat::types::ChatMessage;
+use crate::chat::types::{conversation_references_payload, ChatMessage};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 
@@ -233,7 +233,7 @@ pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
         "role": message.role,
         "content": message.content,
         "attachments": message.attachments,
-        "conversationReferences": message.conversation_references,
+        "conversationReferences": conversation_references_payload(&message.conversation_references),
         "queued": queued,
     });
     if let Some(automation_run_id) = automation_run_id {

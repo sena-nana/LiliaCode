@@ -3,6 +3,10 @@ import { onDebugTimelineEvent } from "../../composables/useDebugTimelineEvents";
 import {
   listAgentTimeline,
 } from "../../services/chat";
+import {
+  conversationReferencesToPayload,
+  readConversationReferences,
+} from "../../services/chatConversationReferences";
 import type {
   AgentTimelineEvent,
   AgentTimelinePayload,
@@ -60,18 +64,6 @@ export function attachmentsToTimelinePayload(
   }));
 }
 
-export function conversationReferencesToTimelinePayload(
-  conversationReferences: ChatConversationReference[],
-): AgentTimelinePayload[] {
-  return conversationReferences.map((reference) => ({
-    taskId: reference.taskId,
-    title: reference.title,
-    route: reference.route,
-    projectId: reference.projectId ?? null,
-    projectName: reference.projectName ?? null,
-  }));
-}
-
 export function createMessageTimelineEvent(
   input: CreateMessageTimelineEventInput,
 ): AgentTimelineEvent {
@@ -88,7 +80,7 @@ export function createMessageTimelineEvent(
       role: "user",
       content: input.content,
       attachments: attachmentsToTimelinePayload(input.attachments ?? []),
-      conversationReferences: conversationReferencesToTimelinePayload(input.conversationReferences ?? []),
+      conversationReferences: conversationReferencesToPayload(input.conversationReferences ?? []),
       queued: input.queued === true,
     },
     createdAt: input.createdAt,
@@ -108,7 +100,7 @@ export function createErrorTimelineEvent(
     payload.retryContext = {
       content: input.retryContext.content,
       attachments: attachmentsToTimelinePayload(input.retryContext.attachments),
-      conversationReferences: conversationReferencesToTimelinePayload(
+      conversationReferences: conversationReferencesToPayload(
         input.retryContext.conversationReferences ?? [],
       ),
     };
@@ -236,9 +228,7 @@ export function readRetryContext(value: unknown): TimelineRetryContext | null {
   const attachments = Array.isArray(payload.attachments)
     ? payload.attachments.filter(isChatAttachment)
     : [];
-  const conversationReferences = Array.isArray(payload.conversationReferences)
-    ? payload.conversationReferences.filter(isChatConversationReference)
-    : [];
+  const conversationReferences = readConversationReferences(payload.conversationReferences);
   if (!content.trim() && attachments.length === 0 && conversationReferences.length === 0) return null;
   return { content, attachments, conversationReferences };
 }
@@ -480,15 +470,9 @@ function userMessageIdentityKey(event: AgentTimelineEvent): string {
       .filter(Boolean)
       .join("\u001f")
     : "";
-  const conversationReferences = Array.isArray(payload.conversationReferences)
-    ? payload.conversationReferences
-      .map((reference) => {
-        const row = readPayloadRecord(reference);
-        return typeof row.taskId === "string" ? row.taskId : "";
-      })
-      .filter(Boolean)
-      .join("\u001f")
-    : "";
+  const conversationReferences = readConversationReferences(payload.conversationReferences)
+    .map((reference) => reference.taskId)
+    .join("\u001f");
   return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}\u001f${conversationReferences}`;
 }
 
@@ -500,14 +484,4 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
     typeof row.path === "string" &&
     (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
     (typeof row.size === "number" || row.size === null);
-}
-
-function isChatConversationReference(value: unknown): value is ChatConversationReference {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  return typeof row.taskId === "string" &&
-    typeof row.title === "string" &&
-    typeof row.route === "string" &&
-    (typeof row.projectId === "string" || typeof row.projectId === "undefined" || row.projectId === null) &&
-    (typeof row.projectName === "string" || typeof row.projectName === "undefined" || row.projectName === null);
 }

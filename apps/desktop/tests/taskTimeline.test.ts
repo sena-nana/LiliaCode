@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTimelineEvent, ChatAttachment } from "@lilia/contracts";
+import type { AgentTimelineEvent, ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import {
   attachmentsToTimelinePayload,
   createErrorTimelineEvent,
@@ -37,6 +37,14 @@ const attachment: ChatAttachment = {
   size: 120,
   exists: true,
   mime: "text/markdown",
+};
+
+const conversationReference: ChatConversationReference = {
+  taskId: "task-old",
+  title: "旧对话",
+  route: "/projects/p-1/tasks/task-old",
+  projectId: "p-1",
+  projectName: "主项目",
 };
 
 describe("task detail timeline helpers", () => {
@@ -104,13 +112,14 @@ describe("task detail timeline helpers", () => {
       retryContext: {
         content: "重试这句",
         attachments: [attachment],
+        conversationReferences: [conversationReference],
       },
     });
 
     expect(retryContextForTimelineEvent(error, [])).toEqual({
       content: "重试这句",
       attachments: [expect.objectContaining({ id: "a-1" })],
-      conversationReferences: [],
+      conversationReferences: [conversationReference],
     });
   });
 
@@ -124,6 +133,11 @@ describe("task detail timeline helpers", () => {
         role: "user",
         content: "从 turn 读取",
         attachments: [attachment],
+        conversationReferences: [{
+          ...conversationReference,
+          projectId: null,
+          projectName: null,
+        }],
       },
     });
     const error = event({
@@ -138,7 +152,50 @@ describe("task detail timeline helpers", () => {
     expect(retryContextForTimelineEvent(error, [userMessage, error])).toEqual({
       content: "从 turn 读取",
       attachments: [expect.objectContaining({ path: attachment.path })],
-      conversationReferences: [],
+      conversationReferences: [expect.objectContaining({
+        taskId: conversationReference.taskId,
+        title: conversationReference.title,
+        route: conversationReference.route,
+      })],
+    });
+  });
+
+  it("消息 payload 和重试恢复共享同一份对话引用序列化结果", () => {
+    const message = createMessageTimelineEvent({
+      id: "message-1",
+      taskId: "t-1",
+      backend: "claude",
+      content: "引用旧对话",
+      attachments: [],
+      conversationReferences: [conversationReference],
+      createdAt: 10,
+    });
+    const error = createErrorTimelineEvent({
+      id: "error-1",
+      taskId: "t-1",
+      backend: "claude",
+      message: "发送失败",
+      createdAt: 20,
+      retryContext: {
+        content: "引用旧对话",
+        attachments: [],
+        conversationReferences: [conversationReference],
+      },
+    });
+
+    expect((message.payload as Record<string, unknown>).conversationReferences).toEqual([
+      {
+        taskId: "task-old",
+        title: "旧对话",
+        route: "/projects/p-1/tasks/task-old",
+        projectId: "p-1",
+        projectName: "主项目",
+      },
+    ]);
+    expect(retryContextForTimelineEvent(error, [message])).toEqual({
+      content: "引用旧对话",
+      attachments: [],
+      conversationReferences: [conversationReference],
     });
   });
 
