@@ -51,17 +51,6 @@ export function readConversationReferences(value: unknown): ChatConversationRefe
     }));
 }
 
-export function fallbackConversationReference(
-  title: string,
-  taskId: string,
-): ChatConversationReference {
-  return {
-    taskId,
-    title: title || taskId,
-    route: "",
-  };
-}
-
 export function resolveConversationReferenceMatch(
   match: RegExpMatchArray,
   conversationReferences: ChatConversationReference[],
@@ -70,7 +59,11 @@ export function resolveConversationReferenceMatch(
   const title = rawTitle.trim();
   const taskId = rawTaskId.trim();
   return conversationReferences.find((reference) => reference.taskId === taskId) ??
-    fallbackConversationReference(title, taskId);
+    {
+      taskId,
+      title: title || taskId,
+      route: "",
+    };
 }
 
 export function stripSerializedConversationReferences(
