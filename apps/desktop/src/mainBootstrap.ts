@@ -4,6 +4,7 @@ import { router } from "./router";
 import "./composables/useCornerStyle";
 import "./composables/useTheme";
 import { installContextMenu } from "./composables/useContextMenu";
+import { installGlobalScrollbarVisibility } from "./composables/useGlobalScrollbarVisibility";
 import { vContextMenu } from "./directives/contextMenu";
 import "./styles/index.css";
 import "./styles/components.css";
@@ -11,6 +12,7 @@ import "./styles/shell.css";
 
 export function mountLiliaApp(): void {
   installContextMenu();
+  installGlobalScrollbarVisibility();
 
   const app = createApp(App);
   app.use(router);
