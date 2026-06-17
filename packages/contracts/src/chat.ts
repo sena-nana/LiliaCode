@@ -327,6 +327,7 @@ export interface ChatComposerState {
   backend: ChatBackendKind;
   model: string;
   planMode: boolean;
+  goalMode: boolean;
   permission: PermissionMode;
 }
 

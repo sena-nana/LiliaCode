@@ -9,6 +9,7 @@ const codexComposerState: ChatComposerState = {
   backend: "codex",
   model: "gpt-5.5",
   planMode: false,
+  goalMode: false,
   permission: "ask",
 };
 
@@ -59,18 +60,24 @@ function renderSurface() {
           },
         }),
         ChatComposer: defineComponent({
-          emits: ["start-lilia-fix-suggestion"],
+          emits: ["reference-conversation", "start-lilia-fix-suggestion"],
           setup(_, { emit }) {
             return () =>
-              h("button", {
-                type: "button",
-                onClick: () => emit(
-                  "start-lilia-fix-suggestion",
-                  "优先给最小修复",
-                  [],
-                  { type: "uncommittedChanges" },
-                ),
-              }, "stub fix suggestion");
+              h("div", [
+                h("button", {
+                  type: "button",
+                  onClick: () => emit(
+                    "start-lilia-fix-suggestion",
+                    "优先给最小修复",
+                    [],
+                    { type: "uncommittedChanges" },
+                  ),
+                }, "stub fix suggestion"),
+                h("button", {
+                  type: "button",
+                  onClick: () => emit("reference-conversation"),
+                }, "stub reference conversation"),
+              ]);
           },
         }),
         TodoFloat: defineComponent({
@@ -109,6 +116,14 @@ describe("TaskDetailChatSurface", () => {
       [],
       { type: "uncommittedChanges" },
     ]);
+  });
+
+  it("forwards conversation reference events from the composer", async () => {
+    const view = renderSurface();
+
+    await fireEvent.click(view.getByRole("button", { name: "stub reference conversation" }));
+
+    expect(view.emitted("reference-conversation")).toHaveLength(1);
   });
 
 });

@@ -103,6 +103,7 @@ export function useTaskComposerController(options: {
       backend: activeBackend.value,
       model: "",
       planMode: false,
+      goalMode: false,
       permission: "ask",
     }),
   );

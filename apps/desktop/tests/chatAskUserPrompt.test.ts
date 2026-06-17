@@ -106,6 +106,7 @@ async function renderCodexTaskDetail(taskId = "t-002", options: { clearMockCalls
     backend: "codex",
     model: "gpt-5.5",
     planMode: false,
+    goalMode: false,
     permission: "ask",
   }));
   const view = await renderTaskDetail(taskId);
@@ -406,7 +407,8 @@ describe("chat AskUser prompt", () => {
     expect(prompt).not.toBeNull();
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
-    expect(view.getByRole("button", { name: "添加附件" })).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
+    expect(view.getByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
 
     emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
     await setComposerText(view, "补充上下文");
@@ -471,7 +473,7 @@ describe("chat AskUser prompt", () => {
     await view.findByRole("alert");
     const composer = view.container.querySelector(".chat-composer");
     expect(composer?.querySelector(".composer-inline--tool")).toBeInTheDocument();
-    expect(view.queryByRole("button", { name: "添加附件" })).toBeNull();
+    expect(view.queryByRole("button", { name: "更多输入操作" })).toBeNull();
     expect(view.queryByRole("button", { name: "拒绝" })).toBeNull();
     expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
     expect(view.getByRole("button", { name: "同意" })).toBeInTheDocument();

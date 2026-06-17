@@ -11,6 +11,7 @@ const baseState: ChatComposerState = {
   backend: "claude",
   model: "claude-sonnet-4-6",
   planMode: false,
+  goalMode: false,
   permission: "full",
 };
 
@@ -139,6 +140,10 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
 
 function composerText(input: HTMLElement): string {
   return input instanceof HTMLTextAreaElement ? input.value : input.textContent ?? "";
+}
+
+async function openComposerActionMenu(view: ReturnType<typeof render>) {
+  await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
 }
 
 function createTextPasteEvent(text: string, html = ""): ClipboardEvent {
@@ -670,6 +675,65 @@ describe("ChatComposer", () => {
   });
 
 
+  it("加号菜单收纳输入框辅助动作", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    expect(view.getByRole("button", { name: "更多输入操作" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(view.queryByRole("menuitem", { name: "添加附件" })).toBeNull();
+    expect(view.queryByRole("menuitemcheckbox", { name: "计划模式" })).toBeNull();
+
+    await openComposerActionMenu(view);
+
+    expect(view.getByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
+    expect(view.getByRole("menuitem", { name: "引用其他对话" })).toBeInTheDocument();
+    expect(view.getByRole("menuitemcheckbox", { name: "计划模式" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(view.getByRole("menuitemcheckbox", { name: "目标模式" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  it("加号菜单可触发添加附件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await openComposerActionMenu(view);
+    await fireEvent.click(view.getByRole("menuitem", { name: "添加附件" }));
+
+    expect(view.emitted("pick-attachments")).toHaveLength(1);
+    expect(view.queryByRole("menu")).toBeNull();
+  });
+
+  it("加号菜单可触发引用其他对话", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await openComposerActionMenu(view);
+    await fireEvent.click(view.getByRole("menuitem", { name: "引用其他对话" }));
+
+    expect(view.emitted("reference-conversation")).toHaveLength(1);
+    expect(view.queryByRole("menu")).toBeNull();
+  });
+
   it("计划模式独立于执行权限切换", async () => {
     const view = render(ChatComposer, {
       props: {
@@ -678,13 +742,36 @@ describe("ChatComposer", () => {
       },
     });
 
-    const planButton = view.getByRole("button", { name: "开启计划模式" });
-    expect(planButton).toHaveAttribute("aria-pressed", "false");
+    await openComposerActionMenu(view);
+    const planButton = view.getByRole("menuitemcheckbox", { name: "计划模式" });
+    expect(planButton).toHaveAttribute("aria-checked", "false");
 
     await fireEvent.click(planButton);
 
     expect(view.emitted("update:state")?.[0]?.[0]).toMatchObject({
       planMode: true,
+      goalMode: false,
+      permission: "full",
+    });
+  });
+
+  it("目标模式独立于计划模式和执行权限切换", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await openComposerActionMenu(view);
+    const goalButton = view.getByRole("menuitemcheckbox", { name: "目标模式" });
+    expect(goalButton).toHaveAttribute("aria-checked", "false");
+
+    await fireEvent.click(goalButton);
+
+    expect(view.emitted("update:state")?.[0]?.[0]).toMatchObject({
+      planMode: false,
+      goalMode: true,
       permission: "full",
     });
   });

@@ -82,6 +82,7 @@ const emit = defineEmits<{
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
+  "reference-conversation": [];
   "add-context-attachment": [attachment: ChatAttachment];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
@@ -371,6 +372,7 @@ function patch(next: Partial<ChatComposerState>) {
 
 function setPermission(v: PermissionMode) { patch({ permission: v }); }
 function togglePlanMode() { patch({ planMode: !props.state.planMode }); }
+function toggleGoalMode() { patch({ goalMode: !props.state.goalMode }); }
 
 function fillSuggestionPrompt(prompt: string) {
   richInput.replaceRange(
@@ -801,8 +803,10 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
+        @reference-conversation="emit('reference-conversation')"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
+        @toggle-goal-mode="toggleGoalMode"
         @start-lilia-compact="emit('start-lilia-compact')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"

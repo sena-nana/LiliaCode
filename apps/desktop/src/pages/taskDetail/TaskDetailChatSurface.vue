@@ -103,6 +103,7 @@ const emit = defineEmits<{
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
+  "reference-conversation": [];
   "add-context-attachment": [attachment: ChatAttachment];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
@@ -225,6 +226,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"
                   @pick-attachments="emit('pick-attachments')"
+                  @reference-conversation="emit('reference-conversation')"
                   @add-context-attachment="emit('add-context-attachment', $event)"
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
