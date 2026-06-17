@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 
 use serde_json::Value as JsonValue;
 
@@ -27,9 +28,11 @@ pub(crate) enum JsonlProcessStdinStatus {
 
 struct JsonlProcessSession {
     child: Child,
-    stdout: Option<BufReader<ChildStdout>>,
+    stdout_lines: Option<mpsc::Receiver<String>>,
+    stdout_available: bool,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     stderr: Option<std::process::ChildStderr>,
+    termination_requested: bool,
     finished: bool,
 }
 
@@ -55,13 +58,17 @@ impl JsonlProcessRegistry {
         *next_id += 1;
         let session_id = format!("jsonl-process-{}", *next_id);
         let stdin = child.stdin.take().map(|stdin| Arc::new(Mutex::new(stdin)));
-        let stdout = child.stdout.take().map(BufReader::new);
+        let stdout = child.stdout.take();
+        let stdout_available = stdout.is_some();
+        let stdout_lines = stdout.map(spawn_stdout_reader);
         let stderr = child.stderr.take();
         let session = JsonlProcessSession {
             child,
-            stdout,
+            stdout_lines,
+            stdout_available,
             stdin: stdin.clone(),
             stderr,
+            termination_requested: false,
             finished: false,
         };
         self.sessions
@@ -126,8 +133,7 @@ impl JsonlProcessRegistry {
             .lock()
             .unwrap()
             .get(session_id)
-            .and_then(|session| session.stdout.as_ref())
-            .is_some()
+            .is_some_and(|session| session.stdout_available)
     }
 
     pub(crate) fn poll(&self, session_id: &str) -> Option<JsonlProcessPoll> {
@@ -136,12 +142,13 @@ impl JsonlProcessRegistry {
         if session.finished {
             return Some(JsonlProcessPoll::Pending);
         }
-        if let Some(stdout) = session.stdout.as_mut() {
-            let mut line = String::new();
-            match stdout.read_line(&mut line) {
-                Ok(0) => {}
-                Ok(_) => return Some(JsonlProcessPoll::StdoutLine(line)),
-                Err(_) => {}
+        if let Some(stdout_lines) = session.stdout_lines.as_ref() {
+            match stdout_lines.try_recv() {
+                Ok(line) => return Some(JsonlProcessPoll::StdoutLine(line)),
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    session.stdout_lines = None;
+                }
             }
         }
         match session.child.try_wait() {
@@ -171,8 +178,19 @@ impl JsonlProcessRegistry {
         if session.finished {
             return Ok(false);
         }
+        if session.termination_requested {
+            return Ok(false);
+        }
+        if session
+            .child
+            .try_wait()
+            .map_err(|err| err.to_string())?
+            .is_some()
+        {
+            return Ok(false);
+        }
         session.child.kill().map_err(|err| err.to_string())?;
-        session.finished = true;
+        session.termination_requested = true;
         Ok(true)
     }
 
@@ -181,7 +199,7 @@ impl JsonlProcessRegistry {
             .lock()
             .unwrap()
             .get(session_id)
-            .is_some_and(|session| !session.finished)
+            .is_some_and(|session| !session.finished && !session.termination_requested)
     }
 
     pub(crate) fn remove(&self, session_id: &str) -> Option<()> {
@@ -202,4 +220,104 @@ fn read_stderr(stderr: Option<std::process::ChildStderr>) -> String {
     let mut text = String::new();
     let _ = stderr.read_to_string(&mut text);
     text
+}
+
+fn spawn_stdout_reader(stdout: ChildStdout) -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            if !matches!(stdout.read_line(&mut line), Ok(n) if n > 0) {
+                break;
+            }
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JsonlProcessPoll, JsonlProcessRegistry};
+    use serde_json::json;
+    use std::process::{Command, Stdio};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    fn start_silent_child(registry: &JsonlProcessRegistry) -> String {
+        let child = Command::new("node")
+            .arg("-e")
+            .arg("setInterval(() => {}, 1000)")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        registry.start(child, &json!({ "boot": true })).unwrap()
+    }
+
+    fn wait_for_exit(registry: &JsonlProcessRegistry, session_id: &str) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match registry.poll(session_id) {
+                Some(JsonlProcessPoll::Exited(_)) => break,
+                Some(JsonlProcessPoll::Pending) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                other => panic!("expected terminated process to exit, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn terminate_is_idempotent_and_poll_observes_exit() {
+        let registry = JsonlProcessRegistry::new();
+        let session_id = start_silent_child(&registry);
+
+        assert!(registry.is_active(&session_id));
+        assert!(registry.terminate(&session_id).unwrap());
+        assert!(!registry.is_active(&session_id));
+        assert!(!registry.terminate(&session_id).unwrap());
+
+        wait_for_exit(&registry, &session_id);
+
+        registry.remove(&session_id);
+    }
+
+    #[test]
+    fn poll_silent_child_returns_pending_without_blocking() {
+        let registry = JsonlProcessRegistry::new();
+        let session_id = start_silent_child(&registry);
+
+        let started = Instant::now();
+        let poll = registry.poll(&session_id);
+
+        assert!(matches!(poll, Some(JsonlProcessPoll::Pending)));
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(registry.terminate(&session_id).unwrap());
+        wait_for_exit(&registry, &session_id);
+        registry.remove(&session_id);
+    }
+
+    #[test]
+    fn terminate_is_not_blocked_by_polling_silent_child() {
+        let registry = Arc::new(JsonlProcessRegistry::new());
+        let session_id = start_silent_child(&registry);
+
+        let poll_registry = Arc::clone(&registry);
+        let poll_session_id = session_id.clone();
+        let poll_thread = thread::spawn(move || poll_registry.poll(&poll_session_id));
+        let poll_result = poll_thread.join().unwrap();
+        assert!(matches!(poll_result, Some(JsonlProcessPoll::Pending)));
+
+        let started = Instant::now();
+        assert!(registry.terminate(&session_id).unwrap());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        wait_for_exit(&registry, &session_id);
+        registry.remove(&session_id);
+    }
 }

@@ -442,7 +442,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("发送后停止等待 Agent 收尾，再通过 done 恢复输入和附件", async () => {
+  it("打断后立即恢复输入态并阻止重复打断", async () => {
     const view = await renderTaskDetail();
     setChatDropBounds(view);
 
@@ -460,22 +460,46 @@ describe("chat scheduler", () => {
       expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+    mockInvoke.mockClear();
+    const interrupt = view.getByRole("button", { name: "打断 Agent" });
+    await Promise.all([
+      fireEvent.click(interrupt),
+      fireEvent.click(interrupt),
+    ]);
 
     await waitFor(() => {
-      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+      expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
+      expect(view.getByRole("textbox")).toBeInTheDocument();
       expect(view.getByText("先别发出去")).toBeInTheDocument();
     });
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_interrupt_turn")).toHaveLength(1);
+  });
 
-    completeMockAgentTurn("t-002");
+  it("打断成功后的新输入会直接发送而不是加入调度队列", async () => {
+    const view = await renderTaskDetail();
+
+    await sendText(view, "先运行一轮");
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+    });
 
     await waitFor(() => {
-      const input = view.getByRole("textbox") as HTMLElement;
-      expect(input.textContent).toContain("先别发出去");
-      expect(view.getByText("README.md")).toBeInTheDocument();
-      expect(view.queryByText("Agent 已打断")).toBeNull();
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
     });
-    expect(view.container.querySelectorAll(".chat-bubble")).toHaveLength(0);
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
+    });
+
+    await sendText(view, "打断后的新请求");
+
+    await waitFor(() => {
+      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      expect(sends).toHaveLength(1);
+      expect(sends[0][1].content).toBe("打断后的新请求");
+    });
   });
 
   it("重新进入任务页时会从 runtime snapshot 恢复运行态", async () => {
