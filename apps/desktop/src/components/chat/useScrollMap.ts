@@ -1,5 +1,13 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { CSSProperties, ComputedRef, Ref } from "vue";
+import {
+  clamp as clampValue,
+  maxScrollOffset,
+  readScrollbarMetrics,
+  scrollOffsetForThumbDrag,
+} from "../../utils/scrollbarMetrics";
+
+export { clamp } from "../../utils/scrollbarMetrics";
 
 export interface ScrollMapGeometry {
   bottomOffset?: number;
@@ -172,16 +180,20 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
     const visibleHeight = Math.max(0, geometry.visibleHeight);
     const domainHeight = Math.max(visibleHeight, geometry.domainHeight);
     const trackHeight = readTrackHeight(visibleHeight);
-    const visibleTop = clamp(scroller.scrollTop, 0, Math.max(0, domainHeight - visibleHeight));
-    const scrollable = domainHeight - visibleHeight > 1;
+    const scrollMetrics = readScrollbarMetrics({
+      domainSize: domainHeight,
+      scrollOffset: scroller.scrollTop,
+      trackSize: trackHeight,
+      visibleSize: visibleHeight,
+    });
 
     metrics.value = {
       bottomOffset: geometry.bottomOffset ?? 0,
       domainHeight,
-      scrollable,
-      thumbHeight: domainHeight > 0 ? trackHeight * visibleHeight / domainHeight : 0,
-      thumbTop: domainHeight > 0 ? trackHeight * visibleTop / domainHeight : 0,
-      trackHeight,
+      scrollable: scrollMetrics.scrollable,
+      thumbHeight: scrollMetrics.thumbSize,
+      thumbTop: scrollMetrics.thumbOffset,
+      trackHeight: scrollMetrics.trackSize,
       visibleHeight,
     };
   }
@@ -208,7 +220,7 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
     const scroller = options.scroller.value;
     if (!scroller) return;
 
-    const nextTop = clamp(top, 0, maxScrollTop(scroller));
+    const nextTop = clampValue(top, 0, maxScrollTop(scroller));
     if (typeof scroller.scrollTo === "function") {
       scroller.scrollTo({ top: nextTop, behavior });
     } else {
@@ -264,12 +276,12 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
 
     event.preventDefault();
     const deltaY = event.clientY - dragState.startY;
-    scroller.scrollTop = clamp(
-      dragState.startScrollTop +
-        deltaY * dragState.metrics.domainHeight / dragState.metrics.trackHeight,
-      0,
-      maxScrollTop(scroller),
-    );
+    scroller.scrollTop = scrollOffsetForThumbDrag(dragState.startScrollTop, deltaY, {
+      domainSize: dragState.metrics.domainHeight,
+      thumbSize: dragState.metrics.thumbHeight,
+      trackSize: dragState.metrics.trackHeight,
+      visibleSize: dragState.metrics.visibleHeight,
+    });
     scheduleMeasure();
   }
 
@@ -442,12 +454,7 @@ export function markerTopForElement(
   const scrollerRect = scroller.getBoundingClientRect();
   const elementRect = element.getBoundingClientRect();
   const contentTop = elementRect.top - scrollerRect.top + scroller.scrollTop;
-  return clamp(metrics.trackHeight * contentTop / metrics.domainHeight, 0, metrics.trackHeight);
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
+  return clampValue(metrics.trackHeight * contentTop / metrics.domainHeight, 0, metrics.trackHeight);
 }
 
 function readDefaultGeometry(scroller: HTMLElement): ScrollMapGeometry {
@@ -459,5 +466,5 @@ function readDefaultGeometry(scroller: HTMLElement): ScrollMapGeometry {
 }
 
 function maxScrollTop(scroller: HTMLElement): number {
-  return Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  return maxScrollOffset(scroller.scrollHeight, scroller.clientHeight);
 }

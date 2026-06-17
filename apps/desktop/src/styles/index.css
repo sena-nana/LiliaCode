@@ -142,8 +142,7 @@
 
 * {
   box-sizing: border-box;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: none;
 }
 
 @supports (corner-shape: squircle) {
@@ -213,21 +212,50 @@ pre code {
 
 /* 滚动条（WebKit） */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 0;
+  height: 0;
 }
 
-::-webkit-scrollbar-thumb {
+.global-scrollbar-overlay {
+  position: fixed;
+  z-index: 2147483647;
+  pointer-events: auto;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.48s ease;
+}
+
+.global-scrollbar-overlay::before {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
   background: var(--border-strong);
-  border-radius: var(--radius-pill);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
+.global-scrollbar-overlay.is-visible {
+  opacity: 1;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+.global-scrollbar-overlay--vertical {
+  width: 12px;
+}
+
+.global-scrollbar-overlay--vertical::before {
+  top: 0;
+  right: 4px;
+  bottom: 0;
+  width: 4px;
+}
+
+.global-scrollbar-overlay--horizontal {
+  height: 12px;
+}
+
+.global-scrollbar-overlay--horizontal::before {
+  right: 0;
+  bottom: 4px;
+  left: 0;
+  height: 4px;
 }
 
 /* ---------------- Shell ---------------- */
