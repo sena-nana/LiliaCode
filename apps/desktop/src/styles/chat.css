@@ -3482,22 +3482,19 @@ button.chat-composer__context-action:active:not(:disabled) {
 .chat-composer-stack-leave-active {
   overflow: hidden;
   transition:
-    max-height 0.32s cubic-bezier(0.65, 0, 0.35, 1),
     opacity 0.18s ease,
     transform 0.18s ease;
-  will-change: max-height, opacity, transform;
+  will-change: opacity, transform;
 }
 
 .chat-composer-stack-enter-from,
 .chat-composer-stack-leave-to {
-  max-height: 0;
   opacity: 0;
   transform: translateY(3px);
 }
 
 .chat-composer-stack-enter-to,
 .chat-composer-stack-leave-from {
-  max-height: 260px;
   opacity: 1;
   transform: translateY(0);
 }
