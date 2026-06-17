@@ -26,6 +26,7 @@ import {
   useToolConsentForTask,
 } from "../src/composables/useToolConsentBridge";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
+import { closeChatSidebar, openChatSidebar } from "../src/composables/useChatSidebar";
 
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
@@ -133,6 +134,7 @@ describe("chat scheduler", () => {
       await respondConsent("t-002", pendingConsent.requestId, "deny", "测试清理");
     }
     await useConnectionStatus({ probe: false }).setActiveBackend("claude");
+    closeChatSidebar();
     unlistenToolConsent?.();
     unlistenToolConsent = null;
   });
@@ -200,29 +202,25 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("Claude 后端可以打开 Lilia IAB", async () => {
+  it("Claude 后端可以在右侧栏打开 Lilia IAB", async () => {
     await setActiveBackendForTest("claude");
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("https://example.com/debug");
+    openChatSidebar("iab");
     const view = await renderTaskDetail();
     await waitFor(() => {
-      expect(view.getByRole("button", { name: "打开 Lilia IAB" })).toBeInTheDocument();
+      expect(view.getByRole("tab", { name: "IAB" })).toBeInTheDocument();
+      expect(view.getByRole("button", { name: "打开 IAB" })).toBeInTheDocument();
       expect(view.queryByRole("button", { name: "回送 IAB 截图" })).toBeNull();
     });
-    mockInvoke.mockClear();
 
-    await fireEvent.click(view.getByRole("button", { name: "打开 Lilia IAB" }));
+    await fireEvent.update(view.getByRole("textbox", { name: "IAB URL" }), "https://example.com/debug");
+    await fireEvent.click(view.getByRole("button", { name: "打开 IAB" }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "lilia_iab_open")).toBe(true);
+      const frame = view.container.querySelector(".iab-panel__frame");
+      expect(frame).toBeInstanceOf(HTMLIFrameElement);
+      expect((frame as HTMLIFrameElement).getAttribute("src")).toBe("https://example.com/debug");
     });
-    const open = mockInvoke.mock.calls.find(([cmd]) => cmd === "lilia_iab_open");
-    expect(open?.[1]).toMatchObject({
-      taskId: "t-002",
-      url: "https://example.com/debug",
-    });
-    expect(view.queryByText("当前后端尚未实现 Lilia IAB。")).toBeNull();
-    expect(promptSpy).toHaveBeenCalledWith("IAB URL", "about:blank");
-    promptSpy.mockRestore();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "lilia_iab_open")).toBe(false);
   });
 
   it("斜杠项目命令通过 workflow 执行并写入时间线", async () => {
