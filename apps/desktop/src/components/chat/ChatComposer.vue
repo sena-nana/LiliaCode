@@ -78,7 +78,6 @@ const emit = defineEmits<{
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
-  "open-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
@@ -805,7 +804,6 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
         @start-lilia-compact="emit('start-lilia-compact')"
-        @open-lilia-iab="emit('open-lilia-iab')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

@@ -97,7 +97,6 @@ const emit = defineEmits<{
   ];
   "start-lilia-compact": [];
   "start-session-fork": [];
-  "open-lilia-iab": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
@@ -221,7 +220,6 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @start-lilia-review="(content, outgoingAttachments, target) => emit('start-lilia-review', content, outgoingAttachments, target)"
                   @start-lilia-fix-suggestion="(content, outgoingAttachments, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, target)"
                   @start-lilia-compact="emit('start-lilia-compact')"
-                  @open-lilia-iab="emit('open-lilia-iab')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"

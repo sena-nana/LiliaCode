@@ -11,6 +11,7 @@ import { useRoute, useRouter } from "vue-router";
 import type { ChatAttachment, SuggestionItem } from "@lilia/contracts";
 import { registerArchitectureChatSidebarPanel } from "../composables/useArchitectureChatSidebarPanel";
 import { registerDebugChatSidebarPanel } from "../composables/useDebugChatSidebarPanel";
+import { registerIabChatSidebarPanel } from "../composables/useIabChatSidebarPanel";
 import TaskDetailChatSurface from "./taskDetail/TaskDetailChatSurface.vue";
 import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
 import { useTaskAttachments } from "./taskDetail/useTaskAttachments";
@@ -255,6 +256,11 @@ function onDraftProjectPickerError(message: string) {
 const unlisteners: UnlistenFn[] = [];
 let unregisterDebugPanel: (() => void) | null = null;
 let unregisterArchitecturePanel: (() => void) | null = null;
+let unregisterIabPanel: (() => void) | null = null;
+
+function supportsSidebarIab(backend: string) {
+  return backend === "codex" || backend === "claude";
+}
 
 function syncDebugPanelRegistration() {
   if (!hasContext.value || !composerController.agentInteractionSettings.debug.value) {
@@ -274,6 +280,16 @@ function syncArchitecturePanelRegistration() {
   }
   if (unregisterArchitecturePanel) return;
   unregisterArchitecturePanel = registerArchitectureChatSidebarPanel();
+}
+
+function syncIabPanelRegistration() {
+  if (!hasContext.value || isPopup.value || !supportsSidebarIab(composerForView.value.backend)) {
+    unregisterIabPanel?.();
+    unregisterIabPanel = null;
+    return;
+  }
+  if (unregisterIabPanel) return;
+  unregisterIabPanel = registerIabChatSidebarPanel();
 }
 
 onMounted(async () => {
@@ -298,6 +314,8 @@ onUnmounted(async () => {
   unregisterDebugPanel = null;
   unregisterArchitecturePanel?.();
   unregisterArchitecturePanel = null;
+  unregisterIabPanel?.();
+  unregisterIabPanel = null;
   for (const unlisten of unlisteners) {
     try {
       await unlisten();
@@ -366,6 +384,12 @@ watch(
 watch(
   () => [hasContext.value, props.projectId ?? "", isPopup.value] as const,
   syncArchitecturePanelRegistration,
+  { immediate: true },
+);
+
+watch(
+  () => [hasContext.value, isPopup.value, composerForView.value.backend] as const,
+  syncIabPanelRegistration,
   { immediate: true },
 );
 
@@ -461,7 +485,6 @@ watch(
     @start-lilia-fix-suggestion="composerController.onStartLiliaFixSuggestion"
     @start-lilia-compact="composerController.onStartLiliaCompact"
     @start-session-fork="composerController.onStartSessionFork"
-    @open-lilia-iab="composerController.onOpenLiliaIab"
     @execute-slash-command="composerController.onExecuteSlashCommand"
     @start-lilia-batch-apply="composerController.onStartLiliaBatchApply"
     @interrupt="composerController.onInterrupt"

@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import {
   ArrowUp,
-  Globe,
   ListChecks,
   Paperclip,
   ShieldCheck,
@@ -35,7 +34,6 @@ const emit = defineEmits<{
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
   startLiliaCompact: [];
-  openLiliaIab: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -168,25 +166,15 @@ const contextUsageRows = computed(() => {
         />
         <button
           type="button"
-          class="chat-chip chat-chip--icon"
+          class="chat-chip"
           :class="{ 'is-open': state.planMode }"
-          :title="state.planMode ? '本轮先制定计划' : '直接执行'"
+          :title="state.planMode ? '计划模式已开启' : '开启计划模式'"
           :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
           :aria-pressed="state.planMode"
           @click="emit('togglePlanMode')"
         >
           <ListChecks :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="supportsBuiltinAgentActions(state.backend)"
-          type="button"
-          class="chat-chip chat-chip--icon"
-          :disabled="actionsBlocked"
-          title="打开 Lilia IAB"
-          aria-label="打开 Lilia IAB"
-          @click="emit('openLiliaIab')"
-        >
-          <Globe :size="14" aria-hidden="true" />
+          <span class="chat-chip__label">计划模式</span>
         </button>
       </div>
 

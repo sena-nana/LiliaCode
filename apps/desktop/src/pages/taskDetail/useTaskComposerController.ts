@@ -36,7 +36,6 @@ import {
   getRuntimeSnapshot,
   ackRestoredRollback,
   interruptTurn,
-  openLiliaIab,
   onAgentTimeline,
   onAgentTimelineBatch,
   onContextUsage,
@@ -223,18 +222,6 @@ export function useTaskComposerController(options: {
       });
     } catch {
       // sendAgentMessage 已写入本地错误 timeline。
-    }
-  }
-
-  async function onOpenLiliaIab() {
-    if (!context.hasContext.value) return;
-    const raw = window.prompt("IAB URL", "about:blank");
-    if (raw === null) return;
-    const url = raw.trim() || "about:blank";
-    try {
-      await openLiliaIab(props.taskId, url);
-    } catch (err) {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打开 IAB 失败：${String(err)}`));
     }
   }
 
@@ -551,7 +538,6 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onExecuteSlashCommand,
-    onOpenLiliaIab,
     ...liliaWorkflowActions,
     onInsertGuide,
     onInsertDraftText,
