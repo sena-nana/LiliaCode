@@ -242,7 +242,7 @@ pre code {
 
 .global-scrollbar-overlay--vertical::before {
   top: 0;
-  right: 4px;
+  right: 0;
   bottom: 0;
   width: 4px;
 }
