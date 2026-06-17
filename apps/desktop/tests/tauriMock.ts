@@ -426,6 +426,7 @@ function cloneAutomationRunNode(row: AutomationRunNodeStateRow): AutomationRunNo
 }
 let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
+let chatInterruptRollbacks: Record<string, Record<string, unknown> | null> = {};
 let runtimeSnapshotOverrides: Record<string, Record<string, unknown>> = {};
 let nextChatSendError: string | null = null;
 let nextAgentInteractionResponseError: string | null = null;
@@ -1135,6 +1136,7 @@ export function resetTauriMockData() {
   };
   chatRunning = {};
   chatQueued = {};
+  chatInterruptRollbacks = {};
   runtimeSnapshotOverrides = {};
   nextChatSendError = null;
   nextAgentInteractionResponseError = null;
@@ -1478,10 +1480,13 @@ export function setMockWindowScaleFactor(scaleFactor: number) {
 }
 
 export function completeMockAgentTurn(taskId: string) {
+  const rollback = chatInterruptRollbacks[taskId] ?? null;
+  delete chatInterruptRollbacks[taskId];
   emitTauriEvent("chat:done", {
     taskId,
     sessionId: `mock-${taskId}`,
     subtype: null,
+    rollback,
   });
   const [next, ...rest] = chatQueued[taskId] ?? [];
   if (next) {
@@ -3362,23 +3367,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           onlyEvent?.kind === "message" &&
           payload?.role === "user"
         ) {
-          timelineEvents[taskId] = (timelineEvents[taskId] ?? []).filter((event) =>
-            event.id !== onlyEvent.id
-          );
-          chatRunning[taskId] = false;
-          queueMicrotask(() => {
-            emitTauriEvent("chat:done", {
-              taskId,
-              sessionId: null,
-              subtype: null,
-              rollback: {
-                rolledBack: true,
-                restoredContent: typeof payload.content === "string" ? payload.content : "",
-                restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
-                removedEventIds: [onlyEvent.id],
-              },
-            });
-          });
+          chatInterruptRollbacks[taskId] = {
+            rolledBack: true,
+            restoredContent: typeof payload.content === "string" ? payload.content : "",
+            restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+            removedEventIds: [onlyEvent.id],
+          };
           return {
             rolledBack: false,
             restoredContent: "",
@@ -3400,15 +3394,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           },
           turnId,
         });
-        chatRunning[taskId] = false;
-        queueMicrotask(() => {
-          emitTauriEvent("chat:done", {
-            taskId,
-            sessionId: null,
-            subtype: null,
-            rollback: null,
-          });
-        });
+        chatInterruptRollbacks[taskId] = null;
       }
       return {
         rolledBack: false,

@@ -84,6 +84,7 @@ export function createInteractionBroker({
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
   let liliaIabResultHandler = null;
+  const interruptHandlers = new Set();
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
     protocol.emit({
@@ -294,6 +295,12 @@ export function createInteractionBroker({
       settingsUpdateHandler?.(msg);
       return;
     }
+    if (msg.type === "interrupt_turn") {
+      for (const handler of interruptHandlers) {
+        handler?.();
+      }
+      return;
+    }
     if (msg.type === "quota_usage_result") {
       if (typeof msg.id !== "string") return;
       const resolve = quotaUsagePending.get(msg.id);
@@ -324,6 +331,11 @@ export function createInteractionBroker({
     },
     handleLiliaIabResult: (handler) => {
       liliaIabResultHandler = typeof handler === "function" ? handler : null;
+    },
+    handleInterruptTurn: (handler) => {
+      if (typeof handler !== "function") return () => {};
+      interruptHandlers.add(handler);
+      return () => interruptHandlers.delete(handler);
     },
     pendingCounts: () => ({
       consent: consentPending.size,

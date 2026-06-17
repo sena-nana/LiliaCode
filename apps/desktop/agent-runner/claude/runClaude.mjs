@@ -791,10 +791,12 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const abortAfterMs = providerOptions.abortAfterMs;
   delete providerOptions.abortAfterMs;
   let abortTimer = null;
+  let interruptedByUser = false;
+  const abortController = new AbortController();
+  providerOptions.abortController = abortController;
   if (typeof abortAfterMs === "number" && abortAfterMs > 0) {
-    providerOptions.abortController = new AbortController();
     abortTimer = setTimeout(() => {
-      providerOptions.abortController.abort();
+      abortController.abort();
     }, abortAfterMs);
   }
   const ctx = {
@@ -868,6 +870,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   context.interactions?.handleSettingsUpdate?.((update) => {
     applyClaudeRuntimePermission(ctx, update?.permission);
   });
+  const unregisterInterrupt = context.interactions?.handleInterruptTurn?.(() => {
+    interruptedByUser = true;
+    abortController.abort();
+  }) ?? null;
   try {
     for await (const msg of claudeQuery) {
       if (msg.session_id) {
@@ -905,7 +911,8 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
             const errorSummary = msg.is_error
               ? (Array.isArray(msg.errors) ? msg.errors.join("\n") : msg.subtype) || ""
               : "";
-            const status = msg.is_error ? "error" : "success";
+            const interrupted = interruptedByUser || msg.subtype === "interrupted";
+            const status = interrupted ? "cancelled" : msg.is_error ? "error" : "success";
             const fragmentsEmitted = finalizeClaudeTextFragments(ctx, status);
             sweepActiveClaudeTools(ctx, status, msg?.session_id);
             finalizeClaudeReasoningTimeline(ctx, msg?.session_id || lastSessionId);
@@ -914,11 +921,13 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
             context.protocol.emitTimeline({
               kind: "turn",
               status,
-              title: msg.is_error ? "Claude turn failed" : "Claude turn completed",
+              title: interrupted
+                ? "Claude turn interrupted"
+                : msg.is_error ? "Claude turn failed" : "Claude turn completed",
               summary: errorSummary,
               payload: {
                 backend: "claude",
-                subtype: msg.subtype,
+                subtype: interrupted ? "interrupted" : msg.subtype,
                 stopReason: msg.stop_reason,
                 terminalReason: msg.terminal_reason,
                 totalCostUsd: msg.total_cost_usd,
@@ -934,7 +943,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
               context.protocol.emit({
                 type: "done",
                 sessionId: msg.session_id || lastSessionId,
-                subtype: msg.subtype,
+                subtype: interrupted ? "interrupted" : msg.subtype,
               });
             }
             break;
@@ -979,28 +988,35 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
         });
       }
     }
+  } catch (err) {
+    if (!interruptedByUser || !isClaudeAbortError(err)) {
+      throw err;
+    }
   } finally {
     if (abortTimer) clearTimeout(abortTimer);
+    unregisterInterrupt?.();
   }
-  if (lastSessionId && !ctx.resultSeen) {
-    const fragmentsEmitted = finalizeClaudeTextFragments(ctx, "success");
-    sweepActiveClaudeTools(ctx, "success", lastSessionId);
+  if ((lastSessionId || interruptedByUser) && !ctx.resultSeen) {
+    const status = interruptedByUser ? "cancelled" : "success";
+    const subtype = interruptedByUser ? "interrupted" : "success";
+    const fragmentsEmitted = finalizeClaudeTextFragments(ctx, status);
+    sweepActiveClaudeTools(ctx, status, lastSessionId);
     finalizeClaudeReasoningTimeline(ctx, lastSessionId);
-    emitClaudeTextResultFallback(ctx, null, "success", fragmentsEmitted, lastSessionId);
+    emitClaudeTextResultFallback(ctx, null, status, fragmentsEmitted, lastSessionId);
     context.protocol.emitTimeline({
       kind: "turn",
-      status: "success",
-      title: "Claude turn completed",
+      status,
+      title: interruptedByUser ? "Claude turn interrupted" : "Claude turn completed",
       summary: "",
       payload: {
         backend: "claude",
-        subtype: "success",
+        subtype,
         sessionId: lastSessionId,
       },
       sourceId: `${lastSessionId}:turn:done`,
     });
     if (overrides.suppressDone !== true) {
-      context.protocol.emit({ type: "done", sessionId: lastSessionId, subtype: "success" });
+      context.protocol.emit({ type: "done", sessionId: lastSessionId, subtype });
     }
   }
   return {
@@ -1008,6 +1024,12 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     compactResult: ctx.compactResult,
     compactError: ctx.compactError,
   };
+}
+
+function isClaudeAbortError(err) {
+  const name = typeof err?.name === "string" ? err.name : "";
+  const message = typeof err?.message === "string" ? err.message : String(err ?? "");
+  return name === "AbortError" || /abort|aborted|cancelled|canceled/i.test(message);
 }
 
 export async function runClaude(cmd, context) {

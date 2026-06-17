@@ -645,6 +645,23 @@ describe("interaction broker", () => {
     await expect(consent).resolves.toMatchObject({ decision: "allow" });
   });
 
+  it("interrupt_turn control lines are dispatched to registered handlers", () => {
+    const { protocol } = captureProtocol();
+    const calls: string[] = [];
+    const broker = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    const unregister = broker.handleInterruptTurn(() => calls.push("interrupt"));
+
+    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    unregister();
+    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+
+    expect(calls).toEqual(["interrupt"]);
+  });
+
   it("MCP elicitation broker preserves the Claude backend through request/response", async () => {
     const { protocol, json } = captureProtocol();
     const broker = createTestInteractionBroker(protocol);
@@ -1556,6 +1573,46 @@ describe("Claude helpers", () => {
       sessionId: "claude-provider-settings",
       subtype: "success",
     });
+  });
+
+  it("Claude interrupt control aborts the active SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createTestInteractionBroker(protocol);
+    let seenController: AbortController | null = null;
+
+    const run = runClaude({
+      cwd: "C:/repo",
+      prompt: "long turn",
+      backend: "claude",
+    }, {
+      protocol,
+      interactions: broker,
+      emitToolConsentTimeline: () => {},
+      createClaudeQuery: ({ options }: any) => {
+        seenController = options.abortController;
+        return (async function* () {
+          await new Promise((_resolve, reject) => {
+            options.abortController.signal.addEventListener("abort", () => {
+              const err = new Error("aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          });
+        })();
+      },
+    });
+
+    await waitUntil(() => seenController !== null);
+    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    await run;
+
+    expect(seenController?.signal.aborted).toBe(true);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: null,
+      subtype: "interrupted",
+    });
+    expect(json().some((line) => line.type === "error")).toBe(false);
   });
 
   it("Claude provider settings diagnose emits diagnostics without SDK query", async () => {
@@ -5210,6 +5267,73 @@ describe("Codex app-server mapping", () => {
       line.event.status === "success" &&
       line.event.payload.approved === true
     )).toBe(true);
+  });
+
+  it("Codex interrupt control calls app-server turn/interrupt for the active turn", async () => {
+    const { protocol, json } = captureProtocol();
+    const broker = createTestInteractionBroker(protocol);
+    const calls: any[] = [];
+    let turnStarted = false;
+    let interrupted = false;
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "initialize") return {};
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        if (method === "turn/start") {
+          turnStarted = true;
+          return { turn: { id: "turn-1" } };
+        }
+        if (method === "turn/interrupt") {
+          interrupted = true;
+          return {};
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        if (!turnStarted || !interrupted) return [];
+        return [{
+          method: "turn/completed",
+          params: {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "interrupted" },
+          },
+        }];
+      },
+      close: () => {},
+    };
+
+    const run = runCodexAppServer({
+      backend: "codex",
+      prompt: "long turn",
+      permission: "ask",
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: broker,
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    await waitUntil(() => turnStarted);
+    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    await run;
+
+    expect(calls).toContainEqual({
+      method: "turn/interrupt",
+      params: { threadId: "thread-1", turnId: "turn-1" },
+    });
+    expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "thread-1",
+      subtype: "interrupted",
+    });
+    expect(json().some((line) => line.type === "error")).toBe(false);
   });
 
   it("Codex plan mode waits for the plan turn to complete before asking Lilia", async () => {

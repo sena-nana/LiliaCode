@@ -983,7 +983,11 @@ async function runCodexTurnLoop(
       { collaborationMode },
     );
     ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
+    if (ctx.interruptRequested) interruptActiveCodexTurn(ctx);
     await drainCodexTurnNotifications(server, ctx, timeoutMessage);
+    if (ctx.turnInterruptedSeen) {
+      continue;
+    }
     if (ctx.turnFailedSeen) {
       continue;
     }
@@ -1019,6 +1023,34 @@ async function runCodexTurnLoop(
     }
   }
   return !ctx.planCancelled;
+}
+
+function interruptActiveCodexTurn(ctx) {
+  if (!ctx) return;
+  ctx.interruptRequested = true;
+  const threadId = ctx.lastThreadId;
+  if (ctx.interruptSent || ctx.turnCompletedSeen) return;
+  if (!ctx.server || !threadId || !ctx.currentTurnId) return;
+  ctx.interruptSent = true;
+  ctx.server.request("turn/interrupt", {
+    threadId,
+    turnId: ctx.currentTurnId,
+  }).catch((err) => {
+    ctx.interruptSent = false;
+    ctx.protocol.emitTimeline({
+      kind: "error",
+      status: "error",
+      title: "Codex interrupt failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "interrupt",
+        threadId,
+        turnId: ctx.currentTurnId,
+      },
+      sourceId: `codex:interrupt:error:${ctx.currentTurnId || Date.now()}`,
+    });
+  });
 }
 
 function codexBatchApplyTimelinePayload(threadId, workflow, extra = {}) {
@@ -1829,6 +1861,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
   const server = context.createCodexAppServer
     ? context.createCodexAppServer()
     : createCodexAppServer({ env: context.env || process.env });
+  let unregisterInterrupt = null;
   emitCodexRuntimeExtensionsTimeline(context.protocol, runtimeExtensions);
   try {
     await initializeCodexAppServer(server);
@@ -1860,6 +1893,9 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ctx.settingsUpdatePromises = [];
     ctx.withCodexElicitation = (kind, fn) =>
       withCodexElicitation(server, threadId, ctx, kind, fn);
+    unregisterInterrupt = context.interactions?.handleInterruptTurn?.(
+      () => interruptActiveCodexTurn(ctx),
+    ) ?? null;
     context.interactions?.handleSettingsUpdate?.((update) => {
       applyCodexRuntimeSettings(
         server,
@@ -1917,6 +1953,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     }
     finalizeCodexRunContext(ctx);
   } finally {
+    unregisterInterrupt?.();
     server.close();
   }
 }

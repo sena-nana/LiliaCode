@@ -10,7 +10,8 @@ mod agent_event_sink_tests {
     use crate::agent_timeline::AgentTimelineEventInput;
     use crate::chat::commands::{
         agent_interaction_response_payload, attach_stdin_delivery,
-        composer_runtime_settings_update_payload, plan_reset_session, ResetSessionPlan,
+        composer_runtime_settings_update_payload, interrupt_turn_control_payload,
+        plan_reset_session, ResetSessionPlan,
     };
     use crate::chat::runner::build_runner_stdin_payload;
     use crate::chat::slash_commands::{execute_slash_command, list_slash_commands};
@@ -199,6 +200,14 @@ mod agent_event_sink_tests {
                     }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn interrupt_turn_control_payload_uses_runner_control_message() {
+        assert_eq!(
+            interrupt_turn_control_payload(),
+            json!({ "type": "interrupt_turn" })
         );
     }
 

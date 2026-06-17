@@ -20,6 +20,7 @@ export function getCodexStatus(eventType, item) {
   if (eventType === "item.completed") return "success";
   if (eventType === "turn.started") return "started";
   if (eventType === "turn.completed") return "success";
+  if (eventType === "turn.interrupted") return "cancelled";
   if (eventType === "turn.failed" || eventType === "error") return "error";
   return "info";
 }
@@ -427,7 +428,9 @@ export function emitCodexTurnTimeline(eventType, ev, ctx) {
         ? "Codex turn started"
         : eventType === "turn.completed"
           ? "Codex turn completed"
-          : "Codex turn failed",
+          : eventType === "turn.interrupted"
+            ? "Codex turn interrupted"
+            : "Codex turn failed",
     summary: errorMessage || "",
     payload: {
       backend: "codex",
@@ -512,6 +515,19 @@ export function mapCodexEventToNdjson(ev, ctx) {
     return;
   }
 
+  if (type === "turn.interrupted") {
+    ctx.turnCompletedSeen = true;
+    ctx.turnInterruptedSeen = true;
+    ctx.pacer.finishImmediate();
+    emitCodexTurnTimeline(type, ev, ctx);
+    ctx.protocol.emit({
+      type: "done",
+      sessionId: ctx.lastThreadId,
+      subtype: "interrupted",
+    });
+    return;
+  }
+
   if (type === "turn.failed" || type === "error") {
     const msg = ev.error?.message || ev.message || "codex turn failed";
     ctx.turnCompletedSeen = true;
@@ -543,7 +559,10 @@ export function normalizeCodexAppServerEvent(msg) {
   if (method === "turn/completed") {
     const turn = isRecord(params.turn) ? params.turn : null;
     const status = stringOrNull(turn?.status);
-    if (status === "failed" || status === "interrupted") {
+    if (status === "interrupted") {
+      return { type: "turn.interrupted", ...params };
+    }
+    if (status === "failed") {
       return { type: "turn.failed", ...params, error: turn?.error || params.error };
     }
     return { type: "turn.completed", ...params };
@@ -616,6 +635,9 @@ export function createCodexRunContext(cmd, protocol, sessionId = null) {
     planDeltaText: "",
     turnCompletedSeen: false,
     turnFailedSeen: false,
+    turnInterruptedSeen: false,
+    interruptRequested: false,
+    interruptSent: false,
     planMode: cmd.planMode === true,
     planApprovalHandled: false,
     planApprovalResolved: false,
@@ -694,6 +716,9 @@ export function resetCodexContextForNextTurn(ctx, options = {}) {
   ctx.planDeltaText = "";
   ctx.turnCompletedSeen = false;
   ctx.turnFailedSeen = false;
+  ctx.turnInterruptedSeen = false;
+  ctx.interruptRequested = false;
+  ctx.interruptSent = false;
   ctx.currentTurnId = null;
   ctx.activeTurnKind = "default";
   ctx.planMode = options.planMode === false ? false : ctx.planMode;
