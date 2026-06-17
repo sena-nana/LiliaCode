@@ -72,6 +72,7 @@ export function useTaskComposerController(options: {
   const composer = ref<ChatComposerState | null>(null);
   const contextUsage = ref<ChatContextUsage | null>(null);
   const isTurnRunning = ref(false);
+  const interruptInFlight = ref(false);
   const userSendScrollKey = ref(0);
   const restoreDraftKey = ref(0);
   const restoreDraftContent = ref("");
@@ -262,10 +263,14 @@ export function useTaskComposerController(options: {
   }
 
   async function onInterrupt() {
-    if (!context.hasContext.value || !isTurnRunning.value) return;
+    if (!context.hasContext.value || !isTurnRunning.value || interruptInFlight.value) return;
+    interruptInFlight.value = true;
     try {
       await interruptTurn(props.taskId);
+      isTurnRunning.value = false;
+      clearPendingInteractionsForTask(props.taskId);
     } catch (err) {
+      interruptInFlight.value = false;
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打断失败：${String(err)}`));
     }
   }
@@ -345,7 +350,6 @@ export function useTaskComposerController(options: {
   function runtimePhaseKeepsTurnRunning(phase: ChatRuntimePhase): boolean {
     return phase === "running" ||
       phase === "running_and_queued" ||
-      phase === "interrupted_pending_finish" ||
       phase === "reset_pending_finish";
   }
 
@@ -475,12 +479,14 @@ export function useTaskComposerController(options: {
       onTurnStarted((e) => {
         if (e.taskId !== props.taskId) return;
         runtimeEventSeq += 1;
+        interruptInFlight.value = false;
         isTurnRunning.value = true;
         timeline.markQueuedUserMessageSuccessful();
       }),
       onDone((e) => {
         if (e.taskId !== props.taskId) return;
         runtimeEventSeq += 1;
+        interruptInFlight.value = false;
         isTurnRunning.value = false;
         clearPendingInteractionsForTask(e.taskId);
         if (e.rollback?.rolledBack) {
@@ -500,6 +506,7 @@ export function useTaskComposerController(options: {
 
   function resetForRouteChange() {
     isTurnRunning.value = false;
+    interruptInFlight.value = false;
     composer.value = null;
     contextUsage.value = null;
     restoreDraftConversationReferences.value = [];

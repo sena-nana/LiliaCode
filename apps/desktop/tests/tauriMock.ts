@@ -3362,6 +3362,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       resetMockQueuedGuides(chatQueued[taskId]);
       chatQueued[taskId] = [];
       if (chatRunning[taskId] === true) {
+        chatRunning[taskId] = false;
         const turnEvents = (timelineEvents[taskId] ?? []).filter((event) =>
           event.turnId === turnId
         );

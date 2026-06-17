@@ -9,16 +9,15 @@ use crate::chat::slash_commands::{
 #[cfg(test)]
 use crate::chat::state::{clear_pending_turns, RunningTurn};
 use crate::chat::state::{
-    clear_persisted_pending_rollback, clear_persisted_pending_turns_for_app, default_composer,
-    model_options_for_backend, new_chat_message_id, normalize_composer_for_backend, now_millis,
-    persist_runtime_state_for_app, prepare_running_turn_stop, queue_pending_turn_for_app,
-    reset_cleared_guide_queue, set_guide_status_for_app, should_persist_user_message, ChatStore,
+    clear_persisted_pending_rollback, default_composer, model_options_for_backend,
+    new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn_for_app,
+    set_guide_status_for_app, should_persist_user_message, stop_running_turn, ChatStore,
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatConversationReference, ChatInterruptResult,
-    ChatMessage, ChatModelOption, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult,
-    ChatWorkflow, ProviderRuntimeOptions,
+    ChatAttachment, ChatComposerState, ChatConversationReference, ChatInterruptResult, ChatMessage,
+    ChatModelOption, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
+    ProviderRuntimeOptions,
 };
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
@@ -176,27 +175,10 @@ pub fn chat_interrupt_turn(
         return Ok(ChatInterruptResult::default());
     };
 
-    match write_runner_stdin(&store, &task_id, interrupt_turn_control_payload()) {
-        Ok(true) => {}
-        Ok(false) => return Err("runner stdin 不可用，无法打断当前对话".to_string()),
-        Err(err) => return Err(format!("发送打断请求失败：{err}")),
+    if let Err(err) = write_runner_stdin(&store, &task_id, interrupt_turn_control_payload()) {
+        eprintln!("[chat-runtime] send interrupt control message failed: {err}");
     }
-
-    let Some(prepared) = prepare_running_turn_stop(&store, &task_id, true, false) else {
-        return Ok(ChatInterruptResult::default());
-    };
-    persist_runtime_state_for_app(
-        &app,
-        &store,
-        &task_id,
-        &prepared.running_turn,
-        "interrupted_pending_finish",
-        None,
-        None,
-    );
-    let mut guide_ids = prepared.guide_ids;
-    guide_ids.append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
-    reset_cleared_guide_queue(&app, guide_ids);
+    stop_running_turn(&app, &store, &task_id, true, false)?;
     Ok(ChatInterruptResult::default())
 }
 
