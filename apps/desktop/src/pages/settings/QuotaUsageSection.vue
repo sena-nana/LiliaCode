@@ -664,7 +664,7 @@ onMounted(() => {
   gap: 9px;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
 }
 
@@ -743,7 +743,7 @@ onMounted(() => {
 .quota-chart-wrap {
   min-width: 0;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
 }
 
@@ -793,7 +793,7 @@ onMounted(() => {
 .quota-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .quota-dot--input {
@@ -825,7 +825,7 @@ onMounted(() => {
   gap: 9px;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
 }
 
@@ -885,7 +885,7 @@ onMounted(() => {
 .quota-breakdown__row i {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .quota-breakdown__row span,
@@ -922,7 +922,7 @@ onMounted(() => {
 .quota-backend-row__track {
   height: 7px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
 }
 
@@ -947,7 +947,7 @@ onMounted(() => {
   align-items: center;
   min-height: 32px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 12px;
 }

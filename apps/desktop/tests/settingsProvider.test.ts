@@ -123,6 +123,25 @@ describe("Settings provider switch", () => {
     expect(localStorage.getItem("lilia.sidebarDisplayMode")).toBe("unified");
   });
 
+  it("外观页可以切换超椭圆圆角并调整全局半径", async () => {
+    const view = await renderSettings("/settings?tab=appearance");
+
+    expect(view.getByRole("radio", { name: "平滑" })).toHaveAttribute("aria-checked", "true");
+    expect(document.documentElement.dataset.corners).toBe("smooth");
+    expect(document.documentElement.style.getPropertyValue("--app-corner-radius")).toBe("8px");
+
+    await fireEvent.click(view.getByRole("radio", { name: "普通" }));
+    expect(view.getByRole("radio", { name: "普通" })).toHaveAttribute("aria-checked", "true");
+    expect(document.documentElement.dataset.corners).toBe("round");
+    expect(localStorage.getItem("lilia.corners")).toBe("round");
+
+    await fireEvent.input(view.getByRole("slider", { name: "圆角半径" }), {
+      target: { value: "14" },
+    });
+    expect(document.documentElement.style.getPropertyValue("--app-corner-radius")).toBe("14px");
+    expect(localStorage.getItem("lilia.cornerRadius")).toBe("14");
+  });
+
   it("额度页显示近 7 天 Token 和成本统计", async () => {
     const view = await renderSettings("/settings?tab=quota");
 

@@ -12,7 +12,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
 }
 
@@ -64,7 +64,7 @@
   gap: 7px;
   padding: 0 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text-muted);
 }
@@ -136,7 +136,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   transition: background-color 0.12s ease, border-color 0.12s ease;
@@ -261,7 +261,7 @@
 .conversation-import__more {
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   display: inline-flex;

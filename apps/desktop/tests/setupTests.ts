@@ -53,6 +53,10 @@ beforeEach(async () => {
   ]);
   const { useSidebarDisplayMode } = await import("../src/composables/useSidebarDisplayMode");
   useSidebarDisplayMode().setSidebarDisplayMode("grouped");
+  const { useCornerStyle } = await import("../src/composables/useCornerStyle");
+  const { setCornerRadius, setCornerStyle } = useCornerStyle();
+  setCornerStyle("smooth");
+  setCornerRadius(8);
   const { clearGitHubRepoCache } = await import("../src/services/projects");
   clearGitHubRepoCache();
   const {
