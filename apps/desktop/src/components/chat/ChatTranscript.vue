@@ -310,9 +310,10 @@ onBeforeUnmount(() => {
     ref="frameEl"
     class="chat-transcript-frame"
   >
-    <div
+      <div
       ref="scroller"
       class="chat-transcript"
+      data-no-global-scrollbar-overlay
       :class="{
         'is-empty': isEmpty,
       }"

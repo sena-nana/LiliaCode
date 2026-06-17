@@ -6,6 +6,7 @@ import {
 const DEFAULT_HIDE_DELAY = 480;
 const HOVER_HOT_ZONE = 12;
 const TRACK_EDGE_PADDING = 4;
+const NO_GLOBAL_OVERLAY_ATTRIBUTE = "data-no-global-scrollbar-overlay";
 
 type ScrollbarVisibilityTarget = {
   key: Element;
@@ -59,6 +60,13 @@ function resolveScrollTarget(target: EventTarget | null): ScrollbarVisibilityTar
     };
   }
   return null;
+}
+
+function shouldSkipTarget(target: ScrollbarVisibilityTarget): boolean {
+  return (
+    target.scroller instanceof Element &&
+    target.scroller.closest(`[${NO_GLOBAL_OVERLAY_ATTRIBUTE}]`) !== null
+  );
 }
 
 function clearOverlayCleanupTimer(target: Element) {
@@ -164,6 +172,7 @@ function findScrollableHoverTarget(event: PointerEvent): ScrollbarVisibilityTarg
     if (!(node instanceof Element)) continue;
     const target = resolveScrollTarget(node);
     if (!target) continue;
+    if (shouldSkipTarget(target)) continue;
     const metrics = readMetrics(target);
     if (isScrollable(metrics) && isPointerInScrollHotZone(metrics, event.clientX, event.clientY)) {
       return target;
@@ -180,6 +189,7 @@ function findScrollableHoverTarget(event: PointerEvent): ScrollbarVisibilityTarg
 }
 
 function updateOverlay(target: ScrollbarVisibilityTarget) {
+  if (shouldSkipTarget(target)) return;
   const metrics = readMetrics(target);
   const verticalScrollable = metrics.scrollHeight > metrics.clientHeight + 1;
   const horizontalScrollable = metrics.scrollWidth > metrics.clientWidth + 1;
@@ -332,14 +342,14 @@ function onDragPointerEnd(event: PointerEvent) {
 
 function onScroll(event: Event) {
   const target = resolveScrollTarget(event.target);
-  if (!target) return;
+  if (!target || shouldSkipTarget(target)) return;
   show(target);
   hideSoon(target);
 }
 
 function onScrollEnd(event: Event) {
   const target = resolveScrollTarget(event.target);
-  if (!target) return;
+  if (!target || shouldSkipTarget(target)) return;
   hideSoon(target);
 }
 
