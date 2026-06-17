@@ -175,6 +175,7 @@ describe("TaskDetail conversation suggestions", () => {
 
     expect(input).toHaveTextContent("继续写草稿");
     expect(view.queryByRole("button", { name: "来点灵感？" })).toBeNull();
+    expect(view.container.querySelector(".chat-suggestions.is-hidden")).toBeInTheDocument();
   });
 
   it("加载历史任务来源时显示历史任务文案", async () => {
@@ -218,6 +219,7 @@ describe("TaskDetail conversation suggestions", () => {
 
     expect(input).toHaveTextContent("先自己输入");
     expect(view.queryByText("建议暂时不可用")).toBeNull();
+    expect(view.container.querySelector(".chat-suggestions.is-hidden")).toBeInTheDocument();
   });
 
   it("主窗口项目草稿进入对话后自动聚焦输入框", async () => {

@@ -92,11 +92,12 @@ const suggestionViewRows = computed(() =>
 
 <template>
   <div
-    v-if="showSuggestions"
     class="chat-suggestions"
-    aria-label="新对话建议"
+    :class="{ 'is-hidden': !showSuggestions }"
+    :aria-label="showSuggestions ? '新对话建议' : undefined"
+    :aria-hidden="showSuggestions ? undefined : 'true'"
   >
-    <div class="chat-suggestions__items">
+    <div v-if="showSuggestions" class="chat-suggestions__items">
       <template v-if="suggestionRows.length > 0">
         <button
           v-for="row in suggestionViewRows"
