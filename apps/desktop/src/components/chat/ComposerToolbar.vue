@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   ArrowUp,
   ListChecks,
@@ -9,6 +9,7 @@ import {
   Goal,
   ShieldCheck,
   Square,
+  X,
 } from "lucide-vue-next";
 import type {
   ChatAttachment,
@@ -46,6 +47,14 @@ const emit = defineEmits<{
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 const actionMenuOpen = ref(false);
 const actionMenuRoot = ref<HTMLElement | null>(null);
+
+type ModeChip = {
+  key: "plan" | "goal";
+  label: string;
+  title: string;
+  icon: Component;
+  toggle: () => void;
+};
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
@@ -126,6 +135,29 @@ const contextUsageRows = computed(() => {
   ];
   if (usage.unavailableReason) rows.push({ label: "说明", value: usage.unavailableReason });
   return rows;
+});
+
+const activeModeChips = computed<ModeChip[]>(() => {
+  const chips: ModeChip[] = [];
+  if (props.state.planMode) {
+    chips.push({
+      key: "plan",
+      label: "计划",
+      title: "关闭计划模式",
+      icon: ListChecks,
+      toggle: () => emit("togglePlanMode"),
+    });
+  }
+  if (props.state.goalMode) {
+    chips.push({
+      key: "goal",
+      label: "目标",
+      title: "关闭目标模式",
+      icon: Goal,
+      toggle: () => emit("toggleGoalMode"),
+    });
+  }
+  return chips;
 });
 
 function toggleActionMenu() {
@@ -273,11 +305,32 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <Dropdown
+          class="chat-composer__permission-dropdown"
+          :class="{ 'is-full-access': state.permission === 'full' }"
           :model-value="state.permission"
           :options="permissionOptions"
           :icon="ShieldCheck"
           @update:model-value="emit('setPermission', $event)"
         />
+        <button
+          v-for="chip in activeModeChips"
+          :key="chip.key"
+          type="button"
+          class="chat-composer__mode-chip"
+          :title="chip.title"
+          :aria-label="chip.title"
+          @click="chip.toggle"
+        >
+          <span class="chat-composer__mode-chip-icon-slot" aria-hidden="true">
+            <component
+              :is="chip.icon"
+              :size="12"
+              class="chat-composer__mode-chip-icon"
+            />
+            <X :size="11" class="chat-composer__mode-chip-delete" />
+          </span>
+          <span class="chat-composer__mode-chip-label">{{ chip.label }}</span>
+        </button>
       </div>
 
       <div class="chat-composer__entry-actions">
