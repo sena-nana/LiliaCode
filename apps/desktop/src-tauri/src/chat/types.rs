@@ -56,6 +56,29 @@ pub(crate) struct ChatConversationReference {
     pub(crate) project_name: Option<String>,
 }
 
+impl ChatConversationReference {
+    pub(crate) fn timeline_payload(&self) -> JsonValue {
+        serde_json::json!({
+            "taskId": self.task_id,
+            "title": self.title,
+            "route": self.route,
+            "projectId": self.project_id,
+            "projectName": self.project_name,
+        })
+    }
+}
+
+pub(crate) fn conversation_references_payload(
+    conversation_references: &[ChatConversationReference],
+) -> JsonValue {
+    JsonValue::Array(
+        conversation_references
+            .iter()
+            .map(ChatConversationReference::timeline_payload)
+            .collect(),
+    )
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatContextSearchResult {
@@ -321,9 +344,7 @@ pub(crate) enum ChatRuntimeCommand {
         include_system_messages: Option<bool>,
     },
     #[serde(rename = "runtime_settings")]
-    RuntimeSettings {
-        action: String,
-    },
+    RuntimeSettings { action: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

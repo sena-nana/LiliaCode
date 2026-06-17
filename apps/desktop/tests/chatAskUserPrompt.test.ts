@@ -980,6 +980,35 @@ describe("chat AskUser prompt", () => {
       expect(ackCalls.length).toBeGreaterThanOrEqual(1);
     });
 
+    it("rollback 恢复时会去掉对话引用占位文本，只保留内联 token", async () => {
+      setMockRuntimeSnapshot("t-002", {
+        phase: "idle",
+        backend: null,
+        turnId: null,
+        pendingRollback: true,
+        rollback: {
+          rolledBack: true,
+          restoredContent: "继续 [对话引用: 旧对话 | task-old] 追问",
+          restoredAttachments: [],
+          restoredConversationReferences: [{
+            taskId: "task-old",
+            title: "旧对话",
+            route: "/projects/lilia/tasks/task-old",
+            projectName: "Lilia",
+          }],
+          removedEventIds: ["evt-original"],
+        },
+      });
+      replaceMockTimelineEvents("t-002", []);
+
+      const view = await renderCodexTaskDetail("t-002", { clearMockCalls: false });
+      await waitFor(() => {
+        expect(view.getByText("旧对话")).toBeInTheDocument();
+      });
+      expect(view.container).not.toHaveTextContent("[对话引用:");
+      expect(view.getByRole("textbox")).toHaveTextContent("继续 追问");
+    });
+
     it("无 rollback 的冷启动不清除预期 composer 内容", async () => {
       setMockRuntimeSnapshot("t-002", {
         phase: "idle",

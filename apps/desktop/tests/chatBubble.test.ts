@@ -1,7 +1,8 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@lilia/contracts";
+import type { ChatConversationReference, ChatMessage } from "@lilia/contracts";
 import ChatBubble from "../src/components/chat/ChatBubble.vue";
+import { serializeConversationReference } from "../src/services/chatConversationReferences";
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -16,6 +17,27 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
 }
 
 describe("ChatBubble", () => {
+  it("对话引用回显复用统一占位序列化格式", () => {
+    const reference: ChatConversationReference = {
+      taskId: "task-old",
+      title: "Claude 旧对话",
+      route: "/projects/p-1/tasks/task-old",
+      projectName: "主项目",
+    };
+    const view = render(ChatBubble, {
+      props: {
+        message: message({
+          content: `先看${serializeConversationReference(reference)}再继续`,
+          conversationReferences: [reference],
+        }),
+      },
+    });
+
+    expect(view.getByText("Claude 旧对话")).toBeInTheDocument();
+    expect(view.getByText("主项目")).toBeInTheDocument();
+    expect(view.container).not.toHaveTextContent("[对话引用:");
+  });
+
   it("图片附件只显示缩略图，普通附件保留名称", () => {
     const view = render(ChatBubble, {
       props: {

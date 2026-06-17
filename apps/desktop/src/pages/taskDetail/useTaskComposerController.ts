@@ -47,6 +47,7 @@ import {
 } from "../../services/chat";
 import type { SendMessageInput } from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
+import { stripSerializedConversationReferences } from "../../services/chatConversationReferences";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
@@ -359,9 +360,10 @@ export function useTaskComposerController(options: {
     restoredAttachments: ChatAttachment[];
     restoredConversationReferences?: ChatConversationReference[];
   }) {
-    restoreDraftContent.value = stripRestoredAttachmentReferences(
+    restoreDraftContent.value = stripRestoredReferences(
       rollback.restoredContent,
       rollback.restoredAttachments,
+      rollback.restoredConversationReferences ?? [],
     );
     restoreDraftConversationReferences.value = rollback.restoredConversationReferences ?? [];
     restoreDraftKey.value += 1;
@@ -567,14 +569,16 @@ export function useTaskComposerController(options: {
   };
 }
 
-function stripRestoredAttachmentReferences(
+function stripRestoredReferences(
   content: string,
   attachments: ChatAttachment[],
+  conversationReferences: ChatConversationReference[],
 ): string {
   let next = content;
   for (const attachment of attachments) {
     next = next.split(serializeAttachmentReference(attachment)).join("");
   }
+  next = stripSerializedConversationReferences(next, conversationReferences);
   return next.replace(/[ \t]{2,}/g, " ").trim();
 }
 

@@ -8,6 +8,10 @@ import {
   isImageAttachment,
   type ChatImageViewerSource,
 } from "./imageViewer";
+import {
+  conversationReferencePattern,
+  resolveConversationReferenceMatch,
+} from "../../services/chatConversationReferences";
 
 const props = defineProps<{ message: ChatMessage & { streaming?: boolean; queued?: boolean } }>();
 const emit = defineEmits<{
@@ -20,8 +24,6 @@ type MessageSegment =
   | { type: "conversationReference"; reference: ChatConversationReference };
 
 const referencePattern = /\[(文件引用|目录引用|图片引用): ([^\]\n|]+?) \| ([^\]\n]+?)\]/g;
-const conversationReferencePattern = /\[对话引用: ([^\]\n|]+?) \| ([^\]\n]+?)\]/g;
-
 const contentSegments = computed(() =>
   parseMessageContent(
     props.message.content,
@@ -55,7 +57,7 @@ function parseMessageContent(
       kind: "attachment" as const,
       match,
     })),
-    ...Array.from(content.matchAll(conversationReferencePattern), (match) => ({
+    ...Array.from(content.matchAll(conversationReferencePattern()), (match) => ({
       kind: "conversationReference" as const,
       match,
     })),
@@ -73,13 +75,9 @@ function parseMessageContent(
           fallbackAttachment(label, name, path),
       });
     } else {
-      const [, rawTitle, rawTaskId] = entry.match;
-      const title = rawTitle.trim();
-      const taskId = rawTaskId.trim();
       segments.push({
         type: "conversationReference",
-        reference: conversationReferences.find((reference) => reference.taskId === taskId) ??
-          fallbackConversationReference(title, taskId),
+        reference: resolveConversationReferenceMatch(entry.match, conversationReferences),
       });
     }
     cursor = start + entry.match[0].length;
@@ -98,14 +96,6 @@ function fallbackAttachment(label: string, name: string, path: string): ChatAtta
     exists: true,
     mime: label === "图片引用" ? "image/*" : null,
     directory: null,
-  };
-}
-
-function fallbackConversationReference(title: string, taskId: string): ChatConversationReference {
-  return {
-    taskId,
-    title: title || taskId,
-    route: "",
   };
 }
 

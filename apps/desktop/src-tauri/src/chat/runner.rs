@@ -34,9 +34,10 @@ use crate::chat::timeline_sink::{
 };
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
-    AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatContextUsage,
-    ChatConversationReference, ChatRollbackResult, ChatRuntimeCommand, ChatWorkflow,
-    CodexComposerSettings, DoneEvent, ProviderRuntimeOptions, TurnStartedEvent,
+    conversation_references_payload, AgentInteractionRequestEvent, ChatAttachment,
+    ChatComposerState, ChatContextUsage, ChatConversationReference, ChatRollbackResult,
+    ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent, ProviderRuntimeOptions,
+    TurnStartedEvent,
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
@@ -559,11 +560,11 @@ pub(crate) fn start_runner_session<R: Runtime>(
             .unwrap()
             .insert(task_id_for_thread.clone(), running_turn.clone());
         let context_json = runtime_state_context_json(
-        &project_cwd,
-        &prompt_for_thread,
-        &attachments_for_thread,
-        &conversation_references_for_thread,
-        workflow_for_thread.as_ref(),
+            &project_cwd,
+            &prompt_for_thread,
+            &attachments_for_thread,
+            &conversation_references_for_thread,
+            workflow_for_thread.as_ref(),
             runtime_command_for_thread.as_ref(),
             &composer_for_thread,
             resume_session_id.as_deref(),
@@ -1113,7 +1114,7 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
         "cwd": project_cwd,
         "prompt": prompt,
         "attachments": attachments,
-        "conversationReferences": conversation_references,
+        "conversationReferences": conversation_references_payload(conversation_references),
         "model": composer.model,
         "resumeSessionId": resume_session_id,
         "planMode": composer.plan_mode,
