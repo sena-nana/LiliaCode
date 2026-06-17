@@ -23,6 +23,14 @@ export interface ChatAttachment {
   directory?: ChatAttachmentDirectoryMeta | null;
 }
 
+export interface ChatConversationReference {
+  taskId: string;
+  title: string;
+  route: string;
+  projectId?: string;
+  projectName?: string;
+}
+
 export interface ChatContextSearchResult {
   attachment: ChatAttachment;
   relativePath: string;
@@ -58,6 +66,7 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   attachments: ChatAttachment[];
+  conversationReferences?: ChatConversationReference[];
   createdAt: number;
 }
 
@@ -276,6 +285,7 @@ export interface ChatInterruptResult {
   rolledBack: boolean;
   restoredContent: string;
   restoredAttachments: ChatAttachment[];
+  restoredConversationReferences?: ChatConversationReference[];
   removedEventIds: string[];
 }
 
@@ -283,6 +293,7 @@ export interface ChatRollbackResult {
   rolledBack: boolean;
   restoredContent: string;
   restoredAttachments: ChatAttachment[];
+  restoredConversationReferences?: ChatConversationReference[];
   removedEventIds: string[];
 }
 

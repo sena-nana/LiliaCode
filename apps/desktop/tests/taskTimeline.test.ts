@@ -110,6 +110,7 @@ describe("task detail timeline helpers", () => {
     expect(retryContextForTimelineEvent(error, [])).toEqual({
       content: "重试这句",
       attachments: [expect.objectContaining({ id: "a-1" })],
+      conversationReferences: [],
     });
   });
 
@@ -137,6 +138,7 @@ describe("task detail timeline helpers", () => {
     expect(retryContextForTimelineEvent(error, [userMessage, error])).toEqual({
       content: "从 turn 读取",
       attachments: [expect.objectContaining({ path: attachment.path })],
+      conversationReferences: [],
     });
   });
 

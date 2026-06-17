@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileText, Folder, Image, Paperclip } from "lucide-vue-next";
-import type { ChatAttachment, ChatMessage } from "@lilia/contracts";
+import { FileText, Folder, Hash, Image, Paperclip } from "lucide-vue-next";
+import type { ChatAttachment, ChatConversationReference, ChatMessage } from "@lilia/contracts";
 import {
   attachmentImageSrc,
   imageViewerSourceFromAttachment,
@@ -16,12 +16,18 @@ const emit = defineEmits<{
 
 type MessageSegment =
   | { type: "text"; text: string }
-  | { type: "attachment"; attachment: ChatAttachment };
+  | { type: "attachment"; attachment: ChatAttachment }
+  | { type: "conversationReference"; reference: ChatConversationReference };
 
 const referencePattern = /\[(文件引用|目录引用|图片引用): ([^\]\n|]+?) \| ([^\]\n]+?)\]/g;
+const conversationReferencePattern = /\[对话引用: ([^\]\n|]+?) \| ([^\]\n]+?)\]/g;
 
 const contentSegments = computed(() =>
-  parseMessageContent(props.message.content, props.message.attachments),
+  parseMessageContent(
+    props.message.content,
+    props.message.attachments,
+    props.message.conversationReferences ?? [],
+  ),
 );
 const previewAttachments = computed(() =>
   props.message.attachments.filter((attachment) => isImageAttachment(attachment)),
@@ -37,21 +43,46 @@ const unreferencedAttachments = computed(() => {
   );
 });
 
-function parseMessageContent(content: string, attachments: ChatAttachment[]): MessageSegment[] {
+function parseMessageContent(
+  content: string,
+  attachments: ChatAttachment[],
+  conversationReferences: ChatConversationReference[],
+): MessageSegment[] {
   const segments: MessageSegment[] = [];
   let cursor = 0;
-  for (const match of content.matchAll(referencePattern)) {
-    const start = match.index ?? 0;
+  const matches = [
+    ...Array.from(content.matchAll(referencePattern), (match) => ({
+      kind: "attachment" as const,
+      match,
+    })),
+    ...Array.from(content.matchAll(conversationReferencePattern), (match) => ({
+      kind: "conversationReference" as const,
+      match,
+    })),
+  ].sort((a, b) => (a.match.index ?? 0) - (b.match.index ?? 0));
+  for (const entry of matches) {
+    const start = entry.match.index ?? 0;
     if (start > cursor) segments.push({ type: "text", text: content.slice(cursor, start) });
-    const [, label, rawName, rawPath] = match;
-    const name = rawName.trim();
-    const path = rawPath.trim();
-    segments.push({
-      type: "attachment",
-      attachment: attachments.find((attachment) => attachment.path === path) ??
-        fallbackAttachment(label, name, path),
-    });
-    cursor = start + match[0].length;
+    if (entry.kind === "attachment") {
+      const [, label, rawName, rawPath] = entry.match;
+      const name = rawName.trim();
+      const path = rawPath.trim();
+      segments.push({
+        type: "attachment",
+        attachment: attachments.find((attachment) => attachment.path === path) ??
+          fallbackAttachment(label, name, path),
+      });
+    } else {
+      const [, rawTitle, rawTaskId] = entry.match;
+      const title = rawTitle.trim();
+      const taskId = rawTaskId.trim();
+      segments.push({
+        type: "conversationReference",
+        reference: conversationReferences.find((reference) => reference.taskId === taskId) ??
+          fallbackConversationReference(title, taskId),
+      });
+    }
+    cursor = start + entry.match[0].length;
   }
   if (cursor < content.length) segments.push({ type: "text", text: content.slice(cursor) });
   return segments.length ? segments : [{ type: "text", text: content }];
@@ -70,6 +101,14 @@ function fallbackAttachment(label: string, name: string, path: string): ChatAtta
   };
 }
 
+function fallbackConversationReference(title: string, taskId: string): ChatConversationReference {
+  return {
+    taskId,
+    title: title || taskId,
+    route: "",
+  };
+}
+
 function openAttachmentImage(attachment: ChatAttachment) {
   const source = imageViewerSourceFromAttachment(attachment);
   if (source) emit("open-image", source);
@@ -80,6 +119,10 @@ function attachmentIcon(attachment: ChatAttachment) {
   if (attachment.kind === "directory") return Folder;
   if (attachment.kind === "file") return FileText;
   return Paperclip;
+}
+
+function conversationReferenceScope(reference: ChatConversationReference) {
+  return reference.projectName ?? "收集箱";
 }
 </script>
 
@@ -99,7 +142,7 @@ function attachmentIcon(attachment: ChatAttachment) {
       >
         <span v-if="segment.type === 'text'">{{ segment.text }}</span>
         <span
-          v-else
+          v-else-if="segment.type === 'attachment'"
           class="chat-file-reference chat-file-reference--readonly"
           :title="segment.attachment.path"
         >
@@ -108,6 +151,21 @@ function attachmentIcon(attachment: ChatAttachment) {
           </span>
           <span class="chat-file-reference__main">
             <span class="chat-file-reference__name">{{ segment.attachment.name }}</span>
+          </span>
+        </span>
+        <span
+          v-else
+          class="chat-file-reference chat-file-reference--readonly chat-file-reference--conversation"
+          :title="segment.reference.route || segment.reference.title"
+        >
+          <span class="chat-file-reference__icon" aria-hidden="true">
+            <Hash :size="12" />
+          </span>
+          <span class="chat-file-reference__main">
+            <span class="chat-file-reference__name">{{ segment.reference.title }}</span>
+          </span>
+          <span class="chat-file-reference__meta">
+            {{ conversationReferenceScope(segment.reference) }}
           </span>
         </span>
       </template>

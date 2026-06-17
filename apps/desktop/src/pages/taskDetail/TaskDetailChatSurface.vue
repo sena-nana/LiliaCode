@@ -6,6 +6,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatConversationReference,
   ChatContextUsage,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
@@ -52,6 +53,7 @@ const props = defineProps<{
   userSendScrollKey: number;
   restoreDraftKey: number;
   restoreDraftContent: string;
+  restoreDraftConversationReferences?: ChatConversationReference[];
   insertDraftTextKey: number;
   insertDraftTextContent: string;
   pendingAgentActions: PendingAgentAction[];
@@ -84,15 +86,17 @@ const emit = defineEmits<{
   "refresh-lilia-goal": [];
   "clear-lilia-goal": [];
   "insert-draft-text": [text: string];
-  send: [content: string, attachments: ChatAttachment[]];
+  send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
   "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ];
   "start-lilia-fix-suggestion": [
     content: string,
     attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
@@ -103,7 +107,6 @@ const emit = defineEmits<{
   "update-composer": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
-  "reference-conversation": [];
   "add-context-attachment": [attachment: ChatAttachment];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
@@ -125,14 +128,22 @@ function focusComposer() {
   composerRef.value?.focusInput();
 }
 
+function triggerConversationReference() {
+  composerRef.value?.triggerConversationReference();
+}
+
 function getComposerDraftSnapshot() {
   return composerRef.value?.getDraftSnapshot() ?? { content: "" };
 }
 
-defineExpose({ chatPageRef, focusComposer, getComposerDraftSnapshot });
+defineExpose({ chatPageRef, focusComposer, getComposerDraftSnapshot, triggerConversationReference });
 
-function emitSend(content: string, outgoingAttachments: ChatAttachment[]) {
-  emit("send", content, outgoingAttachments);
+function emitSend(
+  content: string,
+  outgoingAttachments: ChatAttachment[],
+  conversationReferences: ChatConversationReference[],
+) {
+  emit("send", content, outgoingAttachments, conversationReferences);
 }
 
 function selectSuggestion(suggestion: SuggestionItem) {
@@ -215,18 +226,18 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   :tool-consent="toolConsent"
                   :restore-draft-key="restoreDraftKey"
                   :restore-draft-content="restoreDraftContent"
+                  :restore-draft-conversation-references="restoreDraftConversationReferences"
                   :insert-draft-text-key="insertDraftTextKey"
                   :insert-draft-text-content="insertDraftTextContent"
                   @send="emitSend"
-                  @start-lilia-review="(content, outgoingAttachments, target) => emit('start-lilia-review', content, outgoingAttachments, target)"
-                  @start-lilia-fix-suggestion="(content, outgoingAttachments, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, target)"
+                  @start-lilia-review="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-review', content, outgoingAttachments, conversationReferences, target)"
+                  @start-lilia-fix-suggestion="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, conversationReferences, target)"
                   @start-lilia-compact="emit('start-lilia-compact')"
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"
                   @pick-attachments="emit('pick-attachments')"
-                  @reference-conversation="emit('reference-conversation')"
                   @add-context-attachment="emit('add-context-attachment', $event)"
                   @resolve-ask-user="emit('resolve-ask-user', $event)"
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"

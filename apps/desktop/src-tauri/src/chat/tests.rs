@@ -1137,6 +1137,7 @@ mod agent_event_sink_tests {
             composer: default_composer("task-1"),
             project_cwd: "D:\\PROJECT\\workspace\\Lilia".to_string(),
             attachments: Vec::new(),
+            conversation_references: Vec::new(),
             workflow: None,
             runtime_command: None,
             runtime_options: None,
@@ -1146,6 +1147,7 @@ mod agent_event_sink_tests {
                 role: "user".to_string(),
                 content: format!("content {id}"),
                 attachments: Vec::new(),
+                conversation_references: Vec::new(),
                 created_at: 100,
             },
             turn_id: format!("turn-{id}"),
@@ -1421,6 +1423,7 @@ mod agent_event_sink_tests {
                 mime: Some("text/markdown".to_string()),
                 directory: None,
             }],
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["evt-1".to_string()],
         };
 
@@ -1472,6 +1475,7 @@ mod agent_event_sink_tests {
             rolled_back: true,
             restored_content: "restore after restart".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["evt-1".to_string()],
         };
         persist_runtime_state(
@@ -1517,6 +1521,7 @@ mod agent_event_sink_tests {
             rolled_back: true,
             restored_content: "peek content".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["e-1".to_string()],
         };
 
@@ -1551,6 +1556,7 @@ mod agent_event_sink_tests {
             rolled_back: true,
             restored_content: "clear test".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["e-2".to_string()],
         };
 
@@ -1686,6 +1692,7 @@ mod agent_event_sink_tests {
                 rolled_back: true,
                 restored_content: "restore".to_string(),
                 restored_attachments: Vec::new(),
+                restored_conversation_references: Vec::new(),
                 removed_event_ids: vec!["evt-1".to_string()],
             },
         );
@@ -1903,6 +1910,7 @@ mod agent_event_sink_tests {
             role: "user".to_string(),
             content: "resume queued".to_string(),
             attachments: Vec::new(),
+            conversation_references: Vec::new(),
             created_at: 100,
         };
         let queued_input = AgentTimelineEventInput {

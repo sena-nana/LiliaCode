@@ -9,8 +9,8 @@ use uuid::Uuid;
 use crate::agent_timeline::AgentTimelineEventInput;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatContextUsage, ChatMessage, ChatModelOption,
-    ChatRollbackResult, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow,
+    ChatAttachment, ChatComposerState, ChatContextUsage, ChatConversationReference, ChatMessage,
+    ChatModelOption, ChatRollbackResult, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow,
     ProviderRuntimeOptions,
 };
 use crate::store::LiliaStore;
@@ -22,6 +22,7 @@ pub(crate) struct PendingChatTurn {
     pub(crate) composer: ChatComposerState,
     pub(crate) project_cwd: String,
     pub(crate) attachments: Vec<ChatAttachment>,
+    pub(crate) conversation_references: Vec<ChatConversationReference>,
     pub(crate) workflow: Option<ChatWorkflow>,
     pub(crate) runtime_command: Option<ChatRuntimeCommand>,
     pub(crate) runtime_options: Option<ProviderRuntimeOptions>,
@@ -672,6 +673,8 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
     let guide_id: Option<String> = row
         .get(10)
         .map_err(|e| format!("读取 pending turn guide_id 失败：{e}"))?;
+    let message: ChatMessage = deserialize_pending_turn_field(&message_json, "message")?;
+    let conversation_references = message.conversation_references.clone();
     Ok((
         id,
         PendingChatTurn {
@@ -679,6 +682,7 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
             composer: deserialize_pending_turn_field(&composer_json, "composer")?,
             project_cwd,
             attachments: deserialize_pending_turn_field(&attachments_json, "attachments")?,
+            conversation_references,
             workflow: workflow_json
                 .as_deref()
                 .map(|text| deserialize_pending_turn_field(text, "workflow"))
@@ -691,7 +695,7 @@ fn row_to_pending_turn(row: &rusqlite::Row<'_>) -> Result<(i64, PendingChatTurn)
                 .as_deref()
                 .map(|text| deserialize_pending_turn_field(text, "runtime_options"))
                 .transpose()?,
-            message: deserialize_pending_turn_field(&message_json, "message")?,
+            message,
             turn_id,
             guide_id,
         },
@@ -763,6 +767,7 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    conversation_references: Vec<ChatConversationReference>,
     workflow: Option<ChatWorkflow>,
     runtime_command: Option<ChatRuntimeCommand>,
     runtime_options: Option<ProviderRuntimeOptions>,
@@ -775,6 +780,7 @@ pub(crate) fn queue_pending_turn_for_app<R: Runtime>(
         composer,
         project_cwd,
         attachments,
+        conversation_references,
         workflow,
         runtime_command,
         runtime_options,

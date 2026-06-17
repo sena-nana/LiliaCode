@@ -5,6 +5,7 @@ import type {
   AgentTimelineEventStatus,
   ChatAttachment,
   ChatMessage,
+  ChatConversationReference,
 } from "@lilia/contracts";
 import {
   mergeAdjacentTimelineGroups,
@@ -372,6 +373,9 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
   const attachments = Array.isArray(payload.attachments)
     ? payload.attachments.filter(isChatAttachment)
     : [];
+  const conversationReferences = Array.isArray(payload.conversationReferences)
+    ? payload.conversationReferences.filter(isChatConversationReference)
+    : [];
 
   return {
     id: event.id,
@@ -379,6 +383,7 @@ function messageFromEvent(event: AgentTimelineEvent): StreamableMessage {
     role,
     content,
     attachments,
+    conversationReferences,
     createdAt: event.createdAt,
     queued: payload.queued === true,
   };
@@ -392,4 +397,12 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
     typeof row.path === "string" &&
     (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
     (typeof row.size === "number" || row.size === null);
+}
+
+function isChatConversationReference(value: unknown): value is ChatConversationReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.taskId === "string" &&
+    typeof row.title === "string" &&
+    typeof row.route === "string";
 }

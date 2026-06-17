@@ -1,6 +1,6 @@
 import { fireEvent, render } from "@testing-library/vue";
-import { defineComponent, h } from "vue";
-import { describe, expect, it } from "vitest";
+import { defineComponent, h, ref } from "vue";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatComposerState } from "@lilia/contracts";
 import TaskDetailChatSurface from "../src/pages/taskDetail/TaskDetailChatSurface.vue";
 
@@ -13,45 +13,50 @@ const codexComposerState: ChatComposerState = {
   permission: "ask",
 };
 
+function surfaceProps() {
+  return {
+    taskId: "task-1",
+    projectId: "project-1",
+    isPopup: false,
+    shouldRenderChat: true,
+    isPopupPending: false,
+    shouldShowContextLoading: false,
+    isContextLoading: false,
+    fileDropActive: false,
+    timelineEvents: [],
+    emptyHeadline: "今天想做什么？",
+    isTurnRunning: false,
+    projectCwd: "C:/repo",
+    contextSearchCwd: "C:/repo",
+    activePlanApprovalTurnId: null,
+    userSendScrollKey: 0,
+    restoreDraftKey: 0,
+    restoreDraftContent: "",
+    insertDraftTextKey: 0,
+    insertDraftTextContent: "",
+    pendingAgentActions: [],
+    hasBlockingPendingAction: false,
+    currentLiliaGoal: null,
+    showExpiredPendingActions: false,
+    canRetryEvent: () => false,
+    composerState: codexComposerState,
+    contextUsage: null,
+    attachments: [],
+    appendAttachmentsToEndKey: 0,
+    pendingAsk: null,
+    toolConsent: null,
+    viewingImage: null,
+    suggestions: [],
+    suggestionsStatus: "idle" as const,
+    suggestionsLoadingText: "正在寻找灵感",
+    suggestionsVisible: false,
+  };
+}
+
 function renderSurface() {
-  return render(TaskDetailChatSurface, {
-    props: {
-      taskId: "task-1",
-      projectId: "project-1",
-      isPopup: false,
-      shouldRenderChat: true,
-      isPopupPending: false,
-      shouldShowContextLoading: false,
-      isContextLoading: false,
-      fileDropActive: false,
-      timelineEvents: [],
-      emptyHeadline: "今天想做什么？",
-      isTurnRunning: false,
-      projectCwd: "C:/repo",
-      contextSearchCwd: "C:/repo",
-      activePlanApprovalTurnId: null,
-      userSendScrollKey: 0,
-      restoreDraftKey: 0,
-      restoreDraftContent: "",
-      insertDraftTextKey: 0,
-      insertDraftTextContent: "",
-      pendingAgentActions: [],
-      hasBlockingPendingAction: false,
-      currentLiliaGoal: null,
-      showExpiredPendingActions: false,
-      canRetryEvent: () => false,
-      composerState: codexComposerState,
-      contextUsage: null,
-      attachments: [],
-      appendAttachmentsToEndKey: 0,
-      pendingAsk: null,
-      toolConsent: null,
-      viewingImage: null,
-      suggestions: [],
-      suggestionsStatus: "idle",
-      suggestionsLoadingText: "正在寻找灵感",
-      suggestionsVisible: false,
-    },
+  const triggerConversationReference = vi.fn();
+  const view = render(TaskDetailChatSurface, {
+    props: surfaceProps(),
     global: {
       stubs: {
         ChatTranscript: defineComponent({
@@ -60,8 +65,9 @@ function renderSurface() {
           },
         }),
         ChatComposer: defineComponent({
-          emits: ["reference-conversation", "start-lilia-fix-suggestion"],
-          setup(_, { emit }) {
+          emits: ["start-lilia-fix-suggestion"],
+          setup(_, { emit, expose }) {
+            expose({ triggerConversationReference });
             return () =>
               h("div", [
                 h("button", {
@@ -70,13 +76,10 @@ function renderSurface() {
                     "start-lilia-fix-suggestion",
                     "优先给最小修复",
                     [],
+                    [],
                     { type: "uncommittedChanges" },
                   ),
                 }, "stub fix suggestion"),
-                h("button", {
-                  type: "button",
-                  onClick: () => emit("reference-conversation"),
-                }, "stub reference conversation"),
               ]);
           },
         }),
@@ -95,6 +98,48 @@ function renderSurface() {
       },
     },
   });
+  return { ...view, triggerConversationReference };
+}
+
+function renderSurfaceHost() {
+  const triggerConversationReference = vi.fn();
+  const Host = defineComponent({
+    components: { TaskDetailChatSurface },
+    setup() {
+      const surfaceRef = ref<InstanceType<typeof TaskDetailChatSurface> | null>(null);
+      return () => h("div", [
+        h(TaskDetailChatSurface, {
+          ...surfaceProps(),
+          ref: surfaceRef,
+        }),
+        h("button", {
+          type: "button",
+          onClick: () => surfaceRef.value?.triggerConversationReference(),
+        }, "call surface trigger"),
+      ]);
+    },
+  });
+  const view = render(Host, {
+    global: {
+      stubs: {
+        ChatTranscript: defineComponent({
+          setup(_, { slots }) {
+            return () => h("div", slots.controls?.());
+          },
+        }),
+        ChatComposer: defineComponent({
+          setup(_, { expose }) {
+            expose({ triggerConversationReference });
+            return () => h("div");
+          },
+        }),
+        TodoFloat: true,
+        ChatSidebarHost: true,
+        ImageViewer: true,
+      },
+    },
+  });
+  return { ...view, triggerConversationReference };
 }
 
 describe("TaskDetailChatSurface", () => {
@@ -114,16 +159,16 @@ describe("TaskDetailChatSurface", () => {
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
       [],
+      [],
       { type: "uncommittedChanges" },
     ]);
   });
 
-  it("forwards conversation reference events from the composer", async () => {
-    const view = renderSurface();
+  it("exposes conversation reference trigger through the surface", async () => {
+    const view = renderSurfaceHost();
 
-    await fireEvent.click(view.getByRole("button", { name: "stub reference conversation" }));
+    await fireEvent.click(view.getByRole("button", { name: "call surface trigger" }));
 
-    expect(view.emitted("reference-conversation")).toHaveLength(1);
+    expect(view.triggerConversationReference).toHaveBeenCalledTimes(1);
   });
-
 });

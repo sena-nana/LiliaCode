@@ -233,6 +233,7 @@ pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
         "role": message.role,
         "content": message.content,
         "attachments": message.attachments,
+        "conversationReferences": message.conversation_references,
         "queued": queued,
     });
     if let Some(automation_run_id) = automation_run_id {

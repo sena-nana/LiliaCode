@@ -1,10 +1,12 @@
 import { computed, nextTick, ref, watch, type ComputedRef } from "vue";
-import type { ChatAttachment } from "@lilia/contracts";
+import type { ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import {
   attachmentPart,
   composerPartsHaveAttachmentPath,
+  composerPartsHaveConversationReference,
   composerPartsLength,
   composerPartsSearchText,
+  conversationReferencePart,
   normalizeComposerParts,
   partsStartWithWhitespace,
   replaceComposerPartsRange,
@@ -30,6 +32,7 @@ const inlineIconMarkup: Record<InlineIconName, string> = {
 
 export function useComposerRichInput(options: {
   attachments: ComputedRef<ChatAttachment[]>;
+  conversationReferences?: ComputedRef<ChatConversationReference[]>;
   appendAttachmentsToEndKey: ComputedRef<number>;
   hasPending: ComputedRef<boolean>;
   isLargeDirectory: (attachment: ChatAttachment) => boolean;
@@ -47,11 +50,21 @@ export function useComposerRichInput(options: {
       .map((part) => part.text)
       .join("")
   );
+  const conversationReferences = computed(() =>
+    composerParts.value
+      .filter((part): part is Extract<ComposerPart, { type: "conversationReference" }> =>
+        part.type === "conversationReference")
+      .map((part) => part.reference)
+  );
   const searchText = computed(() => composerPartsSearchText(composerParts.value));
   const isEmpty = computed(() => serializedText.value.length === 0);
 
   function hasAttachmentPath(path: string): boolean {
     return composerPartsHaveAttachmentPath(composerParts.value, path);
+  }
+
+  function hasConversationReference(taskId: string): boolean {
+    return composerPartsHaveConversationReference(composerParts.value, taskId);
   }
 
   function attachmentFromComposerOrProps(id: string): ChatAttachment | null {
@@ -61,6 +74,15 @@ export function useComposerRichInput(options: {
       part.type === "attachment" && part.attachment.id === id
     );
     return fromComposer?.type === "attachment" ? fromComposer.attachment : null;
+  }
+
+  function conversationReferenceFromComposerOrProps(taskId: string): ChatConversationReference | null {
+    const fromProps = options.conversationReferences?.value.find((reference) => reference.taskId === taskId);
+    if (fromProps) return fromProps;
+    const fromComposer = composerParts.value.find((part) =>
+      part.type === "conversationReference" && part.reference.taskId === taskId
+    );
+    return fromComposer?.type === "conversationReference" ? fromComposer.reference : null;
   }
 
   function attachmentIconName(attachment: ChatAttachment): InlineIconName {
@@ -135,6 +157,51 @@ export function useComposerRichInput(options: {
     return chip;
   }
 
+  function createConversationReferenceElement(reference: ChatConversationReference): HTMLElement {
+    const chip = document.createElement("span");
+    chip.className = "chat-file-reference chat-file-reference--conversation";
+    chip.contentEditable = "false";
+    chip.dataset.conversationReferenceTaskId = reference.taskId;
+    chip.title = reference.projectName ? `${reference.projectName} · ${reference.title}` : reference.title;
+
+    const icon = document.createElement("span");
+    icon.className = "chat-file-reference__icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.append(createInlineSvgIcon("file", 13));
+    chip.append(icon);
+
+    const main = document.createElement("span");
+    main.className = "chat-file-reference__main";
+    const name = document.createElement("span");
+    name.className = "chat-file-reference__name";
+    name.textContent = reference.title;
+    main.append(name);
+    chip.append(main);
+
+    const meta = document.createElement("span");
+    meta.className = "chat-file-reference__meta";
+    meta.textContent = reference.projectName ?? "收集箱";
+    chip.append(meta);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chat-file-reference__remove";
+    remove.setAttribute("aria-label", `移除对话引用 ${reference.title}`);
+    remove.append(createInlineSvgIcon("x", 12));
+    remove.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    remove.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeInlineConversationReference(reference.taskId);
+    });
+    chip.append(remove);
+
+    return chip;
+  }
+
   function renderFromParts() {
     const editor = richEditor.value;
     if (!editor) return;
@@ -142,8 +209,10 @@ export function useComposerRichInput(options: {
     for (const part of composerParts.value) {
       if (part.type === "text") {
         if (part.text) fragment.append(document.createTextNode(part.text));
-      } else {
+      } else if (part.type === "attachment") {
         fragment.append(createAttachmentReferenceElement(part.attachment));
+      } else {
+        fragment.append(createConversationReferenceElement(part.reference));
       }
     }
     editor.replaceChildren(fragment);
@@ -155,7 +224,7 @@ export function useComposerRichInput(options: {
       return 0;
     }
     const element = node instanceof HTMLElement ? node : null;
-    if (element?.dataset.attachmentId) return 1;
+    if (element?.dataset.attachmentId || element?.dataset.conversationReferenceTaskId) return 1;
     if (element?.tagName === "BR") return 1;
     return Array.from(node.childNodes).reduce((total, child) => total + nodeComposerLength(child), 0);
   }
@@ -206,7 +275,10 @@ export function useComposerRichInput(options: {
         return null;
       }
 
-      if (node instanceof HTMLElement && node.dataset.attachmentId) {
+      if (
+        node instanceof HTMLElement &&
+        (node.dataset.attachmentId || node.dataset.conversationReferenceTaskId)
+      ) {
         const parent = node.parentNode ?? root;
         const index = childIndex(node);
         if (remaining <= 0) return { node: parent, offset: index };
@@ -252,6 +324,12 @@ export function useComposerRichInput(options: {
     if (attachmentId) {
       const attachment = attachmentFromComposerOrProps(attachmentId);
       if (attachment) parts.push(attachmentPart(attachment));
+      return;
+    }
+    const conversationReferenceTaskId = node.dataset.conversationReferenceTaskId;
+    if (conversationReferenceTaskId) {
+      const reference = conversationReferenceFromComposerOrProps(conversationReferenceTaskId);
+      if (reference) parts.push(conversationReferencePart(reference));
       return;
     }
     if (node.tagName === "BR") {
@@ -332,10 +410,34 @@ export function useComposerRichInput(options: {
     focusAt(inputSelection.value);
   }
 
+  function removeInlineConversationReference(taskId: string) {
+    composerParts.value = normalizeComposerParts(composerParts.value.filter((part) =>
+      !(part.type === "conversationReference" && part.reference.taskId === taskId)
+    ));
+    inputSelection.value = Math.min(inputSelection.value, composerPartsLength(composerParts.value));
+    renderFromParts();
+    focusAt(inputSelection.value);
+  }
+
   function insertAttachmentReference(attachment: ChatAttachment, offset = inputSelection.value): boolean {
     if (attachment.exists === false || hasAttachmentPath(attachment.path)) return false;
     const [before, after] = splitComposerPartsAt(composerParts.value, offset);
     const replacement: ComposerPart[] = [attachmentPart(attachment)];
+    if (!partsStartWithWhitespace(after)) replacement.push(textPart(" "));
+    composerParts.value = normalizeComposerParts([...before, ...replacement, ...after]);
+    inputSelection.value = composerPartsLength([...before, ...replacement]);
+    renderFromParts();
+    focusAt(inputSelection.value);
+    return true;
+  }
+
+  function insertConversationReference(
+    reference: ChatConversationReference,
+    offset = inputSelection.value,
+  ): boolean {
+    if (hasConversationReference(reference.taskId)) return false;
+    const [before, after] = splitComposerPartsAt(composerParts.value, offset);
+    const replacement: ComposerPart[] = [conversationReferencePart(reference)];
     if (!partsStartWithWhitespace(after)) replacement.push(textPart(" "));
     composerParts.value = normalizeComposerParts([...before, ...replacement, ...after]);
     inputSelection.value = composerPartsLength([...before, ...replacement]);
@@ -350,9 +452,14 @@ export function useComposerRichInput(options: {
 
   function resetInput() {
     const retainedAttachments = options.attachments.value;
-    composerParts.value = retainedAttachments.length
+    const retainedConversationReferences = options.conversationReferences?.value ?? [];
+    const retainedParts: ComposerPart[] = [
+      ...retainedAttachments.map(attachmentPart),
+      ...retainedConversationReferences.map(conversationReferencePart),
+    ];
+    composerParts.value = retainedParts.length
       ? normalizeComposerParts([
-        ...retainedAttachments.map(attachmentPart),
+        ...retainedParts,
         textPart(" "),
       ])
       : [textPart("")];
@@ -360,12 +467,27 @@ export function useComposerRichInput(options: {
     renderFromParts();
   }
 
-  function replaceWithText(text: string, attachments: ChatAttachment[] = []) {
+  function replaceWithText(
+    text: string,
+    attachments: ChatAttachment[] = [],
+    nextConversationReferences: ChatConversationReference[] = [],
+  ) {
     const nextParts: ComposerPart[] = [];
     if (text) nextParts.push(textPart(text));
     if (attachments.length) {
       if (text && !/\s$/.test(text)) nextParts.push(textPart(" "));
       nextParts.push(...attachments.map(attachmentPart));
+    }
+    if (nextConversationReferences.length) {
+      const lastTextPart = nextParts.at(-1);
+      if (
+        (text || attachments.length) &&
+        lastTextPart?.type === "text" &&
+        !/\s$/.test(lastTextPart.text)
+      ) {
+        nextParts.push(textPart(" "));
+      }
+      nextParts.push(...nextConversationReferences.map(conversationReferencePart));
     }
     composerParts.value = nextParts.length ? normalizeComposerParts(nextParts) : [textPart("")];
     inputSelection.value = text.length;
@@ -384,6 +506,9 @@ export function useComposerRichInput(options: {
   watch(
     () => [
       options.attachments.value.map((attachment) => `${attachment.id}:${attachment.path}`).join("\n"),
+      (options.conversationReferences?.value ?? [])
+        .map((reference) => `${reference.taskId}:${reference.route}`)
+        .join("\n"),
       options.appendAttachmentsToEndKey.value,
     ] as const,
     () => {
@@ -393,8 +518,15 @@ export function useComposerRichInput(options: {
       observedAppendToEndKey = nextAppendToEndKey;
       const incoming = options.attachments.value;
       const incomingPaths = new Set(incoming.map((attachment) => attachment.path));
+      const incomingConversationReferences = options.conversationReferences?.value;
+      const incomingConversationReferenceIds = new Set(
+        (incomingConversationReferences ?? []).map((reference) => reference.taskId),
+      );
       const filtered = composerParts.value.filter((part) =>
-        part.type === "text" || incomingPaths.has(part.attachment.path)
+        part.type === "text" ||
+        (part.type === "attachment" && incomingPaths.has(part.attachment.path)) ||
+        (!incomingConversationReferences || part.type !== "conversationReference" ||
+          incomingConversationReferenceIds.has(part.reference.taskId))
       );
       if (filtered.length !== composerParts.value.length) {
         composerParts.value = normalizeComposerParts(filtered);
@@ -411,6 +543,14 @@ export function useComposerRichInput(options: {
           offset = inputSelection.value;
         }
       }
+      if (incomingConversationReferences) {
+        for (const reference of incomingConversationReferences) {
+          if (hasConversationReference(reference.taskId)) continue;
+          if (insertConversationReference(reference, offset)) {
+            offset = inputSelection.value;
+          }
+        }
+      }
     },
     { immediate: true },
   );
@@ -419,6 +559,7 @@ export function useComposerRichInput(options: {
     inputSelection,
     serializedText,
     plainText,
+    conversationReferences,
     searchText,
     isEmpty,
     setEditor,
@@ -427,10 +568,12 @@ export function useComposerRichInput(options: {
     replaceRange,
     replaceWithText,
     insertAttachmentReference,
+    insertConversationReference,
     resetInput,
     focusAt,
     captureSelectionOffset,
     captureSelectionRange,
     hasAttachmentPath,
+    hasConversationReference,
   };
 }

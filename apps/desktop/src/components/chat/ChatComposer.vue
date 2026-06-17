@@ -14,6 +14,7 @@ import type {
   AskUserResult,
   ChatAttachment,
   ChatComposerState,
+  ChatConversationReference,
   ChatContextUsage,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
@@ -26,6 +27,7 @@ import type {
   ToolConsentUpdatedInput,
 } from "../../services/chat";
 import ComposerContextPanel from "./ComposerContextPanel.vue";
+import ComposerConversationReferencePanel from "./ComposerConversationReferencePanel.vue";
 import ComposerPendingEntryActions from "./ComposerPendingEntryActions.vue";
 import ComposerPendingPanel from "./ComposerPendingPanel.vue";
 import ComposerRichInput from "./ComposerRichInput.vue";
@@ -36,6 +38,7 @@ import {
   contextInlinePath,
   useComposerContextSearch,
 } from "./useComposerContextSearch";
+import { useComposerConversationSearch } from "./useComposerConversationSearch";
 import {
   useComposerSlashCommands,
 } from "./useComposerSlashCommands";
@@ -61,20 +64,23 @@ const props = defineProps<{
   toolConsent?: ToolConsentRequest | null;
   restoreDraftKey?: number;
   restoreDraftContent?: string;
+  restoreDraftConversationReferences?: ChatConversationReference[];
   insertDraftTextKey?: number;
   insertDraftTextContent?: string;
 }>();
 
 const emit = defineEmits<{
-  send: [content: string, attachments: ChatAttachment[]];
+  send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
   "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ];
   "start-lilia-fix-suggestion": [
     content: string,
     attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
@@ -82,7 +88,6 @@ const emit = defineEmits<{
   "update:state": [next: ChatComposerState];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
-  "reference-conversation": [];
   "add-context-attachment": [attachment: ChatAttachment];
   "resolve-ask-user": [result: AskUserResult];
   "resolve-tool-consent": [
@@ -187,7 +192,12 @@ const {
 });
 
 const attachmentsForView = computed(() => props.attachments ?? []);
+const restoreDraftConversationReferences = computed(() => props.restoreDraftConversationReferences ?? []);
 const appendAttachmentsToEndKey = computed(() => props.appendAttachmentsToEndKey ?? 0);
+const suppressedAttachmentIds = ref<Set<string>>(new Set());
+const unsuppressedAttachmentsForSend = computed(() =>
+  attachmentsForView.value.filter((attachment) => !suppressedAttachmentIds.value.has(attachment.id))
+);
 const contextUsageForToolbar = computed(() =>
   props.contextUsage?.backend === props.state.backend ? props.contextUsage : null,
 );
@@ -198,6 +208,11 @@ const richInput = useComposerRichInput({
   hasPending,
   isLargeDirectory,
   removeAttachment: (attachmentId) => emit("remove-attachment", attachmentId),
+});
+
+const conversationSearch = useComposerConversationSearch({
+  richInput,
+  hasPending,
 });
 
 const contextSearch = useComposerContextSearch({
@@ -223,6 +238,8 @@ const slashCommands = useComposerSlashCommands({
 });
 
 clearComposerContextState = () => {
+  conversationSearch.clear();
+  conversationSearch.resetSuppression();
   contextSearch.clear();
   contextSearch.resetSuppression();
   slashCommands.clear();
@@ -239,7 +256,9 @@ const previewAttachments = computed(() => attachmentsForView.value.filter(isImag
 
 const canSend = computed(() => {
   if (activeToolConsent.value || activeAsk.value) return pendingText.value.trim().length > 0;
-  return richInput.serializedText.value.trim().length > 0 || attachmentsForView.value.length > 0;
+  return richInput.plainText.value.trim().length > 0 ||
+    richInput.conversationReferences.value.length > 0 ||
+    unsuppressedAttachmentsForSend.value.length > 0;
 });
 
 const canInterrupt = computed(() =>
@@ -296,6 +315,7 @@ function updateInputSelection() {
 
 function onInputEvent() {
   updateInputSelection();
+  conversationSearch.noteInputChanged();
   contextSearch.noteInputChanged();
 }
 
@@ -305,6 +325,7 @@ function onSelectionEvent() {
 
 function onRichInput() {
   richInput.onInput();
+  conversationSearch.noteInputChanged();
   contextSearch.noteInputChanged();
   slashCommands.noteInputChanged();
 }
@@ -395,6 +416,8 @@ function blockActionsBriefly() {
 
 function send() {
   const value = hasPending.value ? inputValue.value.trim() : richInput.serializedText.value.trim();
+  const outgoingConversationReferences = richInput.conversationReferences.value;
+  const outgoingAttachments = attachmentsForView.value;
   if (activeToolConsent.value) {
     if (!value) return;
     decideToolConsent("deny", value);
@@ -406,8 +429,9 @@ function send() {
     return;
   }
 
-  if (!value && attachmentsForView.value.length === 0) return;
-  emit("send", value, attachmentsForView.value);
+  if (!value && unsuppressedAttachmentsForSend.value.length === 0) return;
+  suppressedAttachmentIds.value = new Set(outgoingAttachments.map((attachment) => attachment.id));
+  emit("send", value, outgoingAttachments, outgoingConversationReferences);
   richInput.resetInput();
   clearComposerContextState();
 }
@@ -423,7 +447,7 @@ function submitEntry() {
 function startLiliaReview(target: LiliaReviewTarget) {
   if (hasPending.value) return;
   const value = richInput.serializedText.value.trim();
-  emit("start-lilia-review", value, attachmentsForView.value, target);
+  emit("start-lilia-review", value, attachmentsForView.value, richInput.conversationReferences.value, target);
   richInput.resetInput();
   clearComposerContextState();
 }
@@ -431,7 +455,13 @@ function startLiliaReview(target: LiliaReviewTarget) {
 function startLiliaFixSuggestion(target: LiliaReviewTarget) {
   if (hasPending.value) return;
   const value = richInput.serializedText.value.trim();
-  emit("start-lilia-fix-suggestion", value, attachmentsForView.value, target);
+  emit(
+    "start-lilia-fix-suggestion",
+    value,
+    attachmentsForView.value,
+    richInput.conversationReferences.value,
+    target,
+  );
   richInput.resetInput();
   clearComposerContextState();
 }
@@ -439,6 +469,7 @@ function startLiliaFixSuggestion(target: LiliaReviewTarget) {
 function getDraftSnapshot() {
   return {
     content: hasPending.value ? inputValue.value : richInput.plainText.value,
+    conversationReferences: richInput.conversationReferences.value,
   };
 }
 
@@ -454,9 +485,32 @@ function focusInput() {
   richInput.focusAt(richInput.serializedText.value.length);
 }
 
+function triggerConversationReference() {
+  if (hasPending.value) {
+    const el = textarea.value;
+    const start = el?.selectionStart ?? inputValue.value.length;
+    const end = el?.selectionEnd ?? start;
+    const prefix = start > 0 && !/\s/.test(inputValue.value[start - 1] ?? "") ? " #" : "#";
+    inputValue.value = `${inputValue.value.slice(0, start)}${prefix}${inputValue.value.slice(end)}`;
+    const nextOffset = start + prefix.length;
+    void nextTick(() => {
+      textarea.value?.focus();
+      textarea.value?.setSelectionRange(nextOffset, nextOffset);
+      queueResize();
+    });
+    return;
+  }
+  const offset = richInput.captureSelectionOffset();
+  const current = richInput.searchText.value;
+  const prefix = offset > 0 && !/\s/.test(current[offset - 1] ?? "") ? " #" : "#";
+  richInput.replaceRange(offset, offset, [textPart(prefix)]);
+  conversationSearch.noteInputChanged();
+}
+
 function onKeydown(e: KeyboardEvent) {
   updateInputSelection();
   if (e.isComposing) return;
+  if (conversationSearch.handleKeydown(e)) return;
   if (contextSearch.handleKeydown(e)) return;
   if (slashCommands.handleKeydown(e)) return;
   if (e.key === "Enter" && !e.shiftKey) {
@@ -468,6 +522,7 @@ function onKeydown(e: KeyboardEvent) {
 function onRichKeydown(e: KeyboardEvent) {
   richInput.inputSelection.value = richInput.captureSelectionOffset();
   if (e.isComposing) return;
+  if (conversationSearch.handleKeydown(e)) return;
   if (contextSearch.handleKeydown(e)) return;
   if (slashCommands.handleKeydown(e)) return;
   if (e.key === "Enter" && e.shiftKey) {
@@ -477,6 +532,7 @@ function onRichKeydown(e: KeyboardEvent) {
       richInput.inputSelection.value,
       [textPart("\n")],
     );
+    conversationSearch.noteInputChanged();
     contextSearch.noteInputChanged();
     return;
   }
@@ -585,10 +641,33 @@ watch(
 );
 
 watch(
+  [attachmentsForView, () => props.sending],
+  ([attachments, sending]) => {
+    if (suppressedAttachmentIds.value.size === 0) return;
+    if (!sending || attachments.length === 0) {
+      suppressedAttachmentIds.value = new Set();
+      return;
+    }
+    const attachmentIds = new Set(attachments.map((attachment) => attachment.id));
+    const nextSuppressed = new Set(
+      Array.from(suppressedAttachmentIds.value).filter((id) => attachmentIds.has(id)),
+    );
+    if (nextSuppressed.size !== suppressedAttachmentIds.value.size) {
+      suppressedAttachmentIds.value = nextSuppressed;
+    }
+  },
+  { immediate: true },
+);
+
+watch(
   () => props.restoreDraftKey ?? 0,
   (key, previousKey) => {
     if (key === previousKey || key <= 0 || hasPending.value) return;
-    richInput.replaceWithText(props.restoreDraftContent ?? "", attachmentsForView.value);
+    richInput.replaceWithText(
+      props.restoreDraftContent ?? "",
+      attachmentsForView.value,
+      restoreDraftConversationReferences.value,
+    );
     clearComposerContextState();
   },
 );
@@ -635,7 +714,7 @@ onBeforeUnmount(() => {
   }
 });
 
-defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
+defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConversationReference });
 </script>
 
 <template>
@@ -684,6 +763,18 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
         @update-tool-expanded="toolExpanded = $event"
         @update-tool-command-draft="toolCommandDraft = $event"
         @begin-command-edit="beginCommandEdit"
+      />
+    </Transition>
+
+    <Transition name="chat-composer-stack">
+      <ComposerConversationReferencePanel
+        v-if="conversationSearch.panelOpen.value"
+        :results="conversationSearch.results.value"
+        :active-index="conversationSearch.activeIndex.value"
+        :loading="conversationSearch.loading.value"
+        :error="conversationSearch.error.value"
+        @activate="conversationSearch.activateResult"
+        @select="conversationSearch.selectResult"
       />
     </Transition>
 
@@ -803,7 +894,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt });
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
-        @reference-conversation="emit('reference-conversation')"
+        @reference-conversation="triggerConversationReference"
         @set-permission="setPermission"
         @toggle-plan-mode="togglePlanMode"
         @toggle-goal-mode="toggleGoalMode"

@@ -8,11 +8,13 @@ import type {
   AgentTimelinePayload,
   ChatAttachment,
   ChatBackendKind,
+  ChatConversationReference,
 } from "@lilia/contracts";
 
 export interface TimelineRetryContext {
   content: string;
   attachments: ChatAttachment[];
+  conversationReferences?: ChatConversationReference[];
 }
 
 export interface CreateMessageTimelineEventInput {
@@ -21,6 +23,7 @@ export interface CreateMessageTimelineEventInput {
   backend: ChatBackendKind;
   content: string;
   attachments?: ChatAttachment[];
+  conversationReferences?: ChatConversationReference[];
   createdAt: number;
   queued?: boolean;
 }
@@ -57,6 +60,18 @@ export function attachmentsToTimelinePayload(
   }));
 }
 
+export function conversationReferencesToTimelinePayload(
+  conversationReferences: ChatConversationReference[],
+): AgentTimelinePayload[] {
+  return conversationReferences.map((reference) => ({
+    taskId: reference.taskId,
+    title: reference.title,
+    route: reference.route,
+    projectId: reference.projectId ?? null,
+    projectName: reference.projectName ?? null,
+  }));
+}
+
 export function createMessageTimelineEvent(
   input: CreateMessageTimelineEventInput,
 ): AgentTimelineEvent {
@@ -73,6 +88,7 @@ export function createMessageTimelineEvent(
       role: "user",
       content: input.content,
       attachments: attachmentsToTimelinePayload(input.attachments ?? []),
+      conversationReferences: conversationReferencesToTimelinePayload(input.conversationReferences ?? []),
       queued: input.queued === true,
     },
     createdAt: input.createdAt,
@@ -92,6 +108,9 @@ export function createErrorTimelineEvent(
     payload.retryContext = {
       content: input.retryContext.content,
       attachments: attachmentsToTimelinePayload(input.retryContext.attachments),
+      conversationReferences: conversationReferencesToTimelinePayload(
+        input.retryContext.conversationReferences ?? [],
+      ),
     };
   }
   return {
@@ -207,6 +226,7 @@ export function retryContextForTimelineEvent(
   return readRetryContext({
     content: typeof sourcePayload.content === "string" ? sourcePayload.content : source.summary ?? "",
     attachments: sourcePayload.attachments,
+    conversationReferences: sourcePayload.conversationReferences,
   });
 }
 
@@ -216,8 +236,11 @@ export function readRetryContext(value: unknown): TimelineRetryContext | null {
   const attachments = Array.isArray(payload.attachments)
     ? payload.attachments.filter(isChatAttachment)
     : [];
-  if (!content.trim() && attachments.length === 0) return null;
-  return { content, attachments };
+  const conversationReferences = Array.isArray(payload.conversationReferences)
+    ? payload.conversationReferences.filter(isChatConversationReference)
+    : [];
+  if (!content.trim() && attachments.length === 0 && conversationReferences.length === 0) return null;
+  return { content, attachments, conversationReferences };
 }
 
 export function readTimelineEventPayloadRecord(
@@ -325,6 +348,7 @@ export function useTaskTimeline(options: {
   function createOptimisticMessageEvent(input: {
     content: string;
     attachments: ChatAttachment[];
+    conversationReferences?: ChatConversationReference[];
     createdAt?: number;
   }): AgentTimelineEvent {
     const createdAt = input.createdAt ?? Date.now();
@@ -334,6 +358,7 @@ export function useTaskTimeline(options: {
       backend: options.backend(),
       content: input.content,
       attachments: input.attachments,
+      conversationReferences: input.conversationReferences ?? [],
       createdAt,
       queued: true,
     });
@@ -455,7 +480,16 @@ function userMessageIdentityKey(event: AgentTimelineEvent): string {
       .filter(Boolean)
       .join("\u001f")
     : "";
-  return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}`;
+  const conversationReferences = Array.isArray(payload.conversationReferences)
+    ? payload.conversationReferences
+      .map((reference) => {
+        const row = readPayloadRecord(reference);
+        return typeof row.taskId === "string" ? row.taskId : "";
+      })
+      .filter(Boolean)
+      .join("\u001f")
+    : "";
+  return `${payload.role ?? "user"}\u001f${content}\u001f${attachments}\u001f${conversationReferences}`;
 }
 
 function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -466,4 +500,14 @@ function isChatAttachment(value: unknown): value is ChatAttachment {
     typeof row.path === "string" &&
     (row.kind === "file" || row.kind === "directory" || row.kind === "unknown") &&
     (typeof row.size === "number" || row.size === null);
+}
+
+function isChatConversationReference(value: unknown): value is ChatConversationReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.taskId === "string" &&
+    typeof row.title === "string" &&
+    typeof row.route === "string" &&
+    (typeof row.projectId === "string" || typeof row.projectId === "undefined" || row.projectId === null) &&
+    (typeof row.projectName === "string" || typeof row.projectName === "undefined" || row.projectName === null);
 }
