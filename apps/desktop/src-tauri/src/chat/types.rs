@@ -397,6 +397,8 @@ pub(crate) struct ChatComposerState {
     pub(crate) model: String,
     #[serde(default)]
     pub(crate) plan_mode: bool,
+    #[serde(default)]
+    pub(crate) goal_mode: bool,
     /// "full" | "ask" | "readonly"
     pub(crate) permission: String,
     #[serde(default)]

@@ -442,6 +442,7 @@ fn execute_agent_node<R: Runtime>(
         backend,
         model,
         plan_mode: false,
+        goal_mode: false,
         permission,
         codex_settings: Default::default(),
     };

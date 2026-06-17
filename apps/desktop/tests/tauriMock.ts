@@ -2652,6 +2652,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         backend: "claude",
         model: "claude-sonnet-4-6",
         planMode: false,
+        goalMode: false,
         permission: "ask",
       };
     }

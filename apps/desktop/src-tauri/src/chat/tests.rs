@@ -777,6 +777,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
             plan_mode: true,
+            goal_mode: false,
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
@@ -823,6 +824,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
             plan_mode: false,
+            goal_mode: false,
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
@@ -864,6 +866,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
             plan_mode: false,
+            goal_mode: false,
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
@@ -932,6 +935,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
             plan_mode: false,
+            goal_mode: false,
             permission: "ask".to_string(),
             codex_settings: CodexComposerSettings::default(),
         };
@@ -1086,6 +1090,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CLAUDE.to_string(),
             model: "claude-sonnet-4-6".to_string(),
             plan_mode: true,
+            goal_mode: false,
             permission: "readonly".to_string(),
             codex_settings: Default::default(),
         };
@@ -1106,6 +1111,7 @@ mod agent_event_sink_tests {
             backend: BACKEND_CLAUDE.to_string(),
             model: "gpt-5.4-mini".to_string(),
             plan_mode: false,
+            goal_mode: false,
             permission: "ask".to_string(),
             codex_settings: Default::default(),
         };

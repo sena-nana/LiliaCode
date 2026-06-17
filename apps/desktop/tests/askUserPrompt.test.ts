@@ -9,6 +9,7 @@ const baseState: ChatComposerState = {
   backend: "claude",
   model: "claude-sonnet-4-6",
   planMode: false,
+  goalMode: false,
   permission: "ask",
 };
 

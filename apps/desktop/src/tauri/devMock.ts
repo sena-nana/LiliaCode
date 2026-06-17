@@ -202,7 +202,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
     case "conversation_suggestions_get_sources":
       return { sources: [], localGit: null } as T;
     case "chat_get_composer_state":
-      return { taskId: text(args, "taskId"), backend: "codex", model: "gpt-5.4", planMode: false, permission: "ask" } as T;
+      return { taskId: text(args, "taskId"), backend: "codex", model: "gpt-5.4", planMode: false, goalMode: false, permission: "ask" } as T;
     case "chat_get_runtime_snapshot":
       return { taskId: text(args, "taskId"), phase: "idle", backend: null, turnId: null, queuedCount: 0, pendingRollback: false, pendingResetCleanup: false, rollback: null } as T;
     case "chat_search_slash_commands":

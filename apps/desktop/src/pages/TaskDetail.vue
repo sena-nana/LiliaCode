@@ -262,6 +262,12 @@ function supportsSidebarIab(backend: string) {
   return backend === "codex" || backend === "claude";
 }
 
+function openConversationReferenceImport() {
+  const query: Record<string, string> = { tab: "import" };
+  if (props.projectId) query.projectId = props.projectId;
+  void router.push({ path: "/settings", query });
+}
+
 function syncDebugPanelRegistration() {
   if (!hasContext.value || !composerController.agentInteractionSettings.debug.value) {
     unregisterDebugPanel?.();
@@ -491,6 +497,7 @@ watch(
     @update-composer="composerController.onComposerUpdate"
     @remove-attachment="attachmentController.removeAttachment"
     @pick-attachments="attachmentController.onPickAttachments"
+    @reference-conversation="openConversationReferenceImport"
     @add-context-attachment="attachmentController.addContextAttachment"
     @resolve-ask-user="composerController.onResolveAskUser"
     @resolve-tool-consent="composerController.onResolveToolConsent"

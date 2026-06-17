@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowUp,
   ListChecks,
   Paperclip,
+  Plus,
+  MessageSquareQuote,
+  Goal,
   ShieldCheck,
   Square,
 } from "lucide-vue-next";
@@ -31,14 +34,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   pickAttachments: [];
+  referenceConversation: [];
   setPermission: [permission: PermissionMode];
   togglePlanMode: [];
+  toggleGoalMode: [];
   startLiliaCompact: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
+const actionMenuOpen = ref(false);
+const actionMenuRoot = ref<HTMLElement | null>(null);
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
@@ -121,6 +128,48 @@ const contextUsageRows = computed(() => {
   return rows;
 });
 
+function toggleActionMenu() {
+  actionMenuOpen.value = !actionMenuOpen.value;
+}
+
+function closeActionMenu() {
+  actionMenuOpen.value = false;
+}
+
+function pickAction(action: "attachments" | "reference" | "plan" | "goal") {
+  closeActionMenu();
+  if (action === "attachments") emit("pickAttachments");
+  else if (action === "reference") emit("referenceConversation");
+  else if (action === "plan") emit("togglePlanMode");
+  else emit("toggleGoalMode");
+}
+
+function onDocPointer(e: PointerEvent) {
+  if (!actionMenuRoot.value) return;
+  if (!actionMenuRoot.value.contains(e.target as Node)) closeActionMenu();
+}
+
+function onKey(e: KeyboardEvent) {
+  if (e.key !== "Escape" || !actionMenuOpen.value) return;
+  closeActionMenu();
+  e.stopPropagation();
+}
+
+watch(actionMenuOpen, (open) => {
+  if (open) {
+    document.addEventListener("pointerdown", onDocPointer, true);
+    document.addEventListener("keydown", onKey);
+  } else {
+    document.removeEventListener("pointerdown", onDocPointer, true);
+    document.removeEventListener("keydown", onKey);
+  }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocPointer, true);
+  document.removeEventListener("keydown", onKey);
+});
+
 </script>
 
 <template>
@@ -149,33 +198,86 @@ const contextUsageRows = computed(() => {
 
     <div class="chat-composer__row">
       <div class="chat-composer__group">
-        <button
-          type="button"
-          class="chat-chip chat-chip--icon"
-          title="添加附件"
-          aria-label="添加附件"
-          @click="emit('pickAttachments')"
-        >
-          <Paperclip :size="14" aria-hidden="true" />
-        </button>
+        <div ref="actionMenuRoot" class="chat-composer__action-menu">
+          <button
+            type="button"
+            class="chat-composer__action-trigger"
+            :class="{ 'is-open': actionMenuOpen }"
+            title="更多输入操作"
+            aria-label="更多输入操作"
+            aria-haspopup="menu"
+            :aria-expanded="actionMenuOpen"
+            @click="toggleActionMenu"
+          >
+            <Plus :size="16" aria-hidden="true" />
+          </button>
+          <div
+            v-if="actionMenuOpen"
+            class="dd__menu dd__menu--top chat-composer__action-menu-popover"
+            role="menu"
+          >
+            <button
+              type="button"
+              class="dd__item chat-composer__action-menu-item"
+              role="menuitem"
+              @click="pickAction('attachments')"
+            >
+              <span class="chat-composer__action-menu-icon">
+                <Paperclip :size="14" aria-hidden="true" />
+              </span>
+              <span class="dd__item-label">添加附件</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item chat-composer__action-menu-item"
+              role="menuitem"
+              @click="pickAction('reference')"
+            >
+              <span class="chat-composer__action-menu-icon">
+                <MessageSquareQuote :size="14" aria-hidden="true" />
+              </span>
+              <span class="dd__item-label">引用其他对话</span>
+            </button>
+            <button
+              type="button"
+              class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+              :class="{ 'is-active': state.planMode }"
+              role="menuitemcheckbox"
+              :aria-checked="state.planMode"
+              @click="pickAction('plan')"
+            >
+              <span class="chat-composer__action-menu-icon">
+                <ListChecks :size="14" aria-hidden="true" />
+              </span>
+              <span class="dd__item-label">计划模式</span>
+              <span class="chat-composer__action-switch" aria-hidden="true">
+                <span class="chat-composer__action-switch-thumb" />
+              </span>
+            </button>
+            <button
+              type="button"
+              class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+              :class="{ 'is-active': state.goalMode }"
+              role="menuitemcheckbox"
+              :aria-checked="state.goalMode"
+              @click="pickAction('goal')"
+            >
+              <span class="chat-composer__action-menu-icon">
+                <Goal :size="14" aria-hidden="true" />
+              </span>
+              <span class="dd__item-label">目标模式</span>
+              <span class="chat-composer__action-switch" aria-hidden="true">
+                <span class="chat-composer__action-switch-thumb" />
+              </span>
+            </button>
+          </div>
+        </div>
         <Dropdown
           :model-value="state.permission"
           :options="permissionOptions"
           :icon="ShieldCheck"
           @update:model-value="emit('setPermission', $event)"
         />
-        <button
-          type="button"
-          class="chat-chip"
-          :class="{ 'is-open': state.planMode }"
-          :title="state.planMode ? '计划模式已开启' : '开启计划模式'"
-          :aria-label="state.planMode ? '关闭计划模式' : '开启计划模式'"
-          :aria-pressed="state.planMode"
-          @click="emit('togglePlanMode')"
-        >
-          <ListChecks :size="14" aria-hidden="true" />
-          <span class="chat-chip__label">计划模式</span>
-        </button>
       </div>
 
       <div class="chat-composer__entry-actions">
