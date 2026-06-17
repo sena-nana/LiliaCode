@@ -2111,6 +2111,11 @@
   padding: 0 2px;
 }
 
+.chat-suggestions.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .chat-suggestions__items {
   display: flex;
   align-items: center;
