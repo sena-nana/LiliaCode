@@ -374,7 +374,7 @@
 }
 
 .conversation-import__timeline-frame .chat-scroll-map {
-  right: 6px;
+  right: 0;
 }
 
 .conversation-import__timeline-frame .chat-scroll-map__track {

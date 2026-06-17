@@ -651,7 +651,7 @@
   content: "";
   position: absolute;
   top: 0;
-  right: 3px;
+  right: 0;
   bottom: 0;
   width: 4px;
   border-radius: var(--radius-pill);
@@ -668,7 +668,7 @@
 
   position: absolute;
   top: 8px;
-  right: 2px;
+  right: 0;
   bottom: calc(8px + var(--chat-scroll-map-bottom-offset));
   z-index: 4;
 }
