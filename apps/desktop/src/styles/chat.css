@@ -2758,6 +2758,73 @@
   transform: translateX(14px);
 }
 
+.chat-composer__mode-chip {
+  position: relative;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.chat-composer__mode-chip:hover,
+.chat-composer__mode-chip:focus-visible {
+  background: transparent;
+  color: var(--text);
+  filter: none;
+}
+
+.chat-composer__mode-chip-label {
+  white-space: nowrap;
+}
+
+.chat-composer__mode-chip-icon-slot {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 14px;
+}
+
+.chat-composer__mode-chip-icon-slot > * {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.chat-composer__mode-chip-icon {
+  color: var(--text-faint);
+}
+
+.chat-composer__mode-chip-delete {
+  color: var(--text-muted);
+  opacity: 0;
+  transform: scale(0.86);
+}
+
+.chat-composer__mode-chip:hover .chat-composer__mode-chip-icon,
+.chat-composer__mode-chip:focus-visible .chat-composer__mode-chip-icon {
+  opacity: 0;
+  transform: scale(0.86);
+}
+
+.chat-composer__mode-chip:hover .chat-composer__mode-chip-delete,
+.chat-composer__mode-chip:focus-visible .chat-composer__mode-chip-delete {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .chat-composer__entry-actions {
   display: inline-flex;
   align-items: center;
@@ -3900,6 +3967,22 @@ button.chat-composer__context-action:active:not(:disabled) {
   color: var(--text);
 }
 
+.chat-composer__permission-dropdown .chat-chip {
+  background: transparent;
+}
+
+.chat-composer__permission-dropdown .chat-chip:hover:not(.is-disabled):not(:disabled),
+.chat-composer__permission-dropdown .chat-chip.is-open {
+  background: transparent;
+  color: var(--text);
+}
+
+.chat-composer__permission-dropdown.is-full-access .chat-chip,
+.chat-composer__permission-dropdown.is-full-access .chat-chip:hover:not(.is-disabled):not(:disabled),
+.chat-composer__permission-dropdown.is-full-access .chat-chip.is-open {
+  color: var(--warn);
+}
+
 .chat-chip:disabled,
 .chat-chip.is-disabled {
   cursor: not-allowed;
@@ -4097,6 +4180,15 @@ button.chat-attachment-chip--bubble {
 .dd__item.is-active {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.chat-composer__action-menu-toggle.is-active {
+  background: transparent;
+  color: var(--text);
+}
+
+.chat-composer__action-menu-toggle.is-active:hover {
+  background: var(--bg-hover);
 }
 
 .dd__item-label {
