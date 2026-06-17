@@ -583,6 +583,7 @@ onMounted(() => {
               <div
                 ref="previewScroller"
                 class="conversation-import__timeline-scroller"
+                data-no-global-scrollbar-overlay
                 @scroll="showPreviewScrollbar"
               >
                 <div
