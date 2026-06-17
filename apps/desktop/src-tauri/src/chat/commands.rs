@@ -2,18 +2,18 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use tauri::{AppHandle, Manager, State};
 
-use crate::agent_timeline;
 use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
 use crate::chat::slash_commands::{
     emit_slash_command_done, execute_slash_command, persist_and_emit_slash_command_result,
 };
-use crate::chat::state::{
-    clear_persisted_pending_rollback, default_composer, model_options_for_backend,
-    new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn_for_app,
-    set_guide_status_for_app, should_persist_user_message, stop_running_turn, ChatStore,
-};
 #[cfg(test)]
 use crate::chat::state::{clear_pending_turns, RunningTurn};
+use crate::chat::state::{
+    clear_persisted_pending_rollback, clear_persisted_pending_turns_for_app, default_composer,
+    model_options_for_backend, new_chat_message_id, normalize_composer_for_backend, now_millis,
+    persist_runtime_state_for_app, prepare_running_turn_stop, queue_pending_turn_for_app,
+    reset_cleared_guide_queue, set_guide_status_for_app, should_persist_user_message, ChatStore,
+};
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
@@ -167,58 +167,32 @@ pub fn chat_interrupt_turn(
     app: AppHandle,
     store: State<'_, ChatStore>,
 ) -> Result<ChatInterruptResult, String> {
-    let running_turn = {
-        let turns = store.running_turns.lock().unwrap();
-        turns.get(&task_id).cloned()
-    };
-    let Some(running_turn) = running_turn else {
+    if !store.running_turns.lock().unwrap().contains_key(&task_id) {
         return Ok(ChatInterruptResult::default());
     };
 
-    let can_rollback = app
-        .try_state::<LiliaStore>()
-        .and_then(|lilia| {
-            let conn = lilia.conn().ok()?;
-            agent_timeline::user_only_turn_rollback_candidate(
-                &conn,
-                &task_id,
-                &running_turn.turn_id,
-            )
-            .ok()
-            .flatten()
-            .map(|_| ())
-        })
-        .is_some();
-
-    if can_rollback {
-        stop_running_turn(&app, &store, &task_id, false, true)?;
-        if let Some(rollback) =
-            rollback_current_user_only_turn(&app, &task_id, &running_turn.turn_id)?
-        {
-            return Ok(ChatInterruptResult {
-                rolled_back: true,
-                restored_content: rollback.content,
-                restored_attachments: rollback.attachments,
-                removed_event_ids: rollback.removed_event_ids,
-            });
-        }
-        return Ok(ChatInterruptResult::default());
+    match write_runner_stdin(&store, &task_id, interrupt_turn_control_payload()) {
+        Ok(true) => {}
+        Ok(false) => return Err("runner stdin 不可用，无法打断当前对话".to_string()),
+        Err(err) => return Err(format!("发送打断请求失败：{err}")),
     }
 
-    stop_running_turn(&app, &store, &task_id, true, false)?;
-    Ok(ChatInterruptResult::default())
-}
-
-fn rollback_current_user_only_turn(
-    app: &AppHandle,
-    task_id: &str,
-    turn_id: &str,
-) -> Result<Option<agent_timeline::UserOnlyTurnRollback>, String> {
-    let Some(lilia) = app.try_state::<LiliaStore>() else {
-        return Ok(None);
+    let Some(prepared) = prepare_running_turn_stop(&store, &task_id, true, false) else {
+        return Ok(ChatInterruptResult::default());
     };
-    let conn = lilia.conn()?;
-    agent_timeline::rollback_user_only_turn(&conn, task_id, turn_id)
+    persist_runtime_state_for_app(
+        &app,
+        &store,
+        &task_id,
+        &prepared.running_turn,
+        "interrupted_pending_finish",
+        None,
+        None,
+    );
+    let mut guide_ids = prepared.guide_ids;
+    guide_ids.append(&mut clear_persisted_pending_turns_for_app(&app, &task_id));
+    reset_cleared_guide_queue(&app, guide_ids);
+    Ok(ChatInterruptResult::default())
 }
 
 fn write_runner_stdin(
@@ -227,6 +201,10 @@ fn write_runner_stdin(
     payload: JsonValue,
 ) -> Result<bool, String> {
     write_runner_stdin_for_task(store, task_id, payload)
+}
+
+pub(crate) fn interrupt_turn_control_payload() -> JsonValue {
+    serde_json::json!({ "type": "interrupt_turn" })
 }
 
 pub(crate) fn agent_interaction_response_payload(

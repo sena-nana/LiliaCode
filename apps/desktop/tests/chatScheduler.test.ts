@@ -442,7 +442,7 @@ describe("chat scheduler", () => {
     });
   });
 
-  it("发送后立即停止且 Agent 未输出时撤回用户消息并恢复输入和附件", async () => {
+  it("发送后停止等待 Agent 收尾，再通过 done 恢复输入和附件", async () => {
     const view = await renderTaskDetail();
     setChatDropBounds(view);
 
@@ -461,6 +461,13 @@ describe("chat scheduler", () => {
     });
 
     await fireEvent.click(view.getByRole("button", { name: "打断 Agent" }));
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+      expect(view.getByText("先别发出去")).toBeInTheDocument();
+    });
+
+    completeMockAgentTurn("t-002");
 
     await waitFor(() => {
       const input = view.getByRole("textbox") as HTMLElement;

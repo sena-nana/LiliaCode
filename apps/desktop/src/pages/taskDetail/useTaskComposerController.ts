@@ -1,4 +1,4 @@
-import { computed, nextTick, ref, type Ref } from "vue";
+import { computed, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
@@ -247,19 +247,7 @@ export function useTaskComposerController(options: {
   async function onInterrupt() {
     if (!context.hasContext.value || !isTurnRunning.value) return;
     try {
-      const result = await interruptTurn(props.taskId);
-      if (!result.rolledBack) return;
-      isTurnRunning.value = false;
-      for (const eventId of result.removedEventIds) {
-        timeline.removeTimelineEvent(eventId);
-      }
-      restoreDraftContent.value = stripRestoredAttachmentReferences(
-        result.restoredContent,
-        result.restoredAttachments,
-      );
-      restoreDraftKey.value += 1;
-      await nextTick();
-      attachments.value = result.restoredAttachments;
+      await interruptTurn(props.taskId);
     } catch (err) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`打断失败：${String(err)}`));
     }
