@@ -16,8 +16,9 @@ use crate::chat::state::{
 };
 use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
 use crate::chat::types::{
-    ChatAttachment, ChatComposerState, ChatInterruptResult, ChatMessage, ChatModelOption,
-    ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow, ProviderRuntimeOptions,
+    ChatAttachment, ChatComposerState, ChatConversationReference, ChatInterruptResult,
+    ChatMessage, ChatModelOption, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult,
+    ChatWorkflow, ProviderRuntimeOptions,
 };
 use crate::provider::{load_active_backend, validate_backend_ready_for_send};
 use crate::store::LiliaStore;
@@ -38,6 +39,7 @@ pub fn chat_send_message(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    conversation_references: Vec<ChatConversationReference>,
     guide_id: Option<String>,
     workflow: Option<ChatWorkflow>,
     runtime_command: Option<ChatRuntimeCommand>,
@@ -58,6 +60,7 @@ pub fn chat_send_message(
         role: "user".to_string(),
         content: content.clone(),
         attachments: attachments.clone(),
+        conversation_references: conversation_references.clone(),
         created_at: now_millis(),
     };
     // turn_id 在 user 消息入库前就分配，并与 agent turn 共享 —— 让两者落到同一个
@@ -101,6 +104,7 @@ pub fn chat_send_message(
                 composer.clone(),
                 project_cwd,
                 attachments,
+                conversation_references,
                 workflow,
                 runtime_command,
                 runtime_options,
@@ -147,6 +151,7 @@ pub fn chat_send_message(
         composer,
         project_cwd,
         attachments,
+        conversation_references,
         workflow,
         runtime_command,
         runtime_options,

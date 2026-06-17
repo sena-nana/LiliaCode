@@ -5,6 +5,7 @@ import type {
   ChatAttachment,
   ChatContextUsage,
   ChatComposerState,
+  ChatConversationReference,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
 } from "@lilia/contracts";
@@ -73,6 +74,7 @@ export function useTaskComposerController(options: {
   const userSendScrollKey = ref(0);
   const restoreDraftKey = ref(0);
   const restoreDraftContent = ref("");
+  const restoreDraftConversationReferences = ref<ChatConversationReference[]>([]);
   const insertDraftTextKey = ref(0);
   const insertDraftTextContent = ref("");
   const pendingAskUser = useAskUserForTask(() => props.taskId);
@@ -143,12 +145,19 @@ export function useTaskComposerController(options: {
   async function sendAgentMessage(input: SendAgentMessageInput) {
     if (!context.hasContext.value) return;
     const outgoingAttachments = input.turn.outgoingAttachments ?? [];
+    const outgoingConversationReferences = input.turn.outgoingConversationReferences ?? [];
     const workflow = input.workflow ?? null;
     const runtimeCommand = input.runtimeCommand ?? null;
     const runtimeOptions = input.runtimeOptions ?? null;
     const titleContent = input.turn.titleContent;
     const content = input.turn.content;
-    if (!content.trim() && outgoingAttachments.length === 0 && !workflow && !runtimeCommand) return;
+    if (
+      !content.trim() &&
+      outgoingAttachments.length === 0 &&
+      outgoingConversationReferences.length === 0 &&
+      !workflow &&
+      !runtimeCommand
+    ) return;
 
     let optimisticId: string | null = null;
     try {
@@ -160,6 +169,7 @@ export function useTaskComposerController(options: {
       const optimistic = timeline.createOptimisticMessageEvent({
         content,
         attachments: outgoingAttachments,
+        conversationReferences: outgoingConversationReferences,
       });
       optimisticId = optimistic.id;
       timeline.upsertTimelineEvent(optimistic);
@@ -171,6 +181,7 @@ export function useTaskComposerController(options: {
           composer: currentComposer,
           projectCwd: cwd,
           attachments: outgoingAttachments,
+          conversationReferences: outgoingConversationReferences,
           guideId: input.turn.guideId ?? null,
         },
         workflow,
@@ -185,12 +196,17 @@ export function useTaskComposerController(options: {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`发送失败：${String(err)}`, {
         content,
         attachments: outgoingAttachments,
+        conversationReferences: outgoingConversationReferences,
       }));
       throw err;
     }
   }
 
-  async function onSend(content: string, outgoingAttachments: ChatAttachment[] = []) {
+  async function onSend(
+    content: string,
+    outgoingAttachments: ChatAttachment[] = [],
+    outgoingConversationReferences: ChatConversationReference[] = [],
+  ) {
     if (!context.hasContext.value) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
       await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
@@ -198,7 +214,7 @@ export function useTaskComposerController(options: {
     }
 
     try {
-      await sendAgentMessage({ turn: { content, outgoingAttachments } });
+      await sendAgentMessage({ turn: { content, outgoingAttachments, outgoingConversationReferences } });
       attachments.value = [];
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
@@ -280,6 +296,7 @@ export function useTaskComposerController(options: {
         turn: {
           content: retryContext.content,
           outgoingAttachments: retryContext.attachments,
+          outgoingConversationReferences: retryContext.conversationReferences ?? [],
         },
       });
     } catch (err) {
@@ -337,11 +354,16 @@ export function useTaskComposerController(options: {
     return `上次 ${backend} 运行未正常结束，旧执行态已放弃${turn}。你可以重新发送或重置会话。`;
   }
 
-  function restoreDraftFromRollback(rollback: { restoredContent: string; restoredAttachments: ChatAttachment[] }) {
+  function restoreDraftFromRollback(rollback: {
+    restoredContent: string;
+    restoredAttachments: ChatAttachment[];
+    restoredConversationReferences?: ChatConversationReference[];
+  }) {
     restoreDraftContent.value = stripRestoredAttachmentReferences(
       rollback.restoredContent,
       rollback.restoredAttachments,
     );
+    restoreDraftConversationReferences.value = rollback.restoredConversationReferences ?? [];
     restoreDraftKey.value += 1;
     attachments.value = rollback.restoredAttachments;
   }
@@ -478,6 +500,7 @@ export function useTaskComposerController(options: {
     isTurnRunning.value = false;
     composer.value = null;
     contextUsage.value = null;
+    restoreDraftConversationReferences.value = [];
   }
 
   function canAcceptInteractiveDrop(): boolean {
@@ -511,6 +534,7 @@ export function useTaskComposerController(options: {
     userSendScrollKey,
     restoreDraftKey,
     restoreDraftContent,
+    restoreDraftConversationReferences,
     insertDraftTextKey,
     insertDraftTextContent,
     pendingAskUser,

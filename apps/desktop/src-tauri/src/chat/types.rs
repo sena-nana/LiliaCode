@@ -9,6 +9,8 @@ pub(crate) struct ChatMessage {
     pub(crate) role: String, // "user" | "assistant" | "system"
     pub(crate) content: String,
     pub(crate) attachments: Vec<ChatAttachment>,
+    #[serde(default)]
+    pub(crate) conversation_references: Vec<ChatConversationReference>,
     pub(crate) created_at: u64,
 }
 
@@ -40,6 +42,18 @@ pub(crate) struct ChatAttachmentDirectoryMeta {
     pub(crate) total_size: u64,
     pub(crate) truncated: bool,
     pub(crate) unreadable_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatConversationReference {
+    pub(crate) task_id: String,
+    pub(crate) title: String,
+    pub(crate) route: String,
+    #[serde(default)]
+    pub(crate) project_id: Option<String>,
+    #[serde(default)]
+    pub(crate) project_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -347,6 +361,8 @@ pub(crate) struct ChatInterruptResult {
     pub(crate) rolled_back: bool,
     pub(crate) restored_content: String,
     pub(crate) restored_attachments: Vec<ChatAttachment>,
+    #[serde(default)]
+    pub(crate) restored_conversation_references: Vec<ChatConversationReference>,
     pub(crate) removed_event_ids: Vec<String>,
 }
 
@@ -356,6 +372,8 @@ pub(crate) struct ChatRollbackResult {
     pub(crate) rolled_back: bool,
     pub(crate) restored_content: String,
     pub(crate) restored_attachments: Vec<ChatAttachment>,
+    #[serde(default)]
+    pub(crate) restored_conversation_references: Vec<ChatConversationReference>,
     pub(crate) removed_event_ids: Vec<String>,
 }
 

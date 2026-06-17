@@ -1,6 +1,7 @@
 import type { ComputedRef, Ref } from "vue";
 import type {
   ChatAttachment,
+  ChatConversationReference,
   ChatRuntimeCommand,
   ChatWorkflow,
   LiliaReviewTarget,
@@ -13,6 +14,7 @@ export interface LiliaWorkflowSendAgentMessageInput {
   turn: {
     content: string;
     outgoingAttachments?: ChatAttachment[];
+    outgoingConversationReferences?: ChatConversationReference[];
     guideId?: string;
     titleContent?: string;
   };
@@ -37,12 +39,16 @@ export function useLiliaWorkflowActions(options: {
   async function sendHandledLiliaWorkflow(
     content: string,
     outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
     workflow: ChatWorkflow,
     clearComposerAttachments = false,
   ) {
     if (!canStartLiliaWorkflow()) return;
     try {
-      await options.sendAgentMessage({ turn: { content, outgoingAttachments }, workflow });
+      await options.sendAgentMessage({
+        turn: { content, outgoingAttachments, outgoingConversationReferences },
+        workflow,
+      });
       if (clearComposerAttachments) options.attachments.value = [];
     } catch {
       return;
@@ -52,6 +58,7 @@ export function useLiliaWorkflowActions(options: {
   async function onStartLiliaReview(
     content: string,
     outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ) {
     const workflow: ChatWorkflow = {
@@ -61,12 +68,19 @@ export function useLiliaWorkflowActions(options: {
     };
     const instructions = content.trim();
     if (instructions) workflow.instructions = instructions;
-    await sendLiliaWorkflow(workflow, instructions, outgoingAttachments, true);
+    await sendLiliaWorkflow(
+      workflow,
+      instructions,
+      outgoingAttachments,
+      outgoingConversationReferences,
+      true,
+    );
   }
 
   async function onStartLiliaFixSuggestion(
     content: string,
     outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ) {
     const workflow: ChatWorkflow = {
@@ -76,18 +90,26 @@ export function useLiliaWorkflowActions(options: {
     };
     const instructions = content.trim();
     if (instructions) workflow.instructions = instructions;
-    await sendLiliaWorkflow(workflow, instructions, outgoingAttachments, true);
+    await sendLiliaWorkflow(
+      workflow,
+      instructions,
+      outgoingAttachments,
+      outgoingConversationReferences,
+      true,
+    );
   }
 
   async function sendLiliaWorkflow(
     workflow: ChatWorkflow,
     content = "",
     outgoingAttachments: ChatAttachment[] = [],
+    outgoingConversationReferences: ChatConversationReference[] = [],
     clearComposerAttachments = false,
   ) {
     await sendHandledLiliaWorkflow(
       content,
       outgoingAttachments,
+      outgoingConversationReferences,
       workflow,
       clearComposerAttachments,
     );

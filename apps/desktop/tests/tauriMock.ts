@@ -3235,6 +3235,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const composer = normalizeComposer(args.composer, taskId);
       args.composer = composer;
       const attachments = Array.isArray(args.attachments) ? args.attachments : [];
+      const conversationReferences = Array.isArray(args.conversationReferences)
+        ? args.conversationReferences
+        : [];
       const workflow = args.workflow && typeof args.workflow === "object" && !Array.isArray(args.workflow)
         ? args.workflow as Record<string, unknown>
         : null;
@@ -3245,6 +3248,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         role: "user",
         content,
         attachments,
+        conversationReferences,
         createdAt: Date.now(),
       };
       const turnId = queued
@@ -3303,6 +3307,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           role: "user",
           content,
           attachments,
+          conversationReferences,
           queued,
         },
         createdAt: message.createdAt,
@@ -3371,12 +3376,16 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             rolledBack: true,
             restoredContent: typeof payload.content === "string" ? payload.content : "",
             restoredAttachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+            restoredConversationReferences: Array.isArray(payload.conversationReferences)
+              ? payload.conversationReferences
+              : [],
             removedEventIds: [onlyEvent.id],
           };
           return {
             rolledBack: false,
             restoredContent: "",
             restoredAttachments: [],
+            restoredConversationReferences: [],
             removedEventIds: [],
           };
         }
@@ -3400,6 +3409,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         rolledBack: false,
         restoredContent: "",
         restoredAttachments: [],
+        restoredConversationReferences: [],
         removedEventIds: [],
       };
     }

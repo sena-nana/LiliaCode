@@ -18,6 +18,7 @@ import type {
   ChatBackendKind,
   ChatAttachment,
   ChatContextSearchResult,
+  ChatConversationReference,
   ChatSlashCommandSearchResult,
   ChatComposerState,
   ChatContextUsage,
@@ -74,6 +75,7 @@ export type {
   ChatAttachment,
   ChatInterruptResult,
   ChatContextSearchResult,
+  ChatConversationReference,
   ChatContextUsage,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
@@ -174,6 +176,7 @@ export interface SendMessageInput {
     composer: ChatComposerState;
     projectCwd: string;
     attachments?: ChatAttachment[];
+    conversationReferences?: ChatConversationReference[];
     guideId?: string | null;
   };
   workflow?: ChatWorkflow | null;
@@ -188,6 +191,7 @@ export function sendMessage(input: SendMessageInput): Promise<ChatSendResult> {
     composer: input.turn.composer,
     projectCwd: input.turn.projectCwd,
     attachments: input.turn.attachments ?? [],
+    conversationReferences: input.turn.conversationReferences ?? [],
     guideId: input.turn.guideId ?? null,
     workflow: input.workflow ?? null,
     runtimeCommand: input.runtimeCommand ?? null,

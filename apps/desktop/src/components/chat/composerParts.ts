@@ -1,7 +1,8 @@
-import type { ChatAttachment } from "@lilia/contracts";
+import type { ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import { isImageAttachment } from "./imageViewer";
 
 export const ATTACHMENT_OBJECT_CHAR = "\uFFFC";
+export const CONVERSATION_REFERENCE_OBJECT_CHAR = "\uFFFD";
 
 export interface MentionRange {
   start: number;
@@ -21,7 +22,16 @@ export interface ComposerAttachmentPart {
   attachment: ChatAttachment;
 }
 
-export type ComposerPart = ComposerTextPart | ComposerAttachmentPart;
+export interface ComposerConversationReferencePart {
+  id: string;
+  type: "conversationReference";
+  reference: ChatConversationReference;
+}
+
+export type ComposerPart =
+  | ComposerTextPart
+  | ComposerAttachmentPart
+  | ComposerConversationReferencePart;
 
 let composerPartSeq = 0;
 
@@ -43,6 +53,16 @@ export function attachmentPart(attachment: ChatAttachment): ComposerAttachmentPa
     id: nextComposerPartId("attachment"),
     type: "attachment",
     attachment,
+  };
+}
+
+export function conversationReferencePart(
+  reference: ChatConversationReference,
+): ComposerConversationReferencePart {
+  return {
+    id: nextComposerPartId("conversation-reference"),
+    type: "conversationReference",
+    reference,
   };
 }
 
@@ -138,24 +158,41 @@ export function referenceKindLabel(attachment: ChatAttachment): string {
   return "文件引用";
 }
 
+export function conversationReferenceLabel(reference: ChatConversationReference): string {
+  return `[对话引用: ${reference.title} | ${reference.taskId}]`;
+}
+
 export function serializeAttachmentReference(attachment: ChatAttachment): string {
   return `[${referenceKindLabel(attachment)}: ${attachment.name} | ${attachment.path}]`;
 }
 
 export function serializeComposerParts(parts: ComposerPart[]): string {
   return parts
-    .map((part) => part.type === "text"
-      ? part.text
-      : serializeAttachmentReference(part.attachment))
+    .map((part) => {
+      if (part.type === "text") return part.text;
+      if (part.type === "attachment") return serializeAttachmentReference(part.attachment);
+      return conversationReferenceLabel(part.reference);
+    })
     .join("");
 }
 
 export function composerPartsSearchText(parts: ComposerPart[]): string {
   return parts
-    .map((part) => part.type === "text" ? part.text : ATTACHMENT_OBJECT_CHAR)
+    .map((part) => {
+      if (part.type === "text") return part.text;
+      if (part.type === "attachment") return ATTACHMENT_OBJECT_CHAR;
+      return CONVERSATION_REFERENCE_OBJECT_CHAR;
+    })
     .join("");
 }
 
 export function composerPartsHaveAttachmentPath(parts: ComposerPart[], path: string): boolean {
   return parts.some((part) => part.type === "attachment" && part.attachment.path === path);
+}
+
+export function composerPartsHaveConversationReference(
+  parts: ComposerPart[],
+  taskId: string,
+): boolean {
+  return parts.some((part) => part.type === "conversationReference" && part.reference.taskId === taskId);
 }

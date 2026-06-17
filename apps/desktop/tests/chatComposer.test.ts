@@ -237,7 +237,7 @@ describe("ChatComposer", () => {
     await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
-    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", []]);
+    expect(view.emitted("send")?.[0]).toEqual(["补充上下文", [], []]);
     expect(view.emitted("interrupt")).toBeUndefined();
   });
 
@@ -719,7 +719,7 @@ describe("ChatComposer", () => {
     expect(view.queryByRole("menu")).toBeNull();
   });
 
-  it("加号菜单可触发引用其他对话", async () => {
+  it("加号菜单会在输入框插入对话引用前缀", async () => {
     const view = render(ChatComposer, {
       props: {
         state: baseState,
@@ -730,8 +730,28 @@ describe("ChatComposer", () => {
     await openComposerActionMenu(view);
     await fireEvent.click(view.getByRole("menuitem", { name: "引用其他对话" }));
 
-    expect(view.emitted("reference-conversation")).toHaveLength(1);
+    expect(composerText(view.getByRole("textbox") as HTMLElement)).toContain("#");
     expect(view.queryByRole("menu")).toBeNull();
+  });
+
+  it("输入 # 后可搜索并插入对话引用", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await setComposerText(view, "#Claude");
+    await flushContextSearch();
+    await fireEvent.click(view.getAllByRole("option")[0]);
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    expect(view.emitted("send")?.[0]?.[2]?.[0]).toEqual(expect.objectContaining({
+      taskId: expect.any(String),
+      title: expect.any(String),
+      route: expect.any(String),
+    }));
   });
 
   it("计划模式独立于执行权限切换", async () => {
@@ -796,6 +816,7 @@ describe("ChatComposer", () => {
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "",
       [],
+      [],
       { type: "uncommittedChanges" },
     ]);
     expect(view.emitted("execute-slash-command")).toBeUndefined();
@@ -818,6 +839,7 @@ describe("ChatComposer", () => {
 
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "重点看权限边界",
+      [],
       [],
       { type: "uncommittedChanges" },
     ]);
@@ -844,11 +866,11 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
     await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
 
-    expect(view.emitted("start-lilia-review")?.[0]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-review")?.[0]?.[3]).toEqual({
       type: "baseBranch",
       branch: "main",
     });
-    expect(view.emitted("start-lilia-review")?.[1]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-review")?.[1]?.[3]).toEqual({
       type: "commit",
       sha: "abc123",
     });
@@ -872,6 +894,7 @@ describe("ChatComposer", () => {
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "",
       [],
+      [],
       { type: "uncommittedChanges" },
     ]);
 
@@ -886,6 +909,7 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
     expect(view.emitted("start-lilia-fix-suggestion")?.[1]).toEqual([
       "",
+      [],
       [],
       { type: "uncommittedChanges" },
     ]);
@@ -907,6 +931,7 @@ describe("ChatComposer", () => {
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
+      [],
       [],
       { type: "uncommittedChanges" },
     ]);
@@ -933,11 +958,11 @@ describe("ChatComposer", () => {
     await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
     await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
 
-    expect(view.emitted("start-lilia-fix-suggestion")?.[0]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-fix-suggestion")?.[0]?.[3]).toEqual({
       type: "baseBranch",
       branch: "main",
     });
-    expect(view.emitted("start-lilia-fix-suggestion")?.[1]?.[2]).toEqual({
+    expect(view.emitted("start-lilia-fix-suggestion")?.[1]?.[3]).toEqual({
       type: "commit",
       sha: "abc123",
     });

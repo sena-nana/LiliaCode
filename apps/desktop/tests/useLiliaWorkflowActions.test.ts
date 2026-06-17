@@ -31,7 +31,7 @@ describe("useLiliaWorkflowActions", () => {
 
   it("fix suggestion workflow uses the Lilia protocol", async () => {
     const view = setupWorkflowActions();
-    await view.actions.onStartLiliaFixSuggestion("检查空状态", [], { type: "uncommittedChanges" });
+    await view.actions.onStartLiliaFixSuggestion("检查空状态", [], [], { type: "uncommittedChanges" });
     expect(view.sent).toEqual([{
       type: "lilia_fix_suggestion",
       target: { type: "uncommittedChanges" },

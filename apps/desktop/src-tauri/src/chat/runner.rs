@@ -35,8 +35,8 @@ use crate::chat::timeline_sink::{
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
     AgentInteractionRequestEvent, ChatAttachment, ChatComposerState, ChatContextUsage,
-    ChatRollbackResult, ChatRuntimeCommand, ChatWorkflow, CodexComposerSettings, DoneEvent,
-    ProviderRuntimeOptions, TurnStartedEvent,
+    ChatConversationReference, ChatRollbackResult, ChatRuntimeCommand, ChatWorkflow,
+    CodexComposerSettings, DoneEvent, ProviderRuntimeOptions, TurnStartedEvent,
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
@@ -52,6 +52,7 @@ pub(crate) struct RunnerInvocation {
     pub(crate) composer: ChatComposerState,
     pub(crate) project_cwd: String,
     pub(crate) attachments: Vec<ChatAttachment>,
+    pub(crate) conversation_references: Vec<ChatConversationReference>,
     pub(crate) workflow: Option<ChatWorkflow>,
     pub(crate) runtime_command: Option<ChatRuntimeCommand>,
     pub(crate) runtime_options: Option<ProviderRuntimeOptions>,
@@ -257,6 +258,7 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
     composer: ChatComposerState,
     project_cwd: String,
     attachments: Vec<ChatAttachment>,
+    conversation_references: Vec<ChatConversationReference>,
     workflow: Option<ChatWorkflow>,
     runtime_command: Option<ChatRuntimeCommand>,
     runtime_options: Option<ProviderRuntimeOptions>,
@@ -289,6 +291,7 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
         composer,
         project_cwd,
         attachments,
+        conversation_references,
         workflow,
         runtime_command,
         runtime_options,
@@ -400,6 +403,7 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
         turn.composer,
         turn.project_cwd,
         turn.attachments,
+        turn.conversation_references,
         turn.workflow,
         turn.runtime_command,
         turn.runtime_options,
@@ -426,6 +430,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let prompt_for_thread = invocation.content;
     let project_cwd = invocation.project_cwd;
     let attachments_for_thread = invocation.attachments;
+    let conversation_references_for_thread = invocation.conversation_references;
     let workflow_for_thread = invocation.workflow;
     let runtime_command_for_thread = invocation.runtime_command;
     let runtime_options_for_thread = invocation.runtime_options;
@@ -449,6 +454,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
         &project_cwd,
         &prompt_for_thread,
         &attachments_for_thread,
+        &conversation_references_for_thread,
         workflow_for_thread.as_ref(),
         runtime_command_for_thread.as_ref(),
         runtime_options.as_ref(),
@@ -553,10 +559,11 @@ pub(crate) fn start_runner_session<R: Runtime>(
             .unwrap()
             .insert(task_id_for_thread.clone(), running_turn.clone());
         let context_json = runtime_state_context_json(
-            &project_cwd,
-            &prompt_for_thread,
-            &attachments_for_thread,
-            workflow_for_thread.as_ref(),
+        &project_cwd,
+        &prompt_for_thread,
+        &attachments_for_thread,
+        &conversation_references_for_thread,
+        workflow_for_thread.as_ref(),
             runtime_command_for_thread.as_ref(),
             &composer_for_thread,
             resume_session_id.as_deref(),
@@ -1094,6 +1101,7 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
     project_cwd: &str,
     prompt: &str,
     attachments: &[ChatAttachment],
+    conversation_references: &[ChatConversationReference],
     workflow: Option<&ChatWorkflow>,
     runtime_command: Option<&ChatRuntimeCommand>,
     runtime_options: Option<&JsonValue>,
@@ -1105,6 +1113,7 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
         "cwd": project_cwd,
         "prompt": prompt,
         "attachments": attachments,
+        "conversationReferences": conversation_references,
         "model": composer.model,
         "resumeSessionId": resume_session_id,
         "planMode": composer.plan_mode,
@@ -1124,6 +1133,7 @@ fn runtime_state_context_json(
     project_cwd: &str,
     prompt: &str,
     attachments: &[ChatAttachment],
+    conversation_references: &[ChatConversationReference],
     workflow: Option<&ChatWorkflow>,
     runtime_command: Option<&ChatRuntimeCommand>,
     composer: &ChatComposerState,
@@ -1133,6 +1143,7 @@ fn runtime_state_context_json(
         "projectCwd": project_cwd,
         "promptLength": prompt.chars().count(),
         "attachmentCount": attachments.len(),
+        "conversationReferenceCount": conversation_references.len(),
         "workflowType": workflow_kind(workflow),
         "runtimeCommandType": runtime_command_kind(runtime_command),
         "automationRunId": automation_run_id(workflow),
@@ -1425,6 +1436,7 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
             turn.composer,
             turn.project_cwd,
             turn.attachments,
+            turn.conversation_references,
             turn.workflow,
             turn.runtime_command,
             turn.runtime_options,
@@ -1792,12 +1804,14 @@ mod tests {
             rolled_back: true,
             restored_content: "explicit".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["evt-explicit".to_string()],
         };
         let pending = ChatRollbackResult {
             rolled_back: true,
             restored_content: "pending".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["evt-pending".to_string()],
         };
 
@@ -1826,6 +1840,7 @@ mod tests {
             rolled_back: true,
             restored_content: "pending".to_string(),
             restored_attachments: Vec::new(),
+            restored_conversation_references: Vec::new(),
             removed_event_ids: vec!["evt-pending".to_string()],
         };
 
@@ -1859,6 +1874,7 @@ mod tests {
                 composer: crate::chat::state::default_composer("task-1"),
                 project_cwd: "C:\\repo".to_string(),
                 attachments: Vec::new(),
+                conversation_references: Vec::new(),
                 workflow: None,
                 runtime_command: None,
                 runtime_options: None,
@@ -1868,6 +1884,7 @@ mod tests {
                     role: "user".to_string(),
                     content: "next".to_string(),
                     attachments: Vec::new(),
+                    conversation_references: Vec::new(),
                     created_at: 1,
                 },
                 turn_id: "turn-next".to_string(),
@@ -1903,6 +1920,7 @@ mod tests {
                 composer: crate::chat::state::default_composer("task-1"),
                 project_cwd: "C:\\repo".to_string(),
                 attachments: Vec::new(),
+                conversation_references: Vec::new(),
                 workflow: None,
                 runtime_command: None,
                 runtime_options: None,
@@ -1912,6 +1930,7 @@ mod tests {
                     role: "user".to_string(),
                     content: "queued".to_string(),
                     attachments: Vec::new(),
+                    conversation_references: Vec::new(),
                     created_at: 1,
                 },
                 turn_id: "turn-queued".to_string(),
