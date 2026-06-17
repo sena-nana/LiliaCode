@@ -138,7 +138,7 @@
   min-height: 78px;
   padding: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
   color: var(--text);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
@@ -188,7 +188,7 @@
 .automations-page__node-handle span {
   max-width: 52px;
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-subtle);
   color: var(--text-muted);
   font-size: 10px;
@@ -249,7 +249,7 @@
   width: 148px;
   height: 94px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
   overflow: hidden;
 }
@@ -276,7 +276,7 @@
 
 .automations-page__minimap-viewport {
   position: absolute;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--text-faint) 22%, transparent);
   pointer-events: none;
 }
@@ -337,7 +337,7 @@
   min-height: 26px;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text-muted);
   font-size: 12px;
@@ -359,7 +359,7 @@
   width: 100%;
   min-height: 56px;
   padding: 7px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   align-items: flex-start;
@@ -413,7 +413,7 @@
   width: 100%;
   min-height: 32px;
   padding: 5px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   justify-content: space-between;
@@ -437,7 +437,7 @@
 
 .automations-page__replay details {
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
 }
 

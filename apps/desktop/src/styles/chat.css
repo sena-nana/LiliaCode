@@ -80,7 +80,7 @@
   height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 24px;
@@ -239,7 +239,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
 }
 
@@ -390,7 +390,7 @@
 .architecture-panel .markdown-block__mermaid {
   margin: 0;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
 }
 
@@ -411,7 +411,7 @@
 .architecture-panel__change {
   padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
 }
 
@@ -516,7 +516,7 @@
   width: 100%;
   height: 32px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   display: inline-flex;
@@ -582,7 +582,7 @@
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   color: var(--text);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
@@ -594,7 +594,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   display: inline-flex;
@@ -654,7 +654,7 @@
   right: 3px;
   bottom: 0;
   width: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong);
 }
 
@@ -697,7 +697,7 @@
   right: 0;
   width: 9px;
   height: 2px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: currentColor;
   transform: translateY(-50%);
 }
@@ -733,7 +733,7 @@
   max-width: min(320px, calc(100vw - 48px));
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   color: var(--text);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
@@ -1162,7 +1162,7 @@
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
 }
@@ -1238,7 +1238,7 @@
   margin: 4px 0 0;
   padding: 6px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   display: flex;
   flex-direction: column;
@@ -1294,7 +1294,7 @@
   gap: 0;
   padding: 0;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   color: var(--text);
 }
@@ -1532,7 +1532,7 @@
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-muted);
   font-size: 12px;
@@ -1578,7 +1578,7 @@
 .timeline-card--command.timeline-card--error {
   padding: 8px;
   border: 1px solid rgba(244, 113, 116, 0.58);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--text);
 }
@@ -1595,7 +1595,7 @@
   padding: 10px;
   border: 1px solid rgba(244, 113, 116, 0.64);
   border-left: 3px solid var(--err);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--err-soft);
   color: var(--text);
 }
@@ -1710,7 +1710,7 @@
 .timeline-card__text {
   padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
 }
 
@@ -1927,7 +1927,7 @@
 .markdown-block code {
   padding: 1px 4px;
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-subtle);
   color: inherit;
   font-family: var(--font-mono);
@@ -2128,7 +2128,7 @@
   min-width: 0;
   max-width: 100%;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
@@ -2201,7 +2201,7 @@
   height: 12px;
   border: 2px solid var(--border-strong);
   border-top-color: var(--text-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   animation: chat-suggestions-spinner 0.72s linear infinite;
 }
 
@@ -2256,7 +2256,7 @@
   min-width: 0;
   height: 28px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 28px 0 9px;
   background: var(--bg);
   color: var(--text-muted);
@@ -2275,7 +2275,7 @@
   flex: 0 0 auto;
   height: 28px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 9px;
   display: inline-flex;
   align-items: center;
@@ -2365,7 +2365,7 @@
   margin: 0 3px;
   padding: 2px 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   color: var(--text);
   line-height: 1.25;
@@ -2440,7 +2440,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
@@ -2467,7 +2467,7 @@
   max-height: min(280px, 38vh);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
   padding: 4px;
   display: flex;
@@ -2485,7 +2485,7 @@
   width: 100%;
   min-width: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   padding: 4px 5px;
@@ -2604,7 +2604,7 @@
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text);
   display: inline-flex;
@@ -2691,7 +2691,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   width: 230px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -2733,7 +2733,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   width: 30px;
   height: 30px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   border: 0;
@@ -2773,7 +2773,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   overflow: hidden;
   padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--bg-subtle);
 }
 
@@ -2898,7 +2898,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 .composer-inline__tool-name {
   height: 20px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   border: 1px solid var(--border-soft);
   color: var(--text-muted);
@@ -2970,7 +2970,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   align-self: flex-start;
   height: 18px;
   padding: 0 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 10px;
@@ -3027,7 +3027,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   align-items: flex-start;
   text-align: left;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
   color: var(--text);
   cursor: pointer;
@@ -3085,7 +3085,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 }
 
 [role="group"] .composer-inline__option-indicator {
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 [role="group"] .composer-inline__option.is-picked .composer-inline__option-indicator {
@@ -3127,7 +3127,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 .composer-inline__badge {
   height: 16px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 10px;
@@ -3143,7 +3143,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
   overflow: hidden;
 }
@@ -3190,7 +3190,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   padding: 0 12px;
   font-size: 12px;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .composer-inline__skip {
@@ -3278,7 +3278,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-subtle);
   color: var(--text);
   font-family: var(--font-mono);
@@ -3345,7 +3345,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   margin-top: 2px;
   padding: 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent-soft) 58%, var(--bg));
 }
 
@@ -3373,7 +3373,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   max-height: 28px;
   padding: 4px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   font: inherit;
@@ -3579,7 +3579,7 @@ button.chat-composer__context-action:active:not(:disabled) {
 
 .todo-float__row {
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text);
   display: flex;
   font-size: 12px;
@@ -3620,7 +3620,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   align-items: center;
   background: var(--bg-subtle);
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
@@ -3671,7 +3671,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-faint);
   cursor: pointer;
   display: inline-flex;
@@ -3711,7 +3711,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   height: 28px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-muted);
   cursor: pointer;
@@ -3764,7 +3764,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   height: 28px;
   padding: 0 6px 0 9px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-muted);
   display: inline-flex;
@@ -3783,7 +3783,7 @@ button.chat-composer__context-action:active:not(:disabled) {
   height: 30px;
   max-width: 30px;
   padding: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   gap: 0;
   cursor: zoom-in;
   justify-content: center;
@@ -3807,7 +3807,7 @@ button.chat-attachment-chip--bubble {
   width: 20px;
   height: 20px;
   margin-left: -4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   object-fit: cover;
   background: var(--bg-elev);
   flex: 0 0 auto;
@@ -3832,7 +3832,7 @@ button.chat-attachment-chip--bubble {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-faint);
   display: inline-flex;
@@ -3888,7 +3888,7 @@ button.chat-attachment-chip--bubble {
   max-width: 280px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -3913,7 +3913,7 @@ button.chat-attachment-chip--bubble {
   gap: 12px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   cursor: pointer;

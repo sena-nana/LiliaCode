@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { router } from "./router";
+import "./composables/useCornerStyle";
 import "./composables/useTheme";
 import { installContextMenu } from "./composables/useContextMenu";
 import { vContextMenu } from "./directives/contextMenu";

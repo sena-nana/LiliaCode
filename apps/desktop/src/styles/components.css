@@ -2,7 +2,7 @@
 .card {
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   margin-bottom: 12px;
   overflow: hidden;
@@ -78,7 +78,7 @@ select,
   font: inherit;
   height: 32px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg-subtle);
   color: var(--text);
@@ -98,7 +98,7 @@ button,
   font: inherit;
   height: 32px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   border: 0;
@@ -192,7 +192,7 @@ button:disabled,
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 12px;
   display: inline-flex;
@@ -214,7 +214,7 @@ button:disabled,
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
@@ -250,7 +250,7 @@ button:disabled,
 .ui-list-item {
   display: flex;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   color: var(--text);
   text-decoration: none;
@@ -278,7 +278,7 @@ button:disabled,
   gap: 6px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   text-decoration: none;
@@ -320,7 +320,7 @@ button:disabled,
 .ui-tabs__count {
   height: 16px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-subtle);
   color: var(--text-faint);
   font-size: 10px;
@@ -332,7 +332,7 @@ button:disabled,
   display: inline-flex;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px;
   gap: 2px;
   height: 34px;
@@ -345,7 +345,7 @@ button:disabled,
   border: 0;
   height: 28px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -443,7 +443,7 @@ button:disabled,
   letter-spacing: 0.4px;
   text-transform: uppercase;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-muted);
   border: 1px solid var(--border-strong);
@@ -541,7 +541,7 @@ button:disabled,
   height: 30px;
   padding: 0 10px 0 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -572,7 +572,7 @@ button:disabled,
   height: 34px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -659,6 +659,22 @@ button:disabled,
   row-gap: 8px;
 }
 
+.settings-row__radius-control {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 44px;
+}
+
+.settings-row__radius-control input {
+  width: 100%;
+  padding-inline: 0;
+}
+
+.settings-row__radius-control output {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 .settings-row__value,
 .settings-row__status-text {
   overflow: hidden;
@@ -685,7 +701,7 @@ button:disabled,
   min-height: 34px;
   background: var(--bg);
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 10px;
   font-size: 13px;
 }
@@ -734,7 +750,7 @@ button:disabled,
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 12px;
   border: 1px solid transparent;
 }

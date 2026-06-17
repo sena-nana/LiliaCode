@@ -17,7 +17,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
 }
 
@@ -97,7 +97,7 @@
   gap: 7px;
   padding: 0 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text-muted);
 }
@@ -142,7 +142,7 @@
   gap: var(--sb-row-gap);
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -291,7 +291,7 @@
   max-width: 100%;
   overflow-x: auto;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-subtle);
   color: var(--text);
   font-size: 12px;
@@ -313,7 +313,7 @@
 .plugins-create__hint code {
   background: var(--bg-subtle);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
 }
 
