@@ -55,11 +55,15 @@ const {
   triggerEl: actionTriggerEl,
   menuEl: actionMenuEl,
   overlayStyle: actionMenuStyle,
+  resolvedPlacement: resolvedActionMenuPlacement,
   containsTarget: actionMenuContainsTarget,
   clearAnchor: clearActionMenuAnchor,
   captureAnchor: captureActionMenuAnchor,
   updateOrigin: updateActionMenuOrigin,
 } = useAnchoredMenuMotion(actionMenuOpen, actionMenuPlacement);
+const actionMenuPlacementClass = computed(() =>
+  resolvedActionMenuPlacement.value.startsWith("bottom") ? "dd__menu--bottom" : "dd__menu--top",
+);
 
 type ModeChip = {
   key: "plan" | "goal";
@@ -264,7 +268,8 @@ onBeforeUnmount(() => {
               <div
                 v-if="actionMenuOpen"
                 ref="actionMenuEl"
-                class="dd__menu dd__menu--top chat-composer__action-menu-popover"
+                class="dd__menu chat-composer__action-menu-popover"
+                :class="actionMenuPlacementClass"
                 role="menu"
                 :style="actionMenuStyle"
               >

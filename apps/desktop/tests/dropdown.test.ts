@@ -51,6 +51,38 @@ describe("Dropdown", () => {
     expect(screen.getByRole("button", { name: /工作区写入/i })).toBeInTheDocument();
   });
 
+  it("teleports to body and closes on outside click and Escape", async () => {
+    const view = renderDropdown();
+
+    await fireEvent.click(screen.getByRole("button", { name: /只读/i }));
+
+    const listbox = await screen.findByRole("listbox");
+    expect(document.body.contains(listbox)).toBe(true);
+    expect(view.container.contains(listbox)).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    await fireEvent.pointerDown(outside);
+    outside.remove();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /只读/i }));
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+  });
+
   it("会从触发点击位置展开", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
@@ -215,6 +247,103 @@ describe("Dropdown", () => {
         });
       });
     } finally {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: originalGetBoundingClientRect,
+      });
+      if (originalOffsetWidth) {
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+    }
+  });
+
+  it("底部空间不足时会翻转为向上展开语义", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 260,
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function mockRect(this: HTMLElement) {
+        if (this.classList.contains("dd")) {
+          return {
+            x: 100,
+            y: 200,
+            left: 100,
+            top: 200,
+            right: 220,
+            bottom: 232,
+            width: 120,
+            height: 32,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("chat-chip")) {
+          return {
+            x: 100,
+            y: 200,
+            left: 100,
+            top: 200,
+            right: 220,
+            bottom: 232,
+            width: 120,
+            height: 32,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("dd__menu")) {
+          return {
+            x: 100,
+            y: 114,
+            left: 100,
+            top: 114,
+            right: 280,
+            bottom: 194,
+            width: 180,
+            height: 80,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return this.classList.contains("dd__menu") ? 180 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("dd__menu") ? 80 : 0;
+      },
+    });
+
+    try {
+      renderDropdown();
+      await fireEvent.click(screen.getByRole("button", { name: /只读/i }), {
+        clientX: 136,
+        clientY: 216,
+      });
+
+      const listbox = await screen.findByRole("listbox");
+      await waitFor(() => {
+        expect(listbox).toHaveClass("dd__menu--top");
+        expect(listbox).toHaveStyle({ top: "114px" });
+      });
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
       Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
         configurable: true,
         value: originalGetBoundingClientRect,

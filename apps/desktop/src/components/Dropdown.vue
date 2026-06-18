@@ -32,6 +32,7 @@ const {
   triggerEl,
   menuEl,
   overlayStyle,
+  resolvedPlacement,
   containsTarget,
   clearAnchor,
   captureAnchor,
@@ -43,7 +44,7 @@ const current = computed(() =>
 );
 
 const placementClass = computed(() =>
-  props.placement === "bottom" ? "dd__menu--bottom" : "dd__menu--top",
+  resolvedPlacement.value.startsWith("bottom") ? "dd__menu--bottom" : "dd__menu--top",
 );
 
 function toggle(event: MouseEvent) {

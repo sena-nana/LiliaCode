@@ -34,6 +34,7 @@ export function useAnchoredMenuMotion(
   const {
     overlayEl: menuEl,
     overlayStyle,
+    resolvedPlacement,
     setAnchorPoint,
     updatePosition,
     containsTarget,
@@ -62,6 +63,7 @@ export function useAnchoredMenuMotion(
     triggerEl,
     menuEl,
     overlayStyle,
+    resolvedPlacement,
     containsTarget,
     clearAnchor,
     captureAnchor,

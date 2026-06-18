@@ -42,4 +42,20 @@ describe("SearchDropdown", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
   });
+
+  it("closes on Escape after teleporting to body", async () => {
+    const view = renderSearchDropdown();
+    const input = view.getByPlaceholderText("搜索");
+
+    await fireEvent.focus(input);
+
+    const listbox = await screen.findByRole("listbox");
+    expect(document.body.contains(listbox)).toBe(true);
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+  });
 });

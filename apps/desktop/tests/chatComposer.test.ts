@@ -704,6 +704,36 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("加号菜单会 Teleport 到 body，并在外部点击或 Escape 后关闭", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await openComposerActionMenu(view);
+
+    const menu = await view.findByRole("menu");
+    expect(document.body.contains(menu)).toBe(true);
+    expect(view.container.contains(menu)).toBe(false);
+
+    await fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(view.queryByRole("menu")).toBeNull();
+    });
+
+    await openComposerActionMenu(view);
+    expect(await view.findByRole("menu")).toBeInTheDocument();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(view.queryByRole("menu")).toBeNull();
+    });
+  });
+
   it("加号菜单会按触发位置设置展开 origin", async () => {
     const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
     const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
@@ -787,6 +817,109 @@ describe("ChatComposer", () => {
         });
       });
     } finally {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: originalGetBoundingClientRect,
+      });
+      if (originalOffsetWidth) {
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+    }
+  });
+
+  it("加号菜单上方空间不足时会翻转到底部语义", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 360,
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function mockRect(this: HTMLElement) {
+        if (this.classList.contains("chat-composer__action-menu")) {
+          return {
+            x: 100,
+            y: 24,
+            left: 100,
+            top: 24,
+            right: 128,
+            bottom: 52,
+            width: 28,
+            height: 28,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("chat-composer__action-trigger")) {
+          return {
+            x: 100,
+            y: 24,
+            left: 100,
+            top: 24,
+            right: 128,
+            bottom: 52,
+            width: 28,
+            height: 28,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("chat-composer__action-menu-popover")) {
+          return {
+            x: 100,
+            y: 58,
+            left: 100,
+            top: 58,
+            right: 290,
+            bottom: 182,
+            width: 190,
+            height: 124,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
+      },
+    });
+
+    try {
+      const view = render(ChatComposer, {
+        props: {
+          state: baseState,
+          attachments: [],
+        },
+      });
+
+      await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }), {
+        clientX: 112,
+        clientY: 38,
+      });
+
+      const menu = await view.findByRole("menu");
+      await waitFor(() => {
+        expect(menu).toHaveClass("dd__menu--bottom");
+        expect(menu).toHaveStyle({ top: "58px" });
+      });
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
       Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
         configurable: true,
         value: originalGetBoundingClientRect,
