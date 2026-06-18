@@ -1,16 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AlertTriangle, MessageSquarePlus, X } from "lucide-vue-next";
-import type { Project } from "@lilia/contracts";
-import { listProjects } from "../services/projectsStore";
+import type { TreeDragKind } from "../composables/useSidebarTreeDrag";
 import {
   createDraftOrphan,
-  createDraftTask,
-  ensureAllProjectTasksLoaded,
-  ensureOrphansLoaded,
-  listProjectConversations,
-  listOrphanConversations,
 } from "../services/tasksStore";
 import { useSidebarDisplayMode } from "../composables/useSidebarDisplayMode";
 import {
@@ -18,34 +12,57 @@ import {
   conversationActivityForTask,
   hydrateConversationActivities,
 } from "../composables/useConversationActivity";
-import { useProjectTreeExpansion } from "../composables/useProjectTreeExpansion";
-import { useSidebarAddMenu } from "../composables/useSidebarAddMenu";
-import { useSidebarTreeDrag } from "../composables/useSidebarTreeDrag";
-import SidebarSearch from "../components/sidebar/SidebarSearch.vue";
-import SidebarProjectsSection from "../components/sidebar/SidebarProjectsSection.vue";
-import SidebarInboxSection from "../components/sidebar/SidebarInboxSection.vue";
+import { createConversationActivityStagePlan } from "../composables/conversationActivityStages";
 import SidebarConnectionFooter from "../components/sidebar/SidebarConnectionFooter.vue";
-import SidebarProjectAddMenu from "../components/sidebar/SidebarProjectAddMenu.vue";
-import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.vue";
-import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
-import { preloadTaskDetailPage } from "../router";
+import {
+  ensureSidebarConversationsLoaded,
+  listSidebarConversations,
+} from "../services/sidebarConversations";
+import { scheduleTaskDetailPreload } from "../router";
+import {
+  beginPerfStage,
+  cancelIdleRun,
+  installPerfObservers,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../utils/perf";
+
+const SidebarSearch = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "sidebar.search.load",
+    async () => (await import("../components/sidebar/SidebarSearch.vue")).default,
+  ),
+});
+
+const SidebarUnifiedSection = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "sidebar.unified-section.load",
+    async () => (await import("../components/sidebar/SidebarUnifiedSection.vue")).default,
+  ),
+});
+
+const SecondaryPanelGroupedHost = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "sidebar.grouped-host.load",
+    async () => (await import("./SecondaryPanelGroupedHost.vue")).default,
+  ),
+});
 
 const router = useRouter();
 const route = useRoute();
 
-const projects = computed(() => listProjects());
-const orphans = computed(() => listOrphanConversations());
 const projectError = ref<string | null>(null);
 const searchActive = ref(false);
 const unifiedLoaded = ref(false);
 const { sidebarDisplayMode } = useSidebarDisplayMode();
 const isUnifiedMode = computed(() => sidebarDisplayMode.value === "unified");
 let activityHydrationTimer: number | null = null;
-
-type IdleWindow = typeof globalThis & {
-  requestIdleCallback?: (callback: () => void) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
+let deferredActivityHydrationTimer: number | null = null;
+let activityHydrationSeq = 0;
 
 function reportProjectError(message: string) {
   projectError.value = message;
@@ -55,70 +72,50 @@ function dismissError() {
   projectError.value = null;
 }
 
-function runWhenIdle(callback: () => void): number {
-  const idleWindow = globalThis as IdleWindow;
-  if (typeof idleWindow.requestIdleCallback === "function") {
-    return idleWindow.requestIdleCallback(callback);
-  }
-  return globalThis.setTimeout(callback, 1);
-}
-
-function cancelIdleRun(handle: number) {
-  const idleWindow = globalThis as IdleWindow;
-  if (typeof idleWindow.cancelIdleCallback === "function") {
-    idleWindow.cancelIdleCallback(handle);
-    return;
-  }
-  globalThis.clearTimeout(handle);
-}
-
-function scheduleConversationActivityHydration(taskIds: string[]) {
+function cancelConversationActivityHydration() {
   if (activityHydrationTimer !== null) {
     cancelIdleRun(activityHydrationTimer);
     activityHydrationTimer = null;
   }
+  if (deferredActivityHydrationTimer !== null) {
+    cancelIdleRun(deferredActivityHydrationTimer);
+    deferredActivityHydrationTimer = null;
+  }
+  activityHydrationSeq += 1;
+}
+
+function scheduleConversationActivityHydration(
+  taskIds: string[],
+  priorityTaskIds: string[],
+  perfName: string,
+) {
   if (taskIds.length === 0) return;
   activityHydrationTimer = runWhenIdle(() => {
     activityHydrationTimer = null;
-    void hydrateConversationActivities(taskIds);
+    void measurePerfAsync(
+      perfName,
+      () => hydrateConversationActivities(taskIds, { priorityTaskIds }),
+      { detail: `${priorityTaskIds.length}/${taskIds.length}` },
+    );
   });
 }
 
-const {
-  allExpanded,
-  forgetProject,
-  isProjectExpanded,
-  loadInitialSidebarData,
-  orphansExpanded,
-  rememberExpanded,
-  toggle,
-  toggleAll,
-  toggleOrphans,
-} = useProjectTreeExpansion(projects, reportProjectError);
-
-const {
-  orphanDropZoneClass,
-  onTreeClickCapture,
-  onTreePointerDown,
-  treeDrag,
-  treeDropTarget,
-  treeRowStateClass,
-} = useSidebarTreeDrag(projects, orphans, reportProjectError);
-
-const {
-  addMenuOpen,
-  closeAddMenu,
-  menuPos,
-  openAddMenu,
-} = useSidebarAddMenu();
+function treeRowStateClass(
+  _kind: TreeDragKind,
+  _projectId: string | null,
+  _taskId: string | null,
+) {
+  return {};
+}
 
 async function loadUnifiedSidebarData() {
   unifiedLoaded.value = false;
   try {
-    await Promise.all([
-      ensureAllProjectTasksLoaded(),
-      ensureOrphansLoaded(),
-    ]);
+    await measurePerfAsync(
+      "sidebar.unified.load",
+      () => ensureSidebarConversationsLoaded(true),
+      { detail: route.fullPath },
+    );
   } catch (err) {
     reportProjectError(`加载会话列表失败：${String(err)}`);
   } finally {
@@ -126,55 +123,36 @@ async function loadUnifiedSidebarData() {
   }
 }
 
-const unifiedConversations = computed<UnifiedSidebarConversation[]>(() => {
-  const rows: Array<UnifiedSidebarConversation & { createdAt: number; pinned: boolean }> = [];
-  for (const project of projects.value) {
-    for (const task of listProjectConversations(project.id)) {
-      rows.push({
-        task,
-        projectId: project.id,
-        projectName: project.name,
-        route: `/projects/${project.id}/tasks/${task.id}`,
-        createdAt: task.createdAt,
-        pinned: task.pinned,
-      });
-    }
-  }
-  for (const orphan of orphans.value) {
-    rows.push({
-      task: orphan,
-      projectId: null,
-      projectName: null,
-      route: `/chats/${orphan.id}`,
-      createdAt: orphan.createdAt,
-      pinned: orphan.pinned,
-    });
-  }
-  return rows
-    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt)
-    .map(({ createdAt: _createdAt, pinned: _pinned, ...row }) => row);
+const unifiedConversations = computed(() => listSidebarConversations());
+
+const currentTaskId = computed(() =>
+  typeof route.params.taskId === "string" ? route.params.taskId : null,
+);
+
+const visibleUnifiedTaskIds = computed(() => (
+  unifiedConversations.value.slice(0, 24).map((item) => item.taskId)
+));
+
+const unifiedTaskIds = computed(() => unifiedConversations.value.map((item) => item.taskId));
+
+const activityPriorityTaskIds = computed(() => {
+  return currentTaskId.value
+    ? [currentTaskId.value, ...visibleUnifiedTaskIds.value]
+    : visibleUnifiedTaskIds.value;
 });
 
-const sidebarTaskIds = computed(() => {
-  if (isUnifiedMode.value) {
-    return unifiedConversations.value.map((item) => item.task.id);
-  }
-  return [
-    ...projects.value.flatMap((project) => listProjectConversations(project.id).map((task) => task.id)),
-    ...orphans.value.map((task) => task.id),
-  ];
-});
+const unifiedActivityHydrationPlan = computed(() => createConversationActivityStagePlan({
+  taskIds: unifiedTaskIds.value,
+  initialTaskIds: activityPriorityTaskIds.value,
+  priorityTaskIds: activityPriorityTaskIds.value,
+}));
 
 watch(
   isUnifiedMode,
   (enabled) => {
     if (enabled) {
       void loadUnifiedSidebarData();
-      return;
     }
-    void loadInitialSidebarData().catch((err) => {
-      reportProjectError(`加载首屏数据失败：${String(err)}`);
-    });
   },
   { immediate: true },
 );
@@ -188,23 +166,45 @@ watch(
 );
 
 watch(
-  () => sidebarTaskIds.value.join("\x1f"),
-  () => {
-    scheduleConversationActivityHydration(sidebarTaskIds.value);
+  () => [isUnifiedMode.value, unifiedTaskIds.value.join("\x1f")] as const,
+  ([enabled]) => {
+    cancelConversationActivityHydration();
+    if (!enabled) return;
+    const plan = unifiedActivityHydrationPlan.value;
+    scheduleConversationActivityHydration(
+      plan.initialTaskIds,
+      plan.initialPriorityTaskIds,
+      "sidebar.unified.activity.primary",
+    );
+    if (plan.deferredTaskIds.length === 0) return;
+    const seq = activityHydrationSeq;
+    scheduleAfterPaint(() => {
+      if (seq !== activityHydrationSeq) return;
+      deferredActivityHydrationTimer = runWhenIdle(() => {
+        deferredActivityHydrationTimer = null;
+        if (seq !== activityHydrationSeq) return;
+        void measurePerfAsync(
+          "sidebar.unified.activity.deferred",
+          () => hydrateConversationActivities(
+            plan.deferredTaskIds,
+            { priorityTaskIds: plan.deferredPriorityTaskIds },
+          ),
+          { detail: `${plan.deferredPriorityTaskIds.length}/${plan.deferredTaskIds.length}` },
+        );
+      });
+    });
   },
   { immediate: true },
 );
 
 onMounted(() => {
-  runWhenIdle(() => {
-    void preloadTaskDetailPage();
-  });
+  installPerfObservers();
+  const stage = beginPerfStage("sidebar.mount", { detail: route.fullPath });
+  runWhenIdle(() => stage.end("idle"));
 });
 
 onBeforeUnmount(() => {
-  if (activityHydrationTimer === null) return;
-  cancelIdleRun(activityHydrationTimer);
-  activityHydrationTimer = null;
+  cancelConversationActivityHydration();
 });
 
 function newChat() {
@@ -212,45 +212,18 @@ function newChat() {
   router.push(`/chats/${draft.id}`);
 }
 
-function newProjectChat(projectId: string) {
-  openProjectChat(projectId);
-}
-
-function openProjectChat(projectId: string) {
-  const draft = createDraftTask(projectId);
-  if (!draft) return;
-  rememberExpanded(projectId);
-  router.push(`/projects/${projectId}/tasks/${draft.id}`);
-}
-
 function onSearchSelect(result: { route: string }) {
   router.push(result.route);
 }
 
-function openProjectsOverview() {
-  router.push("/projects");
-}
-
-function onProjectArchived(projectId: string) {
-  openProjectChat(projectId);
-}
-
-function onProjectDeleted(projectId: string) {
-  router.push("/");
-  forgetProject(projectId);
-}
-
-function onProjectCreated(project: Project) {
-  openProjectChat(project.id);
+function prefetchTaskDetailIntent(detail: string) {
+  scheduleTaskDetailPreload(detail);
 }
 </script>
 
 <template>
   <aside
     class="secondary-panel"
-    :class="{ 'is-tree-dragging': !isUnifiedMode && treeDrag?.active }"
-    @pointerdown="!isUnifiedMode && onTreePointerDown($event)"
-    @click.capture="!isUnifiedMode && onTreeClickCapture($event)"
   >
     <div class="sb-section sb-section--actions">
       <button
@@ -259,6 +232,8 @@ function onProjectCreated(project: Project) {
         class="sb-primary-btn"
         title="新对话"
         aria-label="新对话"
+        @mouseenter="prefetchTaskDetailIntent('sidebar:new-chat')"
+        @focusin="prefetchTaskDetailIntent('sidebar:new-chat')"
         @click="newChat"
       >
         <MessageSquarePlus :size="15" aria-hidden="true" />
@@ -284,47 +259,8 @@ function onProjectCreated(project: Project) {
       @error="reportProjectError"
     />
 
-    <template v-else>
-      <SidebarProjectsSection
-        :add-menu-open="addMenuOpen"
-        :all-expanded="allExpanded"
-        :drag-source="treeDrag"
-        :drop-target="treeDropTarget"
-        :activity-for-task="conversationActivityForTask"
-        :is-project-expanded="isProjectExpanded"
-        :project-error="projectError"
-        :projects="projects"
-        @archived="onProjectArchived"
-        @deleted="onProjectDeleted"
-        @dismiss-error="dismissError"
-        @error="reportProjectError"
-        @new-chat="newProjectChat"
-        @open-add-menu="openAddMenu"
-        @open-overview="openProjectsOverview"
-        @toggle="toggle"
-        @toggle-all="toggleAll"
-      />
-
-      <SidebarInboxSection
-        :orphans="orphans"
-        :orphans-expanded="orphansExpanded"
-        :orphan-drop-zone-class="orphanDropZoneClass"
-        :activity-for-task="conversationActivityForTask"
-        :tree-row-state-class="treeRowStateClass"
-        @error="reportProjectError"
-        @new-chat="newChat"
-        @toggle-orphans="toggleOrphans"
-      />
-    </template>
+    <SecondaryPanelGroupedHost v-else />
 
     <SidebarConnectionFooter />
-
-    <SidebarProjectAddMenu
-      :open="addMenuOpen"
-      :position="menuPos"
-      @close="closeAddMenu"
-      @created="onProjectCreated"
-      @error="reportProjectError"
-    />
   </aside>
 </template>

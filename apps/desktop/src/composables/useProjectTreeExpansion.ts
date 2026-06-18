@@ -12,9 +12,17 @@ import {
   ensureProjectsLoaded,
 } from "../services/projectsStore";
 import {
+  areOrphansLoaded,
   ensureOrphansLoaded,
   ensureProjectTasksLoaded,
 } from "../services/tasksStore";
+import {
+  beginPerfStage,
+  cancelIdleRun,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../utils/perf";
 
 const TREE_EXPANSION_KEY = "lilia.projectTree.expansion";
 
@@ -55,6 +63,12 @@ export function useProjectTreeExpansion(
   const expanded = reactive<Record<string, boolean>>({});
   const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
   const sidebarDataReady = ref(false);
+  let expandedProjectHydrationHandle: number | null = null;
+  let expandedProjectHydrationStage: ReturnType<typeof beginPerfStage> | null = null;
+  let expandedProjectHydrationQueue: string[] = [];
+  let expandedProjectHydrationSeq = 0;
+  let orphanHydrationHandle: number | null = null;
+  let orphanHydrationSeq = 0;
 
   function isProjectExpanded(projectId: string): boolean {
     if (String(route.params.projectId ?? "") === projectId) return true;
@@ -79,9 +93,109 @@ export function useProjectTreeExpansion(
     }
   }
 
-  function loadProjectTasks(projectId: string) {
-    void ensureProjectTasksLoaded(projectId).catch((err) => {
+  async function loadProjectTasks(projectId: string, source = "sidebar.project") {
+    try {
+      await measurePerfAsync(
+        "sidebar.project-tasks.load",
+        () => ensureProjectTasksLoaded(projectId),
+        { detail: `${source}:${projectId}` },
+      );
+    } catch (err) {
       reportError(`加载项目对话失败：${String(err)}`);
+    }
+  }
+
+  function finishExpandedProjectHydration(stage: string) {
+    expandedProjectHydrationStage?.end(stage);
+    expandedProjectHydrationStage = null;
+  }
+
+  function cancelExpandedProjectHydration(stage = "superseded") {
+    expandedProjectHydrationSeq += 1;
+    if (expandedProjectHydrationHandle !== null) {
+      cancelIdleRun(expandedProjectHydrationHandle);
+      expandedProjectHydrationHandle = null;
+    }
+    expandedProjectHydrationQueue = [];
+    finishExpandedProjectHydration(stage);
+  }
+
+  function cancelOrphanHydration() {
+    orphanHydrationSeq += 1;
+    if (orphanHydrationHandle !== null) {
+      cancelIdleRun(orphanHydrationHandle);
+      orphanHydrationHandle = null;
+    }
+  }
+
+  function scheduleOrphanHydration(source: string) {
+    cancelOrphanHydration();
+    if (areOrphansLoaded()) return;
+    const seq = orphanHydrationSeq;
+    scheduleAfterPaint(() => {
+      if (seq !== orphanHydrationSeq) return;
+      orphanHydrationHandle = runWhenIdle(() => {
+        orphanHydrationHandle = null;
+        if (seq !== orphanHydrationSeq) return;
+        void measurePerfAsync(
+          "sidebar.orphans.load",
+          () => ensureOrphansLoaded(),
+          { detail: source },
+        ).catch((err) => {
+          reportError(`加载收集箱对话失败：${String(err)}`);
+        });
+      });
+    });
+  }
+
+  function listExpandedProjectIds(): string[] {
+    return projects.value
+      .filter((project) => isProjectExpanded(project.id))
+      .map((project) => project.id);
+  }
+
+  function pumpExpandedProjectHydration(seq: number) {
+    if (seq !== expandedProjectHydrationSeq) return;
+    if (expandedProjectHydrationQueue.length === 0) {
+      finishExpandedProjectHydration("idle");
+      return;
+    }
+    expandedProjectHydrationHandle = runWhenIdle(async () => {
+      expandedProjectHydrationHandle = null;
+      if (seq !== expandedProjectHydrationSeq) return;
+      const nextProjectId = expandedProjectHydrationQueue.shift();
+      if (nextProjectId) {
+        await loadProjectTasks(nextProjectId, "sidebar.expanded-project");
+      }
+      if (seq !== expandedProjectHydrationSeq) return;
+      if (expandedProjectHydrationQueue.length === 0) {
+        finishExpandedProjectHydration("idle");
+        return;
+      }
+      pumpExpandedProjectHydration(seq);
+    });
+  }
+
+  function scheduleExpandedProjectHydration(source: string) {
+    const expandedProjectIds = listExpandedProjectIds();
+    const currentProjectId =
+      typeof route.params.projectId === "string" && expandedProjectIds.includes(route.params.projectId)
+        ? route.params.projectId
+        : null;
+    cancelExpandedProjectHydration();
+    if (currentProjectId) {
+      void loadProjectTasks(currentProjectId, `${source}:route`);
+    }
+    const deferredIds = expandedProjectIds.filter((projectId) => projectId !== currentProjectId);
+    if (deferredIds.length === 0) return;
+    const seq = expandedProjectHydrationSeq;
+    expandedProjectHydrationQueue = deferredIds;
+    expandedProjectHydrationStage = beginPerfStage("sidebar.expanded-projects.hydrate", {
+      detail: `${source}:${deferredIds.length}`,
+    });
+    scheduleAfterPaint(() => {
+      if (seq !== expandedProjectHydrationSeq) return;
+      pumpExpandedProjectHydration(seq);
     });
   }
 
@@ -103,14 +217,6 @@ export function useProjectTreeExpansion(
     return changed;
   }
 
-  function loadExpandedProjectTasks() {
-    for (const project of projects.value) {
-      if (isProjectExpanded(project.id)) {
-        loadProjectTasks(project.id);
-      }
-    }
-  }
-
   watch(
     projects,
     (nextProjects) => {
@@ -118,16 +224,21 @@ export function useProjectTreeExpansion(
         persistProjectTreeExpansion();
       }
       if (sidebarDataReady.value) {
-        loadExpandedProjectTasks();
+        scheduleExpandedProjectHydration("sidebar.projects.sync");
       }
     },
     { immediate: true },
   );
 
   async function loadInitialSidebarData() {
-    await Promise.all([ensureProjectsLoaded(), ensureOrphansLoaded()]);
+    await measurePerfAsync(
+      "sidebar.projects.load",
+      () => ensureProjectsLoaded(),
+      { detail: "sidebar.initial" },
+    );
     sidebarDataReady.value = true;
-    window.setTimeout(loadExpandedProjectTasks, 0);
+    scheduleExpandedProjectHydration("sidebar.initial");
+    scheduleOrphanHydration("sidebar.initial");
   }
 
   watch(
@@ -138,7 +249,8 @@ export function useProjectTreeExpansion(
         typeof projectId === "string" &&
         projectId.length > 0
       ) {
-        loadProjectTasks(projectId);
+        void loadProjectTasks(projectId, "sidebar.route");
+        scheduleExpandedProjectHydration("sidebar.route.sync");
       }
     },
     { immediate: true },
@@ -148,8 +260,11 @@ export function useProjectTreeExpansion(
     expanded[projectId] = !isProjectExpanded(projectId);
     persistProjectTreeExpansion();
     if (isProjectExpanded(projectId)) {
-      loadProjectTasks(projectId);
+      void loadProjectTasks(projectId, "sidebar.toggle");
+      scheduleExpandedProjectHydration("sidebar.toggle.sync");
+      return;
     }
+    scheduleExpandedProjectHydration("sidebar.toggle.sync");
   }
 
   const allExpanded = computed(
@@ -162,6 +277,7 @@ export function useProjectTreeExpansion(
     const target = !allExpanded.value;
     for (const p of projects.value) expanded[p.id] = target;
     persistProjectTreeExpansion();
+    scheduleExpandedProjectHydration("sidebar.toggle-all");
   }
 
   function rememberExpanded(projectId: string) {
@@ -183,6 +299,8 @@ export function useProjectTreeExpansion(
   }
 
   onBeforeUnmount(() => {
+    cancelExpandedProjectHydration("disposed");
+    cancelOrphanHydration();
     window.removeEventListener("beforeunload", rememberCurrentExpansion);
     persistProjectTreeExpansion();
   });

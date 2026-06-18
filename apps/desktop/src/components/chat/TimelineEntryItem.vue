@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, defineAsyncComponent } from "vue";
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-vue-next";
 import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import TimelineDeclaredEvent from "./TimelineDeclaredEvent.vue";
-import TimelineFinalReply from "./TimelineFinalReply.vue";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
-import TimelinePlanCard from "./TimelinePlanCard.vue";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
@@ -28,6 +25,31 @@ import {
   timelineGroupLabel,
   type TimelineDisplayContext,
 } from "./timelineDisplay";
+import { measurePerfAsync } from "../../utils/perf";
+
+const TimelineDeclaredEvent = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.declared.load",
+    async () => (await import("./TimelineDeclaredEvent.vue")).default,
+  ),
+});
+
+const TimelineFinalReply = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.final-reply.load",
+    async () => (await import("./TimelineFinalReply.vue")).default,
+  ),
+});
+
+const TimelinePlanCard = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.plan-card.load",
+    async () => (await import("./TimelinePlanCard.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   entry: TimelineEntry;

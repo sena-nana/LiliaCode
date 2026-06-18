@@ -99,17 +99,38 @@ const scrollHeights: number[] = [];
 let scrollHeightDescriptor: PropertyDescriptor | undefined;
 
 async function flushContextSearch() {
+  await vi.advanceTimersByTimeAsync(32);
+  await vi.dynamicImportSettled();
+  await Promise.resolve();
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
 }
 
 async function flushPasteTasks() {
+  await vi.advanceTimersByTimeAsync(32);
+  await vi.dynamicImportSettled();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function flushToolbarLoad() {
+  await vi.advanceTimersByTimeAsync(32);
+  await vi.dynamicImportSettled();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function requestComposerChrome(view: ReturnType<typeof render>) {
+  const composer = view.container.querySelector(".chat-composer");
+  expect(composer).not.toBeNull();
+  await fireEvent.pointerEnter(composer as HTMLElement);
+  await fireEvent.focusIn(view.getByRole("textbox"));
+  await flushToolbarLoad();
 }
 
 function placeEditableCaret(element: HTMLElement, offset: number) {
@@ -143,7 +164,8 @@ function composerText(input: HTMLElement): string {
 }
 
 async function openComposerActionMenu(view: ReturnType<typeof render>) {
-  await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
+  await requestComposerChrome(view);
+  await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
 }
 
 function createTextPasteEvent(text: string, html = ""): ClipboardEvent {
@@ -290,7 +312,7 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "参考 @read");
     await flushContextSearch();
-    expect(view.getAllByText("README.md").length).toBeGreaterThan(0);
+    await view.findByText("README.md");
 
     await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
@@ -304,6 +326,27 @@ describe("ChatComposer", () => {
     expect(composerText(input)).toContain("README.md");
     expect(composerText(input)).not.toContain("D:\\PROJECT\\workspace\\Lilia\\README.md");
     expect(composerText(input)).not.toContain("@read");
+  });
+
+  it("@ 搜索会在首帧后再触发上下文查询，避免阻塞当前输入事件", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+
+    mockInvoke.mockClear();
+    await setComposerText(view, "参考 @read");
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_search_context_attachments")).toBe(false);
+
+    await flushContextSearch();
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_search_context_attachments")).toBe(true);
+    });
+    expect(await view.findByText("README.md")).toBeInTheDocument();
   });
 
 
@@ -324,7 +367,7 @@ describe("ChatComposer", () => {
 
     expect(view.emitted("add-context-attachment")).toBeUndefined();
     expect(composerText(input)).toBe("@big-dir/");
-    expect(view.getByText("inside.md")).toBeInTheDocument();
+    expect(await view.findByText("inside.md")).toBeInTheDocument();
   });
 
 
@@ -341,7 +384,7 @@ describe("ChatComposer", () => {
     await setComposerText(view, "@D:\\PROJECT\\workspace\\Lilia\\missing.md");
     await flushContextSearch();
 
-    expect(view.getByText(/路径不存在/)).toBeInTheDocument();
+    expect(await view.findByText(/路径不存在/)).toBeInTheDocument();
     await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
     expect(view.emitted("add-context-attachment")).toBeUndefined();
@@ -359,7 +402,7 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "@zzzz");
     await flushContextSearch();
-    expect(view.getByText("没有匹配的文件或目录")).toBeInTheDocument();
+    expect(await view.findByText("没有匹配的文件或目录")).toBeInTheDocument();
 
     await setComposerText(view, "@zzzzz");
     await waitFor(() => {
@@ -384,7 +427,7 @@ describe("ChatComposer", () => {
     });
     await setComposerText(view, "@");
     await flushContextSearch();
-    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+    expect(await view.findByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
   });
 
   it("@ 路径型无结果继续输入时不会自动收起搜索面板", async () => {
@@ -398,11 +441,11 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "@dist/not-there");
     await flushContextSearch();
-    expect(view.getByText("没有匹配的文件或目录")).toBeInTheDocument();
+    expect(await view.findByText("没有匹配的文件或目录")).toBeInTheDocument();
 
     await setComposerText(view, "@dist/not-there-more");
     await flushContextSearch();
-    expect(view.getByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
+    expect(await view.findByRole("listbox", { name: "文件上下文搜索" })).toBeInTheDocument();
   });
 
   it("输入 / 时展示斜杠命令并可选择执行", async () => {
@@ -418,8 +461,8 @@ describe("ChatComposer", () => {
     await setComposerText(view, "/he");
     await flushContextSearch();
 
-    expect(view.getByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
-    expect(view.getByText("/help")).toBeInTheDocument();
+    expect(await view.findByRole("listbox", { name: "斜杠命令" })).toBeInTheDocument();
+    expect(await view.findByText("/help")).toBeInTheDocument();
 
     await fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
@@ -610,7 +653,8 @@ describe("ChatComposer", () => {
       state: baseState,
       attachments: [pastedAttachment],
     });
-    expect(view.getByLabelText("图片预览").querySelector("img")).toHaveAttribute(
+    await flushToolbarLoad();
+    expect((await view.findByLabelText("图片预览")).querySelector("img")).toHaveAttribute(
       "src",
       "asset://C:/Users/mock/.lilia/cache/clipboard-images/clipboard-1.png",
     );
@@ -635,7 +679,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    const preview = view.getByLabelText("图片预览");
+    await flushToolbarLoad();
+    const preview = await view.findByLabelText("图片预览");
     expect(preview.querySelector(".chat-attachment-chip--image-preview")).not.toBeNull();
     expect(preview.querySelector(".chat-attachment-chip__thumb")).not.toBeNull();
     expect(preview.querySelector(".chat-attachment-chip__name")).toBeNull();
@@ -683,7 +728,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: "更多输入操作" })).toHaveAttribute(
+    await requestComposerChrome(view);
+    expect(await view.findByRole("button", { name: "更多输入操作" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -804,7 +850,8 @@ describe("ChatComposer", () => {
         },
       });
 
-      await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }), {
+      await requestComposerChrome(view);
+      await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
         clientX: 112,
         clientY: 214,
       });
@@ -905,7 +952,8 @@ describe("ChatComposer", () => {
         },
       });
 
-      await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }), {
+      await requestComposerChrome(view);
+      await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }), {
         clientX: 112,
         clientY: 38,
       });
@@ -973,7 +1021,7 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "#Claude");
     await flushContextSearch();
-    await fireEvent.click(view.getAllByRole("option")[0]);
+    await fireEvent.click((await view.findAllByRole("option"))[0]);
     await fireEvent.click(view.getByRole("button", { name: "发送" }));
 
     expect(view.emitted("send")?.[0]?.[2]?.[0]).toEqual(expect.objectContaining({
@@ -981,6 +1029,23 @@ describe("ChatComposer", () => {
       title: expect.any(String),
       route: expect.any(String),
     }));
+  });
+
+  it("快速从上下文引用切到斜杠命令时只按最新输入加载控制器", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: codexState,
+        attachments: [],
+        projectCwd,
+      },
+    });
+
+    await setComposerText(view, "@read");
+    await setComposerText(view, "/re");
+    await flushContextSearch();
+
+    expect(await view.findByRole("option", { name: /\/review/ })).toBeInTheDocument();
+    expect(view.queryByText("README.md")).toBeNull();
   });
 
   it("计划模式独立于执行权限切换", async () => {
@@ -1037,9 +1102,9 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "/re");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/review/ }));
 
-    expect(view.getByRole("option", { name: /未提交改动/ })).toBeInTheDocument();
+    expect(await view.findByRole("option", { name: /未提交改动/ })).toBeInTheDocument();
     await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
@@ -1063,8 +1128,8 @@ describe("ChatComposer", () => {
     await setComposerText(view, "重点看权限边界\n/re");
     await flushContextSearch();
 
-    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/review/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]).toEqual([
       "重点看权限边界",
@@ -1088,12 +1153,12 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "/re");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
-    await fireEvent.click(view.getByRole("option", { name: /对比分支/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/review/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /对比分支/ }));
     await setComposerText(view, "/re");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
-    await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/review/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /指定提交/ }));
 
     expect(view.emitted("start-lilia-review")?.[0]?.[3]).toEqual({
       type: "baseBranch",
@@ -1117,8 +1182,8 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "/fi");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "",
@@ -1134,8 +1199,8 @@ describe("ChatComposer", () => {
     });
     await setComposerText(view, "/fi");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /未提交改动/ }));
     expect(view.emitted("start-lilia-fix-suggestion")?.[1]).toEqual([
       "",
       [],
@@ -1155,8 +1220,8 @@ describe("ChatComposer", () => {
     await setComposerText(view, "优先给最小修复\n/fi");
     await flushContextSearch();
 
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /未提交改动/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
@@ -1180,12 +1245,12 @@ describe("ChatComposer", () => {
 
     await setComposerText(view, "/fi");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /对比分支/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /对比分支/ }));
     await setComposerText(view, "/fi");
     await flushContextSearch();
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /指定提交/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /指定提交/ }));
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]?.[3]).toEqual({
       type: "baseBranch",
@@ -1235,7 +1300,8 @@ describe("ChatComposer", () => {
     });
 
     expect(view.queryByTitle("压缩上下文")).toBeNull();
-    const compactButton = view.getByRole("button", { name: /压缩上下文/ });
+    await requestComposerChrome(view);
+    const compactButton = await view.findByRole("button", { name: /压缩上下文/ });
     expect(compactButton).not.toBeDisabled();
     expect(compactButton).toHaveClass("chat-composer__context-action");
     await fireEvent.click(compactButton);
@@ -1246,7 +1312,8 @@ describe("ChatComposer", () => {
       state: codexState,
       attachments: [],
     });
-    await fireEvent.click(view.getByRole("button", { name: /压缩上下文/ }));
+    await requestComposerChrome(view);
+    await fireEvent.click(await view.findByRole("button", { name: /压缩上下文/ }));
     expect(view.emitted("start-lilia-compact")?.length).toBe(2);
   });
 
@@ -1268,10 +1335,11 @@ describe("ChatComposer", () => {
       },
     });
 
-    const compactButton = view.getByRole("button", { name: /已用 7,168 tokens/ });
+    await requestComposerChrome(view);
+    const compactButton = await view.findByRole("button", { name: /已用 7,168 tokens/ });
     expect(compactButton).toHaveClass("chat-context-ring--warn");
     expect(compactButton).toHaveStyle({ "--quota-progress": "87.5" });
-    const contextCard = view.getByRole("tooltip");
+    const contextCard = await view.findByRole("tooltip");
     expect(contextCard).toHaveTextContent("已用");
     expect(contextCard).toHaveTextContent("占用");
     expect(contextCard).toHaveTextContent("87.5%");
@@ -1295,10 +1363,11 @@ describe("ChatComposer", () => {
       },
     });
 
-    const compactButton = view.getByRole("button", { name: /占用比例未知/ });
+    await requestComposerChrome(view);
+    const compactButton = await view.findByRole("button", { name: /占用比例未知/ });
     expect(compactButton).toHaveClass("chat-context-ring--empty");
     expect(compactButton).toHaveStyle({ "--quota-progress": "0" });
-    expect(view.getByRole("tooltip")).toHaveTextContent("provider 未返回上下文上限");
+    expect(await view.findByRole("tooltip")).toHaveTextContent("provider 未返回上下文上限");
     await fireEvent.click(compactButton);
     expect(view.emitted("start-lilia-compact")?.length).toBe(1);
   });
@@ -1364,7 +1433,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
+    await requestComposerChrome(view);
+    expect(await view.findByRole("button", { name: /压缩上下文/ })).toBeDisabled();
 
     await view.rerender({
       state: baseState,
@@ -1372,7 +1442,8 @@ describe("ChatComposer", () => {
       sending: false,
       compactDisabled: true,
     });
-    expect(view.getByRole("button", { name: /压缩上下文/ })).toBeDisabled();
+    await requestComposerChrome(view);
+    expect(await view.findByRole("button", { name: /压缩上下文/ })).toBeDisabled();
   });
 
   it("Codex 后端不再从工具栏清理后台终端", async () => {
@@ -1466,7 +1537,7 @@ describe("ChatComposer", () => {
     });
 
     expect(view.queryByRole("textbox")).toBeNull();
-    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
+    await fireEvent.click(await view.findByRole("radio", { name: "其他" }));
     const input = view.getByRole("textbox");
     const entryRow = input.closest(".chat-composer__entry-row");
     expect(entryRow).not.toBeNull();
@@ -1499,9 +1570,10 @@ describe("ChatComposer", () => {
       attachments: [],
       toolConsent,
     });
-    await fireEvent.update(view.getByRole("textbox"), "先不要写这个文件");
+    await vi.dynamicImportSettled();
+    await fireEvent.update(await view.findByRole("textbox"), "先不要写这个文件");
 
-    expect(view.getByRole("button", { name: "同意" })).toBeDisabled();
+    expect(await view.findByRole("button", { name: "同意" })).toBeDisabled();
     expect(view.getByRole("button", { name: "修改" })).toBeDisabled();
 
     await vi.advanceTimersByTimeAsync(320);
@@ -1519,8 +1591,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    expect(view.getByRole("button", { name: "忽略" })).toBeDisabled();
-    await fireEvent.update(view.getByRole("textbox"), "先不要写这个文件");
+    expect(await view.findByRole("button", { name: "忽略" })).toBeDisabled();
+    await fireEvent.update(await view.findByRole("textbox"), "先不要写这个文件");
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([
@@ -1539,8 +1611,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
-    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
+    await fireEvent.click(await view.findByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(await view.findByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([
@@ -1559,8 +1631,8 @@ describe("ChatComposer", () => {
       },
     });
 
-    await fireEvent.click(view.getByRole("button", { name: "编辑完整命令" }));
-    await fireEvent.update(view.getByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
+    await fireEvent.click(await view.findByRole("button", { name: "编辑完整命令" }));
+    await fireEvent.update(await view.findByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     expect(view.emitted("resolve-tool-consent")?.[0]).toEqual([

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, ref, watch } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
 import {
   AlertTriangle,
   ChevronDown,
@@ -10,15 +10,31 @@ import type { AgentInteractionSettings } from "@lilia/contracts";
 import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
+import {
+  beginPerfStage,
+  cancelIdleRun,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../../utils/perf";
 
-const SubagentCatalogSection = defineAsyncComponent(() => import("./SubagentCatalogSection.vue"));
+const SubagentCatalogSection = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "settings.agent.subagents.load",
+    async () => (await import("./SubagentCatalogSection.vue")).default as Component,
+  ),
+});
 
 const agentInteractionStore = useAgentInteractionSettings();
 const agentInteraction = agentInteractionStore.settings;
 const savingAgentInteraction = ref(false);
 const agentInteractionError = ref<string | null>(null);
 const subagentCardExpanded = ref(false);
+const subagentCatalogReady = ref(false);
 const subagentDetailsId = "agent-subagent-mode-details";
+let subagentCatalogIdleHandle: number | null = null;
+let subagentCatalogMountSeq = 0;
 
 async function loadAgentInteraction() {
   try {
@@ -96,6 +112,27 @@ function toggleSubagentCard() {
   subagentCardExpanded.value = !subagentCardExpanded.value;
 }
 
+function scheduleSubagentCatalogMount() {
+  if (subagentCatalogReady.value) return;
+  const seq = ++subagentCatalogMountSeq;
+  const stage = beginPerfStage("settings.agent.subagents.mount");
+  scheduleAfterPaint(() => {
+    if (seq !== subagentCatalogMountSeq || subagentCatalogReady.value) {
+      stage.end("cancelled");
+      return;
+    }
+    subagentCatalogIdleHandle = runWhenIdle(() => {
+      subagentCatalogIdleHandle = null;
+      if (seq !== subagentCatalogMountSeq || subagentCatalogReady.value) {
+        stage.end("cancelled");
+        return;
+      }
+      subagentCatalogReady.value = true;
+      stage.end("idle");
+    });
+  });
+}
+
 watch(
   () => agentInteraction.value.subagentMode.enabled,
   (enabled) => {
@@ -104,7 +141,17 @@ watch(
   { immediate: true },
 );
 
-onMounted(loadAgentInteraction);
+onMounted(() => {
+  void loadAgentInteraction();
+  scheduleSubagentCatalogMount();
+});
+
+onBeforeUnmount(() => {
+  subagentCatalogMountSeq += 1;
+  if (subagentCatalogIdleHandle === null) return;
+  cancelIdleRun(subagentCatalogIdleHandle);
+  subagentCatalogIdleHandle = null;
+});
 </script>
 
 <template>
@@ -331,9 +378,17 @@ onMounted(loadAgentInteraction);
       </div>
     </section>
 
-    <Suspense>
+    <Suspense v-if="subagentCatalogReady">
       <SubagentCatalogSection />
     </Suspense>
+    <section v-else class="subagent-section subagent-section--placeholder" aria-busy="true">
+      <div class="subagent-section__header">
+        <div class="subagent-section__title">
+          <span>自定义 Agent</span>
+        </div>
+      </div>
+      <div class="subagent-empty">首屏加载后补齐自定义 Agent 目录…</div>
+    </section>
 
     <div v-if="agentInteractionError" class="conn-banner conn-banner--err">
       <AlertTriangle :size="16" aria-hidden="true" />
@@ -401,5 +456,9 @@ onMounted(loadAgentInteraction);
 
 .subagent-mode-card__details .settings-row--nested {
   padding-left: 0;
+}
+
+.subagent-section--placeholder {
+  opacity: 0.78;
 }
 </style>

@@ -17,6 +17,7 @@ import {
   type ComposerPart,
 } from "./composerParts";
 import { isImageAttachment } from "./imageViewer";
+import { measurePerfSync } from "../../utils/perf";
 
 type InlineIconName = "file" | "folder" | "image" | "paperclip" | "x";
 
@@ -67,23 +68,10 @@ export function useComposerRichInput(options: {
     return composerPartsHaveConversationReference(composerParts.value, taskId);
   }
 
-  function attachmentFromComposerOrProps(id: string): ChatAttachment | null {
-    const fromProps = options.attachments.value.find((attachment) => attachment.id === id);
-    if (fromProps) return fromProps;
-    const fromComposer = composerParts.value.find((part) =>
-      part.type === "attachment" && part.attachment.id === id
-    );
-    return fromComposer?.type === "attachment" ? fromComposer.attachment : null;
-  }
-
-  function conversationReferenceFromComposerOrProps(taskId: string): ChatConversationReference | null {
-    const fromProps = options.conversationReferences?.value.find((reference) => reference.taskId === taskId);
-    if (fromProps) return fromProps;
-    const fromComposer = composerParts.value.find((part) =>
-      part.type === "conversationReference" && part.reference.taskId === taskId
-    );
-    return fromComposer?.type === "conversationReference" ? fromComposer.reference : null;
-  }
+  type ComposerLookupState = {
+    attachmentById: Map<string, ChatAttachment>;
+    conversationReferenceByTaskId: Map<string, ChatConversationReference>;
+  };
 
   function attachmentIconName(attachment: ChatAttachment): InlineIconName {
     if (isImageAttachment(attachment)) return "image";
@@ -203,19 +191,21 @@ export function useComposerRichInput(options: {
   }
 
   function renderFromParts() {
-    const editor = richEditor.value;
-    if (!editor) return;
-    const fragment = document.createDocumentFragment();
-    for (const part of composerParts.value) {
-      if (part.type === "text") {
-        if (part.text) fragment.append(document.createTextNode(part.text));
-      } else if (part.type === "attachment") {
-        fragment.append(createAttachmentReferenceElement(part.attachment));
-      } else {
-        fragment.append(createConversationReferenceElement(part.reference));
+    measurePerfSync("chat-composer.rich-input.render-parts", () => {
+      const editor = richEditor.value;
+      if (!editor) return;
+      const fragment = document.createDocumentFragment();
+      for (const part of composerParts.value) {
+        if (part.type === "text") {
+          if (part.text) fragment.append(document.createTextNode(part.text));
+        } else if (part.type === "attachment") {
+          fragment.append(createAttachmentReferenceElement(part.attachment));
+        } else {
+          fragment.append(createConversationReferenceElement(part.reference));
+        }
       }
-    }
-    editor.replaceChildren(fragment);
+      editor.replaceChildren(fragment);
+    }, { detail: `${composerParts.value.length}` });
   }
 
   function nodeComposerLength(node: Node): number {
@@ -313,7 +303,7 @@ export function useComposerRichInput(options: {
     });
   }
 
-  function collectPartsFromNode(node: Node, parts: ComposerPart[]) {
+  function collectPartsFromNode(node: Node, parts: ComposerPart[], lookups: ComposerLookupState) {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent ?? "";
       if (text) parts.push(textPart(text));
@@ -322,13 +312,13 @@ export function useComposerRichInput(options: {
     if (!(node instanceof HTMLElement)) return;
     const attachmentId = node.dataset.attachmentId;
     if (attachmentId) {
-      const attachment = attachmentFromComposerOrProps(attachmentId);
+      const attachment = lookups.attachmentById.get(attachmentId) ?? null;
       if (attachment) parts.push(attachmentPart(attachment));
       return;
     }
     const conversationReferenceTaskId = node.dataset.conversationReferenceTaskId;
     if (conversationReferenceTaskId) {
-      const reference = conversationReferenceFromComposerOrProps(conversationReferenceTaskId);
+      const reference = lookups.conversationReferenceByTaskId.get(conversationReferenceTaskId) ?? null;
       if (reference) parts.push(conversationReferencePart(reference));
       return;
     }
@@ -337,8 +327,30 @@ export function useComposerRichInput(options: {
       return;
     }
     for (const child of Array.from(node.childNodes)) {
-      collectPartsFromNode(child, parts);
+      collectPartsFromNode(child, parts, lookups);
     }
+  }
+
+  function readComposerLookupState(): ComposerLookupState {
+    const attachmentById = new Map<string, ChatAttachment>();
+    for (const attachment of options.attachments.value) {
+      attachmentById.set(attachment.id, attachment);
+    }
+    const conversationReferenceByTaskId = new Map<string, ChatConversationReference>();
+    for (const reference of options.conversationReferences?.value ?? []) {
+      conversationReferenceByTaskId.set(reference.taskId, reference);
+    }
+    for (const part of composerParts.value) {
+      if (part.type === "attachment") {
+        attachmentById.set(part.attachment.id, part.attachment);
+      } else if (part.type === "conversationReference") {
+        conversationReferenceByTaskId.set(part.reference.taskId, part.reference);
+      }
+    }
+    return {
+      attachmentById,
+      conversationReferenceByTaskId,
+    };
   }
 
   function isBrowserEmptyEditor(editor: HTMLElement): boolean {
@@ -346,16 +358,19 @@ export function useComposerRichInput(options: {
   }
 
   function readPartsFromEditor(): ComposerPart[] {
-    const editor = richEditor.value;
-    if (!editor) return composerParts.value;
-    if (isBrowserEmptyEditor(editor)) {
-      return [textPart("")];
-    }
-    const parts: ComposerPart[] = [];
-    for (const child of Array.from(editor.childNodes)) {
-      collectPartsFromNode(child, parts);
-    }
-    return normalizeComposerParts(parts);
+    return measurePerfSync("chat-composer.rich-input.read-parts", () => {
+      const editor = richEditor.value;
+      if (!editor) return composerParts.value;
+      if (isBrowserEmptyEditor(editor)) {
+        return [textPart("")];
+      }
+      const parts: ComposerPart[] = [];
+      const lookups = readComposerLookupState();
+      for (const child of Array.from(editor.childNodes)) {
+        collectPartsFromNode(child, parts, lookups);
+      }
+      return normalizeComposerParts(parts);
+    }, { detail: `${richEditor.value?.childNodes.length ?? 0}` });
   }
 
   function syncRemovedInlineAttachments(nextParts: ComposerPart[]) {
@@ -388,12 +403,19 @@ export function useComposerRichInput(options: {
     inputSelection.value = captureSelectionOffset();
   }
 
-  function replaceRange(start: number, end: number, replacement: ComposerPart[]): number {
+  function replaceRange(
+    start: number,
+    end: number,
+    replacement: ComposerPart[],
+    options: { commit?: boolean } = {},
+  ): number {
     const next = replaceComposerPartsRange(composerParts.value, start, end, replacement);
     composerParts.value = next.parts;
     inputSelection.value = next.cursor;
-    renderFromParts();
-    focusAt(inputSelection.value);
+    if (options.commit !== false) {
+      renderFromParts();
+      focusAt(inputSelection.value);
+    }
     return inputSelection.value;
   }
 
@@ -419,21 +441,28 @@ export function useComposerRichInput(options: {
     focusAt(inputSelection.value);
   }
 
-  function insertAttachmentReference(attachment: ChatAttachment, offset = inputSelection.value): boolean {
+  function insertAttachmentReference(
+    attachment: ChatAttachment,
+    offset = inputSelection.value,
+    options: { commit?: boolean } = {},
+  ): boolean {
     if (attachment.exists === false || hasAttachmentPath(attachment.path)) return false;
     const [before, after] = splitComposerPartsAt(composerParts.value, offset);
     const replacement: ComposerPart[] = [attachmentPart(attachment)];
     if (!partsStartWithWhitespace(after)) replacement.push(textPart(" "));
     composerParts.value = normalizeComposerParts([...before, ...replacement, ...after]);
     inputSelection.value = composerPartsLength([...before, ...replacement]);
-    renderFromParts();
-    focusAt(inputSelection.value);
+    if (options.commit !== false) {
+      renderFromParts();
+      focusAt(inputSelection.value);
+    }
     return true;
   }
 
   function insertConversationReference(
     reference: ChatConversationReference,
     offset = inputSelection.value,
+    options: { commit?: boolean } = {},
   ): boolean {
     if (hasConversationReference(reference.taskId)) return false;
     const [before, after] = splitComposerPartsAt(composerParts.value, offset);
@@ -441,8 +470,10 @@ export function useComposerRichInput(options: {
     if (!partsStartWithWhitespace(after)) replacement.push(textPart(" "));
     composerParts.value = normalizeComposerParts([...before, ...replacement, ...after]);
     inputSelection.value = composerPartsLength([...before, ...replacement]);
-    renderFromParts();
-    focusAt(inputSelection.value);
+    if (options.commit !== false) {
+      renderFromParts();
+      focusAt(inputSelection.value);
+    }
     return true;
   }
 
@@ -512,45 +543,59 @@ export function useComposerRichInput(options: {
       options.appendAttachmentsToEndKey.value,
     ] as const,
     () => {
-      if (options.hasPending.value) return;
-      const nextAppendToEndKey = options.appendAttachmentsToEndKey.value;
-      const shouldAppendToEnd = nextAppendToEndKey !== observedAppendToEndKey;
-      observedAppendToEndKey = nextAppendToEndKey;
-      const incoming = options.attachments.value;
-      const incomingPaths = new Set(incoming.map((attachment) => attachment.path));
-      const incomingConversationReferences = options.conversationReferences?.value;
-      const incomingConversationReferenceIds = new Set(
-        (incomingConversationReferences ?? []).map((reference) => reference.taskId),
-      );
-      const filtered = composerParts.value.filter((part) =>
-        part.type === "text" ||
-        (part.type === "attachment" && incomingPaths.has(part.attachment.path)) ||
-        (!incomingConversationReferences || part.type !== "conversationReference" ||
-          incomingConversationReferenceIds.has(part.reference.taskId))
-      );
-      if (filtered.length !== composerParts.value.length) {
-        composerParts.value = normalizeComposerParts(filtered);
-        inputSelection.value = Math.min(inputSelection.value, composerPartsLength(composerParts.value));
-        renderFromParts();
-      }
-
-      let offset = shouldAppendToEnd
-        ? composerPartsLength(composerParts.value)
-        : externalInsertionOffset();
-      for (const attachment of incoming) {
-        if (hasAttachmentPath(attachment.path)) continue;
-        if (insertAttachmentReference(attachment, offset)) {
-          offset = inputSelection.value;
+      measurePerfSync("chat-composer.rich-input.external-sync", () => {
+        if (options.hasPending.value) return;
+        const nextAppendToEndKey = options.appendAttachmentsToEndKey.value;
+        const shouldAppendToEnd = nextAppendToEndKey !== observedAppendToEndKey;
+        observedAppendToEndKey = nextAppendToEndKey;
+        const incoming = options.attachments.value;
+        const incomingPaths = new Set(incoming.map((attachment) => attachment.path));
+        const incomingConversationReferences = options.conversationReferences?.value;
+        const incomingConversationReferenceIds = new Set(
+          (incomingConversationReferences ?? []).map((reference) => reference.taskId),
+        );
+        let didRender = false;
+        let didInsert = false;
+        const filtered = composerParts.value.filter((part) =>
+          part.type === "text" ||
+          (part.type === "attachment" && incomingPaths.has(part.attachment.path)) ||
+          (!incomingConversationReferences || part.type !== "conversationReference" ||
+            incomingConversationReferenceIds.has(part.reference.taskId))
+        );
+        if (filtered.length !== composerParts.value.length) {
+          composerParts.value = normalizeComposerParts(filtered);
+          inputSelection.value = Math.min(inputSelection.value, composerPartsLength(composerParts.value));
+          didRender = true;
         }
-      }
-      if (incomingConversationReferences) {
-        for (const reference of incomingConversationReferences) {
-          if (hasConversationReference(reference.taskId)) continue;
-          if (insertConversationReference(reference, offset)) {
+
+        let offset = shouldAppendToEnd
+          ? composerPartsLength(composerParts.value)
+          : externalInsertionOffset();
+        for (const attachment of incoming) {
+          if (hasAttachmentPath(attachment.path)) continue;
+          if (insertAttachmentReference(attachment, offset, { commit: false })) {
             offset = inputSelection.value;
+            didRender = true;
+            didInsert = true;
           }
         }
-      }
+        if (incomingConversationReferences) {
+          for (const reference of incomingConversationReferences) {
+            if (hasConversationReference(reference.taskId)) continue;
+            if (insertConversationReference(reference, offset, { commit: false })) {
+              offset = inputSelection.value;
+              didRender = true;
+              didInsert = true;
+            }
+          }
+        }
+        if (didRender) {
+          renderFromParts();
+          if (didInsert) focusAt(inputSelection.value);
+        }
+      }, {
+        detail: `${options.attachments.value.length}:${options.conversationReferences?.value.length ?? 0}`,
+      });
     },
     { immediate: true },
   );

@@ -1,11 +1,20 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from "vue";
 import type {
   AgentTimelineDisplayDetail,
   AgentTimelineDisplayField,
   AgentTimelineDisplayListItem,
 } from "@lilia/contracts";
-import MarkdownBlock from "./MarkdownBlock.vue";
 import type { TimelineMarkdownView } from "./timelineDisplay";
+import { measurePerfAsync } from "../../utils/perf";
+
+const MarkdownBlock = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.markdown.load",
+    async () => (await import("./MarkdownBlock.vue")).default,
+  ),
+});
 
 defineProps<{
   details: AgentTimelineDisplayDetail[];

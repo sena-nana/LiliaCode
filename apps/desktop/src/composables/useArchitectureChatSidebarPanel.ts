@@ -1,5 +1,4 @@
 import { Network } from "lucide-vue-next";
-import ArchitectureSidebarPanel from "../components/chat/ArchitectureSidebarPanel.vue";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerArchitectureChatSidebarPanel(): () => void {
@@ -8,6 +7,6 @@ export function registerArchitectureChatSidebarPanel(): () => void {
     title: "架构图",
     icon: Network,
     order: 20,
-    component: ArchitectureSidebarPanel,
+    loader: async () => (await import("../components/chat/ArchitectureSidebarPanel.vue")).default,
   });
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ChevronRight,
@@ -8,17 +8,31 @@ import {
   X,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getProject } from "../services/projectsStore";
-import {
-  getOrphanConversation,
-  getTask,
-  resolveConversationRouteState,
-} from "../services/tasksStore";
 import { focusMainWindow } from "../services/popupWindows";
+import { measurePerfAsync } from "../utils/perf";
 
 const route = useRoute();
 const router = useRouter();
 const appWindow = getCurrentWindow();
+
+interface PopupRouteState {
+  isDraftRoute: boolean;
+  isLiveDraft: boolean;
+  isLostDraft: boolean;
+}
+
+interface PopupStoreBindings {
+  getProject: (projectId: string) => { name: string } | undefined;
+  getOrphanConversation: (taskId: string) => { title: string } | undefined;
+  getTask: (projectId: string, taskId: string) => { title: string } | undefined;
+  resolveConversationRouteState: (
+    projectId: string | null | undefined,
+    taskId: string | null | undefined,
+  ) => PopupRouteState;
+}
+
+const popupStores = shallowRef<PopupStoreBindings | null>(null);
+let popupStoresPromise: Promise<PopupStoreBindings> | null = null;
 
 function paramAsString(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
@@ -28,8 +42,67 @@ function paramAsString(value: string | string[] | undefined): string | undefined
 const projectId = computed(() => paramAsString(route.params.projectId));
 const taskId = computed(() => paramAsString(route.params.taskId));
 
+function inferDraftRouteState(
+  projectIdValue: string | undefined,
+  taskIdValue: string | undefined,
+): PopupRouteState {
+  if (!taskIdValue) {
+    return {
+      isDraftRoute: false,
+      isLiveDraft: false,
+      isLostDraft: false,
+    };
+  }
+  const isDraftRoute = projectIdValue
+    ? taskIdValue.startsWith("t-draft-")
+    : taskIdValue.startsWith("o-draft-");
+  return {
+    isDraftRoute,
+    isLiveDraft: false,
+    isLostDraft: false,
+  };
+}
+
+function ensurePopupStoresLoaded(): Promise<PopupStoreBindings> {
+  if (popupStores.value) return Promise.resolve(popupStores.value);
+  if (popupStoresPromise) return popupStoresPromise;
+  popupStoresPromise = measurePerfAsync(
+    "popup-titlebar.stores.load",
+    async () => {
+      const [projectsStore, tasksStore] = await Promise.all([
+        import("../services/projectsStore"),
+        import("../services/tasksStore"),
+      ]);
+      const bindings: PopupStoreBindings = {
+        getProject: projectsStore.getProject,
+        getOrphanConversation: tasksStore.getOrphanConversation,
+        getTask: tasksStore.getTask,
+        resolveConversationRouteState: tasksStore.resolveConversationRouteState,
+      };
+      popupStores.value = bindings;
+      return bindings;
+    },
+    { detail: route.fullPath },
+  ).finally(() => {
+    popupStoresPromise = null;
+  });
+  return popupStoresPromise;
+}
+
+watch(
+  () => [projectId.value, taskId.value] as const,
+  ([projectIdValue, taskIdValue]) => {
+    if (!projectIdValue && !taskIdValue) return;
+    void ensurePopupStoresLoaded().catch((err) => {
+      console.error("[popup-titlebar] load stores failed", err);
+    });
+  },
+  { immediate: true },
+);
+
 const routeState = computed(() =>
-  resolveConversationRouteState(projectId.value, taskId.value),
+  popupStores.value?.resolveConversationRouteState(projectId.value, taskId.value) ??
+    inferDraftRouteState(projectId.value, taskId.value),
 );
 
 interface Crumb {
@@ -40,16 +113,17 @@ interface Crumb {
 const crumbs = computed<Crumb[]>(() => {
   const pid = projectId.value;
   const tid = taskId.value;
+  const stores = popupStores.value;
 
   if (pid) {
-    const project = getProject(pid);
+    const project = stores?.getProject(pid);
     if (!tid || routeState.value.isLiveDraft || routeState.value.isLostDraft) {
       return [
         { text: project?.name ?? "未知项目", muted: true },
         { text: "新对话" },
       ];
     }
-    const task = getTask(pid, tid);
+    const task = stores?.getTask(pid, tid);
     return [
       { text: project?.name ?? "未知项目", muted: true },
       { text: task?.title ?? "未知任务" },
@@ -57,7 +131,7 @@ const crumbs = computed<Crumb[]>(() => {
   }
 
   if (tid) {
-    const orphan = getOrphanConversation(tid);
+    const orphan = stores?.getOrphanConversation(tid);
     return [
       { text: "收集箱", muted: true },
       {
@@ -97,6 +171,13 @@ async function onNewChat() {
 }
 
 async function onFocusMain() {
+  if (taskId.value) {
+    try {
+      await ensurePopupStoresLoaded();
+    } catch (err) {
+      console.error("[popup-titlebar] ensure stores before focus main failed", err);
+    }
+  }
   await focusMainWindow(mainRouteForPopup());
   await appWindow.close();
 }

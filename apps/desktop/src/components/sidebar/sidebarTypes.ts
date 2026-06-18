@@ -1,8 +1,3 @@
-import type { Task } from "@lilia/contracts";
+import type { SidebarConversationSummary } from "@lilia/contracts";
 
-export interface UnifiedSidebarConversation {
-  task: Pick<Task, "id" | "title" | "pinned" | "createdAt">;
-  projectId: string | null;
-  projectName: string | null;
-  route: string;
-}
+export interface UnifiedSidebarConversation extends SidebarConversationSummary {}

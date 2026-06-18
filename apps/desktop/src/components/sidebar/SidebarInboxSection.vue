@@ -12,6 +12,7 @@ import SidebarTaskRow from "./SidebarTaskRow.vue";
 
 defineProps<{
   activityForTask: (taskId: string) => ConversationActivity | null;
+  loaded: boolean;
   orphans: OrphanConversation[];
   orphansExpanded: boolean;
   orphanDropZoneClass: Record<string, boolean>;
@@ -68,7 +69,8 @@ function isActiveOrphan(taskId: string) {
             :tree-row-state-class="treeRowStateClass"
             @error="emit('error', $event)"
           />
-          <p v-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
+          <p v-if="!loaded" class="sb-tree__empty">加载中...</p>
+          <p v-else-if="orphans.length === 0" class="sb-tree__empty">没有未绑定的对话</p>
         </div>
       </div>
     </div>

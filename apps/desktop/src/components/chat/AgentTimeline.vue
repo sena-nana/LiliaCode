@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import ChatBubble from "./ChatBubble.vue";
-import TimelineEntryItem from "./TimelineEntryItem.vue";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { processGroupEntries, type TimelineGroupEntry } from "./timelineEntries";
@@ -23,6 +22,15 @@ import {
 } from "./timelinePendingActions";
 import { useAgentTimelineEntries } from "./useAgentTimelineEntries";
 import { useTimelineRailMask } from "./useTimelineRailMask";
+import { measurePerfAsync } from "../../utils/perf";
+
+const TimelineEntryItem = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.entry-item.load",
+    async () => (await import("./TimelineEntryItem.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   events: AgentTimelineEvent[];

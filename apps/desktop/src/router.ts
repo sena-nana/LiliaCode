@@ -5,20 +5,72 @@ import {
   type RouterHistory,
 } from "vue-router";
 import { defineComponent, h } from "vue";
-import AppShell from "./layouts/AppShell.vue";
+import {
+  beginPerfStage,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "./utils/perf";
 
-const PopupShell = () => import("./layouts/PopupShell.vue");
-const ConversationStatusFloat = () => import("./pages/ConversationStatusFloat.vue");
-const loadTaskDetail = () => import("./pages/TaskDetail.vue");
+function loadRouteComponent<T>(name: string, loader: () => Promise<T>): () => Promise<T> {
+  return () => measurePerfAsync(
+    "router.component.load",
+    loader,
+    { detail: name },
+  );
+}
+
+const AppShell = loadRouteComponent(
+  "AppShell",
+  async () => (await import("./layouts/AppShell.vue")).default,
+);
+const PopupShell = loadRouteComponent(
+  "PopupShell",
+  async () => (await import("./layouts/PopupShell.vue")).default,
+);
+const ConversationStatusFloat = loadRouteComponent(
+  "ConversationStatusFloat",
+  async () => (await import("./pages/ConversationStatusFloat.vue")).default,
+);
+const loadTaskDetail = loadRouteComponent(
+  "TaskDetail",
+  async () => (await import("./pages/TaskDetail.vue")).default,
+);
 const TaskDetail = loadTaskDetail;
-const PopupDraftBoot = () => import("./pages/PopupDraftBoot.vue");
-const Settings = () => import("./pages/Settings.vue");
-const Automations = () => import("./pages/Automations.vue");
-const ProjectsOverview = () => import("./pages/project/ProjectsOverview.vue");
-const ProjectShell = () => import("./pages/project/ProjectShell.vue");
-const SessionsView = () => import("./pages/project/SessionsView.vue");
-const RoadmapView = () => import("./pages/project/RoadmapView.vue");
-const MemoryView = () => import("./pages/project/MemoryView.vue");
+let taskDetailPreloadPromise: Promise<unknown> | null = null;
+let taskDetailPreloadScheduled = false;
+const PopupDraftBoot = loadRouteComponent(
+  "PopupDraftBoot",
+  async () => (await import("./pages/PopupDraftBoot.vue")).default,
+);
+const Settings = loadRouteComponent(
+  "Settings",
+  async () => (await import("./pages/Settings.vue")).default,
+);
+const Automations = loadRouteComponent(
+  "Automations",
+  async () => (await import("./pages/Automations.vue")).default,
+);
+const ProjectsOverview = loadRouteComponent(
+  "ProjectsOverview",
+  async () => (await import("./pages/project/ProjectsOverview.vue")).default,
+);
+const ProjectShell = loadRouteComponent(
+  "ProjectShell",
+  async () => (await import("./pages/project/ProjectShell.vue")).default,
+);
+const SessionsView = loadRouteComponent(
+  "SessionsView",
+  async () => (await import("./pages/project/SessionsView.vue")).default,
+);
+const RoadmapView = loadRouteComponent(
+  "RoadmapView",
+  async () => (await import("./pages/project/RoadmapView.vue")).default,
+);
+const MemoryView = loadRouteComponent(
+  "MemoryView",
+  async () => (await import("./pages/project/MemoryView.vue")).default,
+);
 
 const Home = defineComponent({
   name: "LiliaHome",
@@ -47,7 +99,7 @@ function createDefaultHistory(): RouterHistory {
 }
 
 export function createLiliaRouter(history: RouterHistory = createDefaultHistory()) {
-  return createRouter({
+  const router = createRouter({
     history,
     routes: [
       {
@@ -147,10 +199,45 @@ export function createLiliaRouter(history: RouterHistory = createDefaultHistory(
       { path: "/:pathMatch(.*)*", redirect: "/" },
     ],
   });
+  let navigationStage: ReturnType<typeof beginPerfStage> | null = null;
+  router.beforeEach((to) => {
+    navigationStage?.end("superseded");
+    navigationStage = beginPerfStage("route.switch", { detail: to.fullPath });
+  });
+  router.afterEach(() => {
+    navigationStage?.end("resolved");
+    navigationStage = null;
+  });
+  return router;
 }
 
 export function preloadTaskDetailPage(): Promise<unknown> {
-  return loadTaskDetail();
+  if (!taskDetailPreloadPromise) {
+    taskDetailPreloadPromise = loadTaskDetail().catch((err) => {
+      taskDetailPreloadPromise = null;
+      throw err;
+    });
+  }
+  return taskDetailPreloadPromise;
+}
+
+export function scheduleTaskDetailPreload(detail = "intent"): void {
+  if (taskDetailPreloadPromise || taskDetailPreloadScheduled) return;
+  taskDetailPreloadScheduled = true;
+  scheduleAfterPaint(() => {
+    if (taskDetailPreloadPromise) {
+      taskDetailPreloadScheduled = false;
+      return;
+    }
+    runWhenIdle(() => {
+      taskDetailPreloadScheduled = false;
+      void measurePerfAsync(
+        "task-detail.preload.intent",
+        () => preloadTaskDetailPage(),
+        { detail },
+      );
+    });
+  });
 }
 
 export const router = createLiliaRouter();

@@ -12,13 +12,6 @@ import {
   X,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ensureProjectsLoaded, listProjects } from "../services/projectsStore";
-import {
-  ensureAllProjectTasksLoaded,
-  ensureOrphansLoaded,
-  listOrphanConversations,
-  listProjectConversations,
-} from "../services/tasksStore";
 import {
   openPopupNewChat,
   openPopupTask,
@@ -28,10 +21,22 @@ import {
   hydrateConversationActivities,
   type ConversationActivity,
 } from "../composables/useConversationActivity";
+import { createConversationActivityStagePlan } from "../composables/conversationActivityStages";
 import type { TreeDragKind } from "../composables/useSidebarTreeDrag";
 import SidebarUnifiedSection from "../components/sidebar/SidebarUnifiedSection.vue";
 import ProviderConnectionBadge from "../components/ProviderConnectionBadge.vue";
 import type { UnifiedSidebarConversation } from "../components/sidebar/sidebarTypes";
+import {
+  ensureSidebarConversationsLoaded,
+  listSidebarConversations,
+} from "../services/sidebarConversations";
+import {
+  cancelIdleRun,
+  installPerfObservers,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../utils/perf";
 
 const ALWAYS_ON_TOP_STORAGE_KEY = "lilia.conversationStatus.alwaysOnTop";
 const OPACITY_STORAGE_KEY = "lilia.conversationStatus.opacity";
@@ -56,38 +61,23 @@ const alwaysOnTop = ref(readStoredBoolean(ALWAYS_ON_TOP_STORAGE_KEY, false));
 const opacity = ref(readStoredOpacity());
 const opacityPanelOpen = ref(false);
 let geometryUnlisteners: Array<() => void> = [];
-
-const projects = computed(() => listProjects());
-const orphans = computed(() => listOrphanConversations());
+let activityHydrationTimer: number | null = null;
+let deferredActivityHydrationTimer: number | null = null;
+let activityHydrationSeq = 0;
 
 const conversations = computed<UnifiedSidebarConversation[]>(() => {
-  const rows: UnifiedSidebarConversation[] = [];
-  for (const project of projects.value) {
-    for (const task of listProjectConversations(project.id)) {
-      rows.push({
-        task,
-        projectId: project.id,
-        projectName: project.name,
-        route: `/projects/${project.id}/tasks/${task.id}`,
-      });
-    }
-  }
-  for (const orphan of orphans.value) {
-    rows.push({
-      task: orphan,
-      projectId: null,
-      projectName: "收集箱",
-      route: `/chats/${orphan.id}`,
-    });
-  }
-  return rows.sort((a, b) =>
-    Number(b.task.pinned) - Number(a.task.pinned) ||
-    b.task.createdAt - a.task.createdAt ||
-    a.task.id.localeCompare(b.task.id)
+  return listSidebarConversations().map((item) =>
+    item.projectId ? item : { ...item, projectName: "收集箱" }
   );
 });
 
-const taskIds = computed(() => conversations.value.map((item) => item.task.id));
+const taskIds = computed(() => conversations.value.map((item) => item.taskId));
+const prioritizedTaskIds = computed(() => conversations.value.slice(0, 16).map((item) => item.taskId));
+const activityHydrationPlan = computed(() => createConversationActivityStagePlan({
+  taskIds: taskIds.value,
+  initialTaskIds: prioritizedTaskIds.value,
+  priorityTaskIds: prioritizedTaskIds.value,
+}));
 
 const opacityCssValue = computed(() => opacity.value.toFixed(2));
 const opacityPercentLabel = computed(() => `${Math.round(opacity.value * 100)}%`);
@@ -208,11 +198,11 @@ async function loadConversations() {
   loaded.value = false;
   error.value = null;
   try {
-    await ensureProjectsLoaded(true);
-    await Promise.all([
-      ensureAllProjectTasksLoaded(),
-      ensureOrphansLoaded(),
-    ]);
+    await measurePerfAsync(
+      "sidebar.float.load",
+      () => ensureSidebarConversationsLoaded(true),
+      { detail: "popup-status" },
+    );
   } catch (err) {
     error.value = `加载会话状态失败：${String(err)}`;
   } finally {
@@ -257,7 +247,7 @@ async function closeWindow() {
 
 async function openConversation(item: UnifiedSidebarConversation) {
   try {
-    await openPopupTask(item.task.id, item.projectId);
+    await openPopupTask(item.taskId, item.projectId);
   } catch (err) {
     error.value = `打开弹出窗口对话失败：${String(err)}`;
   }
@@ -271,6 +261,18 @@ function dismissError() {
   error.value = null;
 }
 
+function cancelConversationActivityHydration() {
+  if (activityHydrationTimer !== null) {
+    cancelIdleRun(activityHydrationTimer);
+    activityHydrationTimer = null;
+  }
+  if (deferredActivityHydrationTimer !== null) {
+    cancelIdleRun(deferredActivityHydrationTimer);
+    deferredActivityHydrationTimer = null;
+  }
+  activityHydrationSeq += 1;
+}
+
 function treeRowStateClass(
   _kind: TreeDragKind,
   _projectId: string | null,
@@ -282,12 +284,44 @@ function treeRowStateClass(
 watch(
   () => taskIds.value.join("\x1f"),
   () => {
-    void hydrateConversationActivities(taskIds.value);
+    cancelConversationActivityHydration();
+    const plan = activityHydrationPlan.value;
+    if (plan.initialTaskIds.length > 0) {
+      activityHydrationTimer = runWhenIdle(() => {
+        activityHydrationTimer = null;
+        void measurePerfAsync(
+          "sidebar.float.activity.primary",
+          () => hydrateConversationActivities(
+            plan.initialTaskIds,
+            { priorityTaskIds: plan.initialPriorityTaskIds },
+          ),
+          { detail: `${plan.initialPriorityTaskIds.length}/${plan.initialTaskIds.length}` },
+        );
+      });
+    }
+    if (plan.deferredTaskIds.length === 0) return;
+    const seq = activityHydrationSeq;
+    scheduleAfterPaint(() => {
+      if (seq !== activityHydrationSeq) return;
+      deferredActivityHydrationTimer = runWhenIdle(() => {
+        deferredActivityHydrationTimer = null;
+        if (seq !== activityHydrationSeq) return;
+        void measurePerfAsync(
+          "sidebar.float.activity.deferred",
+          () => hydrateConversationActivities(
+            plan.deferredTaskIds,
+            { priorityTaskIds: plan.deferredPriorityTaskIds },
+          ),
+          { detail: `${plan.deferredPriorityTaskIds.length}/${plan.deferredTaskIds.length}` },
+        );
+      });
+    });
   },
   { immediate: true },
 );
 
 onMounted(() => {
+  installPerfObservers();
   document.body.classList.add(TRANSPARENT_BODY_CLASS);
   void initializeGeometryPersistence();
   void applyAlwaysOnTop(alwaysOnTop.value);
@@ -295,6 +329,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  cancelConversationActivityHydration();
   for (const unlisten of geometryUnlisteners) unlisten();
   geometryUnlisteners = [];
   document.body.classList.remove(TRANSPARENT_BODY_CLASS);

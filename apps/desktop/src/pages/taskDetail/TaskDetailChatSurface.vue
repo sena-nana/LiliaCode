@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Plus } from "lucide-vue-next";
 import type {
   AgentTimelineEvent,
@@ -14,16 +14,17 @@ import type {
   Project,
   SuggestionItem,
 } from "@lilia/contracts";
-import ChatTranscript from "../../components/chat/ChatTranscript.vue";
-import ChatComposer from "../../components/chat/ChatComposer.vue";
-import ChatSuggestions from "../../components/chat/ChatSuggestions.vue";
-import ComposerProjectPicker from "../../components/chat/ComposerProjectPicker.vue";
-import ChatSidebarHost from "../../components/chat/ChatSidebarHost.vue";
-import ImageViewer from "../../components/chat/ImageViewer.vue";
 import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import type { ChatImageViewerSource } from "../../components/chat/imageViewer";
-import TodoFloat from "../../components/todo/TodoFloat.vue";
+import {
+  cancelIdleRun,
+  measurePerfAsync,
+  measurePerfSync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../../utils/perf";
 import type { PendingAsk } from "../../composables/useAskUser";
+import { useChatSidebar } from "../../composables/useChatSidebar";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -34,6 +35,62 @@ import type {
   ToolConsentUpdatedInput,
 } from "../../services/chat";
 import type { TaskTodo } from "../../services/todos";
+
+const ChatTranscript = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.transcript.load",
+    async () => (await import("../../components/chat/ChatTranscript.vue")).default,
+  ),
+});
+
+const ChatComposer = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.composer.load",
+    async () => (await import("../../components/chat/ChatComposer.vue")).default,
+  ),
+});
+
+const ChatSuggestions = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.chat-suggestions.load",
+    async () => (await import("../../components/chat/ChatSuggestions.vue")).default,
+  ),
+});
+
+const ComposerProjectPicker = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.project-picker.load",
+    async () => (await import("../../components/chat/ComposerProjectPicker.vue")).default,
+  ),
+});
+
+const ImageViewer = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.image-viewer.load",
+    async () => (await import("../../components/chat/ImageViewer.vue")).default,
+  ),
+});
+
+const TodoFloat = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.todo-float.load",
+    async () => (await import("../../components/todo/TodoFloat.vue")).default,
+  ),
+});
+
+const ChatSidebarHost = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.sidebar-host.load",
+    async () => (await import("../../components/chat/ChatSidebarHost.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   taskId: string;
@@ -120,16 +177,149 @@ const emit = defineEmits<{
   "draft-project-picker-error": [message: string];
 }>();
 
+interface ChatComposerHandle {
+  fillSuggestionPrompt: (prompt: string) => void;
+  focusInput: () => void;
+  getDraftSnapshot: () => { content: string };
+  triggerConversationReference: () => void;
+}
+
 const chatPageRef = ref<HTMLElement | null>(null);
-const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
+const composerRef = ref<ChatComposerHandle | null>(null);
 const composerDraftEmpty = ref(true);
+const pendingComposerFocus = ref(false);
+const pendingConversationReference = ref(false);
+const pendingSuggestionPrompt = ref<string | null>(null);
+const shouldRenderTodoFloat = ref(false);
+const composerActivated = ref(false);
+const chatSidebar = useChatSidebar();
+const sidebarHostActivated = ref(!props.isPopup && chatSidebar.state.open);
+let todoFloatIdleHandle: number | null = null;
+let composerActivationSeq = 0;
+
+function scheduleTodoFloatRender() {
+  if (
+    shouldRenderTodoFloat.value ||
+    !props.taskId ||
+    !props.shouldRenderChat ||
+    !composerActivated.value
+  ) return;
+  scheduleAfterPaint(() => {
+    if (
+      shouldRenderTodoFloat.value ||
+      !props.taskId ||
+      !props.shouldRenderChat ||
+      !composerActivated.value
+    ) return;
+    todoFloatIdleHandle = runWhenIdle(() => {
+      scheduleAfterPaint(() => {
+        todoFloatIdleHandle = runWhenIdle(() => {
+          todoFloatIdleHandle = null;
+          if (!props.shouldRenderChat || !composerActivated.value) return;
+          shouldRenderTodoFloat.value = true;
+        });
+      });
+    });
+  });
+}
+
+function shouldPrioritizeComposerActivation() {
+  return props.timelineEvents.length === 0 &&
+    !props.isTurnRunning &&
+    props.pendingAgentActions.length === 0;
+}
+
+function scheduleComposerActivation() {
+  if (composerActivated.value || !props.shouldRenderChat) return;
+  const seq = ++composerActivationSeq;
+  const activate = () => {
+    if (seq !== composerActivationSeq || composerActivated.value || !props.shouldRenderChat) return;
+    measurePerfSync("task-detail.composer.activate", () => {
+      composerActivated.value = true;
+    }, { detail: props.taskId });
+  };
+  scheduleAfterPaint(() => {
+    if (seq !== composerActivationSeq || composerActivated.value || !props.shouldRenderChat) return;
+    if (shouldPrioritizeComposerActivation()) {
+      activate();
+      return;
+    }
+    scheduleAfterPaint(activate);
+  });
+}
+
+onMounted(() => {
+  scheduleComposerActivation();
+});
+
+onBeforeUnmount(() => {
+  if (todoFloatIdleHandle !== null) {
+    cancelIdleRun(todoFloatIdleHandle);
+    todoFloatIdleHandle = null;
+  }
+});
+
+watch(
+  () => [props.isPopup, chatSidebar.state.open] as const,
+  ([isPopup, open]) => {
+    if (isPopup || !open || sidebarHostActivated.value) return;
+    sidebarHostActivated.value = true;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.shouldRenderChat,
+  (shouldRenderChat) => {
+    if (!shouldRenderChat) {
+      composerActivationSeq += 1;
+      return;
+    }
+    scheduleComposerActivation();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => composerActivated.value,
+  (active) => {
+    if (!active) return;
+    scheduleTodoFloatRender();
+  },
+  { immediate: true },
+);
+
+watch(composerRef, (composer) => {
+  if (!composer) return;
+  const suggestionPrompt = pendingSuggestionPrompt.value;
+  if (suggestionPrompt) {
+    pendingSuggestionPrompt.value = null;
+    composer.fillSuggestionPrompt(suggestionPrompt);
+  }
+  if (pendingConversationReference.value) {
+    pendingConversationReference.value = false;
+    composer.triggerConversationReference();
+  }
+  if (pendingComposerFocus.value) {
+    pendingComposerFocus.value = false;
+    composer.focusInput();
+  }
+});
 
 function focusComposer() {
-  composerRef.value?.focusInput();
+  if (composerRef.value) {
+    composerRef.value.focusInput();
+    return;
+  }
+  pendingComposerFocus.value = true;
 }
 
 function triggerConversationReference() {
-  composerRef.value?.triggerConversationReference();
+  if (composerRef.value) {
+    composerRef.value.triggerConversationReference();
+    return;
+  }
+  pendingConversationReference.value = true;
 }
 
 function getComposerDraftSnapshot() {
@@ -147,7 +337,11 @@ function emitSend(
 }
 
 function selectSuggestion(suggestion: SuggestionItem) {
-  composerRef.value?.fillSuggestionPrompt(suggestion.prompt);
+  if (composerRef.value) {
+    composerRef.value.fillSuggestionPrompt(suggestion.prompt);
+    return;
+  }
+  pendingSuggestionPrompt.value = suggestion.prompt;
 }
 </script>
 
@@ -203,7 +397,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
             <template #controls>
               <div class="chat-controls">
                 <TodoFloat
-                  v-if="taskId"
+                  v-if="taskId && shouldRenderTodoFloat"
                   :task-id="taskId"
                   :show-goal="true"
                   :goal="currentLiliaGoal"
@@ -214,6 +408,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @clear-lilia-goal="emit('clear-lilia-goal')"
                 />
                 <ChatComposer
+                  v-if="composerActivated"
                   ref="composerRef"
                   :state="composerState"
                   :attachments="attachments"
@@ -244,6 +439,17 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @open-image="emit('open-image', $event)"
                   @draft-empty-change="composerDraftEmpty = $event"
                 />
+                <div
+                  v-else
+                  class="chat-composer chat-composer--loading"
+                  aria-hidden="true"
+                >
+                  <div class="chat-composer__placeholder">
+                    <div class="chat-composer__placeholder-line chat-composer__placeholder-line--primary" />
+                    <div class="chat-composer__placeholder-line" />
+                    <div class="chat-composer__placeholder-line chat-composer__placeholder-line--short" />
+                  </div>
+                </div>
                 <ComposerProjectPicker
                   v-if="showDraftProjectPicker"
                   :projects="draftProjectPickerProjects ?? []"
@@ -256,11 +462,24 @@ function selectSuggestion(suggestion: SuggestionItem) {
           </ChatTranscript>
         </div>
         <ChatSidebarHost
-          v-if="!isPopup"
+          v-if="!isPopup && sidebarHostActivated"
           :task-id="taskId"
           :project-id="projectId"
           :project-cwd="projectCwd"
         />
+        <aside
+          v-else-if="!isPopup"
+          class="chat-sidebar"
+          aria-label="对话侧栏"
+          aria-hidden="true"
+          inert
+        >
+          <div class="chat-sidebar__inner">
+            <section class="chat-sidebar__body">
+              <div class="chat-sidebar__empty">暂无内容</div>
+            </section>
+          </div>
+        </aside>
       </div>
     </div>
     <ImageViewer

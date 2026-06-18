@@ -1,8 +1,86 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { defineComponent, h, ref } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatComposerState } from "@lilia/contracts";
 import TaskDetailChatSurface from "../src/pages/taskDetail/TaskDetailChatSurface.vue";
+
+const MockTodoFloat = defineComponent({
+  name: "MockTodoFloat",
+  emits: ["set-lilia-goal"],
+  setup(_, { emit }) {
+    return () =>
+      h("button", {
+        type: "button",
+        onClick: () => emit("set-lilia-goal", "新的 Lilia Goal"),
+      }, "stub set goal");
+  },
+});
+
+vi.mock("../src/components/todo/TodoFloat.vue", () => ({
+  default: MockTodoFloat,
+}));
+
+vi.mock("../src/components/chat/ChatSidebarHost.vue", () => ({
+  default: defineComponent({
+    name: "MockChatSidebarHost",
+    setup() {
+      return () => h("div", { "data-testid": "chat-sidebar-host" });
+    },
+  }),
+}));
+
+vi.mock("../src/components/chat/ImageViewer.vue", () => ({
+  default: defineComponent({
+    name: "MockImageViewer",
+    setup() {
+      return () => h("div", { "data-testid": "image-viewer" });
+    },
+  }),
+}));
+
+const triggerConversationReference = vi.fn();
+const fillSuggestionPrompt = vi.fn();
+
+vi.mock("../src/components/chat/ChatTranscript.vue", () => ({
+  default: defineComponent({
+    name: "MockChatTranscript",
+    setup(_, { slots }) {
+      return () => h("div", slots.controls?.());
+    },
+  }),
+}));
+
+vi.mock("../src/components/chat/ChatComposer.vue", () => ({
+  default: defineComponent({
+    name: "MockChatComposer",
+    emits: ["start-lilia-fix-suggestion"],
+    setup(_, { emit, expose }) {
+      expose({
+        fillSuggestionPrompt,
+        focusInput: vi.fn(),
+        getDraftSnapshot: () => ({ content: "" }),
+        triggerConversationReference,
+      });
+      return () =>
+        h("div", [
+          h("button", {
+            type: "button",
+            onClick: () => emit(
+              "start-lilia-fix-suggestion",
+              "优先给最小修复",
+              [],
+              [],
+              { type: "uncommittedChanges" },
+            ),
+          }, "stub fix suggestion"),
+        ]);
+    },
+  }),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const codexComposerState: ChatComposerState = {
   taskId: "task-1",
@@ -54,55 +132,12 @@ function surfaceProps() {
 }
 
 function renderSurface() {
-  const triggerConversationReference = vi.fn();
-  const view = render(TaskDetailChatSurface, {
+  return render(TaskDetailChatSurface, {
     props: surfaceProps(),
-    global: {
-      stubs: {
-        ChatTranscript: defineComponent({
-          setup(_, { slots }) {
-            return () => h("div", slots.controls?.());
-          },
-        }),
-        ChatComposer: defineComponent({
-          emits: ["start-lilia-fix-suggestion"],
-          setup(_, { emit, expose }) {
-            expose({ triggerConversationReference });
-            return () =>
-              h("div", [
-                h("button", {
-                  type: "button",
-                  onClick: () => emit(
-                    "start-lilia-fix-suggestion",
-                    "优先给最小修复",
-                    [],
-                    [],
-                    { type: "uncommittedChanges" },
-                  ),
-                }, "stub fix suggestion"),
-              ]);
-          },
-        }),
-        TodoFloat: defineComponent({
-          emits: ["set-lilia-goal"],
-          setup(_, { emit }) {
-            return () =>
-              h("button", {
-                type: "button",
-                onClick: () => emit("set-lilia-goal", "新的 Lilia Goal"),
-              }, "stub set goal");
-          },
-        }),
-        ChatSidebarHost: true,
-        ImageViewer: true,
-      },
-    },
   });
-  return { ...view, triggerConversationReference };
 }
 
 function renderSurfaceHost() {
-  const triggerConversationReference = vi.fn();
   const Host = defineComponent({
     components: { TaskDetailChatSurface },
     setup() {
@@ -119,34 +154,15 @@ function renderSurfaceHost() {
       ]);
     },
   });
-  const view = render(Host, {
-    global: {
-      stubs: {
-        ChatTranscript: defineComponent({
-          setup(_, { slots }) {
-            return () => h("div", slots.controls?.());
-          },
-        }),
-        ChatComposer: defineComponent({
-          setup(_, { expose }) {
-            expose({ triggerConversationReference });
-            return () => h("div");
-          },
-        }),
-        TodoFloat: true,
-        ChatSidebarHost: true,
-        ImageViewer: true,
-      },
-    },
-  });
-  return { ...view, triggerConversationReference };
+  return render(Host);
 }
 
 describe("TaskDetailChatSurface", () => {
   it("forwards Lilia Goal setting events from TodoFloat", async () => {
     const view = renderSurface();
 
-    await fireEvent.click(view.getByRole("button", { name: "stub set goal" }));
+    const button = await waitFor(() => view.getByRole("button", { name: "stub set goal" }));
+    await fireEvent.click(button);
 
     expect(view.emitted("set-lilia-goal")?.[0]).toEqual(["新的 Lilia Goal"]);
   });
@@ -154,7 +170,8 @@ describe("TaskDetailChatSurface", () => {
   it("forwards Codex fix suggestion events from the composer", async () => {
     const view = renderSurface();
 
-    await fireEvent.click(view.getByRole("button", { name: "stub fix suggestion" }));
+    const button = await waitFor(() => view.getByRole("button", { name: "stub fix suggestion" }));
+    await fireEvent.click(button);
 
     expect(view.emitted("start-lilia-fix-suggestion")?.[0]).toEqual([
       "优先给最小修复",
@@ -167,8 +184,9 @@ describe("TaskDetailChatSurface", () => {
   it("exposes conversation reference trigger through the surface", async () => {
     const view = renderSurfaceHost();
 
+    await waitFor(() => view.getByRole("button", { name: "stub fix suggestion" }));
     await fireEvent.click(view.getByRole("button", { name: "call surface trigger" }));
 
-    expect(view.triggerConversationReference).toHaveBeenCalledTimes(1);
+    expect(triggerConversationReference).toHaveBeenCalledTimes(1);
   });
 });

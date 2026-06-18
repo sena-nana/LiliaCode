@@ -244,9 +244,11 @@ describe("Popup shell", () => {
       await vi.advanceTimersByTimeAsync(700);
       await nextTick();
       await nextTick();
-      expect(view.container.querySelector(".chat-page--pending")).not.toBeInTheDocument();
-      expect(view.container.querySelector(".chat-composer")).toBeInTheDocument();
-      expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(view.container.querySelector(".chat-page--pending")).not.toBeInTheDocument();
+        expect(view.container.querySelector(".chat-composer")).toBeInTheDocument();
+        expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+      });
     } finally {
       vi.useRealTimers();
     }

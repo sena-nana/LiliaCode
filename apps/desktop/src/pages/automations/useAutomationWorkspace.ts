@@ -12,7 +12,6 @@ import type { AutomationFlowEdge, AutomationFlowNode } from "./types";
 
 export function useAutomationWorkspace(options: {
   selectedWorkflowId: Ref<string | null>;
-  applyWorkflow: (workflow: AutomationWorkflow | null) => AutomationWorkflow["draft"];
   automationNodes: () => AutomationFlowNode["data"]["node"][];
   automationEdges: () => {
     id: AutomationFlowEdge["id"];
@@ -38,6 +37,17 @@ export function useAutomationWorkspace(options: {
     workflowRows.value.find((workflow) => workflow.id === selectedWorkflowId.value) ?? null,
   );
 
+  function syncSelectedWorkflowState() {
+    const workflow = selectedWorkflow.value;
+    if (!workflow) {
+      workflowName.value = "新自动化";
+      scope.value = { ...DEFAULT_SCOPE };
+      return;
+    }
+    workflowName.value = workflow.name;
+    scope.value = { ...DEFAULT_SCOPE, ...workflow.scope };
+  }
+
   async function refreshWorkflows() {
     loading.value = true;
     options.setError("");
@@ -50,7 +60,7 @@ export function useAutomationWorkspace(options: {
       ) {
         selectedWorkflowId.value = workflowRows.value[0]?.id ?? null;
       }
-      applySelectedWorkflow();
+      syncSelectedWorkflowState();
       void options.refreshRuns().catch((err) => {
         options.setError(String(err));
       });
@@ -61,23 +71,10 @@ export function useAutomationWorkspace(options: {
     }
   }
 
-  function applySelectedWorkflow() {
-    const workflow = selectedWorkflow.value;
-    if (!workflow) {
-      workflowName.value = "新自动化";
-      const draft = options.applyWorkflow(null);
-      scope.value = { ...draft.scope };
-      return;
-    }
-    workflowName.value = workflow.name;
-    scope.value = { ...DEFAULT_SCOPE, ...workflow.scope };
-    options.applyWorkflow(workflow);
-  }
-
   function selectWorkflow(workflow: AutomationWorkflow) {
     selectedWorkflowId.value = workflow.id;
     options.resetRunSelection();
-    applySelectedWorkflow();
+    syncSelectedWorkflowState();
     void options.refreshRuns().catch((err) => {
       options.setError(String(err));
     });
@@ -106,7 +103,7 @@ export function useAutomationWorkspace(options: {
       workflowRows.value = [saved, ...workflowRows.value.filter((workflow) => workflow.id !== saved.id)];
       selectedWorkflowId.value = saved.id;
       options.resetRunSelection();
-      applySelectedWorkflow();
+      syncSelectedWorkflowState();
       void options.refreshRuns().catch((err) => {
         options.setError(String(err));
       });

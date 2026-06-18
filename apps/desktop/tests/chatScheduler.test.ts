@@ -17,6 +17,7 @@ import {
   setMockActiveBackend,
   setMockChatRunning,
   setMockComposerStateHandler,
+  setMockRuntimeSnapshotDelay,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
 import { createDraftTask } from "../src/services/tasksStore";
@@ -28,12 +29,24 @@ import {
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { closeChatSidebar, openChatSidebar } from "../src/composables/useChatSidebar";
 
+async function flushAfterPaint() {
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      window.setTimeout(resolve, 0);
+    });
+  });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+}
+
 async function renderTaskDetail() {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push("/projects/lilia/tasks/t-002");
   await router.isReady();
 
-  return render(TaskDetail, {
+  const view = render(TaskDetail, {
     props: {
       projectId: "lilia",
       taskId: "t-002",
@@ -42,6 +55,14 @@ async function renderTaskDetail() {
       plugins: [router],
     },
   });
+  await waitFor(() => {
+    expect(view.container.querySelector(".chat-controls")).not.toBeNull();
+  });
+  await flushAfterPaint();
+  await waitFor(() => {
+    expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
+  });
+  return view;
 }
 
 async function renderProjectDraftTaskDetail(taskId: string) {
@@ -49,7 +70,7 @@ async function renderProjectDraftTaskDetail(taskId: string) {
   await router.push(`/projects/lilia/tasks/${taskId}`);
   await router.isReady();
 
-  return render(TaskDetail, {
+  const view = render(TaskDetail, {
     props: {
       projectId: "lilia",
       taskId,
@@ -58,6 +79,14 @@ async function renderProjectDraftTaskDetail(taskId: string) {
       plugins: [router],
     },
   });
+  await waitFor(() => {
+    expect(view.container.querySelector(".chat-controls")).not.toBeNull();
+  });
+  await flushAfterPaint();
+  await waitFor(() => {
+    expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
+  });
+  return view;
 }
 
 function placeEditableCaret(element: HTMLElement, offset: number) {
@@ -75,7 +104,11 @@ function placeEditableCaret(element: HTMLElement, offset: number) {
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
-  const input = view.getByRole("textbox") as HTMLElement;
+  const input = await waitFor(() => {
+    const element = view.container.querySelector(".chat-composer [role='textbox']");
+    expect(element).toBeInstanceOf(HTMLElement);
+    return element as HTMLElement;
+  });
   if (input instanceof HTMLTextAreaElement) {
     await fireEvent.update(input, text);
     return input;
@@ -514,6 +547,20 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("任务页首屏不会等待 runtime snapshot，运行态稍后补齐", async () => {
+    setMockChatRunning("t-002", true);
+    setMockRuntimeSnapshotDelay(300);
+
+    const view = await renderTaskDetail();
+
+    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
+
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
+    });
+  });
+
   it("重新进入任务页时会把 abandoned runtime snapshot 显示为异常而不是运行态", async () => {
     setMockRuntimeSnapshot("t-002", {
       phase: "abandoned",
@@ -614,7 +661,7 @@ describe("chat scheduler", () => {
     );
     await fireEvent.click(imageButton);
 
-    const viewer = view.getByRole("dialog", { name: "图片查看器" });
+    const viewer = await view.findByRole("dialog", { name: "图片查看器" });
     const page = view.container.querySelector(".chat-page");
     const main = view.container.querySelector(".chat-layout__main");
 

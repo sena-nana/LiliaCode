@@ -1,4 +1,3 @@
-import DebugTimelinePanel from "../components/chat/DebugTimelinePanel.vue";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerDebugChatSidebarPanel(): () => void {
@@ -6,6 +5,6 @@ export function registerDebugChatSidebarPanel(): () => void {
     id: "debug",
     title: "Debug",
     order: 900,
-    component: DebugTimelinePanel,
+    loader: async () => (await import("../components/chat/DebugTimelinePanel.vue")).default,
   });
 }

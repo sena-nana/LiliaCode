@@ -117,16 +117,18 @@ function optionItem(button: HTMLElement): HTMLElement {
 describe("ChatComposer AskUser pending prompt", () => {
   it("从问题 2 回到问题 1 后再前进，会保留问题 2 已选项", async () => {
     const view = renderComposer(multiStepSpec);
+    const alpha = await view.findByRole("radio", { name: "Alpha" });
+    const beta = await view.findByRole("radio", { name: "Beta" });
 
-    await fireEvent.click(view.getByRole("radio", { name: "Alpha" }));
-    expect(view.getByRole("radio", { name: "Alpha" }))
+    await fireEvent.click(alpha);
+    expect(alpha)
       .toHaveAttribute("aria-checked", "true");
-    expect(view.getByRole("radio", { name: "Beta" }))
+    expect(beta)
       .toHaveAttribute("aria-checked", "false");
-    await fireEvent.mouseEnter(view.getByRole("radio", { name: "Beta" }));
-    expect(view.getByRole("radio", { name: "Alpha" }))
+    await fireEvent.mouseEnter(beta);
+    expect(alpha)
       .toHaveAttribute("aria-checked", "true");
-    expect(view.getByRole("radio", { name: "Beta" }))
+    expect(beta)
       .toHaveAttribute("aria-checked", "false");
     await fireEvent.click(view.getByRole("button", { name: /继续/ }));
     await fireEvent.click(view.getByRole("checkbox", { name: "保留选择" }));
@@ -143,8 +145,8 @@ describe("ChatComposer AskUser pending prompt", () => {
 
   it("推荐单选项不默认高亮，鼠标离开后清除临时高亮", async () => {
     const view = renderComposer(recommendedSingleSpec);
-    const alpha = view.getByRole("radio", { name: /Alpha/ });
-    const beta = view.getByRole("radio", { name: "Beta" });
+    const alpha = await view.findByRole("radio", { name: /Alpha/ });
+    const beta = await view.findByRole("radio", { name: "Beta" });
     const alphaItem = optionItem(alpha);
     const betaItem = optionItem(beta);
 
@@ -170,11 +172,12 @@ describe("ChatComposer AskUser pending prompt", () => {
 
   it("允许 other 的单选题点击其他后才显示输入框", async () => {
     const view = renderComposer(singleWithOtherSpec);
+    const other = await view.findByRole("radio", { name: "其他" });
 
     expect(view.queryByRole("textbox")).toBeNull();
-    await fireEvent.click(view.getByRole("radio", { name: "其他" }));
+    await fireEvent.click(other);
 
-    expect(view.getByRole("radio", { name: "其他" }))
+    expect(other)
       .toHaveAttribute("aria-checked", "true");
     expect(view.getByRole("textbox")).toBeInTheDocument();
   });
@@ -186,10 +189,10 @@ describe("ChatComposer AskUser pending prompt", () => {
     expect(view.queryByRole("textbox")).toBeNull();
   });
 
-  it("计划确认提示作为 composer 内部一行紧凑扩展", () => {
+  it("计划确认提示作为 composer 内部一行紧凑扩展", async () => {
     const view = renderComposer(planApprovalSpec);
 
-    const prompt = view.getByRole("region", { name: "确认 Claude 计划" });
+    const prompt = await view.findByRole("region", { name: "确认 Claude 计划" });
     expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");
     expect(view.queryByText(/确认后将按/)).toBeNull();
     expect(view.queryByRole("button", { name: "先不执行" })).toBeNull();

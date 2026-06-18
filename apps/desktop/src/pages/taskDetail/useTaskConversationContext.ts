@@ -4,7 +4,6 @@ import { homeDir } from "@tauri-apps/api/path";
 import {
   createDraftOrphan,
   createDraftTask,
-  ensureProjectTasksLoaded,
   ensureTaskLoaded,
   getOrphanConversation,
   getTask,
@@ -15,6 +14,7 @@ import {
 import { ensureProjectLoaded, getProject } from "../../services/projectsStore";
 import { rememberPopupLastProject } from "../../services/popupWindows";
 import type { ChatAttachment } from "@lilia/contracts";
+import { measurePerfAsync } from "../../utils/perf";
 
 export interface TaskDetailRouteProps {
   projectId?: string;
@@ -181,16 +181,39 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     if (isPopup.value) return;
     try {
       if (props.projectId) {
-        await Promise.all([
-          ensureProjectLoaded(props.projectId),
-          ensureProjectTasksLoaded(props.projectId),
-          ensureTaskLoaded(props.taskId, props.projectId),
-        ]);
+        await measurePerfAsync(
+          "task-detail.main-context.project",
+          async () => {
+            await ensureProjectLoaded(props.projectId!);
+          },
+          { detail: `${props.projectId}:${props.taskId}` },
+        );
       } else {
-        await ensureTaskLoaded(props.taskId, null);
+        await measurePerfAsync(
+          "task-detail.main-context.orphan",
+          async () => {
+            await ensureTaskLoaded(props.taskId, null);
+          },
+          { detail: props.taskId },
+        );
       }
     } catch (err) {
       console.error("[chat] hydrate context failed", err);
+    }
+  }
+
+  async function hydrateMainTaskRecord() {
+    if (isPopup.value || !props.projectId) return;
+    try {
+      await measurePerfAsync(
+        "task-detail.main-context.task-record",
+        async () => {
+          await ensureTaskLoaded(props.taskId, props.projectId);
+        },
+        { detail: `${props.projectId}:${props.taskId}` },
+      );
+    } catch (err) {
+      console.error("[chat] hydrate task record failed", err);
     }
   }
 
@@ -258,6 +281,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     ensureTaskReadyForMessage,
     hydratePopupContext,
     hydrateMainContext,
+    hydrateMainTaskRecord,
     prepareForRouteChange,
   };
 }

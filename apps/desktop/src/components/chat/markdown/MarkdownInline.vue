@@ -1,6 +1,16 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from "vue";
 import type { ChatImageViewerSource } from "../imageViewer";
 import type { InlineToken } from "./markdownParser";
+import { measurePerfAsync } from "../../../utils/perf";
+
+const MarkdownMathInline = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "markdown.math-inline.load",
+    async () => (await import("./MarkdownMathInline.vue")).default,
+  ),
+});
 
 withDefaults(defineProps<{
   tokens: InlineToken[];
@@ -30,10 +40,9 @@ function openMarkdownImage(token: InlineToken) {
 <template>
   <template v-for="(token, index) in tokens" :key="`${token.type}:${index}`">
     <code v-if="token.type === 'code'">{{ token.text }}</code>
-    <span
+    <MarkdownMathInline
       v-else-if="token.type === 'math'"
-      class="markdown-block__math-inline"
-      v-html="token.html"
+      :source="token.text"
     />
     <strong v-else-if="token.type === 'strong'">{{ token.text }}</strong>
     <em v-else-if="token.type === 'em'">{{ token.text }}</em>

@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { searchSessions } from "../src/services/sessionSearch";
+import { beforeEach, describe, expect, it } from "vitest";
+import { ensureSessionSearchCorpusLoaded, searchSessions } from "../src/services/sessionSearch";
+import { mockInvoke, resetTauriMockData } from "./tauriMock";
 
 describe("sessionSearch", () => {
+  beforeEach(async () => {
+    resetTauriMockData();
+    await ensureSessionSearchCorpusLoaded(true);
+  });
 
   it("合并子串与相似度结果并按分值从高到低排序", () => {
     const res = searchSessions("tsconfig");
@@ -25,5 +30,19 @@ describe("sessionSearch", () => {
     const orphan = res.find((r) => r.kind === "orphan");
     expect(task?.route.startsWith("/projects/")).toBe(true);
     expect(orphan?.route.startsWith("/chats/")).toBe(true);
+  });
+
+  it("强制刷新 sidebar summary 后会更新搜索结果", async () => {
+    await mockInvoke("task_update", {
+      id: "t-002",
+      title: "新的统一侧栏标题",
+    });
+    await ensureSessionSearchCorpusLoaded(true);
+
+    const res = searchSessions("统一侧栏标题");
+    expect(res[0]).toMatchObject({
+      taskId: "t-002",
+      route: "/projects/lilia/tasks/t-002",
+    });
   });
 });

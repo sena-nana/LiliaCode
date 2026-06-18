@@ -14,7 +14,7 @@ import {
 } from "../src/composables/useChatSidebar";
 import { setAgentInteractionSettings } from "../src/services/chat";
 import { createTodo } from "../src/services/todos";
-import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
+import { resolveAskUserById, useAskUser } from "../src/composables/useAskUser";
 import { mockInvoke } from "./tauriMock";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -109,11 +109,16 @@ async function renderTaskDetail() {
     `,
   });
 
-  return render(Wrapper, {
+  const view = render(Wrapper, {
     global: {
       plugins: [router],
     },
   });
+  await waitFor(() => {
+    expect(titlebarSidebarButton(view.container)).toBeInstanceOf(HTMLButtonElement);
+    expect(sidebarElement(view.container)).toBeInstanceOf(HTMLElement);
+  }, { timeout: 4000 });
+  return view;
 }
 
 function placeEditableCaret(element: HTMLElement, offset: number) {
@@ -131,7 +136,11 @@ function placeEditableCaret(element: HTMLElement, offset: number) {
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
-  const input = view.getByRole("textbox") as HTMLElement;
+  const input = await waitFor(() => {
+    const element = view.container.querySelector(".chat-composer [role='textbox']");
+    expect(element).toBeInstanceOf(HTMLElement);
+    return element as HTMLElement;
+  });
   if (input instanceof HTMLTextAreaElement) {
     await fireEvent.update(input, text);
     return;
@@ -166,12 +175,20 @@ beforeEach(() => {
   localStorage.setItem(WIDTH_STORAGE_KEY, "340");
 });
 
-afterEach(() => {
+afterEach(async () => {
   const { state } = useAskUser();
-  while (state.current || state.queue.length) {
-    resolveAskUser({ answers: {}, cancelled: true });
+  while (state.current || state.queue.length || state.pending.length) {
+    const id = state.current?.id ?? state.queue[0]?.id ?? state.pending[0]?.id;
+    if (typeof id !== "number") break;
+    resolveAskUserById(id, { answers: {}, cancelled: true });
+  }
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
   }
   cleanup();
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
   for (const cleanup of cleanups.splice(0)) cleanup();
   closeChatSidebar();
   localStorage.clear();
@@ -210,9 +227,49 @@ describe("chat sidebar host", () => {
 
     const view = renderHost();
 
-    expect(view.getByTestId("dummy-panel")).toHaveTextContent(
-      `t-002|lilia|${PROJECT_CWD}`,
-    );
+    return waitFor(() => {
+      expect(view.getByTestId("dummy-panel")).toHaveTextContent(
+        `t-002|lilia|${PROJECT_CWD}`,
+      );
+    });
+  });
+
+  it("异步 panel 仅在首次打开时加载一次，并在切换后复用缓存", async () => {
+    const loadDebug = vi.fn(async () => FirstPanel);
+    const loadContext = vi.fn(async () => SecondPanel);
+    trackPanel({
+      id: "debug",
+      title: "Debug",
+      order: 10,
+      loader: loadDebug,
+    });
+    trackPanel({
+      id: "context",
+      title: "上下文",
+      order: 20,
+      loader: loadContext,
+    });
+    openChatSidebar("debug");
+
+    const view = renderHost();
+
+    await waitFor(() => {
+      expect(view.getByTestId("first-panel")).toBeInTheDocument();
+    });
+    expect(loadDebug).toHaveBeenCalledTimes(1);
+    expect(loadContext).toHaveBeenCalledTimes(0);
+
+    await fireEvent.click(view.getByRole("tab", { name: "上下文" }));
+    await waitFor(() => {
+      expect(view.getByTestId("second-panel")).toBeInTheDocument();
+    });
+    expect(loadContext).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(view.getByRole("tab", { name: "Debug" }));
+    await waitFor(() => {
+      expect(view.getByTestId("first-panel")).toBeInTheDocument();
+    });
+    expect(loadDebug).toHaveBeenCalledTimes(1);
   });
 
 
@@ -267,7 +324,7 @@ describe("chat sidebar host", () => {
 describe("TaskDetail chat sidebar toggle", () => {
   it("通过标题栏右侧按钮打开和关闭侧栏，并写回本地存储", async () => {
     const view = await enableDebugSidebar();
-    const sidebar = sidebarElement(view.container);
+    const sidebar = await waitFor(() => sidebarElement(view.container));
     const toggle = await waitFor(() => titlebarSidebarButton(view.container));
 
     closeChatSidebar();

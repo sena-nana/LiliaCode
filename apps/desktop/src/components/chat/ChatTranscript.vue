@@ -1,16 +1,45 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type CSSProperties,
+} from "vue";
 import { Copy, MessageSquarePlus, Quote } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import { openPopupNewChat } from "../../services/popupWindows";
-import AgentTimeline from "./AgentTimeline.vue";
-import ChatScrollMap from "./ChatScrollMap.vue";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
+import {
+  cancelIdleRun,
+  measurePerfAsync,
+  measurePerfSync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../../utils/perf";
+
+const AgentTimeline = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "chat.timeline.load",
+    async () => (await import("./AgentTimeline.vue")).default,
+  ),
+});
+
+const ChatScrollMap = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "chat.scroll-map.load",
+    async () => (await import("./ChatScrollMap.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   timelineEvents: AgentTimelineEvent[];
@@ -44,7 +73,11 @@ const isPinnedToBottom = ref(true);
 const selectionToolbarVisible = ref(false);
 const selectedAgentText = ref("");
 const selectionToolbarStyle = ref<CSSProperties>({});
+const shouldRenderScrollMap = ref(false);
+const scrollMapRequested = ref(false);
+const timelineActivated = ref(false);
 let pointerSelectionStarted = false;
+let scrollMapIdleHandle: number | null = null;
 
 const PLAN_REVEAL_PADDING = 8;
 const SELECTION_TOOLBAR_GAP = 8;
@@ -61,6 +94,7 @@ function checkPinned() {
 }
 
 function onScroll() {
+  requestScrollMapRender();
   checkPinned();
   hideSelectionToolbar();
 }
@@ -154,6 +188,44 @@ watch(
 const isEmpty = computed(() =>
   props.timelineEvents.length === 0 && !props.isThinking,
 );
+const shouldRenderTimeline = computed(() => !isEmpty.value);
+
+function scheduleTimelineActivation() {
+  if (timelineActivated.value || !shouldRenderTimeline.value) return;
+  scheduleAfterPaint(() => {
+    if (timelineActivated.value || !shouldRenderTimeline.value) return;
+    measurePerfSync("chat.timeline.activate", () => {
+      timelineActivated.value = true;
+    });
+  });
+}
+
+function cancelScrollMapSchedule() {
+  if (scrollMapIdleHandle === null) return;
+  cancelIdleRun(scrollMapIdleHandle);
+  scrollMapIdleHandle = null;
+}
+
+function requestScrollMapRender() {
+  if (shouldRenderScrollMap.value || scrollMapIdleHandle !== null) return;
+  cancelScrollMapSchedule();
+  if (isEmpty.value || !timelineActivated.value) {
+    shouldRenderScrollMap.value = false;
+    scrollMapRequested.value = !isEmpty.value;
+    return;
+  }
+  scrollMapRequested.value = true;
+  scheduleAfterPaint(() => {
+    scrollMapIdleHandle = runWhenIdle(() => {
+      scrollMapIdleHandle = null;
+      shouldRenderScrollMap.value = true;
+    });
+  });
+}
+
+function onFramePointerEnter() {
+  requestScrollMapRender();
+}
 
 function nodeElement(node: Node | null): HTMLElement | null {
   if (!node) return null;
@@ -260,6 +332,10 @@ async function askSelectionInPopup() {
   const text = selectedAgentText.value;
   if (!text.trim()) return;
   try {
+    const { openPopupNewChat } = await measurePerfAsync(
+      "chat.selection-popup.load",
+      () => import("../../services/popupWindows"),
+    );
     await openPopupNewChat(props.projectId ?? null, popupAskText(text));
     hideSelectionToolbar();
     window.getSelection()?.removeAllRanges();
@@ -298,17 +374,44 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  cancelScrollMapSchedule();
   document.removeEventListener("pointerdown", onDocumentPointerDown, true);
   document.removeEventListener("pointerup", onDocumentPointerUp, true);
   document.removeEventListener("keydown", onDocumentKeydown);
   window.removeEventListener("resize", hideSelectionToolbar);
 });
+
+watch(
+  () => isEmpty.value,
+  (empty) => {
+    if (empty) {
+      cancelScrollMapSchedule();
+      shouldRenderScrollMap.value = false;
+      scrollMapRequested.value = false;
+      return;
+    }
+    scheduleTimelineActivation();
+    if (scrollMapRequested.value) {
+      requestScrollMapRender();
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => timelineActivated.value,
+  (active) => {
+    if (!active || isEmpty.value || !scrollMapRequested.value) return;
+    requestScrollMapRender();
+  },
+);
 </script>
 
 <template>
   <div
     ref="frameEl"
     class="chat-transcript-frame"
+    @pointerenter="onFramePointerEnter"
   >
       <div
       ref="scroller"
@@ -330,6 +433,7 @@ onBeforeUnmount(() => {
       </div>
       <template v-else>
         <AgentTimeline
+          v-if="timelineActivated && shouldRenderTimeline"
           :events="timelineEvents"
           :is-thinking="isThinking"
           :project-cwd="projectCwd"
@@ -346,6 +450,15 @@ onBeforeUnmount(() => {
           @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
           @start-session-fork="emit('start-session-fork')"
         />
+        <div
+          v-else-if="shouldRenderTimeline"
+          class="chat-transcript__loading"
+          aria-hidden="true"
+        >
+          <div class="chat-transcript__loading-card chat-transcript__loading-card--wide" />
+          <div class="chat-transcript__loading-card" />
+          <div class="chat-transcript__loading-card chat-transcript__loading-card--compact" />
+        </div>
       </template>
       <div class="chat-controls-wrap">
         <slot name="controls" />
@@ -391,6 +504,7 @@ onBeforeUnmount(() => {
       </div>
     </Transition>
     <ChatScrollMap
+      v-if="shouldRenderScrollMap"
       ref="scrollMap"
       :events="timelineEvents"
       :hover-target="frameEl"

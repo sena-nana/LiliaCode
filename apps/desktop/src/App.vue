@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import ContextMenuHost from "./components/ContextMenuHost.vue";
-import { installAgentInteractionBridge } from "./composables/useAgentInteractionBridge";
-import { installConversationActivityBridge } from "./composables/useConversationActivity";
+import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
+
+const ContextMenuHost = defineAsyncComponent({
+  loader: () => measurePerfAsync(
+    "app.context-menu-host.load",
+    async () => (await import("./components/ContextMenuHost.vue")).default,
+    { detail: "ContextMenuHost" },
+  ),
+  suspensible: false,
+});
 
 let unlistenInteraction: (() => void) | null = null;
 let unlistenConversationActivity: (() => void) | null = null;
@@ -26,12 +33,39 @@ function keepCleanup(cleanup: () => void): (() => void) | null {
   return cleanup;
 }
 
-onMounted(async () => {
-  unlistenInteraction = keepCleanup(await installAgentInteractionBridge());
+async function installDeferredBridges() {
+  const [{ installAgentInteractionBridge }, { installConversationActivityBridge }] =
+    await measurePerfAsync(
+      "app.bridge.import",
+      () => Promise.all([
+        import("./composables/useAgentInteractionBridge"),
+        import("./composables/useConversationActivity"),
+      ]),
+      { detail: appWindow.label },
+    );
+  if (disposed) return;
+
+  unlistenInteraction = keepCleanup(await measurePerfAsync(
+    "app.bridge.agent.install",
+    () => installAgentInteractionBridge(),
+    { detail: appWindow.label },
+  ));
   if (!unlistenInteraction) return;
 
-  unlistenConversationActivity = keepCleanup(await installConversationActivityBridge());
-  if (!unlistenConversationActivity) return;
+  unlistenConversationActivity = keepCleanup(await measurePerfAsync(
+    "app.bridge.activity.install",
+    () => installConversationActivityBridge(),
+    { detail: appWindow.label },
+  ));
+}
+
+onMounted(async () => {
+  scheduleAfterPaint(() => {
+    if (disposed) return;
+    void installDeferredBridges().catch((err) => {
+      console.error("[app] install deferred bridges failed", err);
+    });
+  });
 
   if (isMainWindow) {
     const mainNavigateCleanup = await listen<{ route: string }>("lilia:main:navigate", (event) => {

@@ -27,6 +27,18 @@ pub struct TaskRow {
     pub pinned: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarConversationSummaryRow {
+    pub task_id: String,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+    pub title: String,
+    pub created_at: i64,
+    pub pinned: bool,
+    pub route: String,
+}
+
 pub(super) struct NewTask<'a> {
     pub id: &'a str,
     pub project_id: Option<&'a str>,

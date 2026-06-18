@@ -18,6 +18,16 @@ export interface Task {
   dependsOn: string[];
 }
 
+export interface SidebarConversationSummary {
+  taskId: string;
+  projectId: string | null;
+  projectName: string | null;
+  title: string;
+  createdAt: number;
+  pinned: boolean;
+  route: string;
+}
+
 export interface TaskGraph {
   tasks: Task[];
   childrenByParent: Record<string, string[]>;

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AskUserSpec } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { installAgentInteractionBridge } from "../src/composables/useAgentInteractionBridge";
-import { resolveAskUser, useAskUser } from "../src/composables/useAskUser";
+import { resolveAskUserById, useAskUser } from "../src/composables/useAskUser";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
 import { setAgentInteractionSettings } from "../src/services/chat";
@@ -51,12 +51,15 @@ async function renderTaskDetail(taskId = "t-002") {
       plugins: [router],
     },
   });
+  await vi.dynamicImportSettled();
   await waitFor(() => {
     expect(mockInvoke.mock.calls.some(([cmd]) =>
       cmd === "agent_interaction_get_settings"
     )).toBe(true);
   });
-  await Promise.resolve();
+  await waitFor(() => {
+    expect(view.container.querySelector(".chat-controls")).not.toBeNull();
+  });
   return Object.assign(view, { router });
 }
 
@@ -75,7 +78,11 @@ function placeEditableCaret(element: HTMLElement, offset: number) {
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
-  const input = view.getByRole("textbox") as HTMLElement;
+  const input = await waitFor(() => {
+    const element = view.container.querySelector(".chat-composer [role='textbox']");
+    expect(element).toBeInstanceOf(HTMLElement);
+    return element as HTMLElement;
+  });
   if (input instanceof HTMLTextAreaElement) {
     await fireEvent.update(input, text);
     return input;
@@ -341,8 +348,10 @@ describe("chat AskUser prompt", () => {
 
   afterEach(async () => {
     const { state } = useAskUser();
-    while (state.current || state.queue.length) {
-      resolveAskUser({ answers: {}, cancelled: true });
+    while (state.current || state.queue.length || state.pending.length) {
+      const id = state.current?.id ?? state.queue[0]?.id ?? state.pending[0]?.id;
+      if (typeof id !== "number") break;
+      resolveAskUserById(id, { answers: {}, cancelled: true });
     }
     await Promise.resolve();
     await useConnectionStatus({ probe: false }).setActiveBackend("claude");
@@ -403,8 +412,11 @@ describe("chat AskUser prompt", () => {
     await waitFor(() => {
       expect(view.container.querySelector(".chat-composer .composer-inline--ask")).toBeNull();
     });
-    const prompt = view.container.querySelector(".timeline-pending-action.composer-inline--ask");
-    expect(prompt).not.toBeNull();
+    const prompt = await waitFor(() => {
+      const element = view.container.querySelector(".timeline-pending-action.composer-inline--ask");
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
     await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
@@ -793,8 +805,12 @@ describe("chat AskUser prompt", () => {
 
     await setComposerText(view, "重点看权限边界\n/review");
     await flushSlashCommands();
-    await fireEvent.click(view.getByRole("option", { name: /\/review/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    const reviewOption = await waitFor(() => view.getByRole("option", { name: /\/review/ }));
+    await fireEvent.click(reviewOption);
+    const uncommittedChangesReviewOption = await waitFor(() =>
+      view.getByRole("option", { name: /未提交改动/ })
+    );
+    await fireEvent.click(uncommittedChangesReviewOption);
 
     await expectLatestChatSend({
       content: "重点看权限边界",
@@ -810,8 +826,12 @@ describe("chat AskUser prompt", () => {
 
     await setComposerText(view, "优先给最小修复\n/fix");
     await flushSlashCommands();
-    await fireEvent.click(view.getByRole("option", { name: /\/fix/ }));
-    await fireEvent.click(view.getByRole("option", { name: /未提交改动/ }));
+    const fixOption = await waitFor(() => view.getByRole("option", { name: /\/fix/ }));
+    await fireEvent.click(fixOption);
+    const uncommittedChangesFixOption = await waitFor(() =>
+      view.getByRole("option", { name: /未提交改动/ })
+    );
+    await fireEvent.click(uncommittedChangesFixOption);
 
     await expectLatestChatSend({
       content: "优先给最小修复",
@@ -867,7 +887,7 @@ describe("chat AskUser prompt", () => {
   it("Codex compact 入口以 workflow 进入发送命令", async () => {
     const view = await renderCodexTaskDetail();
 
-    await fireEvent.click(view.getByRole("button", { name: /压缩上下文/ }));
+    await fireEvent.click(await view.findByRole("button", { name: /压缩上下文/ }));
     await expectLatestChatSend({
       content: "",
       workflow: { type: "lilia_compact" },

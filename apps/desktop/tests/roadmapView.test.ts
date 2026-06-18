@@ -21,6 +21,13 @@ async function renderRoadmap(projectId = "lilia") {
   });
 }
 
+async function waitForTaskInsightsReady(view: Awaited<ReturnType<typeof renderRoadmap>>) {
+  await waitFor(() => {
+    expect(view.getByLabelText("路线图完成度")).not.toHaveTextContent("--");
+    expect(view.getAllByText("接入 Claude Code 会话发现").length).toBeGreaterThan(0);
+  });
+}
+
 describe("RoadmapView", () => {
   it("从真实 milestone/link 快照展示路线图进度", async () => {
     const view = await renderRoadmap();
@@ -28,6 +35,7 @@ describe("RoadmapView", () => {
     await waitFor(() => {
       expect(view.getByText("首发可用路线图")).toBeInTheDocument();
     });
+    await waitForTaskInsightsReady(view);
 
     expect(view.queryByText(/Task 状态聚合/)).not.toBeInTheDocument();
     expect(view.getByLabelText("路线图完成度")).toHaveTextContent("50%");
@@ -55,6 +63,7 @@ describe("RoadmapView", () => {
 
   it("能切换 milestone 状态并勾选关联任务", async () => {
     const view = await renderRoadmap();
+    await waitForTaskInsightsReady(view);
 
     const statusSelect = await view.findByLabelText("首发可用路线图 状态");
     await fireEvent.update(statusSelect, "done");
@@ -104,6 +113,7 @@ describe("RoadmapView", () => {
     const view = await renderRoadmap();
 
     await view.findByText("首发可用路线图");
+    await waitForTaskInsightsReady(view);
     await fireEvent.click(view.getByRole("button", { name: "删除 首发可用路线图" }));
 
     await waitFor(() => {

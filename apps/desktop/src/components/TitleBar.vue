@@ -13,12 +13,8 @@ import {
   PanelRightOpen,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  getOrphanConversation,
-  getTask,
-} from "../services/tasksStore";
-import { getProject } from "../services/projectsStore";
 import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
+import { useTitleBarCrumbs } from "../composables/useTitleBarCrumbs";
 
 defineProps<{
   leftSidebarCollapsed?: boolean;
@@ -30,15 +26,8 @@ defineEmits<{
 }>();
 
 const route = useRoute();
-
-function paramAsString(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value;
-}
-
-const projectId = computed(() => paramAsString(route.params.projectId));
-const taskId = computed(() => paramAsString(route.params.taskId));
 const chatSidebar = useChatSidebar();
+const { projectId, taskId, crumbs } = useTitleBarCrumbs();
 
 const canToggleChatSidebar = computed(() =>
   !!taskId.value &&
@@ -46,48 +35,12 @@ const canToggleChatSidebar = computed(() =>
   chatSidebar.panels.value.length > 0,
 );
 
-interface Crumb {
-  text: string;
-  muted?: boolean;
-}
-
-/**
- * 面包屑：根据路由生成 1-2 段。收集箱被当成「虚拟项目」，让项目对话和收集箱
- * 对话走同一套两段结构，prefixKey 在两者之间切换时自然触发过渡。
- */
-const crumbs = computed<Crumb[]>(() => {
-  const pid = projectId.value;
-  const tid = taskId.value;
-
-  if (pid && tid) {
-    const proj = getProject(pid);
-    const task = getTask(pid, tid);
-    return [
-      { text: proj?.name ?? "未知项目", muted: true },
-      { text: task?.title ?? "未知任务" },
-    ];
-  }
-
-  if (route.path.startsWith("/chats/") && tid) {
-    const orphan = getOrphanConversation(tid);
-    return [
-      { text: "收集箱", muted: true },
-      { text: orphan?.title ?? "新对话" },
-    ];
-  }
-
-  if (route.path === "/settings") return [{ text: "设置" }];
-  if (route.path === "/automations") return [{ text: "自动化" }];
-
-  return [{ text: "Lilia" }];
-});
-
-const leafCrumb = computed<Crumb | null>(() => {
+const leafCrumb = computed(() => {
   const arr = crumbs.value;
   return arr.length > 0 ? arr[arr.length - 1] : null;
 });
 
-const nonLeafCrumbs = computed<Crumb[]>(() => crumbs.value.slice(0, -1));
+const nonLeafCrumbs = computed(() => crumbs.value.slice(0, -1));
 
 /**
  * 前缀 key 同项目内切 session 时不变；叶子 key 含前缀，避免不同项目同名 task

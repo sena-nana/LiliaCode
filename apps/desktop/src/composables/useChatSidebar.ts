@@ -19,16 +19,19 @@ export interface ChatSidebarPanel {
   title: string;
   icon?: Component;
   order?: number;
-  component: Component;
+  loader?: () => Promise<Component>;
+  component?: Component;
 }
 
 interface RegisteredChatSidebarPanel extends ChatSidebarPanel {
+  loader: () => Promise<Component>;
   token: symbol;
 }
 
 interface ChatSidebarState {
   open: boolean;
   activePanelId: string | null;
+  pendingPanelId: string | null;
   panels: RegisteredChatSidebarPanel[];
 }
 
@@ -51,6 +54,7 @@ function persistOpen(open: boolean) {
 const state = reactive<ChatSidebarState>({
   open: readStoredOpen(),
   activePanelId: null,
+  pendingPanelId: null,
   panels: [],
 });
 
@@ -67,15 +71,23 @@ function sortedPanels(): RegisteredChatSidebarPanel[] {
   return [...state.panels].sort(comparePanels);
 }
 
-function ensureActivePanel(panelId?: string) {
-  if (panelId && state.panels.some((panel) => panel.id === panelId)) {
-    state.activePanelId = panelId;
+function reconcileActivePanel() {
+  if (state.pendingPanelId && state.panels.some((panel) => panel.id === state.pendingPanelId)) {
+    state.activePanelId = state.pendingPanelId;
+    state.pendingPanelId = null;
     return;
   }
   if (state.activePanelId && state.panels.some((panel) => panel.id === state.activePanelId)) {
     return;
   }
   state.activePanelId = sortedPanels()[0]?.id ?? null;
+}
+
+function requestActivePanel(panelId?: string) {
+  if (panelId) {
+    state.pendingPanelId = panelId;
+  }
+  reconcileActivePanel();
 }
 
 function setOpen(open: boolean) {
@@ -95,13 +107,25 @@ export const activeChatSidebarPanel = computed(() => {
   return panels.find((panel) => panel.id === state.activePanelId) ?? panels[0] ?? null;
 });
 
+function normalizePanelLoader(panel: ChatSidebarPanel): () => Promise<Component> {
+  if (panel.loader) {
+    return panel.loader;
+  }
+  if (panel.component) {
+    const component = markRaw(panel.component);
+    return () => Promise.resolve(component);
+  }
+  throw new Error(`chat sidebar panel "${panel.id}" 缺少 loader`);
+}
+
 export function registerChatSidebarPanel(panel: ChatSidebarPanel): () => void {
   const token = Symbol(panel.id);
   const registered: RegisteredChatSidebarPanel = {
     ...panel,
     token,
     icon: panel.icon ? markRaw(panel.icon) : undefined,
-    component: markRaw(panel.component),
+    component: panel.component ? markRaw(panel.component) : undefined,
+    loader: normalizePanelLoader(panel),
   };
   const existingIndex = state.panels.findIndex((item) => item.id === panel.id);
   if (existingIndex >= 0) {
@@ -109,7 +133,7 @@ export function registerChatSidebarPanel(panel: ChatSidebarPanel): () => void {
   } else {
     state.panels.push(registered);
   }
-  ensureActivePanel(panel.id);
+  reconcileActivePanel();
 
   return () => {
     const index = state.panels.findIndex((item) =>
@@ -119,13 +143,17 @@ export function registerChatSidebarPanel(panel: ChatSidebarPanel): () => void {
     const wasActive = state.activePanelId === panel.id;
     state.panels.splice(index, 1);
     if (wasActive) {
-      state.activePanelId = sortedPanels()[0]?.id ?? null;
+      state.activePanelId = null;
     }
+    if (state.pendingPanelId === panel.id) {
+      state.pendingPanelId = null;
+    }
+    reconcileActivePanel();
   };
 }
 
 export function openChatSidebar(panelId?: string) {
-  ensureActivePanel(panelId);
+  requestActivePanel(panelId);
   setOpen(true);
 }
 
@@ -143,6 +171,7 @@ export function toggleChatSidebar(panelId?: string) {
 
 export function setActiveChatSidebarPanel(panelId: string) {
   if (!state.panels.some((panel) => panel.id === panelId)) return;
+  state.pendingPanelId = null;
   state.activePanelId = panelId;
 }
 

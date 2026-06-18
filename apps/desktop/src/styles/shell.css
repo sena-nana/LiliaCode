@@ -631,7 +631,16 @@
   cursor: grabbing;
 }
 
+.secondary-panel__grouped.is-tree-dragging,
+.secondary-panel__grouped.is-tree-dragging .sb-tree__row {
+  cursor: grabbing;
+}
+
 .secondary-panel.is-tree-dragging .sb-tree__row:hover {
+  background: var(--bg-active);
+}
+
+.secondary-panel__grouped.is-tree-dragging .sb-tree__row:hover {
   background: var(--bg-active);
 }
 

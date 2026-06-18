@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import "../styles/pages/plugins.css";
-import { computed, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch, type Component } from "vue";
 import {
   AlertTriangle,
   Check,
@@ -31,13 +31,69 @@ import {
   type PluginPackage,
   type PluginSkill,
 } from "../services/plugins";
+import { measurePerfAsync } from "../utils/perf";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
 import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
-import HookSourceEditorDialog from "./plugins/HookSourceEditorDialog.vue";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
-import SkillCreateDialog from "./plugins/SkillCreateDialog.vue";
-import McpServerEditorDialog from "./plugins/McpServerEditorDialog.vue";
+
+let skillCreateDialogLoad: Promise<Component> | null = null;
+let hookSourceEditorDialogLoad: Promise<Component> | null = null;
+let mcpServerEditorDialogLoad: Promise<Component> | null = null;
+
+async function loadSkillCreateDialog(): Promise<Component> {
+  if (!skillCreateDialogLoad) {
+    skillCreateDialogLoad = measurePerfAsync(
+      "plugins.skill-create-dialog.load",
+      async () => (await import("./plugins/SkillCreateDialog.vue")).default,
+    ).catch((error) => {
+      skillCreateDialogLoad = null;
+      throw error;
+    });
+  }
+  return skillCreateDialogLoad;
+}
+
+async function loadHookSourceEditorDialog(): Promise<Component> {
+  if (!hookSourceEditorDialogLoad) {
+    hookSourceEditorDialogLoad = measurePerfAsync(
+      "plugins.hook-editor-dialog.load",
+      async () => (await import("./plugins/HookSourceEditorDialog.vue")).default,
+    ).catch((error) => {
+      hookSourceEditorDialogLoad = null;
+      throw error;
+    });
+  }
+  return hookSourceEditorDialogLoad;
+}
+
+async function loadMcpServerEditorDialog(): Promise<Component> {
+  if (!mcpServerEditorDialogLoad) {
+    mcpServerEditorDialogLoad = measurePerfAsync(
+      "plugins.mcp-editor-dialog.load",
+      async () => (await import("./plugins/McpServerEditorDialog.vue")).default,
+    ).catch((error) => {
+      mcpServerEditorDialogLoad = null;
+      throw error;
+    });
+  }
+  return mcpServerEditorDialogLoad;
+}
+
+const SkillCreateDialog = defineAsyncComponent({
+  suspensible: false,
+  loader: loadSkillCreateDialog,
+});
+
+const HookSourceEditorDialog = defineAsyncComponent({
+  suspensible: false,
+  loader: loadHookSourceEditorDialog,
+});
+
+const McpServerEditorDialog = defineAsyncComponent({
+  suspensible: false,
+  loader: loadMcpServerEditorDialog,
+});
 
 const {
   tab,
@@ -547,6 +603,7 @@ function openCreate() {
   newName.value = "";
   newDesc.value = "";
   createError.value = null;
+  void loadSkillCreateDialog();
   showCreate.value = true;
 }
 
@@ -621,6 +678,7 @@ async function openSelectedHookEditor(entry: HookEntry) {
     const document = hookDocumentFor(entry.item) ?? await readHookSource(entry.item);
     selectedHookDocument.value = document;
     hookDocumentError.value = null;
+    void loadHookSourceEditorDialog();
     hookEditor.openHookEditor(document);
   } catch (err) {
     errorText.value = String(err);
@@ -675,6 +733,7 @@ function selectEntry(entry: PluginEntry) {
 }
 
 function openMcpCreate() {
+  void loadMcpServerEditorDialog();
   if (tab.value === "claude-mcp") mcpEditor.openCreateMcp();
   else if (tab.value === "codex-mcp") codexMcpEditor.openCreateMcp();
 }
@@ -703,8 +762,13 @@ function toggleSelected(entry: PluginEntry) {
 }
 
 function editSelected(entry: PluginEntry) {
-  if (entry.kind === "claude-mcp") mcpEditor.openEditMcp(entry.item);
-  else if (entry.kind === "codex-mcp" && entry.item.editable) codexMcpEditor.openEditMcp(entry.item);
+  if (entry.kind === "claude-mcp") {
+    void loadMcpServerEditorDialog();
+    mcpEditor.openEditMcp(entry.item);
+  } else if (entry.kind === "codex-mcp" && entry.item.editable) {
+    void loadMcpServerEditorDialog();
+    codexMcpEditor.openEditMcp(entry.item);
+  }
   else if (isHookEntry(entry)) void openSelectedHookEditor(entry);
 }
 
@@ -990,6 +1054,7 @@ function canOpenConfig(entry: PluginEntry) {
     </div>
 
     <SkillCreateDialog
+      v-if="showCreate"
       v-model:open="showCreate"
       v-model:name="newName"
       v-model:description="newDesc"
@@ -1000,6 +1065,7 @@ function canOpenConfig(entry: PluginEntry) {
     />
 
     <HookSourceEditorDialog
+      v-if="hookEditor.showHookEditor.value"
       v-model:open="hookEditor.showHookEditor.value"
       :title="hookEditor.hookEditorTitle.value"
       :source-name="hookEditor.editingSource.value?.name ?? ''"
@@ -1013,6 +1079,7 @@ function canOpenConfig(entry: PluginEntry) {
     />
 
     <McpServerEditorDialog
+      v-if="mcpEditor.showMcpEditor.value"
       v-model:open="mcpEditor.showMcpEditor.value"
       v-model:name="mcpEditor.mcpName.value"
       v-model:command="mcpEditor.mcpCommand.value"
@@ -1030,6 +1097,7 @@ function canOpenConfig(entry: PluginEntry) {
     />
 
     <McpServerEditorDialog
+      v-if="codexMcpEditor.showMcpEditor.value"
       v-model:open="codexMcpEditor.showMcpEditor.value"
       v-model:name="codexMcpEditor.mcpName.value"
       v-model:command="codexMcpEditor.mcpCommand.value"

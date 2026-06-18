@@ -97,6 +97,14 @@ function timelineEvent(
   };
 }
 
+async function flushAsyncPreviewComponents() {
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("ConversationImport", () => {
   beforeEach(() => {
     routerMock.push.mockClear();
@@ -145,6 +153,7 @@ describe("ConversationImport", () => {
     });
 
     const view = render(ConversationImport);
+    await flushAsyncPreviewComponents();
 
     await waitFor(() => {
       expect(view.container.querySelector(".agent-timeline")).toBeInTheDocument();
@@ -187,6 +196,7 @@ describe("ConversationImport", () => {
     });
 
     const view = render(ConversationImport);
+    await flushAsyncPreviewComponents();
     const sidebar = view.container.querySelector(".conversation-import__sidebar");
     expect(sidebar).toBeInstanceOf(HTMLElement);
 
@@ -385,6 +395,7 @@ describe("ConversationImport", () => {
     expect(sidebar).toBeInstanceOf(HTMLElement);
 
     await fireEvent.click(within(sidebar as HTMLElement).getByRole("tab", { name: "Claude" }));
+    await flushAsyncPreviewComponents();
 
     await waitFor(() => {
       expect(within(sidebar as HTMLElement).getByRole("button", {

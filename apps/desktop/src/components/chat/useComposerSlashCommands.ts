@@ -1,17 +1,36 @@
-import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from "vue";
+import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type {
   ChatSlashCommandSearchResult,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
 } from "@lilia/contracts";
-import { searchSlashCommands } from "../../services/chat";
+import { measurePerfAsync } from "../../utils/perf";
 import { textPart, type MentionRange } from "./composerParts";
+import { readSlashCommandRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
 
 const SLASH_COMMAND_LIMIT = 12;
 
 type ComposerRichInput = ReturnType<typeof useComposerRichInput>;
 export type ComposerWorkflowSlashKind = "review" | "fix_suggestion";
+type SlashCommandDeps = {
+  searchSlashCommands: typeof import("../../services/chat").searchSlashCommands;
+};
+
+let slashCommandDepsLoad: Promise<SlashCommandDeps> | null = null;
+
+async function loadSlashCommandDeps(): Promise<SlashCommandDeps> {
+  if (!slashCommandDepsLoad) {
+    slashCommandDepsLoad = measurePerfAsync(
+      "chat-composer.slash-search.load",
+      async () => {
+        const { searchSlashCommands } = await import("../../services/chat");
+        return { searchSlashCommands };
+      },
+    );
+  }
+  return slashCommandDepsLoad;
+}
 
 export interface ComposerSlashCommandItem {
   kind: "command" | "workflow";
@@ -60,16 +79,6 @@ const TARGET_ITEMS: ComposerSlashTargetItem[] = [
   { id: "branch", label: "对比分支...", hint: "输入要对比的分支" },
   { id: "commit", label: "指定提交...", hint: "输入要审查的提交" },
 ];
-
-export function readSlashCommandRange(text: string, cursor: number): MentionRange | null {
-  const end = Math.min(Math.max(cursor, 0), text.length);
-  const prefix = text.slice(0, end);
-  const lineStart = Math.max(prefix.lastIndexOf("\n") + 1, 0);
-  const beforeLine = text.slice(lineStart, end);
-  if (!beforeLine.startsWith("/")) return null;
-  if (beforeLine.length > 160 || /\s/.test(beforeLine)) return null;
-  return { start: lineStart, end, query: beforeLine.slice(1) };
-}
 
 export function useComposerSlashCommands(options: {
   richInput: ComposerRichInput;
@@ -145,11 +154,15 @@ export function useComposerSlashCommands(options: {
     loading.value = true;
     error.value = null;
     try {
+      const deps = await loadSlashCommandDeps();
       const cwd = options.projectCwd.value?.trim();
       const query = range.query.trim();
       const workflowResults = localWorkflowResults(query);
       const backendResults = cwd
-        ? await searchSlashCommands(cwd, query, SLASH_COMMAND_LIMIT)
+        ? await measurePerfAsync(
+          "chat-composer.slash-search.query",
+          () => deps.searchSlashCommands(cwd, query, SLASH_COMMAND_LIMIT),
+        )
         : [];
       if (seq !== searchSeq) return;
       results.value = [
@@ -289,7 +302,7 @@ export function useComposerSlashCommands(options: {
     { immediate: true },
   );
 
-  onBeforeUnmount(() => {
+  onScopeDispose(() => {
     searchSeq += 1;
   });
 

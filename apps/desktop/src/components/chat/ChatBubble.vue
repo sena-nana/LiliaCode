@@ -8,96 +8,14 @@ import {
   isImageAttachment,
   type ChatImageViewerSource,
 } from "./imageViewer";
-import {
-  conversationReferencePattern,
-  resolveConversationReferenceMatch,
-} from "../../services/chatConversationReferences";
+import { readChatBubbleDisplay } from "./chatBubbleDisplay";
 
 const props = defineProps<{ message: ChatMessage & { streaming?: boolean; queued?: boolean } }>();
 const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
 }>();
 
-type MessageSegment =
-  | { type: "text"; text: string }
-  | { type: "attachment"; attachment: ChatAttachment }
-  | { type: "conversationReference"; reference: ChatConversationReference };
-
-const referencePattern = /\[(文件引用|目录引用|图片引用): ([^\]\n|]+?) \| ([^\]\n]+?)\]/g;
-const contentSegments = computed(() =>
-  parseMessageContent(
-    props.message.content,
-    props.message.attachments,
-    props.message.conversationReferences ?? [],
-  ),
-);
-const previewAttachments = computed(() =>
-  props.message.attachments.filter((attachment) => isImageAttachment(attachment)),
-);
-const unreferencedAttachments = computed(() => {
-  const referenced = new Set(contentSegments.value
-    .filter((segment): segment is { type: "attachment"; attachment: ChatAttachment } =>
-      segment.type === "attachment"
-    )
-    .map((segment) => segment.attachment.path));
-  return props.message.attachments.filter((attachment) =>
-    !referenced.has(attachment.path) && !isImageAttachment(attachment)
-  );
-});
-
-function parseMessageContent(
-  content: string,
-  attachments: ChatAttachment[],
-  conversationReferences: ChatConversationReference[],
-): MessageSegment[] {
-  const segments: MessageSegment[] = [];
-  let cursor = 0;
-  const matches = [
-    ...Array.from(content.matchAll(referencePattern), (match) => ({
-      kind: "attachment" as const,
-      match,
-    })),
-    ...Array.from(content.matchAll(conversationReferencePattern()), (match) => ({
-      kind: "conversationReference" as const,
-      match,
-    })),
-  ].sort((a, b) => (a.match.index ?? 0) - (b.match.index ?? 0));
-  for (const entry of matches) {
-    const start = entry.match.index ?? 0;
-    if (start > cursor) segments.push({ type: "text", text: content.slice(cursor, start) });
-    if (entry.kind === "attachment") {
-      const [, label, rawName, rawPath] = entry.match;
-      const name = rawName.trim();
-      const path = rawPath.trim();
-      segments.push({
-        type: "attachment",
-        attachment: attachments.find((attachment) => attachment.path === path) ??
-          fallbackAttachment(label, name, path),
-      });
-    } else {
-      segments.push({
-        type: "conversationReference",
-        reference: resolveConversationReferenceMatch(entry.match, conversationReferences),
-      });
-    }
-    cursor = start + entry.match[0].length;
-  }
-  if (cursor < content.length) segments.push({ type: "text", text: content.slice(cursor) });
-  return segments.length ? segments : [{ type: "text", text: content }];
-}
-
-function fallbackAttachment(label: string, name: string, path: string): ChatAttachment {
-  return {
-    id: `inline-${path}`,
-    name: name || path,
-    path,
-    kind: label === "目录引用" ? "directory" : "file",
-    size: null,
-    exists: true,
-    mime: label === "图片引用" ? "image/*" : null,
-    directory: null,
-  };
-}
+const bubbleDisplay = computed(() => readChatBubbleDisplay(props.message));
 
 function openAttachmentImage(attachment: ChatAttachment) {
   const source = imageViewerSourceFromAttachment(attachment);
@@ -127,7 +45,7 @@ function conversationReferenceScope(reference: ChatConversationReference) {
   >
     <div v-if="message.content" class="chat-bubble__content">
       <template
-        v-for="(segment, index) in contentSegments"
+        v-for="(segment, index) in bubbleDisplay.segments"
         :key="index"
       >
         <span v-if="segment.type === 'text'">{{ segment.text }}</span>
@@ -166,12 +84,12 @@ function conversationReferenceScope(reference: ChatConversationReference) {
       />
     </div>
     <div
-      v-if="previewAttachments.length || unreferencedAttachments.length"
+      v-if="bubbleDisplay.previewAttachments.length || bubbleDisplay.unreferencedAttachments.length"
       class="chat-bubble__attachments"
       aria-label="消息附件"
     >
       <button
-        v-for="attachment in previewAttachments"
+        v-for="attachment in bubbleDisplay.previewAttachments"
         :key="attachment.id"
         type="button"
         class="chat-attachment-chip chat-attachment-chip--bubble chat-attachment-chip--image-preview"
@@ -186,7 +104,7 @@ function conversationReferenceScope(reference: ChatConversationReference) {
         />
       </button>
       <span
-        v-for="attachment in unreferencedAttachments"
+        v-for="attachment in bubbleDisplay.unreferencedAttachments"
         :key="attachment.id"
         class="chat-attachment-chip chat-attachment-chip--bubble"
         :title="attachment.path"

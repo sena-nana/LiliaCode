@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, defineAsyncComponent } from "vue";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import MarkdownBlock from "./MarkdownBlock.vue";
-import TimelineCardDetails from "./TimelineCardDetails.vue";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
+import { measurePerfAsync } from "../../utils/perf";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
   truncateTimelineText,
 } from "./timelineDisplay";
+
+const TimelineCardDetails = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.card-details.load",
+    async () => (await import("./TimelineCardDetails.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   event: AgentTimelineEvent;
@@ -37,11 +44,8 @@ const summaryLine = computed(() =>
   display.value.label?.trim() ||
   "暂无摘要。",
 );
-const compactView = computed(() =>
-  createTimelineMarkdownView(
-    truncateTimelineText(summaryLine.value, 180),
-    { forceSingleLine: true, singleLineTone: "muted" },
-  ),
+const compactSummaryText = computed(() =>
+  truncateTimelineText(summaryLine.value.replace(/\s+/g, " ").trim(), 180),
 );
 const expandedFallbackView = computed(() =>
   details.value.length
@@ -58,13 +62,12 @@ const expandedFallbackView = computed(() =>
     class="timeline-card timeline-card--declared"
     :class="{ 'timeline-card--compact': props.compact }"
   >
-    <MarkdownBlock
-      v-if="collapsed && compactView"
-      :content="compactView.content"
-      :tone="compactView.tone"
-      :single-line="compactView.singleLine"
+    <p
+      v-if="collapsed && compactSummaryText"
       class="timeline-muted-line"
-    />
+    >
+      {{ compactSummaryText }}
+    </p>
 
     <template v-else>
       <TimelineCardDetails
