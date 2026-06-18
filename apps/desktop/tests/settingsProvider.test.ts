@@ -153,6 +153,12 @@ describe("Settings provider switch", () => {
     });
     expect(await view.findByText("总 Token")).toBeInTheDocument();
     expect(view.getByRole("img", { name: "每日 Token 趋势" })).toBeInTheDocument();
+    expect(
+      view.getByRole("img", { name: "Token 消耗热度图（全部 · 近 7 天）" }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.container.querySelectorAll(".quota-heatmap__day[title]").length).toBeGreaterThan(0);
+    });
     expect(view.getByText("项目消耗")).toBeInTheDocument();
     expect(view.getByText("对话消耗")).toBeInTheDocument();
     expect(view.getByText("工具活跃度")).toBeInTheDocument();
@@ -165,6 +171,20 @@ describe("Settings provider switch", () => {
         input: { days: 7, backend: "codex" },
       });
     });
+    expect(
+      view.getByRole("img", { name: "Token 消耗热度图（Codex · 近 7 天）" }),
+    ).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("radio", { name: "30 天" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("quota_usage_get_stats")).toMatchObject({
+        input: { days: 30, backend: "codex" },
+      });
+    });
+    expect(
+      view.getByRole("img", { name: "Token 消耗热度图（Codex · 近 30 天）" }),
+    ).toBeInTheDocument();
   });
 
   it("额度页无新增记录时显示空态", async () => {
@@ -174,6 +194,7 @@ describe("Settings provider switch", () => {
 
     expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
     expect(view.getByText("无新增记录")).toBeInTheDocument();
+    expect(view.queryByRole("img", { name: /Token 消耗热度图/ })).not.toBeInTheDocument();
   });
 
   it("额度页在 Codex 官方账号模式显示官方额度", async () => {
