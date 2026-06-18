@@ -8,6 +8,7 @@ use super::claude_mcp::{
 use super::claude_plugins::list_claude_plugins;
 use super::claude_skills::list_claude_skills;
 use super::codex_mcp::{codex_config_path, list_codex_mcp_servers};
+use super::hooks::runtime_claude_hooks;
 use super::paths::{SCOPE_PROJECT, SCOPE_USER};
 use super::types::{
     AgentRuntimeExtensions, ClaudeRuntimeExtensions, ClaudeRuntimePlugin, CodexRuntimeExtensions,
@@ -83,6 +84,8 @@ pub fn runtime_extensions<R: Runtime>(
         .collect();
     let (claude_mcp_servers, mcp_warnings) = runtime_claude_mcp_servers();
     claude_warnings.extend(mcp_warnings);
+    let (hooks, hook_warnings) = runtime_claude_hooks(app, project_cwd);
+    claude_warnings.extend(hook_warnings);
 
     let config_path = codex_config_path(app).ok();
     let (mcp_servers, codex_warnings) = list_codex_mcp_servers(app);
@@ -92,6 +95,7 @@ pub fn runtime_extensions<R: Runtime>(
             skills,
             plugins: runtime_plugins,
             mcp_servers: claude_mcp_servers,
+            hooks,
             warnings: claude_warnings,
         },
         codex: CodexRuntimeExtensions {

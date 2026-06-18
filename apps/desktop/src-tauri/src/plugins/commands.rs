@@ -16,9 +16,14 @@ use super::codex_mcp::{
     codex_config_path, create_codex_mcp_server, delete_codex_mcp_server,
     set_codex_mcp_server_enabled, update_codex_mcp_server,
 };
+use super::hooks::{
+    create_hook_source, delete_hook_source, hooks_overview, read_hook_source,
+    set_hook_source_enabled, update_hook_source,
+};
 use super::runtime::overview;
 use super::types::{
-    PluginMcpServer, PluginMcpServerInput, PluginSkill, PluginsOverview,
+    HookDocumentUpdateInput, HookDocumentView, HookSourceSummary, HooksOverview, PluginMcpServer,
+    PluginMcpServerInput, PluginSkill, PluginsOverview,
 };
 
 const BACKEND_CLAUDE: &str = "claude";
@@ -43,6 +48,11 @@ fn plugin_backend(value: &str) -> Result<PluginBackend, String> {
 #[tauri::command]
 pub fn plugins_overview(app: AppHandle, project_cwd: Option<String>) -> PluginsOverview {
     overview(&app, project_cwd.as_deref())
+}
+
+#[tauri::command]
+pub fn plugins_hooks_overview(app: AppHandle, project_cwd: Option<String>) -> HooksOverview {
+    hooks_overview(&app, project_cwd.as_deref())
 }
 
 #[tauri::command]
@@ -184,4 +194,67 @@ pub fn plugins_open_mcp_config(app: AppHandle, backend: String) -> Result<(), St
             "打开 config.toml 失败",
         ),
     }
+}
+
+#[tauri::command]
+pub fn plugins_read_hook_source(
+    app: AppHandle,
+    source: HookSourceSummary,
+) -> Result<HookDocumentView, String> {
+    read_hook_source(&app, &source)
+}
+
+#[tauri::command]
+pub fn plugins_update_hook_source(
+    app: AppHandle,
+    source: HookSourceSummary,
+    input: HookDocumentUpdateInput,
+) -> Result<HookDocumentView, String> {
+    update_hook_source(&app, &source, input)
+}
+
+#[tauri::command]
+pub fn plugins_create_hook_source(
+    app: AppHandle,
+    backend: String,
+    scope: String,
+    project_cwd: Option<String>,
+) -> Result<HookSourceSummary, String> {
+    create_hook_source(&app, &backend, &scope, project_cwd.as_deref())
+}
+
+#[tauri::command]
+pub fn plugins_delete_hook_source(
+    app: AppHandle,
+    source: HookSourceSummary,
+) -> Result<(), String> {
+    delete_hook_source(&app, &source)
+}
+
+#[tauri::command]
+pub fn plugins_set_hook_source_enabled(
+    app: AppHandle,
+    source: HookSourceSummary,
+    enabled: bool,
+) -> Result<HookSourceSummary, String> {
+    set_hook_source_enabled(&app, &source, enabled)
+}
+
+#[tauri::command]
+pub fn plugins_open_hook_config(app: AppHandle, source: HookSourceSummary) -> Result<(), String> {
+    let path = PathBuf::from(&source.path);
+    let default_contents: &[u8] = match (source.backend.as_str(), source.format.as_str()) {
+        (BACKEND_CLAUDE, "claude_settings_json") | (BACKEND_CODEX, "codex_hooks_json") => {
+            b"{\n  \"hooks\": {}\n}\n"
+        }
+        _ => b"",
+    };
+    ensure_file_and_open(
+        &app,
+        path,
+        default_contents,
+        "创建 hooks 配置目录失败",
+        "初始化 hooks 配置失败",
+        "打开 hooks 配置失败",
+    )
 }

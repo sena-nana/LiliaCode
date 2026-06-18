@@ -50,10 +50,12 @@ export function readClaudeRuntimeExtensions(cmd) {
       .map((plugin) => ({ type: "local", path: plugin.path }))
     : [];
   const warnings = stringArray(ext?.warnings);
+  const hooks = isRecord(ext?.hooks) ? ext.hooks : null;
   return {
     skills: stringArray(ext?.skills),
     plugins,
     mcpServers: readClaudeRuntimeMcpServers(ext?.mcpServers, warnings),
+    hooks,
     warnings,
   };
 }

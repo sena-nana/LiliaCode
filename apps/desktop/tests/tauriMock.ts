@@ -491,6 +491,58 @@ let codexAppServerStatus = {
   issues: [] as string[],
 };
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
+type MockHookTrustState = "unknown" | "required" | "managed" | "n_a";
+interface MockHookSourceSummary {
+  id: string;
+  backend: "claude" | "codex";
+  scope: "managed" | "user" | "project" | "local" | "plugin" | "system";
+  format: string;
+  name: string;
+  path: string;
+  exists: boolean;
+  editable: boolean;
+  managed: boolean;
+  enabled: boolean;
+  handlerCount: number;
+  warnings: string[];
+  limitations: string[];
+  trustState: MockHookTrustState;
+  description?: string | null;
+}
+interface MockHookHandlerView {
+  id: string;
+  event: string;
+  matcher: string | null;
+  type: string;
+  command: string | null;
+  commandWindows: string | null;
+  timeoutSeconds: number | null;
+  statusMessage: string | null;
+  supported: boolean;
+  executable: boolean;
+  groupAdvancedJson: string | null;
+  advancedJson: string | null;
+  warnings: string[];
+}
+interface MockHookDocumentView {
+  source: MockHookSourceSummary;
+  handlers: MockHookHandlerView[];
+  rawDocument: string | null;
+  rawFormat: "json" | "toml" | "text";
+  warnings: string[];
+  limitations: string[];
+}
+const CODEX_MIXED_SOURCE_WARNING = "同一层同时存在 hooks.json 与 inline [hooks]；Codex 会同时加载两者。";
+const CODEX_PROMPT_WARNING = "type=prompt 当前上游解析但不执行。";
+const CODEX_INLINE_LIMITATIONS = [
+  "当前来源为只读 inline [hooks]，Lilia 不会自动重写 config.toml。",
+  "如需编辑，请改用 hooks.json 或直接手工维护 TOML。",
+];
+const CODEX_REQUIREMENTS_LIMITATIONS = [
+  "当前来源来自 requirements.toml，仅用于展示约束与托管 hooks。",
+  "allow_managed_hooks_only = true：仅允许托管 hooks。",
+  "requirements.toml 约束 features.hooks = false",
+];
 const baseClaudePlugins = [{
   backend: "claude",
   scope: "user",
@@ -543,6 +595,325 @@ let codexMcpServers = baseCodexMcpServers.map((server) => ({
   args: [...server.args],
   envKeys: [...server.envKeys],
 }));
+
+function makeHookSource(
+  source: Partial<MockHookSourceSummary> & Pick<MockHookSourceSummary, "id" | "backend" | "scope" | "format" | "name" | "path">,
+): MockHookSourceSummary {
+  return {
+    exists: true,
+    editable: false,
+    managed: false,
+    enabled: false,
+    handlerCount: 0,
+    warnings: [],
+    limitations: [],
+    trustState: "unknown",
+    description: null,
+    ...source,
+  };
+}
+
+function makeHookHandler(
+  handler: Partial<MockHookHandlerView> & Pick<MockHookHandlerView, "id" | "event" | "type">,
+): MockHookHandlerView {
+  return {
+    matcher: null,
+    command: null,
+    commandWindows: null,
+    timeoutSeconds: null,
+    statusMessage: null,
+    supported: true,
+    executable: true,
+    groupAdvancedJson: null,
+    advancedJson: null,
+    warnings: [],
+    ...handler,
+  };
+}
+
+function buildHookRawDocument(handlers: MockHookHandlerView[]) {
+  const grouped = handlers.reduce<Record<string, Array<Record<string, unknown>>>>((acc, handler) => {
+    const event = handler.event.trim();
+    if (!event) return acc;
+    acc[event] ??= [];
+    const row: Record<string, unknown> = {
+      type: handler.type,
+    };
+    if (handler.matcher) row.matcher = handler.matcher;
+    if (handler.command) row.command = handler.command;
+    if (handler.commandWindows) row.commandWindows = handler.commandWindows;
+    if (handler.timeoutSeconds != null) row.timeout = handler.timeoutSeconds;
+    if (handler.statusMessage) row.statusMessage = handler.statusMessage;
+    if (handler.groupAdvancedJson) Object.assign(row, JSON.parse(handler.groupAdvancedJson));
+    if (handler.advancedJson) Object.assign(row, JSON.parse(handler.advancedJson));
+    acc[event].push({ hooks: [row], ...(handler.matcher ? { matcher: handler.matcher } : {}) });
+    return acc;
+  }, {});
+  return `${JSON.stringify({ hooks: grouped }, null, 2)}\n`;
+}
+
+function cloneHookDocument(document: MockHookDocumentView): MockHookDocumentView {
+  return structuredClone(document);
+}
+
+function syncHookDocument(document: MockHookDocumentView) {
+  document.source.handlerCount = document.handlers.length;
+  document.source.enabled = document.source.exists && document.handlers.length > 0;
+}
+
+function makeHookDocument({
+  source,
+  handlers = [],
+  rawDocument,
+  rawFormat = "json",
+  warnings = [],
+  limitations = [],
+}: {
+  source: MockHookSourceSummary;
+  handlers?: MockHookHandlerView[];
+  rawDocument?: string | null;
+  rawFormat?: MockHookDocumentView["rawFormat"];
+  warnings?: string[];
+  limitations?: string[];
+}): MockHookDocumentView {
+  const document: MockHookDocumentView = {
+    source,
+    handlers,
+    rawDocument: rawDocument ?? (rawFormat === "json" ? buildHookRawDocument(handlers) : null),
+    rawFormat,
+    warnings,
+    limitations,
+  };
+  syncHookDocument(document);
+  return document;
+}
+
+function initialHookDocuments(): Record<string, MockHookDocumentView> {
+  const claudeUser = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-user",
+      backend: "claude",
+      scope: "user",
+      format: "claude_settings_json",
+      name: "Claude User Hooks",
+      path: "C:\\Users\\mock\\.claude\\settings.json",
+      editable: true,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      description: "~/.claude/settings.json 中的 hooks",
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "claude-user-1",
+        event: "PostToolUse",
+        matcher: "Bash",
+        type: "command",
+        command: "node global-hook.js",
+        statusMessage: "Running global Claude hook",
+        timeoutSeconds: 30,
+      }),
+    ],
+  });
+
+  const claudeProject = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-project",
+      backend: "claude",
+      scope: "project",
+      format: "claude_settings_json",
+      name: "Claude Project Hooks",
+      path: "D:\\PROJECT\\workspace\\Lilia\\.claude\\settings.json",
+      editable: true,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      description: ".claude/settings.json 中的 hooks",
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "claude-project-1",
+        event: "PostToolUse",
+        matcher: "Edit",
+        type: "command",
+        command: "node project-hook.js",
+        advancedJson: "{\n  \"env\": {\n    \"MODE\": \"project\"\n  }\n}",
+      }),
+    ],
+  });
+
+  const claudeLocal = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-local",
+      backend: "claude",
+      scope: "local",
+      format: "claude_settings_json",
+      name: "Claude Local Hooks",
+      path: "D:\\PROJECT\\workspace\\Lilia\\.claude\\settings.local.json",
+      editable: true,
+      exists: false,
+      enabled: false,
+      handlerCount: 0,
+      description: ".claude/settings.local.json 中的 hooks",
+    }),
+    rawDocument: null,
+  });
+
+  const claudeManaged = makeHookDocument({
+    source: makeHookSource({
+      id: "claude-managed",
+      backend: "claude",
+      scope: "managed",
+      format: "managed_settings",
+      name: "Claude Managed Hooks",
+      path: "C:\\Program Files\\ClaudeCode\\managed-settings.json",
+      editable: false,
+      managed: true,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      trustState: "managed",
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "claude-managed-1",
+        event: "PreToolUse",
+        matcher: "Bash",
+        type: "command",
+        command: "node managed-hook.js",
+      }),
+    ],
+    rawDocument: "{\n  \"hooks\": {}\n}\n",
+    limitations: ["托管 settings 来源不可在 Lilia 中修改。"],
+  });
+
+  const codexUser = makeHookDocument({
+    source: makeHookSource({
+      id: "codex-user-hooks",
+      backend: "codex",
+      scope: "user",
+      format: "codex_hooks_json",
+      name: "Codex User Hooks",
+      path: "C:\\Users\\mock\\.codex\\hooks.json",
+      editable: true,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      trustState: "required",
+      warnings: [CODEX_MIXED_SOURCE_WARNING],
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "codex-user-1",
+        event: "PreToolUse",
+        matcher: "Bash",
+        type: "command",
+        command: "node codex-hook.js",
+        commandWindows: "powershell -File codex-hook.ps1",
+        groupAdvancedJson: "{\n  \"shared\": true\n}",
+      }),
+    ],
+    warnings: [CODEX_MIXED_SOURCE_WARNING],
+  });
+
+  const codexUserConfig = makeHookDocument({
+    source: makeHookSource({
+      id: "codex-user-config",
+      backend: "codex",
+      scope: "user",
+      format: "codex_config_toml",
+      name: "Codex User Config Hooks",
+      path: "C:\\Users\\mock\\.codex\\config.toml",
+      editable: false,
+      exists: true,
+      enabled: true,
+      handlerCount: 1,
+      trustState: "required",
+      warnings: [CODEX_MIXED_SOURCE_WARNING],
+    }),
+    handlers: [
+      makeHookHandler({
+        id: "codex-user-config-1",
+        event: "PreToolUse",
+        matcher: "Read",
+        type: "prompt",
+        supported: false,
+        executable: false,
+        warnings: [CODEX_PROMPT_WARNING],
+      }),
+    ],
+    rawDocument: "[hooks]\n",
+    rawFormat: "toml",
+    warnings: [CODEX_PROMPT_WARNING],
+    limitations: CODEX_INLINE_LIMITATIONS,
+  });
+
+  const codexProject = makeHookDocument({
+    source: makeHookSource({
+      id: "codex-project-hooks",
+      backend: "codex",
+      scope: "project",
+      format: "codex_hooks_json",
+      name: "Codex Project Hooks",
+      path: "D:\\PROJECT\\workspace\\Lilia\\.codex\\hooks.json",
+      editable: true,
+      exists: false,
+      enabled: false,
+      handlerCount: 0,
+      trustState: "required",
+    }),
+    rawDocument: null,
+  });
+
+  const codexRequirements = makeHookDocument({
+    source: makeHookSource({
+      id: "codex-project-requirements",
+      backend: "codex",
+      scope: "managed",
+      format: "requirements_toml",
+      name: "Codex Project Requirements",
+      path: "D:\\PROJECT\\workspace\\Lilia\\.codex\\requirements.toml",
+      editable: false,
+      managed: true,
+      exists: true,
+      enabled: false,
+      handlerCount: 0,
+      trustState: "managed",
+    }),
+    rawDocument: "allow_managed_hooks_only = true\n[features]\nhooks = false\n",
+    rawFormat: "toml",
+    limitations: CODEX_REQUIREMENTS_LIMITATIONS,
+  });
+
+  return {
+    [claudeUser.source.id]: claudeUser,
+    [claudeProject.source.id]: claudeProject,
+    [claudeLocal.source.id]: claudeLocal,
+    [claudeManaged.source.id]: claudeManaged,
+    [codexUser.source.id]: codexUser,
+    [codexUserConfig.source.id]: codexUserConfig,
+    [codexProject.source.id]: codexProject,
+    [codexRequirements.source.id]: codexRequirements,
+  };
+}
+
+let hookDocuments = initialHookDocuments();
+
+function hookSourcesOverview() {
+  return Object.values(hookDocuments).map((document) => {
+    syncHookDocument(document);
+    return structuredClone(document.source);
+  });
+}
+
+function editableHookSourceFor(backend: string, scope: string) {
+  return Object.values(hookDocuments).find((document) =>
+    document.source.backend === backend &&
+    document.source.scope === scope &&
+    document.source.editable,
+  );
+}
+
 function mcpServersForBackend(backend: string) {
   return backend === "claude" ? claudeMcpServers : codexMcpServers;
 }
@@ -1194,6 +1565,7 @@ export function resetTauriMockData() {
     args: [...server.args],
     envKeys: [...server.envKeys],
   }));
+  hookDocuments = initialHookDocuments();
   agentInteractionSettings = defaultAgentInteractionSettings();
   customSubagents = [
     {
@@ -2755,6 +3127,105 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         warnings: [],
       };
 
+    case "plugins_hooks_overview":
+      return {
+        sources: hookSourcesOverview(),
+        warnings: [],
+      };
+
+    case "plugins_read_hook_source": {
+      const source = args.source as { id?: string };
+      const document = source?.id ? hookDocuments[String(source.id)] : undefined;
+      if (!document) throw new Error("unknown hook source");
+      syncHookDocument(document);
+      return cloneHookDocument(document);
+    }
+
+    case "plugins_update_hook_source": {
+      const source = args.source as { id?: string };
+      const input = args.input as {
+        handlers?: Array<{
+          id?: string;
+          event?: string;
+          matcher?: string | null;
+          type?: string;
+          command?: string | null;
+          commandWindows?: string | null;
+          timeoutSeconds?: number | null;
+          statusMessage?: string | null;
+          groupAdvancedJson?: string | null;
+          advancedJson?: string | null;
+        }>;
+      };
+      const document = source?.id ? hookDocuments[String(source.id)] : undefined;
+      if (!document) throw new Error("unknown hook source");
+      if (!document.source.editable) throw new Error("当前 hooks source 为只读，不能保存");
+      document.source.exists = true;
+      document.handlers = Array.isArray(input.handlers)
+        ? input.handlers.map((handler, index) => {
+          const type = String(handler.type ?? "");
+          const supported = document.source.backend !== "codex" || type === "command";
+          const executable = supported;
+          return makeHookHandler({
+            id: String(handler.id ?? `${document.source.id}:${index}`),
+            event: String(handler.event ?? ""),
+            matcher: typeof handler.matcher === "string" ? handler.matcher : null,
+            type,
+            command: typeof handler.command === "string" ? handler.command : null,
+            commandWindows: typeof handler.commandWindows === "string" ? handler.commandWindows : null,
+            timeoutSeconds: typeof handler.timeoutSeconds === "number" ? handler.timeoutSeconds : null,
+            statusMessage: typeof handler.statusMessage === "string" ? handler.statusMessage : null,
+            groupAdvancedJson: typeof handler.groupAdvancedJson === "string" ? handler.groupAdvancedJson : null,
+            advancedJson: typeof handler.advancedJson === "string" ? handler.advancedJson : null,
+            supported,
+            executable,
+            warnings: supported ? [] : [`type=${type} 当前上游解析但不执行。`],
+          });
+        })
+        : [];
+      syncHookDocument(document);
+      document.rawDocument = buildHookRawDocument(document.handlers);
+      document.warnings = document.handlers.flatMap((handler) => handler.warnings);
+      document.source.warnings = [...document.warnings];
+      return cloneHookDocument(document);
+    }
+
+    case "plugins_create_hook_source": {
+      const backend = String(args.backend);
+      const scope = String(args.scope);
+      const document = editableHookSourceFor(backend, scope);
+      if (!document) throw new Error("当前 scope 不支持创建 hooks source");
+      document.source.exists = true;
+      document.handlers = [];
+      document.rawDocument = "{\n  \"hooks\": {}\n}\n";
+      syncHookDocument(document);
+      return structuredClone(document.source);
+    }
+
+    case "plugins_delete_hook_source": {
+      const source = args.source as { id?: string };
+      const document = source?.id ? hookDocuments[String(source.id)] : undefined;
+      if (!document) throw new Error("unknown hook source");
+      if (!document.source.editable) throw new Error("当前 hooks source 为只读，不能删除");
+      document.source.exists = false;
+      document.handlers = [];
+      document.rawDocument = null;
+      document.warnings = [];
+      document.source.warnings = [];
+      syncHookDocument(document);
+      return undefined;
+    }
+
+    case "plugins_set_hook_source_enabled": {
+      const source = args.source as { id?: string };
+      const enabled = args.enabled === true;
+      const document = source?.id ? hookDocuments[String(source.id)] : undefined;
+      if (!document) throw new Error("unknown hook source");
+      document.source.exists = enabled;
+      syncHookDocument(document);
+      return structuredClone(document.source);
+    }
+
     case "plugins_set_package_enabled": {
       if (args.backend !== "claude") throw new Error("unsupported package backend");
       const name = String(args.name);
@@ -2847,6 +3318,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     }
 
     case "plugins_open_mcp_config":
+    case "plugins_open_hook_config":
       return undefined;
 
     case "chat_set_composer_state":

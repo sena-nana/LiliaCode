@@ -13,19 +13,28 @@ import {
 } from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
+  createHookSource,
   createSkill,
+  deleteHookSource,
   deleteMcpServer,
   deleteSkill,
+  openHookConfig,
   openMcpConfig,
+  readHookSource,
   setMcpServerEnabled,
   setPackageEnabled,
   setSkillEnabled,
+  type HookDocumentView,
+  type HookHandlerView,
+  type HookSourceSummary,
   type PluginMcpServer,
   type PluginPackage,
   type PluginSkill,
 } from "../services/plugins";
 import { usePluginsOverview } from "./plugins/usePluginsOverview";
+import { useHookSourceEditor } from "./plugins/useHookSourceEditor";
 import { useMcpServerEditor } from "./plugins/useMcpServerEditor";
+import HookSourceEditorDialog from "./plugins/HookSourceEditorDialog.vue";
 import PluginsTabBar from "./plugins/PluginsTabBar.vue";
 import SkillCreateDialog from "./plugins/SkillCreateDialog.vue";
 import McpServerEditorDialog from "./plugins/McpServerEditorDialog.vue";
@@ -39,8 +48,10 @@ const {
   claudePlugins,
   claudeMcpServers,
   claudeMcpConfigPath,
+  claudeHookSources,
   codexServers,
   codexConfigPath,
+  codexHookSources,
   warnings,
   loading,
   errorText,
@@ -54,9 +65,14 @@ const creating = ref(false);
 const createError = ref<string | null>(null);
 const pendingRemoveSkill = ref<PluginSkill | null>(null);
 const pendingRemoveMcp = ref<PluginMcpServer | null>(null);
+const pendingRemoveHook = ref<HookSourceSummary | null>(null);
 const removing = ref(false);
 const query = ref("");
 const selectedKey = ref<string | null>(null);
+const selectedHookDocument = ref<HookDocumentView | null>(null);
+const hookDocumentLoading = ref(false);
+const hookDocumentError = ref<string | null>(null);
+let hookDocumentRequestId = 0;
 
 const mcpEditor = useMcpServerEditor<PluginMcpServer>({
   backend: "claude",
@@ -67,6 +83,13 @@ const codexMcpEditor = useMcpServerEditor<PluginMcpServer>({
   backend: "codex",
   label: "Codex MCP",
   refresh,
+});
+const hookEditor = useHookSourceEditor({
+  refresh,
+  onSaved: (document) => {
+    selectedHookDocument.value = document;
+    hookDocumentError.value = null;
+  },
 });
 const USER_SKILLS_ROOT = "~/.claude/skills/";
 
@@ -88,6 +111,22 @@ type PluginEntry =
       meta: string;
       searchText: string;
       item: PluginMcpServer;
+    }
+  | {
+      kind: "claude-hook";
+      key: string;
+      title: string;
+      meta: string;
+      searchText: string;
+      item: HookSourceSummary;
+    }
+  | {
+      kind: "codex-hook";
+      key: string;
+      title: string;
+      meta: string;
+      searchText: string;
+      item: HookSourceSummary;
     };
 
 interface DetailRow {
@@ -95,6 +134,8 @@ interface DetailRow {
   value: string;
   code?: boolean;
 }
+
+type HookEntry = Extract<PluginEntry, { kind: "claude-hook" | "codex-hook" }>;
 
 function enabledLabel(enabled: boolean) {
   return enabled ? "已启用" : "已停用";
@@ -128,7 +169,7 @@ function projectFolderFromSkillPath(path: string) {
   const marker = "/.claude/skills/";
   const markerIndex = normalized.toLocaleLowerCase().indexOf(marker);
   if (markerIndex <= 0) return "";
-  const projectPath = normalized.slice(0, markerIndex).replace(/\/+$/, "");
+  const projectPath = normalized.slice(0, markerIndex).replace(/\/*$/, "");
   const parts = projectPath.split("/");
   return parts[parts.length - 1] ?? "";
 }
@@ -162,6 +203,115 @@ function skillLocation(skill: PluginSkill) {
     : projectSkillsRootFromPath(skill.path) || "未选择项目";
 }
 
+function hookScopeLabel(scope: HookSourceSummary["scope"]) {
+  switch (scope) {
+    case "user":
+      return "全局";
+    case "project":
+      return "项目";
+    case "local":
+      return "本地";
+    case "managed":
+      return "Managed";
+    case "plugin":
+      return "Plugin";
+    case "system":
+      return "System";
+    default:
+      return scope;
+  }
+}
+
+function hookFormatLabel(format: HookSourceSummary["format"]) {
+  switch (format) {
+    case "claude_settings_json":
+      return "settings.json";
+    case "codex_hooks_json":
+      return "hooks.json";
+    case "codex_config_toml":
+      return "config.toml [hooks]";
+    case "managed_settings":
+      return "managed settings";
+    case "requirements_toml":
+      return "requirements.toml";
+    case "plugin_manifest":
+      return "plugin.json";
+    default:
+      return format;
+  }
+}
+
+function hookTrustLabel(trustState: HookSourceSummary["trustState"]) {
+  switch (trustState) {
+    case "required":
+      return "需要 review/trust";
+    case "managed":
+      return "Managed";
+    case "n_a":
+      return "不适用";
+    default:
+      return "未知";
+  }
+}
+
+function hookSourceStateLabel(source: HookSourceSummary) {
+  if (!source.exists) return "未创建";
+  if (source.handlerCount === 0) return "空来源";
+  return `${source.handlerCount} 条 Handler`;
+}
+
+function hookSourceEditLabel(source: HookSourceSummary) {
+  if (!source.editable) return "只读";
+  return source.exists ? "可写" : "可创建";
+}
+
+function hookSourceMeta(source: HookSourceSummary) {
+  return [
+    hookScopeLabel(source.scope),
+    hookSourceEditLabel(source),
+    hookSourceStateLabel(source),
+    source.managed ? "Managed" : "",
+    source.warnings.length ? `${source.warnings.length} 警告` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function joinSearchText(...parts: Array<string | null | undefined>) {
+  return parts.filter(Boolean).join("\n");
+}
+
+function buildHookEntry(kind: HookEntry["kind"], source: HookSourceSummary): HookEntry {
+  return {
+    kind,
+    key: `${kind}:${source.id}`,
+    title: source.name,
+    meta: hookSourceMeta(source),
+    searchText: joinSearchText(
+      source.name,
+      source.path,
+      source.description,
+      source.warnings.join("\n"),
+      source.limitations.join("\n"),
+    ),
+    item: source,
+  };
+}
+
+function isHookEntry(
+  entry: PluginEntry | null,
+): entry is HookEntry {
+  return !!entry && (entry.kind === "claude-hook" || entry.kind === "codex-hook");
+}
+
+function hookDocumentFor(source: HookSourceSummary | null) {
+  return source && selectedHookDocument.value?.source.id === source.id
+    ? selectedHookDocument.value
+    : null;
+}
+
+function mergeUniqueTexts(...groups: string[][]) {
+  return Array.from(new Set(groups.flat()));
+}
+
 const allEntries = computed<PluginEntry[]>(() => {
   if (tab.value === "claude-skills") {
     return [...userSkills.value, ...projectSkills.value].map((skill) => {
@@ -190,6 +340,10 @@ const allEntries = computed<PluginEntry[]>(() => {
     }));
   }
 
+  if (tab.value === "claude-hooks") {
+    return claudeHookSources.value.map((source) => buildHookEntry("claude-hook", source));
+  }
+
   if (tab.value === "claude-mcp") {
     return claudeMcpServers.value.map((server) => ({
       kind: "claude-mcp",
@@ -201,6 +355,10 @@ const allEntries = computed<PluginEntry[]>(() => {
       ),
       item: server,
     }));
+  }
+
+  if (tab.value === "codex-hooks") {
+    return codexHookSources.value.map((source) => buildHookEntry("codex-hook", source));
   }
 
   return codexServers.value.map((server) => ({
@@ -234,13 +392,42 @@ const selectedEntry = computed(
   () => filteredEntries.value.find((entry) => entry.key === selectedKey.value) ?? null,
 );
 
+const selectedHookSource = computed(() => (
+  isHookEntry(selectedEntry.value) ? selectedEntry.value.item : null
+));
+
+const selectedHookSourceData = computed(() => {
+  const selected = selectedHookSource.value;
+  if (!selected) return null;
+  return hookDocumentFor(selected)?.source ?? selected;
+});
+
+const selectedHookHandlers = computed(() => {
+  const selected = selectedHookSource.value;
+  return hookDocumentFor(selected)?.handlers ?? [];
+});
+
+const selectedDetailWarnings = computed(() => {
+  const source = selectedHookSourceData.value;
+  if (!source) return [];
+  return mergeUniqueTexts(source.warnings, hookDocumentFor(source)?.warnings ?? []);
+});
+
+const selectedDetailLimitations = computed(() => {
+  const source = selectedHookSourceData.value;
+  if (!source) return [];
+  return mergeUniqueTexts(source.limitations, hookDocumentFor(source)?.limitations ?? []);
+});
+
 const selectedMeta = computed(() => {
   const entry = selectedEntry.value;
   if (!entry) return "";
   if (entry.kind === "skill") return `${entry.item.scope === "user" ? "全局" : "项目"} · ${entry.meta}`;
   if (entry.kind === "plugin") return `Claude Plugin · ${entry.meta}`;
   if (entry.kind === "claude-mcp") return `Claude MCP · ${entry.meta}`;
-  return `Codex MCP · ${entry.meta}`;
+  if (entry.kind === "codex-mcp") return `Codex MCP · ${entry.meta}`;
+  const backendLabel = entry.kind === "claude-hook" ? "Claude Hooks" : "Codex Hooks";
+  return `${backendLabel} · ${entry.meta}`;
 });
 
 const detailRows = computed<DetailRow[]>(() => {
@@ -275,12 +462,25 @@ const detailRows = computed<DetailRow[]>(() => {
       },
     ];
   }
+  if (entry.kind === "codex-mcp") {
+    return [
+      { label: "Transport", value: codexTransportLabel(entry.item) },
+      { label: "命令", value: codexServerSummary(entry.item), code: true },
+      { label: "环境变量", value: entry.item.envKeys.join(", ") || "-" },
+      { label: "权限", value: entry.item.editable ? "可编辑" : "只读" },
+      { label: "配置", value: codexConfigPath.value || "~/.codex/config.toml", code: true },
+    ];
+  }
+  const source = selectedHookSourceData.value ?? entry.item;
   return [
-    { label: "Transport", value: codexTransportLabel(entry.item) },
-    { label: "命令", value: codexServerSummary(entry.item), code: true },
-    { label: "环境变量", value: entry.item.envKeys.join(", ") || "-" },
-    { label: "权限", value: entry.item.editable ? "可编辑" : "只读" },
-    { label: "配置", value: codexConfigPath.value || "~/.codex/config.toml", code: true },
+    { label: "Scope", value: hookScopeLabel(source.scope) },
+    { label: "格式", value: hookFormatLabel(source.format) },
+    { label: "路径", value: source.path, code: true },
+    { label: "状态", value: hookSourceStateLabel(source) },
+    { label: "权限", value: hookSourceEditLabel(source) },
+    { label: "Trust", value: hookTrustLabel(source.trustState) },
+    { label: "Handlers", value: String(source.handlerCount) },
+    ...(source.description ? [{ label: "说明", value: source.description }] : []),
   ];
 });
 
@@ -288,8 +488,19 @@ const emptyText = computed(() => {
   if (query.value.trim()) return "没有匹配项";
   if (tab.value === "claude-skills") return "没有 Skill";
   if (tab.value === "claude-plugins") return "没有 Plugin";
+  if (tab.value === "claude-hooks" || tab.value === "codex-hooks") return "没有 Hooks 来源";
   return "没有 MCP";
 });
+
+function handlerMeta(handler: HookHandlerView) {
+  return [
+    handler.matcher ? `matcher: ${handler.matcher}` : "",
+    handler.type,
+    handler.supported ? "" : "未结构化支持",
+    handler.executable ? "" : "当前不会执行",
+    handler.warnings.length ? `${handler.warnings.length} 警告` : "",
+  ].filter(Boolean).join(" · ");
+}
 
 watch(
   filteredEntries,
@@ -303,6 +514,34 @@ watch(
 watch(tab, () => {
   query.value = "";
 });
+
+watch(
+  selectedHookSource,
+  async (source) => {
+    hookDocumentRequestId += 1;
+    const requestId = hookDocumentRequestId;
+    selectedHookDocument.value = null;
+    hookDocumentError.value = null;
+    if (!source) {
+      hookDocumentLoading.value = false;
+      return;
+    }
+    hookDocumentLoading.value = true;
+    try {
+      const document = await readHookSource(source);
+      if (requestId !== hookDocumentRequestId) return;
+      selectedHookDocument.value = document;
+    } catch (err) {
+      if (requestId !== hookDocumentRequestId) return;
+      hookDocumentError.value = String(err);
+    } finally {
+      if (requestId === hookDocumentRequestId) {
+        hookDocumentLoading.value = false;
+      }
+    }
+  },
+  { immediate: true },
+);
 
 function openCreate() {
   newName.value = "";
@@ -364,6 +603,30 @@ async function toggleMcp(server: PluginMcpServer) {
   }
 }
 
+async function createSelectedHookSource(entry: HookEntry) {
+  try {
+    await createHookSource(
+      entry.item.backend,
+      entry.item.scope,
+      entry.item.scope === "project" || entry.item.scope === "local" ? projectCwd.value : null,
+    );
+    await refresh();
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
+async function openSelectedHookEditor(entry: HookEntry) {
+  try {
+    const document = hookDocumentFor(entry.item) ?? await readHookSource(entry.item);
+    selectedHookDocument.value = document;
+    hookDocumentError.value = null;
+    hookEditor.openHookEditor(document);
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
 async function confirmRemove() {
   if (removing.value) return;
   removing.value = true;
@@ -379,6 +642,9 @@ async function confirmRemove() {
     } else if (pendingRemoveMcp.value) {
       await deleteMcpServer(pendingRemoveMcp.value.backend, pendingRemoveMcp.value.name);
       pendingRemoveMcp.value = null;
+    } else if (pendingRemoveHook.value) {
+      await deleteHookSource(pendingRemoveHook.value);
+      pendingRemoveHook.value = null;
     }
     await refresh();
   } catch (err) {
@@ -396,6 +662,14 @@ async function openMcp(server: PluginMcpServer) {
   }
 }
 
+async function openHookSourceConfig(source: HookSourceSummary) {
+  try {
+    await openHookConfig(source);
+  } catch (err) {
+    errorText.value = String(err);
+  }
+}
+
 function selectEntry(entry: PluginEntry) {
   selectedKey.value = entry.key;
 }
@@ -406,18 +680,32 @@ function openMcpCreate() {
 }
 
 function canCreateInDetail() {
-  return tab.value === "claude-mcp" || tab.value === "codex-mcp";
+  if (tab.value === "claude-mcp" || tab.value === "codex-mcp") return true;
+  return !!selectedHookSource.value && selectedHookSource.value.editable && !selectedHookSource.value.exists;
+}
+
+function detailCreateLabel() {
+  return tab.value === "claude-mcp" || tab.value === "codex-mcp" ? "新增 MCP" : "创建来源";
+}
+
+function openDetailCreate() {
+  if (selectedEntry.value && isHookEntry(selectedEntry.value)) {
+    void createSelectedHookSource(selectedEntry.value);
+    return;
+  }
+  openMcpCreate();
 }
 
 function toggleSelected(entry: PluginEntry) {
   if (entry.kind === "skill") void toggleSkill(entry.item);
   else if (entry.kind === "plugin") void togglePlugin(entry.item);
-  else void toggleMcp(entry.item);
+  else if (entry.kind === "claude-mcp" || entry.kind === "codex-mcp") void toggleMcp(entry.item);
 }
 
 function editSelected(entry: PluginEntry) {
   if (entry.kind === "claude-mcp") mcpEditor.openEditMcp(entry.item);
   else if (entry.kind === "codex-mcp" && entry.item.editable) codexMcpEditor.openEditMcp(entry.item);
+  else if (isHookEntry(entry)) void openSelectedHookEditor(entry);
 }
 
 function removeSelected(entry: PluginEntry) {
@@ -425,11 +713,14 @@ function removeSelected(entry: PluginEntry) {
   else if (entry.kind === "claude-mcp") pendingRemoveMcp.value = entry.item;
   else if (entry.kind === "codex-mcp" && entry.item.editable) {
     pendingRemoveMcp.value = entry.item;
+  } else if (isHookEntry(entry)) {
+    pendingRemoveHook.value = entry.item;
   }
 }
 
 function openSelectedConfig(entry: PluginEntry) {
   if (entry.kind === "claude-mcp" || entry.kind === "codex-mcp") void openMcp(entry.item);
+  else if (isHookEntry(entry)) void openHookSourceConfig(entry.item);
 }
 
 function actionLabel(entry: PluginEntry) {
@@ -437,19 +728,22 @@ function actionLabel(entry: PluginEntry) {
 }
 
 function canToggle(entry: PluginEntry) {
+  if (isHookEntry(entry)) return false;
   return entry.kind !== "codex-mcp" || entry.item.editable;
 }
 
 function canEdit(entry: PluginEntry) {
+  if (isHookEntry(entry)) return entry.item.editable && entry.item.exists;
   return entry.kind === "claude-mcp" || (entry.kind === "codex-mcp" && entry.item.editable);
 }
 
 function canRemove(entry: PluginEntry) {
+  if (isHookEntry(entry)) return entry.item.editable && entry.item.exists;
   return entry.kind === "skill" || entry.kind === "claude-mcp" || (entry.kind === "codex-mcp" && entry.item.editable);
 }
 
 function canOpenConfig(entry: PluginEntry) {
-  return entry.kind === "claude-mcp" || entry.kind === "codex-mcp";
+  return entry.kind === "claude-mcp" || entry.kind === "codex-mcp" || isHookEntry(entry);
 }
 </script>
 
@@ -479,7 +773,9 @@ function canOpenConfig(entry: PluginEntry) {
           v-model="tab"
           :skills-count="userSkills.length + projectSkills.length"
           :plugins-count="claudePlugins.length"
+          :claude-hooks-count="claudeHookSources.length"
           :claude-mcp-count="claudeMcpServers.length"
+          :codex-hooks-count="codexHookSources.length"
           :codex-mcp-count="codexServers.length"
         />
         <div class="plugins-browser__topbar-actions">
@@ -546,10 +842,10 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canCreateInDetail()"
                   type="button"
                   class="ui-button ui-button--ghost"
-                  @click="openMcpCreate"
+                  @click="openDetailCreate"
                 >
                   <Plus :size="14" aria-hidden="true" />
-                  <span>新增 MCP</span>
+                  <span>{{ detailCreateLabel() }}</span>
                 </button>
                 <button
                   v-if="canOpenConfig(selectedEntry)"
@@ -590,19 +886,85 @@ function canOpenConfig(entry: PluginEntry) {
               </div>
             </div>
 
-            <dl class="plugins-browser__detail-list">
-              <div
-                v-for="row in detailRows"
-                :key="row.label"
-                class="plugins-browser__detail-row"
-              >
-                <dt>{{ row.label }}</dt>
-                <dd>
-                  <code v-if="row.code">{{ row.value }}</code>
-                  <span v-else>{{ row.value }}</span>
-                </dd>
-              </div>
-            </dl>
+            <div class="plugins-browser__detail-list">
+              <dl class="plugins-browser__detail-grid">
+                <div
+                  v-for="row in detailRows"
+                  :key="row.label"
+                  class="plugins-browser__detail-row"
+                >
+                  <dt>{{ row.label }}</dt>
+                  <dd>
+                    <code v-if="row.code">{{ row.value }}</code>
+                    <span v-else>{{ row.value }}</span>
+                  </dd>
+                </div>
+              </dl>
+
+              <template v-if="selectedHookSource">
+                <div v-if="hookDocumentLoading" class="plugins-browser__notice">
+                  <Loader2 :size="14" class="is-spinning" aria-hidden="true" />
+                  <span>读取 Hooks 文档…</span>
+                </div>
+                <div v-else-if="hookDocumentError" class="plugins-hook-section">
+                  <div class="plugins-hook-section__title">读取失败</div>
+                  <div class="plugins-hook-section__card plugins-hook-section__card--warn">
+                    {{ hookDocumentError }}
+                  </div>
+                </div>
+                <div v-if="selectedDetailWarnings.length" class="plugins-hook-section">
+                  <div class="plugins-hook-section__title">Warnings</div>
+                  <ul class="plugins-hook-section__list">
+                    <li v-for="warning in selectedDetailWarnings" :key="warning">{{ warning }}</li>
+                  </ul>
+                </div>
+                <div v-if="selectedDetailLimitations.length" class="plugins-hook-section">
+                  <div class="plugins-hook-section__title">限制与说明</div>
+                  <ul class="plugins-hook-section__list">
+                    <li v-for="limitation in selectedDetailLimitations" :key="limitation">{{ limitation }}</li>
+                  </ul>
+                </div>
+                <div class="plugins-hook-section">
+                  <div class="plugins-hook-section__title">Handlers</div>
+                  <div v-if="!selectedHookHandlers.length" class="plugins-browser__notice">
+                    {{ selectedHookSourceData?.exists ? "当前来源没有 Handler" : "当前来源尚未创建" }}
+                  </div>
+                  <div v-else class="plugins-hook-handlers">
+                    <article
+                      v-for="handler in selectedHookHandlers"
+                      :key="handler.id"
+                      class="plugins-hook-handler"
+                    >
+                      <div class="plugins-hook-handler__head">
+                        <strong>{{ handler.event }}</strong>
+                        <span class="plugins-browser__row-meta">{{ handlerMeta(handler) }}</span>
+                      </div>
+                      <div class="plugins-hook-handler__body">
+                        <code v-if="handler.command">{{ handler.command }}</code>
+                        <code v-if="handler.commandWindows">{{ handler.commandWindows }}</code>
+                        <span v-if="handler.statusMessage">{{ handler.statusMessage }}</span>
+                        <span v-if="handler.timeoutSeconds != null">timeout: {{ handler.timeoutSeconds }}s</span>
+                      </div>
+                      <ul v-if="handler.warnings.length" class="plugins-hook-section__list">
+                        <li v-for="warning in handler.warnings" :key="warning">{{ warning }}</li>
+                      </ul>
+                      <pre v-if="handler.groupAdvancedJson" class="plugins-hook-raw">{{ handler.groupAdvancedJson }}</pre>
+                      <pre v-if="handler.advancedJson" class="plugins-hook-raw">{{ handler.advancedJson }}</pre>
+                    </article>
+                  </div>
+                </div>
+                <div class="plugins-hook-section">
+                  <div class="plugins-hook-section__title">
+                    原始文档
+                    <span v-if="selectedHookDocument?.rawFormat" class="plugins-browser__row-meta">
+                      {{ selectedHookDocument.rawFormat.toUpperCase() }}
+                    </span>
+                  </div>
+                  <pre v-if="selectedHookDocument?.rawDocument" class="plugins-hook-raw">{{ selectedHookDocument.rawDocument }}</pre>
+                  <div v-else class="plugins-browser__notice">当前来源没有原始文档内容</div>
+                </div>
+              </template>
+            </div>
           </template>
           <template v-else>
             <div class="plugins-browser__detail-head">
@@ -614,10 +976,10 @@ function canOpenConfig(entry: PluginEntry) {
                   v-if="canCreateInDetail()"
                   type="button"
                   class="ui-button ui-button--ghost"
-                  @click="openMcpCreate"
+                  @click="openDetailCreate"
                 >
                   <Plus :size="14" aria-hidden="true" />
-                  <span>新增 MCP</span>
+                  <span>{{ detailCreateLabel() }}</span>
                 </button>
               </div>
             </div>
@@ -635,6 +997,19 @@ function canOpenConfig(entry: PluginEntry) {
       :creating="creating"
       :error="createError"
       @confirm="confirmCreate"
+    />
+
+    <HookSourceEditorDialog
+      v-model:open="hookEditor.showHookEditor.value"
+      :title="hookEditor.hookEditorTitle.value"
+      :source-name="hookEditor.editingSource.value?.name ?? ''"
+      :source-path="hookEditor.editingSource.value?.path ?? null"
+      :handler-rows="hookEditor.hookHandlerRows.value"
+      :saving="hookEditor.hookSaving.value"
+      :error="hookEditor.hookError.value"
+      @add-handler="hookEditor.addHookHandler"
+      @remove-handler="hookEditor.removeHookHandler"
+      @confirm="hookEditor.saveHookSource"
     />
 
     <McpServerEditorDialog
@@ -672,20 +1047,24 @@ function canOpenConfig(entry: PluginEntry) {
     />
 
     <ConfirmDialog
-      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null"
+      :open="pendingRemoveSkill !== null || pendingRemoveMcp !== null || pendingRemoveHook !== null"
       :title="pendingRemoveSkill
         ? `删除 skill「${pendingRemoveSkill?.name ?? ''}」？`
-        : `删除 ${pendingRemoveMcp ? mcpBackendLabel(pendingRemoveMcp) : 'MCP'}「${pendingRemoveMcp?.name ?? ''}」？`"
+        : pendingRemoveMcp
+          ? `删除 ${mcpBackendLabel(pendingRemoveMcp)}「${pendingRemoveMcp?.name ?? ''}」？`
+          : `删除 Hooks 来源「${pendingRemoveHook?.name ?? ''}」？`"
       :message="pendingRemoveSkill
         ? '该 skill 目录会被整体删除，不可恢复。'
-        : pendingRemoveMcp?.backend === 'claude'
-          ? '该 MCP server 会从 Lilia 配置中删除，不可恢复。'
-          : '该 stdio MCP server 会从 Codex config.toml 中删除，不可恢复。'"
+        : pendingRemoveMcp
+          ? pendingRemoveMcp.backend === 'claude'
+            ? '该 MCP server 会从 Lilia 配置中删除，不可恢复。'
+            : '该 stdio MCP server 会从 Codex config.toml 中删除，不可恢复。'
+          : '该 hooks 来源会从对应配置文件中移除，不可恢复。'"
       confirm-text="删除"
       busy-text="删除中…"
       :busy="removing"
       danger
-      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null"
+      @cancel="pendingRemoveSkill = null; pendingRemoveMcp = null; pendingRemoveHook = null"
       @confirm="confirmRemove"
     />
   </section>

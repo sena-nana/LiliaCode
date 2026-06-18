@@ -274,6 +274,88 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return { graph: architecture(text(args, "projectId")), event: null } as T;
     case "plugins_overview":
       return { skills: [], packages: [], mcpServers: [], configPaths: { claude: null, codex: null }, warnings: [] } as T;
+    case "plugins_hooks_overview":
+      return {
+        sources: [
+          {
+            id: "dev-claude-hooks",
+            backend: "claude",
+            scope: "user",
+            format: "claude_settings_json",
+            name: "Claude User Hooks",
+            path: "C:\\Users\\dev\\.claude\\settings.json",
+            exists: true,
+            editable: true,
+            managed: false,
+            enabled: true,
+            handlerCount: 1,
+            warnings: [],
+            limitations: [],
+            trustState: "unknown",
+            description: "~/.claude/settings.json 中的 hooks",
+          },
+          {
+            id: "dev-codex-hooks",
+            backend: "codex",
+            scope: "user",
+            format: "codex_hooks_json",
+            name: "Codex User Hooks",
+            path: "C:\\Users\\dev\\.codex\\hooks.json",
+            exists: true,
+            editable: true,
+            managed: false,
+            enabled: true,
+            handlerCount: 1,
+            warnings: ["同一层同时存在 hooks.json 与 inline [hooks]；Codex 会同时加载两者。"],
+            limitations: [],
+            trustState: "required",
+            description: "~/.codex/hooks.json",
+          },
+        ],
+        warnings: [],
+      } as T;
+    case "plugins_read_hook_source":
+      return {
+        source: args.source,
+        handlers: [],
+        rawDocument: "{\n  \"hooks\": {}\n}\n",
+        rawFormat: "json",
+        warnings: [],
+        limitations: [],
+      } as T;
+    case "plugins_update_hook_source":
+      return {
+        source: args.source,
+        handlers: (args.input as Args)?.handlers ?? [],
+        rawDocument: "{\n  \"hooks\": {}\n}\n",
+        rawFormat: "json",
+        warnings: [],
+        limitations: [],
+      } as T;
+    case "plugins_create_hook_source":
+      return {
+        id: `${text(args, "backend")}-${text(args, "scope")}`,
+        backend: text(args, "backend"),
+        scope: text(args, "scope"),
+        format: text(args, "backend") === "codex" ? "codex_hooks_json" : "claude_settings_json",
+        name: "Mock Hooks",
+        path: text(args, "backend") === "codex"
+          ? "C:\\Users\\dev\\.codex\\hooks.json"
+          : "C:\\Users\\dev\\.claude\\settings.json",
+        exists: true,
+        editable: true,
+        managed: false,
+        enabled: false,
+        handlerCount: 0,
+        warnings: [],
+        limitations: [],
+        trustState: text(args, "backend") === "codex" ? "required" : "unknown",
+        description: null,
+      } as T;
+    case "plugins_delete_hook_source":
+    case "plugins_set_hook_source_enabled":
+    case "plugins_open_hook_config":
+      return undefined as T;
     case "popup_get_window_settings":
       return { shortcut: null } as T;
     case "lilia_iab_submit":

@@ -19,6 +19,7 @@ mod claude_plugins;
 mod claude_skills;
 mod codex_mcp;
 mod commands;
+mod hooks;
 mod paths;
 mod runtime;
 mod types;
