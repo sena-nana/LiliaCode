@@ -32,6 +32,12 @@ type QuotaBreakdownItem = {
   meta: string;
   color: string;
 };
+type QuotaHeatmapCell = QuotaUsageDailyBucket & {
+  date: string;
+  weekStart: string;
+  level: number;
+  inRange: boolean;
+};
 
 const backendOptions: BackendOption[] = [
   { value: "all", label: "全部" },
@@ -75,6 +81,12 @@ const officialQuotaGroups = computed(() => [
 const hasOfficialQuotaWindow = computed(() => officialQuotaGroups.value.length > 0);
 const maxDailyTokens = computed(() =>
   Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
+);
+const heatmapWeeks = computed(() => buildHeatmapWeeks(stats.value?.daily ?? []));
+const heatmapMonthLabels = computed(() => buildHeatmapMonthLabels(heatmapWeeks.value));
+const heatmapSubtitle = computed(() => `${backendLabel(selectedBackend.value)} · 近 ${selectedDays.value} 天`);
+const heatmapLabel = computed(
+  () => `Token 消耗热度图（${heatmapSubtitle.value}）`,
 );
 const sortedBackends = computed(() =>
   [...(stats.value?.backends ?? [])].sort((a, b) => b.totalTokens - a.totalTokens),
@@ -174,6 +186,107 @@ function formatDay(value: number) {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date(value));
+}
+
+function formatDayKey(value: number) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function parseDateOnly(date: string) {
+  return new Date(`${date}T00:00:00Z`);
+}
+
+function formatHeatmapMonth(month: string) {
+  const [, rawMonth] = month.split("-");
+  return `${Number(rawMonth)}月`;
+}
+
+function heatmapLevel(tokens: number, maxTokens: number) {
+  if (tokens <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil((tokens / maxTokens) * 4)));
+}
+
+function emptyHeatmapBucket(timestamp: number): QuotaUsageDailyBucket {
+  return {
+    dayStart: timestamp,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    knownCostUsd: null,
+    costRecordCount: 0,
+    recordCount: 0,
+  };
+}
+
+function buildHeatmapWeeks(days: readonly QuotaUsageDailyBucket[]): QuotaHeatmapCell[][] {
+  if (!days.length) return [];
+  const sorted = [...days].sort((a, b) => a.dayStart - b.dayStart);
+  const maxTokens = Math.max(1, ...sorted.map((day) => day.totalTokens));
+  const rangeStart = formatDayKey(sorted[0].dayStart);
+  const rangeEnd = formatDayKey(sorted[sorted.length - 1].dayStart);
+  const start = parseDateOnly(rangeStart);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+  const end = parseDateOnly(rangeEnd);
+  end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()));
+  const byDate = new Map(sorted.map((day) => [formatDayKey(day.dayStart), day]));
+  const weeks: QuotaHeatmapCell[][] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
+    const week: QuotaHeatmapCell[] = [];
+    for (let offset = 0; offset < 7; offset += 1) {
+      const date = new Date(cursor);
+      date.setUTCDate(cursor.getUTCDate() + offset);
+      const key = date.toISOString().slice(0, 10);
+      const bucket = byDate.get(key) ?? emptyHeatmapBucket(date.getTime());
+      const inRange = key >= rangeStart && key <= rangeEnd;
+      week.push({
+        ...bucket,
+        date: key,
+        weekStart: cursor.toISOString().slice(0, 10),
+        level: inRange ? heatmapLevel(bucket.totalTokens, maxTokens) : 0,
+        inRange,
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+function buildHeatmapMonthLabels(weeks: readonly QuotaHeatmapCell[][]) {
+  let lastMonth = "";
+  return weeks.map((week, index) => {
+    const weekStart = week[0]?.weekStart ?? String(index);
+    const month = week
+      .filter((day) => day.inRange)
+      .map((day) => day.date.slice(0, 7))
+      .find((value) => value && value !== lastMonth) ?? "";
+    const label = month && month !== lastMonth ? formatHeatmapMonth(month) : "";
+    if (month) lastMonth = month;
+    return { key: weekStart, label };
+  });
+}
+
+function heatmapDayParts(day: QuotaHeatmapCell) {
+  if (!day.inRange) return [`${day.date}`, "不在当前统计范围"];
+  const cacheTokens = day.cacheReadTokens + day.cacheCreationTokens;
+  return [
+    day.date,
+    `总 ${formatNumber(day.totalTokens)} tokens`,
+    `输入 ${formatNumber(day.inputTokens)}`,
+    `输出 ${formatNumber(day.outputTokens)}`,
+    `缓存 ${formatNumber(cacheTokens)}`,
+  ];
+}
+
+function heatmapDayTitle(day: QuotaHeatmapCell) {
+  const parts = heatmapDayParts(day);
+  if (!day.inRange) return parts.join("\n");
+  return [parts[0], parts.slice(1).join(" · ")].join("\n");
+}
+
+function heatmapDayLabel(day: QuotaHeatmapCell) {
+  return heatmapDayParts(day).join("，");
 }
 
 function chartX(index: number, count: number) {
@@ -465,6 +578,69 @@ onMounted(() => {
         <span><i class="quota-dot quota-dot--output" />输出</span>
         <span><i class="quota-dot quota-dot--cache" />缓存</span>
       </div>
+      <section class="quota-heatmap">
+        <div class="quota-heatmap__head">
+          <div>
+            <strong>Token 热度</strong>
+            <span>{{ heatmapSubtitle }}</span>
+          </div>
+          <div class="quota-heatmap__scale" aria-hidden="true">
+            <span>低</span>
+            <div class="quota-heatmap__scale-dots">
+              <i class="quota-heatmap__day quota-heatmap__day--0" />
+              <i class="quota-heatmap__day quota-heatmap__day--1" />
+              <i class="quota-heatmap__day quota-heatmap__day--2" />
+              <i class="quota-heatmap__day quota-heatmap__day--3" />
+              <i class="quota-heatmap__day quota-heatmap__day--4" />
+            </div>
+            <span>高</span>
+          </div>
+        </div>
+        <div class="quota-heatmap__chart" role="img" :aria-label="heatmapLabel">
+          <div class="quota-heatmap__week-labels" aria-hidden="true">
+            <span class="quota-heatmap__month-spacer" />
+            <span />
+            <span>Mon</span>
+            <span />
+            <span>Wed</span>
+            <span />
+            <span>Fri</span>
+            <span />
+          </div>
+          <div class="quota-heatmap__window">
+            <div class="quota-heatmap__grid">
+              <div class="quota-heatmap__months" aria-hidden="true">
+                <span
+                  v-for="month in heatmapMonthLabels"
+                  :key="month.key"
+                  class="quota-heatmap__month"
+                >
+                  {{ month.label }}
+                </span>
+              </div>
+              <div class="quota-heatmap__weeks">
+                <div
+                  v-for="(week, weekIndex) in heatmapWeeks"
+                  :key="weekIndex"
+                  class="quota-heatmap__week"
+                >
+                  <span
+                    v-for="day in week"
+                    :key="day.date"
+                    class="quota-heatmap__day"
+                    :class="[
+                      `quota-heatmap__day--${day.level}`,
+                      { 'is-outside': !day.inRange },
+                    ]"
+                    :title="heatmapDayTitle(day)"
+                    :aria-label="heatmapDayLabel(day)"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -742,6 +918,9 @@ onMounted(() => {
 
 .quota-chart-wrap {
   min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--bg);
@@ -779,7 +958,6 @@ onMounted(() => {
 .quota-chart__legend {
   display: flex;
   gap: 14px;
-  padding: 0 12px 10px;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -806,6 +984,136 @@ onMounted(() => {
 
 .quota-dot--cache {
   background: var(--warn);
+}
+
+.quota-heatmap {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.quota-heatmap__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quota-heatmap__head > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.quota-heatmap__head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.quota-heatmap__head span,
+.quota-heatmap__scale {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.quota-heatmap__scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.quota-heatmap__scale-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.quota-heatmap__chart {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-heatmap__week-labels {
+  display: grid;
+  grid-template-rows: 14px repeat(7, 11px);
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 11px;
+}
+
+.quota-heatmap__month-spacer {
+  height: 14px;
+}
+
+.quota-heatmap__window {
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.quota-heatmap__grid {
+  min-width: max-content;
+}
+
+.quota-heatmap__months,
+.quota-heatmap__weeks {
+  display: flex;
+  gap: 3px;
+  min-width: max-content;
+}
+
+.quota-heatmap__months {
+  margin-bottom: 3px;
+}
+
+.quota-heatmap__month {
+  width: 11px;
+  height: 14px;
+  overflow: visible;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.quota-heatmap__week {
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+}
+
+.quota-heatmap__day {
+  width: 11px;
+  height: 11px;
+  border: 1px solid color-mix(in srgb, var(--bg) 18%, transparent);
+  border-radius: 2px;
+  background: var(--bg-subtle);
+}
+
+.quota-heatmap__day.is-outside {
+  opacity: 0.4;
+}
+
+.quota-heatmap__day--1 {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-subtle));
+}
+
+.quota-heatmap__day--2 {
+  background: color-mix(in srgb, var(--accent) 40%, var(--bg-subtle));
+}
+
+.quota-heatmap__day--3 {
+  background: color-mix(in srgb, var(--accent) 62%, var(--bg-subtle));
+}
+
+.quota-heatmap__day--4 {
+  background: color-mix(in srgb, var(--accent) 84%, var(--bg-subtle));
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .quota-backends {
@@ -1009,6 +1317,10 @@ onMounted(() => {
 
   .quota-recent__row > span:last-child {
     display: none;
+  }
+
+  .quota-heatmap__head {
+    display: grid;
   }
 }
 </style>
