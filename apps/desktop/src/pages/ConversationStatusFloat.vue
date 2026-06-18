@@ -326,7 +326,10 @@ onUnmounted(() => {
       </div>
 
       <div class="conversation-status-float__tools">
-        <ProviderConnectionBadge popover-id="conversation-status-provider-popover" />
+        <ProviderConnectionBadge
+          popover-id="conversation-status-provider-popover"
+          preferred-placement="bottom-end"
+        />
 
         <div class="conversation-status-float__opacity">
           <button

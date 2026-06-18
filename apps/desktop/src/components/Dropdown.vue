@@ -29,14 +29,14 @@ const emit = defineEmits<{ "update:modelValue": [value: T] }>();
 const open = ref(false);
 const placement = computed(() => props.placement === "bottom" ? "bottom" : "top");
 const {
-  rootEl: root,
   triggerEl,
   menuEl,
-  origin,
+  overlayStyle,
+  containsTarget,
+  clearAnchor,
   captureAnchor,
-  resolveInitialOrigin,
   updateOrigin,
-} = useAnchoredMenuMotion(placement);
+} = useAnchoredMenuMotion(open, placement);
 
 const current = computed(() =>
   props.options.find((o) => o.value === props.modelValue),
@@ -58,8 +58,7 @@ function pick(opt: Option) {
 }
 
 function onDocPointer(e: PointerEvent) {
-  if (!root.value) return;
-  if (!root.value.contains(e.target as Node)) open.value = false;
+  if (!containsTarget(e.target)) open.value = false;
 }
 
 function onKey(e: KeyboardEvent) {
@@ -71,11 +70,11 @@ function onKey(e: KeyboardEvent) {
 
 watch(open, async (v) => {
   if (v) {
-    resolveInitialOrigin();
     await updateOrigin();
     document.addEventListener("pointerdown", onDocPointer, true);
     document.addEventListener("keydown", onKey);
   } else {
+    clearAnchor();
     document.removeEventListener("pointerdown", onDocPointer, true);
     document.removeEventListener("keydown", onKey);
   }
@@ -88,7 +87,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="dd" ref="root">
+  <div class="dd">
     <button
       ref="triggerEl"
       type="button"
@@ -106,32 +105,31 @@ onBeforeUnmount(() => {
       <ChevronDown :size="12" aria-hidden="true" class="chat-chip__caret" />
     </button>
 
-    <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
-      <div
-        v-if="open"
-        ref="menuEl"
-        class="dd__menu"
-        :class="placementClass"
-        role="listbox"
-        :style="{
-          '--sb-menu-origin-x': `${origin.x}px`,
-          '--sb-menu-origin-y': `${origin.y}px`,
-        }"
-      >
-        <button
-          v-for="opt in options"
-          :key="String(opt.value)"
-          type="button"
-          class="dd__item"
-          :class="{ 'is-active': opt.value === modelValue }"
-          role="option"
-          :aria-selected="opt.value === modelValue"
-          @click="pick(opt)"
+    <Teleport to="body">
+      <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
+        <div
+          v-if="open"
+          ref="menuEl"
+          class="dd__menu"
+          :class="placementClass"
+          role="listbox"
+          :style="overlayStyle"
         >
-          <span class="dd__item-label">{{ opt.label }}</span>
-          <span v-if="opt.hint" class="dd__item-hint">{{ opt.hint }}</span>
-        </button>
-      </div>
-    </Transition>
+          <button
+            v-for="opt in options"
+            :key="String(opt.value)"
+            type="button"
+            class="dd__item"
+            :class="{ 'is-active': opt.value === modelValue }"
+            role="option"
+            :aria-selected="opt.value === modelValue"
+            @click="pick(opt)"
+          >
+            <span class="dd__item-label">{{ opt.label }}</span>
+            <span v-if="opt.hint" class="dd__item-hint">{{ opt.hint }}</span>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

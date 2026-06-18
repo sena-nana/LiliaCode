@@ -2,6 +2,8 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { homeDir } from "@tauri-apps/api/path";
 import {
+  createDraftOrphan,
+  createDraftTask,
   ensureProjectTasksLoaded,
   ensureTaskLoaded,
   getOrphanConversation,
@@ -117,8 +119,21 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     else await promoteDraftOrphan(props.taskId, title);
   }
 
-  function popupNewDraftRoute(projectId: string | undefined): string {
-    return projectId ? `/popup/projects/${projectId}/new` : "/popup/chats/new";
+  async function recreatePopupDraft(projectId: string | undefined) {
+    const query = router.currentRoute.value.query;
+    if (projectId) {
+      const draft = createDraftTask(projectId);
+      await router.replace({
+        path: `/popup/projects/${projectId}/tasks/${draft.id}`,
+        query,
+      });
+      return;
+    }
+    const draft = createDraftOrphan();
+    await router.replace({
+      path: `/popup/chats/${draft.id}`,
+      query,
+    });
   }
 
   function clearContextLoadingTimer() {
@@ -156,7 +171,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
         popupContextHydrated.value = true;
         const routeState = resolveConversationRouteState(projectId, taskId);
         if (routeState.isLostDraft) {
-          void router.replace(popupNewDraftRoute(projectId));
+          void recreatePopupDraft(projectId);
         }
       }
     }

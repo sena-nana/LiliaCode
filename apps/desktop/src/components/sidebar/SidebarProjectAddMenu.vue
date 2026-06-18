@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref, watch } from "vue";
 import {
   FolderOpen,
   FolderPlus,
@@ -13,10 +13,10 @@ import {
 } from "../../services/projectsStore";
 import { pickFolder } from "../../services/projects";
 import {
-  resolveMenuTransformOrigin,
   SB_MENU_POP_TRANSITION_MS,
   type AnchoredMenuPosition,
 } from "../../composables/menuMotion";
+import { useAnchoredOverlay } from "../../composables/useAnchoredOverlay";
 
 const props = defineProps<{
   open: boolean;
@@ -35,8 +35,18 @@ const CloneRepoDialog = defineAsyncComponent(
 
 const cloneOpen = ref(false);
 const categoryOpen = ref(false);
-const menuEl = ref<HTMLElement | null>(null);
-const origin = ref(resolveMenuTransformOrigin(props.position));
+const openState = computed(() => props.open);
+const preferredPlacement = computed(() => "bottom-start" as const);
+const {
+  overlayEl: menuEl,
+  overlayStyle,
+  setAnchorPoint,
+  updatePosition,
+} = useAnchoredOverlay({
+  open: openState,
+  preferredPlacement,
+  offset: 0,
+});
 
 async function pickLocalFolder() {
   emit("close");
@@ -82,14 +92,6 @@ async function confirmCategory(name: string) {
   }
 }
 
-async function updateOrigin() {
-  origin.value = resolveMenuTransformOrigin(props.position);
-  await nextTick();
-  const el = menuEl.value;
-  if (!el) return;
-  origin.value = resolveMenuTransformOrigin(props.position, el.offsetWidth, el.offsetHeight);
-}
-
 watch(
   () => [
     props.open,
@@ -100,7 +102,11 @@ watch(
   ] as const,
   ([open]) => {
     if (!open) return;
-    void updateOrigin();
+    setAnchorPoint({
+      x: props.position.anchorX,
+      y: props.position.anchorY,
+    });
+    void updatePosition();
   },
   { immediate: true },
 );
@@ -114,12 +120,7 @@ watch(
         ref="menuEl"
         class="sb-menu"
         role="menu"
-        :style="{
-          left: `${position.x}px`,
-          top: `${position.y}px`,
-          '--sb-menu-origin-x': `${origin.x}px`,
-          '--sb-menu-origin-y': `${origin.y}px`,
-        }"
+        :style="overlayStyle"
       >
         <button type="button" class="sb-menu__item" role="menuitem" @click="pickLocalFolder">
           <FolderOpen :size="13" aria-hidden="true" />

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
 import { AlertTriangle, Sparkles } from "lucide-vue-next";
 import type { CodexAccountQuotaStatus, CodexAccountQuotaWindow } from "@lilia/contracts";
+import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus } from "../services/chat";
 import {
@@ -17,9 +18,11 @@ const QUOTA_STALE_MS = 60_000;
 const props = withDefaults(defineProps<{
   to?: RouteLocationRaw | null;
   popoverId?: string;
+  preferredPlacement?: "top-start" | "top-end" | "bottom-start" | "bottom-end";
 }>(), {
   to: null,
   popoverId: "provider-conn-quota-popover",
+  preferredPlacement: "top-start",
 });
 
 const {
@@ -33,11 +36,26 @@ const {
 } = useConnectionStatus({ probe: false, loadBackend: false });
 
 const activeStatus = computed(() => statusFor(activeBackend.value));
+const badgeAnchorEl = ref<HTMLElement | null>(null);
 const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const quotaLoading = ref(false);
 const quotaTooltipOpen = ref(false);
+const closeTimerId = ref<number | null>(null);
 let quotaRequestSeq = 0;
 let quotaInflight: Promise<void> | null = null;
+const openState = computed(() => quotaTooltipOpen.value);
+const preferredPlacement = computed(() => props.preferredPlacement);
+const {
+  overlayEl: quotaPopoverEl,
+  overlayStyle: quotaPopoverStyle,
+  resolvedPlacement: resolvedQuotaPlacement,
+  updatePosition: updateQuotaPopoverPosition,
+} = useAnchoredOverlay({
+  open: openState,
+  anchorEl: badgeAnchorEl,
+  preferredPlacement,
+  offset: 8,
+});
 
 const backendLabel = computed(() =>
   activeBackend.value === "codex" ? "Codex" : "Claude",
@@ -164,6 +182,21 @@ function quotaRemainingLine(window: CodexAccountQuotaWindow | null | undefined, 
   return suffix ? `${base} · ${suffix}` : base;
 }
 
+function cancelCloseTimer() {
+  if (closeTimerId.value !== null) {
+    window.clearTimeout(closeTimerId.value);
+    closeTimerId.value = null;
+  }
+}
+
+function scheduleCloseQuotaDetails() {
+  cancelCloseTimer();
+  closeTimerId.value = window.setTimeout(() => {
+    quotaTooltipOpen.value = false;
+    closeTimerId.value = null;
+  }, 80);
+}
+
 async function loadOfficialQuota() {
   if (!isCodexOfficialAccount.value) {
     clearOfficialQuota();
@@ -192,15 +225,18 @@ async function loadOfficialQuota() {
 
 function openQuotaDetails() {
   if (!isCodexOfficialAccount.value) return;
+  cancelCloseTimer();
   quotaTooltipOpen.value = true;
   void loadOfficialQuota();
+  void nextTick(() => updateQuotaPopoverPosition());
 }
 
 function closeQuotaDetails() {
-  quotaTooltipOpen.value = false;
+  scheduleCloseQuotaDetails();
 }
 
 function clearOfficialQuota() {
+  cancelCloseTimer();
   quotaRequestSeq += 1;
   officialQuota.value = null;
   quotaLoading.value = false;
@@ -219,61 +255,93 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => [
+    quotaTooltipOpen.value,
+    officialQuota.value?.available ?? false,
+    officialQuota.value?.error ?? "",
+    quotaDetailRows.value.length,
+    quotaLoading.value,
+  ] as const,
+  ([open]) => {
+    if (!open) return;
+    void updateQuotaPopoverPosition();
+  },
+);
+
 onMounted(() => {
   window.setTimeout(() => {
     void refresh(false).then(() => loadOfficialQuota());
   }, 0);
 });
+
+onBeforeUnmount(() => {
+  cancelCloseTimer();
+});
 </script>
 
 <template>
-  <component
-    :is="badgeTag"
-    v-bind="badgeAttrs"
-    class="sb-conn"
-    :class="[
-      `sb-conn--${connectionTone}`,
-      { 'sb-conn--quota': shouldShowQuotaRings },
-    ]"
-    :title="connectionTooltip"
-    :aria-label="connectionTooltip"
-    :aria-describedby="quotaTooltipOpen ? popoverId : undefined"
+  <span
+    ref="badgeAnchorEl"
+    class="sb-conn-anchor"
     @mouseenter="openQuotaDetails"
     @mouseleave="closeQuotaDetails"
-    @focus="openQuotaDetails"
-    @blur="closeQuotaDetails"
   >
-    <template v-if="connectionTone !== 'ok'">
-      <AlertTriangle :size="12" aria-hidden="true" />
-      <span class="sb-conn__label">{{ connectionTone === "error" ? "异常" : "未连接" }}</span>
-    </template>
-    <template v-else-if="activeStatus">
-      <Sparkles :size="12" aria-hidden="true" />
-      <span class="sb-conn__label">{{ backendLabel }}</span>
-      <span v-if="shouldShowQuotaRings" class="sb-quota-rings" aria-hidden="true">
-        <span
-          v-for="row in quotaRows"
-          :key="row.key"
-          class="sb-quota-ring"
-          :class="quotaRingTone(row.window)"
-          :style="quotaRingStyle(row.window)"
-        >
-          <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-            <circle class="sb-quota-ring__track" cx="8" cy="8" r="6" pathLength="100" />
-            <circle class="sb-quota-ring__value" cx="8" cy="8" r="6" pathLength="100" />
-          </svg>
+    <component
+      :is="badgeTag"
+      v-bind="badgeAttrs"
+      class="sb-conn"
+      :class="[
+        `sb-conn--${connectionTone}`,
+        { 'sb-conn--quota': shouldShowQuotaRings },
+      ]"
+      :title="connectionTooltip"
+      :aria-label="connectionTooltip"
+      :aria-describedby="quotaTooltipOpen ? popoverId : undefined"
+      @mouseenter="openQuotaDetails"
+      @mouseleave="closeQuotaDetails"
+      @focus="openQuotaDetails"
+      @blur="closeQuotaDetails"
+    >
+      <template v-if="connectionTone !== 'ok'">
+        <AlertTriangle :size="12" aria-hidden="true" />
+        <span class="sb-conn__label">{{ connectionTone === "error" ? "异常" : "未连接" }}</span>
+      </template>
+      <template v-else-if="activeStatus">
+        <Sparkles :size="12" aria-hidden="true" />
+        <span class="sb-conn__label">{{ backendLabel }}</span>
+        <span v-if="shouldShowQuotaRings" class="sb-quota-rings" aria-hidden="true">
+          <span
+            v-for="row in quotaRows"
+            :key="row.key"
+            class="sb-quota-ring"
+            :class="quotaRingTone(row.window)"
+            :style="quotaRingStyle(row.window)"
+          >
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <circle class="sb-quota-ring__track" cx="8" cy="8" r="6" pathLength="100" />
+              <circle class="sb-quota-ring__value" cx="8" cy="8" r="6" pathLength="100" />
+            </svg>
+          </span>
         </span>
-      </span>
-    </template>
-    <template v-else>
-      <span class="sb-conn__label sb-conn__label--probing">检测中...</span>
-    </template>
-
+      </template>
+      <template v-else>
+        <span class="sb-conn__label sb-conn__label--probing">检测中...</span>
+      </template>
+    </component>
+  </span>
+  <Teleport to="body">
     <span
       v-if="quotaTooltipOpen"
       :id="popoverId"
+      ref="quotaPopoverEl"
       role="tooltip"
       class="sb-conn-popover"
+      :class="`sb-conn-popover--${resolvedQuotaPlacement}`"
+      :data-placement="resolvedQuotaPlacement"
+      :style="quotaPopoverStyle"
+      @mouseenter="openQuotaDetails"
+      @mouseleave="closeQuotaDetails"
     >
       <span v-if="officialQuota?.available" class="sb-conn-popover__quota-list">
         <span v-for="row in quotaDetailRows" :key="row.key" class="sb-conn-popover__quota-row">
@@ -298,5 +366,5 @@ onMounted(() => {
         {{ officialQuota.error }}
       </span>
     </span>
-  </component>
+  </Teleport>
 </template>

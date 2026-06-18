@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 
 interface Segment {
   text: string;
@@ -32,6 +33,25 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 const suppressNextFocusOpen = ref(false);
+const openState = computed(() => props.open);
+const preferredPlacement = computed(() => "bottom-start" as const);
+const {
+  overlayEl: menuEl,
+  overlayStyle,
+  resolvedPlacement,
+  containsTarget,
+} = useAnchoredOverlay({
+  open: openState,
+  anchorEl: root,
+  preferredPlacement,
+  offset: 0,
+  matchAnchorWidth: true,
+});
+const menuPlacementClass = computed(() =>
+  resolvedPlacement.value.startsWith("top")
+    ? "search-dropdown__menu--top"
+    : "search-dropdown__menu--bottom",
+);
 
 function requestOpen(event?: Event) {
   if (event?.type === "focus" && suppressNextFocusOpen.value) {
@@ -48,8 +68,8 @@ function onInput(event: Event) {
 }
 
 function onDocPointer(event: PointerEvent) {
-  if (!props.closeOnOutside || !root.value) return;
-  if (!root.value.contains(event.target as Node)) {
+  if (!props.closeOnOutside) return;
+  if (!containsTarget(event.target)) {
     emit("update:open", false);
   }
 }
@@ -151,7 +171,11 @@ defineExpose({
   <div
     ref="root"
     class="search-dropdown"
-    :class="{ 'is-open': open }"
+    :class="{
+      'is-open': open,
+      'is-open-top': open && resolvedPlacement.startsWith('top'),
+      'is-open-bottom': open && !resolvedPlacement.startsWith('top'),
+    }"
   >
     <div class="search-dropdown__field">
       <slot name="leading" />
@@ -169,17 +193,21 @@ defineExpose({
       />
       <slot name="trailing" />
     </div>
-
-    <div
-      v-if="open"
-      class="search-dropdown__menu"
-      role="listbox"
-    >
-      <slot
-        :query="modelValue"
-        :highlight-query-segments="highlightQuerySegments"
-        :highlight-range-segments="highlightRangeSegments"
-      />
-    </div>
+    <Teleport to="body">
+      <div
+        v-if="open"
+        ref="menuEl"
+        class="search-dropdown__menu"
+        :class="menuPlacementClass"
+        role="listbox"
+        :style="overlayStyle"
+      >
+        <slot
+          :query="modelValue"
+          :highlight-query-segments="highlightQuerySegments"
+          :highlight-range-segments="highlightRangeSegments"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
