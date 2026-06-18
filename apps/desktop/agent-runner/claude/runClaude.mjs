@@ -434,6 +434,11 @@ function readPlainObject(value) {
   return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
 }
 
+function readClaudeManagedAgents(value) {
+  if (!isRecord(value) || !isRecord(value.agents)) return null;
+  return Object.keys(value.agents).length > 0 ? { ...value.agents } : null;
+}
+
 function readClaudeToolsOption(value) {
   const list = readStringList(value);
   if (list.length > 0) return list;
@@ -788,6 +793,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const permOpts = mapClaudeInitialPermission(permission, planMode);
   let lastSessionId = null;
   const providerOptions = { ...(providerSettings?.options || {}) };
+  const managedAgents = readClaudeManagedAgents(providerOptions.managedSettings);
+  if (managedAgents && !isRecord(providerOptions.agents)) {
+    providerOptions.agents = managedAgents;
+  }
   const abortAfterMs = providerOptions.abortAfterMs;
   delete providerOptions.abortAfterMs;
   let abortTimer = null;

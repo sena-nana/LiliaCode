@@ -860,6 +860,13 @@ export function buildCodexCollaborationMode(kind, model, preset = null) {
   };
 }
 
+function readCodexSubagentInstructions(cmd) {
+  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  const codex = isRecord(provider.codex) ? provider.codex : {};
+  return stringOrNull(codex.subagentInstructions)?.trim() || null;
+}
+
 export async function startCodexAppServerTurn(
   server,
   threadId,
@@ -966,6 +973,7 @@ async function runCodexTurnLoop(
   let nextPrompt = initialPrompt;
   let nextTurnKind = initialTurnKind === "plan" ? "plan" : "default";
   let shouldStartTurn = true;
+  const subagentInstructions = readCodexSubagentInstructions(cmd);
   while (shouldStartTurn) {
     shouldStartTurn = false;
     ctx.activeTurnKind = nextTurnKind;
@@ -973,6 +981,9 @@ async function runCodexTurnLoop(
       nextTurnKind === "plan"
         ? buildCodexCollaborationMode("plan", selectedModel, planPreset)
         : buildCodexCollaborationMode("default", selectedModel, null);
+    if (subagentInstructions) {
+      collaborationMode.settings.developer_instructions = subagentInstructions;
+    }
     await flushCodexRuntimeSettings(ctx);
     const startedTurn = await startCodexAppServerTurn(
       server,
@@ -1146,13 +1157,22 @@ async function runCodexFixSuggestionWorkflow(server, threadId, cmd, ctx, cwdFn =
     sourceId: `codex:fix-suggestion:start:${threadId}:${targetSummary}`,
   });
   try {
+    const collaborationMode = buildCodexCollaborationMode(
+      "default",
+      normalizeCodexSettings(turnCmd).model,
+      null,
+    );
+    const subagentInstructions = readCodexSubagentInstructions(turnCmd);
+    if (subagentInstructions) {
+      collaborationMode.settings.developer_instructions = subagentInstructions;
+    }
     const startedTurn = await startCodexAppServerTurn(
       server,
       threadId,
       prompt,
       turnCmd,
       cwdFn,
-      { collaborationMode: buildCodexCollaborationMode("default", normalizeCodexSettings(turnCmd).model, null) },
+      { collaborationMode },
     );
     ctx.currentTurnId = codexTurnIdFromStartResult(startedTurn) || ctx.currentTurnId;
     ctx.workflowSource = {

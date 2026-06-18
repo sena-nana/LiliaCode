@@ -41,7 +41,8 @@ use crate::chat::types::{
 };
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
-    build_codex_app_server_probe_status_cached, load_agent_interaction_settings,
+    build_codex_app_server_probe_status_cached, build_effective_claude_settings,
+    build_effective_codex_subagent_settings, load_agent_interaction_settings,
     resolve_connection_for, CodexProfileSettings, ConnectionMode,
 };
 use crate::store::LiliaStore;
@@ -1168,10 +1169,22 @@ fn build_provider_runtime_options<R: Runtime>(
 ) -> Option<JsonValue> {
     let mut provider = serde_json::Map::new();
     if backend == BACKEND_CODEX {
-        provider.insert(
-            "codex".to_string(),
-            build_effective_codex_settings(app, composer),
-        );
+        let mut codex = build_effective_codex_settings(app, composer);
+        if let Some(subagents) = build_effective_codex_subagent_settings(app) {
+            if let (Some(target), Some(source)) = (codex.as_object_mut(), subagents.as_object()) {
+                for (key, value) in source {
+                    if !target.contains_key(key) || target[key].is_null() {
+                        target.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        provider.insert("codex".to_string(), codex);
+    }
+    if backend == BACKEND_CLAUDE {
+        if let Some(claude) = build_effective_claude_settings(app) {
+            provider.insert("claude".to_string(), claude);
+        }
     }
     if let Some(options) = runtime_options {
         if let Ok(value) = serde_json::to_value(options) {
@@ -1215,8 +1228,20 @@ fn merge_runtime_provider_defaults(
         value["provider"] = serde_json::json!({});
     }
     for (key, default_value) in defaults {
-        if value["provider"].get(&key).is_none() || value["provider"][&key].is_null() {
-            value["provider"][key] = default_value;
+        let existing = value["provider"].get(&key).cloned();
+        match (existing, default_value.as_object()) {
+            (Some(JsonValue::Object(mut current)), Some(default_map)) => {
+                for (inner_key, inner_value) in default_map {
+                    if current.get(inner_key).is_none() || current[inner_key].is_null() {
+                        current.insert(inner_key.clone(), inner_value.clone());
+                    }
+                }
+                value["provider"][&key] = JsonValue::Object(current);
+            }
+            (Some(current), _) if !current.is_null() => {}
+            _ => {
+                value["provider"][key] = default_value;
+            }
         }
     }
     value

@@ -634,8 +634,32 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
       nonInterruptMode: false;
       debug: true;
       codexProfile: CodexProfileSettings;
+      subagentMode: {
+        enabled: false;
+        codex: {
+          enabled: true;
+        };
+        claude: {
+          enabled: true;
+          forwardSubagentText: true;
+          agentProgressSummaries: true;
+        };
+      };
     },
     AgentInteractionSettings
+  >
+>;
+
+export type CustomSubagentDefinitionShapeTypeTest = Assert<
+  Extends<
+    {
+      id: "agent-1";
+      name: "Reviewer";
+      description: "Checks code";
+      instruction: "Review the diff and summarize risks.";
+      enabled: true;
+    },
+    import("./chat").CustomSubagentDefinition
   >
 >;
 

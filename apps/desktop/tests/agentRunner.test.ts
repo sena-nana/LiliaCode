@@ -1488,7 +1488,15 @@ describe("Claude helpers", () => {
           tools: { type: "preset", preset: "claude_code" },
           permissionPromptToolName: "mcp__lilia__permission_prompt",
           settings: { model: "claude-opus-4-5" },
-          managedSettings: { sandbox: { enabled: true } },
+          managedSettings: {
+            sandbox: { enabled: true },
+            agents: {
+              "lilia-reviewer": {
+                description: "检查风险与回归",
+                prompt: "Review code changes and summarize risks.",
+              },
+            },
+          },
           settingSources: ["user", "project"],
           sandbox: { enabled: true },
           outputFormat: { type: "json" },
@@ -1535,7 +1543,15 @@ describe("Claude helpers", () => {
       tools: { type: "preset", preset: "claude_code" },
       permissionPromptToolName: "mcp__lilia__permission_prompt",
       settings: { model: "claude-opus-4-5" },
-      managedSettings: { sandbox: { enabled: true } },
+      managedSettings: {
+        sandbox: { enabled: true },
+        agents: {
+          "lilia-reviewer": {
+            description: "检查风险与回归",
+            prompt: "Review code changes and summarize risks.",
+          },
+        },
+      },
       settingSources: ["user", "project"],
       sandbox: { enabled: true },
       outputFormat: { type: "json" },
@@ -1546,6 +1562,12 @@ describe("Claude helpers", () => {
       resumeSessionAt: "message-uuid",
       sessionId: "00000000-0000-4000-8000-000000000001",
       sessionStore: { explicit: true },
+      agents: {
+        "lilia-reviewer": {
+          description: "检查风险与回归",
+          prompt: "Review code changes and summarize risks.",
+        },
+      },
     });
     expect(seenOptions.abortController).toBeInstanceOf(AbortController);
     expect(seenOptions.abortAfterMs).toBeUndefined();
@@ -5595,6 +5617,107 @@ describe("Codex app-server mapping", () => {
       line.event.payload.revisionRequest === "先补充回滚方案"
     )).toBe(true);
     expect(json().some((line) => line.type === "user_message")).toBe(false);
+  });
+
+  it("reuses Codex subagent instructions for both the plan turn and the approved execution turn", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    let turnStarts = 0;
+    let planSent = false;
+    let planCompletionSent = false;
+    let executionCompletionSent = false;
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ type: "server", method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.1" };
+        if (method === "collaborationMode/list") {
+          return { data: [{ name: "plan", mode: "plan", reasoning_effort: "medium" }] };
+        }
+        if (method === "turn/start") {
+          turnStarts += 1;
+          return { turn: { id: `turn-${turnStarts}` } };
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        if (turnStarts === 1 && !planSent) {
+          planSent = true;
+          return [{
+            method: "turn/plan/updated",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              explanation: "计划草稿",
+              plan: [{ step: "改代码", status: "pending" }],
+            },
+          }];
+        }
+        if (turnStarts === 1 && !planCompletionSent) {
+          planCompletionSent = true;
+          return [{
+            method: "turn/completed",
+            params: { threadId: "thread-1", turn: { status: "completed" } },
+          }];
+        }
+        if (turnStarts === 2 && !executionCompletionSent) {
+          executionCompletionSent = true;
+          return [{
+            method: "turn/completed",
+            params: { threadId: "thread-1", turn: { status: "completed" } },
+          }];
+        }
+        return [];
+      },
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "请制定计划",
+      permission: "ask",
+      planMode: true,
+      runtimeOptions: {
+        provider: {
+          codex: {
+            subagentInstructions: "Delegate review work to Reviewer and avoid duplicate delegation.",
+          },
+        },
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: {
+        requestAskUser: async () => ({
+          cancelled: false,
+          answers: {
+            "approve-plan": {
+              questionId: "approve-plan",
+              value: "yes",
+            },
+          },
+        }),
+      },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    const startCalls = calls.filter((call) => call.type === "server" && call.method === "turn/start");
+    expect(startCalls).toHaveLength(2);
+    expect(startCalls[0].params.collaborationMode).toMatchObject({
+      mode: "plan",
+      settings: {
+        developer_instructions: "Delegate review work to Reviewer and avoid duplicate delegation.",
+      },
+    });
+    expect(startCalls[1].params.collaborationMode).toMatchObject({
+      mode: "default",
+      settings: {
+        developer_instructions: "Delegate review work to Reviewer and avoid duplicate delegation.",
+      },
+    });
   });
 
   it("Codex plan mode fails before turn/start when plan preset is missing", async () => {

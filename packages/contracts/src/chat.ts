@@ -384,8 +384,40 @@ export interface ToolConsentResponsePayload {
   codexDecision?: CodexToolConsentDecision;
 }
 
+export interface AgentSubagentBackendSettings {
+  enabled: boolean;
+}
+
+export interface ClaudeSubagentModeSettings extends AgentSubagentBackendSettings {
+  forwardSubagentText: boolean;
+  agentProgressSummaries: boolean;
+}
+
+export interface AgentSubagentModeSettings {
+  enabled: boolean;
+  codex: AgentSubagentBackendSettings;
+  claude: ClaudeSubagentModeSettings;
+}
+
+export interface CustomSubagentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  instruction: string;
+  enabled: boolean;
+}
+
+export interface CustomSubagentUpsertInput {
+  id?: string | null;
+  name: string;
+  description?: string | null;
+  instruction: string;
+  enabled?: boolean;
+}
+
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
   codexProfile: CodexProfileSettings;
+  subagentMode: AgentSubagentModeSettings;
 }
