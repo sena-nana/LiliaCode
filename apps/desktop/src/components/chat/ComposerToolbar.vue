@@ -19,6 +19,10 @@ import type {
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
 import { attachmentImageSrc } from "./imageViewer";
+import {
+  SB_MENU_POP_TRANSITION_MS,
+} from "../../composables/menuMotion";
+import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -46,7 +50,16 @@ const emit = defineEmits<{
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 const actionMenuOpen = ref(false);
-const actionMenuRoot = ref<HTMLElement | null>(null);
+const actionMenuPlacement = ref<"top" | "bottom">("top");
+const {
+  rootEl: actionMenuRoot,
+  triggerEl: actionTriggerEl,
+  menuEl: actionMenuEl,
+  origin: actionMenuOrigin,
+  captureAnchor: captureActionMenuAnchor,
+  resolveInitialOrigin: resolveActionMenuInitialOrigin,
+  updateOrigin: updateActionMenuOrigin,
+} = useAnchoredMenuMotion(actionMenuPlacement);
 
 type ModeChip = {
   key: "plan" | "goal";
@@ -160,7 +173,8 @@ const activeModeChips = computed<ModeChip[]>(() => {
   return chips;
 });
 
-function toggleActionMenu() {
+function toggleActionMenu(event: MouseEvent) {
+  captureActionMenuAnchor(event);
   actionMenuOpen.value = !actionMenuOpen.value;
 }
 
@@ -189,6 +203,8 @@ function onKey(e: KeyboardEvent) {
 
 watch(actionMenuOpen, (open) => {
   if (open) {
+    resolveActionMenuInitialOrigin();
+    void updateActionMenuOrigin();
     document.addEventListener("pointerdown", onDocPointer, true);
     document.addEventListener("keydown", onKey);
   } else {
@@ -232,6 +248,7 @@ onBeforeUnmount(() => {
       <div class="chat-composer__group">
         <div ref="actionMenuRoot" class="chat-composer__action-menu">
           <button
+            ref="actionTriggerEl"
             type="button"
             class="chat-composer__action-trigger"
             :class="{ 'is-open': actionMenuOpen }"
@@ -243,66 +260,73 @@ onBeforeUnmount(() => {
           >
             <Plus :size="16" aria-hidden="true" />
           </button>
-          <div
-            v-if="actionMenuOpen"
-            class="dd__menu dd__menu--top chat-composer__action-menu-popover"
-            role="menu"
-          >
-            <button
-              type="button"
-              class="dd__item chat-composer__action-menu-item"
-              role="menuitem"
-              @click="pickAction('attachments')"
+          <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
+            <div
+              v-if="actionMenuOpen"
+              ref="actionMenuEl"
+              class="dd__menu dd__menu--top chat-composer__action-menu-popover"
+              role="menu"
+              :style="{
+                '--sb-menu-origin-x': `${actionMenuOrigin.x}px`,
+                '--sb-menu-origin-y': `${actionMenuOrigin.y}px`,
+              }"
             >
-              <span class="chat-composer__action-menu-icon">
-                <Paperclip :size="14" aria-hidden="true" />
-              </span>
-              <span class="dd__item-label">添加附件</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item chat-composer__action-menu-item"
-              role="menuitem"
-              @click="pickAction('reference')"
-            >
-              <span class="chat-composer__action-menu-icon">
-                <MessageSquareQuote :size="14" aria-hidden="true" />
-              </span>
-              <span class="dd__item-label">引用其他对话</span>
-            </button>
-            <button
-              type="button"
-              class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
-              :class="{ 'is-active': state.planMode }"
-              role="menuitemcheckbox"
-              :aria-checked="state.planMode"
-              @click="pickAction('plan')"
-            >
-              <span class="chat-composer__action-menu-icon">
-                <ListChecks :size="14" aria-hidden="true" />
-              </span>
-              <span class="dd__item-label">计划模式</span>
-              <span class="chat-composer__action-switch" aria-hidden="true">
-                <span class="chat-composer__action-switch-thumb" />
-              </span>
-            </button>
-            <button
-              type="button"
-              class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
-              :class="{ 'is-active': state.goalMode }"
-              role="menuitemcheckbox"
-              :aria-checked="state.goalMode"
-              @click="pickAction('goal')"
-            >
-              <span class="chat-composer__action-menu-icon">
-                <Goal :size="14" aria-hidden="true" />
-              </span>
-              <span class="dd__item-label">目标模式</span>
-              <span class="chat-composer__action-switch" aria-hidden="true">
-                <span class="chat-composer__action-switch-thumb" />
-              </span>
-            </button>
-          </div>
+              <button
+                type="button"
+                class="dd__item chat-composer__action-menu-item"
+                role="menuitem"
+                @click="pickAction('attachments')"
+              >
+                <span class="chat-composer__action-menu-icon">
+                  <Paperclip :size="14" aria-hidden="true" />
+                </span>
+                <span class="dd__item-label">添加附件</span>
+              </button>
+              <button
+                type="button"
+                class="dd__item chat-composer__action-menu-item"
+                role="menuitem"
+                @click="pickAction('reference')"
+              >
+                <span class="chat-composer__action-menu-icon">
+                  <MessageSquareQuote :size="14" aria-hidden="true" />
+                </span>
+                <span class="dd__item-label">引用其他对话</span>
+              </button>
+              <button
+                type="button"
+                class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+                :class="{ 'is-active': state.planMode }"
+                role="menuitemcheckbox"
+                :aria-checked="state.planMode"
+                @click="pickAction('plan')"
+              >
+                <span class="chat-composer__action-menu-icon">
+                  <ListChecks :size="14" aria-hidden="true" />
+                </span>
+                <span class="dd__item-label">计划模式</span>
+                <span class="chat-composer__action-switch" aria-hidden="true">
+                  <span class="chat-composer__action-switch-thumb" />
+                </span>
+              </button>
+              <button
+                type="button"
+                class="dd__item chat-composer__action-menu-item chat-composer__action-menu-toggle"
+                :class="{ 'is-active': state.goalMode }"
+                role="menuitemcheckbox"
+                :aria-checked="state.goalMode"
+                @click="pickAction('goal')"
+              >
+                <span class="chat-composer__action-menu-icon">
+                  <Goal :size="14" aria-hidden="true" />
+                </span>
+                <span class="dd__item-label">目标模式</span>
+                <span class="chat-composer__action-switch" aria-hidden="true">
+                  <span class="chat-composer__action-switch-thumb" />
+                </span>
+              </button>
+            </div>
+          </Transition>
         </div>
         <Dropdown
           class="chat-composer__permission-dropdown"

@@ -98,6 +98,9 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
       directives: {
         contextMenu: {},
       },
+      stubs: {
+        transition: false,
+      },
     },
   });
   return { ...view, router };

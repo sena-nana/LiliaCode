@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from "vue";
 import { FolderPlus } from "lucide-vue-next";
-import type { Project } from "@lilia/contracts";
-import { createProject } from "../../services/projectsStore";
 
 const emit = defineEmits<{
   close: [];
-  created: [project: Project];
+  confirm: [name: string];
 }>();
 
 const categoryName = ref("");
@@ -21,8 +19,7 @@ async function init() {
 async function confirm() {
   const name = categoryName.value.trim();
   if (!name) return;
-  const project = await createProject({ name, cwd: null });
-  emit("created", project);
+  emit("confirm", name);
   emit("close");
 }
 

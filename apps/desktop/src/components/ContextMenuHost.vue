@@ -5,16 +5,25 @@
  */
 import { nextTick, ref, watch } from "vue";
 import {
+  finalizeClosedContextMenu,
   isContextMenuItemPending,
   selectContextMenuItem,
   useContextMenu,
   type ContextMenuItem,
 } from "../composables/useContextMenu";
+import {
+  clampAnchoredMenuPosition,
+  createAnchoredMenuPosition,
+  resolveMenuTransformOrigin,
+  SB_MENU_POP_TRANSITION_MS,
+} from "../composables/menuMotion";
 
 const { state } = useContextMenu();
 
 const menuEl = ref<HTMLElement | null>(null);
-const pos = ref<{ x: number; y: number }>({ x: 0, y: 0 });
+const rendered = ref(false);
+const pos = ref(createAnchoredMenuPosition(0, 0));
+const origin = ref({ x: 0, y: 0 });
 
 function displayLabel(item: ContextMenuItem) {
   return isContextMenuItemPending(item) ? item.confirmLabel : item.label;
@@ -24,49 +33,77 @@ function isDanger(item: ContextMenuItem) {
   return item.danger || isContextMenuItemPending(item);
 }
 
+async function updateGeometry() {
+  const initialPos = createAnchoredMenuPosition(
+    state.x,
+    state.y,
+    state.anchorX,
+    state.anchorY,
+  );
+  pos.value = initialPos;
+  origin.value = resolveMenuTransformOrigin(initialPos);
+  await nextTick();
+  const el = menuEl.value;
+  if (!el) return;
+  const clampedPos = clampAnchoredMenuPosition(initialPos, el.offsetWidth, el.offsetHeight);
+  pos.value = clampedPos;
+  origin.value = resolveMenuTransformOrigin(clampedPos, el.offsetWidth, el.offsetHeight);
+}
+
+function onAfterLeave() {
+  finalizeClosedContextMenu();
+}
+
 watch(
-  () => state.open,
-  async (open) => {
-    if (!open) return;
-    // 先用锚点占位，下一帧拿到真实尺寸再 clamp，避免菜单先闪到边外再跳回来。
-    pos.value = { x: state.x, y: state.y };
-    await nextTick();
-    const el = menuEl.value;
-    if (!el) return;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const x = Math.max(4, Math.min(state.x, window.innerWidth - w - 4));
-    const y = Math.max(4, Math.min(state.y, window.innerHeight - h - 4));
-    pos.value = { x, y };
+  () => [state.openSeq, state.open] as const,
+  ([, open]) => {
+    if (!open) {
+      rendered.value = false;
+      return;
+    }
+    rendered.value = true;
+    void updateGeometry();
   },
+  { immediate: true },
 );
 </script>
 
 <template>
   <Teleport to="body">
-    <div
-      v-if="state.open"
-      ref="menuEl"
-      class="ctx-menu sb-menu"
-      role="menu"
-      :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+    <Transition
+      name="sb-menu-pop"
+      :duration="SB_MENU_POP_TRANSITION_MS"
+      @after-leave="onAfterLeave"
     >
-      <button
-        v-for="(item, i) in state.items"
-        :key="item.id ?? i"
-        type="button"
-        class="sb-menu__item ctx-menu__item"
-        :class="{
-          'ctx-menu__item--danger': isDanger(item),
-          'ctx-menu__item--pending': isContextMenuItemPending(item),
+      <div
+        v-if="rendered"
+        ref="menuEl"
+        class="ctx-menu sb-menu"
+        role="menu"
+        :style="{
+          left: `${pos.x}px`,
+          top: `${pos.y}px`,
+          '--sb-menu-origin-x': `${origin.x}px`,
+          '--sb-menu-origin-y': `${origin.y}px`,
         }"
-        :disabled="item.disabled"
-        role="menuitem"
-        @click="selectContextMenuItem(item)"
       >
-        <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
-        <span class="sb-menu__label">{{ displayLabel(item) }}</span>
-      </button>
-    </div>
+        <button
+          v-for="(item, i) in state.items"
+          :key="item.id ?? i"
+          type="button"
+          class="sb-menu__item ctx-menu__item"
+          :class="{
+            'ctx-menu__item--danger': isDanger(item),
+            'ctx-menu__item--pending': isContextMenuItemPending(item),
+          }"
+          :disabled="item.disabled"
+          role="menuitem"
+          @click="selectContextMenuItem(item)"
+        >
+          <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
+          <span class="sb-menu__label">{{ displayLabel(item) }}</span>
+        </button>
+      </div>
+    </Transition>
   </Teleport>
 </template>

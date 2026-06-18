@@ -4144,6 +4144,8 @@ button.chat-attachment-chip--bubble {
   gap: 1px;
   box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   z-index: 20;
+  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
+  will-change: transform, opacity;
 }
 
 .dd__menu--top {
