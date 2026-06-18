@@ -519,8 +519,17 @@ describe("Settings provider switch", () => {
     });
     expect(await view.findByText("Reviewer")).toBeInTheDocument();
 
-    const subagentGroup = await view.findByRole("radiogroup", { name: "Subagent 模式" });
-    await fireEvent.click(within(subagentGroup).getByRole("radio", { name: "开启" }));
+    const subagentCardToggle = () =>
+      view.getByRole("button", { name: /Subagent 详细配置/ });
+    const subagentGroup = () => view.getByRole("radiogroup", { name: "Subagent 模式" });
+    const codexGroup = () => view.queryByRole("radiogroup", { name: "Codex Subagent" });
+
+    expect(subagentCardToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(subagentCardToggle()).toHaveAttribute("aria-disabled", "true");
+    expect(codexGroup()).toBeNull();
+    expect(view.queryByRole("radiogroup", { name: "Claude 转发子代理文本" })).toBeNull();
+
+    await fireEvent.click(within(subagentGroup()).getByRole("radio", { name: "开启" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
@@ -538,16 +547,27 @@ describe("Settings provider switch", () => {
       });
     });
     await waitFor(() => {
-      expect(within(subagentGroup).getByRole("radio", { name: "开启" })).toHaveAttribute(
+      expect(within(subagentGroup()).getByRole("radio", { name: "开启" })).toHaveAttribute(
         "aria-checked",
         "true",
       );
-      expect(within(view.getByRole("radiogroup", { name: "Codex Subagent" })).getByRole("radio", { name: "关闭" }))
-        .toBeEnabled();
+      expect(subagentCardToggle()).toHaveAttribute("aria-expanded", "true");
+      expect(subagentCardToggle()).toHaveAttribute("aria-label", "收起 Subagent 详细配置");
+      expect(within(codexGroup() as HTMLElement).getByRole("radio", { name: "关闭" })).toBeEnabled();
     });
 
-    const codexGroup = view.getByRole("radiogroup", { name: "Codex Subagent" });
-    await fireEvent.click(within(codexGroup).getByRole("radio", { name: "关闭" }));
+    await fireEvent.click(subagentCardToggle());
+    expect(subagentCardToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(codexGroup()).toBeNull();
+
+    await fireEvent.click(within(subagentGroup()).getByRole("radio", { name: "开启" }));
+    expect(subagentCardToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(codexGroup()).toBeNull();
+
+    await fireEvent.click(subagentCardToggle());
+    expect(await view.findByRole("radiogroup", { name: "Codex Subagent" })).toBeInTheDocument();
+
+    await fireEvent.click(within(codexGroup() as HTMLElement).getByRole("radio", { name: "关闭" }));
 
     await waitFor(() => {
       expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
@@ -576,6 +596,29 @@ describe("Settings provider switch", () => {
           },
         },
       });
+    });
+
+    await fireEvent.click(within(subagentGroup()).getByRole("radio", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: {
+          subagentMode: {
+            enabled: false,
+            codex: { enabled: false },
+            claude: {
+              enabled: true,
+              forwardSubagentText: false,
+              agentProgressSummaries: true,
+            },
+          },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(subagentCardToggle()).toHaveAttribute("aria-expanded", "false");
+      expect(subagentCardToggle()).toHaveAttribute("aria-disabled", "true");
+      expect(codexGroup()).toBeNull();
     });
   });
 
