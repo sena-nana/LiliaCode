@@ -233,6 +233,10 @@ describe("Settings provider switch", () => {
     expect(view.getByText("剩余 85%")).toBeInTheDocument();
     expect(view.getByText("剩余 30%")).toBeInTheDocument();
     expect(view.getAllByText(/^重置 /)).toHaveLength(4);
+    expect(view.getByText("重置次数")).toBeInTheDocument();
+    expect(view.getByText("剩余 3")).toBeInTheDocument();
+    expect(view.getByText("Spark重置次数")).toBeInTheDocument();
+    expect(view.getByText("不限")).toBeInTheDocument();
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
@@ -273,6 +277,8 @@ describe("Settings provider switch", () => {
       weekly: null,
       sparkFiveHour: null,
       sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
       fetchedAt: Date.now(),
       error: "Codex 未登录",
     });
@@ -414,7 +420,7 @@ describe("Settings provider switch", () => {
     setMockCodexAppServerStatus({
       supportsRequiredProtocol: false,
       failureKind: "experimentalApiUnsupported",
-      issues: ["当前 codex CLI 版本过低，需要 0.128.0 或更新版本。"],
+      issues: ["当前 codex CLI 版本过低，需要 0.136.0 或更新版本。"],
     });
 
     const view = await renderSettings("/settings?tab=providers");

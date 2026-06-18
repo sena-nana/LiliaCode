@@ -36,7 +36,7 @@ export function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
     status?.failureKind === "appServerUnavailable" ||
     status?.failureKind === "experimentalApiUnsupported"
   ) {
-    return `${issue} 请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。`;
+    return `${issue} 请升级 Codex CLI 到 0.136.0 或更新版本后重新检测。`;
   }
   return issue;
 }

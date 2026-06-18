@@ -189,6 +189,14 @@ pub struct CodexAccountQuotaWindow {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CodexAccountQuotaCredits {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexAccountQuotaStatus {
     pub available: bool,
     pub connection_mode: String,
@@ -200,6 +208,8 @@ pub struct CodexAccountQuotaStatus {
     pub weekly: Option<CodexAccountQuotaWindow>,
     pub spark_five_hour: Option<CodexAccountQuotaWindow>,
     pub spark_weekly: Option<CodexAccountQuotaWindow>,
+    pub credits: Option<CodexAccountQuotaCredits>,
+    pub spark_credits: Option<CodexAccountQuotaCredits>,
     pub fetched_at: i64,
     pub error: Option<String>,
 }
@@ -250,6 +260,8 @@ fn codex_account_quota_unavailable(
         weekly: None,
         spark_five_hour: None,
         spark_weekly: None,
+        credits: None,
+        spark_credits: None,
         fetched_at: now_millis(),
         error,
     }

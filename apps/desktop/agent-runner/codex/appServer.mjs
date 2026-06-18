@@ -7,7 +7,7 @@ export function codexAppServerBinary(env = process.env) {
   const injected = stringOrNull(env.LILIA_CODEX_CLI_PATH)?.trim();
   if (!injected) {
     throw new Error(
-      "Codex app-server 环境不满足：Lilia 未找到满足协议要求的 codex CLI。请升级 Codex CLI 到 0.128.0 或更新版本后重新检测。",
+      "Codex app-server 环境不满足：Lilia 未找到满足协议要求的 codex CLI。请升级 Codex CLI 到 0.136.0 或更新版本后重新检测。",
     );
   }
   return injected;

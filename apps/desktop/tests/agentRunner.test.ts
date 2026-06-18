@@ -2576,6 +2576,7 @@ describe("Codex app-server mapping", () => {
         codex: {
           limitId: "codex",
           planType: "pro",
+          credits: { hasCredits: true, unlimited: false, balance: "3" },
           primary: { usedPercent: 14, windowDurationMins: 300, resetsAt: 10 },
           secondary: { usedPercent: 14, windowDurationMins: 10080, resetsAt: 20 },
         },
@@ -2583,6 +2584,7 @@ describe("Codex app-server mapping", () => {
           limitId: "codex_bengalfox",
           limitName: "GPT-5.3-Codex-Spark",
           planType: "pro",
+          credits: { hasCredits: true, unlimited: true, balance: null },
           primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: 30 },
           secondary: { usedPercent: 18, windowDurationMins: 10080, resetsAt: 40 },
         },
@@ -2598,6 +2600,8 @@ describe("Codex app-server mapping", () => {
     expect(status.weekly?.usedPercent).toBe(14);
     expect(status.sparkFiveHour?.usedPercent).toBe(0);
     expect(status.sparkWeekly?.usedPercent).toBe(18);
+    expect(status.credits).toEqual({ hasCredits: true, unlimited: false, balance: "3" });
+    expect(status.sparkCredits).toEqual({ hasCredits: true, unlimited: true, balance: null });
   });
 
   it("Codex account quota retries transient wham usage fetch failures", async () => {
@@ -2633,6 +2637,8 @@ describe("Codex app-server mapping", () => {
     expect(status.error).toBeNull();
     expect(status.fiveHour?.usedPercent).toBe(12);
     expect(status.weekly?.usedPercent).toBe(34);
+    expect(status.credits).toBeNull();
+    expect(status.sparkCredits).toBeNull();
   });
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {

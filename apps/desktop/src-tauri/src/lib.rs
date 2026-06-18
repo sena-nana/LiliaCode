@@ -38,7 +38,7 @@ pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 Mini"),
 ];
-pub(crate) const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 128, 0);
+pub(crate) const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 136, 0);
 
 #[tauri::command]
 fn ping() -> &'static str {

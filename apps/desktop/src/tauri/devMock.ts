@@ -391,7 +391,22 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
     case "quota_usage_get_stats":
       return { today: null, weekly: null, monthly: null, updatedAt: Date.now() } as T;
     case "quota_usage_get_codex_account_status":
-      return { available: false, error: "dev-mock" } as T;
+      return {
+        available: false,
+        connectionMode: "codex-account",
+        limitId: null,
+        limitName: null,
+        planType: null,
+        rateLimitReachedType: null,
+        fiveHour: null,
+        weekly: null,
+        sparkFiveHour: null,
+        sparkWeekly: null,
+        credits: null,
+        sparkCredits: null,
+        fetchedAt: Date.now(),
+        error: "dev-mock",
+      } as T;
     default:
       console.warn(`[lilia:dev-mock] Unhandled Tauri command: ${cmd}`, args);
       return undefined as T;

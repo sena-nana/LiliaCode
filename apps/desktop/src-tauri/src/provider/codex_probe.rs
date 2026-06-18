@@ -289,7 +289,7 @@ where
             let issue = if parsed_version.is_none() {
                 "无法读取 codex CLI 版本，无法确认 experimental API 协议能力。".to_string()
             } else {
-                "当前 codex CLI 版本过低，需要 0.128.0 或更新版本以支持 Lilia 的流式事件、工具审批和 AskUser。".to_string()
+                "当前 codex CLI 版本过低，需要 0.136.0 或更新版本以支持 Lilia 的流式事件、工具审批、AskUser 和官方额度重置次数查询。".to_string()
             };
             experimental_unsupported = Some(CodexAppServerProbeStatus {
                 public: CodexAppServerStatus {
@@ -375,7 +375,7 @@ pub(crate) fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<S
     }
 
     Some(format!(
-        "{detail} 请安装或升级 Codex CLI 到 0.128.0 或更新版本后重新检测。"
+        "{detail} 请安装或升级 Codex CLI 到 0.136.0 或更新版本后重新检测。"
     ))
 }
 
@@ -398,7 +398,7 @@ mod tests {
     fn supported_status(path: &str) -> CodexAppServerProbeStatus {
         CodexAppServerProbeStatus {
             public: CodexAppServerStatus {
-                version: Some("codex 0.128.0".to_string()),
+                version: Some("codex 0.136.0".to_string()),
                 available: true,
                 supports_required_protocol: true,
                 failure_kind: None,
@@ -442,7 +442,7 @@ mod tests {
                 match (program, args) {
                     ("old", ["--version"]) => Ok("codex 0.127.0".to_string()),
                     ("old", ["app-server", "--help"]) => Ok("Usage: codex app-server".to_string()),
-                    ("new", ["--version"]) => Ok("codex 0.128.0".to_string()),
+                    ("new", ["--version"]) => Ok("codex 0.136.0".to_string()),
                     ("new", ["app-server", "--help"]) => Ok("Usage: codex app-server".to_string()),
                     _ => Err("unknown command".to_string()),
                 }
@@ -476,7 +476,7 @@ mod tests {
     fn codex_probe_reports_missing_app_server_subcommand() {
         let candidates = vec!["codex".to_string()];
         let status = build_codex_app_server_probe_status_with(&candidates, |_, args| match args {
-            ["--version"] => Ok("codex 0.128.0".to_string()),
+            ["--version"] => Ok("codex 0.136.0".to_string()),
             ["app-server", "--help"] => Err("unknown subcommand".to_string()),
             _ => Err("unknown command".to_string()),
         });

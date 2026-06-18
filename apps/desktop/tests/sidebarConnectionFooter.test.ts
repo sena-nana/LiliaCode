@@ -61,6 +61,16 @@ function officialQuota(overrides: Record<string, unknown> = {}) {
       windowDurationMins: 10080,
       resetsAt: 1_800_360_000,
     },
+    credits: {
+      hasCredits: true,
+      unlimited: false,
+      balance: "3",
+    },
+    sparkCredits: {
+      hasCredits: true,
+      unlimited: true,
+      balance: null,
+    },
     fetchedAt: 1_800_000_000_000,
     error: null,
     ...overrides,
@@ -153,6 +163,8 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       weekly: null,
       sparkFiveHour: null,
       sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
       error: "Codex 官方额度接口未返回可识别的额度数据。",
     }));
 

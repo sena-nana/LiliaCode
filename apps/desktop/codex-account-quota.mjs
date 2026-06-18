@@ -20,6 +20,8 @@ main().catch((err) => {
     weekly: null,
     sparkFiveHour: null,
     sparkWeekly: null,
+    credits: null,
+    sparkCredits: null,
     fetchedAt: Date.now(),
     error: err?.message || String(err),
   });

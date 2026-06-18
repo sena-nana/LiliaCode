@@ -108,6 +108,12 @@ export interface CodexAccountQuotaWindow {
   resetsAt: number | null;
 }
 
+export interface CodexAccountQuotaCredits {
+  hasCredits: boolean;
+  unlimited: boolean;
+  balance: string | null;
+}
+
 export interface CodexAccountQuotaStatus {
   available: boolean;
   connectionMode: string;
@@ -119,6 +125,8 @@ export interface CodexAccountQuotaStatus {
   weekly: CodexAccountQuotaWindow | null;
   sparkFiveHour: CodexAccountQuotaWindow | null;
   sparkWeekly: CodexAccountQuotaWindow | null;
+  credits: CodexAccountQuotaCredits | null;
+  sparkCredits: CodexAccountQuotaCredits | null;
   fetchedAt: number;
   error: string | null;
 }

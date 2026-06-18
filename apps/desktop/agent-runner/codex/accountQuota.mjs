@@ -13,6 +13,15 @@ function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function normalizeCredits(value) {
+  if (!isRecord(value)) return null;
+  return {
+    hasCredits: Boolean(value.hasCredits),
+    unlimited: Boolean(value.unlimited),
+    balance: stringOrNull(value.balance),
+  };
+}
+
 function normalizeWindow(value) {
   if (!isRecord(value)) return null;
   const usedPercent = numberOrNull(value.usedPercent);
@@ -49,6 +58,7 @@ function normalizeLimitSnapshot(value) {
     rateLimitReachedType: stringOrNull(value.rateLimitReachedType),
     fiveHour,
     weekly,
+    credits: normalizeCredits(value.credits),
   };
 }
 
@@ -97,6 +107,8 @@ function normalizeRateLimitSnapshot(result) {
     weekly: codex?.weekly ?? null,
     sparkFiveHour: spark?.fiveHour ?? null,
     sparkWeekly: spark?.weekly ?? null,
+    credits: codex?.credits ?? null,
+    sparkCredits: spark?.credits ?? null,
     fetchedAt: Date.now(),
     error: null,
   };
@@ -144,6 +156,8 @@ export async function readCodexAccountQuotaStatus(
       weekly: null,
       sparkFiveHour: null,
       sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
       fetchedAt: Date.now(),
       error: "Codex 官方额度接口未返回可识别的额度数据。",
     };
