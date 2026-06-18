@@ -148,6 +148,8 @@ function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
     weekly: null,
     sparkFiveHour: null,
     sparkWeekly: null,
+    credits: null,
+    sparkCredits: null,
     fetchedAt: Date.now(),
     error: String(error),
   };

@@ -514,6 +514,16 @@ export type CodexAccountQuotaStatusTypeTest = Assert<
         windowDurationMins: 10080;
         resetsAt: 5;
       };
+      credits: {
+        hasCredits: true;
+        unlimited: false;
+        balance: "3";
+      };
+      sparkCredits: {
+        hasCredits: true;
+        unlimited: true;
+        balance: null;
+      };
       fetchedAt: 3;
       error: null;
     },

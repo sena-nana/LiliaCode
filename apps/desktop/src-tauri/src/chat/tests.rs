@@ -1042,7 +1042,7 @@ mod agent_event_sink_tests {
                 return Err("Access is denied.".to_string());
             }
             match args {
-                ["--version"] => Ok("codex-cli 0.130.0-alpha.5".to_string()),
+                ["--version"] => Ok("codex-cli 0.136.0".to_string()),
                 ["app-server", "--help"] => {
                     Ok("Usage: codex app-server [OPTIONS] [COMMAND]".to_string())
                 }
@@ -1057,7 +1057,7 @@ mod agent_event_sink_tests {
         assert!(status.public.supports_required_protocol);
         assert_eq!(
             status.public.version.as_deref(),
-            Some("codex-cli 0.130.0-alpha.5")
+            Some("codex-cli 0.136.0")
         );
     }
 
@@ -1068,16 +1068,16 @@ mod agent_event_sink_tests {
             available: true,
             supports_required_protocol: false,
             failure_kind: Some("experimentalApiUnsupported".to_string()),
-            issues: vec!["当前 codex CLI 版本过低，需要 0.128.0 或更新版本。".to_string()],
+            issues: vec!["当前 codex CLI 版本过低，需要 0.136.0 或更新版本。".to_string()],
         })
         .unwrap();
 
         assert!(reason.contains("当前 codex CLI 版本过低"));
-        assert!(reason.contains("0.128.0"));
+        assert!(reason.contains("0.136.0"));
         assert!(!reason.contains("OpenAI Responses API"));
 
         let reason = codex_send_block_reason(&CodexAppServerStatus {
-            version: Some("codex-cli 0.128.0".to_string()),
+            version: Some("codex-cli 0.136.0".to_string()),
             available: true,
             supports_required_protocol: false,
             failure_kind: Some("providerIncompatible".to_string()),
@@ -1087,7 +1087,7 @@ mod agent_event_sink_tests {
         assert!(reason.contains("OpenAI Responses API"));
 
         assert!(codex_send_block_reason(&CodexAppServerStatus {
-            version: Some("codex-cli 0.128.0".to_string()),
+            version: Some("codex-cli 0.136.0".to_string()),
             available: true,
             supports_required_protocol: true,
             failure_kind: None,

@@ -479,7 +479,7 @@ function createMockLiliaIabSnapshot(args: Record<string, unknown>) {
   };
 }
 let codexAppServerStatus = {
-  version: "codex-cli 0.128.0",
+  version: "codex-cli 0.136.0",
   available: true,
   supportsRequiredProtocol: true,
   failureKind: null as
@@ -1192,6 +1192,8 @@ function createMockCodexAccountQuotaStatus() {
       weekly: null,
       sparkFiveHour: null,
       sparkWeekly: null,
+      credits: null,
+      sparkCredits: null,
       fetchedAt: Date.now(),
       error: null,
     };
@@ -1223,6 +1225,16 @@ function createMockCodexAccountQuotaStatus() {
       usedPercent: 70,
       windowDurationMins: 10080,
       resetsAt: nowSeconds + 2 * 86_400,
+    },
+    credits: {
+      hasCredits: true,
+      unlimited: false,
+      balance: "3",
+    },
+    sparkCredits: {
+      hasCredits: true,
+      unlimited: true,
+      balance: null,
     },
     fetchedAt: Date.now(),
     error: null,
@@ -1548,7 +1560,7 @@ export function resetTauriMockData() {
   };
   nodeAvailable = true;
   codexAppServerStatus = {
-    version: "codex-cli 0.128.0",
+    version: "codex-cli 0.136.0",
     available: true,
     supportsRequiredProtocol: true,
     failureKind: null,

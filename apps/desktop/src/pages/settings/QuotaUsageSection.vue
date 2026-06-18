@@ -9,6 +9,7 @@ import {
 } from "lucide-vue-next";
 import type {
   ChatBackendKind,
+  CodexAccountQuotaCredits,
   CodexAccountQuotaStatus,
   QuotaUsageDailyBucket,
   QuotaUsageStats,
@@ -78,6 +79,20 @@ const officialQuotaGroups = computed(() => [
   { key: "codex", label: "", rows: officialQuotaWindows.value },
   { key: "spark", label: "Spark额度", rows: sparkQuotaWindows.value.filter((row) => row.window) },
 ].filter((group) => group.rows.some((row) => row.window)));
+const officialQuotaCreditRows = computed(() => [
+  {
+    key: "codex",
+    label: "重置次数",
+    credits: officialQuota.value?.credits ?? null,
+  },
+  ...(officialQuota.value?.sparkCredits
+    ? [{
+      key: "spark",
+      label: "Spark重置次数",
+      credits: officialQuota.value.sparkCredits,
+    }]
+    : []),
+]);
 const hasOfficialQuotaWindow = computed(() => officialQuotaGroups.value.length > 0);
 const maxDailyTokens = computed(() =>
   Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
@@ -328,6 +343,13 @@ function backendPercent(tokens: number) {
   return Math.max(4, Math.round((tokens / totalTokens.value) * 100));
 }
 
+function quotaCreditsLabel(credits: CodexAccountQuotaCredits | null | undefined) {
+  if (!credits || !credits.hasCredits) return "暂无重置次数数据";
+  if (credits.unlimited) return "不限";
+  if (credits.balance) return `剩余 ${credits.balance}`;
+  return "可用";
+}
+
 function pieStyle(items: QuotaBreakdownItem[]) {
   const total = items.reduce((sum, item) => sum + item.value, 0);
   if (total <= 0) return { background: "var(--bg-subtle)" };
@@ -376,6 +398,8 @@ async function loadOfficialQuota() {
         weekly: null,
         sparkFiveHour: null,
         sparkWeekly: null,
+        credits: null,
+        sparkCredits: null,
         fetchedAt: Date.now(),
         error: String(err),
       };
@@ -486,6 +510,16 @@ onMounted(() => {
             <small>{{ quotaWindowLabel(row.window) }}</small>
             <small>重置 {{ formatUnixSeconds(row.window?.resetsAt) }}</small>
           </div>
+        </div>
+      </div>
+      <div class="quota-official__credits" aria-label="Codex 官方重置次数">
+        <div
+          v-for="row in officialQuotaCreditRows"
+          :key="row.key"
+          class="quota-official-credit"
+        >
+          <span>{{ row.label }}</span>
+          <strong>{{ quotaCreditsLabel(row.credits) }}</strong>
         </div>
       </div>
       <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
@@ -865,6 +899,7 @@ onMounted(() => {
 .quota-official__head span,
 .quota-official-window span,
 .quota-official-window small,
+.quota-official-credit span,
 .quota-official__empty,
 .quota-official__error {
   overflow: hidden;
@@ -891,14 +926,18 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.quota-official-window {
+.quota-official-window,
+.quota-official-credit {
   min-width: 0;
   display: grid;
   gap: 3px;
-  padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: var(--bg-subtle);
+}
+
+.quota-official-window {
+  padding: 9px 10px;
 }
 
 .quota-official-window strong {
@@ -906,6 +945,25 @@ onMounted(() => {
   font-size: 18px;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
+}
+
+.quota-official__credits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quota-official-credit {
+  padding: 8px 10px;
+}
+
+.quota-official-credit strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quota-official__empty {
@@ -1303,7 +1361,8 @@ onMounted(() => {
     grid-column: 1 / -1;
   }
 
-  .quota-official__grid {
+  .quota-official__grid,
+  .quota-official__credits {
     grid-template-columns: 1fr;
   }
 
