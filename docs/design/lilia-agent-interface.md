@@ -1,7 +1,7 @@
 # Lilia Agent 三层协议
 
 > 状态：本文是 Lilia 应用层到 Claude / Codex provider adapter 的协议边界文档。
-> 核对时间：2026-06-14。
+> 核对时间：2026-06-19。
 
 ## 协议分层
 
@@ -72,10 +72,14 @@ runner stdin 的稳定形状是：
 | runtime command | 含义 | provider 映射 |
 |---|---|---|
 | `session_fork` | 从当前 provider session 分叉新 session。 | Codex 使用 thread fork；Claude 使用 session resume / transcript 能力时由 adapter 映射或 diagnostic。 |
-| `session_management` | list / info / messages / rename / tag / delete / archive 等 provider session 管理。 | Codex 接 thread list / search / turns / archive / name set；Claude 接 SDK session APIs。 |
-| `runtime_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`；Claude 写本地诊断并把 update 映射到 SDK query options，Codex 写本地诊断并把 update 映射到 `thread/settings/update`。 |
+| `session_management` | list / info / messages / rename / tag / delete / archive / history search / turn item list 等 provider session 管理。 | Codex 接 `thread/list`、`thread/search`、`thread/read`、`thread/turns/list`、`thread/turns/items/list`、`thread/archive`、`thread/name/set`；Claude 接 SDK session APIs。 |
+| `runtime_settings` | diagnose / update provider runtime 设置。 | 设置值必须进入顶层 `runtimeOptions.common` / `runtimeOptions.provider`；Claude 写本地诊断并把 update 映射到 SDK query options；Codex 接 `thread/settings/update`，并消费 `thread/settings/updated` 作为状态同步。 |
+| `remote_environment` | 注册或选择 provider 远程执行环境。 | Codex 接 `environment/add`；Claude 无等价能力时写 diagnostic。 |
+| `process_session` | 管理 provider 独立进程 session，包括启动、stdin、终止、PTY resize、输出和退出事件。 | Codex 接 `process/spawn`、`process/writeStdin`、`process/kill`、`process/resizePty`，并消费 `process/outputDelta`、`process/exited`；Claude 无等价能力时写 diagnostic。 |
+| `remote_control` | 管理 provider 远程控制启停和状态读取。 | Codex 接 `remoteControl/enable`、`remoteControl/disable`、`remoteControl/status/read`；Claude 无等价能力时写 diagnostic。 |
+| `sandbox_diagnostics` | 读取 provider sandbox readiness / diagnostic。 | Codex 接 `windowsSandbox/readiness`；Claude 无等价能力时写 diagnostic。 |
 
-预留 runtime command 边界包括 realtime、remote environment、process session、file search session。接入这些能力时必须新增 runtime command 或 experimental capability，不得扩大 `ChatWorkflow` union。
+预留 runtime command 边界包括 realtime 和 file search session。接入这些能力时必须先在本文定义 Lilia 协议名、层级和 fallback，再实现 provider 映射，不得扩大 `ChatWorkflow` union。
 
 ## ProviderRuntimeOptions
 
@@ -106,6 +110,21 @@ provider 专属字段只能在 adapter 边界出现：
 
 UI 禁止直接构造 provider 专属 payload。高级能力必须通过 `ChatRuntimeCommand` 或 `experimentalProviderOptions` 进入 adapter。
 
+### Runtime Extensions
+
+runtime extensions 是 provider 扩展能力的 Lilia 层入口，能力名必须稳定，不使用 provider 方法名：
+
+| capability | Lilia 语义 | Codex 映射 |
+|---|---|---|
+| `permission_profiles` | 列出当前 cwd 可用的权限配置档案。 | `permissionProfile/list`。 |
+| `plugin_inventory` | 读取 provider 已安装 plugin 清单。 | `plugin/installed`。 |
+| `plugin_skill_read` | 读取远端 plugin 中某个 skill 的内容。 | `plugin/skill/read`。 |
+| `plugin_share` | 保存、更新目标、列出、checkout 或删除 plugin share。 | `plugin/share/save`、`plugin/share/updateTargets`、`plugin/share/list`、`plugin/share/checkout`、`plugin/share/delete`。 |
+| `skills_extra_roots` | 设置 provider skill 额外搜索根目录。 | `skills/extraRoots/set`。 |
+| `account_quota_status` | 读取 provider 官方账号额度 / rate limit 状态，供连接状态、设置页和内部 quota 工具展示。 | `account/rateLimits/read`。 |
+
+这些能力只允许从 runtime extensions 管理面或 `experimentalProviderOptions[]` 进入 adapter。UI 不直接拼 provider payload；adapter 不支持时按 `fallback` 写 diagnostic / unsupported / ignore。
+
 ## Adapter Registry
 
 agent-runner 以 provider adapter registry 分发：
@@ -132,6 +151,10 @@ agent-runner 以 provider adapter registry 分发：
 
 Codex 的 `threadId`、`turnId`、`itemId`、`strictAutoReview`、原始 permissions 等只放在 `providerContext.codex`，UI 只依赖公共字段渲染，提交时把 `providerContext` 原样传回 adapter。
 
+用户编辑 Codex 命令后的 Lilia-owned 执行仍属于 `permission_approval` 的后续处理，timeline 使用 `command` / `subkind: "lilia_edit_exec"`。即使 Codex adapter 内部使用 `process/spawn` 兜底执行编辑后的命令，也不能把这个已实现功能改名或迁移成通用 `process_session`；只有独立进程控制 UI / API 才使用 `process_session`。
+
+`attestation_request` 是 provider-initiated interaction，不属于用户可见 workflow。Codex 可把 `attestation/generate` 映射到该 interaction；当前 Lilia 若未实现，adapter 必须写明确 unsupported diagnostic，不能静默吞掉 request。
+
 ## 落点表
 
 | 落点 | 层级 | Lilia 语义 | 不支持时 |
@@ -142,14 +165,17 @@ Codex 的 `threadId`、`turnId`、`itemId`、`strictAutoReview`、原始 permiss
 | automation / slash command | workflow | 自动化或命令触发的 Lilia 行为。 | 拒绝启动并保留状态。 |
 | session fork / management | runtime command | provider session 控制，不是 UI workflow。 | 写 unsupported diagnostic。 |
 | provider settings | runtime command + runtime options | 诊断或更新 adapter runtime 设置，不污染 workflow；timeline payload 统一使用 `backend`、`subkind: "provider_settings"`、`action`、`settingsKeys`。 | 无有效字段时拒绝；未知 experimental capability 按 fallback。 |
+| remote environment / process / remote control / sandbox diagnostics | runtime command | provider 运行时控制，不是 UI workflow。 | 写 unsupported diagnostic。 |
 | permission approval | interaction | provider-neutral 权限审批。 | provider 无等价能力时走 `PermissionMode` / `tool_consent`。 |
-| plugins / extensions | runtime extensions | 当前 turn 可用扩展集合。 | 单项 warning，不阻塞其他扩展。 |
+| attestation request | interaction | provider 发起的 attestation 请求。 | 写 unsupported diagnostic。 |
+| plugins / extensions / account quota | runtime extensions | 当前 turn 可用扩展集合、扩展管理和 provider 账号额度状态。 | 单项 warning，不阻塞其他扩展。 |
 
 ## 升级复核清单
 
-1. 新增用户可见 agent 意图时，先判断是否属于 `ChatWorkflow`；session / settings / remote / realtime / process / file-search 默认属于 `ChatRuntimeCommand`。
-2. 新增 provider 字段时，先放入 `ProviderRuntimeOptions.provider.<provider>` 或 `experimentalProviderOptions`，不得加到 public workflow。
-3. runner payload 必须保持 `{ turn, workflow?, runtimeCommand?, runtimeOptions? }` 分层。
-4. provider adapter 不认识 runtime command 或 experimental capability 时必须写 diagnostic / unsupported result。
-5. UI 不直接读取或构造 providerContext 内部字段；只 round-trip 给 adapter。
-6. 升级 Claude SDK 或 Codex CLI 后，重新核对 provider options 是否仍在 adapter 边界内消费。
+1. 用户可见 agent 意图先判断是否属于 `ChatWorkflow`；session / settings / remote / realtime / process / file-search 默认属于 `ChatRuntimeCommand`。
+2. 升级 Claude SDK 或 Codex CLI 后，先判断 provider 能力是否能落到已有 Lilia 协议；不能落地时，先在本文定义 Lilia 协议名、层级和 fallback，再实现 provider 映射。
+3. provider 字段先放入 `ProviderRuntimeOptions.provider.<provider>` 或 `experimentalProviderOptions`，不得加到 public workflow。
+4. runner payload 必须保持 `{ turn, workflow?, runtimeCommand?, runtimeOptions? }` 分层。
+5. provider adapter 不认识 runtime command 或 experimental capability 时必须写 diagnostic / unsupported result。
+6. UI 不直接读取或构造 providerContext 内部字段；只 round-trip 给 adapter。
+7. 旧 provider 专属 flow 不是 Lilia 协议来源；升级后以本文的 Lilia 协议名为准，不按上游历史方法名倒推 UI contract。
