@@ -1,5 +1,7 @@
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
+  hooksOverview,
+  type HookSourceSummary,
   pluginsOverview,
   type PluginMcpServer,
   type PluginPackage,
@@ -7,7 +9,13 @@ import {
 } from "../../services/plugins";
 import { listProjects } from "../../services/projectsStore";
 
-export type PluginsTab = "claude-skills" | "claude-plugins" | "claude-mcp" | "codex-mcp";
+export type PluginsTab =
+  | "claude-skills"
+  | "claude-plugins"
+  | "claude-hooks"
+  | "claude-mcp"
+  | "codex-hooks"
+  | "codex-mcp";
 
 export function usePluginsOverview() {
   const tab = ref<PluginsTab>("claude-skills");
@@ -25,8 +33,10 @@ export function usePluginsOverview() {
   const claudePlugins = ref<PluginPackage[]>([]);
   const claudeMcpServers = ref<PluginMcpServer[]>([]);
   const claudeMcpConfigPath = ref<string | null>(null);
+  const claudeHookSources = ref<HookSourceSummary[]>([]);
   const codexServers = ref<PluginMcpServer[]>([]);
   const codexConfigPath = ref<string | null>(null);
+  const codexHookSources = ref<HookSourceSummary[]>([]);
   const warnings = ref<string[]>([]);
   const loading = ref(false);
   const errorText = ref<string | null>(null);
@@ -35,19 +45,24 @@ export function usePluginsOverview() {
     loading.value = true;
     errorText.value = null;
     try {
-      const data = await pluginsOverview(projectCwd.value);
-      userSkills.value = data.skills.filter(
+      const [pluginsData, hooksData] = await Promise.all([
+        pluginsOverview(projectCwd.value),
+        hooksOverview(projectCwd.value),
+      ]);
+      userSkills.value = pluginsData.skills.filter(
         (skill) => skill.backend === "claude" && skill.scope === "user",
       );
-      projectSkills.value = data.skills.filter(
+      projectSkills.value = pluginsData.skills.filter(
         (skill) => skill.backend === "claude" && skill.scope === "project",
       );
-      claudePlugins.value = data.packages.filter((plugin) => plugin.backend === "claude");
-      claudeMcpServers.value = data.mcpServers.filter((server) => server.backend === "claude");
-      claudeMcpConfigPath.value = data.configPaths.claude ?? null;
-      codexServers.value = data.mcpServers.filter((server) => server.backend === "codex");
-      codexConfigPath.value = data.configPaths.codex ?? null;
-      warnings.value = data.warnings;
+      claudePlugins.value = pluginsData.packages.filter((plugin) => plugin.backend === "claude");
+      claudeMcpServers.value = pluginsData.mcpServers.filter((server) => server.backend === "claude");
+      claudeMcpConfigPath.value = pluginsData.configPaths.claude ?? null;
+      claudeHookSources.value = hooksData.sources.filter((source) => source.backend === "claude");
+      codexServers.value = pluginsData.mcpServers.filter((server) => server.backend === "codex");
+      codexConfigPath.value = pluginsData.configPaths.codex ?? null;
+      codexHookSources.value = hooksData.sources.filter((source) => source.backend === "codex");
+      warnings.value = [...pluginsData.warnings, ...hooksData.warnings];
     } catch (err) {
       errorText.value = String(err);
     } finally {
@@ -56,6 +71,9 @@ export function usePluginsOverview() {
   }
 
   onMounted(() => refresh());
+  watch(projectCwd, () => {
+    void refresh();
+  });
 
   return {
     tab,
@@ -66,8 +84,10 @@ export function usePluginsOverview() {
     claudePlugins,
     claudeMcpServers,
     claudeMcpConfigPath,
+    claudeHookSources,
     codexServers,
     codexConfigPath,
+    codexHookSources,
     warnings,
     loading,
     errorText,

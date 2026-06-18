@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { Puzzle, Server, Sparkles } from "lucide-vue-next";
+import { Puzzle, Server, Sparkles, Workflow } from "lucide-vue-next";
 import type { PluginsTab } from "./usePluginsOverview";
 
 defineProps<{
   modelValue: PluginsTab;
   skillsCount: number;
   pluginsCount: number;
+  claudeHooksCount: number;
   claudeMcpCount: number;
+  codexHooksCount: number;
   codexMcpCount: number;
 }>();
 
@@ -40,12 +42,32 @@ const emit = defineEmits<{
     <button
       type="button" role="tab"
       class="ui-tabs__tab"
+      :aria-selected="modelValue === 'claude-hooks'"
+      :class="{ 'is-active': modelValue === 'claude-hooks' }"
+      @click="emit('update:modelValue', 'claude-hooks')"
+    >
+      <Workflow :size="14" aria-hidden="true" /> Claude Hooks
+      <span class="ui-tabs__count">{{ claudeHooksCount }}</span>
+    </button>
+    <button
+      type="button" role="tab"
+      class="ui-tabs__tab"
       :aria-selected="modelValue === 'claude-mcp'"
       :class="{ 'is-active': modelValue === 'claude-mcp' }"
       @click="emit('update:modelValue', 'claude-mcp')"
     >
       <Server :size="14" aria-hidden="true" /> Claude MCP
       <span class="ui-tabs__count">{{ claudeMcpCount }}</span>
+    </button>
+    <button
+      type="button" role="tab"
+      class="ui-tabs__tab"
+      :aria-selected="modelValue === 'codex-hooks'"
+      :class="{ 'is-active': modelValue === 'codex-hooks' }"
+      @click="emit('update:modelValue', 'codex-hooks')"
+    >
+      <Workflow :size="14" aria-hidden="true" /> Codex Hooks
+      <span class="ui-tabs__count">{{ codexHooksCount }}</span>
     </button>
     <button
       type="button" role="tab"

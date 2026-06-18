@@ -5,6 +5,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  HookDocumentUpdateInput,
+  HookDocumentView,
+  HooksOverview,
+  HookSourceSummary,
   PluginBackendKind,
   PluginMcpServer,
   PluginMcpServerInput,
@@ -15,6 +19,10 @@ import type {
 } from "@lilia/contracts";
 
 export type {
+  HookDocumentUpdateInput,
+  HookDocumentView,
+  HooksOverview,
+  HookSourceSummary,
   PluginBackendKind,
   PluginMcpServer,
   PluginMcpServerInput,
@@ -26,6 +34,12 @@ export type {
 
 export function pluginsOverview(projectCwd?: string | null): Promise<PluginsOverview> {
   return invoke<PluginsOverview>("plugins_overview", {
+    projectCwd: projectCwd ?? null,
+  });
+}
+
+export function hooksOverview(projectCwd?: string | null): Promise<HooksOverview> {
+  return invoke<HooksOverview>("plugins_hooks_overview", {
     projectCwd: projectCwd ?? null,
   });
 }
@@ -113,4 +127,45 @@ export function setMcpServerEnabled(
 
 export function openMcpConfig(backend: PluginBackendKind): Promise<void> {
   return invoke<void>("plugins_open_mcp_config", { backend });
+}
+
+export function readHookSource(source: HookSourceSummary): Promise<HookDocumentView> {
+  return invoke<HookDocumentView>("plugins_read_hook_source", { source });
+}
+
+export function updateHookSource(
+  source: HookSourceSummary,
+  input: HookDocumentUpdateInput,
+): Promise<HookDocumentView> {
+  return invoke<HookDocumentView>("plugins_update_hook_source", { source, input });
+}
+
+export function createHookSource(
+  backend: PluginBackendKind,
+  scope: string,
+  projectCwd?: string | null,
+): Promise<HookSourceSummary> {
+  return invoke<HookSourceSummary>("plugins_create_hook_source", {
+    backend,
+    scope,
+    projectCwd: projectCwd ?? null,
+  });
+}
+
+export function deleteHookSource(source: HookSourceSummary): Promise<void> {
+  return invoke<void>("plugins_delete_hook_source", { source });
+}
+
+export function setHookSourceEnabled(
+  source: HookSourceSummary,
+  enabled: boolean,
+): Promise<HookSourceSummary> {
+  return invoke<HookSourceSummary>("plugins_set_hook_source_enabled", {
+    source,
+    enabled,
+  });
+}
+
+export function openHookConfig(source: HookSourceSummary): Promise<void> {
+  return invoke<void>("plugins_open_hook_config", { source });
 }

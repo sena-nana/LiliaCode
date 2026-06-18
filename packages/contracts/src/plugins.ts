@@ -57,6 +57,7 @@ export interface ClaudeRuntimeExtensions {
   skills: string[];
   plugins: ClaudeRuntimePlugin[];
   mcpServers: Record<string, ClaudeRuntimeMcpServer>;
+  hooks?: Record<string, unknown>;
   warnings: string[];
 }
 

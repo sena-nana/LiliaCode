@@ -30,6 +30,8 @@ import type {
   CodexAccountQuotaStatus,
   QuotaUsageStats,
   AutomationRunSummary,
+  HookDocumentUpdateInput,
+  HooksOverview,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -256,6 +258,56 @@ export type RuntimeSettingsIsNotWorkflowTypeTest = Assert<
     },
     ChatWorkflow
   > extends true ? false : true
+>;
+
+export type HooksOverviewShapeTypeTest = Assert<
+  Extends<
+    {
+      sources: [
+        {
+          id: "claude-user";
+          backend: "claude";
+          scope: "user";
+          format: "claude_settings_json";
+          name: "Claude User Hooks";
+          path: "C:/Users/mock/.claude/settings.json";
+          exists: true;
+          editable: true;
+          managed: false;
+          enabled: true;
+          handlerCount: 1;
+          warnings: [];
+          limitations: [];
+          trustState: "unknown";
+          description: "~/.claude/settings.json 中的 hooks";
+        },
+      ];
+      warnings: [];
+    },
+    HooksOverview
+  >
+>;
+
+export type HookDocumentUpdateInputShapeTypeTest = Assert<
+  Extends<
+    {
+      handlers: [
+        {
+          id: "handler-1";
+          event: "PostToolUse";
+          matcher: "Bash";
+          type: "command";
+          command: "node hook.js";
+          commandWindows: "powershell -File hook.ps1";
+          timeoutSeconds: 30;
+          statusMessage: "Running hook";
+          groupAdvancedJson: "{\"shared\":true}";
+          advancedJson: "{\"env\":{\"MODE\":\"test\"}}";
+        },
+      ];
+    },
+    HookDocumentUpdateInput
+  >
 >;
 
 export type ProviderRuntimeOptionsTypeTest = Assert<

@@ -253,6 +253,10 @@
   background: var(--bg);
 }
 
+.plugins-browser__detail-grid {
+  margin: 0;
+}
+
 .plugins-browser__detail-row {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
@@ -439,6 +443,142 @@
   min-width: 0;
 }
 
+.plugins-hook-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.plugins-hook-section__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.plugins-hook-section__card,
+.plugins-hook-handler {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.plugins-hook-section__card {
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plugins-hook-section__card--warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.plugins-hook-section__list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plugins-hook-handlers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plugins-hook-handler {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.plugins-hook-handler__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.plugins-hook-handler__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.plugins-hook-raw {
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font: 12px/1.55 var(--font-mono, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.plugins-hook-editor {
+  width: min(960px, calc(100vw - 32px));
+}
+
+.plugins-hook-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.plugins-hook-editor__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.plugins-hook-editor__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plugins-hook-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plugins-hook-editor__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plugins-hook-editor__grid label span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.plugins-hook-editor__field-wide {
+  grid-column: 1 / -1;
+}
+
 /* 全局右键菜单：复用 .sb-menu 的浮层壳，z-index 抬到最上，再补 disabled / danger 两个状态。 */
 .ctx-menu {
   z-index: 2000;
@@ -500,5 +640,9 @@
   .plugins-browser__actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .plugins-hook-editor__grid {
+    grid-template-columns: 1fr;
   }
 }

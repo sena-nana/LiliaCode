@@ -130,4 +130,76 @@ describe("Plugins page", () => {
     await fireEvent.click(within(list).getByRole("button", { name: /codex-linear/ }));
     expect(within(detail).getByText("uvx linear-mcp")).toBeInTheDocument();
   });
+
+  it("展示 Claude Hooks 并在编辑结构化字段后保留高级 JSON", async () => {
+    const view = render(Plugins);
+
+    await fireEvent.click(view.getByRole("tab", { name: /Claude Hooks/ }));
+    const list = view.getByRole("region", { name: "检索结果" });
+    const detail = view.getByRole("region", { name: "插件和技能详情" });
+
+    await waitFor(() => {
+      expect(within(list).getByRole("button", { name: /Claude Project Hooks/ })).toBeInTheDocument();
+    });
+    await fireEvent.click(within(list).getByRole("button", { name: /Claude Project Hooks/ }));
+    await waitFor(() => {
+      expect(within(detail).getAllByText(/MODE/).length).toBeGreaterThan(0);
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "编辑" }));
+    const commandInput = view.getByDisplayValue("node project-hook.js");
+    await fireEvent.update(commandInput, "node changed-hook.js");
+    await fireEvent.click(view.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(within(detail).getByText("node changed-hook.js")).toBeInTheDocument();
+    });
+    expect(within(detail).getAllByText(/MODE/).length).toBeGreaterThan(0);
+    expect(
+      mockInvoke.mock.calls.some(
+        ([command, args]) =>
+          command === "plugins_update_hook_source" &&
+          Array.isArray(args?.input?.handlers) &&
+          args.input.handlers[0]?.advancedJson?.includes?.("MODE"),
+      ),
+    ).toBe(true);
+  });
+
+  it("支持创建缺失的 Hooks 来源，并对 Codex 只读来源展示限制", async () => {
+    const view = render(Plugins);
+
+    await fireEvent.click(view.getByRole("tab", { name: /Claude Hooks/ }));
+    const list = view.getByRole("region", { name: "检索结果" });
+    const detail = view.getByRole("region", { name: "插件和技能详情" });
+
+    await waitFor(() => {
+      expect(within(list).getByRole("button", { name: /Claude Local Hooks/ })).toBeInTheDocument();
+    });
+    await fireEvent.click(within(list).getByRole("button", { name: /Claude Local Hooks/ }));
+    expect(within(detail).getByText("未创建")).toBeInTheDocument();
+    await fireEvent.click(view.getByRole("button", { name: "创建来源" }));
+
+    await waitFor(() => {
+      expect(within(detail).getByText("空来源")).toBeInTheDocument();
+    });
+    expect(
+      mockInvoke.mock.calls.some(
+        ([command, args]) =>
+          command === "plugins_create_hook_source" &&
+          args?.backend === "claude" &&
+          args?.scope === "local",
+      ),
+    ).toBe(true);
+
+    await fireEvent.click(view.getByRole("tab", { name: /Codex Hooks/ }));
+    await waitFor(() => {
+      expect(within(list).getByRole("button", { name: /Codex User Config Hooks/ })).toBeInTheDocument();
+    });
+    await fireEvent.click(within(list).getByRole("button", { name: /Codex User Config Hooks/ }));
+    await waitFor(() => {
+      expect(within(detail).getByText(/Lilia 不会自动重写 config.toml/)).toBeInTheDocument();
+    });
+    expect(view.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+  });
 });

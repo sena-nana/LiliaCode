@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +65,110 @@ pub struct PluginsOverview {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HookTrustState {
+    Unknown,
+    Required,
+    Managed,
+    NA,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookSourceSummary {
+    pub id: String,
+    pub backend: String,
+    pub scope: String,
+    pub format: String,
+    pub name: String,
+    pub path: String,
+    pub exists: bool,
+    pub editable: bool,
+    pub managed: bool,
+    pub enabled: bool,
+    pub handler_count: usize,
+    pub warnings: Vec<String>,
+    pub limitations: Vec<String>,
+    pub trust_state: HookTrustState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookHandlerView {
+    pub id: String,
+    pub event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+    pub r#type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_windows: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
+    pub supported: bool,
+    pub executable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_advanced_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advanced_json: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookDocumentView {
+    pub source: HookSourceSummary,
+    pub handlers: Vec<HookHandlerView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_document: Option<String>,
+    pub raw_format: String,
+    pub warnings: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HooksOverview {
+    pub sources: Vec<HookSourceSummary>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HookHandlerUpdateInput {
+    pub id: Option<String>,
+    pub event: String,
+    #[serde(default)]
+    pub matcher: Option<String>,
+    #[serde(rename = "type")]
+    pub handler_type: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub command_windows: Option<String>,
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+    #[serde(default)]
+    pub status_message: Option<String>,
+    #[serde(default)]
+    pub group_advanced_json: Option<String>,
+    #[serde(default)]
+    pub advanced_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HookDocumentUpdateInput {
+    #[serde(default)]
+    pub handlers: Vec<HookHandlerUpdateInput>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeRuntimePlugin {
@@ -77,6 +182,8 @@ pub struct ClaudeRuntimeExtensions {
     pub skills: Vec<String>,
     pub plugins: Vec<ClaudeRuntimePlugin>,
     pub mcp_servers: BTreeMap<String, ClaudeRuntimeMcpServer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<JsonValue>,
     pub warnings: Vec<String>,
 }
 

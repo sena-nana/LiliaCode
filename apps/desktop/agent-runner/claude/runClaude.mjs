@@ -744,6 +744,19 @@ function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null)
   });
 }
 
+function mergeClaudeHookMap(...maps) {
+  const merged = {};
+  for (const map of maps) {
+    if (!map || typeof map !== "object") continue;
+    for (const [eventName, entries] of Object.entries(map)) {
+      if (!Array.isArray(entries) || entries.length === 0) continue;
+      if (!Array.isArray(merged[eventName])) merged[eventName] = [];
+      merged[eventName].push(...entries);
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 async function runClaudeCompactWorkflow(cmd, context, workingDir) {
   if (!readClaudeCompactWorkflow(cmd)) return false;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
@@ -844,7 +857,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     includePartialMessages: true,
     promptSuggestions: overrides.skipPromptSuggestions === true ? false : true,
     canUseTool: createClaudeCanUseTool(ctx),
-    hooks: createClaudeHooks(ctx),
+    hooks: mergeClaudeHookMap(runtimeExtensions.hooks, createClaudeHooks(ctx)),
     onElicitation: (request) => requestClaudeMcpElicitation(request, ctx),
     systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform),
     mcpServers: {
