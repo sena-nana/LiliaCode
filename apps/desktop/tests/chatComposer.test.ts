@@ -704,6 +704,102 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("加号菜单会按触发位置设置展开 origin", async () => {
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function mockRect(this: HTMLElement) {
+        if (this.classList.contains("chat-composer__action-menu")) {
+          return {
+            x: 100,
+            y: 200,
+            left: 100,
+            top: 200,
+            right: 128,
+            bottom: 228,
+            width: 28,
+            height: 28,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("chat-composer__action-trigger")) {
+          return {
+            x: 100,
+            y: 200,
+            left: 100,
+            top: 200,
+            right: 128,
+            bottom: 228,
+            width: 28,
+            height: 28,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.classList.contains("chat-composer__action-menu-popover")) {
+          return {
+            x: 100,
+            y: 70,
+            left: 100,
+            top: 70,
+            right: 290,
+            bottom: 194,
+            width: 190,
+            height: 124,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalGetBoundingClientRect.call(this);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return this.classList.contains("chat-composer__action-menu-popover") ? 190 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("chat-composer__action-menu-popover") ? 124 : 0;
+      },
+    });
+
+    try {
+      const view = render(ChatComposer, {
+        props: {
+          state: baseState,
+          attachments: [],
+        },
+      });
+
+      await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }), {
+        clientX: 112,
+        clientY: 214,
+      });
+
+      const menu = view.getByRole("menu");
+      await waitFor(() => {
+        expect(menu).toHaveStyle({
+          "--sb-menu-origin-x": "12px",
+          "--sb-menu-origin-y": "124px",
+        });
+      });
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: originalGetBoundingClientRect,
+      });
+      if (originalOffsetWidth) {
+        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+    }
+  });
+
   it("加号菜单可触发添加附件", async () => {
     const view = render(ChatComposer, {
       props: {

@@ -1,6 +1,6 @@
 import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 import type { Task } from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
@@ -45,6 +45,9 @@ async function renderSecondaryPanel(initialRoute = "/") {
   const view = render(Wrapper, {
     global: {
       plugins: [router],
+      stubs: {
+        transition: false,
+      },
     },
   });
   return { ...view, router };
@@ -269,6 +272,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("创建空分类后会自动进入该项目的新对话", async () => {
     const view = await renderSecondaryPanel();
+    const pushSpy = vi.spyOn(view.router, "push").mockResolvedValue(undefined);
 
     await fireEvent.click(view.getByRole("button", { name: "添加项目" }));
     await fireEvent.click(await view.findByRole("menuitem", { name: "创建空分类" }));
@@ -276,10 +280,23 @@ describe("SecondaryPanel project chat navigation", () => {
       await view.findByPlaceholderText("例如：实验、归档…"),
       "临时分类",
     );
-    await fireEvent.click(view.getByRole("button", { name: "创建" }));
-
+    const createButton = view.getByRole("button", { name: "创建" });
     await waitFor(() => {
-      expect(view.router.currentRoute.value.path).toMatch(
+      expect(createButton).toBeEnabled();
+    });
+    await fireEvent.click(createButton);
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("project_create", {
+        name: "临时分类",
+        cwd: null,
+      }, undefined);
+    });
+    await waitFor(() => {
+      expect(pushSpy).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(view.getByText("临时分类")).toBeInTheDocument();
+      expect(pushSpy.mock.lastCall?.[0]).toMatch(
         /^\/projects\/p-3\/tasks\/t-draft-/,
       );
     });
@@ -288,6 +305,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("顶部搜索会话后点击结果进入对应对话并关闭搜索", async () => {
     const view = await renderSecondaryPanel();
+    const pushSpy = vi.spyOn(view.router, "push").mockResolvedValue(undefined);
 
     await fireEvent.click(view.getByRole("button", { name: "搜索会话" }));
     await fireEvent.update(
@@ -303,9 +321,7 @@ describe("SecondaryPanel project chat navigation", () => {
     );
 
     await waitFor(() => {
-      expect(view.router.currentRoute.value.path).toBe(
-        "/projects/lilia/tasks/t-002",
-      );
+      expect(pushSpy).toHaveBeenCalledWith("/projects/lilia/tasks/t-002");
     });
     expect(view.queryByPlaceholderText("搜索会话…")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();

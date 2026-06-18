@@ -481,6 +481,23 @@
   flex-direction: column;
   gap: 1px;
   box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55);
+  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
+  will-change: transform, opacity;
+}
+
+.sb-menu-pop-enter-active,
+.sb-menu-pop-leave-active {
+  transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.sb-menu-pop-leave-active {
+  pointer-events: none;
+}
+
+.sb-menu-pop-enter-from,
+.sb-menu-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
 }
 
 .sb-menu__item {
