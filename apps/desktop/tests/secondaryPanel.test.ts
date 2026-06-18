@@ -302,6 +302,31 @@ describe("SecondaryPanel project chat navigation", () => {
     });
   });
 
+  it("添加项目菜单 Teleport 到 body，并保留 outside click / Escape 关闭", async () => {
+    const view = await renderSecondaryPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: "添加项目" }));
+
+    const menu = await view.findByRole("menu");
+    expect(document.body.contains(menu)).toBe(true);
+    expect(view.container.contains(menu)).toBe(false);
+
+    await fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(view.queryByRole("menu")).toBeNull();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "添加项目" }));
+    expect(await view.findByRole("menu")).toBeInTheDocument();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(view.queryByRole("menu")).toBeNull();
+    });
+  });
+
 
   it("顶部搜索会话后点击结果进入对应对话并关闭搜索", async () => {
     const view = await renderSecondaryPanel();
