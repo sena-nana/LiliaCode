@@ -5,16 +5,30 @@ import {
 } from "../src/composables/useGlobalScrollbarVisibility";
 
 function createScroller(input: {
+  overflowX?: string;
+  overflowY?: string;
   scrollHeight?: number;
+  scrollWidth?: number;
+  scrollLeft?: number;
   scrollTop?: number;
 } = {}) {
   const scroller = document.createElement("div");
+  scroller.style.overflowX = input.overflowX ?? "hidden";
+  scroller.style.overflowY = input.overflowY ?? "auto";
+  let scrollLeft = input.scrollLeft ?? 0;
   let scrollTop = input.scrollTop ?? 0;
   Object.defineProperties(scroller, {
     clientHeight: { configurable: true, value: 100 },
     clientWidth: { configurable: true, value: 200 },
     scrollHeight: { configurable: true, value: input.scrollHeight ?? 400 },
-    scrollWidth: { configurable: true, value: 200 },
+    scrollWidth: { configurable: true, value: input.scrollWidth ?? 200 },
+    scrollLeft: {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (value) => {
+        scrollLeft = value;
+      },
+    },
     scrollTop: {
       configurable: true,
       get: () => scrollTop,
@@ -22,7 +36,6 @@ function createScroller(input: {
         scrollTop = value;
       },
     },
-    scrollLeft: { configurable: true, value: 0 },
   });
   scroller.getBoundingClientRect = () => ({
     top: 10,
@@ -44,6 +57,10 @@ function createScroller(input: {
 
 function verticalOverlay() {
   return document.querySelector(".global-scrollbar-overlay--vertical");
+}
+
+function horizontalOverlay() {
+  return document.querySelector(".global-scrollbar-overlay--horizontal");
 }
 
 describe("global scrollbar visibility", () => {
@@ -128,6 +145,64 @@ describe("global scrollbar visibility", () => {
       clientX: 205,
       clientY: 32,
     }));
+
+    element.remove();
+  });
+
+  it("does not show a horizontal overlay when overflow-x is hidden", () => {
+    installGlobalScrollbarVisibility();
+    const { element } = createScroller({
+      overflowX: "hidden",
+      overflowY: "hidden",
+      scrollHeight: 100,
+      scrollWidth: 420,
+    });
+
+    element.dispatchEvent(new Event("scroll"));
+    element.dispatchEvent(new MouseEvent("pointermove", {
+      bubbles: true,
+      clientX: 40,
+      clientY: 104,
+    }));
+
+    expect(horizontalOverlay()).toBeNull();
+
+    element.remove();
+  });
+
+  it("preserves horizontal overlays for overflow-x auto scrollers", () => {
+    installGlobalScrollbarVisibility();
+    const { element } = createScroller({
+      overflowX: "auto",
+      overflowY: "hidden",
+      scrollHeight: 100,
+      scrollWidth: 420,
+      scrollLeft: 30,
+    });
+
+    element.dispatchEvent(new Event("scroll"));
+
+    const overlay = horizontalOverlay();
+    expect(overlay).toHaveClass("is-visible");
+    expect(Number.parseFloat((overlay as HTMLElement).style.width)).toBeGreaterThan(24);
+
+    element.remove();
+  });
+
+  it("keeps vertical overlays for overflow-y auto scrollers", () => {
+    installGlobalScrollbarVisibility();
+    const { element } = createScroller({
+      overflowX: "hidden",
+      overflowY: "auto",
+      scrollHeight: 500,
+      scrollTop: 50,
+    });
+
+    element.dispatchEvent(new Event("scroll"));
+
+    const overlay = verticalOverlay();
+    expect(overlay).toHaveClass("is-visible");
+    expect(overlay).toHaveStyle({ height: "24px" });
 
     element.remove();
   });
