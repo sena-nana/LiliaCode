@@ -17,9 +17,12 @@ use super::config::{
 };
 use super::connection::build_backend_env_status;
 use super::credentials::{apply_secret_update, assistant_ai_account, provider_account};
+use super::subagents::{
+    delete_custom_subagent, load_custom_subagents, upsert_custom_subagent, CustomSubagentUpsertInput,
+};
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, AssistantAITestResult, EnvStatusReport,
-    ProviderConfig,
+    AgentInteractionSettings, AssistantAIConfig, AssistantAITestResult, CustomSubagentDefinition,
+    EnvStatusReport, ProviderConfig,
 };
 
 #[tauri::command]
@@ -113,6 +116,23 @@ pub fn agent_interaction_set_settings(
 ) -> Result<(), String> {
     let settings = normalize_agent_interaction_settings(Some(settings));
     save_store_value(&app, AGENT_INTERACTION_KEY, &settings)
+}
+
+#[tauri::command]
+pub fn agent_interaction_list_subagents() -> Result<Vec<CustomSubagentDefinition>, String> {
+    load_custom_subagents()
+}
+
+#[tauri::command]
+pub fn agent_interaction_upsert_subagent(
+    input: CustomSubagentUpsertInput,
+) -> Result<CustomSubagentDefinition, String> {
+    upsert_custom_subagent(input)
+}
+
+#[tauri::command]
+pub fn agent_interaction_delete_subagent(id: String) -> Result<(), String> {
+    delete_custom_subagent(&id)
 }
 
 #[tauri::command]

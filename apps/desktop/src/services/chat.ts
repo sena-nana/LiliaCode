@@ -60,6 +60,8 @@ import type {
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
   CodexAccountQuotaStatus,
+  CustomSubagentDefinition,
+  CustomSubagentUpsertInput,
   QuotaUsageStats,
   QuotaUsageStatsInput,
 } from "@lilia/contracts";
@@ -286,6 +288,20 @@ export function setAgentInteractionSettings(
   settings: Partial<AgentInteractionSettings>,
 ): Promise<void> {
   return invoke<void>("agent_interaction_set_settings", { settings });
+}
+
+export function listCustomSubagents(): Promise<CustomSubagentDefinition[]> {
+  return invoke<CustomSubagentDefinition[]>("agent_interaction_list_subagents");
+}
+
+export function upsertCustomSubagent(
+  input: CustomSubagentUpsertInput,
+): Promise<CustomSubagentDefinition> {
+  return invoke<CustomSubagentDefinition>("agent_interaction_upsert_subagent", { input });
+}
+
+export function deleteCustomSubagent(id: string): Promise<void> {
+  return invoke<void>("agent_interaction_delete_subagent", { id });
 }
 
 export function ackRestoredRollback(taskId: string): Promise<void> {

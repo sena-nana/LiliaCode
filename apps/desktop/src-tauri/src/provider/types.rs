@@ -12,10 +12,73 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) debug: bool,
     #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
+    #[serde(default)]
+    pub(crate) subagent_mode: SubagentModeSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubagentBackendSettings {
+    #[serde(default = "default_enabled_true")]
+    pub(crate) enabled: bool,
+}
+
+impl Default for SubagentBackendSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClaudeSubagentModeSettings {
+    #[serde(default = "default_enabled_true")]
+    pub(crate) enabled: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) forward_subagent_text: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) agent_progress_summaries: bool,
+}
+
+impl Default for ClaudeSubagentModeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            forward_subagent_text: true,
+            agent_progress_summaries: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubagentModeSettings {
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) codex: SubagentBackendSettings,
+    #[serde(default)]
+    pub(crate) claude: ClaudeSubagentModeSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CustomSubagentDefinition {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) description: String,
+    pub(crate) instruction: String,
+    #[serde(default)]
+    pub(crate) enabled: bool,
 }
 
 fn default_codex_profile_name() -> String {
     "default".to_string()
+}
+
+fn default_enabled_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

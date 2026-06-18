@@ -105,6 +105,14 @@ const noops = new Set([
   "task_reparent",
 ]);
 
+let agentInteractionSubagents = [{
+  id: "reviewer",
+  name: "Reviewer",
+  description: "检查风险与回归",
+  instruction: "Review code changes, identify risk, and summarize findings.",
+  enabled: true,
+}];
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -205,6 +213,50 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return { taskId: text(args, "taskId"), backend: "codex", model: "gpt-5.4", planMode: false, goalMode: false, permission: "ask" } as T;
     case "chat_get_runtime_snapshot":
       return { taskId: text(args, "taskId"), phase: "idle", backend: null, turnId: null, queuedCount: 0, pendingRollback: false, pendingResetCleanup: false, rollback: null } as T;
+    case "agent_interaction_get_settings":
+      return {
+        nonInterruptMode: false,
+        debug: false,
+        codexProfile: {
+          profile: "default",
+          model: null,
+          reasoningEffort: null,
+          runtimeWorkspaceRoots: [],
+          responsesApiClientMetadata: null,
+          additionalContext: null,
+          persistExtendedHistory: null,
+          initialTurnsPage: null,
+          excludeTurns: [],
+        },
+        subagentMode: {
+          enabled: false,
+          codex: { enabled: true },
+          claude: {
+            enabled: true,
+            forwardSubagentText: true,
+            agentProgressSummaries: true,
+          },
+        },
+      } as T;
+    case "agent_interaction_list_subagents":
+      return agentInteractionSubagents.map((item) => ({ ...item })) as T;
+    case "agent_interaction_upsert_subagent": {
+      const input = (args.input ?? {}) as Args;
+      const saved = {
+        id: text(input, "id") || `agent-${agentInteractionSubagents.length + 1}`,
+        name: text(input, "name"),
+        description: text(input, "description"),
+        instruction: text(input, "instruction"),
+        enabled: input.enabled !== false,
+      };
+      const index = agentInteractionSubagents.findIndex((item) => item.id === saved.id);
+      if (index === -1) agentInteractionSubagents = [...agentInteractionSubagents, saved];
+      else agentInteractionSubagents = agentInteractionSubagents.map((item, itemIndex) => itemIndex === index ? saved : item);
+      return saved as T;
+    }
+    case "agent_interaction_delete_subagent":
+      agentInteractionSubagents = agentInteractionSubagents.filter((item) => item.id !== text(args, "id"));
+      return undefined as T;
     case "chat_search_slash_commands":
       return [{ command: { id: "native:help", name: "help", title: "显示可用斜杠命令", description: "开发期 mock 命令。", source: "native", parameters: [] }, matchedBy: "name" }] as T;
     case "chat_send_message":

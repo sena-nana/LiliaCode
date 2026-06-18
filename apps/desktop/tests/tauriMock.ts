@@ -570,6 +570,17 @@ function defaultAgentInteractionSettings() {
       initialTurnsPage: null as Record<string, unknown> | null,
       excludeTurns: [] as string[],
     },
+    subagentMode: {
+      enabled: false,
+      codex: {
+        enabled: true,
+      },
+      claude: {
+        enabled: true,
+        forwardSubagentText: true,
+        agentProgressSummaries: true,
+      },
+    },
   };
 }
 
@@ -586,6 +597,15 @@ function normalizeMockStringList(value: unknown): string[] {
 }
 
 let agentInteractionSettings = defaultAgentInteractionSettings();
+let customSubagents = [
+  {
+    id: "reviewer",
+    name: "Reviewer",
+    description: "检查风险与回归",
+    instruction: "Review code changes, identify risk, and summarize findings.",
+    enabled: true,
+  },
+];
 let assistantAIConfig = {
   baseUrl: null as string | null,
   apiKey: null as string | null,
@@ -1175,6 +1195,15 @@ export function resetTauriMockData() {
     envKeys: [...server.envKeys],
   }));
   agentInteractionSettings = defaultAgentInteractionSettings();
+  customSubagents = [
+    {
+      id: "reviewer",
+      name: "Reviewer",
+      description: "检查风险与回归",
+      instruction: "Review code changes, identify risk, and summarize findings.",
+      enabled: true,
+    },
+  ];
   assistantAIConfig = {
     baseUrl: null,
     apiKey: null,
@@ -2826,6 +2855,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "agent_interaction_get_settings":
       return { ...agentInteractionSettings };
 
+    case "agent_interaction_list_subagents":
+      return customSubagents.map((item) => ({ ...item }));
+
     case "agent_interaction_set_settings": {
       const settings = args.settings as {
         nonInterruptMode?: unknown;
@@ -2842,8 +2874,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           initialTurnsPage?: unknown;
           excludeTurns?: unknown;
         };
+        subagentMode?: {
+          enabled?: unknown;
+          codex?: { enabled?: unknown };
+          claude?: {
+            enabled?: unknown;
+            forwardSubagentText?: unknown;
+            agentProgressSummaries?: unknown;
+          };
+        };
       } | undefined;
       const codexProfile = settings?.codexProfile;
+      const subagentMode = settings?.subagentMode;
+      const claudeSubagentMode = subagentMode?.claude;
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
@@ -2868,9 +2911,48 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           initialTurnsPage: normalizeMockJsonObject(codexProfile?.initialTurnsPage),
           excludeTurns: normalizeMockStringList(codexProfile?.excludeTurns),
         },
+        subagentMode: {
+          enabled: subagentMode?.enabled === true,
+          codex: {
+            enabled: subagentMode?.codex?.enabled !== false,
+          },
+          claude: {
+            enabled: claudeSubagentMode?.enabled !== false,
+            forwardSubagentText: claudeSubagentMode?.forwardSubagentText !== false,
+            agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
+          },
+        },
       };
       return undefined;
     }
+
+    case "agent_interaction_upsert_subagent": {
+      const input = args.input as {
+        id?: unknown;
+        name?: unknown;
+        description?: unknown;
+        instruction?: unknown;
+        enabled?: unknown;
+      } | undefined;
+      const id = typeof input?.id === "string" && input.id.trim()
+        ? input.id.trim()
+        : `agent-${customSubagents.length + 1}`;
+      const saved = {
+        id,
+        name: typeof input?.name === "string" ? input.name.trim() : "",
+        description: typeof input?.description === "string" ? input.description.trim() : "",
+        instruction: typeof input?.instruction === "string" ? input.instruction.trim() : "",
+        enabled: input?.enabled !== false,
+      };
+      const index = customSubagents.findIndex((item) => item.id === id);
+      if (index === -1) customSubagents = [...customSubagents, saved];
+      else customSubagents = customSubagents.map((item, itemIndex) => itemIndex === index ? saved : item);
+      return saved;
+    }
+
+    case "agent_interaction_delete_subagent":
+      customSubagents = customSubagents.filter((item) => item.id !== String(args.id || ""));
+      return undefined;
 
     case "chat_list_models": {
       const backend = String(args.backend || "claude");

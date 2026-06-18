@@ -510,6 +510,75 @@ describe("Settings provider switch", () => {
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
   });
 
+  it("Agent 设置页可以保存 subagent 模式开关", async () => {
+    const view = await renderSettings("/settings?tab=agent");
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+    expect(await view.findByText("Reviewer")).toBeInTheDocument();
+
+    const subagentGroup = await view.findByRole("radiogroup", { name: "Subagent 模式" });
+    await fireEvent.click(within(subagentGroup).getByRole("radio", { name: "开启" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: {
+          subagentMode: {
+            enabled: true,
+            codex: { enabled: true },
+            claude: {
+              enabled: true,
+              forwardSubagentText: true,
+              agentProgressSummaries: true,
+            },
+          },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(within(subagentGroup).getByRole("radio", { name: "开启" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(within(view.getByRole("radiogroup", { name: "Codex Subagent" })).getByRole("radio", { name: "关闭" }))
+        .toBeEnabled();
+    });
+
+    const codexGroup = view.getByRole("radiogroup", { name: "Codex Subagent" });
+    await fireEvent.click(within(codexGroup).getByRole("radio", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: {
+          subagentMode: {
+            enabled: true,
+            codex: { enabled: false },
+          },
+        },
+      });
+    });
+
+    const claudeTextGroup = view.getByRole("radiogroup", { name: "Claude 转发子代理文本" });
+    await fireEvent.click(within(claudeTextGroup).getByRole("radio", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: {
+          subagentMode: {
+            enabled: true,
+            claude: {
+              enabled: true,
+              forwardSubagentText: false,
+              agentProgressSummaries: true,
+            },
+          },
+        },
+      });
+    });
+  });
+
   it("项目设置页不再显示 Codex 项目默认高级字段", async () => {
     const view = await renderSettings("/settings?tab=project");
 

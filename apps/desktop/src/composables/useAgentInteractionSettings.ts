@@ -1,8 +1,15 @@
 import { computed, readonly, ref } from "vue";
-import type { AgentInteractionSettings } from "@lilia/contracts";
+import type {
+  AgentInteractionSettings,
+  CustomSubagentDefinition,
+  CustomSubagentUpsertInput,
+} from "@lilia/contracts";
 import {
+  deleteCustomSubagent,
   getAgentInteractionSettings,
+  listCustomSubagents,
   setAgentInteractionSettings,
+  upsertCustomSubagent,
 } from "../services/chat";
 
 const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
@@ -19,11 +26,23 @@ const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
     initialTurnsPage: null,
     excludeTurns: [],
   },
+  subagentMode: {
+    enabled: false,
+    codex: {
+      enabled: true,
+    },
+    claude: {
+      enabled: true,
+      forwardSubagentText: true,
+      agentProgressSummaries: true,
+    },
+  },
 };
 
 const settings = ref<AgentInteractionSettings>({
   ...DEFAULT_AGENT_INTERACTION_SETTINGS,
 });
+const subagents = ref<CustomSubagentDefinition[]>([]);
 
 let loadPromise: Promise<AgentInteractionSettings> | null = null;
 
@@ -42,6 +61,8 @@ export function normalizeAgentInteractionSettings(
   input: Partial<AgentInteractionSettings> | null | undefined,
 ): AgentInteractionSettings {
   const codexProfile = input?.codexProfile;
+  const subagentMode = input?.subagentMode;
+  const claudeSubagentMode = subagentMode?.claude;
   return {
     nonInterruptMode: input?.nonInterruptMode === true,
     debug: input?.debug === true,
@@ -55,6 +76,17 @@ export function normalizeAgentInteractionSettings(
       persistExtendedHistory: normalizeNullableBoolean(codexProfile?.persistExtendedHistory),
       initialTurnsPage: normalizeJsonObject(codexProfile?.initialTurnsPage),
       excludeTurns: uniqueTrimmedStrings(codexProfile?.excludeTurns),
+    },
+    subagentMode: {
+      enabled: subagentMode?.enabled === true,
+      codex: {
+        enabled: subagentMode?.codex?.enabled !== false,
+      },
+      claude: {
+        enabled: claudeSubagentMode?.enabled !== false,
+        forwardSubagentText: claudeSubagentMode?.forwardSubagentText !== false,
+        agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
+      },
     },
   };
 }
@@ -83,11 +115,16 @@ function normalizeProfile(value: unknown): AgentInteractionSettings["codexProfil
   return value === "fast" || value === "balanced" || value === "deep" ? value : "default";
 }
 
-export function sameCodexProfile(
-  a: unknown,
-  b: unknown,
-): boolean {
+function sameJsonValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function sameCodexProfile(a: unknown, b: unknown): boolean {
+  return sameJsonValue(a, b);
+}
+
+export function sameSubagentMode(a: unknown, b: unknown): boolean {
+  return sameJsonValue(a, b);
 }
 
 export async function loadAgentInteractionSettings(): Promise<AgentInteractionSettings> {
@@ -104,6 +141,29 @@ export async function loadAgentInteractionSettings(): Promise<AgentInteractionSe
   return loadPromise;
 }
 
+export async function loadCustomSubagentDefinitions(): Promise<CustomSubagentDefinition[]> {
+  const next = await listCustomSubagents();
+  subagents.value = [...next].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  return subagents.value;
+}
+
+export async function saveCustomSubagentDefinition(
+  input: CustomSubagentUpsertInput,
+): Promise<CustomSubagentDefinition> {
+  const saved = await upsertCustomSubagent(input);
+  const next = [...subagents.value];
+  const index = next.findIndex((item) => item.id === saved.id);
+  if (index === -1) next.push(saved);
+  else next[index] = saved;
+  subagents.value = next.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  return saved;
+}
+
+export async function removeCustomSubagentDefinition(id: string): Promise<void> {
+  await deleteCustomSubagent(id);
+  subagents.value = subagents.value.filter((item) => item.id !== id);
+}
+
 export async function updateAgentInteractionSettings(
   patch: Partial<AgentInteractionSettings>,
 ): Promise<AgentInteractionSettings> {
@@ -112,7 +172,8 @@ export async function updateAgentInteractionSettings(
   if (
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&
-    sameCodexProfile(next.codexProfile, previous.codexProfile)
+    sameCodexProfile(next.codexProfile, previous.codexProfile) &&
+    sameSubagentMode(next.subagentMode, previous.subagentMode)
   ) {
     return previous;
   }
@@ -129,9 +190,13 @@ export async function updateAgentInteractionSettings(
 export function useAgentInteractionSettings() {
   return {
     settings: readonly(settings),
+    subagents: readonly(subagents),
     nonInterruptMode: computed(() => settings.value.nonInterruptMode),
     debug: computed(() => settings.value.debug),
     load: loadAgentInteractionSettings,
+    loadSubagents: loadCustomSubagentDefinitions,
+    saveSubagent: saveCustomSubagentDefinition,
+    deleteSubagent: removeCustomSubagentDefinition,
     update: updateAgentInteractionSettings,
   };
 }
