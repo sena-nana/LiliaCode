@@ -4,19 +4,14 @@ import {
   type AnchoredMenuPosition,
 } from "./menuMotion";
 
-const MENU_W = 200;
-const MENU_H_EST = 132;
-
 export function useSidebarAddMenu() {
   const addMenuOpen = ref(false);
   const menuPos = ref<AnchoredMenuPosition>(createAnchoredMenuPosition(0, 0));
 
   function openAddMenu(e: MouseEvent) {
-    const x = Math.min(e.clientX, window.innerWidth - MENU_W - 4);
-    const y = Math.min(e.clientY, window.innerHeight - MENU_H_EST - 4);
     menuPos.value = createAnchoredMenuPosition(
-      Math.max(4, x),
-      Math.max(4, y),
+      e.clientX,
+      e.clientY,
       e.clientX,
       e.clientY,
     );

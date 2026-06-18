@@ -71,6 +71,10 @@ function refreshText(resetsAt: number): string {
   return `刷新 ${formatUnixSeconds(resetsAt)}`;
 }
 
+function popoverMeters(): HTMLElement[] {
+  return Array.from(document.body.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
+}
+
 describe("SidebarConnectionFooter provider quota badge", () => {
   it("does not show quota rings for Claude", async () => {
     setMockActiveBackend("claude");
@@ -132,7 +136,7 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(view.getByText(refreshText(1_800_300_000))).toBeInTheDocument();
     expect(view.getByText(refreshText(1_800_060_000))).toBeInTheDocument();
     expect(view.getByText(refreshText(1_800_360_000))).toBeInTheDocument();
-    const meters = Array.from(view.container.querySelectorAll<HTMLElement>(".sb-conn-popover__quota-meter"));
+    const meters = popoverMeters();
     expect(meters).toHaveLength(4);
     expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
     expect(meters[1]).toHaveStyle({ "--quota-progress": "9" });
