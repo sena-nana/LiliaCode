@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import "../styles/chat.css";
 import "../styles/pages/conversation-import.css";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Check,
@@ -25,8 +25,28 @@ import {
   searchHistoryImports,
 } from "../services/chat";
 import { ensureOrphansLoaded, ensureProjectTasksLoaded } from "../services/tasksStore";
-import AgentTimeline from "../components/chat/AgentTimeline.vue";
-import ChatScrollMap from "../components/chat/ChatScrollMap.vue";
+import {
+  cancelIdleRun,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../utils/perf";
+
+const AgentTimeline = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "import.timeline.load",
+    async () => (await import("../components/chat/AgentTimeline.vue")).default,
+  ),
+});
+
+const ChatScrollMap = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "import.scroll-map.load",
+    async () => (await import("../components/chat/ChatScrollMap.vue")).default,
+  ),
+});
 
 const route = useRoute();
 const router = useRouter();
@@ -60,6 +80,8 @@ const fullPreviewEvents = ref<AgentTimelineEvent[]>([]);
 const previewFrame = ref<HTMLElement | null>(null);
 const previewScroller = ref<HTMLElement | null>(null);
 const previewScrollMap = ref<{ show: () => void } | null>(null);
+const previewScrollMapReady = ref(false);
+let previewScrollMapIdleHandle: number | null = null;
 
 const routeProjectId = computed(() => {
   const value = route.query.projectId;
@@ -348,6 +370,26 @@ function showPreviewScrollbar() {
   previewScrollMap.value?.show();
 }
 
+function cancelPreviewScrollMapSchedule() {
+  if (previewScrollMapIdleHandle === null) return;
+  cancelIdleRun(previewScrollMapIdleHandle);
+  previewScrollMapIdleHandle = null;
+}
+
+function schedulePreviewScrollMap() {
+  cancelPreviewScrollMapSchedule();
+  if (!fullPreviewEvents.value.length) {
+    previewScrollMapReady.value = false;
+    return;
+  }
+  scheduleAfterPaint(() => {
+    previewScrollMapIdleHandle = runWhenIdle(() => {
+      previewScrollMapIdleHandle = null;
+      previewScrollMapReady.value = true;
+    });
+  });
+}
+
 async function importSelectedItem() {
   const item = selectedItem.value;
   if (!item || importing.value) return;
@@ -421,6 +463,17 @@ watch(() => includeArchived.value, () => {
 onMounted(() => {
   void loadHistoryImports();
 });
+
+onBeforeUnmount(() => {
+  cancelPreviewScrollMapSchedule();
+});
+
+watch(
+  () => fullPreviewEvents.value.length,
+  () => {
+    schedulePreviewScrollMap();
+  },
+);
 </script>
 
 <template>
@@ -608,6 +661,7 @@ onMounted(() => {
                 </div>
               </div>
               <ChatScrollMap
+                v-if="previewScrollMapReady"
                 ref="previewScrollMap"
                 :events="fullPreviewEvents"
                 :hover-target="previewFrame"

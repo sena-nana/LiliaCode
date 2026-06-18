@@ -1,4 +1,3 @@
-import { renderMathToHtml } from "./math";
 import { makeInlineToken, type InlineToken } from "./types";
 
 const INLINE_TOKEN_PATTERN = /`(?<code>[^`\n]+)`|!\[(?<imageAlt>[^\]\n]*)\]\((?<imageSrc>[^)\s]+)\)|\\\((?<parenMath>[^\n]*?)\\\)|~~(?<delete>[^~\n]+)~~|\*\*(?<starStrong>[^*\n]+)\*\*|__(?<underscoreStrong>[^_\n]+)__|_(?<underscoreEm>[^_\n]+)_|\*(?<starEm>[^*\n]+)\*|\[(?<linkText>[^\]\n]+)\]\((?<linkHref>[^)\s]+)\)|<(?<angleHref>(?:https?:\/\/|mailto:)[^<>\s]+)>/g;
@@ -47,12 +46,7 @@ function pushInlineMatch(tokens: InlineToken[], match: RegExpMatchArray) {
   }
 
   if (groups.parenMath !== undefined) {
-    const html = renderMathToHtml(groups.parenMath, false);
-    if (html) {
-      tokens.push(makeInlineToken("math", groups.parenMath, { html }));
-    } else {
-      pushTextToken(tokens, match[0]);
-    }
+    tokens.push(makeInlineToken("math", groups.parenMath));
     return;
   }
 

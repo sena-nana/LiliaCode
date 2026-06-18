@@ -39,11 +39,11 @@ function isActiveConversation(item: UnifiedSidebarConversation): boolean {
     <div class="sb-tree sb-tree--unified">
       <SidebarTaskRow
         v-for="item in conversations"
-        :key="item.task.id"
-        :task="item.task"
+        :key="item.taskId"
+        :task="{ id: item.taskId, title: item.title, pinned: item.pinned }"
         :project-id="item.projectId"
         :project-label="item.projectName"
-        :activity="activityForTask(item.task.id)"
+        :activity="activityForTask(item.taskId)"
         :to="readonly ? undefined : item.route"
         :readonly="readonly"
         row-kind="unified"

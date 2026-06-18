@@ -5,10 +5,14 @@ import {
   type AgentTimelineEventStatus,
   type AgentTimelinePayload,
 } from "@lilia/contracts";
+import { measurePerfSync } from "../../utils/perf";
 
 export type MarkdownBlockTone = "default" | "muted";
 
 const TIMELINE_SUMMARY_MAX_LENGTH = 220;
+const timelinePayloadRecordCache = new WeakMap<object, TimelinePayloadRecord>();
+const timelineDisplayCache = new WeakMap<object, Map<string, AgentTimelineDisplay>>();
+const timelineFinalTextCache = new WeakMap<object, string>();
 
 export type TimelinePayloadRecord = Record<string, AgentTimelinePayload | undefined>;
 
@@ -44,6 +48,13 @@ type DisplayDerivableEvent = Pick<
 export function readTimelinePayloadRecord(
   event: Pick<AgentTimelineEvent, "payload">,
 ): TimelinePayloadRecord {
+  if (typeof event === "object" && event !== null) {
+    const cached = timelinePayloadRecordCache.get(event);
+    if (cached) return cached;
+    const record = readPayloadRecord(event.payload);
+    timelinePayloadRecordCache.set(event, record);
+    return record;
+  }
   return readPayloadRecord(event.payload);
 }
 
@@ -56,14 +67,38 @@ export function readTimelineDisplay(
   event: DisplayDerivableEvent,
   context: TimelineDisplayContext = {},
 ): AgentTimelineDisplay {
-  return deriveTimelineDisplay({
-    kind: event.kind,
-    status: event.status,
-    title: event.title,
-    summary: event.summary,
-    payload: event.payload,
-    projectCwd: context.projectCwd,
-  });
+  if (typeof event !== "object" || event === null) {
+    return deriveTimelineDisplay({
+      kind: event.kind,
+      status: event.status,
+      title: event.title,
+      summary: event.summary,
+      payload: event.payload,
+      projectCwd: context.projectCwd,
+    });
+  }
+  const cacheKey = context.projectCwd ?? "";
+  let cachedByContext = timelineDisplayCache.get(event);
+  const cached = cachedByContext?.get(cacheKey);
+  if (cached) return cached;
+  const display = measurePerfSync(
+    "timeline.display.derive",
+    () => deriveTimelineDisplay({
+      kind: event.kind,
+      status: event.status,
+      title: event.title,
+      summary: event.summary,
+      payload: event.payload,
+      projectCwd: context.projectCwd,
+    }),
+    { detail: `${event.kind}:${event.status}` },
+  );
+  if (!cachedByContext) {
+    cachedByContext = new Map<string, AgentTimelineDisplay>();
+    timelineDisplayCache.set(event, cachedByContext);
+  }
+  cachedByContext.set(cacheKey, display);
+  return display;
 }
 
 function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
@@ -73,6 +108,19 @@ function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
 }
 
 export function timelineFinalText(
+  event: Pick<AgentTimelineEvent, "kind" | "status" | "title" | "summary" | "payload">,
+): string {
+  if (typeof event === "object" && event !== null) {
+    const cached = timelineFinalTextCache.get(event);
+    if (cached !== undefined) return cached;
+    const text = readTimelineFinalText(event);
+    timelineFinalTextCache.set(event, text);
+    return text;
+  }
+  return readTimelineFinalText(event);
+}
+
+function readTimelineFinalText(
   event: Pick<AgentTimelineEvent, "kind" | "status" | "title" | "summary" | "payload">,
 ): string {
   if (isTimelineErrorReply(event)) return timelineErrorReplyText(event);

@@ -12,6 +12,12 @@ import {
   listOrphanConversations,
   listProjectConversations,
 } from "./tasksStore";
+import {
+  areSidebarConversationsLoaded,
+  ensureSidebarConversationsLoaded,
+  getSidebarConversationRevision,
+  listSidebarConversations,
+} from "./sidebarConversations";
 
 export type SearchKind = "project-task" | "orphan";
 
@@ -40,7 +46,20 @@ interface Doc {
   route: string;
 }
 
-function buildCorpus(): Doc[] {
+interface IndexedDoc extends Doc {
+  titleTokens: string[];
+  vector: Map<string, number>;
+}
+
+interface IndexedCorpus {
+  key: string;
+  docs: IndexedDoc[];
+  idf: Map<string, number>;
+}
+
+let indexedSidebarCorpus: IndexedCorpus | null = null;
+
+function buildStoreCorpus(): Doc[] {
   const docs: Doc[] = [];
   for (const p of listProjects()) {
     for (const t of listProjectConversations(p.id)) {
@@ -63,6 +82,22 @@ function buildCorpus(): Doc[] {
     });
   }
   return docs;
+}
+
+function buildSidebarCorpus(): Doc[] {
+  return listSidebarConversations().map((conversation) => ({
+    kind: conversation.projectId ? "project-task" : "orphan",
+    projectId: conversation.projectId ?? undefined,
+    projectName: conversation.projectName ?? undefined,
+    taskId: conversation.taskId,
+    title: conversation.title,
+    route: conversation.route,
+  }));
+}
+
+function buildSidebarCorpusKey(): string | null {
+  if (!areSidebarConversationsLoaded()) return null;
+  return `sidebar:${getSidebarConversationRevision()}`;
 }
 
 // ---------------- text mode ----------------
@@ -90,7 +125,20 @@ function findRanges(title: string, query: string): Array<[number, number]> {
   return ranges;
 }
 
-function searchText(query: string, corpus: Doc[]): SearchResult[] {
+function toSearchResult(doc: Doc, score: number, highlights: Array<[number, number]>): SearchResult {
+  return {
+    kind: doc.kind,
+    projectId: doc.projectId,
+    projectName: doc.projectName,
+    taskId: doc.taskId,
+    title: doc.title,
+    route: doc.route,
+    score,
+    highlights,
+  };
+}
+
+function searchText(query: string, corpus: readonly Doc[]): SearchResult[] {
   const q = query.trim();
   if (!q) return [];
   const out: SearchResult[] = [];
@@ -101,7 +149,7 @@ function searchText(query: string, corpus: Doc[]): SearchResult[] {
     // 越多命中 / 越靠前得分越高；常数 10 让命中数主导。
     const score =
       ranges.length * 10 + (1 - earliest / Math.max(d.title.length, 1));
-    out.push({ ...d, score, highlights: ranges });
+    out.push(toSearchResult(d, score, ranges));
   }
   return out.sort((a, b) => b.score - a.score);
 }
@@ -129,11 +177,11 @@ function termFreq(tokens: string[]): Map<string, number> {
   return tf;
 }
 
-function buildIdf(docs: Doc[]): Map<string, number> {
+function buildIdf(docs: readonly { titleTokens: string[] }[]): Map<string, number> {
   const n = docs.length || 1;
   const df = new Map<string, number>();
   for (const d of docs) {
-    const seen = new Set(bigrams(d.title));
+    const seen = new Set(d.titleTokens);
     for (const t of seen) df.set(t, (df.get(t) ?? 0) + 1);
   }
   const idf = new Map<string, number>();
@@ -168,19 +216,64 @@ function cosine(a: Map<string, number>, b: Map<string, number>): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-function searchVector(query: string, corpus: Doc[]): SearchResult[] {
+function searchVector(query: string, corpus: readonly Doc[]): SearchResult[] {
   const q = query.trim();
-  if (!q) return [];
-  if (corpus.length === 0) return [];
-  const idf = buildIdf(corpus);
+  if (!q || corpus.length === 0) return [];
+  const indexedDocs = corpus.map((doc) => ({
+    ...doc,
+    titleTokens: bigrams(doc.title),
+  }));
+  const idf = buildIdf(indexedDocs);
   const qVec = tfidfVec(bigrams(q), idf);
   if (qVec.size === 0) return [];
   const out: SearchResult[] = [];
-  for (const d of corpus) {
-    const dVec = tfidfVec(bigrams(d.title), idf);
+  for (const d of indexedDocs) {
+    const dVec = tfidfVec(d.titleTokens, idf);
     const score = cosine(qVec, dVec);
     if (score <= 0) continue;
-    out.push({ ...d, score, highlights: [] });
+    out.push(toSearchResult(d, score, []));
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+function buildIndexedCorpus(docs: Doc[], key: string): IndexedCorpus {
+  const prepared = docs.map((doc) => ({
+    ...doc,
+    titleTokens: bigrams(doc.title),
+    vector: new Map<string, number>(),
+  }));
+  const idf = buildIdf(prepared);
+  for (const doc of prepared) {
+    doc.vector = tfidfVec(doc.titleTokens, idf);
+  }
+  return {
+    key,
+    docs: prepared,
+    idf,
+  };
+}
+
+function getIndexedSidebarCorpus(): IndexedCorpus | null {
+  const key = buildSidebarCorpusKey();
+  if (!key) {
+    indexedSidebarCorpus = null;
+    return null;
+  }
+  if (indexedSidebarCorpus?.key === key) return indexedSidebarCorpus;
+  indexedSidebarCorpus = buildIndexedCorpus(buildSidebarCorpus(), key);
+  return indexedSidebarCorpus;
+}
+
+function searchVectorIndexed(query: string, corpus: IndexedCorpus): SearchResult[] {
+  const q = query.trim();
+  if (!q || corpus.docs.length === 0) return [];
+  const qVec = tfidfVec(bigrams(q), corpus.idf);
+  if (qVec.size === 0) return [];
+  const out: SearchResult[] = [];
+  for (const d of corpus.docs) {
+    const score = cosine(qVec, d.vector);
+    if (score <= 0) continue;
+    out.push(toSearchResult(d, score, []));
   }
   return out.sort((a, b) => b.score - a.score);
 }
@@ -188,12 +281,9 @@ function searchVector(query: string, corpus: Doc[]): SearchResult[] {
 // ---------------- merge ----------------
 
 /** 合并两路结果：text 分数除以最高 text 分归一到 [0,1]；权重 0.6/0.4 略偏向文本。 */
-function searchMerged(query: string, corpus: Doc[]): SearchResult[] {
+function searchMerged(query: string, textHits: SearchResult[], vectorHits: SearchResult[]): SearchResult[] {
   const q = query.trim();
   if (!q) return [];
-  const textHits = searchText(q, corpus);
-  const vectorHits = searchVector(q, corpus);
-
   const TEXT_WEIGHT = 0.6;
   const VECTOR_WEIGHT = 0.4;
 
@@ -230,5 +320,22 @@ function searchMerged(query: string, corpus: Doc[]): SearchResult[] {
 // ---------------- public ----------------
 
 export function searchSessions(query: string): SearchResult[] {
-  return searchMerged(query, buildCorpus());
+  const sidebarCorpus = getIndexedSidebarCorpus();
+  if (sidebarCorpus) {
+    return searchMerged(
+      query,
+      searchText(query, sidebarCorpus.docs),
+      searchVectorIndexed(query, sidebarCorpus),
+    );
+  }
+  const storeCorpus = buildStoreCorpus();
+  return searchMerged(
+    query,
+    searchText(query, storeCorpus),
+    searchVector(query, storeCorpus),
+  );
+}
+
+export async function ensureSessionSearchCorpusLoaded(force = false): Promise<void> {
+  await ensureSidebarConversationsLoaded(force);
 }

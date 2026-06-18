@@ -1,32 +1,41 @@
 <script setup lang="ts">
-import { computed, type Component } from "vue";
+import { computed, defineAsyncComponent, watch, type Component } from "vue";
 import { useRoute } from "vue-router";
-import AppearanceSection from "./settings/AppearanceSection.vue";
-import PopupWindowSection from "./settings/PopupWindowSection.vue";
-import ProviderConnectionSection from "./settings/ProviderConnectionSection.vue";
-import AssistantAISection from "./settings/AssistantAISection.vue";
-import AgentInteractionSection from "./settings/AgentInteractionSection.vue";
-import QuotaUsageSection from "./settings/QuotaUsageSection.vue";
-import ProjectPreferencesSection from "./settings/ProjectPreferencesSection.vue";
-import AboutSection from "./settings/AboutSection.vue";
-import Plugins from "./Plugins.vue";
-import ConversationImport from "./ConversationImport.vue";
 import {
   normalizeSettingsTab,
   type SettingsTabKey,
 } from "./settings/settingsTabs";
+import {
+  beginPerfStage,
+  installPerfObservers,
+  measurePerfAsync,
+  scheduleAfterPaint,
+} from "../utils/perf";
+
+function lazySettingsSection(
+  tab: SettingsTabKey,
+  loader: () => Promise<{ default: Component }>,
+): Component {
+  return defineAsyncComponent(() =>
+    measurePerfAsync(
+      "settings.tab.load",
+      async () => (await loader()).default,
+      { detail: tab },
+    )
+  );
+}
 
 const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {
-  appearance: AppearanceSection,
-  window: PopupWindowSection,
-  providers: ProviderConnectionSection,
-  assistant: AssistantAISection,
-  agent: AgentInteractionSection,
-  quota: QuotaUsageSection,
-  plugins: Plugins,
-  import: ConversationImport,
-  project: ProjectPreferencesSection,
-  about: AboutSection,
+  appearance: lazySettingsSection("appearance", () => import("./settings/AppearanceSection.vue")),
+  window: lazySettingsSection("window", () => import("./settings/PopupWindowSection.vue")),
+  providers: lazySettingsSection("providers", () => import("./settings/ProviderConnectionSection.vue")),
+  assistant: lazySettingsSection("assistant", () => import("./settings/AssistantAISection.vue")),
+  agent: lazySettingsSection("agent", () => import("./settings/AgentInteractionSection.vue")),
+  quota: lazySettingsSection("quota", () => import("./settings/QuotaUsageSection.vue")),
+  plugins: lazySettingsSection("plugins", () => import("./Plugins.vue")),
+  import: lazySettingsSection("import", () => import("./ConversationImport.vue")),
+  project: lazySettingsSection("project", () => import("./settings/ProjectPreferencesSection.vue")),
+  about: lazySettingsSection("about", () => import("./settings/AboutSection.vue")),
 };
 
 const route = useRoute();
@@ -34,6 +43,17 @@ const activeTab = computed(() => normalizeSettingsTab(route.query.tab));
 const activeTabSection = computed(() => SETTINGS_SECTIONS[activeTab.value]);
 const isFullPageSection = computed(() =>
   activeTab.value === "plugins" || activeTab.value === "import",
+);
+
+installPerfObservers();
+
+watch(
+  () => activeTab.value,
+  (tab) => {
+    const stage = beginPerfStage("settings.tab.switch", { detail: tab });
+    scheduleAfterPaint(() => stage.end("paint"));
+  },
+  { immediate: true },
 );
 </script>
 

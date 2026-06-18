@@ -1,10 +1,15 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import { normalizeClaudeTool } from "../../../packages/contracts/src/claudeTools.mjs";
 import AgentTimeline from "../src/components/chat/AgentTimeline.vue";
-import { timelineEventLabel, timelineInlinePreview } from "../src/components/chat/timelineDisplay";
+import {
+  readTimelineDisplay,
+  readTimelinePayloadRecord,
+  timelineEventLabel,
+  timelineInlinePreview,
+} from "../src/components/chat/timelineDisplay";
 
 function codeContent(
   details: ReturnType<typeof deriveTimelineDisplay>["details"],
@@ -81,6 +86,22 @@ function assistantReplyEvent(
 
 function nextFrame(): Promise<void> {
   return new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+}
+
+async function flushTimelineAsyncComponents() {
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function renderAgentTimeline(
+  props: InstanceType<typeof AgentTimeline>["$props"],
+) {
+  const view = render(AgentTimeline, { props });
+  await flushTimelineAsyncComponents();
+  return view;
 }
 
 afterEach(() => {
@@ -323,6 +344,36 @@ describe("timeline display derivation", () => {
     expect(listItems(display.details)).toEqual([]);
   });
 
+  it("同一事件快照会复用 payload 和 display 派生结果，但不同 context 仍分开缓存", () => {
+    const event = timelineEvent({
+      id: "tool-1",
+      kind: "tool",
+      status: "success",
+      title: "Read",
+      summary: "src/App.vue",
+      payload: {
+        toolName: "Read",
+        path: "src/App.vue",
+      },
+    });
+
+    const payloadA = readTimelinePayloadRecord(event);
+    const payloadB = readTimelinePayloadRecord(event);
+    expect(payloadA).toBe(payloadB);
+
+    const displayA = readTimelineDisplay(event);
+    const displayB = readTimelineDisplay(event);
+    const displayWithProject = readTimelineDisplay(event, { projectCwd: "D:/PROJECT/workspace/Lilia" });
+    const displayWithProjectAgain = readTimelineDisplay(
+      event,
+      { projectCwd: "D:/PROJECT/workspace/Lilia" },
+    );
+
+    expect(displayA).toBe(displayB);
+    expect(displayWithProject).toBe(displayWithProjectAgain);
+    expect(displayWithProject).not.toBe(displayA);
+  });
+
   it("配置要求用诊断事件展示", () => {
     const display = deriveTimelineDisplay({
       kind: "diagnostic",
@@ -484,8 +535,7 @@ describe("timeline event expansion", () => {
   });
 
   it("折叠的过程事件不参与 rail 避让计算", async () => {
-    const view = render(AgentTimeline, {
-      props: {
+    const view = await renderAgentTimeline({
         events: [
           timelineEvent({
             id: "tool-1",
@@ -527,7 +577,6 @@ describe("timeline event expansion", () => {
             intraTurnOrder: 3,
           }),
         ],
-      },
     });
 
     await nextFrame();
@@ -539,8 +588,7 @@ describe("timeline event expansion", () => {
   });
 
   it("有详情事件仍可展开", async () => {
-    const view = render(AgentTimeline, {
-      props: {
+    const view = await renderAgentTimeline({
         events: [
           timelineEvent({
             id: "command-1",
@@ -553,20 +601,21 @@ describe("timeline event expansion", () => {
             },
           }),
         ],
-      },
     });
 
     expect(view.container.querySelector(".agent-timeline__chevron")).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("button", { name: "已运行 yarn test" }));
+    await flushTimelineAsyncComponents();
 
-    expect(view.container.querySelector(".agent-timeline__content")).toBeInTheDocument();
-    expect(view.getByText("COMMAND")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.container.querySelector(".agent-timeline__content")).toBeInTheDocument();
+      expect(view.getByText("COMMAND")).toBeInTheDocument();
+    });
   });
 
-  it("运行失败错误按 Agent 回复渲染，不显示错误概要卡", () => {
-    const view = render(AgentTimeline, {
-      props: {
+  it("运行失败错误按 Agent 回复渲染，不显示错误概要卡", async () => {
+    const view = await renderAgentTimeline({
         events: [
           timelineEvent({
             id: "error-1",
@@ -577,19 +626,19 @@ describe("timeline event expansion", () => {
             payload: {},
           }),
         ],
-      },
     });
 
-    expect(view.container.querySelector(".timeline-card--final-reply")).toBeInTheDocument();
-    expect(view.getByText("发生错误")).toBeInTheDocument();
-    expect(view.getByText("provider failed")).toBeInTheDocument();
-    expect(view.queryByText("Runner error")).not.toBeInTheDocument();
-    expect(view.container.querySelector(".agent-timeline__preview")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.container.querySelector(".timeline-card--final-reply")).toBeInTheDocument();
+      expect(view.getByText("发生错误")).toBeInTheDocument();
+      expect(view.getByText("provider failed")).toBeInTheDocument();
+      expect(view.queryByText("Runner error")).not.toBeInTheDocument();
+      expect(view.container.querySelector(".agent-timeline__preview")).not.toBeInTheDocument();
+    });
   });
 
   it("Codex 修复建议最终回复可发起批量应用", async () => {
-    const view = render(AgentTimeline, {
-      props: {
+    const view = await renderAgentTimeline({
         canStartLiliaBatchApply: true,
         events: [
           timelineEvent({
@@ -611,9 +660,11 @@ describe("timeline event expansion", () => {
             turnId: "turn-source",
           }),
         ],
-      },
     });
 
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "应用建议" })).toBeInTheDocument();
+    });
     await fireEvent.click(view.getByRole("button", { name: "应用建议" }));
 
     expect(view.emitted("start-lilia-batch-apply")?.[0]).toEqual([{
@@ -623,9 +674,8 @@ describe("timeline event expansion", () => {
     }]);
   });
 
-  it("普通 Codex 最终回复不显示批量应用入口", () => {
-    const view = render(AgentTimeline, {
-      props: {
+  it("普通 Codex 最终回复不显示批量应用入口", async () => {
+    const view = await renderAgentTimeline({
         canStartLiliaBatchApply: true,
         events: [
           timelineEvent({
@@ -643,23 +693,25 @@ describe("timeline event expansion", () => {
             turnId: "turn-normal",
           }),
         ],
-      },
     });
 
-    expect(view.queryByRole("button", { name: "应用建议" })).toBeNull();
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "应用建议" })).toBeNull();
+    });
   });
 
   it("每条非流式 Agent 最终回复都可发起分叉当前会话", async () => {
-    const view = render(AgentTimeline, {
-      props: {
+    const view = await renderAgentTimeline({
         canStartSessionFork: true,
         events: [
           assistantReplyEvent("reply-fork-1", "第一条回复", { turnSeq: 1 }),
           assistantReplyEvent("reply-fork-2", "第二条回复", { turnSeq: 2 }),
         ],
-      },
     });
 
+    await waitFor(() => {
+      expect(view.getAllByRole("button", { name: "分叉当前会话" })).toHaveLength(2);
+    });
     const forkButtons = view.getAllByRole("button", { name: "分叉当前会话" });
     expect(forkButtons).toHaveLength(2);
 
@@ -668,37 +720,36 @@ describe("timeline event expansion", () => {
     expect(view.emitted("start-session-fork")?.length).toBe(1);
   });
 
-  it("流式最终回复不显示分叉当前会话入口", () => {
-    const view = render(AgentTimeline, {
-      props: {
+  it("流式最终回复不显示分叉当前会话入口", async () => {
+    const view = await renderAgentTimeline({
         canStartSessionFork: true,
         events: [
           assistantReplyEvent("reply-fork-streaming", "正在回复", {
             status: "running",
           }),
         ],
-      },
     });
 
-    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+    });
   });
 
-  it("禁用分叉时最终回复不显示分叉当前会话入口", () => {
-    const view = render(AgentTimeline, {
-      props: {
+  it("禁用分叉时最终回复不显示分叉当前会话入口", async () => {
+    const view = await renderAgentTimeline({
         canStartSessionFork: false,
         events: [
           assistantReplyEvent("reply-fork-disabled", "普通回复"),
         ],
-      },
     });
 
-    expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+    await waitFor(() => {
+      expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+    });
   });
 
-  it("中断错误仍按过程状态渲染", () => {
-    const view = render(AgentTimeline, {
-      props: {
+  it("中断错误仍按过程状态渲染", async () => {
+    const view = await renderAgentTimeline({
         events: [
           timelineEvent({
             id: "interrupt-1",
@@ -709,7 +760,6 @@ describe("timeline event expansion", () => {
             payload: { interrupted: true },
           }),
         ],
-      },
     });
 
     expect(view.container.querySelector(".timeline-card--final-reply")).not.toBeInTheDocument();

@@ -118,53 +118,14 @@ function collectItemsFor(e: MouseEvent): ContextMenuItem[] {
   return [];
 }
 
-let installed = false;
+export function syncContextMenuForEvent(e: MouseEvent) {
+  const items = collectItemsFor(e);
+  if (items.length) openMenu(e.clientX, e.clientY, items);
+  else closeContextMenu();
+}
 
-/** 在 app 启动时调一次：屏蔽原生右键菜单，接管为自定义菜单。 */
-export function installContextMenu() {
-  if (installed || typeof window === "undefined") return;
-  installed = true;
-
-  window.addEventListener("contextmenu", (e) => {
-    // 一律阻止浏览器默认菜单；有没有自定义菜单可弹，再单独判断。
-    e.preventDefault();
-    const items = collectItemsFor(e);
-    if (items.length) openMenu(e.clientX, e.clientY, items);
-    else closeContextMenu();
-  });
-
-  window.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (!state.open) return;
-      const t = e.target as Element | null;
-      if (t?.closest?.(".ctx-menu")) return;
-      closeContextMenu();
-    },
-    true,
-  );
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.open) {
-      closeContextMenu();
-      e.stopPropagation();
-    }
-  });
-
-  // 滚动 / resize 会让锚点失效，索性关掉。
-  window.addEventListener(
-    "scroll",
-    () => {
-      if (state.open) closeContextMenu();
-    },
-    true,
-  );
-  window.addEventListener("resize", () => {
-    if (state.open) closeContextMenu();
-  });
-
-  // 窗口失焦时关掉，避免切走又切回还挂着。
-  window.addEventListener("blur", () => closeContextMenu());
+export function isContextMenuOpen() {
+  return state.open;
 }
 
 export function useContextMenu() {

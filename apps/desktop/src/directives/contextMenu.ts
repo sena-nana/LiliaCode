@@ -1,9 +1,9 @@
 import type { Directive } from "vue";
-import {
-  registerContextMenu,
-  type ContextMenuItem,
-  type ContextMenuProvider,
+import type {
+  ContextMenuItem,
+  ContextMenuProvider,
 } from "../composables/useContextMenu";
+import { measurePerfAsync } from "../utils/perf";
 
 /**
  * v-context-menu 用法：
@@ -16,14 +16,51 @@ import {
 type Value = ContextMenuItem[] | ContextMenuProvider | null | undefined;
 
 const cleanups = new WeakMap<Element, () => void>();
+const bindSeq = new WeakMap<Element, number>();
+let registerContextMenuPromise: Promise<typeof import("../composables/useContextMenu")["registerContextMenu"]> | null = null;
 
-function rebind(el: Element, value: Value) {
+function nextBindSeq(el: Element): number {
+  const seq = (bindSeq.get(el) ?? 0) + 1;
+  bindSeq.set(el, seq);
+  return seq;
+}
+
+function currentBindSeq(el: Element): number {
+  return bindSeq.get(el) ?? 0;
+}
+
+function clearBinding(el: Element) {
   cleanups.get(el)?.();
   cleanups.delete(el);
+  nextBindSeq(el);
+}
+
+function loadRegisterContextMenu() {
+  if (registerContextMenuPromise) return registerContextMenuPromise;
+  registerContextMenuPromise = measurePerfAsync(
+    "context-menu.directive.load",
+    async () => (await import("../composables/useContextMenu")).registerContextMenu,
+    { detail: "registerContextMenu" },
+  ).finally(() => {
+    registerContextMenuPromise = null;
+  });
+  return registerContextMenuPromise;
+}
+
+function rebind(el: Element, value: Value) {
+  clearBinding(el);
   if (!value) return;
+  const seq = currentBindSeq(el);
   const provider: ContextMenuProvider =
     typeof value === "function" ? value : () => value;
-  cleanups.set(el, registerContextMenu(el, provider));
+  void loadRegisterContextMenu()
+    .then((registerContextMenu) => {
+      if (currentBindSeq(el) !== seq || cleanups.has(el)) return;
+      cleanups.set(el, registerContextMenu(el, provider));
+    })
+    .catch((err) => {
+      console.error("[context-menu] load registerContextMenu failed", err);
+    });
 }
 
 export const vContextMenu: Directive<Element, Value> = {
@@ -35,7 +72,6 @@ export const vContextMenu: Directive<Element, Value> = {
     rebind(el, binding.value);
   },
   beforeUnmount(el) {
-    cleanups.get(el)?.();
-    cleanups.delete(el);
+    clearBinding(el);
   },
 };

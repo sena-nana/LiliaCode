@@ -1,5 +1,4 @@
 import { Globe } from "lucide-vue-next";
-import IabSidebarPanel from "../components/chat/IabSidebarPanel.vue";
 import { registerChatSidebarPanel } from "./useChatSidebar";
 
 export function registerIabChatSidebarPanel(): () => void {
@@ -8,6 +7,6 @@ export function registerIabChatSidebarPanel(): () => void {
     title: "IAB",
     icon: Globe,
     order: 10,
-    component: IabSidebarPanel,
+    loader: async () => (await import("../components/chat/IabSidebarPanel.vue")).default,
   });
 }

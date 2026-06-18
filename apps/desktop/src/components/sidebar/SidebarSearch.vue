@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { FileText, Search, X } from "lucide-vue-next";
-import { searchSessions, type SearchResult } from "../../services/sessionSearch";
-import { ensureAllProjectTasksLoaded } from "../../services/tasksStore";
+import {
+  ensureSessionSearchCorpusLoaded,
+  searchSessions,
+  type SearchResult,
+} from "../../services/sessionSearch";
+import { measurePerfAsync } from "../../utils/perf";
 import SearchDropdown from "../SearchDropdown.vue";
 
 const props = defineProps<{
@@ -44,7 +48,10 @@ async function hydrateCorpus() {
   if (hydrating.value) return;
   hydrating.value = true;
   try {
-    await ensureAllProjectTasksLoaded();
+    await measurePerfAsync(
+      "sidebar.search.hydrate",
+      () => ensureSessionSearchCorpusLoaded(),
+    );
   } finally {
     hydrating.value = false;
   }

@@ -269,6 +269,7 @@ pub fn run() {
             projects_tasks::project_architecture_reject,
             projects_tasks::project_architecture_rollback,
             projects_tasks::task_list,
+            projects_tasks::task_list_sidebar_conversations,
             projects_tasks::task_get,
             projects_tasks::task_create,
             projects_tasks::task_update,

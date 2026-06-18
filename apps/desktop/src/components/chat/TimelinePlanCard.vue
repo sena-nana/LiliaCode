@@ -1,20 +1,35 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, defineAsyncComponent } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
-import MarkdownBlock from "./MarkdownBlock.vue";
-import TimelineCardDetails from "./TimelineCardDetails.vue";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
+import { measurePerfAsync } from "../../utils/perf";
 import {
   createTimelineMarkdownView,
   readTimelineDisplay,
   readTimelinePayloadRecord,
   truncateTimelineText,
 } from "./timelineDisplay";
+
+const MarkdownBlock = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.markdown.load",
+    async () => (await import("./MarkdownBlock.vue")).default,
+  ),
+});
+
+const TimelineCardDetails = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.card-details.load",
+    async () => (await import("./TimelineCardDetails.vue")).default,
+  ),
+});
 
 type PlanStatusKind =
   | "pending"

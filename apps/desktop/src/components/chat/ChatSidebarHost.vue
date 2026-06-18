@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, markRaw, ref, shallowRef, watch, type Component } from "vue";
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -9,6 +9,7 @@ import {
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
 import { useResizablePane } from "../../composables/useResizablePane";
+import { measurePerfAsync } from "../../utils/perf";
 
 const props = defineProps<ChatSidebarContext>();
 
@@ -30,6 +31,55 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
   projectId: props.projectId,
   projectCwd: props.projectCwd,
 }));
+
+const panelComponentCache = new Map<string, Component>();
+const activePanelComponent = shallowRef<Component | null>(null);
+const activePanelLoading = ref(false);
+
+watch(
+  () => [sidebarState.open, activePanel.value?.id ?? ""] as const,
+  async ([open, panelId]) => {
+    if (!open || !panelId) {
+      activePanelComponent.value = null;
+      activePanelLoading.value = false;
+      return;
+    }
+    const panel = activePanel.value;
+    if (!panel) {
+      activePanelComponent.value = null;
+      activePanelLoading.value = false;
+      return;
+    }
+    const cached = panelComponentCache.get(panel.id);
+    if (cached) {
+      activePanelComponent.value = cached;
+      activePanelLoading.value = false;
+      return;
+    }
+    activePanelLoading.value = true;
+    try {
+      const component = markRaw(await measurePerfAsync(
+        "chat-sidebar.panel.load",
+        () => panel.loader(),
+        { detail: panel.id },
+      ));
+      panelComponentCache.set(panel.id, component);
+      if (activePanel.value?.id === panel.id) {
+        activePanelComponent.value = component;
+      }
+    } catch (err) {
+      console.error("[chat-sidebar] load panel failed", panel.id, err);
+      if (activePanel.value?.id === panel.id) {
+        activePanelComponent.value = null;
+      }
+    } finally {
+      if (activePanel.value?.id === panel.id) {
+        activePanelLoading.value = false;
+      }
+    }
+  },
+  { immediate: true },
+);
 
 </script>
 
@@ -88,10 +138,13 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
 
       <section class="chat-sidebar__body">
         <component
-          :is="activePanel.component"
-          v-if="activePanel"
+          :is="activePanelComponent"
+          v-if="activePanel && activePanelComponent"
           v-bind="sidebarContext"
         />
+        <div v-else-if="activePanelLoading" class="chat-sidebar__empty">
+          正在加载...
+        </div>
         <div v-else class="chat-sidebar__empty">
           暂无内容
         </div>

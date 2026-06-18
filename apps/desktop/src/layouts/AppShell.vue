@@ -1,11 +1,31 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { ArrowLeft } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
-import SecondaryPanel from "./SecondaryPanel.vue";
-import SettingsSidebar from "./SettingsSidebar.vue";
 import { useResizablePane } from "../composables/useResizablePane";
+import {
+  beginPerfStage,
+  installPerfObservers,
+  measurePerfAsync,
+  scheduleAfterPaint,
+} from "../utils/perf";
+
+const SecondaryPanel = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "app-shell.secondary-panel.load",
+    async () => (await import("./SecondaryPanel.vue")).default,
+  ),
+});
+
+const SettingsSidebar = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "app-shell.settings-sidebar.load",
+    async () => (await import("./SettingsSidebar.vue")).default,
+  ),
+});
 
 /** 侧栏宽度的硬约束：太窄项目名糊成一团，太宽主区被挤掉。 */
 const MIN_WIDTH = 180;
@@ -87,6 +107,17 @@ const removeBeforeEach = router.beforeEach((to, from) => {
 function goBackFromAutomation() {
   router.push(sidebarReturnTo.value);
 }
+
+installPerfObservers();
+
+watch(
+  () => route.fullPath,
+  (path) => {
+    const stage = beginPerfStage("route.paint", { detail: path });
+    scheduleAfterPaint(() => stage.end("paint"));
+  },
+  { immediate: true },
+);
 
 onBeforeUnmount(() => {
   removeBeforeEach();

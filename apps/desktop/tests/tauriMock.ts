@@ -991,6 +991,7 @@ let conversationSuggestionsOverride: unknown[] | null = null;
 let conversationSuggestionSourcesOverride: unknown | null = null;
 let nextConversationSuggestionsError: string | null = null;
 let conversationSuggestionsDelayMs = 0;
+let runtimeSnapshotDelayMs = 0;
 let projectSettings = {
   cloneParentDir: null as string | null,
   codexDefaults: null as unknown,
@@ -1587,6 +1588,7 @@ export function resetTauriMockData() {
   conversationSuggestionSourcesOverride = null;
   nextConversationSuggestionsError = null;
   conversationSuggestionsDelayMs = 0;
+  runtimeSnapshotDelayMs = 0;
   projectSettings = { cloneParentDir: null, codexDefaults: null, githubBinding: null };
   mockPickedFolderPath = "C:\\Users\\mock";
   githubBindingStatus = {
@@ -1758,16 +1760,20 @@ export function setMockAgentTimelineDelay(delayMs: number) {
   agentTimelineDelayMs = delayMs;
 }
 
-export function setMockConversationSuggestions(items: unknown[]) {
+export function setMockConversationSuggestions(items: unknown[] | null) {
   conversationSuggestionsOverride = items;
 }
 
-export function setMockConversationSuggestionSources(sources: unknown) {
+export function setMockConversationSuggestionSources(sources: unknown | null) {
   conversationSuggestionSourcesOverride = sources;
 }
 
 export function setMockConversationSuggestionsDelay(delayMs: number) {
   conversationSuggestionsDelayMs = delayMs;
+}
+
+export function setMockRuntimeSnapshotDelay(delayMs: number) {
+  runtimeSnapshotDelayMs = delayMs;
 }
 
 export function failNextMockConversationSuggestions(message: string) {
@@ -2475,6 +2481,22 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         );
     }
 
+    case "task_list_sidebar_conversations":
+      return tasks
+        .filter((task) => !task.archived)
+        .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt)
+        .map((task) => ({
+          taskId: task.id,
+          projectId: task.projectId ?? null,
+          projectName: task.projectId
+            ? projects.find((project) => project.id === task.projectId)?.name ?? null
+            : null,
+          title: task.title,
+          createdAt: task.createdAt,
+          pinned: task.pinned,
+          route: task.projectId ? `/projects/${task.projectId}/tasks/${task.id}` : `/chats/${task.id}`,
+        }));
+
     case "task_get": {
       const id = String(args.id);
       const row = tasks.find((task) => !task.archived && task.id === id);
@@ -3065,6 +3087,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "chat_get_runtime_snapshot": {
       const taskId = String(args.taskId);
+      if (runtimeSnapshotDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, runtimeSnapshotDelayMs));
+      }
       const queuedCount = chatQueued[taskId]?.length ?? 0;
       const running = chatRunning[taskId] === true;
       return {

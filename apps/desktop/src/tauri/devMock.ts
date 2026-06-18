@@ -156,6 +156,23 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       const projectId = args.projectId ?? null;
       return clone(tasks.filter((task) => task.projectId === projectId)) as T;
     }
+    case "task_list_sidebar_conversations":
+      return clone(
+        tasks
+          .filter((task) => task.archived !== true)
+          .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt)
+          .map((task) => ({
+            taskId: task.id,
+            projectId: task.projectId ?? null,
+            projectName: task.projectId
+              ? projects.find((project) => project.id === task.projectId)?.name ?? null
+              : null,
+            title: task.title,
+            createdAt: task.createdAt,
+            pinned: task.pinned,
+            route: task.projectId ? `/projects/${task.projectId}/tasks/${task.id}` : `/chats/${task.id}`,
+          })),
+      ) as T;
     case "task_get":
       return clone(tasks.find((task) => task.id === text(args, "id")) ?? null) as T;
     case "task_promote":

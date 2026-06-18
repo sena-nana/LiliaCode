@@ -20,11 +20,17 @@ async function renderSettings(initialRoute = "/settings") {
   await router.push(initialRoute);
   await router.isReady();
 
-  return render(Settings, {
+  const view = render(Settings, {
     global: {
       plugins: [router],
     },
   });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+  return { ...view, router };
 }
 
 function lastInvokeInput(command: string): Record<string, unknown> | undefined {
@@ -104,6 +110,20 @@ describe("Settings provider switch", () => {
     expect(imports.container.querySelector(".conversation-import-page")).toBeInTheDocument();
     expect(imports.queryByRole("heading", { level: 1, name: "导入对话" }))
       .not.toBeInTheDocument();
+  });
+
+  it("设置页只在切到对应 tab 时加载重量 section", async () => {
+    mockInvoke.mockClear();
+    const view = await renderSettings("/settings?tab=appearance");
+
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "quota_usage_get_stats")).toBe(false);
+
+    await view.router.push("/settings?tab=quota");
+    await view.router.isReady();
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "quota_usage_get_stats")).toBe(true);
+    });
   });
 
   it("外观页可以切换侧边栏样式并写入本地偏好", async () => {
@@ -508,6 +528,27 @@ describe("Settings provider switch", () => {
     });
 
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
+  });
+
+  it("Agent 设置页会在首屏后再加载自定义 Agent 目录", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockClear();
+
+    const view = await renderSettings("/settings?tab=agent");
+
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_list_subagents"),
+    ).toBe(false);
+    expect(view.getByText("首屏加载后补齐自定义 Agent 目录…")).toBeInTheDocument();
+
+    await vi.runAllTimersAsync();
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_list_subagents"),
+      ).toBe(true);
+    });
+    expect(await view.findByText("Reviewer")).toBeInTheDocument();
   });
 
   it("Agent 设置页可以保存 subagent 模式开关", async () => {

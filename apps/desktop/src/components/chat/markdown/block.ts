@@ -1,6 +1,6 @@
 import { parseInlineMarkdown, parseInlineMarkdownLines } from "./inline";
 import { parseListBlock, parseListItem } from "./list";
-import { isMathBlockStart, parseMathBlock, renderMathToHtml } from "./math";
+import { isMathBlockStart, parseMathBlock } from "./math";
 import { isTableStart, parseTable } from "./table";
 import { makeBlock, type FencedCodeBlock, type MarkdownBlockNode } from "./types";
 
@@ -36,11 +36,9 @@ export function parseMarkdownBlocks(source: string): MarkdownBlockNode[] {
 
     const mathBlock = parseMathBlock(lines, index);
     if (mathBlock) {
-      const html = mathBlock.closed ? renderMathToHtml(mathBlock.text, true) : null;
-      if (html) {
+      if (mathBlock.closed) {
         parsedBlocks.push(makeBlock("math", key, {
           text: mathBlock.text,
-          html,
         }));
       } else {
         parsedBlocks.push(makeBlock("paragraph", key, {

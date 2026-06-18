@@ -2,6 +2,7 @@ import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
 import type { ChatConversationReference, ChatMessage } from "@lilia/contracts";
 import ChatBubble from "../src/components/chat/ChatBubble.vue";
+import { readChatBubbleDisplay } from "../src/components/chat/chatBubbleDisplay";
 import { serializeConversationReference } from "../src/services/chatConversationReferences";
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
@@ -107,5 +108,41 @@ describe("ChatBubble", () => {
       mime: "image/png",
       size: 42,
     });
+  });
+
+  it("同一消息快照复用派生结果，内容或附件变化后会失效", () => {
+    const attachments = [
+      {
+        id: "file-1",
+        name: "README.md",
+        path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
+        kind: "file",
+        size: 42,
+        exists: true,
+        mime: null,
+        directory: null,
+      },
+    ] satisfies ChatMessage["attachments"];
+    const item = message({
+      content: "先读这个",
+      attachments,
+    });
+
+    const first = readChatBubbleDisplay(item);
+    const second = readChatBubbleDisplay(item);
+    expect(second).toBe(first);
+
+    attachments[0] = {
+      ...attachments[0],
+      name: "GUIDE.md",
+    };
+    const third = readChatBubbleDisplay(item);
+    expect(third).not.toBe(first);
+    expect(third.unreferencedAttachments[0]?.name).toBe("GUIDE.md");
+
+    item.content = "内容更新";
+    const fourth = readChatBubbleDisplay(item);
+    expect(fourth).not.toBe(third);
+    expect(fourth.segments).toEqual([{ type: "text", text: "内容更新" }]);
   });
 });

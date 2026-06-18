@@ -10,7 +10,7 @@ use crate::BACKEND_CODEX;
 use super::events::emit_tasks_changed;
 use super::ordering::next_task_sort_order;
 use super::queries::{build_task, insert_task_with_deps, load_project_deps, load_task_deps};
-use super::types::{NewTask, TaskRow};
+use super::types::{NewTask, SidebarConversationSummaryRow, TaskRow};
 
 #[tauri::command]
 pub fn task_list(
@@ -53,6 +53,58 @@ pub fn task_list(
                 out.push(r.map_err(|e| format!("task_list: row 失败：{e}"))?);
             }
         }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn task_list_sidebar_conversations(
+    store: State<'_, LiliaStore>,
+) -> Result<Vec<SidebarConversationSummaryRow>, String> {
+    let conn = store.conn()?;
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT
+                   t.id,
+                   t.project_id,
+                   p.name,
+                   t.title,
+                   t.created_at,
+                   t.pinned
+               FROM tasks t
+               LEFT JOIN projects p ON p.id = t.project_id
+               WHERE t.archived = 0
+               ORDER BY t.pinned DESC, t.created_at DESC, t.sort_order ASC"#,
+        )
+        .map_err(|e| format!("task_list_sidebar_conversations: prepare 失败：{e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let task_id = row.get::<_, String>(0)?;
+            let project_id = row.get::<_, Option<String>>(1)?;
+            let project_name = row.get::<_, Option<String>>(2)?;
+            let title = row.get::<_, String>(3)?;
+            let created_at = row.get::<_, i64>(4)?;
+            let pinned = row.get::<_, i64>(5)? != 0;
+            let route = match project_id.as_deref() {
+                Some(project_id) => format!("/projects/{project_id}/tasks/{task_id}"),
+                None => format!("/chats/{task_id}"),
+            };
+            Ok(SidebarConversationSummaryRow {
+                task_id,
+                project_id,
+                project_name,
+                title,
+                created_at,
+                pinned,
+                route,
+            })
+        })
+        .map_err(|e| format!("task_list_sidebar_conversations: query 失败：{e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(
+            row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?,
+        );
     }
     Ok(out)
 }

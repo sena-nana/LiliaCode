@@ -59,6 +59,9 @@ describe("Plugins page", () => {
     ).toBe(true);
 
     await fireEvent.click(view.getByRole("button", { name: /新增 MCP/ }));
+    await waitFor(() => {
+      expect(view.getByPlaceholderText("weather-mcp")).toBeInTheDocument();
+    });
     await fireEvent.update(view.getByPlaceholderText("weather-mcp"), "linear");
     await fireEvent.update(view.getByPlaceholderText("node"), "uvx");
     await fireEvent.update(view.getByPlaceholderText("每行一个参数"), "linear-mcp");
@@ -111,6 +114,9 @@ describe("Plugins page", () => {
     ).toBe(true);
 
     await fireEvent.click(view.getByRole("button", { name: /新增 MCP/ }));
+    await waitFor(() => {
+      expect(view.getByPlaceholderText("weather-mcp")).toBeInTheDocument();
+    });
     await fireEvent.update(view.getByPlaceholderText("weather-mcp"), "codex-linear");
     await fireEvent.update(view.getByPlaceholderText("node"), "uvx");
     await fireEvent.update(view.getByPlaceholderText("每行一个参数"), "linear-mcp");
@@ -147,6 +153,9 @@ describe("Plugins page", () => {
     });
 
     await fireEvent.click(view.getByRole("button", { name: "编辑" }));
+    await waitFor(() => {
+      expect(view.getByDisplayValue("node project-hook.js")).toBeInTheDocument();
+    });
     const commandInput = view.getByDisplayValue("node project-hook.js");
     await fireEvent.update(commandInput, "node changed-hook.js");
     await fireEvent.click(view.getByRole("button", { name: "保存" }));

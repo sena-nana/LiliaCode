@@ -7,8 +7,9 @@ import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
+import { vContextMenu } from "../src/directives/contextMenu";
 import { createLiliaRouter } from "../src/router";
-import { TASKS } from "../src/data/tasks";
+import { ORPHAN_LIST, ORPHANS_LOADED, PROJECT_TASKS_LOADED, TASKS } from "../src/data/tasks";
 import {
   emitMockTimelineEvent,
   emitTauriEvent,
@@ -45,11 +46,23 @@ async function renderSecondaryPanel(initialRoute = "/") {
   const view = render(Wrapper, {
     global: {
       plugins: [router],
+      directives: {
+        contextMenu: vContextMenu,
+      },
       stubs: {
         transition: false,
       },
     },
   });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
   return { ...view, router };
 }
 
@@ -67,6 +80,13 @@ function getConversationRow(view: ReturnType<typeof render>, title: string): HTM
     throw new Error(`未找到对话行：${title}`);
   }
   return row;
+}
+
+async function findConversationRow(view: ReturnType<typeof render>, title: string): Promise<HTMLElement> {
+  await waitFor(() => {
+    expect(view.getByText(title)).toBeInTheDocument();
+  });
+  return getConversationRow(view, title);
 }
 
 function box(top: number, bottom: number): DOMRect {
@@ -222,6 +242,54 @@ describe("SecondaryPanel project tree expansion", () => {
     expect(orphansToggle).toBeInTheDocument();
   });
 
+  it("首屏会优先加载当前路由项目，再补齐其他已展开项目", async () => {
+    seedTreeExpansionState({
+      projects: {
+        lilia: true,
+        tools: true,
+      },
+      orphansExpanded: true,
+    });
+    TASKS.value = {};
+    PROJECT_TASKS_LOADED.value = {};
+    ORPHAN_LIST.value = [];
+    ORPHANS_LOADED.value = false;
+    mockInvoke.mockClear();
+
+    await renderSecondaryPanel("/projects/lilia");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(
+          ([cmd, args]) => cmd === "task_list" && args?.projectId === "lilia",
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(
+          ([cmd, args]) => cmd === "task_list" && args?.projectId === "tools",
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(
+          ([cmd, args]) => cmd === "task_list" && (args?.projectId ?? null) === null,
+        ),
+      ).toBe(true);
+    });
+
+    const taskListCalls = mockInvoke.mock.calls
+      .filter(([cmd]) => cmd === "task_list")
+      .map(([, args]) => args?.projectId ?? null);
+    expect(taskListCalls.indexOf("lilia")).toBeGreaterThan(-1);
+    expect(taskListCalls.indexOf("tools")).toBeGreaterThan(-1);
+    expect(taskListCalls.indexOf(null)).toBeGreaterThan(-1);
+    expect(taskListCalls.indexOf("lilia")).toBeLessThan(taskListCalls.indexOf("tools"));
+    expect(taskListCalls.indexOf("lilia")).toBeLessThan(taskListCalls.indexOf(null));
+  });
+
 
   it("用户切换后会写回本地存储", async () => {
     seedTreeExpansionState({
@@ -331,6 +399,7 @@ describe("SecondaryPanel project chat navigation", () => {
   it("顶部搜索会话后点击结果进入对应对话并关闭搜索", async () => {
     const view = await renderSecondaryPanel();
     const pushSpy = vi.spyOn(view.router, "push").mockResolvedValue(undefined);
+    mockInvoke.mockClear();
 
     await fireEvent.click(view.getByRole("button", { name: "搜索会话" }));
     await fireEvent.update(
@@ -348,6 +417,8 @@ describe("SecondaryPanel project chat navigation", () => {
     await waitFor(() => {
       expect(pushSpy).toHaveBeenCalledWith("/projects/lilia/tasks/t-002");
     });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list_sidebar_conversations")).toBe(true);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list")).toBe(false);
     expect(view.queryByPlaceholderText("搜索会话…")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();
   });
@@ -355,7 +426,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("归档当前打开的单条项目对话后会进入该项目的新对话", async () => {
     const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
-    const row = getConversationRow(view, "接入 Claude Code 会话发现");
+    const row = await findConversationRow(view, "接入 Claude Code 会话发现");
 
     await fireEvent.click(within(row).getByRole("button", { name: "归档" }));
     await fireEvent.click(
@@ -386,11 +457,16 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("统一列表模式隐藏项目分组和收集箱，并在项目会话右侧显示项目名", async () => {
     useSidebarDisplayMode().setSidebarDisplayMode("unified");
+    mockInvoke.mockClear();
     const view = await renderSecondaryPanel();
 
     expect(view.getByText("会话")).toBeInTheDocument();
     expect(view.queryByText("收集箱")).not.toBeInTheDocument();
     expect(view.queryByRole("button", { name: "添加项目" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list_sidebar_conversations")).toBe(true);
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list")).toBe(false);
 
     const projectRow = await view.findByText("打通 tsconfig paths 搜索");
     const projectConversation = projectRow.closest(".sb-tree__row--unified");
@@ -585,7 +661,7 @@ describe("SecondaryPanel project chat navigation", () => {
     });
 
     const view = await renderSecondaryPanel();
-    const row = getConversationRow(view, "整理窗口快捷键");
+    const row = await findConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
       expect(within(row).getByLabelText("对话中")).toHaveClass(
@@ -684,7 +760,7 @@ describe("SecondaryPanel project chat navigation", () => {
 
   it("切换侧边栏对话不会调用打断接口", async () => {
     const view = await renderSecondaryPanel("/projects/lilia/tasks/t-001");
-    const row = getConversationRow(view, "打通 tsconfig paths 搜索");
+    const row = await findConversationRow(view, "打通 tsconfig paths 搜索");
     mockInvoke.mockClear();
 
     await fireEvent.click(row);

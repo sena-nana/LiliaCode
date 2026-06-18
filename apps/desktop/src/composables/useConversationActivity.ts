@@ -9,6 +9,7 @@ import {
   onDone,
   onTurnStarted,
 } from "../services/chat";
+import { measurePerfAsync } from "../utils/perf";
 
 export type ConversationActivity = "running" | "requires_action" | "completed" | "error";
 
@@ -22,8 +23,14 @@ interface ConversationActivityState {
 const states = reactive<Record<string, ConversationActivityState>>({});
 const hydratedTaskIds = new Set<string>();
 const timelineRequestIdsByEventId = new Map<string, string>();
+const pendingHydrationQueue = new Map<string, { priority: number; seq: number }>();
+const pendingHydrationTaskIds = new Set<string>();
+const activeHydrationTaskIds = new Set<string>();
+const hydrationWaiters = new Set<{ taskIds: Set<string>; resolve: () => void }>();
+const HYDRATION_CONCURRENCY = 3;
 let installed = false;
 let unlistenAll: UnlistenFn[] = [];
+let hydrationSeq = 0;
 
 function ensureState(taskId: string): ConversationActivityState {
   const existing = states[taskId];
@@ -111,6 +118,13 @@ export function resetConversationActivity() {
   }
   hydratedTaskIds.clear();
   timelineRequestIdsByEventId.clear();
+  pendingHydrationQueue.clear();
+  pendingHydrationTaskIds.clear();
+  activeHydrationTaskIds.clear();
+  for (const waiter of hydrationWaiters) {
+    waiter.resolve();
+  }
+  hydrationWaiters.clear();
 }
 
 export function conversationActivityForTask(taskId: string): ConversationActivity | null {
@@ -185,49 +199,133 @@ function timelineRequiresActionRequestIds(events: AgentTimelineEvent[]): string[
   return [...requestIds];
 }
 
-export async function hydrateConversationActivities(taskIds: string[]): Promise<void> {
-  const pendingTaskIds = Array.from(new Set(taskIds.filter(Boolean))).filter((taskId) =>
-    !isDraftConversationId(taskId) &&
-    !hydratedTaskIds.has(taskId) &&
-    !states[taskId]
-  );
-  if (pendingTaskIds.length === 0) return;
+export interface HydrateConversationActivityOptions {
+  priorityTaskIds?: string[];
+}
 
-  const entries = await Promise.all(pendingTaskIds.map(async (taskId) => {
-    try {
-      const [snapshot, timeline] = await Promise.all([
-        getRuntimeSnapshot(taskId),
-        listAgentTimeline(taskId),
-      ]);
-      return { taskId, snapshot, timeline };
-    } catch (err) {
-      console.error("[conversation-activity] hydrate failed", taskId, err);
-      return null;
+function shouldSkipHydration(taskId: string): boolean {
+  return !taskId ||
+    isDraftConversationId(taskId) ||
+    hydratedTaskIds.has(taskId) ||
+    !!states[taskId];
+}
+
+function collectPendingTaskIds(taskIds: string[]): string[] {
+  return Array.from(new Set(taskIds.filter(Boolean))).filter((taskId) => !shouldSkipHydration(taskId));
+}
+
+function resolveHydrationWaiters() {
+  for (const waiter of [...hydrationWaiters]) {
+    const done = [...waiter.taskIds].every((taskId) =>
+      shouldSkipHydration(taskId) ||
+      (!pendingHydrationTaskIds.has(taskId) && !activeHydrationTaskIds.has(taskId))
+    );
+    if (!done) continue;
+    hydrationWaiters.delete(waiter);
+    waiter.resolve();
+  }
+}
+
+function nextQueuedHydrationTaskId(): string | null {
+  let nextTaskId: string | null = null;
+  let nextPriority = Number.POSITIVE_INFINITY;
+  let nextSeq = Number.POSITIVE_INFINITY;
+  for (const [taskId, entry] of pendingHydrationQueue) {
+    if (
+      entry.priority < nextPriority ||
+      (entry.priority === nextPriority && entry.seq < nextSeq)
+    ) {
+      nextTaskId = taskId;
+      nextPriority = entry.priority;
+      nextSeq = entry.seq;
     }
-  }));
+  }
+  return nextTaskId;
+}
 
-  for (const entry of entries) {
-    if (!entry) continue;
-    const { taskId, snapshot, timeline } = entry;
+async function hydrateSingleConversationActivity(taskId: string) {
+  try {
+    const [snapshot, timeline] = await Promise.all([
+      measurePerfAsync(
+        "conversation.activity.runtime",
+        () => getRuntimeSnapshot(taskId),
+        { detail: taskId },
+      ),
+      measurePerfAsync(
+        "conversation.activity.timeline",
+        () => listAgentTimeline(taskId),
+        { detail: taskId },
+      ),
+    ]);
     hydratedTaskIds.add(taskId);
-    if (states[taskId]) continue;
+    if (states[taskId]) return;
     const runtimeActivity = runtimePhaseToConversationActivity(snapshot.phase);
     if (runtimeActivity === "error") {
       markConversationError(taskId);
-      continue;
+      return;
     }
     if (runtimeActivity === "running") {
       markConversationRunning(taskId);
-      continue;
+      return;
     }
     if (timelineHasError(timeline)) {
       markConversationError(taskId);
-      continue;
+      return;
     }
     for (const requestId of timelineRequiresActionRequestIds(timeline)) {
       markConversationRequiresAction(taskId, requestId);
     }
+  } catch (err) {
+    console.error("[conversation-activity] hydrate failed", taskId, err);
   }
+}
+
+function pumpConversationActivityHydrationQueue() {
+  while (activeHydrationTaskIds.size < HYDRATION_CONCURRENCY) {
+    const taskId = nextQueuedHydrationTaskId();
+    if (!taskId) break;
+    pendingHydrationQueue.delete(taskId);
+    pendingHydrationTaskIds.delete(taskId);
+    if (shouldSkipHydration(taskId) || activeHydrationTaskIds.has(taskId)) {
+      continue;
+    }
+    activeHydrationTaskIds.add(taskId);
+    void hydrateSingleConversationActivity(taskId).finally(() => {
+      activeHydrationTaskIds.delete(taskId);
+      resolveHydrationWaiters();
+      pumpConversationActivityHydrationQueue();
+    });
+  }
+  resolveHydrationWaiters();
+}
+
+export async function hydrateConversationActivities(
+  taskIds: string[],
+  options: HydrateConversationActivityOptions = {},
+): Promise<void> {
+  const pendingTaskIds = collectPendingTaskIds(taskIds);
+  if (pendingTaskIds.length === 0) return;
+  const requestedTaskIds = new Set(pendingTaskIds);
+  const priorityOrder = new Map<string, number>();
+  for (const [index, taskId] of Array.from(new Set(options.priorityTaskIds ?? [])).entries()) {
+    if (requestedTaskIds.has(taskId)) {
+      priorityOrder.set(taskId, index);
+    }
+  }
+  for (const [index, taskId] of pendingTaskIds.entries()) {
+    const priority = priorityOrder.get(taskId) ?? ((options.priorityTaskIds?.length ?? 0) + index);
+    const existing = pendingHydrationQueue.get(taskId);
+    if (!existing || priority < existing.priority) {
+      pendingHydrationQueue.set(taskId, { priority, seq: ++hydrationSeq });
+    }
+    pendingHydrationTaskIds.add(taskId);
+  }
+  pumpConversationActivityHydrationQueue();
+  await new Promise<void>((resolve) => {
+    const waiter = { taskIds: requestedTaskIds, resolve };
+    hydrationWaiters.add(waiter);
+    resolveHydrationWaiters();
+  });
 }
 
 function applyTimelineActivity(event: AgentTimelineEvent) {

@@ -5,9 +5,9 @@ import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, Loader2, Messa
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
-import { vContextMenu } from "../../directives/contextMenu";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
+import { scheduleTaskDetailPreload } from "../../router";
 import { archiveTask, toggleTaskPin } from "../../services/tasksStore";
 import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";
 
@@ -83,6 +83,11 @@ async function onPinClick(e: MouseEvent) {
 
 function onRowLeave() {
   confirming.value = false;
+}
+
+function preloadConversationDetail() {
+  if (!props.to) return;
+  scheduleTaskDetailPreload(`sidebar-task:${props.task.id}`);
 }
 
 async function openInPopup() {
@@ -170,6 +175,8 @@ function onClick() {
     @click="onClick"
     @dragstart.prevent
     @auxclick="onAuxClick"
+    @mouseenter="preloadConversationDetail"
+    @focusin="preloadConversationDetail"
     @mouseleave="onRowLeave"
   >
     <span class="sb-tree__name">{{ task.title }}</span>

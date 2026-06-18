@@ -2,19 +2,23 @@ import { computed, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
+  AskUserResult,
   ChatAttachment,
   ChatContextUsage,
   ChatComposerState,
   ChatConversationReference,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
+  LiliaReviewTarget,
 } from "@lilia/contracts";
+import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import {
   useAskUserForTask,
   usePendingAsksForTask,
 } from "../../composables/useAskUser";
 import {
   usePendingAgentActionsForTask,
+  type PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
 import {
   usePendingAgentInteractionsForTask,
@@ -26,7 +30,6 @@ import {
   usePendingToolConsentsForTask,
   useToolConsentForTask,
 } from "../../composables/useToolConsentBridge";
-import { useGuideDispatch } from "../../composables/useGuideDispatch";
 import {
   loadAgentInteractionSettings,
   useAgentInteractionSettings,
@@ -45,22 +48,75 @@ import {
   sendMessage,
   setComposerState,
 } from "../../services/chat";
-import type { SendMessageInput } from "../../services/chat";
+import type {
+  SendMessageInput,
+  ToolConsentDecision,
+  ToolConsentUpdatedInput,
+} from "../../services/chat";
 import { serializeAttachmentReference } from "../../components/chat/composerParts";
 import { stripSerializedConversationReferences } from "../../services/chatConversationReferences";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
-import { useLiliaWorkflowActions } from "./useLiliaWorkflowActions";
 import type { LiliaWorkflowSendAgentMessageInput } from "./useLiliaWorkflowActions";
 import {
   clearPendingInteractionsForTask,
   hydratePendingInteractions,
-  usePendingInteractionActions,
 } from "./usePendingInteractionActions";
 import type { ChatRuntimePhase } from "@lilia/contracts";
+import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
+type GuideDispatchWindow = "tool" | "user" | "idle";
+
+interface GuideDispatchController {
+  createGuideFromComposer: (
+    content: string,
+    outgoingAttachments?: ChatAttachment[],
+  ) => Promise<void>;
+  dispatchGuide: (todo: TaskTodo) => Promise<void>;
+  scheduleGuideInsertion: (windowKind: GuideDispatchWindow) => Promise<void>;
+}
+
+interface PendingInteractionResolvers {
+  onResolveAskUser: (result: AskUserResult) => void;
+  onResolveToolConsent: (
+    decision: ToolConsentDecision,
+    message?: string,
+    updatedInput?: ToolConsentUpdatedInput,
+  ) => Promise<void>;
+  onResolvePendingAgentAction: (resolution: PendingAgentActionResolution) => Promise<void>;
+}
+
+interface LiliaWorkflowActionHandlers {
+  onStartLiliaReview: (
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
+    target: LiliaReviewTarget,
+  ) => Promise<void>;
+  onStartLiliaFixSuggestion: (
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
+    target: LiliaReviewTarget,
+  ) => Promise<void>;
+  onStartLiliaCompact: () => Promise<void>;
+  onStartSessionFork: () => Promise<void>;
+  onStartLiliaBatchApply: (input: LiliaBatchApplyInput) => Promise<void>;
+  onSetLiliaGoal: (objective: string) => Promise<void>;
+  onRefreshLiliaGoal: () => Promise<void>;
+  onClearLiliaGoal: () => Promise<void>;
+}
+
+interface TaskLoadCycle {
+  seq: number;
+  taskId: string;
+  projectId?: string;
+  pendingBeforeLoad: Set<string>;
+  timelineEventIdsBeforeLoad: Set<string>;
+  runtimeSeqBeforeLoad: number;
+}
 
 export function useTaskComposerController(options: {
   props: TaskDetailRouteProps;
@@ -100,6 +156,9 @@ export function useTaskComposerController(options: {
   let loadSeq = 0;
   let runtimeEventSeq = 0;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
+  let guideDispatchLoad: Promise<GuideDispatchController> | null = null;
+  let pendingInteractionResolversLoad: Promise<PendingInteractionResolvers> | null = null;
+  let liliaWorkflowActionsLoad: Promise<LiliaWorkflowActionHandlers> | null = null;
 
   const composerForView = computed<ChatComposerState>(() =>
     withActiveBackend(composer.value ?? {
@@ -142,6 +201,58 @@ export function useTaskComposerController(options: {
       taskId: props.taskId,
       backend: activeBackend.value,
     };
+  }
+
+  async function getGuideDispatch(): Promise<GuideDispatchController> {
+    if (!guideDispatchLoad) {
+      guideDispatchLoad = measurePerfAsync(
+        "task-detail.guide-dispatch.load",
+        async () => {
+          const { useGuideDispatch } = await import("../../composables/useGuideDispatch");
+          return useGuideDispatch({
+            taskId: () => props.taskId,
+            ensureReady: context.ensureTaskReadyForMessage,
+            sendAgentMessage: (content, outgoingAttachments, guideId) =>
+              sendAgentMessage({ turn: { content, outgoingAttachments, guideId } }),
+            ensureDispatchReady: async () => {
+              await ensureComposerLoaded();
+            },
+            hasPendingAgentAction: () =>
+              pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
+            isTurnRunning: () => isTurnRunning.value,
+            clearAttachments: () => {
+              attachments.value = [];
+            },
+            reportError: (message) => {
+              timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
+            },
+          });
+        },
+        { detail: props.taskId },
+      ).catch((err) => {
+        guideDispatchLoad = null;
+        throw err;
+      });
+    }
+    return guideDispatchLoad;
+  }
+
+  async function createGuideFromComposer(
+    content: string,
+    outgoingAttachments: ChatAttachment[] = [],
+  ) {
+    const guideDispatch = await getGuideDispatch();
+    await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
+  }
+
+  async function dispatchGuide(todo: TaskTodo) {
+    const guideDispatch = await getGuideDispatch();
+    await guideDispatch.dispatchGuide(todo);
+  }
+
+  async function scheduleGuideInsertion(windowKind: GuideDispatchWindow) {
+    const guideDispatch = await getGuideDispatch();
+    await guideDispatch.scheduleGuideInsertion(windowKind);
   }
 
   async function sendAgentMessage(input: SendAgentMessageInput) {
@@ -211,7 +322,7 @@ export function useTaskComposerController(options: {
   ) {
     if (!context.hasContext.value) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
-      await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
+      await createGuideFromComposer(content, outgoingAttachments);
       return;
     }
 
@@ -244,16 +355,91 @@ export function useTaskComposerController(options: {
     }
   }
 
-  const liliaWorkflowActions = useLiliaWorkflowActions({
-    hasContext: context.hasContext,
-    isTurnRunning,
-    blockingPendingAgentActions,
-    attachments,
-    sendAgentMessage,
-  });
+  async function getLiliaWorkflowActions() {
+    if (!liliaWorkflowActionsLoad) {
+      liliaWorkflowActionsLoad = measurePerfAsync(
+        "task-detail.workflows.load",
+        async () => {
+          const { useLiliaWorkflowActions } = await import("./useLiliaWorkflowActions");
+          return useLiliaWorkflowActions({
+            hasContext: context.hasContext,
+            isTurnRunning,
+            blockingPendingAgentActions,
+            attachments,
+            sendAgentMessage,
+          });
+        },
+        { detail: props.taskId },
+      ).catch((err) => {
+        liliaWorkflowActionsLoad = null;
+        throw err;
+      });
+    }
+    return liliaWorkflowActionsLoad;
+  }
+
+  async function onStartLiliaReview(
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
+    target: LiliaReviewTarget,
+  ) {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onStartLiliaReview(
+      content,
+      outgoingAttachments,
+      outgoingConversationReferences,
+      target,
+    );
+  }
+
+  async function onStartLiliaFixSuggestion(
+    content: string,
+    outgoingAttachments: ChatAttachment[],
+    outgoingConversationReferences: ChatConversationReference[],
+    target: LiliaReviewTarget,
+  ) {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onStartLiliaFixSuggestion(
+      content,
+      outgoingAttachments,
+      outgoingConversationReferences,
+      target,
+    );
+  }
+
+  async function onStartLiliaCompact() {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onStartLiliaCompact();
+  }
+
+  async function onStartSessionFork() {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onStartSessionFork();
+  }
+
+  async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onStartLiliaBatchApply(input);
+  }
+
+  async function onSetLiliaGoal(objective: string) {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onSetLiliaGoal(objective);
+  }
+
+  async function onRefreshLiliaGoal() {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onRefreshLiliaGoal();
+  }
+
+  async function onClearLiliaGoal() {
+    const actions = await getLiliaWorkflowActions();
+    await actions.onClearLiliaGoal();
+  }
 
   function onInsertGuide(todo: TaskTodo) {
-    void guideDispatch.dispatchGuide(todo);
+    void dispatchGuide(todo);
   }
 
   function onInsertDraftText(text: string) {
@@ -275,14 +461,50 @@ export function useTaskComposerController(options: {
     }
   }
 
-  const pendingInteractionActions = usePendingInteractionActions({
-    taskId: () => props.taskId,
-    pendingAskUser,
-    pendingToolConsent,
-    pendingToolConsents,
-    pendingAgentInteractions,
-    pendingArchitectureChanges,
-  });
+  async function getPendingInteractionResolvers() {
+    if (!pendingInteractionResolversLoad) {
+      pendingInteractionResolversLoad = measurePerfAsync(
+        "task-detail.pending-interactions.load",
+        async () => {
+          const { usePendingInteractionResolvers } = await import("./usePendingInteractionResolvers");
+          return usePendingInteractionResolvers({
+            taskId: () => props.taskId,
+            pendingAskUser,
+            pendingToolConsent,
+            pendingToolConsents,
+            pendingAgentInteractions,
+            pendingArchitectureChanges,
+          });
+        },
+        { detail: props.taskId },
+      ).catch((err) => {
+        pendingInteractionResolversLoad = null;
+        throw err;
+      });
+    }
+    return pendingInteractionResolversLoad;
+  }
+
+  async function onResolveAskUser(result: AskUserResult) {
+    const resolvers = await getPendingInteractionResolvers();
+    resolvers.onResolveAskUser(result);
+  }
+
+  async function onResolveToolConsent(
+    decision: ToolConsentDecision,
+    message?: string,
+    updatedInput?: ToolConsentUpdatedInput,
+  ) {
+    const resolvers = await getPendingInteractionResolvers();
+    await resolvers.onResolveToolConsent(decision, message, updatedInput);
+  }
+
+  async function onResolvePendingAgentAction(
+    resolution: PendingAgentActionResolution,
+  ) {
+    const resolvers = await getPendingInteractionResolvers();
+    await resolvers.onResolvePendingAgentAction(resolution);
+  }
 
   async function onComposerUpdate(next: ChatComposerState) {
     const normalized = withActiveBackend(next);
@@ -391,71 +613,152 @@ export function useTaskComposerController(options: {
     return ids;
   }
 
-  async function loadAll() {
-    const seq = ++loadSeq;
-    const taskId = props.taskId;
-    const projectId = props.projectId;
-    const pendingBeforeLoad = currentPendingRequestIds();
-    const timelineEventIdsBeforeLoad = new Set(
-      timeline.persistedTimelineEvents.value.map((event) => event.id),
-    );
-    const runtimeSeqBeforeLoad = runtimeEventSeq;
+  function applyRuntimeSnapshotForCurrentLoad(options: {
+    taskId: string;
+    projectId?: string;
+    seq: number;
+    runtimeSeqBeforeLoad: number;
+    runtimeSnapshot: Awaited<ReturnType<typeof getRuntimeSnapshot>> | null;
+  }) {
+    const { taskId, projectId, seq, runtimeSeqBeforeLoad, runtimeSnapshot } = options;
+    if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+    if (runtimeSeqBeforeLoad !== runtimeEventSeq) return;
+    contextUsage.value = runtimeSnapshot?.contextUsage ?? null;
+    isTurnRunning.value = runtimeSnapshot
+      ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
+      : false;
+    if (runtimeSnapshot?.phase === "abandoned") {
+      clearPendingInteractionsForTask(taskId);
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
+        runtimeAbandonedMessage(runtimeSnapshot),
+      ));
+    }
+    if (runtimeSnapshot?.rollback?.rolledBack) {
+      restoreDraftFromRollback(runtimeSnapshot.rollback);
+      void ackRestoredRollback(taskId);
+    }
+  }
+
+  function scheduleRuntimeSnapshotHydration(options: {
+    taskId: string;
+    projectId?: string;
+    seq: number;
+    runtimeSeqBeforeLoad: number;
+  }) {
+    const { taskId, projectId, seq, runtimeSeqBeforeLoad } = options;
+    scheduleAfterPaint(() => {
+      if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+      void measurePerfAsync(
+        "task-detail.runtime-snapshot",
+        async () => {
+          const runtimeSnapshot = await getRuntimeSnapshot(taskId).catch((err) => {
+            console.error("[chat] getRuntimeSnapshot failed", err);
+            return null;
+          });
+          applyRuntimeSnapshotForCurrentLoad({
+            taskId,
+            projectId,
+            seq,
+            runtimeSeqBeforeLoad,
+            runtimeSnapshot,
+          });
+        },
+        { detail: taskId },
+      );
+    });
+  }
+
+  function beginLoadCycle(): TaskLoadCycle {
+    const cycle: TaskLoadCycle = {
+      seq: ++loadSeq,
+      taskId: props.taskId,
+      projectId: props.projectId,
+      pendingBeforeLoad: currentPendingRequestIds(),
+      timelineEventIdsBeforeLoad: new Set(
+        timeline.persistedTimelineEvents.value.map((event) => event.id),
+      ),
+      runtimeSeqBeforeLoad: runtimeEventSeq,
+    };
     if (context.isPopup.value && !context.conversationRouteState.value.isLiveDraft) {
       context.popupContentReady.value = false;
     }
     composer.value = null;
-    const existingComposerLoad = composerLoad;
-    const nextComposerLoad = existingComposerLoad ??
-      loadComposerForCurrentTask(taskId, seq).catch((err) => {
+    composerLoad = null;
+    return cycle;
+  }
+
+  function finalizeLoadCycle(cycle: TaskLoadCycle) {
+    if (
+      cycle.seq === loadSeq &&
+      cycle.taskId === props.taskId &&
+      cycle.projectId === props.projectId &&
+      context.isPopup.value
+    ) {
+      context.popupContentReady.value = true;
+    }
+  }
+
+  function scheduleComposerStateHydration(cycle: TaskLoadCycle) {
+    scheduleAfterPaint(() => {
+      if (
+        cycle.seq !== loadSeq ||
+        cycle.taskId !== props.taskId ||
+        cycle.projectId !== props.projectId ||
+        composer.value
+      ) {
+        return;
+      }
+      const pending = composerLoad ?? measurePerfAsync(
+        "task-detail.composer-state.load",
+        () => loadComposerForCurrentTask(cycle.taskId, cycle.seq),
+        { detail: cycle.taskId },
+      ).catch((err) => {
         console.error("[chat] getComposerState failed", err);
         return null;
       });
-    const runtimeSnapshotLoad = getRuntimeSnapshot(taskId).catch((err) => {
-      console.error("[chat] getRuntimeSnapshot failed", err);
-      return null;
+      composerLoad = pending;
+      void pending.finally(() => {
+        if (composerLoad === pending) composerLoad = null;
+      });
     });
-    if (!existingComposerLoad) composerLoad = nextComposerLoad;
+  }
+
+  async function loadAll() {
+    const cycle = beginLoadCycle();
     try {
-      const [events, comp, runtimeSnapshot] = await Promise.all([
-        timeline.loadTimelineEvents(taskId),
-        nextComposerLoad,
-        runtimeSnapshotLoad,
-      ]);
-      if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+      const events = await measurePerfAsync(
+        "task-detail.timeline.load",
+        () => timeline.loadTimelineEvents(cycle.taskId),
+        { detail: cycle.taskId },
+      );
+      if (
+        cycle.seq !== loadSeq ||
+        cycle.taskId !== props.taskId ||
+        cycle.projectId !== props.projectId
+      ) {
+        return;
+      }
       const timelineEventIdsToPreserve = new Set(
         timeline.persistedTimelineEvents.value
-          .filter((event) => !timelineEventIdsBeforeLoad.has(event.id))
+          .filter((event) => !cycle.timelineEventIdsBeforeLoad.has(event.id))
           .map((event) => event.id),
       );
       timeline.applyLoadedTimelineEvents(events, timelineEventIdsToPreserve);
       const activeRequestIds = hydratePendingInteractions(events, props.taskId);
       for (const requestId of currentPendingRequestIds()) {
-        if (!pendingBeforeLoad.has(requestId)) activeRequestIds.add(requestId);
+        if (!cycle.pendingBeforeLoad.has(requestId)) activeRequestIds.add(requestId);
       }
-      clearPendingInteractionsForTask(taskId, { keepRequestIds: activeRequestIds });
-      if (runtimeSeqBeforeLoad === runtimeEventSeq) {
-        contextUsage.value = runtimeSnapshot?.contextUsage ?? null;
-        isTurnRunning.value = runtimeSnapshot
-          ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
-          : false;
-        if (runtimeSnapshot?.phase === "abandoned") {
-          clearPendingInteractionsForTask(taskId);
-          timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
-            runtimeAbandonedMessage(runtimeSnapshot),
-          ));
-        }
-        if (runtimeSnapshot?.rollback?.rolledBack) {
-          restoreDraftFromRollback(runtimeSnapshot.rollback);
-          void ackRestoredRollback(taskId);
-        }
-      }
-      if (!comp) return;
+      clearPendingInteractionsForTask(cycle.taskId, { keepRequestIds: activeRequestIds });
+      scheduleRuntimeSnapshotHydration({
+        taskId: cycle.taskId,
+        projectId: cycle.projectId,
+        seq: cycle.seq,
+        runtimeSeqBeforeLoad: cycle.runtimeSeqBeforeLoad,
+      });
     } finally {
-      if (composerLoad === nextComposerLoad) composerLoad = null;
-      if (seq === loadSeq && taskId === props.taskId && projectId === props.projectId) {
-        if (context.isPopup.value) context.popupContentReady.value = true;
-      }
+      finalizeLoadCycle(cycle);
     }
+    scheduleComposerStateHydration(cycle);
   }
 
   async function installRuntimeListeners(): Promise<UnlistenFn[]> {
@@ -465,7 +768,7 @@ export function useTaskComposerController(options: {
         timeline.upsertTimelineEvent(e);
         hydratePendingInteractions([e], props.taskId);
         if (isAgentTimelineToolWindowKind(e.kind)) {
-          void guideDispatch.scheduleGuideInsertion("tool");
+          void scheduleGuideInsertion("tool");
         }
       }),
       onAgentTimelineBatch((e) => {
@@ -473,7 +776,7 @@ export function useTaskComposerController(options: {
         timeline.queueTimelineEvents(e.events);
         hydratePendingInteractions(e.events, props.taskId);
         if (e.events.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
-          void guideDispatch.scheduleGuideInsertion("tool");
+          void scheduleGuideInsertion("tool");
         }
       }),
       onTurnStarted((e) => {
@@ -495,13 +798,16 @@ export function useTaskComposerController(options: {
           }
           restoreDraftFromRollback(e.rollback);
         }
-        void guideDispatch.scheduleGuideInsertion("idle");
-      }),
-      onContextUsage((e) => {
-        if (e.taskId !== props.taskId) return;
-        contextUsage.value = e;
+        void scheduleGuideInsertion("idle");
       }),
     ]);
+  }
+
+  async function installContextUsageListener(): Promise<UnlistenFn> {
+    return await onContextUsage((e) => {
+      if (e.taskId !== props.taskId) return;
+      contextUsage.value = e;
+    });
   }
 
   function resetForRouteChange() {
@@ -515,25 +821,6 @@ export function useTaskComposerController(options: {
   function canAcceptInteractiveDrop(): boolean {
     return nonInterruptMode.value || (!pendingAskUser.value && !pendingToolConsent.value);
   }
-
-  const guideDispatch = useGuideDispatch({
-    taskId: () => props.taskId,
-    ensureReady: context.ensureTaskReadyForMessage,
-    sendAgentMessage: (content, outgoingAttachments, guideId) =>
-      sendAgentMessage({ turn: { content, outgoingAttachments, guideId } }),
-    ensureDispatchReady: async () => {
-      await ensureComposerLoaded();
-    },
-    hasPendingAgentAction: () =>
-      pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
-    isTurnRunning: () => isTurnRunning.value,
-    clearAttachments: () => {
-      attachments.value = [];
-    },
-    reportError: (message) => {
-      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
-    },
-  });
 
   return {
     composer,
@@ -560,19 +847,29 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onExecuteSlashCommand,
-    ...liliaWorkflowActions,
+    onStartLiliaReview,
+    onStartLiliaFixSuggestion,
+    onStartLiliaCompact,
+    onStartSessionFork,
+    onStartLiliaBatchApply,
+    onSetLiliaGoal,
+    onRefreshLiliaGoal,
+    onClearLiliaGoal,
     onInsertGuide,
     onInsertDraftText,
     onInterrupt,
-    ...pendingInteractionActions,
+    onResolveAskUser,
+    onResolveToolConsent,
+    onResolvePendingAgentAction,
     onComposerUpdate,
     onRetryTimelineEvent,
     loadAll,
     loadAgentInteractionSettings,
     installRuntimeListeners,
+    installContextUsageListener,
     resetForRouteChange,
     canAcceptInteractiveDrop,
-    scheduleUserGuideInsertion: () => guideDispatch.scheduleGuideInsertion("user"),
+    scheduleUserGuideInsertion: () => scheduleGuideInsertion("user"),
   };
 }
 

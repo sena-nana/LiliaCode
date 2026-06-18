@@ -11,7 +11,7 @@ import type {
   ToolConsentUpdatedInput,
 } from "../../services/chat";
 
-interface UseComposerPendingInteractionOptions {
+export interface UseComposerPendingInteractionOptions {
   clearContextState: () => void;
   pendingAsk: ComputedRef<PendingAsk | null | undefined>;
   queueResize: () => void;
@@ -220,3 +220,5 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     toolSubtitle,
   };
 }
+
+export type ComposerPendingInteractionController = ReturnType<typeof useComposerPendingInteraction>;

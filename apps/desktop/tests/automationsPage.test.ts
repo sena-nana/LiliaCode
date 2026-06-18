@@ -56,7 +56,11 @@ function lastInvokeInput(command: string) {
     .at(-1)?.[1];
 }
 
-function renderAutomations() {
+function invokeCount(command: string) {
+  return mockInvoke.mock.calls.filter(([calledCommand]) => calledCommand === command).length;
+}
+
+async function renderAutomations() {
   document.getElementById("automation-sidebar-host")?.closest("aside")?.remove();
   const sidebar = document.createElement("aside");
   sidebar.setAttribute("aria-label", "自动化列表");
@@ -67,20 +71,46 @@ function renderAutomations() {
   host.id = "automation-sidebar-host";
   sidebar.appendChild(host);
   document.body.appendChild(sidebar);
-  return render(Automations);
+  const view = render(Automations);
+  await view.findByRole("complementary", { name: "自动化列表" }, { timeout: 5000 });
+  await view.findByRole("group", { name: "自动化操作" }, { timeout: 5000 });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  return view;
 }
 
-function workflowNameInput(view: ReturnType<typeof renderAutomations>) {
+type AutomationsView = Awaited<ReturnType<typeof renderAutomations>>;
+
+function workflowNameInput(view: AutomationsView) {
   return within(view.getByRole("group", { name: "自动化操作" })).getByRole("textbox", {
     name: "自动化名称",
   });
 }
 
-async function editWorkflowName(view: ReturnType<typeof renderAutomations>, value: string) {
+async function waitForInspectorReady(view: AutomationsView) {
+  const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+  await waitFor(() => {
+    expect(inspector).toHaveAttribute("aria-busy", "false");
+    expect(within(inspector).getByText("作用域")).toBeInTheDocument();
+  });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  return inspector;
+}
+
+async function editWorkflowName(view: AutomationsView, value: string) {
   const input = workflowNameInput(view);
   await fireEvent.pointerDown(input);
   await fireEvent.update(input, value);
   return input;
+}
+
+async function waitForWorkflowActionEnabled(view: AutomationsView, name: string) {
+  await waitFor(() => {
+    expect(view.getByRole("button", { name })).toBeEnabled();
+  });
 }
 
 describe("Automations page", () => {
@@ -95,11 +125,11 @@ describe("Automations page", () => {
       dimensions: { value: { width: 740, height: 470 } },
       viewport: { value: { x: 18, y: -12, zoom: 1.5 } },
     } as never);
-    const view = renderAutomations();
+    const view = await renderAutomations();
 
     await view.findByRole("complementary", { name: "自动化检查器" }, { timeout: 5000 });
     const list = view.getByRole("complementary", { name: "自动化列表" });
-    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+    const inspector = await waitForInspectorReady(view);
 
     await waitFor(() => {
       expect(within(list).getByRole("button", { name: /任务完成后复盘/ })).toBeInTheDocument();
@@ -130,7 +160,6 @@ describe("Automations page", () => {
     expect(zoomIn).toHaveBeenCalled();
     expect(zoomOut).toHaveBeenCalled();
     expect(fitView).toHaveBeenCalledWith({ padding: 0.2 });
-    expect(within(inspector).getByText("作用域")).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "Lilia" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "task_created" })).toBeInTheDocument();
     expect(within(inspector).getByRole("button", { name: "task_status_changed" })).toBeInTheDocument();
@@ -144,7 +173,9 @@ describe("Automations page", () => {
       expect(workflowNameInput(view)).toHaveValue("未命名自动化");
       expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
     });
-    expect(view.getByRole("button", { name: "添加事件触发" })).toBeEnabled();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "添加事件触发" })).toBeEnabled();
+    });
 
     const newWorkflowRow = within(list).getByRole("button", { name: /未命名自动化/ });
     await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "删除" }));
@@ -157,9 +188,42 @@ describe("Automations page", () => {
     });
   });
 
+  it("运行历史与检查器内容在首屏后异步加载", async () => {
+    const view = await renderAutomations();
+    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+
+    expect(inspector).toHaveAttribute("aria-busy", "true");
+    expect(within(inspector).getByText("首屏加载后补齐检查器与运行历史…")).toBeInTheDocument();
+    expect(invokeCount("automation_list_runs")).toBe(0);
+    expect(invokeCount("automation_get_run")).toBe(0);
+
+    await waitForInspectorReady(view);
+
+    await waitFor(() => {
+      expect(invokeCount("automation_list_runs")).toBeGreaterThan(0);
+    });
+  });
+
+  it("工作流切换期间会短暂禁用保存操作，避免旧画布数据被直接提交", async () => {
+    const view = await renderAutomations();
+
+    await waitFor(() => {
+      expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
+    });
+    await waitForWorkflowActionEnabled(view, "保存草稿");
+
+    await fireEvent.click(view.getByRole("button", { name: "新建自动化" }));
+    await waitFor(() => {
+      expect(workflowNameInput(view)).toHaveValue("未命名自动化");
+      expect(view.getByRole("button", { name: "保存草稿" })).toBeDisabled();
+    });
+
+    await waitForWorkflowActionEnabled(view, "保存草稿");
+  });
+
   it("没有自动化或删除最后一项后自动创建空白自动化", async () => {
     clearMockAutomations();
-    const view = renderAutomations();
+    const view = await renderAutomations();
     const list = view.getByRole("complementary", { name: "自动化列表" });
 
     await waitFor(() => {
@@ -189,7 +253,7 @@ describe("Automations page", () => {
   });
 
   it("暴露 Agent、工具配置并支持手动运行", async () => {
-    const view = renderAutomations();
+    const view = await renderAutomations();
 
     await waitFor(() => {
       expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
@@ -197,7 +261,7 @@ describe("Automations page", () => {
 
     const flow = view.getByTestId("automation-flow");
     await fireEvent.click(within(flow).getByText("复盘 Agent"));
-    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+    const inspector = await waitForInspectorReady(view);
 
     await fireEvent.update(within(inspector).getByLabelText("模型"), "gpt-5.5");
     await fireEvent.update(within(inspector).getByLabelText("工作目录"), "C:\\Files\\workspace\\Lilia");
@@ -207,6 +271,7 @@ describe("Automations page", () => {
     await fireEvent.update(within(inspector).getByLabelText("引导内容"), "请确认 ${trigger.taskId}");
     await fireEvent.change(within(inspector).getByLabelText("优先级"), { target: { value: "high" } });
 
+    await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
     await waitFor(() => {
       expect(lastInvokeInput("automation_save_draft")?.input.nodes).toEqual(
@@ -230,7 +295,9 @@ describe("Automations page", () => {
       );
     });
 
+    await waitForWorkflowActionEnabled(view, "发布");
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
+    await waitForWorkflowActionEnabled(view, "手动运行");
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
 
     await waitFor(() => {
@@ -242,17 +309,18 @@ describe("Automations page", () => {
   });
 
   it("保存草稿、发布、启停并手动运行后显示运行历史和节点状态", async () => {
-    const view = renderAutomations();
+    const view = await renderAutomations();
 
     await waitFor(() => {
       expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     await editWorkflowName(view, "自动复盘");
-    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+    const inspector = await waitForInspectorReady(view);
     await fireEvent.click(within(inspector).getByRole("button", { name: "Lilia" }));
     await fireEvent.click(within(inspector).getByRole("button", { name: "running" }));
     await fireEvent.click(within(inspector).getByRole("button", { name: "claude" }));
+    await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
 
     await waitFor(() => {
@@ -270,16 +338,19 @@ describe("Automations page", () => {
       expect(view.getByRole("button", { name: /自动复盘/ })).toBeInTheDocument();
     });
 
+    await waitForWorkflowActionEnabled(view, "发布");
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
     await waitFor(() => {
       expect(lastInvokeInput("automation_publish")).toEqual({ id: "auto-1" });
     });
 
+    await waitForWorkflowActionEnabled(view, "启用");
     await fireEvent.click(view.getByRole("button", { name: "启用" }));
     await waitFor(() => {
       expect(lastInvokeInput("automation_set_enabled")).toEqual({ id: "auto-1", enabled: true });
     });
 
+    await waitForWorkflowActionEnabled(view, "手动运行");
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
     await waitFor(() => {
       expect(lastInvokeInput("automation_run_once")).toEqual({ id: "auto-1", input: {} });
@@ -312,13 +383,14 @@ describe("Automations page", () => {
   });
 
   it("人工节点等待用户确认后可以继续运行", async () => {
-    const view = renderAutomations();
+    const view = await renderAutomations();
 
     await waitFor(() => {
       expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
 
     await fireEvent.click(view.getByRole("button", { name: "添加人工确认" }));
+    await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
     await waitFor(() => {
       expect(lastInvokeInput("automation_save_draft")?.input.nodes).toEqual(
@@ -326,10 +398,12 @@ describe("Automations page", () => {
       );
     });
 
+    await waitForWorkflowActionEnabled(view, "发布");
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
+    await waitForWorkflowActionEnabled(view, "手动运行");
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
 
-    const inspector = view.getByRole("complementary", { name: "自动化检查器" });
+    const inspector = await waitForInspectorReady(view);
     await waitFor(() => {
       expect(within(inspector).getAllByText("waiting_user").length).toBeGreaterThan(0);
     });

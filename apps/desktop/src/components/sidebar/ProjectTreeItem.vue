@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Archive,
@@ -14,9 +14,8 @@ import {
   Plus,
   Trash2,
 } from "lucide-vue-next";
-import type { Project, Task } from "@lilia/contracts";
+import type { Project } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
-import { vContextMenu } from "../../directives/contextMenu";
 import {
   openContextMenuAt,
   type ContextMenuItem,
@@ -27,11 +26,7 @@ import {
   renameProject,
   toggleProjectPin,
 } from "../../services/projectsStore";
-import {
-  archiveTask,
-  isProjectTasksLoaded,
-  listProjectConversations,
-} from "../../services/tasksStore";
+import { archiveTask } from "../../services/tasksStore";
 import type {
   TreeDragKind,
   TreeDragSource,
@@ -39,7 +34,21 @@ import type {
 } from "../../composables/useSidebarTreeDrag";
 import { openInFileManager, openInVSCode } from "../../services/projects";
 import { openPopupNewChat } from "../../services/popupWindows";
-import SidebarTaskRow from "./SidebarTaskRow.vue";
+import {
+  beginPerfStage,
+  cancelIdleRun,
+  measurePerfAsync,
+  runWhenIdle,
+  scheduleAfterPaint,
+} from "../../utils/perf";
+
+const ProjectTreeConversationList = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "sidebar.project-conversation-list.load",
+    async () => (await import("./ProjectTreeConversationList.vue")).default as Component,
+  ),
+});
 
 const props = defineProps<{
   activityForTask: (taskId: string) => ConversationActivity | null;
@@ -60,80 +69,13 @@ const emit = defineEmits<{
 const route = useRoute();
 const router = useRouter();
 
-const PROJECT_CONVERSATION_COLLAPSE_LIMIT = 4;
-
 const editingId = ref<string | null>(null);
 const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
+const conversationListReady = ref(false);
+let conversationListRevealHandle: number | null = null;
+let conversationListRevealSeq = 0;
 
-const overflowExpanded = ref(false);
-
-const projectConversations = computed(() =>
-  listProjectConversations(props.project.id)
-);
-const projectTasksLoaded = computed(() => isProjectTasksLoaded(props.project.id));
-
-const activeTaskId = computed(() => {
-  const taskId = route.params.taskId;
-  return String(route.params.projectId ?? "") === props.project.id &&
-    typeof taskId === "string"
-    ? taskId
-    : null;
-});
-
-function collapsedConversations(conversations: Task[]): Task[] {
-  if (conversations.length <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
-    return conversations;
-  }
-  const first = conversations.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT);
-  const activeId = activeTaskId.value;
-  if (!activeId || first.some((conversation) => conversation.id === activeId)) {
-    return first;
-  }
-  const active = conversations.find((conversation) => conversation.id === activeId);
-  if (!active) return first;
-  return [
-    ...first.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT - 1),
-    active,
-  ];
-}
-
-const visibleProjectConversations = computed(() =>
-  overflowExpanded.value
-    ? projectConversations.value
-    : collapsedConversations(projectConversations.value)
-);
-
-const showConversationOverflow = computed(() =>
-  !overflowExpanded.value &&
-  visibleProjectConversations.value.length < projectConversations.value.length
-);
-
-function collapseConversationOverflow() {
-  overflowExpanded.value = false;
-}
-
-function revealConversationOverflow() {
-  overflowExpanded.value = true;
-}
-
-watch(
-  () => props.isExpanded,
-  (isExpanded) => {
-    if (!isExpanded) {
-      collapseConversationOverflow();
-    }
-  },
-);
-
-watch(
-  () => projectConversations.value.length,
-  (conversationCount) => {
-    if (conversationCount <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
-      collapseConversationOverflow();
-    }
-  },
-);
 async function startRename() {
   editingId.value = props.project.id;
   editingValue.value = props.project.name;
@@ -233,18 +175,15 @@ function onProjectAuxClick(e: MouseEvent) {
   void openProjectChatInPopup();
 }
 
-function isActiveTask(taskId: string) {
-  return route.path === `/projects/${props.project.id}/tasks/${taskId}`;
-}
-
-function onTaskArchived(taskId: string) {
-  if (isActiveTask(taskId)) emit("archived");
-}
-
 async function archiveProjectTask(taskId: string): Promise<boolean> {
   try {
     const archived = await archiveTask(taskId);
-    if (archived) onTaskArchived(taskId);
+    if (
+      archived &&
+      route.path === `/projects/${props.project.id}/tasks/${taskId}`
+    ) {
+      emit("archived");
+    }
     return archived;
   } catch (err) {
     emit("error", `归档对话失败：${String(err)}`);
@@ -362,6 +301,56 @@ function onMoreClick(e: MouseEvent) {
     openContextMenuAt(e.clientX, e.clientY, buildMenu());
   }
 }
+
+function scheduleConversationListReveal() {
+  if (conversationListReady.value || !props.isExpanded) return;
+  const seq = ++conversationListRevealSeq;
+  const stage = beginPerfStage("sidebar.project-conversations.reveal", {
+    detail: props.project.id,
+  });
+  scheduleAfterPaint(() => {
+    if (seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
+      stage.end("cancelled");
+      return;
+    }
+    conversationListRevealHandle = runWhenIdle(() => {
+      conversationListRevealHandle = null;
+      if (seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
+        stage.end("cancelled");
+        return;
+      }
+      conversationListReady.value = true;
+      stage.end("idle");
+    });
+  });
+}
+
+watch(
+  () => props.isExpanded,
+  (isExpanded) => {
+    if (isExpanded) {
+      scheduleConversationListReveal();
+      return;
+    }
+    conversationListRevealSeq += 1;
+    if (conversationListRevealHandle !== null) {
+      cancelIdleRun(conversationListRevealHandle);
+      conversationListRevealHandle = null;
+    }
+  },
+);
+
+if (props.isExpanded) {
+  scheduleConversationListReveal();
+}
+
+onBeforeUnmount(() => {
+  if (conversationListRevealHandle !== null) {
+    cancelIdleRun(conversationListRevealHandle);
+    conversationListRevealHandle = null;
+  }
+  conversationListRevealSeq += 1;
+});
 </script>
 
 <template>
@@ -421,34 +410,17 @@ function onMoreClick(e: MouseEvent) {
 
     <div class="sb-collapse" :class="{ 'is-open': isExpanded }" :aria-hidden="!isExpanded">
       <div class="sb-collapse__inner">
-        <SidebarTaskRow
-          v-for="c in visibleProjectConversations"
-          :key="c.id"
-          :task="c"
+        <ProjectTreeConversationList
+          v-if="conversationListReady && isExpanded"
           :project-id="project.id"
-          :activity="activityForTask(c.id)"
-          row-kind="child"
-          :active="isActiveTask(c.id)"
+          :activity-for-task="activityForTask"
           :archive="archiveProjectTask"
+          :open="openTask"
           :tree-row-state-class="treeRowStateClass"
-          @open="openTask"
           @error="emit('error', $event)"
         />
-        <button
-          v-if="showConversationOverflow"
-          type="button"
-          class="sb-tree__row sb-tree__row--child sb-tree__row--more"
-          title="显示剩余对话"
-          aria-label="显示剩余对话"
-          @click="revealConversationOverflow"
-        >
-          ...
-        </button>
-        <p v-if="!projectTasksLoaded" class="sb-tree__empty">
-          加载中…
-        </p>
-        <p v-else-if="projectConversations.length === 0" class="sb-tree__empty">
-          还没有对话
+        <p v-else-if="isExpanded" class="sb-tree__empty">
+          准备对话列表…
         </p>
       </div>
     </div>

@@ -3,9 +3,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import {
   closeContextMenu,
-  installContextMenu,
   openContextMenuAt,
 } from "../src/composables/useContextMenu";
+import { installContextMenu } from "../src/composables/useContextMenuInstall";
 import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
 
 async function waitForMenuLeave() {

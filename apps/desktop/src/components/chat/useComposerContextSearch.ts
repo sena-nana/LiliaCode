@@ -1,43 +1,46 @@
-import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from "vue";
+import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatAttachment, ChatContextSearchResult } from "@lilia/contracts";
-import { describeAttachments, searchContextAttachments } from "../../services/chat";
+import { measurePerfAsync } from "../../utils/perf";
 import { attachmentPart, textPart, type MentionRange } from "./composerParts";
+import {
+  compactPathLabel,
+  contextInlinePath,
+  isAbsolutePathLike,
+  isContextPathQueryLike,
+  readContextMentionRange,
+} from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
 
 const CONTEXT_SEARCH_LIMIT = 12;
 
 type ComposerRichInput = ReturnType<typeof useComposerRichInput>;
+type ContextSearchDeps = {
+  describeAttachments: typeof import("../../services/chat").describeAttachments;
+  searchContextAttachments: typeof import("../../services/chat").searchContextAttachments;
+};
 
-export function isAbsolutePathLike(value: string): boolean {
-  const trimmed = value.trim();
-  return /^[a-zA-Z]:[\\/]/.test(trimmed) ||
-    trimmed.startsWith("\\\\") ||
-    trimmed.startsWith("/");
+let contextSearchDepsLoad: Promise<ContextSearchDeps> | null = null;
+
+async function loadContextSearchDeps(): Promise<ContextSearchDeps> {
+  if (!contextSearchDepsLoad) {
+    contextSearchDepsLoad = measurePerfAsync(
+      "chat-composer.context-search.load",
+      async () => {
+        const { describeAttachments, searchContextAttachments } = await import("../../services/chat");
+        return { describeAttachments, searchContextAttachments };
+      },
+    );
+  }
+  return contextSearchDepsLoad;
 }
 
-export function readMentionRange(text: string, cursor: number): MentionRange | null {
-  const end = Math.min(Math.max(cursor, 0), text.length);
-  const prefix = text.slice(0, end);
-  const start = prefix.lastIndexOf("@");
-  if (start < 0) return null;
-  const query = text.slice(start + 1, end);
-  if (query.length > 240 || /[\n\r]/.test(query)) return null;
-  if (/\s/.test(query) && !isAbsolutePathLike(query)) return null;
-  return { start, end, query };
-}
-
-export function isContextPathQueryLike(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
-}
-
-export function compactPathLabel(value: string): string {
-  return value.replace(/\\/g, "/");
-}
-
-export function contextInlinePath(result: ChatContextSearchResult): string | null {
-  const path = compactPathLabel(result.relativePath);
-  return path && path !== result.attachment.name ? path : null;
-}
+export {
+  compactPathLabel,
+  contextInlinePath,
+  isAbsolutePathLike,
+  isContextPathQueryLike,
+  readContextMentionRange as readMentionRange,
+};
 
 export function useComposerContextSearch(options: {
   richInput: ComposerRichInput;
@@ -60,7 +63,10 @@ export function useComposerContextSearch(options: {
 
   const mentionRange = computed<MentionRange | null>(() => {
     if (options.hasPending.value) return null;
-    return readMentionRange(options.richInput.searchText.value, options.richInput.inputSelection.value);
+    return readContextMentionRange(
+      options.richInput.searchText.value,
+      options.richInput.inputSelection.value,
+    );
   });
   const mentionKey = computed(() => {
     const range = mentionRange.value;
@@ -117,11 +123,15 @@ export function useComposerContextSearch(options: {
     error.value = null;
     missingPath.value = null;
     try {
+      const deps = await loadContextSearchDeps();
       let nextResults: ChatContextSearchResult[] = [];
       let nextMissingPath: string | null = null;
       let nextError: string | null = null;
       if (isAbsolutePathLike(query)) {
-        const [attachment] = await describeAttachments([query]);
+        const [attachment] = await measurePerfAsync(
+          "chat-composer.context-search.describe",
+          () => deps.describeAttachments([query]),
+        );
         if (attachment?.exists !== false) {
           nextResults = [{
             attachment,
@@ -138,7 +148,10 @@ export function useComposerContextSearch(options: {
         if (!cwd) {
           nextError = "没有可搜索的项目目录";
         } else {
-          nextResults = await searchContextAttachments(cwd, query, CONTEXT_SEARCH_LIMIT);
+          nextResults = await measurePerfAsync(
+            "chat-composer.context-search.query",
+            () => deps.searchContextAttachments(cwd, query, CONTEXT_SEARCH_LIMIT),
+          );
         }
       }
       if (seq !== searchSeq) return;
@@ -288,7 +301,7 @@ export function useComposerContextSearch(options: {
     { immediate: true },
   );
 
-  onBeforeUnmount(() => {
+  onScopeDispose(() => {
     searchSeq += 1;
   });
 

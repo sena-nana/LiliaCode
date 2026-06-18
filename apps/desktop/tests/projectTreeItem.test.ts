@@ -5,7 +5,8 @@ import { defineComponent } from "vue";
 import type { Task } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
-import { installContextMenu } from "../src/composables/useContextMenu";
+import { installContextMenu } from "../src/composables/useContextMenuInstall";
+import { vContextMenu } from "../src/directives/contextMenu";
 import { TASKS } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
 
@@ -96,14 +97,28 @@ async function renderProjectTreeItem(initialRoute = "/projects/lilia") {
     global: {
       plugins: [router],
       directives: {
-        contextMenu: {},
+        contextMenu: vContextMenu,
       },
       stubs: {
         transition: false,
       },
     },
   });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
   return { ...view, router };
+}
+
+async function waitForProjectConversations(view: Awaited<ReturnType<typeof renderProjectTreeItem>>) {
+  await waitFor(() => {
+    expect(view.queryByText("准备对话列表…")).not.toBeInTheDocument();
+    expect(view.getByText("接入 Claude Code 会话发现")).toBeInTheDocument();
+  });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
 }
 
 describe("ProjectTreeItem", () => {
@@ -167,6 +182,7 @@ describe("ProjectTreeItem", () => {
 
   it("中键点击项目对话会在弹出窗口中打开", async () => {
     const view = await renderProjectTreeItem();
+    await waitForProjectConversations(view);
     const row = view.getByText("接入 Claude Code 会话发现").closest(".sb-tree__row");
 
     await fireEvent(
@@ -183,6 +199,7 @@ describe("ProjectTreeItem", () => {
   it("项目对话右键菜单拆分为弹窗继续和询问", async () => {
     installContextMenu();
     const view = await renderProjectTreeItem();
+    await waitForProjectConversations(view);
     const row = view.getByText("接入 Claude Code 会话发现").closest(".sb-tree__row");
 
     await fireEvent.contextMenu(row!, { clientX: 10, clientY: 10 });
@@ -210,8 +227,11 @@ describe("ProjectTreeItem", () => {
     seedProjectConversations(6);
 
     const view = await renderProjectTreeItem();
+    await waitFor(() => {
+      expect(view.queryByText("准备对话列表…")).not.toBeInTheDocument();
+      expect(view.getByText("对话 1")).toBeInTheDocument();
+    });
 
-    expect(view.getByText("对话 1")).toBeInTheDocument();
     expect(view.getByText("对话 4")).toBeInTheDocument();
     expect(view.queryByText("对话 5")).not.toBeInTheDocument();
     expect(view.queryByText("对话 6")).not.toBeInTheDocument();

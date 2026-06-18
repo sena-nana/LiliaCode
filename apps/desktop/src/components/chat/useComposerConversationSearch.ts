@@ -1,22 +1,49 @@
-import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from "vue";
+import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatConversationReference } from "@lilia/contracts";
-import { ensureAllProjectTasksLoaded } from "../../services/tasksStore";
-import { searchSessions, type SearchResult } from "../../services/sessionSearch";
+import type { SearchResult } from "../../services/sessionSearch";
+import { measurePerfAsync } from "../../utils/perf";
 import { conversationReferencePart, textPart, type MentionRange } from "./composerParts";
+import { readConversationReferenceRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
 
 const CONVERSATION_SEARCH_LIMIT = 12;
 
 type ComposerRichInput = ReturnType<typeof useComposerRichInput>;
+type ConversationSearchDeps = {
+  ensureSessionSearchCorpusLoaded: typeof import("../../services/sessionSearch").ensureSessionSearchCorpusLoaded;
+  searchSessions: typeof import("../../services/sessionSearch").searchSessions;
+};
 
-export function readConversationReferenceRange(text: string, cursor: number): MentionRange | null {
-  const end = Math.min(Math.max(cursor, 0), text.length);
-  const prefix = text.slice(0, end);
-  const start = prefix.lastIndexOf("#");
-  if (start < 0) return null;
-  const query = text.slice(start + 1, end);
-  if (query.length > 240 || /[\n\r]/.test(query)) return null;
-  return { start, end, query };
+let conversationSearchDepsLoad: Promise<ConversationSearchDeps> | null = null;
+let conversationSearchWarm: Promise<void> | null = null;
+
+async function loadConversationSearchDeps(): Promise<ConversationSearchDeps> {
+  if (!conversationSearchDepsLoad) {
+    conversationSearchDepsLoad = measurePerfAsync(
+      "chat-composer.conversation-search.load",
+      async () => {
+        const { ensureSessionSearchCorpusLoaded, searchSessions } = await import("../../services/sessionSearch");
+        return { ensureSessionSearchCorpusLoaded, searchSessions };
+      },
+    );
+  }
+  return conversationSearchDepsLoad;
+}
+
+export async function warmComposerConversationSearch(): Promise<void> {
+  if (!conversationSearchWarm) {
+    conversationSearchWarm = measurePerfAsync(
+      "chat-composer.conversation-search.prewarm",
+      async () => {
+        const deps = await loadConversationSearchDeps();
+        await deps.ensureSessionSearchCorpusLoaded();
+      },
+    ).catch((err) => {
+      conversationSearchWarm = null;
+      throw err;
+    });
+  }
+  return conversationSearchWarm;
 }
 
 function conversationReferenceFromSearchResult(result: SearchResult): ChatConversationReference {
@@ -83,10 +110,14 @@ export function useComposerConversationSearch(options: {
     loading.value = true;
     error.value = null;
     try {
-      await ensureAllProjectTasksLoaded();
+      const deps = await loadConversationSearchDeps();
+      await measurePerfAsync(
+        "chat-composer.conversation-search.hydrate",
+        () => deps.ensureSessionSearchCorpusLoaded(),
+      );
       if (seq !== searchSeq) return;
       const query = range.query.trim();
-      results.value = query ? searchSessions(query).slice(0, CONVERSATION_SEARCH_LIMIT) : [];
+      results.value = query ? deps.searchSessions(query).slice(0, CONVERSATION_SEARCH_LIMIT) : [];
       activeIndex.value = 0;
       userInteracted.value = false;
     } catch (err) {
@@ -172,7 +203,7 @@ export function useComposerConversationSearch(options: {
     { immediate: true },
   );
 
-  onBeforeUnmount(() => {
+  onScopeDispose(() => {
     searchSeq += 1;
   });
 

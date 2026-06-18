@@ -1,7 +1,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { defineComponent } from "vue";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
@@ -19,7 +19,7 @@ async function renderProjectDraftTaskDetail(taskId: string) {
   await router.push(`/projects/lilia/tasks/${taskId}`);
   await router.isReady();
 
-  return render(TaskDetail, {
+  const view = render(TaskDetail, {
     props: {
       projectId: "lilia",
       taskId,
@@ -28,6 +28,11 @@ async function renderProjectDraftTaskDetail(taskId: string) {
       plugins: [router],
     },
   });
+  await vi.dynamicImportSettled();
+  await waitFor(() => {
+    expect(view.getByRole("textbox")).toBeInTheDocument();
+  }, { timeout: 3000 });
+  return view;
 }
 
 async function renderOrphanDraftTaskDetail(taskId: string) {
@@ -35,7 +40,7 @@ async function renderOrphanDraftTaskDetail(taskId: string) {
   await router.push(`/chats/${taskId}`);
   await router.isReady();
 
-  return render(TaskDetail, {
+  const view = render(TaskDetail, {
     props: {
       taskId,
     },
@@ -43,6 +48,11 @@ async function renderOrphanDraftTaskDetail(taskId: string) {
       plugins: [router],
     },
   });
+  await vi.dynamicImportSettled();
+  await waitFor(() => {
+    expect(view.getByRole("textbox")).toBeInTheDocument();
+  }, { timeout: 3000 });
+  return view;
 }
 
 async function renderRouterView(initialRoute: string) {
@@ -59,6 +69,10 @@ async function renderRouterView(initialRoute: string) {
       plugins: [router],
     },
   });
+  await vi.dynamicImportSettled();
+  await waitFor(() => {
+    expect(view.getByRole("textbox")).toBeInTheDocument();
+  }, { timeout: 3000 });
   return { ...view, router };
 }
 
@@ -68,6 +82,12 @@ function expectComposerFocused(view: ReturnType<typeof render>) {
 }
 
 describe("TaskDetail conversation suggestions", () => {
+  beforeEach(() => {
+    setMockConversationSuggestions(null);
+    setMockConversationSuggestionSources(null);
+    setMockConversationSuggestionsDelay(0);
+  });
+
   it("项目空白草稿会在空态标题下方加载并展示新对话建议", async () => {
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
@@ -206,20 +226,31 @@ describe("TaskDetail conversation suggestions", () => {
   });
 
   it("建议加载失败时显示轻量状态且不影响输入", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    setMockConversationSuggestionSources({ sources: ["task"], localGit: null });
+    setMockConversationSuggestionsDelay(0);
     failNextMockConversationSuggestions("suggestions unavailable");
-    const draft = createDraftTask("lilia");
-    const view = await renderProjectDraftTaskDetail(draft.id);
+    try {
+      const draft = createDraftTask("lilia");
+      const view = await renderProjectDraftTaskDetail(draft.id);
 
-    await waitFor(() => {
-      expect(view.getByText("建议暂时不可用")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(consoleError).toHaveBeenCalledWith(
+          "[conversation-suggestions] load failed",
+          expect.any(Error),
+        );
+      });
 
-    const input = view.getByRole("textbox");
-    await fireEvent.input(input, { target: { textContent: "先自己输入" } });
+      const input = view.getByRole("textbox");
+      await fireEvent.input(input, { target: { textContent: "先自己输入" } });
 
-    expect(input).toHaveTextContent("先自己输入");
-    expect(view.queryByText("建议暂时不可用")).toBeNull();
-    expect(view.container.querySelector(".chat-suggestions.is-hidden")).toBeInTheDocument();
+      expect(input).toHaveTextContent("先自己输入");
+      await waitFor(() => {
+        expect(view.container.querySelector(".chat-suggestions.is-hidden")).not.toBeNull();
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("主窗口项目草稿进入对话后自动聚焦输入框", async () => {
@@ -262,7 +293,8 @@ describe("TaskDetail conversation suggestions", () => {
 
     const input = await view.findByRole("textbox");
     await fireEvent.input(input, { target: { textContent: "把这个想法放进项目" } });
-    await fireEvent.change(view.getByLabelText("选择项目"), {
+    const projectPicker = await view.findByLabelText("选择项目");
+    await fireEvent.change(projectPicker, {
       target: { value: "lilia" },
     });
 

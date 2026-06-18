@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, defineAsyncComponent } from "vue";
 import { GitFork, WandSparkles } from "lucide-vue-next";
 import type { AgentTimelineEvent } from "@lilia/contracts";
-import MarkdownBlock from "./MarkdownBlock.vue";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
+import { measurePerfAsync } from "../../utils/perf";
 import { readTimelinePayloadRecord, timelineFinalText } from "./timelineDisplay";
+
+const MarkdownBlock = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "timeline.markdown.load",
+    async () => (await import("./MarkdownBlock.vue")).default,
+  ),
+});
 
 const props = withDefaults(defineProps<{
   event: AgentTimelineEvent;

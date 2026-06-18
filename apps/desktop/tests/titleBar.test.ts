@@ -56,4 +56,12 @@ describe("TitleBar breadcrumbs", () => {
       expect(view.getByText("用首条消息生成标题")).toBeInTheDocument();
     });
   });
+
+  it("已有会话优先通过轻量 summary 解析标题", async () => {
+    const view = await renderTitleBar("/projects/lilia/tasks/t-001");
+
+    await waitFor(() => {
+      expect(view.getByText("接入 Claude Code 会话发现")).toBeInTheDocument();
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
@@ -16,6 +16,14 @@ function scrollMapElement(container: HTMLElement): HTMLElement {
   const element = container.querySelector(".chat-scroll-map");
   if (!(element instanceof HTMLElement)) {
     throw new Error("chat scroll map element not found");
+  }
+  return element;
+}
+
+function transcriptFrameElement(container: HTMLElement): HTMLElement {
+  const element = container.querySelector(".chat-transcript-frame");
+  if (!(element instanceof HTMLElement)) {
+    throw new Error("chat transcript frame element not found");
   }
   return element;
 }
@@ -185,12 +193,32 @@ describe("ChatTranscript empty state", () => {
 
 async function flushScrollMapFrame() {
   await vi.advanceTimersByTimeAsync(20);
-  await Promise.resolve();
+  await nextTick();
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await nextTick();
+  await vi.advanceTimersByTimeAsync(20);
+  await nextTick();
+}
+
+async function triggerScrollMapIntent(view: { container: HTMLElement }) {
+  await fireEvent.pointerEnter(transcriptFrameElement(view.container));
+  await flushScrollMapFrame();
 }
 
 async function flushTranscriptScroll() {
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
   await nextTick();
   await nextTick();
+}
+
+async function waitForTimelineRender(view: { container: HTMLElement }) {
+  await waitFor(() => {
+    expect(view.container.querySelector(".agent-timeline")).toBeInstanceOf(HTMLElement);
+  });
 }
 
 describe("ChatTranscript scrollbar visibility", () => {
@@ -204,16 +232,29 @@ describe("ChatTranscript scrollbar visibility", () => {
   });
 
   it("滚动时显示滚动条，并在滚动结束后短暂延时再隐藏", async () => {
-    const { controls, transcript, view } = renderTranscriptWithControls([]);
-    mockTranscriptViewport(transcript, controls);
+    const { controls, transcript, view } = renderTranscriptWithControls([
+      timelineEvent({
+        id: "user-1",
+        kind: "message",
+        payload: { role: "user", content: "第一条消息" },
+      }),
+    ]);
     await flushScrollMapFrame();
+    await waitForTimelineRender(view);
+    mockTranscriptViewport(transcript, controls);
+    expect(view.container.querySelector(".chat-scroll-map")).toBeNull();
+    await triggerScrollMapIntent(view);
 
-    expect(scrollMapElement(view.container)).not.toHaveClass("is-visible");
+    await waitFor(() => {
+      expect(scrollMapElement(view.container)).not.toHaveClass("is-visible");
+    });
 
     await fireEvent.scroll(transcript);
     await flushScrollMapFrame();
 
-    expect(scrollMapElement(view.container)).toHaveClass("is-visible");
+    await waitFor(() => {
+      expect(scrollMapElement(view.container)).toHaveClass("is-visible");
+    });
     await fireEvent(transcript, new Event("scrollend"));
     await vi.advanceTimersByTimeAsync(179);
     expect(scrollMapElement(view.container)).toHaveClass("is-visible");
@@ -297,6 +338,9 @@ describe("ChatTranscript scrollbar visibility", () => {
         controls: "<div data-testid=\"composer\">composer</div>",
       },
     });
+    await flushScrollMapFrame();
+    await waitForTimelineRender(view);
+    await triggerScrollMapIntent(view);
     const transcript = transcriptElement(view.container);
     const controls = view.container.querySelector(".chat-controls-wrap");
     const planAnchor = view.container.querySelector('[data-scroll-anchor-id="plan-1"]');
@@ -327,6 +371,9 @@ describe("ChatTranscript scrollbar visibility", () => {
 
     await fireEvent.scroll(transcript);
     await flushScrollMapFrame();
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "跳到计划位置" })).toBeInTheDocument();
+    });
     await fireEvent.click(view.getByRole("button", { name: "跳到计划位置" }));
 
     expect(scrollTo).toHaveBeenCalledWith({
@@ -350,7 +397,9 @@ describe("ChatTranscript agent selection toolbar", () => {
         emptyHeadline: "今天想做什么？",
       },
     });
-    const walker = document.createTreeWalker(view.container, NodeFilter.SHOW_TEXT);
+    await waitForTimelineRender(view);
+    const message = await waitFor(() => view.getByText(/可操作文本/));
+    const walker = document.createTreeWalker(message, NodeFilter.SHOW_TEXT);
     let textNode = walker.nextNode() as Text | null;
     while (textNode && !textNode.textContent?.includes("可操作文本")) {
       textNode = walker.nextNode() as Text | null;

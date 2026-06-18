@@ -29,6 +29,11 @@ async function renderAppShell(initialRoute = "/") {
       plugins: [router],
     },
   });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
 
   return {
     ...view,
@@ -113,7 +118,7 @@ describe("AppShell left sidebar collapse", () => {
     const view = await renderAppShell("/projects/lilia");
 
     await view.router.push("/settings?tab=agent");
-    await fireEvent.click(view.getByRole("button", { name: "返回" }));
+    await fireEvent.click(await view.findByRole("button", { name: "返回" }));
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe("/projects/lilia");
     });

@@ -20,7 +20,7 @@ describe("MarkdownBlock", () => {
   });
 
 
-  it("渲染 markdown 表格并保留列对齐", () => {
+  it("渲染 markdown 表格并保留列对齐", async () => {
     const view = render(MarkdownBlock, {
       props: {
         content: [
@@ -37,11 +37,13 @@ describe("MarkdownBlock", () => {
     expect(view.getByText("名称").closest("th")).toHaveStyle({ textAlign: "left" });
     expect(view.getByText("42").closest("td")).toHaveStyle({ textAlign: "right" });
     expect(view.getByText("比例").closest("th")).toHaveStyle({ textAlign: "center" });
-    expect(view.container.querySelector(".markdown-block__table .katex")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.container.querySelector(".markdown-block__table .katex")).toBeInTheDocument();
+    });
   });
 
 
-  it("渲染明确边界的行内和块级 LaTeX", () => {
+  it("渲染明确边界的行内和块级 LaTeX", async () => {
     const view = render(MarkdownBlock, {
       props: {
         content: [
@@ -54,10 +56,12 @@ describe("MarkdownBlock", () => {
       },
     });
 
-    expect(view.container.querySelectorAll(".markdown-block__math-inline .katex"))
-      .toHaveLength(2);
-    expect(view.container.querySelector(".markdown-block__math-block .katex-display"))
-      .toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.container.querySelectorAll(".markdown-block__math-inline .katex"))
+        .toHaveLength(2);
+      expect(view.container.querySelector(".markdown-block__math-block .katex-display"))
+        .toBeInTheDocument();
+    });
   });
 
 
@@ -167,6 +171,30 @@ describe("MarkdownBlock", () => {
     });
 
     expect(mermaidMock.initialize).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector('[data-testid="mermaid-svg"]')).toBeInTheDocument();
+  });
+
+  it("较大的 mermaid 图表会等待显式点击后再渲染", async () => {
+    const largeSource = Array.from({ length: 90 }, (_, index) => `  n${index}[\"node-${index}\"]`).join("\n");
+    const view = render(MarkdownBlock, {
+      props: {
+        content: [
+          "```mermaid",
+          "graph TD",
+          largeSource,
+          "```",
+        ].join("\n"),
+      },
+    });
+
+    expect(mermaidMock.render).not.toHaveBeenCalled();
+
+    await vi.dynamicImportSettled();
+    await fireEvent.click(await view.findByRole("button", { name: "图表较大，点击渲染。" }));
+
+    await waitFor(() => {
+      expect(mermaidMock.render).toHaveBeenCalledTimes(1);
+    });
     expect(view.container.querySelector('[data-testid="mermaid-svg"]')).toBeInTheDocument();
   });
 });

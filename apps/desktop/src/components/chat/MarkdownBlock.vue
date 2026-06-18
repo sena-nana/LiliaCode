@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { computed, type CSSProperties } from "vue";
-import "katex/dist/katex.min.css";
-import MarkdownMermaid from "./MarkdownMermaid.vue";
+import { computed, defineAsyncComponent, type CSSProperties } from "vue";
 import MarkdownInline from "./markdown/MarkdownInline.vue";
 import MarkdownList from "./markdown/MarkdownList.vue";
 import {
@@ -14,6 +12,61 @@ import {
 } from "./markdown/markdownParser";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { MarkdownBlockTone } from "./timelineDisplay";
+import { measurePerfAsync, measurePerfSync } from "../../utils/perf";
+import type { InlineToken } from "./markdown/types";
+
+const MarkdownMathBlock = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "markdown.math-block.load",
+    async () => (await import("./markdown/MarkdownMathBlock.vue")).default,
+  ),
+});
+
+const MarkdownMermaid = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "markdown.mermaid.load",
+    async () => (await import("./MarkdownMermaid.vue")).default,
+  ),
+});
+
+const INLINE_CACHE_LIMIT = 200;
+const BLOCK_CACHE_LIMIT = 120;
+const inlineParseCache = new Map<string, InlineToken[]>();
+const blockParseCache = new Map<string, MarkdownBlockNode[]>();
+
+function readCachedInlineTokens(content: string): InlineToken[] {
+  const cached = inlineParseCache.get(content);
+  if (cached) return cached;
+  const parsed = measurePerfSync(
+    "markdown.inline.parse",
+    () => parseInlineMarkdown(toSingleLineText(content)),
+    { detail: `${content.length} chars` },
+  );
+  inlineParseCache.set(content, parsed);
+  if (inlineParseCache.size > INLINE_CACHE_LIMIT) {
+    const oldestKey = inlineParseCache.keys().next().value;
+    if (oldestKey !== undefined) inlineParseCache.delete(oldestKey);
+  }
+  return parsed;
+}
+
+function readCachedBlocks(content: string): MarkdownBlockNode[] {
+  const cached = blockParseCache.get(content);
+  if (cached) return cached;
+  const parsed = measurePerfSync(
+    "markdown.block.parse",
+    () => parseMarkdownBlocks(content),
+    { detail: `${content.length} chars` },
+  );
+  blockParseCache.set(content, parsed);
+  if (blockParseCache.size > BLOCK_CACHE_LIMIT) {
+    const oldestKey = blockParseCache.keys().next().value;
+    if (oldestKey !== undefined) blockParseCache.delete(oldestKey);
+  }
+  return parsed;
+}
 
 const props = withDefaults(defineProps<{
   content: string | null | undefined;
@@ -25,8 +78,8 @@ const props = withDefaults(defineProps<{
 });
 
 const normalizedContent = computed(() => normalizeMarkdownSource(props.content));
-const inlineTokens = computed(() => parseInlineMarkdown(toSingleLineText(normalizedContent.value)));
-const blocks = computed(() => parseMarkdownBlocks(normalizedContent.value));
+const inlineTokens = computed(() => readCachedInlineTokens(normalizedContent.value));
+const blocks = computed(() => readCachedBlocks(normalizedContent.value));
 const hasContent = computed(() => normalizedContent.value.length > 0);
 
 const emit = defineEmits<{
@@ -75,10 +128,9 @@ function tableAlignmentStyle(alignment: TableAlignment): CSSProperties | undefin
           :data-language="block.language || undefined"
         ><code>{{ block.text }}</code></pre>
 
-        <div
+        <MarkdownMathBlock
           v-else-if="block.type === 'math'"
-          class="markdown-block__math-block"
-          v-html="block.html"
+          :source="block.text"
         />
 
         <MarkdownMermaid
