@@ -13,6 +13,36 @@ pub struct ProjectRow {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectTaskStatusCountsRow {
+    pub draft: i64,
+    pub waiting: i64,
+    pub running: i64,
+    pub blocked: i64,
+    pub done: i64,
+    pub cancelled: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDashboardSummaryRow {
+    pub id: String,
+    pub name: String,
+    pub cwd: Option<String>,
+    pub pinned: bool,
+    pub task_count: i64,
+    pub session_count: i64,
+    pub status_counts: ProjectTaskStatusCountsRow,
+    pub blocked_count: i64,
+    pub active_count: i64,
+    pub recent_activity_at: Option<i64>,
+    pub total_tokens: i64,
+    pub known_cost_usd: Option<f64>,
+    pub cost_record_count: i64,
+    pub usage_record_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskRow {
     pub id: String,
     pub project_id: Option<String>,

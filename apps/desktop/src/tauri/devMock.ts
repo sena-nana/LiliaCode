@@ -35,6 +35,7 @@ const tasks = [
     dependsOn: [],
     sortOrder: 0,
     pinned: true,
+    archived: false,
   },
   {
     id: "o-001",
@@ -48,8 +49,45 @@ const tasks = [
     dependsOn: [],
     sortOrder: 0,
     pinned: false,
+    archived: false,
   },
 ];
+
+const statusKeys = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
+
+function projectDashboardRows() {
+  return projects.map((project) => {
+    const projectTasks = tasks.filter((task) => task.projectId === project.id);
+    const statusCounts = Object.fromEntries(statusKeys.map((status) => [status, 0])) as Record<
+      (typeof statusKeys)[number],
+      number
+    >;
+    for (const task of projectTasks) {
+      if (statusKeys.includes(task.status as (typeof statusKeys)[number])) {
+        statusCounts[task.status as (typeof statusKeys)[number]] += 1;
+      }
+    }
+    const usage = project.id === "lilia"
+      ? { totalTokens: 12_400, knownCostUsd: 0.084, costRecordCount: 1, usageRecordCount: 2 }
+      : { totalTokens: 0, knownCostUsd: null, costRecordCount: 0, usageRecordCount: 0 };
+    return {
+      id: project.id,
+      name: project.name,
+      cwd: project.cwd,
+      pinned: project.pinned,
+      taskCount: projectTasks.length,
+      sessionCount: new Set(projectTasks.map((task) => task.sessionId)).size,
+      statusCounts,
+      blockedCount: statusCounts.blocked,
+      activeCount: statusCounts.waiting + statusCounts.running,
+      recentActivityAt: projectTasks.reduce<number | null>(
+        (latest, task) => latest === null ? task.createdAt : Math.max(latest, task.createdAt),
+        null,
+      ),
+      ...usage,
+    };
+  });
+}
 
 const emptyLists = new Set([
   "agent_timeline_list",
@@ -141,6 +179,8 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return null as T;
     case "project_list":
       return clone(projects) as T;
+    case "project_dashboard_list":
+      return clone(projectDashboardRows()) as T;
     case "project_get":
       return clone(projects.find((project) => project.id === text(args, "id")) ?? null) as T;
     case "project_create":

@@ -8,6 +8,32 @@ export interface Project {
   pinned: boolean;
 }
 
+export interface ProjectTaskStatusCounts {
+  draft: number;
+  waiting: number;
+  running: number;
+  blocked: number;
+  done: number;
+  cancelled: number;
+}
+
+export interface ProjectDashboardSummary {
+  id: string;
+  name: string;
+  cwd: string | null;
+  pinned: boolean;
+  taskCount: number;
+  sessionCount: number;
+  statusCounts: ProjectTaskStatusCounts;
+  blockedCount: number;
+  activeCount: number;
+  recentActivityAt: number | null;
+  totalTokens: number;
+  knownCostUsd: number | null;
+  costRecordCount: number;
+  usageRecordCount: number;
+}
+
 export type SessionKind = "interactive" | "headless" | "unknown";
 
 export interface Session {

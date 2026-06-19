@@ -254,6 +254,7 @@ pub fn run() {
             todos::todo_delete,
             todos::todo_apply_agent_event,
             projects_tasks::project_list,
+            projects_tasks::project_dashboard_list,
             projects_tasks::project_get,
             projects_tasks::project_create,
             projects_tasks::project_rename,

@@ -7,6 +7,8 @@ const CODEX_MODEL_OPTIONS = [
 ] as const;
 const MILESTONE_STATUSES = ["upcoming", "in-progress", "done", "abandoned"] as const;
 type MockMilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+const TASK_STATUSES = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
+type MockTaskStatus = (typeof TASK_STATUSES)[number];
 
 interface ProjectRow {
   id: string;
@@ -15,6 +17,23 @@ interface ProjectRow {
   sessionCount: number;
   sortOrder: number;
   pinned: boolean;
+}
+
+interface ProjectDashboardSummaryRow {
+  id: string;
+  name: string;
+  cwd: string | null;
+  pinned: boolean;
+  taskCount: number;
+  sessionCount: number;
+  statusCounts: Record<MockTaskStatus, number>;
+  blockedCount: number;
+  activeCount: number;
+  recentActivityAt: number | null;
+  totalTokens: number;
+  knownCostUsd: number | null;
+  costRecordCount: number;
+  usageRecordCount: number;
 }
 
 interface TaskRow {
@@ -1039,6 +1058,56 @@ function cloneProject(row: ProjectRow): ProjectRow {
 
 function cloneTask(row: TaskRow): TaskRow {
   return { ...row, dependsOn: [...row.dependsOn] };
+}
+
+function createProjectDashboardSummaries(): ProjectDashboardSummaryRow[] {
+  return projects
+    .map((project) => {
+      const projectTasks = tasks.filter((task) => task.projectId === project.id && task.archived !== true);
+      const statusCounts = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<
+        MockTaskStatus,
+        number
+      >;
+      for (const task of projectTasks) {
+        if (TASK_STATUSES.includes(task.status as MockTaskStatus)) {
+          statusCounts[task.status as MockTaskStatus] += 1;
+        }
+      }
+      const latestTaskAt = projectTasks.reduce<number | null>(
+        (latest, task) => latest === null ? task.createdAt : Math.max(latest, task.createdAt),
+        null,
+      );
+      const latestTimelineAt = projectTasks.reduce<number | null>((latest, task) => {
+        const taskLatest = (timelineEvents[task.id] ?? []).reduce<number | null>(
+          (eventLatest, event) => eventLatest === null
+            ? event.updatedAt
+            : Math.max(eventLatest, event.updatedAt),
+          null,
+        );
+        if (taskLatest === null) return latest;
+        return latest === null ? taskLatest : Math.max(latest, taskLatest);
+      }, null);
+      const recentActivityAt = [latestTaskAt, latestTimelineAt]
+        .filter((value): value is number => value !== null)
+        .reduce<number | null>((latest, value) => latest === null ? value : Math.max(latest, value), null);
+      const usage = project.id === "lilia"
+        ? { totalTokens: 4200, knownCostUsd: 0.15, costRecordCount: 1, usageRecordCount: 2 }
+        : { totalTokens: 0, knownCostUsd: null, costRecordCount: 0, usageRecordCount: 0 };
+      return {
+        id: project.id,
+        name: project.name,
+        cwd: project.cwd,
+        pinned: project.pinned,
+        taskCount: projectTasks.length,
+        sessionCount: new Set(projectTasks.map((task) => task.sessionId)).size,
+        statusCounts,
+        blockedCount: statusCounts.blocked,
+        activeCount: statusCounts.waiting + statusCounts.running,
+        recentActivityAt,
+        ...usage,
+      };
+    })
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned));
 }
 
 function cloneMilestone(row: MilestoneRow): MilestoneRow {
@@ -2218,6 +2287,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return projects
         .map(cloneProject)
         .sort((a, b) => a.sortOrder - b.sortOrder);
+
+    case "project_dashboard_list":
+      return createProjectDashboardSummaries();
 
     case "project_get": {
       const id = String(args.id);

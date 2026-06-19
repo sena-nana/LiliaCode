@@ -6,6 +6,15 @@ describe("dev Tauri mock", () => {
     await expect(invoke("project_list")).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "lilia" })]),
     );
+    await expect(invoke("project_dashboard_list")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "lilia",
+          statusCounts: expect.objectContaining({ running: 1 }),
+          totalTokens: expect.any(Number),
+        }),
+      ]),
+    );
     await expect(invoke("task_list", { projectId: null })).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "o-001" })]),
     );
