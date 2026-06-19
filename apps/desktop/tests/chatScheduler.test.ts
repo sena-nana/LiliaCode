@@ -217,7 +217,7 @@ describe("chat scheduler", () => {
   });
 
   it("全局 provider 为 Codex 时发送会覆盖旧 composer backend", async () => {
-    setMockActiveBackend("codex");
+    await setActiveBackendForTest("codex");
     const view = await renderTaskDetail();
 
     await sendText(view, "检查 Codex 通路");
@@ -230,9 +230,116 @@ describe("chat scheduler", () => {
     expect(send?.[1]).toMatchObject({
       composer: expect.objectContaining({
         backend: "codex",
-        model: "gpt-5.5",
+        model: "gpt-5.4-mini",
       }),
     });
+  });
+
+  it("默认发送会携带模型选择 metadata", async () => {
+    const view = await renderTaskDetail();
+
+    await sendText(view, "短消息自动选择模型");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      runtimeOptions: {
+        common: {
+          model: "claude-haiku-4-5",
+          reasoningEffort: "low",
+          modelSelection: expect.objectContaining({
+            mode: "auto",
+            model: "claude-haiku-4-5",
+            reasoningEffort: "low",
+            source: "auto",
+          }),
+        },
+        provider: {
+          claude: {
+            reasoningEffort: "low",
+            thinking: { type: "adaptive" },
+          },
+        },
+      },
+    });
+  });
+
+  it("手动选择 Claude thinking 强度会随消息发送", async () => {
+    setMockComposerStateHandler((taskId) => ({
+      taskId,
+      backend: "claude",
+      model: "claude-opus-4-7",
+      modelSelectionMode: "manual",
+      reasoningEffort: "max",
+      planMode: false,
+      goalMode: false,
+      permission: "ask",
+    }));
+    const view = await renderTaskDetail();
+
+    await sendText(view, "使用手动 Claude 配置");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1]).toMatchObject({
+      composer: expect.objectContaining({
+        modelSelectionMode: "manual",
+        model: "claude-opus-4-7",
+        reasoningEffort: "max",
+      }),
+      runtimeOptions: {
+        common: {
+          model: "claude-opus-4-7",
+          reasoningEffort: "max",
+          modelSelection: expect.objectContaining({
+            source: "manual",
+            model: "claude-opus-4-7",
+            reasoningEffort: "max",
+          }),
+        },
+        provider: {
+          claude: {
+            reasoningEffort: "max",
+            thinking: { type: "adaptive" },
+          },
+        },
+      },
+    });
+  });
+
+  it("计划模式会触发 deep 档模型选择", async () => {
+    setMockComposerStateHandler((taskId) => ({
+      taskId,
+      backend: "claude",
+      model: "claude-sonnet-4-6",
+      modelSelectionMode: "auto",
+      reasoningEffort: null,
+      planMode: true,
+      goalMode: false,
+      permission: "ask",
+    }));
+    const view = await renderTaskDetail();
+
+    await sendText(view, "需要先计划");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    expect(send?.[1].runtimeOptions.common.modelSelection).toMatchObject({
+      model: "claude-opus-4-7",
+      reasoningEffort: "high",
+      source: "auto",
+    });
+    expect(send?.[1].runtimeOptions.common.modelSelection.signals)
+      .toContain("计划模式");
   });
 
   it("Claude 后端可以在右侧栏打开 Lilia IAB", async () => {
@@ -308,7 +415,7 @@ describe("chat scheduler", () => {
   });
 
   it("Codex 项目草稿首条消息会先提升草稿再发送", async () => {
-    setMockActiveBackend("codex");
+    await setActiveBackendForTest("codex");
     const draft = createDraftTask("lilia");
     const view = await renderProjectDraftTaskDetail(draft.id);
 
@@ -329,7 +436,7 @@ describe("chat scheduler", () => {
       taskId: draft.id,
       composer: expect.objectContaining({
         backend: "codex",
-        model: "gpt-5.5",
+        model: "gpt-5.4-mini",
       }),
     });
     expect(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "task_promote"))

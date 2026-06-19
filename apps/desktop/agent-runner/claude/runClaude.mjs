@@ -321,6 +321,8 @@ const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
   "allowedTools",
   "disallowedTools",
   "additionalDirectories",
+  "reasoningEffort",
+  "thinking",
   "settingSources",
   "permissionPromptToolName",
   "resumeSessionAt",
@@ -434,6 +436,26 @@ function readPlainObject(value) {
   return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
 }
 
+const CLAUDE_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+function readClaudeReasoningEffort(value) {
+  const effort = readStringOption(value);
+  return CLAUDE_REASONING_EFFORTS.has(effort) ? effort : null;
+}
+
+function readClaudeThinkingConfig(value) {
+  if (!isRecord(value)) return null;
+  if (value.type === "adaptive") return { type: "adaptive" };
+  if (value.type === "disabled") return { type: "disabled" };
+  if (value.type === "enabled") {
+    const budgetTokens = Number(value.budgetTokens);
+    if (Number.isFinite(budgetTokens) && budgetTokens > 0) {
+      return { type: "enabled", budgetTokens: Math.trunc(budgetTokens) };
+    }
+  }
+  return null;
+}
+
 function readClaudeManagedAgents(value) {
   if (!isRecord(value) || !isRecord(value.agents)) return null;
   return Object.keys(value.agents).length > 0 ? { ...value.agents } : null;
@@ -467,8 +489,17 @@ function readClaudeRuntimeSettingsCommand(command, runtimeOptions = {}) {
   const options = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
+  const reasoningEffort = readClaudeReasoningEffort(claude.reasoningEffort) ||
+    readClaudeReasoningEffort(common.reasoningEffort);
+  const thinking = readClaudeThinkingConfig(claude.thinking);
   if (model) supported.model = model;
   if (permission) supported.permission = permission;
+  if (reasoningEffort) options.effort = reasoningEffort;
+  if (thinking) {
+    options.thinking = thinking;
+  } else if (reasoningEffort) {
+    options.thinking = { type: "adaptive" };
+  }
 
   for (const key of ["allowedTools", "disallowedTools", "additionalDirectories"]) {
     const values = readStringList(claude[key]);

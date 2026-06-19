@@ -91,13 +91,16 @@ runner stdin 的稳定形状是：
 | `permission` | Lilia 权限模式。 |
 | `reasoningEffort` | 通用 reasoning / effort 意图。 |
 | `runtimeWorkspaceRoots` | 运行时工作区根目录。 |
+| `modelSelection` | Lilia 智能模型选择解释，只用于诊断和持久化，不作为 provider 原生命令参数。 |
 
 provider 专属字段只能在 adapter 边界出现：
 
 | provider | 字段示例 | 消费方 |
 |---|---|---|
 | `provider.codex` | `profile`、`reasoningEffort`、`runtimeWorkspaceRoots`、`persistExtendedHistory`、`initialTurnsPage`、`excludeTurns`、`environments`、`experimentalRawEvents`、`responsesApiClientMetadata` | `apps/desktop/agent-runner/codex/runCodex.mjs` |
-| `provider.claude` | `allowedTools`、`disallowedTools`、`additionalDirectories`、`maxTurns`、`maxBudgetUsd`、`tools`、`settings`、`managedSettings`、`sandbox`、`outputFormat`、`sessionStore` | `apps/desktop/agent-runner/claude/runClaude.mjs` |
+| `provider.claude` | `reasoningEffort`、`thinking`、`allowedTools`、`disallowedTools`、`additionalDirectories`、`maxTurns`、`maxBudgetUsd`、`tools`、`settings`、`managedSettings`、`sandbox`、`outputFormat`、`sessionStore` | `apps/desktop/agent-runner/claude/runClaude.mjs` |
+
+智能模型选择在发送前合并这些字段：显式 `runtimeOptions.common` / `runtimeOptions.provider.<provider>` 优先，其次是 composer 手动覆盖，最后才由自动策略填补缺省值。Claude `reasoningEffort` 会映射到 SDK `options.effort`，并在未显式传入 `provider.claude.thinking` 时补 `thinking: { type: "adaptive" }`；Codex `max` 会降级为 `xhigh` 并写入 `common.modelSelection.signals`。
 
 高变动能力放入 `experimentalProviderOptions[]`。每项必须包含：
 

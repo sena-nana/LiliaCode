@@ -1478,12 +1478,13 @@ describe("Claude helpers", () => {
         action: "update",
       },
       runtimeOptions: {
-        common: { model: "claude-opus-4-5", permission: "readonly" },
+        common: { model: "claude-opus-4-5", permission: "readonly", reasoningEffort: "medium" },
         provider: {
           claude: {
           allowedTools: ["Read"],
           disallowedTools: ["Bash"],
           additionalDirectories: ["D:/shared"],
+          reasoningEffort: "xhigh",
           maxTurns: 4,
           maxBudgetUsd: 1.5,
           tools: { type: "preset", preset: "claude_code" },
@@ -1539,6 +1540,8 @@ describe("Claude helpers", () => {
       allowedTools: ["Read"],
       disallowedTools: ["Bash"],
       additionalDirectories: ["D:/shared"],
+      effort: "xhigh",
+      thinking: { type: "adaptive" },
       maxTurns: 4,
       maxBudgetUsd: 1.5,
       tools: { type: "preset", preset: "claude_code" },
@@ -1582,8 +1585,8 @@ describe("Claude helpers", () => {
           backend: "claude",
           subkind: "provider_settings",
           action: "update",
-          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
-          optionKeys: expect.arrayContaining(["allowedTools", "disallowedTools"]),
+          settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools", "effort", "thinking"]),
+          optionKeys: expect.arrayContaining(["allowedTools", "disallowedTools", "effort", "thinking"]),
         }),
       }),
     }));
@@ -5558,6 +5561,13 @@ describe("Codex app-server mapping", () => {
       prompt: "请制定计划",
       permission: "ask",
       planMode: true,
+      runtimeOptions: {
+        provider: {
+          codex: {
+            reasoningEffort: "xhigh",
+          },
+        },
+      },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions,
@@ -5609,7 +5619,7 @@ describe("Codex app-server mapping", () => {
       mode: "plan",
       settings: {
         model: "gpt-5.1",
-        reasoning_effort: "high",
+        reasoning_effort: "xhigh",
         developer_instructions: null,
       },
     });

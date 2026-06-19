@@ -5,6 +5,11 @@ const CODEX_MODEL_OPTIONS = [
   { id: "gpt-5.4", label: "GPT-5.4" },
   { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
 ] as const;
+const CLAUDE_MODEL_OPTIONS = [
+  { id: "claude-opus-4-7", label: "Opus 4.7" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
+] as const;
 const MILESTONE_STATUSES = ["upcoming", "in-progress", "done", "abandoned"] as const;
 type MockMilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 const TASK_STATUSES = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
@@ -1523,6 +1528,8 @@ function normalizeComposer(input: unknown, taskId: string) {
     taskId,
     backend,
     model,
+    modelSelectionMode: row.modelSelectionMode === "manual" ? "manual" : "auto",
+    reasoningEffort: typeof row.reasoningEffort === "string" ? row.reasoningEffort : null,
   };
 }
 
@@ -3606,13 +3613,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       if (backend === "codex") {
         return CODEX_MODEL_OPTIONS.map((option) => ({ ...option, backend }));
       }
-      return [
-        {
-          id: "claude-sonnet-4-6",
-          label: "Sonnet 4.6",
-          backend,
-        },
-      ];
+      return CLAUDE_MODEL_OPTIONS.map((option) => ({ ...option, backend }));
     }
 
     case "chat_respond_agent_interaction":
@@ -4044,6 +4045,36 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         turnSeq: 0,
         intraTurnOrder: 0,
       });
+      const runtimeOptions = args.runtimeOptions && typeof args.runtimeOptions === "object" && !Array.isArray(args.runtimeOptions)
+        ? args.runtimeOptions as Record<string, unknown>
+        : {};
+      const commonOptions = runtimeOptions.common && typeof runtimeOptions.common === "object" && !Array.isArray(runtimeOptions.common)
+        ? runtimeOptions.common as Record<string, unknown>
+        : {};
+      const modelSelection = commonOptions.modelSelection && typeof commonOptions.modelSelection === "object" && !Array.isArray(commonOptions.modelSelection)
+        ? commonOptions.modelSelection as Record<string, unknown>
+        : null;
+      if (modelSelection) {
+        emitMockTimelineEvent(taskId, {
+          id: `${taskId}:${turnId}:model-selection:${turnId}`,
+          turnId,
+          kind: "diagnostic",
+          backend: composer.backend,
+          status: "info",
+          title: "模型选择",
+          summary: typeof modelSelection.summary === "string" ? modelSelection.summary : "已自动选择本轮模型",
+          payload: {
+            backend: composer.backend,
+            sourceId: `model-selection:${turnId}`,
+            subkind: "model_selection",
+            selection: modelSelection,
+          },
+          createdAt: message.createdAt,
+          updatedAt: message.createdAt,
+          turnSeq: 0,
+          intraTurnOrder: 1,
+        });
+      }
       if (queued) {
         setMockGuideStatus(args.guideId, "queued");
         chatQueued[taskId] = [...(chatQueued[taskId] ?? []), args];

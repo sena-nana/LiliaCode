@@ -84,7 +84,7 @@ const conversation = measurePerfSync(
   { detail: taskDetailPerfDetail() },
 );
 const chatSidebar = useChatSidebar();
-const timeline = measurePerfSync(
+const timeline: ReturnType<typeof useTaskTimeline> = measurePerfSync(
   "task-detail.setup.timeline",
   () => useTaskTimeline({
     taskId: () => props.taskId,
@@ -92,7 +92,7 @@ const timeline = measurePerfSync(
   }),
   { detail: taskDetailPerfDetail() },
 );
-const composerController = measurePerfSync(
+const composerController: ReturnType<typeof useTaskComposerController> = measurePerfSync(
   "task-detail.setup.composer-controller",
   () => useTaskComposerController({
     props: routeProps,
@@ -137,6 +137,7 @@ const {
 } = attachmentController;
 const {
   composerForView,
+  modelOptionsForView,
   contextUsage,
   isTurnRunning,
   userSendScrollKey,
@@ -757,6 +758,7 @@ watch(
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
     :composer-state="composerForView"
+    :model-options="modelOptionsForView"
     :context-usage="contextUsage"
     :attachments="attachments"
     :append-attachments-to-end-key="droppedAttachmentAppendKey"

@@ -1,12 +1,14 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, ref, watch, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   AskUserResult,
   ChatAttachment,
+  ChatBackendKind,
   ChatContextUsage,
   ChatComposerState,
   ChatConversationReference,
+  ChatModelOption,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
@@ -37,6 +39,7 @@ import {
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
   getComposerState,
+  listModels,
   getRuntimeSnapshot,
   ackRestoredRollback,
   interruptTurn,
@@ -65,6 +68,7 @@ import {
 } from "./usePendingInteractionActions";
 import type { ChatRuntimePhase } from "@lilia/contracts";
 import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
+import { selectModelForTurn } from "../../services/modelSelection";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 type GuideDispatchWindow = "tool" | "user" | "idle";
@@ -126,6 +130,10 @@ export function useTaskComposerController(options: {
 }) {
   const { props, context, timeline, attachments } = options;
   const composer = ref<ChatComposerState | null>(null);
+  const modelOptionsByBackend = ref<Record<ChatBackendKind, ChatModelOption[]>>({
+    claude: [],
+    codex: [],
+  });
   const contextUsage = ref<ChatContextUsage | null>(null);
   const isTurnRunning = ref(false);
   const interruptInFlight = ref(false);
@@ -156,6 +164,7 @@ export function useTaskComposerController(options: {
   let loadSeq = 0;
   let runtimeEventSeq = 0;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
+  const modelOptionsLoads: Partial<Record<ChatBackendKind, Promise<ChatModelOption[]>>> = {};
   let guideDispatchLoad: Promise<GuideDispatchController> | null = null;
   let pendingInteractionResolversLoad: Promise<PendingInteractionResolvers> | null = null;
   let liliaWorkflowActionsLoad: Promise<LiliaWorkflowActionHandlers> | null = null;
@@ -165,11 +174,14 @@ export function useTaskComposerController(options: {
       taskId: props.taskId,
       backend: activeBackend.value,
       model: "",
+      modelSelectionMode: "auto",
+      reasoningEffort: null,
       planMode: false,
       goalMode: false,
       permission: "ask",
     }),
   );
+  const modelOptionsForView = computed(() => modelOptionsByBackend.value[activeBackend.value]);
   const pendingAgentActions = computed(() =>
     runtimePendingAgentActions.value.filter((action) =>
       nonInterruptMode.value ||
@@ -200,7 +212,31 @@ export function useTaskComposerController(options: {
       ...state,
       taskId: props.taskId,
       backend: activeBackend.value,
+      modelSelectionMode: state.modelSelectionMode === "manual" ? "manual" : "auto",
+      reasoningEffort: state.reasoningEffort ?? null,
     };
+  }
+
+  async function ensureModelOptions(backend: ChatBackendKind): Promise<ChatModelOption[]> {
+    if (modelOptionsByBackend.value[backend].length > 0) {
+      return modelOptionsByBackend.value[backend];
+    }
+    if (!modelOptionsLoads[backend]) {
+      modelOptionsLoads[backend] = listModels(backend)
+        .then((options) => {
+          modelOptionsByBackend.value = {
+            ...modelOptionsByBackend.value,
+            [backend]: options,
+          };
+          return options;
+        })
+        .catch((err) => {
+          delete modelOptionsLoads[backend];
+          console.error("[chat] listModels failed", err);
+          return [];
+        });
+    }
+    return modelOptionsLoads[backend]!;
   }
 
   async function getGuideDispatch(): Promise<GuideDispatchController> {
@@ -276,6 +312,19 @@ export function useTaskComposerController(options: {
     try {
       await ensureComposerLoaded();
       const currentComposer = composerForView.value;
+      const modelOptions = await ensureModelOptions(currentComposer.backend);
+      const selected = selectModelForTurn({
+        backend: currentComposer.backend,
+        modelOptions,
+        composer: currentComposer,
+        prompt: content,
+        attachments: outgoingAttachments,
+        conversationReferences: outgoingConversationReferences,
+        contextUsage: contextUsage.value,
+        workflow,
+        runtimeCommand,
+        runtimeOptions,
+      });
       await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
       const cwd = context.project.value?.cwd ?? (await context.ensureOrphanCwd());
 
@@ -291,7 +340,7 @@ export function useTaskComposerController(options: {
         taskId: props.taskId,
         turn: {
           content,
-          composer: currentComposer,
+          composer: selected.composer,
           projectCwd: cwd,
           attachments: outgoingAttachments,
           conversationReferences: outgoingConversationReferences,
@@ -299,7 +348,7 @@ export function useTaskComposerController(options: {
         },
         workflow,
         runtimeCommand,
-        runtimeOptions,
+        runtimeOptions: selected.runtimeOptions,
       };
       await sendMessage(sendInput);
       timeline.removeTimelineEvent(optimistic.id);
@@ -314,6 +363,14 @@ export function useTaskComposerController(options: {
       throw err;
     }
   }
+
+  watch(
+    activeBackend,
+    (backend) => {
+      void ensureModelOptions(backend);
+    },
+    { immediate: true },
+  );
 
   async function onSend(
     content: string,
@@ -825,6 +882,7 @@ export function useTaskComposerController(options: {
   return {
     composer,
     composerForView,
+    modelOptionsForView,
     contextUsage,
     isTurnRunning,
     userSendScrollKey,
