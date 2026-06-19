@@ -450,6 +450,13 @@ pub(crate) fn start_runner_session<R: Runtime>(
         runtime_command_for_thread.as_ref(),
         runtime_options_for_thread.as_ref(),
     );
+    let runtime_options = crate::memory::apply_memory_baseline_to_runtime_options(
+        app_handle,
+        &task_id_for_thread,
+        &project_cwd,
+        &backend_for_thread,
+        runtime_options,
+    );
     let mut stdin_payload = build_runner_stdin_payload(
         &backend_for_thread,
         &project_cwd,

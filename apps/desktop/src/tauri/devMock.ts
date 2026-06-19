@@ -151,12 +151,62 @@ let agentInteractionSubagents = [{
   enabled: true,
 }];
 
+type MockMemory = {
+  id: string;
+  scope: "user" | "project";
+  projectId: string | null;
+  title: string;
+  body: string;
+  tags: string[];
+  enabled: boolean;
+  sourceTaskId: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+let memories: MockMemory[] = [
+  {
+    id: "memory-user-1",
+    scope: "user",
+    projectId: null,
+    title: "PR 文案",
+    body: "PR 描述里不要出现 emoji。",
+    tags: ["preference"],
+    enabled: true,
+    sourceTaskId: null,
+    createdAt: now - 3_600_000,
+    updatedAt: now - 3_600_000,
+  },
+  {
+    id: "memory-project-1",
+    scope: "project",
+    projectId: "lilia",
+    title: "迁移检查",
+    body: "涉及数据库迁移时先验证 dry-run 或最小 schema 测试。",
+    tags: ["database"],
+    enabled: true,
+    sourceTaskId: "t-001",
+    createdAt: now - 1_800_000,
+    updatedAt: now - 1_800_000,
+  },
+];
+
+let memorySettings = {
+  enabled: true,
+  baselineInjectionEnabled: true,
+  cooldownTurns: 5,
+};
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
 function text(args: Args, key: string): string {
   return typeof args[key] === "string" ? args[key] : "";
+}
+
+function bool(args: Args, key: string, fallback = false): boolean {
+  return typeof args[key] === "boolean" ? args[key] : fallback;
 }
 
 function architecture(projectId: string) {
@@ -192,6 +242,72 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return false as T;
     case "project_get_settings":
       return { cloneParentDir: "C:\\Files\\workspace", codexDefaults: null, githubBinding: null } as T;
+    case "memory_list": {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      return clone(memories.filter((item) => item.scope === "user" || item.projectId === projectId)) as T;
+    }
+    case "memory_upsert": {
+      const input = (args.input ?? {}) as Args;
+      const scope = text(input, "scope") === "user" ? "user" : "project";
+      const projectId = scope === "project" ? text(input, "projectId") || "lilia" : null;
+      const id = text(input, "id") || `memory-${Date.now()}`;
+      const existing = memories.find((item) => item.id === id);
+      const saved: MockMemory = {
+        id,
+        scope,
+        projectId,
+        title: text(input, "title") || "新记忆",
+        body: text(input, "body") || "",
+        tags: Array.isArray(input.tags) ? input.tags.filter((item): item is string => typeof item === "string") : [],
+        enabled: input.enabled !== false,
+        sourceTaskId: typeof input.sourceTaskId === "string" ? input.sourceTaskId : null,
+        createdAt: existing?.createdAt ?? Date.now(),
+        updatedAt: Date.now(),
+      };
+      memories = existing
+        ? memories.map((item) => item.id === id ? saved : item)
+        : [saved, ...memories];
+      return clone(saved) as T;
+    }
+    case "memory_set_enabled": {
+      const id = text(args, "id");
+      memories = memories.map((item) =>
+        item.id === id ? { ...item, enabled: bool(args, "enabled"), updatedAt: Date.now() } : item
+      );
+      return clone(memories.find((item) => item.id === id) ?? memories[0]) as T;
+    }
+    case "memory_delete": {
+      const id = text(args, "id");
+      const before = memories.length;
+      memories = memories.filter((item) => item.id !== id);
+      return (memories.length !== before) as T;
+    }
+    case "memory_get_settings":
+      return clone(memorySettings) as T;
+    case "memory_set_settings": {
+      const input = (args.settings ?? {}) as Args;
+      const cooldownTurns =
+        typeof input.cooldownTurns === "number" && Number.isFinite(input.cooldownTurns) && input.cooldownTurns > 0
+          ? Math.trunc(input.cooldownTurns)
+          : memorySettings.cooldownTurns;
+      memorySettings = {
+        enabled: typeof input.enabled === "boolean" ? input.enabled : memorySettings.enabled,
+        baselineInjectionEnabled: typeof input.baselineInjectionEnabled === "boolean"
+          ? input.baselineInjectionEnabled
+          : memorySettings.baselineInjectionEnabled,
+        cooldownTurns,
+      };
+      return undefined as T;
+    }
+    case "memory_get_injection_state":
+    case "memory_set_task_enabled":
+    case "memory_reset_task_cooldown":
+      return {
+        taskId: text(args, "taskId"),
+        enabled: args.enabled !== false,
+        lastInjectedTurnSeq: null,
+        updatedAt: Date.now(),
+      } as T;
     case "task_list": {
       const projectId = args.projectId ?? null;
       return clone(tasks.filter((task) => task.projectId === projectId)) as T;

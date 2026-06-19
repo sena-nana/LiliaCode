@@ -282,6 +282,8 @@ pub(crate) struct RuntimeSettingsClaude {
     #[serde(default)]
     pub(crate) additional_directories: Option<Vec<String>>,
     #[serde(default)]
+    pub(crate) additional_context: Option<String>,
+    #[serde(default)]
     pub(crate) max_turns: Option<u64>,
     #[serde(default)]
     pub(crate) max_budget_usd: Option<f64>,
