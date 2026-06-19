@@ -224,7 +224,7 @@ pub(crate) enum LiliaReviewTarget {
     Commit { sha: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeSettingsCommon {
     #[serde(default)]
@@ -239,7 +239,7 @@ pub(crate) struct RuntimeSettingsCommon {
     pub(crate) model_selection: Option<JsonValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeSettingsCodex {
     #[serde(default)]
@@ -268,7 +268,7 @@ pub(crate) struct RuntimeSettingsCodex {
     pub(crate) responses_api_client_metadata: Option<JsonValue>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeSettingsClaude {
     #[serde(default)]

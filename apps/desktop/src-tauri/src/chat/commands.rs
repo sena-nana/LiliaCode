@@ -2,6 +2,7 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use tauri::{AppHandle, Manager, State};
 
+use crate::chat::auto_turn_decision::{prepare_turn_for_start, resolve_resume_session_id};
 use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
 use crate::chat::slash_commands::{
     emit_slash_command_done, execute_slash_command, persist_and_emit_slash_command_result,
@@ -57,7 +58,8 @@ pub fn chat_send_message(
 ) -> Result<ChatSendResult, String> {
     let active_backend = load_active_backend(&app);
     validate_backend_ready_for_send(&active_backend)?;
-    let composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
+    let mut composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
+    let mut runtime_options = runtime_options;
     let slash_command_id = match &workflow {
         Some(ChatWorkflow::SlashCommand { command_id, .. }) => Some(command_id.clone()),
         _ => None,
@@ -148,6 +150,30 @@ pub fn chat_send_message(
             });
         }
         running.insert(task_id.clone(), true);
+    }
+
+    let resume_session_id = resolve_resume_session_id(&app, &task_id, &composer.backend);
+    match prepare_turn_for_start(
+        &app,
+        &task_id,
+        &content,
+        composer,
+        &project_cwd,
+        &attachments,
+        &conversation_references,
+        workflow.as_ref(),
+        runtime_command.as_ref(),
+        runtime_options,
+        resume_session_id.as_deref(),
+    ) {
+        Ok(prepared) => {
+            composer = prepared.composer;
+            runtime_options = prepared.runtime_options;
+        }
+        Err(err) => {
+            store.running_tasks.lock().unwrap().remove(&task_id);
+            return Err(err);
+        }
     }
 
     set_guide_status_for_app(&app, guide_id.as_deref(), "sent")?;

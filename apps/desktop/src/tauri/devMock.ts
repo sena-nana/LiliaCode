@@ -443,6 +443,14 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
             agentProgressSummaries: true,
           },
         },
+        autoTurnDecision: {
+          enabled: true,
+          allowModelTier: true,
+          allowReasoningEffort: true,
+          allowPlanMode: true,
+          allowGoalMode: true,
+          allowSessionFork: true,
+        },
       } as T;
     case "agent_interaction_list_subagents":
       return agentInteractionSubagents.map((item) => ({ ...item })) as T;

@@ -26,6 +26,14 @@ describe("useAgentInteractionSettings", () => {
       },
     });
     expect(store.settings.value.permissionMode).toBe("ask");
+    expect(store.settings.value.autoTurnDecision).toEqual({
+      enabled: true,
+      allowModelTier: true,
+      allowReasoningEffort: true,
+      allowPlanMode: true,
+      allowGoalMode: true,
+      allowSessionFork: true,
+    });
   });
 
   it("saves supported permission modes", async () => {
@@ -68,6 +76,32 @@ describe("useAgentInteractionSettings", () => {
     })).rejects.toThrow("save failed");
 
     expect(store.settings.value.subagentMode).toEqual(previous);
+  });
+
+  it("normalizes and saves auto turn decision settings", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+
+    await store.update({
+      autoTurnDecision: {
+        enabled: true,
+        allowModelTier: false,
+        allowReasoningEffort: true,
+        allowPlanMode: false,
+        allowGoalMode: true,
+        allowSessionFork: false,
+      },
+    });
+
+    expect(store.settings.value.autoTurnDecision).toEqual({
+      enabled: true,
+      allowModelTier: false,
+      allowReasoningEffort: true,
+      allowPlanMode: false,
+      allowGoalMode: true,
+      allowSessionFork: false,
+    });
   });
 
   it("loads, saves, updates, and deletes custom subagents through the shared store", async () => {

@@ -16,6 +16,8 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) codex_profile: CodexProfileSettings,
     #[serde(default)]
     pub(crate) subagent_mode: SubagentModeSettings,
+    #[serde(default)]
+    pub(crate) auto_turn_decision: AutoTurnDecisionSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,36 @@ fn default_codex_profile_name() -> String {
 
 fn default_enabled_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AutoTurnDecisionSettings {
+    #[serde(default = "default_enabled_true")]
+    pub(crate) enabled: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) allow_model_tier: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) allow_reasoning_effort: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) allow_plan_mode: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) allow_goal_mode: bool,
+    #[serde(default = "default_enabled_true")]
+    pub(crate) allow_session_fork: bool,
+}
+
+impl Default for AutoTurnDecisionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow_model_tier: true,
+            allow_reasoning_effort: true,
+            allow_plan_mode: true,
+            allow_goal_mode: true,
+            allow_session_fork: true,
+        }
+    }
 }
 
 fn default_permission_mode() -> String {

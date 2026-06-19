@@ -1,4 +1,5 @@
 pub(crate) mod attachments;
+pub(crate) mod auto_turn_decision;
 pub(crate) mod commands;
 mod process_registry;
 pub(crate) mod runner;

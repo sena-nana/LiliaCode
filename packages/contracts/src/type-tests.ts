@@ -750,6 +750,14 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
           agentProgressSummaries: true;
         };
       };
+      autoTurnDecision: {
+        enabled: true;
+        allowModelTier: true;
+        allowReasoningEffort: true;
+        allowPlanMode: true;
+        allowGoalMode: true;
+        allowSessionFork: true;
+      };
     },
     AgentInteractionSettings
   >

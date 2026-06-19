@@ -189,6 +189,10 @@ export interface ModelSelectionExplanation {
   mode: ModelSelectionMode;
   model: string;
   reasoningEffort?: ReasoningEffort | null;
+  tier?: "light" | "normal" | "deep";
+  planMode?: boolean;
+  goalMode?: boolean;
+  sessionFork?: boolean;
   source: "auto" | "manual" | "runtimeOptions";
   summary: string;
   signals: string[];
@@ -423,6 +427,15 @@ export interface AgentSubagentModeSettings {
   claude: ClaudeSubagentModeSettings;
 }
 
+export interface AutoTurnDecisionSettings {
+  enabled: boolean;
+  allowModelTier: boolean;
+  allowReasoningEffort: boolean;
+  allowPlanMode: boolean;
+  allowGoalMode: boolean;
+  allowSessionFork: boolean;
+}
+
 export interface CustomSubagentDefinition {
   id: string;
   name: string;
@@ -445,4 +458,5 @@ export interface AgentInteractionSettings {
   permissionMode: PermissionMode;
   codexProfile: CodexProfileSettings;
   subagentMode: AgentSubagentModeSettings;
+  autoTurnDecision: AutoTurnDecisionSettings;
 }

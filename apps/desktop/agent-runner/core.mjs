@@ -74,6 +74,8 @@ export async function runAgentTurn(cmd, deps = {}) {
     model: typeof turn.model === "string" ? turn.model : undefined,
     resumeSessionId: typeof turn.resumeSessionId === "string" ? turn.resumeSessionId : undefined,
     planMode: typeof turn.planMode === "boolean" ? turn.planMode : undefined,
+    goalMode: typeof turn.goalMode === "boolean" ? turn.goalMode : undefined,
+    autoSessionFork: cmd.runtimeOptions?.common?.modelSelection?.sessionFork === true,
     permission: typeof turn.permission === "string" ? turn.permission : undefined,
   };
   const allowsEmptyWorkflowPrompt = workflowMetadata?.requiresPrompt === false;

@@ -251,6 +251,7 @@ pub(crate) fn normalize_agent_interaction_settings(
         permission_mode: normalize_permission_mode(&settings.permission_mode),
         codex_profile: normalize_codex_profile_settings(settings.codex_profile),
         subagent_mode: normalize_subagent_mode_settings(settings.subagent_mode),
+        auto_turn_decision: settings.auto_turn_decision,
     }
 }
 

@@ -23,8 +23,8 @@ pub(crate) use config::{
 };
 pub(crate) use connection::resolve_connection_for;
 pub(crate) use types::{
-    AssistantAIConfig, BackendConnectionPlan, CodexProfileSettings, ConnectionMode,
-    CustomSubagentDefinition,
+    AssistantAIConfig, AutoTurnDecisionSettings, BackendConnectionPlan, CodexProfileSettings,
+    ConnectionMode, CustomSubagentDefinition,
 };
 
 pub(crate) use subagents::CustomSubagentUpsertInput;

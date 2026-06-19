@@ -206,6 +206,62 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
   return true;
 }
 
+async function runClaudeAutoSessionFork(cmd, context, cwd) {
+  if (cmd?.autoSessionFork !== true || cmd?.runtimeCommand?.type === "session_fork") return;
+  const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "started",
+    title: "Claude session fork started",
+    summary: "正在分叉 Claude session",
+    payload: {
+      backend: "claude",
+      subkind: "session_fork",
+      sourceSessionId: sourceSessionId || null,
+      autoTurnDecision: true,
+    },
+    sourceId: `claude:session-fork:auto:start:${sourceSessionId || "missing"}`,
+  });
+  try {
+    if (!sourceSessionId) throw new Error("辅助模型建议会话分叉，但当前 Claude task 没有可 fork 的 session");
+    const forkClaudeSession = context.forkClaudeSession || forkSession;
+    const result = await forkClaudeSession(sourceSessionId, { dir: cwd });
+    const sessionId = typeof result?.sessionId === "string" ? result.sessionId.trim() : "";
+    if (!sessionId) throw new Error("Claude forkSession did not return a session id");
+    cmd.resumeSessionId = sessionId;
+    context.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "success",
+      title: "Claude session fork completed",
+      summary: "已分叉 Claude session，本轮将在分叉 session 中继续",
+      payload: {
+        backend: "claude",
+        subkind: "session_fork",
+        sourceSessionId,
+        sessionId,
+        autoTurnDecision: true,
+      },
+      sourceId: `claude:session-fork:auto:completed:${sourceSessionId}:${sessionId}`,
+    });
+  } catch (err) {
+    context.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Claude session fork failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "claude",
+        subkind: "session_fork",
+        sourceSessionId: sourceSessionId || null,
+        autoTurnDecision: true,
+        error: err?.message || String(err),
+      },
+      sourceId: `claude:session-fork:auto:error:${sourceSessionId || "missing"}`,
+    });
+    throw err;
+  }
+}
+
 function normalizeLiliaReviewTarget(target) {
   if (!isRecord(target)) return null;
   const type = stringOrNull(target.type);
@@ -1113,6 +1169,7 @@ export async function runClaude(cmd, context) {
   const { cwd } = cmd;
   const workingDir = cwd || (context.cwd ? context.cwd() : process.cwd());
   if (await runClaudeSessionForkRuntimeCommand(cmd, context, workingDir)) return;
+  await runClaudeAutoSessionFork(cmd, context, workingDir);
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeProviderSettingsRuntimeCommand(cmd, context)) return;

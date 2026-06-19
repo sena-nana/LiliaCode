@@ -989,6 +989,14 @@ function defaultAgentInteractionSettings() {
         agentProgressSummaries: true,
       },
     },
+    autoTurnDecision: {
+      enabled: true,
+      allowModelTier: true,
+      allowReasoningEffort: true,
+      allowPlanMode: true,
+      allowGoalMode: true,
+      allowSessionFork: true,
+    },
   };
 }
 
@@ -3556,10 +3564,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             agentProgressSummaries?: unknown;
           };
         };
+        autoTurnDecision?: {
+          enabled?: unknown;
+          allowModelTier?: unknown;
+          allowReasoningEffort?: unknown;
+          allowPlanMode?: unknown;
+          allowGoalMode?: unknown;
+          allowSessionFork?: unknown;
+        };
       } | undefined;
       const codexProfile = settings?.codexProfile;
       const subagentMode = settings?.subagentMode;
       const claudeSubagentMode = subagentMode?.claude;
+      const autoTurnDecision = settings?.autoTurnDecision;
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
@@ -3599,6 +3616,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             forwardSubagentText: claudeSubagentMode?.forwardSubagentText !== false,
             agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
           },
+        },
+        autoTurnDecision: {
+          enabled: autoTurnDecision?.enabled !== false,
+          allowModelTier: autoTurnDecision?.allowModelTier !== false,
+          allowReasoningEffort: autoTurnDecision?.allowReasoningEffort !== false,
+          allowPlanMode: autoTurnDecision?.allowPlanMode !== false,
+          allowGoalMode: autoTurnDecision?.allowGoalMode !== false,
+          allowSessionFork: autoTurnDecision?.allowSessionFork !== false,
         },
       };
       return undefined;
