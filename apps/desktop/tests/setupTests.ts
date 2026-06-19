@@ -38,6 +38,42 @@ Object.defineProperty(window, "__TAURI_INTERNALS__", {
   },
 });
 
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  configurable: true,
+  value(this: HTMLCanvasElement) {
+    const context: Record<string, unknown> = {
+      canvas: this,
+      createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      createPattern: vi.fn(() => null),
+      createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+      getLineDash: vi.fn(() => []),
+      measureText: vi.fn((text: string) => ({
+        width: text.length * 6,
+        actualBoundingBoxAscent: 8,
+        actualBoundingBoxDescent: 2,
+      })),
+    };
+    return new Proxy(context, {
+      get(target, prop: string) {
+        target[prop] ??= vi.fn();
+        return target[prop];
+      },
+    });
+  },
+});
+
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+Object.defineProperty(window, "ResizeObserver", {
+  configurable: true,
+  value: MockResizeObserver,
+});
+
 beforeEach(async () => {
   resetTauriMockData();
   Object.defineProperty(navigator, "clipboard", {

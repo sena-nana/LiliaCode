@@ -172,16 +172,16 @@ describe("Settings provider switch", () => {
       }, undefined);
     });
     expect(await view.findByText("总 Token")).toBeInTheDocument();
-    expect(view.getByRole("img", { name: "每日 Token 趋势" })).toBeInTheDocument();
     expect(
-      view.getByRole("img", { name: "Token 消耗热度图（全部 · 近 7 天）" }),
+      view.getByRole("img", { name: "Token 用量趋势（全部 · 近 7 天）" }),
     ).toBeInTheDocument();
-    await waitFor(() => {
-      expect(view.container.querySelectorAll(".quota-heatmap__day[title]").length).toBeGreaterThan(0);
-    });
+    expect(view.getByRole("img", { name: "后端 Token 分布" })).toBeInTheDocument();
     expect(view.getByText("项目消耗")).toBeInTheDocument();
+    expect(view.getByRole("img", { name: "项目消耗图表" })).toBeInTheDocument();
     expect(view.getByText("对话消耗")).toBeInTheDocument();
+    expect(view.getByRole("img", { name: "对话消耗图表" })).toBeInTheDocument();
     expect(view.getByText("工具活跃度")).toBeInTheDocument();
+    expect(view.getByRole("img", { name: "工具活跃度图表" })).toBeInTheDocument();
     expect(view.getByText("按调用次数统计")).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
@@ -192,7 +192,7 @@ describe("Settings provider switch", () => {
       });
     });
     expect(
-      view.getByRole("img", { name: "Token 消耗热度图（Codex · 近 7 天）" }),
+      view.getByRole("img", { name: "Token 用量趋势（Codex · 近 7 天）" }),
     ).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("radio", { name: "30 天" }));
@@ -203,7 +203,7 @@ describe("Settings provider switch", () => {
       });
     });
     expect(
-      view.getByRole("img", { name: "Token 消耗热度图（Codex · 近 30 天）" }),
+      view.getByRole("img", { name: "Token 用量趋势（Codex · 近 30 天）" }),
     ).toBeInTheDocument();
   });
 
@@ -214,7 +214,7 @@ describe("Settings provider switch", () => {
 
     expect(await view.findAllByText("暂无新增额度数据")).toHaveLength(2);
     expect(view.getByText("无新增记录")).toBeInTheDocument();
-    expect(view.queryByRole("img", { name: /Token 消耗热度图/ })).not.toBeInTheDocument();
+    expect(view.queryByRole("img", { name: /Token 用量趋势/ })).not.toBeInTheDocument();
   });
 
   it("额度页在 Codex 官方账号模式显示官方额度", async () => {
