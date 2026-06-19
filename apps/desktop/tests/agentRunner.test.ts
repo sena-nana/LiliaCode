@@ -57,6 +57,10 @@ import {
   readCodexAccountQuotaStatus,
 } from "../agent-runner/codex/accountQuota.mjs";
 import {
+  runCodexSparkPromptCommand,
+  updateCodexSparkPromptState,
+} from "../agent-runner/codex/sparkPrompt.mjs";
+import {
   archiveCodexThread,
   cleanCodexThreadBackgroundTerminals,
   codexHistoryTimelineInputs,
@@ -2012,6 +2016,116 @@ describe("Codex app-server mapping", () => {
       method: "config/read",
       params: { cwd: "C:/repo" },
     });
+  });
+
+  it("collects Codex Spark assistant delta text from app-server notifications", async () => {
+    const calls: any[] = [];
+    let drained = false;
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "initialize") return {};
+        if (method === "thread/start") return { thread: { id: "thread-spark" } };
+        if (method === "turn/start") return { turn: { id: "turn-spark" } };
+        return {};
+      },
+      notify: () => {},
+      drainNotifications: () => {
+        if (drained) return [];
+        drained = true;
+        return [
+          { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: "{\"items\"" } },
+          { method: "item/agentMessage/delta", params: { itemId: "msg-1", delta: ":[]}" } },
+          { method: "turn/completed", params: { threadId: "thread-spark", turn: { status: "completed" } } },
+        ];
+      },
+      close: () => calls.push({ method: "close" }),
+    };
+
+    const result = await runCodexSparkPromptCommand({
+      kind: "codex_spark_prompt",
+      prompt: "suggest",
+      instruction: "json only",
+      timeoutMs: 100,
+    }, {
+      createCodexAppServer: () => server,
+      cwd: () => "C:/repo",
+    });
+
+    expect(result).toEqual({ ok: true, text: "{\"items\":[]}", error: null });
+    expect(calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
+      model: "gpt-5.3-codex-spark",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      dynamicTools: [],
+    });
+    expect(calls.find((call) => call.method === "turn/start")?.params.collaborationMode.settings)
+      .toMatchObject({
+        model: "gpt-5.3-codex-spark",
+        developer_instructions: "json only",
+      });
+  });
+
+  it("collects Codex Spark assistant text from completed agentMessage items", () => {
+    const state = {
+      deltaText: "",
+      snapshotText: "",
+      completed: false,
+      error: null,
+    };
+
+    updateCodexSparkPromptState(state, {
+      method: "item/completed",
+      params: {
+        item: {
+          type: "agentMessage",
+          content: [{ type: "output_text", text: "完成标题" }],
+        },
+      },
+    });
+    updateCodexSparkPromptState(state, {
+      method: "turn/completed",
+      params: { turn: { status: "completed" } },
+    });
+
+    expect(state.snapshotText).toBe("完成标题");
+    expect(state.completed).toBe(true);
+    expect(state.error).toBeNull();
+  });
+
+  it("returns a handled failure JSON when Codex Spark turn fails", async () => {
+    let drained = false;
+    const server = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "thread-spark" } };
+        return {};
+      },
+      notify: () => {},
+      drainNotifications: () => {
+        if (drained) return [];
+        drained = true;
+        return [
+          {
+            method: "turn/completed",
+            params: {
+              turn: { status: "failed", error: { message: "spark unavailable" } },
+            },
+          },
+        ];
+      },
+      close: () => {},
+    };
+
+    const result = await runCodexSparkPromptCommand({
+      kind: "codex_spark_prompt",
+      prompt: "suggest",
+      timeoutMs: 100,
+    }, {
+      createCodexAppServer: () => server,
+      cwd: () => "C:/repo",
+    });
+
+    expect(result).toEqual({ ok: false, text: null, error: "spark unavailable" });
   });
 
   it("keeps app-server exit errors actionable when stderr is empty", async () => {

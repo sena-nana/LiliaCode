@@ -14,9 +14,10 @@ use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::codex_history;
 use crate::projects_tasks::events::emit_tasks_changed;
 use crate::provider::{
-    assistant_ai_secret, backend_api_key_env, backend_direct_url, load_active_backend,
-    load_assistant_ai_config, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
-    ConnectionMode,
+    assistant_ai_secret, backend_api_key_env, backend_direct_url, codex_account_spark_enabled,
+    is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
+    request_codex_account_spark, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
+    ConnectionMode, CODEX_SPARK_BASE_URL, CODEX_SPARK_MODEL,
 };
 use crate::store::LiliaStore;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -26,6 +27,7 @@ const TITLE_LABEL: &str = "标题已更新";
 const TITLE_MAX_CHARS: usize = 18;
 const TITLE_MIN_CHARS: usize = 2;
 const SAMPLE_TEXT_LIMIT: usize = 260;
+const TITLE_SPARK_INSTRUCTION: &str = "只输出一个中文短标题。";
 
 #[derive(Debug, Clone)]
 struct TaskTitleState {
@@ -72,9 +74,23 @@ fn run_title_update<R: Runtime>(
     if prompt.is_none() {
         return Ok(());
     }
-    let model =
-        resolve_model_request(app, backend).ok_or_else(|| "model unavailable".to_string())?;
-    let proposed = request_title(&model, &prompt.unwrap()).and_then(normalize_title)?;
+    let prompt = prompt.unwrap();
+    let mut last_error = None;
+    let mut proposed = None;
+    for model in resolve_model_requests(app, backend) {
+        match request_title(app, &model, &prompt).and_then(normalize_title) {
+            Ok(title) => {
+                proposed = Some(title);
+                break;
+            }
+            Err(err) => {
+                eprintln!("[title-update] model failed: {err}");
+                last_error = Some(err);
+            }
+        }
+    }
+    let proposed =
+        proposed.ok_or_else(|| last_error.unwrap_or_else(|| "model unavailable".to_string()))?;
     if proposed == compact_line(&task.title) {
         return Ok(());
     }
@@ -280,8 +296,34 @@ fn load_timeline_samples(conn: &Connection, task_id: &str) -> Result<Vec<String>
     Ok(out)
 }
 
-fn resolve_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Option<ModelRequest> {
-    assistant_ai_model_request(app).or_else(|| provider_model_request(app, backend))
+fn resolve_model_requests<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Vec<ModelRequest> {
+    let mut requests = Vec::new();
+    if let Some(request) = codex_spark_model_request(app) {
+        requests.push(request);
+    }
+    if let Some(request) = assistant_ai_model_request(app) {
+        requests.push(request);
+    }
+    if let Some(request) = provider_model_request(app, backend) {
+        requests.push(request);
+    }
+    requests
+}
+
+fn codex_spark_model_request<R: Runtime>(app: &AppHandle<R>) -> Option<ModelRequest> {
+    if !codex_account_spark_enabled(app) {
+        return None;
+    }
+    Some(ModelRequest {
+        backend: BACKEND_CODEX.to_string(),
+        model: CODEX_SPARK_MODEL.to_string(),
+        base_url: CODEX_SPARK_BASE_URL.to_string(),
+        api_key: String::new(),
+    })
+}
+
+fn is_codex_spark_request(model: &ModelRequest) -> bool {
+    is_codex_account_spark_request(Some(&model.backend), &model.model, &model.base_url)
 }
 
 fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Option<ModelRequest> {
@@ -335,7 +377,15 @@ fn provider_model_request<R: Runtime>(app: &AppHandle<R>, backend: &str) -> Opti
     })
 }
 
-fn request_title(model: &ModelRequest, prompt: &str) -> Result<String, String> {
+fn request_title<R: Runtime>(
+    app: &AppHandle<R>,
+    model: &ModelRequest,
+    prompt: &str,
+) -> Result<String, String> {
+    if is_codex_spark_request(model) {
+        return request_codex_account_spark(app, prompt, TITLE_SPARK_INSTRUCTION)
+            .map_err(|err| format!("title Codex Spark request failed: {err}"));
+    }
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()

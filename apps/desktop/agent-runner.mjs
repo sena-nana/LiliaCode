@@ -6,6 +6,7 @@
 
 import { createInterface } from "node:readline";
 import { createRunnerContext, runAgentTurn } from "./agent-runner/core.mjs";
+import { runCodexSparkPromptCommand } from "./agent-runner/codex/sparkPrompt.mjs";
 
 async function readInitialCommand(rl, protocol, context) {
   let cmd = null;
@@ -35,6 +36,12 @@ async function main() {
   const context = createRunnerContext();
   const rl = createInterface({ input: process.stdin });
   const cmd = await readInitialCommand(rl, context.protocol, context);
+  if (cmd?.kind === "codex_spark_prompt") {
+    const result = await runCodexSparkPromptCommand(cmd);
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    rl.close();
+    process.exit(0);
+  }
   const result = await runAgentTurn(cmd, context);
   rl.close();
   process.exit(result.exitCode);

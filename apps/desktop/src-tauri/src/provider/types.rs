@@ -145,6 +145,8 @@ pub(crate) struct AssistantAIConfig {
     pub(crate) api_key: Option<String>,
     pub(crate) model: Option<String>,
     #[serde(default)]
+    pub(crate) codex_account_spark_enabled: bool,
+    #[serde(default)]
     pub(crate) has_api_key: bool,
     #[serde(default)]
     pub(crate) clear_api_key: bool,

@@ -286,7 +286,13 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
     case "router_get_mode":
       return (text(args, "backend") === "codex" ? "codex-account" : "api") as T;
     case "assistant_ai_get_config":
-      return { baseUrl: null, apiKey: null, model: null, hasApiKey: false } as T;
+      return {
+        baseUrl: null,
+        apiKey: null,
+        model: null,
+        codexAccountSparkEnabled: false,
+        hasApiKey: false,
+      } as T;
     case "assistant_ai_test_connection":
       return { ok: true, error: null, models: ["mock-assistant"], modelMatched: true } as T;
     case "conversation_suggestions_get_settings":

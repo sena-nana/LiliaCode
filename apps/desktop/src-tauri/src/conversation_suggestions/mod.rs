@@ -18,7 +18,7 @@ use crate::store::LiliaStore;
 use cache::{build_cache_key, cache_scope_key, load_cache_hit, normalize_settings, save_cache};
 use claude_native::{load_claude_native_suggestions, should_use_claude_native_suggestions};
 use generation::{build_generation_prompt, materialize_items, parse_model_suggestions};
-use model::{request_model, resolve_model_request};
+use model::{request_model, resolve_model_requests};
 use scope::{build_scope, summarize_scope_sources};
 use types::{SuggestionItemSource, SuggestionSourceProbe, SETTINGS_KEY};
 
@@ -117,29 +117,31 @@ fn conversation_suggestions_get_blocking(
     let Some(scope) = build_scope(&app, &conn, project_id.as_deref())? else {
         return Ok(Vec::new());
     };
-    let Some(model) = resolve_model_request(&app, &settings) else {
+    let models = resolve_model_requests(&app, &settings);
+    if models.is_empty() {
         return Ok(Vec::new());
-    };
-    let cache_key = build_cache_key(&scope, &model);
-    let cache_scope = cache_scope_key(project_id.as_deref(), &settings.source);
-    if force_refresh != Some(true) {
-        if let Some(hit) = load_cache_hit(&app, &cache_scope, &cache_key) {
-            return Ok(hit.items);
-        }
     }
-
     let prompt = build_generation_prompt(&scope);
-    match request_model(&model, &prompt).and_then(parse_model_suggestions) {
-        Ok(items) => {
-            let generated = materialize_items(items, &scope);
-            save_cache(&app, cache_scope, cache_key, generated.clone());
-            Ok(generated)
+    let cache_scope = cache_scope_key(project_id.as_deref(), &settings.source);
+    for model in models {
+        let cache_key = build_cache_key(&scope, &model);
+        if force_refresh != Some(true) {
+            if let Some(hit) = load_cache_hit(&app, &cache_scope, &cache_key) {
+                return Ok(hit.items);
+            }
         }
-        Err(err) => {
-            eprintln!("[conversation-suggestions] generate failed: {err}");
-            Ok(Vec::new())
+        match request_model(&app, &model, &prompt).and_then(parse_model_suggestions) {
+            Ok(items) => {
+                let generated = materialize_items(items, &scope);
+                save_cache(&app, cache_scope.clone(), cache_key, generated.clone());
+                return Ok(generated);
+            }
+            Err(err) => {
+                eprintln!("[conversation-suggestions] generate failed: {err}");
+            }
         }
     }
+    Ok(Vec::new())
 }
 
 #[cfg(test)]

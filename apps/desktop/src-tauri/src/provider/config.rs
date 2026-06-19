@@ -40,6 +40,7 @@ struct ProviderConfigMetadata {
 struct AssistantAIConfigMetadata {
     base_url: Option<String>,
     model: Option<String>,
+    codex_account_spark_enabled: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -184,11 +185,16 @@ pub(crate) fn save_assistant_ai_config_metadata<R: Runtime>(
     app: &AppHandle<R>,
     base_url: Option<String>,
     model: Option<String>,
+    codex_account_spark_enabled: bool,
 ) -> Result<(), String> {
     save_store_value(
         app,
         ASSISTANT_AI_KEY,
-        &AssistantAIConfigMetadata { base_url, model },
+        &AssistantAIConfigMetadata {
+            base_url,
+            model,
+            codex_account_spark_enabled,
+        },
     )
 }
 
@@ -221,7 +227,12 @@ fn migrate_assistant_ai_config<R: Runtime>(app: &AppHandle<R>) -> Result<(), Str
     if !has_secret(assistant_ai_account())? {
         write_secret(assistant_ai_account(), api_key)?;
     }
-    save_assistant_ai_config_metadata(app, config.base_url, config.model)
+    save_assistant_ai_config_metadata(
+        app,
+        config.base_url,
+        config.model,
+        config.codex_account_spark_enabled,
+    )
 }
 
 pub(crate) fn load_agent_interaction_settings<R: Runtime>(
@@ -325,9 +336,7 @@ pub(crate) fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     normalized
 }
 
-pub(crate) fn build_effective_claude_settings<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Option<JsonValue> {
+pub(crate) fn build_effective_claude_settings<R: Runtime>(app: &AppHandle<R>) -> Option<JsonValue> {
     let settings = load_agent_interaction_settings(app).subagent_mode;
     if !settings.enabled || !settings.claude.enabled {
         return None;
@@ -468,6 +477,7 @@ mod tests {
         let value = serde_json::to_value(AssistantAIConfigMetadata {
             base_url: Some("https://api.example.com/v1".to_string()),
             model: Some("mini".to_string()),
+            codex_account_spark_enabled: true,
         })
         .unwrap();
 
@@ -476,6 +486,12 @@ mod tests {
             Some("https://api.example.com/v1")
         );
         assert_eq!(value.get("model").and_then(JsonValue::as_str), Some("mini"));
+        assert_eq!(
+            value
+                .get("codexAccountSparkEnabled")
+                .and_then(JsonValue::as_bool),
+            Some(true)
+        );
         assert!(value.get("apiKey").is_none());
         assert!(value.get("hasApiKey").is_none());
         assert!(value.get("clearApiKey").is_none());

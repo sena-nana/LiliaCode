@@ -91,6 +91,7 @@ mod tests {
             base_url: Some("https://example.com/v1".to_string()),
             api_key: None,
             model: Some("model".to_string()),
+            codex_account_spark_enabled: false,
             has_api_key: false,
             clear_api_key: false,
         });

@@ -719,6 +719,19 @@ export type CodexProfileSettingsShapeTypeTest = Assert<
   >
 >;
 
+export type AssistantAIConfigIncludesCodexSparkSwitchTypeTest = Assert<
+  Extends<
+    {
+      baseUrl: "https://api.example.com/v1";
+      apiKey: null;
+      model: "gpt-4o-mini";
+      codexAccountSparkEnabled: true;
+      hasApiKey: false;
+    },
+    import("./provider").AssistantAIConfig
+  >
+>;
+
 export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
   Extends<
     {
