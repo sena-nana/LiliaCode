@@ -28,6 +28,7 @@ pub(crate) fn runtime_command_kind(command: Option<&ChatRuntimeCommand>) -> Opti
         ChatRuntimeCommand::RuntimeSettings { .. } => "runtime_settings",
         ChatRuntimeCommand::RemoteEnvironment { .. } => "remote_environment",
         ChatRuntimeCommand::SandboxDiagnostics { .. } => "sandbox_diagnostics",
+        ChatRuntimeCommand::ProcessSession { .. } => "process_session",
     };
     Some(kind.to_string())
 }
@@ -139,6 +140,18 @@ mod tests {
             },
             ChatRuntimeCommand::SandboxDiagnostics {
                 include_details: Some(true),
+            },
+            ChatRuntimeCommand::ProcessSession {
+                action: "spawn".to_string(),
+                process_id: None,
+                command: Some("npm test".to_string()),
+                cwd: None,
+                stdin: None,
+                rows: None,
+                cols: None,
+                env: None,
+                tty: Some(true),
+                permission_profile: None,
             },
         ];
         let manifest: TestLiliaProtocolManifest =

@@ -210,6 +210,13 @@ export function interruptTurn(taskId: string): Promise<ChatInterruptResult> {
   return invoke<ChatInterruptResult>("chat_interrupt_turn", { taskId });
 }
 
+export function sendProcessSessionCommand(
+  taskId: string,
+  command: ChatRuntimeCommand,
+): Promise<void> {
+  return invoke<void>("chat_send_process_session_command", { taskId, command });
+}
+
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
   return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
 }

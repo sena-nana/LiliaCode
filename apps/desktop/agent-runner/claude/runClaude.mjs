@@ -799,6 +799,29 @@ function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
   return true;
 }
 
+function runClaudeProcessSessionRuntimeCommand(cmd, context) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "process_session") return false;
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Claude process session unsupported",
+    summary: "Claude SDK has no equivalent independent process session endpoint.",
+    payload: {
+      backend: "claude",
+      subkind: "process_session",
+      action: stringOrNull(command.action),
+      processId: stringOrNull(command.processId) || null,
+      native: false,
+      unsupported: true,
+      reason: "Claude SDK has no equivalent Lilia-controllable process session endpoint.",
+    },
+    sourceId: `claude:process-session:${stringOrNull(command.action) || "unknown"}:${Date.now()}`,
+  });
+  emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
+  return true;
+}
+
 function runClaudeRemoteEnvironmentRuntimeCommand(cmd, context) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
   if (command?.type !== "remote_environment") return false;
@@ -1226,6 +1249,7 @@ export async function runClaude(cmd, context) {
   if (await runClaudeProviderSettingsRuntimeCommand(cmd, context)) return;
   if (runClaudeRemoteEnvironmentRuntimeCommand(cmd, context)) return;
   if (runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context)) return;
+  if (runClaudeProcessSessionRuntimeCommand(cmd, context)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);
 }

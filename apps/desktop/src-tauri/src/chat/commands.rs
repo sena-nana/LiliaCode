@@ -246,6 +246,13 @@ pub(crate) fn interrupt_turn_control_payload() -> JsonValue {
     serde_json::json!({ "type": "interrupt_turn" })
 }
 
+pub(crate) fn process_session_command_payload(command: ChatRuntimeCommand) -> JsonValue {
+    serde_json::json!({
+        "type": "process_session_command",
+        "runtimeCommand": command,
+    })
+}
+
 pub(crate) fn agent_interaction_response_payload(
     request_id: String,
     kind: String,
@@ -360,6 +367,23 @@ pub fn chat_respond_agent_interaction(
     let write_result = write_runner_stdin(&store, &task_id, payload);
     attach_stdin_delivery(&mut attributes, &write_result);
     write_result.map(|_| ())
+}
+
+#[tauri::command]
+pub fn chat_send_process_session_command(
+    task_id: String,
+    command: ChatRuntimeCommand,
+    store: State<'_, ChatStore>,
+) -> Result<(), String> {
+    match command {
+        ChatRuntimeCommand::ProcessSession { .. } => {
+            let payload = process_session_command_payload(command);
+            write_runner_stdin(&store, &task_id, payload).map(|_| ())
+        }
+        _ => Err(
+            "chat_send_process_session_command 只接受 process_session runtime command".to_string(),
+        ),
+    }
 }
 
 #[tauri::command]

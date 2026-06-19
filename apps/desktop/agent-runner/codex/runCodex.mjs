@@ -521,6 +521,7 @@ function readCodexConfigDiagnosticsWorkflow(cmd) {
 const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
 const REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS = ["diagnose", "add", "select"];
 const REMOTE_ENVIRONMENT_ACTIONS = new Set(REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS);
+const PROCESS_SESSION_ACTIONS = new Set(["spawn", "write_stdin", "kill", "resize_pty"]);
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -604,6 +605,34 @@ function readCodexSandboxDiagnosticsCommand(cmd) {
   if (command?.type !== "sandbox_diagnostics") return null;
   return {
     includeDetails: command.includeDetails === true,
+  };
+}
+
+function readCodexProcessSessionCommand(value) {
+  const command = isRecord(value?.runtimeCommand) ? value.runtimeCommand : isRecord(value) ? value : null;
+  if (command?.type !== "process_session") return null;
+  const action = stringOrNull(command.action);
+  if (!PROCESS_SESSION_ACTIONS.has(action)) {
+    throw new Error("Lilia process session command missing a valid action");
+  }
+  const processId = stringOrNull(command.processId)?.trim() || "";
+  const shellCommand = stringOrNull(command.command)?.trim() || "";
+  if (action === "spawn" && !shellCommand) {
+    throw new Error("Lilia process session spawn requires command");
+  }
+  const rows = numberOrNull(command.rows);
+  const cols = numberOrNull(command.cols);
+  return {
+    action,
+    processId,
+    command: shellCommand,
+    cwd: stringOrNull(command.cwd)?.trim() || "",
+    stdin: stringOrNull(command.stdin) || "",
+    rows: rows && rows > 0 ? Math.trunc(rows) : null,
+    cols: cols && cols > 0 ? Math.trunc(cols) : null,
+    env: jsonObjectOrNull(command.env),
+    tty: command.tty === true,
+    permissionProfile: stringOrNull(command.permissionProfile)?.trim() || "",
   };
 }
 
@@ -1685,6 +1714,254 @@ function emitCodexRemoteEnvironmentTimeline(ctx, input) {
   });
 }
 
+function codexProcessIdFromSpawnResult(result) {
+  if (!isRecord(result)) return "";
+  return stringOrNull(result.processId) ||
+    stringOrNull(result.processID) ||
+    stringOrNull(result.pid) ||
+    stringOrNull(result.id) ||
+    "";
+}
+
+function processNotificationMethod(msg) {
+  return stringOrNull(msg?.method) || stringOrNull(msg?.type) || "";
+}
+
+function processNotificationParams(msg) {
+  return isRecord(msg?.params) ? msg.params : isRecord(msg) ? msg : {};
+}
+
+function processNotificationId(msg) {
+  const params = processNotificationParams(msg);
+  return stringOrNull(params.processId) ||
+    stringOrNull(params.processID) ||
+    stringOrNull(params.pid) ||
+    stringOrNull(params.id) ||
+    "";
+}
+
+function processOutputDelta(msg) {
+  const params = processNotificationParams(msg);
+  return stringOrNull(params.delta) ||
+    stringOrNull(params.text) ||
+    stringOrNull(params.chunk) ||
+    stringOrNull(params.output) ||
+    "";
+}
+
+function processSessionSourceId(action, processId, suffix = "") {
+  return `codex:process-session:${action}:${processId || "unknown"}${suffix ? `:${suffix}` : ""}`;
+}
+
+function emitCodexProcessSessionTimeline(ctx, input) {
+  const failed = input.status === "error";
+  const errorMessage = failed ? input.error?.message || String(input.error) : null;
+  ctx.protocol.emitTimeline({
+    kind: "command",
+    status: input.status,
+    title: input.title,
+    summary: errorMessage || input.summary || "",
+    payload: {
+      backend: "codex",
+      subkind: "process_session",
+      action: input.action,
+      method: input.method,
+      threadId: input.threadId,
+      processId: input.processId || null,
+      ...(input.command ? { command: input.command } : {}),
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      ...(input.stream ? { stream: input.stream } : {}),
+      ...(input.delta ? { delta: input.delta } : {}),
+      ...(typeof input.exitCode === "number" ? { exitCode: input.exitCode } : {}),
+      ...(input.result !== undefined ? { result: input.result } : {}),
+      ...(failed ? { error: errorMessage } : { native: true }),
+    },
+    sourceId: input.sourceId,
+  });
+}
+
+function codexProcessSessionSpawnParams(command, cmd, cwdFn) {
+  const params = {
+    command: command.command,
+    cwd: command.cwd || cmd.cwd || cwdFn(),
+  };
+  if (command.env) params.env = command.env;
+  if (command.tty) params.tty = true;
+  if (command.rows) params.rows = command.rows;
+  if (command.cols) params.cols = command.cols;
+  if (command.permissionProfile) params.permissionProfile = command.permissionProfile;
+  return params;
+}
+
+function resolveCodexProcessId(command, ctx) {
+  const processId = command.processId || ctx.activeProcessSession?.processId || "";
+  if (!processId) {
+    throw new Error("Lilia process session command requires processId");
+  }
+  return processId;
+}
+
+async function runCodexProcessSessionControl(server, command, ctx) {
+  const processId = resolveCodexProcessId(command, ctx);
+  if (command.action === "write_stdin") {
+    return server.request("process/writeStdin", {
+      processId,
+      stdin: command.stdin,
+    });
+  }
+  if (command.action === "kill") {
+    return server.request("process/kill", { processId });
+  }
+  if (command.action === "resize_pty") {
+    if (!command.rows || !command.cols) {
+      throw new Error("Lilia process session resize_pty requires rows and cols");
+    }
+    return server.request("process/resizePty", {
+      processId,
+      rows: command.rows,
+      cols: command.cols,
+    });
+  }
+}
+
+function registerCodexProcessSessionCommand(ctx, server, threadId) {
+  return ctx.interactions?.handleProcessSessionCommand?.((rawCommand) => {
+    let command;
+    try {
+      command = readCodexProcessSessionCommand(rawCommand);
+      if (!command || command.action === "spawn") return;
+    } catch (err) {
+      emitCodexProcessSessionTimeline(ctx, {
+        status: "error",
+        title: "Codex process session command rejected",
+        action: "control",
+        method: "process/session",
+        threadId,
+        processId: ctx.activeProcessSession?.processId || "",
+        error: err,
+        sourceId: processSessionSourceId("control-error", ctx.activeProcessSession?.processId, Date.now()),
+      });
+      return;
+    }
+    const promise = runCodexProcessSessionControl(server, command, ctx)
+      .catch((err) => {
+        emitCodexProcessSessionTimeline(ctx, {
+          status: "error",
+          title: "Codex process session command failed",
+          action: command.action,
+          method: "process/session",
+          threadId,
+          processId: command.processId || ctx.activeProcessSession?.processId || "",
+          error: err,
+          sourceId: processSessionSourceId(command.action, command.processId || ctx.activeProcessSession?.processId, Date.now()),
+        });
+      });
+    ctx.processSessionControlPromises.push(promise);
+  }) ?? (() => {});
+}
+
+async function drainCodexProcessSessionNotifications(server, ctx, processId, threadId) {
+  while (!ctx.activeProcessSession?.exited) {
+    const messages = server.drainNotifications?.() || [];
+    for (const msg of messages) {
+      if (await maybeHandleCodexServerRequest(server, msg, ctx)) continue;
+      const method = processNotificationMethod(msg);
+      if (!method.startsWith("process/")) {
+        const ev = normalizeCodexAppServerEvent(msg);
+        if (ev) mapCodexEventToNdjson(ev, ctx);
+        continue;
+      }
+      const params = processNotificationParams(msg);
+      const eventProcessId = processNotificationId(msg);
+      if (eventProcessId && eventProcessId !== processId) continue;
+      if (method === "process/outputDelta") {
+        const delta = processOutputDelta(msg);
+        emitCodexProcessSessionTimeline(ctx, {
+          status: "running",
+          title: "Codex process output",
+          summary: oneLineSummary(delta),
+          action: "output",
+          method,
+          threadId,
+          processId,
+          stream: stringOrNull(params.stream) || (params.fd === 2 ? "stderr" : "stdout"),
+          delta,
+          sourceId: processSessionSourceId("output", processId, Date.now()),
+        });
+      } else if (method === "process/exited") {
+        const exitCode = numberOrNull(params.exitCode) ?? numberOrNull(params.code) ?? 0;
+        ctx.activeProcessSession.exited = true;
+        emitCodexProcessSessionTimeline(ctx, {
+          status: exitCode === 0 ? "success" : "error",
+          title: "Codex process exited",
+          summary: `exit ${exitCode}`,
+          action: "exited",
+          method,
+          threadId,
+          processId,
+          exitCode,
+          sourceId: processSessionSourceId("exited", processId),
+        });
+      }
+    }
+    if (!ctx.activeProcessSession?.exited) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  await Promise.allSettled(ctx.processSessionControlPromises);
+}
+
+async function runCodexProcessSessionCommand(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const command = readCodexProcessSessionCommand(cmd);
+  if (!command) return false;
+  if (command.action !== "spawn") {
+    await runCodexProcessSessionControl(server, command, ctx);
+    emitCodexWorkflowDone(ctx, threadId);
+    return true;
+  }
+  await flushCodexRuntimeSettings(ctx);
+  const params = codexProcessSessionSpawnParams(command, cmd, cwdFn);
+  let result;
+  try {
+    result = await server.request("process/spawn", params);
+  } catch (err) {
+    emitCodexProcessSessionTimeline(ctx, {
+      status: "error",
+      title: "Codex process spawn failed",
+      action: command.action,
+      method: "process/spawn",
+      threadId,
+      command: command.command,
+      cwd: params.cwd,
+      error: err,
+      sourceId: processSessionSourceId("spawn-error", "", Date.now()),
+    });
+    throw err;
+  }
+  const processId = codexProcessIdFromSpawnResult(result);
+  ctx.activeProcessSession = { processId, exited: false };
+  emitCodexProcessSessionTimeline(ctx, {
+    status: "started",
+    title: command.command,
+    summary: "Codex process session started",
+    action: command.action,
+    method: "process/spawn",
+    threadId,
+    processId,
+    command: command.command,
+    cwd: params.cwd,
+    result,
+    sourceId: processSessionSourceId("spawn", processId || Date.now()),
+  });
+  if (!processId) {
+    emitCodexWorkflowDone(ctx, threadId);
+    return true;
+  }
+  await drainCodexProcessSessionNotifications(server, ctx, processId, threadId);
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
 async function runCodexRemoteEnvironmentCommand(server, threadId, cmd, ctx) {
   const command = readCodexRemoteEnvironmentCommand(cmd);
   if (!command) return false;
@@ -2012,6 +2289,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexRuntimeSettingsCommand },
   { run: runCodexRemoteEnvironmentCommand },
   { run: runCodexSandboxDiagnosticsCommand },
+  { run: runCodexProcessSessionCommand, needsCwd: true },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },
@@ -2124,6 +2402,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ? context.createCodexAppServer()
     : createCodexAppServer({ env: context.env || process.env });
   let unregisterInterrupt = null;
+  let unregisterProcessSessionCommand = null;
   emitCodexRuntimeExtensionsTimeline(context.protocol, runtimeExtensions);
   try {
     await initializeCodexAppServer(server);
@@ -2153,6 +2432,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     ctx.server = server;
     ctx.emitToolConsentTimeline = context.emitToolConsentTimeline;
     ctx.settingsUpdatePromises = [];
+    ctx.processSessionControlPromises = [];
     ctx.withCodexElicitation = (kind, fn) =>
       withCodexElicitation(server, threadId, ctx, kind, fn);
     unregisterInterrupt = context.interactions?.handleInterruptTurn?.(
@@ -2185,6 +2465,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
         }),
       );
     });
+    unregisterProcessSessionCommand = registerCodexProcessSessionCommand(ctx, server, threadId);
     const planPreset = cmd.planMode === true
       ? await requireCodexPlanModePreset(server, context.protocol)
       : null;
@@ -2223,6 +2504,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     finalizeCodexRunContext(ctx);
   } finally {
     unregisterInterrupt?.();
+    unregisterProcessSessionCommand?.();
     server.close();
   }
 }

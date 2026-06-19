@@ -366,6 +366,28 @@ pub(crate) enum ChatRuntimeCommand {
         #[serde(default)]
         include_details: Option<bool>,
     },
+    #[serde(rename = "process_session")]
+    ProcessSession {
+        action: String,
+        #[serde(default)]
+        process_id: Option<String>,
+        #[serde(default)]
+        command: Option<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        stdin: Option<String>,
+        #[serde(default)]
+        rows: Option<u64>,
+        #[serde(default)]
+        cols: Option<u64>,
+        #[serde(default)]
+        env: Option<JsonValue>,
+        #[serde(default)]
+        tty: Option<bool>,
+        #[serde(default)]
+        permission_profile: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

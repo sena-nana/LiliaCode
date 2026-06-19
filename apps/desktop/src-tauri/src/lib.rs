@@ -189,6 +189,7 @@ pub fn run() {
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_agent_interaction,
+            chat::commands::chat_send_process_session_command,
             chat::title_update::chat_respond_title_update,
             chat::commands::chat_list_models,
             chat::commands::chat_get_composer_state,
