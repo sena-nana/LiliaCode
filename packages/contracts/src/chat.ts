@@ -266,6 +266,13 @@ export interface RuntimeSettingsCommand {
   runtimeOptions?: never;
 }
 
+export interface RemoteEnvironmentRuntimeCommand {
+  type: "remote_environment";
+  action: "diagnose" | "add" | "select";
+  environmentId?: string;
+  environment?: Record<string, unknown>;
+}
+
 export interface SandboxDiagnosticsRuntimeCommand {
   type: "sandbox_diagnostics";
   includeDetails?: boolean;
@@ -311,6 +318,7 @@ export type ChatRuntimeCommand =
   | SessionForkRuntimeCommand
   | SessionManagementRuntimeCommand
   | RuntimeSettingsCommand
+  | RemoteEnvironmentRuntimeCommand
   | SandboxDiagnosticsRuntimeCommand;
 
 export interface ChatInterruptResult {

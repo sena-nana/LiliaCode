@@ -387,6 +387,7 @@ const LILIA_GOAL_STATUSES = new Set([
 ]);
 const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
 const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+const REMOTE_ENVIRONMENT_ACTIONS = new Set(["diagnose", "add", "select"]);
 const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
   "allowedTools",
   "disallowedTools",
@@ -798,6 +799,34 @@ function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
   return true;
 }
 
+function runClaudeRemoteEnvironmentRuntimeCommand(cmd, context) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "remote_environment") return false;
+  const action = stringOrNull(command.action);
+  if (!REMOTE_ENVIRONMENT_ACTIONS.has(action)) {
+    throw new Error("Lilia remote environment command missing a valid action");
+  }
+  const environmentId = stringOrNull(command.environmentId)?.trim() || null;
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Claude remote environment unsupported",
+    summary: "Claude SDK has no equivalent remote environment endpoint.",
+    payload: {
+      backend: "claude",
+      subkind: "remote_environment",
+      action,
+      environmentId,
+      native: false,
+      unsupported: true,
+      reason: "Claude SDK has no equivalent Lilia-controllable remote environment endpoint.",
+    },
+    sourceId: `claude:remote-environment:${action}:${Date.now()}`,
+  });
+  emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
+  return true;
+}
+
 function normalizeClaudeMcpElicitationPayload(request, ctx) {
   if (!isRecord(request)) return null;
   const serverName = stringOrNull(request.serverName) || stringOrNull(request.mcp_server_name);
@@ -1195,6 +1224,7 @@ export async function runClaude(cmd, context) {
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeProviderSettingsRuntimeCommand(cmd, context)) return;
+  if (runClaudeRemoteEnvironmentRuntimeCommand(cmd, context)) return;
   if (runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);

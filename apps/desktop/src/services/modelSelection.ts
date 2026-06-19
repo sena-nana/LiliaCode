@@ -171,6 +171,10 @@ function selectAutoTier(input: ModelSelectionInput, signals: string[]): ModelTie
     signals.push("运行时诊断/设置");
     return "light";
   }
+  if (input.runtimeCommand?.type === "remote_environment") {
+    signals.push("远程环境管理");
+    return "light";
+  }
   if (input.runtimeCommand?.type === "session_management") {
     signals.push("会话管理");
     return "light";

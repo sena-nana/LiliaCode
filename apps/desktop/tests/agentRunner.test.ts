@@ -1898,6 +1898,50 @@ describe("Claude helpers", () => {
     });
   });
 
+  it("Claude remote environment emits unsupported diagnostic without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-existing",
+      runtimeCommand: {
+        type: "remote_environment",
+        action: "select",
+        environmentId: "env-1",
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Claude remote environment unsupported",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "remote_environment",
+          action: "select",
+          environmentId: "env-1",
+          native: false,
+          unsupported: true,
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-existing",
+      subtype: "success",
+    });
+  });
+
   it("Claude experimental provider options emit diagnostics or stop by fallback", async () => {
     const diagnostic = captureProtocol();
     let queryCalled = false;
@@ -5164,6 +5208,173 @@ describe("Codex app-server mapping", () => {
           action: "update",
           method: "thread/settings/update",
           error: "settings update failed",
+        }),
+      }),
+    }));
+  });
+
+  it("handles Codex remote environment diagnostics without starting a turn", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServerTestTurn({
+      protocol,
+      server,
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "remote_environment",
+        action: "diagnose",
+      },
+      runtimeOptions: {
+        provider: {
+          codex: {
+            environments: [{ id: "env-1" }],
+          },
+        },
+      },
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Codex remote environment diagnostics",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "remote_environment",
+          action: "diagnose",
+          threadId: "thread-1",
+          native: true,
+          environments: [{ id: "env-1" }],
+        }),
+      }),
+    }));
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("adds Codex remote environment through app-server", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        if (method === "environment/add") return { environment: { id: "env-1", name: "Windows VM" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServerTestTurn({
+      protocol,
+      server,
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "remote_environment",
+        action: "add",
+        environmentId: "env-1",
+        environment: { name: "Windows VM" },
+      },
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "environment/add")).toEqual({
+      method: "environment/add",
+      params: { name: "Windows VM", id: "env-1" },
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Codex remote environment added",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "remote_environment",
+          action: "add",
+          method: "environment/add",
+          threadId: "thread-1",
+          environmentId: "env-1",
+          native: true,
+        }),
+      }),
+    }));
+  });
+
+  it("selects Codex remote environment through thread settings", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServerTestTurn({
+      protocol,
+      server,
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "remote_environment",
+        action: "select",
+        environmentId: "env-1",
+      },
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.filter((call) => call.method === "thread/settings/update").at(-1)).toEqual({
+      method: "thread/settings/update",
+      params: {
+        threadId: "thread-1",
+        environments: [{ id: "env-1" }],
+      },
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Codex remote environment selected",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "remote_environment",
+          action: "select",
+          method: "thread/settings/update",
+          threadId: "thread-1",
+          environmentId: "env-1",
+          environments: [{ id: "env-1" }],
+          native: true,
         }),
       }),
     }));

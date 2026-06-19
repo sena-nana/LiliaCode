@@ -353,6 +353,14 @@ pub(crate) enum ChatRuntimeCommand {
     },
     #[serde(rename = "runtime_settings")]
     RuntimeSettings { action: String },
+    #[serde(rename = "remote_environment")]
+    RemoteEnvironment {
+        action: String,
+        #[serde(default)]
+        environment_id: Option<String>,
+        #[serde(default)]
+        environment: Option<JsonValue>,
+    },
     #[serde(rename = "sandbox_diagnostics")]
     SandboxDiagnostics {
         #[serde(default)]

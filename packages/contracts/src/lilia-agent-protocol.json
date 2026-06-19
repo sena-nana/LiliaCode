@@ -16,6 +16,7 @@
     { "kind": "session_fork", "requiresPrompt": false },
     { "kind": "session_management", "requiresPrompt": false },
     { "kind": "runtime_settings", "requiresPrompt": false },
+    { "kind": "remote_environment", "requiresPrompt": false },
     { "kind": "sandbox_diagnostics", "requiresPrompt": false }
   ]
 }
