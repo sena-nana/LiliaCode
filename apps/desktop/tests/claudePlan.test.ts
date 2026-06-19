@@ -78,6 +78,7 @@ describe("claudePlan helpers", () => {
 
   it("执行权限映射与只读写工具门禁保持分层", () => {
     expect(normalizeClaudePermissionMode("full")).toBe("bypassPermissions");
+    expect(normalizeClaudePermissionMode("free")).toBe("bypassPermissions");
     expect(normalizeClaudePermissionMode("ask")).toBe("default");
     expect(normalizeClaudePermissionMode("readonly")).toBe("default");
     expect(isReadonlyDeniedClaudeTool("Write")).toBe(true);

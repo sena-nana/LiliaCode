@@ -3467,6 +3467,22 @@ button.chat-composer__context-action:active:not(:disabled) {
   min-width: 0;
 }
 
+.composer-inline__auto-decision {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.chat-composer__entry-actions > .composer-inline__auto-decision {
+  margin-right: 4px;
+}
+
+.timeline-pending-action__auto-decision {
+  align-self: flex-end;
+}
+
 .composer-inline__other-input {
   flex: 1 1 auto;
   min-width: 0;

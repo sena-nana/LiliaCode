@@ -166,10 +166,10 @@ export function createArchitectureChangeHandler({
         message: "当前对话不属于项目，无法更新项目架构图。",
       };
     }
-    const permission = cmd?.permission === "full" || cmd?.permission === "readonly"
+    const permission = cmd?.permission === "full" || cmd?.permission === "readonly" || cmd?.permission === "free"
       ? cmd.permission
       : "ask";
-    const allowedByPlan = permission === "full" &&
+    const allowedByPlan = (permission === "full" || permission === "free") &&
       changesAllowedByPlan(normalized.changes, ctx?.approvedArchitectureImpacts);
     const status = permission === "readonly"
       ? "proposed"

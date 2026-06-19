@@ -12,6 +12,7 @@ import type {
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
+  PermissionMode,
 } from "@lilia/contracts";
 import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import {
@@ -158,6 +159,7 @@ export function useTaskComposerController(options: {
   );
   const agentInteractionSettings = useAgentInteractionSettings();
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
+  const permissionMode = agentInteractionSettings.permissionMode;
   const { activeBackend } = useConnectionStatus({
     probe: !context.isPopup.value && !context.conversationRouteState.value.isLiveDraft,
   });
@@ -178,7 +180,7 @@ export function useTaskComposerController(options: {
       reasoningEffort: null,
       planMode: false,
       goalMode: false,
-      permission: "ask",
+      permission: permissionMode.value,
     }),
   );
   const modelOptionsForView = computed(() => modelOptionsByBackend.value[activeBackend.value]);
@@ -207,13 +209,17 @@ export function useTaskComposerController(options: {
     latestLiliaGoalFromTimeline(timeline.timelineEvents.value),
   );
 
-  function withActiveBackend(state: ChatComposerState): ChatComposerState {
+  function withActiveBackend(
+    state: ChatComposerState,
+    permissionOverride?: PermissionMode,
+  ): ChatComposerState {
     return {
       ...state,
       taskId: props.taskId,
       backend: activeBackend.value,
       modelSelectionMode: state.modelSelectionMode === "manual" ? "manual" : "auto",
       reasoningEffort: state.reasoningEffort ?? null,
+      permission: permissionOverride ?? permissionMode.value,
     };
   }
 
@@ -564,8 +570,12 @@ export function useTaskComposerController(options: {
   }
 
   async function onComposerUpdate(next: ChatComposerState) {
-    const normalized = withActiveBackend(next);
+    const requestedPermission = next.permission;
+    const normalized = withActiveBackend(next, requestedPermission);
     composer.value = normalized;
+    if (requestedPermission !== permissionMode.value) {
+      void agentInteractionSettings.update({ permissionMode: requestedPermission });
+    }
     try {
       await setComposerState(normalized);
     } catch (err) {

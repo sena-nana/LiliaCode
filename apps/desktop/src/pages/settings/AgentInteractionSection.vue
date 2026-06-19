@@ -6,7 +6,7 @@ import {
   ChevronRight,
   Sparkles,
 } from "lucide-vue-next";
-import type { AgentInteractionSettings } from "@lilia/contracts";
+import type { AgentInteractionSettings, PermissionMode } from "@lilia/contracts";
 import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
@@ -36,6 +36,18 @@ const subagentDetailsId = "agent-subagent-mode-details";
 let subagentCatalogIdleHandle: number | null = null;
 let subagentCatalogMountSeq = 0;
 
+const permissionModeOptions: Array<{ value: PermissionMode; label: string; description: string }> = [
+  { value: "ask", label: "询问", description: "敏感操作前等待用户确认。" },
+  { value: "readonly", label: "只读", description: "允许读取与分析，禁止写入和执行变更。" },
+  { value: "full", label: "完全访问", description: "使用完全访问权限，不逐条请求操作确认。" },
+  { value: "free", label: "自由实现", description: "完全访问，并在 8 秒后按建议项处理交互。" },
+];
+
+function activePermissionDescription(): string {
+  return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
+    ?.description ?? permissionModeOptions[0].description;
+}
+
 async function loadAgentInteraction() {
   try {
     await agentInteractionStore.load();
@@ -50,6 +62,10 @@ async function setNonInterruptMode(nonInterruptMode: boolean) {
 
 async function setDebugMode(debug: boolean) {
   await setAgentInteraction({ debug });
+}
+
+async function setPermissionMode(permissionMode: PermissionMode) {
+  await setAgentInteraction({ permissionMode });
 }
 
 function nextSubagentMode(
@@ -162,6 +178,38 @@ onBeforeUnmount(() => {
         Agent 交互
       </span>
     </h2>
+
+    <section class="permission-mode-panel" aria-label="权限行为">
+      <div class="permission-mode-panel__head">
+        <div>
+          <div class="settings-row__label">权限行为</div>
+          <p class="permission-mode-panel__hint">{{ activePermissionDescription() }}</p>
+        </div>
+        <div class="ui-segmented permission-mode-panel__switch" role="radiogroup" aria-label="权限行为">
+          <button
+            v-for="option in permissionModeOptions"
+            :key="option.value"
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.permissionMode === option.value"
+            :class="{ 'is-active': agentInteraction.permissionMode === option.value }"
+            :disabled="savingAgentInteraction"
+            @click="setPermissionMode(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+      </div>
+      <div class="permission-mode-panel__descriptions">
+        <span
+          v-for="option in permissionModeOptions"
+          :key="`${option.value}-desc`"
+          class="permission-mode-panel__description"
+        >
+          <strong>{{ option.label }}</strong>{{ option.description }}
+        </span>
+      </div>
+    </section>
 
     <div class="settings-row">
       <div class="settings-row__label">非打断模式</div>
@@ -406,6 +454,46 @@ onBeforeUnmount(() => {
   border: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
   border-radius: 14px;
   background: var(--bg-elev-2, rgba(255, 255, 255, 0.02));
+}
+
+.permission-mode-panel {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0 12px;
+  padding: 12px 0;
+  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+}
+
+.permission-mode-panel__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.permission-mode-panel__hint {
+  margin: 4px 0 0;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 13px;
+}
+
+.permission-mode-panel__switch {
+  justify-self: end;
+}
+
+.permission-mode-panel__descriptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.permission-mode-panel__description strong {
+  margin-right: 4px;
+  color: var(--text-primary, rgba(255, 255, 255, 0.82));
+  font-weight: 600;
 }
 
 .subagent-mode-card__header {

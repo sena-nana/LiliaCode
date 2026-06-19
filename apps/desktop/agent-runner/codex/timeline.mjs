@@ -646,7 +646,7 @@ export function createCodexRunContext(cmd, protocol, sessionId = null) {
     planCancelled: false,
     pendingPlanPayload: null,
     latestPlanPayload: null,
-    executionPermission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
+    executionPermission: cmd.permission === "full" || cmd.permission === "readonly" || cmd.permission === "free" ? cmd.permission : "ask",
     assistantSuccessEmitted: false,
     workflowSource: null,
     pacer: null,

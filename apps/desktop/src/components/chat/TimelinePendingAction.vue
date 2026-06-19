@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { AskUserResult } from "@lilia/contracts";
+import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
 import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
 import type {
@@ -9,6 +10,10 @@ import type {
 } from "../../composables/usePendingAgentActions";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type { ToolConsentDecision } from "../../services/chat";
+import {
+  recommendedAskUserResult,
+  useFreeImplementationCountdown,
+} from "./freeImplementationMode";
 import AskUserInlinePrompt from "./AskUserInlinePrompt.vue";
 import ToolConsentInlinePrompt from "./ToolConsentInlinePrompt.vue";
 
@@ -27,6 +32,9 @@ const toolSubmitting = ref<ToolConsentDecision | null>(null);
 const codexSubmitting = ref(false);
 const mcpValues = ref<Record<string, unknown>>({});
 const mcpJsonText = ref("{}");
+
+const agentInteractionSettings = useAgentInteractionSettings();
+const freeImplementation = computed(() => agentInteractionSettings.permissionMode.value === "free");
 
 const actionKey = computed(() =>
   props.action.kind === "tool_consent"
@@ -65,14 +73,14 @@ const {
   focusOption,
   highlightOption,
   clearOptionHighlight,
-  selectSingleOption,
-  toggleMulti,
-  submitAsk,
-  submitAskFreeform,
-  confirmAskNo,
-  skipAsk,
-  backAsk,
-  cancelAsk,
+  selectSingleOption: selectSingleOptionBase,
+  toggleMulti: toggleMultiBase,
+  submitAsk: submitAskBase,
+  submitAskFreeform: submitAskFreeformBase,
+  confirmAskNo: confirmAskNoBase,
+  skipAsk: skipAskBase,
+  backAsk: backAskBase,
+  cancelAsk: cancelAskBase,
 } = useAskUserInteraction(activeAsk, freeformText, resolveAsk);
 
 const toolRequest = computed(() =>
@@ -84,14 +92,42 @@ const titleUpdateAction = computed(() =>
 const { toolDanger, toolIcon, toolHeadline, toolInputJson, toolSubtitle } =
   useToolConsentPresentation(toolRequest);
 const {
-  commandDraft: toolCommandDraft,
+  commandDraft: toolCommandDraftBase,
   isEditingCommand: isEditingToolCommand,
   hasEditableCommand,
   commandIsEmpty: toolCommandIsEmpty,
   updatedCommandInput,
-  beginCommandEdit,
-  cancelCommandEdit,
+  beginCommandEdit: beginCommandEditBase,
+  cancelCommandEdit: cancelCommandEditBase,
 } = useEditableToolCommand(toolRequest);
+const toolCommandDraft = computed({
+  get: () => toolCommandDraftBase.value,
+  set: (value: string) => {
+    if (value !== toolCommandDraftBase.value) cancelAutoDecision();
+    toolCommandDraftBase.value = value;
+  },
+});
+const freeformTextModel = computed({
+  get: () => freeformText.value,
+  set: (value: string) => {
+    if (value !== freeformText.value) cancelAutoDecision();
+    freeformText.value = value;
+  },
+});
+const toolMessageModel = computed({
+  get: () => toolMessage.value,
+  set: (value: string) => {
+    if (value !== toolMessage.value) cancelAutoDecision();
+    toolMessage.value = value;
+  },
+});
+const mcpJsonTextModel = computed({
+  get: () => mcpJsonText.value,
+  set: (value: string) => {
+    if (value !== mcpJsonText.value) cancelAutoDecision();
+    mcpJsonText.value = value;
+  },
+});
 const hasFreeformText = computed(() => freeformText.value.trim().length > 0);
 const hasToolMessage = computed(() => toolMessage.value.trim().length > 0);
 const mcpAction = computed(() =>
@@ -203,6 +239,7 @@ function mcpMultiSelected(key: string, value: string): boolean {
 }
 
 function toggleMcpMultiValue(key: string, value: string) {
+  cancelAutoDecision();
   const current = mcpValues.value[key];
   const values = Array.isArray(current)
     ? current.filter((item): item is string => typeof item === "string")
@@ -251,7 +288,8 @@ function resolveAsk(result: AskUserResult) {
   });
 }
 
-function decideTool(decision: ToolConsentDecision) {
+function decideTool(decision: ToolConsentDecision, source: "manual" | "auto" = "manual") {
+  if (source === "manual") cancelAutoDecision();
   if (props.action.kind !== "tool_consent" || toolSubmitting.value) return;
   if (decision === "allow" && toolCommandIsEmpty.value) return;
   toolSubmitting.value = decision;
@@ -267,7 +305,8 @@ function decideTool(decision: ToolConsentDecision) {
   });
 }
 
-function decideTitleUpdate(decision: "accept" | "decline") {
+function decideTitleUpdate(decision: "accept" | "decline", source: "manual" | "auto" = "manual") {
+  if (source === "manual") cancelAutoDecision();
   if (props.action.kind !== "title_update") return;
   emit("resolve", {
     kind: "title_update",
@@ -276,7 +315,8 @@ function decideTitleUpdate(decision: "accept" | "decline") {
   });
 }
 
-function decideMcp(action: "accept" | "decline" | "cancel") {
+function decideMcp(action: "accept" | "decline" | "cancel", source: "manual" | "auto" = "manual") {
+  if (source === "manual") cancelAutoDecision();
   if (props.action.kind !== "mcp_elicitation" || codexSubmitting.value) return;
   if (action === "accept" && !canSubmitMcp.value) return;
   codexSubmitting.value = true;
@@ -290,7 +330,8 @@ function decideMcp(action: "accept" | "decline" | "cancel") {
   });
 }
 
-function decidePermission(decision: "allow" | "deny") {
+function decidePermission(decision: "allow" | "deny", source: "manual" | "auto" = "manual") {
+  if (source === "manual") cancelAutoDecision();
   if (props.action.kind !== "permission_approval" || codexSubmitting.value) return;
   codexSubmitting.value = true;
   emit("resolve", {
@@ -300,7 +341,8 @@ function decidePermission(decision: "allow" | "deny") {
   });
 }
 
-function decideArchitecture(decision: "allow" | "deny") {
+function decideArchitecture(decision: "allow" | "deny", source: "manual" | "auto" = "manual") {
+  if (source === "manual") cancelAutoDecision();
   if (props.action.kind !== "architecture_change" || codexSubmitting.value) return;
   codexSubmitting.value = true;
   emit("resolve", {
@@ -309,6 +351,136 @@ function decideArchitecture(decision: "allow" | "deny") {
     decision,
   });
 }
+
+function submitAsk() {
+  cancelAutoDecision();
+  submitAskBase();
+}
+
+function submitAskFreeform(value?: string) {
+  cancelAutoDecision();
+  submitAskFreeformBase(value);
+}
+
+function confirmAskNo() {
+  cancelAutoDecision();
+  confirmAskNoBase();
+}
+
+function skipAsk() {
+  cancelAutoDecision();
+  skipAskBase();
+}
+
+function backAsk() {
+  cancelAutoDecision();
+  backAskBase();
+}
+
+function cancelAsk() {
+  cancelAutoDecision();
+  cancelAskBase();
+}
+
+function selectSingleOption(id: string) {
+  cancelAutoDecision();
+  selectSingleOptionBase(id);
+}
+
+function toggleMulti(id: string) {
+  cancelAutoDecision();
+  toggleMultiBase(id);
+}
+
+function beginCommandEdit() {
+  cancelAutoDecision();
+  beginCommandEditBase();
+}
+
+function cancelCommandEdit() {
+  cancelAutoDecision();
+  cancelCommandEditBase();
+}
+
+function updateMcpField(key: string, value: unknown) {
+  cancelAutoDecision();
+  mcpValues.value[key] = value;
+}
+
+function autoDecisionKeyForCurrentState(): string {
+  if (activeAsk.value) {
+    const result = recommendedAskUserResult(activeAsk.value.spec);
+    if (!result) return "";
+    return `ask:${activeAsk.value.id}:${askQuestion.value?.id ?? ""}`;
+  }
+  if (
+    props.action.kind === "tool_consent" &&
+    !toolDanger.value &&
+    !toolSubmitting.value &&
+    !isEditingToolCommand.value &&
+    !toolCommandIsEmpty.value
+  ) {
+    return `tool:${props.action.requestId}`;
+  }
+  if (props.action.kind === "title_update") return `title:${props.action.requestId}`;
+  if (
+    props.action.kind === "mcp_elicitation" &&
+    props.action.payload.mode === "form" &&
+    canSubmitMcp.value &&
+    !codexSubmitting.value
+  ) {
+    return `mcp:${props.action.requestId}`;
+  }
+  if (props.action.kind === "architecture_change" && !codexSubmitting.value) {
+    return `architecture:${props.action.requestId}`;
+  }
+  if (props.action.kind === "permission_approval" && !codexSubmitting.value) {
+    return `permission:${props.action.requestId}`;
+  }
+  return "";
+}
+
+const autoDecisionKey = computed(autoDecisionKeyForCurrentState);
+
+function autoDecisionLabelForCurrentState(): string {
+  if (activeAsk.value) return props.action.kind === "plan_approval" ? "同意计划" : "选择推荐项";
+  if (props.action.kind === "tool_consent") return "同意工具调用";
+  if (props.action.kind === "title_update") return "同意标题";
+  if (props.action.kind === "mcp_elicitation") return "提交 MCP 表单";
+  if (props.action.kind === "architecture_change") return "应用架构变更";
+  if (props.action.kind === "permission_approval") return "同意权限请求";
+  return "";
+}
+
+function runAutoDecision() {
+  if (activeAsk.value) {
+    const result = recommendedAskUserResult(activeAsk.value.spec);
+    if (result) resolveAsk(result);
+    return;
+  }
+  if (props.action.kind === "tool_consent") {
+    decideTool("allow", "auto");
+  } else if (props.action.kind === "title_update") {
+    decideTitleUpdate("accept", "auto");
+  } else if (props.action.kind === "mcp_elicitation") {
+    decideMcp("accept", "auto");
+  } else if (props.action.kind === "architecture_change") {
+    decideArchitecture("allow", "auto");
+  } else if (props.action.kind === "permission_approval") {
+    decidePermission("allow", "auto");
+  }
+}
+
+const {
+  text: autoDecisionText,
+  cancel: cancelAutoDecision,
+  reset: resetAutoDecision,
+} = useFreeImplementationCountdown({
+  enabled: freeImplementation,
+  decisionKey: autoDecisionKey,
+  decisionLabel: autoDecisionLabelForCurrentState,
+  runDecision: runAutoDecision,
+});
 
 function architectureChangeText(change: { type: string; [key: string]: unknown }): string {
   if (change.type === "upsert_node") {
@@ -330,6 +502,7 @@ function architectureChangeText(change: { type: string; [key: string]: unknown }
 }
 
 watch(actionKey, () => {
+  resetAutoDecision();
   toolExpanded.value = false;
   toolMessage.value = "";
   toolSubmitting.value = null;
@@ -368,9 +541,16 @@ watch(actionKey, () => {
     @update-tool-command-draft="toolCommandDraft = $event"
     @begin-command-edit="beginCommandEdit"
   >
+    <div
+      v-if="autoDecisionText"
+      class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+      role="status"
+    >
+      {{ autoDecisionText }}
+    </div>
     <div class="timeline-pending-action__row">
       <textarea
-        v-model="toolMessage"
+        v-model="toolMessageModel"
         class="timeline-pending-action__input"
         rows="1"
         placeholder="拒绝理由"
@@ -405,6 +585,13 @@ watch(actionKey, () => {
     <span class="timeline-pending-action__title-preview">
       {{ titleUpdateAction.proposedTitle }}
     </span>
+    <div
+      v-if="autoDecisionText"
+      class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+      role="status"
+    >
+      {{ autoDecisionText }}
+    </div>
     <div class="composer-inline__actions">
       <button
         type="button"
@@ -456,8 +643,9 @@ watch(actionKey, () => {
           </span>
           <select
             v-if="field.options.length && !field.multi"
-            v-model="mcpValues[field.key]"
+            :value="String(mcpValues[field.key] ?? '')"
             class="timeline-pending-action__input"
+            @change="updateMcpField(field.key, ($event.target as HTMLSelectElement).value)"
           >
             <option
               v-for="option in field.options"
@@ -483,23 +671,35 @@ watch(actionKey, () => {
             </label>
           </div>
           <label v-else-if="field.type === 'boolean'" class="timeline-pending-action__check">
-            <input v-model="mcpValues[field.key]" type="checkbox" />
+            <input
+              :checked="mcpValues[field.key] === true"
+              type="checkbox"
+              @change="updateMcpField(field.key, ($event.target as HTMLInputElement).checked)"
+            />
             <span>{{ field.description || "启用" }}</span>
           </label>
           <input
             v-else
-            v-model="mcpValues[field.key]"
+            :value="String(mcpValues[field.key] ?? '')"
             class="timeline-pending-action__input"
             :type="mcpFieldInputType(field.type)"
+            @input="updateMcpField(field.key, ($event.target as HTMLInputElement).value)"
           />
         </label>
         <textarea
           v-if="mcpFields.length === 0"
-          v-model="mcpJsonText"
+          v-model="mcpJsonTextModel"
           class="timeline-pending-action__input timeline-pending-action__input--json"
           rows="3"
           placeholder="JSON content"
         />
+      </div>
+      <div
+        v-if="autoDecisionText"
+        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+        role="status"
+      >
+        {{ autoDecisionText }}
       </div>
       <div class="composer-inline__actions">
         <button
@@ -549,6 +749,13 @@ watch(actionKey, () => {
         </li>
         <li v-if="architectureExtraCount > 0">另有 {{ architectureExtraCount }} 项变更</li>
       </ul>
+      <div
+        v-if="autoDecisionText"
+        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+        role="status"
+      >
+        {{ autoDecisionText }}
+      </div>
       <div class="composer-inline__actions">
         <button
           type="button"
@@ -582,6 +789,13 @@ watch(actionKey, () => {
       </div>
       <div class="timeline-pending-action__meta">{{ permissionCwd }}</div>
       <pre class="timeline-code-block">{{ permissionJson }}</pre>
+      <div
+        v-if="autoDecisionText"
+        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+        role="status"
+      >
+        {{ autoDecisionText }}
+      </div>
       <div class="composer-inline__actions">
         <button
           type="button"
@@ -610,11 +824,18 @@ watch(actionKey, () => {
     :aria-label="askTitle"
   >
     <textarea
-      v-model="freeformText"
+      v-model="freeformTextModel"
       class="timeline-pending-action__input"
       rows="1"
       placeholder="修改要求"
     />
+    <div
+      v-if="autoDecisionText"
+      class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+      role="status"
+    >
+      {{ autoDecisionText }}
+    </div>
     <div class="composer-inline__actions">
       <button
         type="button"
@@ -632,7 +853,7 @@ watch(actionKey, () => {
 
   <AskUserInlinePrompt
     v-else-if="activeAsk && askQuestion"
-    v-model:freeform-text="freeformText"
+    v-model:freeform-text="freeformTextModel"
     root-class="timeline-pending-action composer-inline composer-inline--ask"
     input-class="timeline-pending-action__input composer-inline__other-input"
     :active-ask="activeAsk"
@@ -662,5 +883,15 @@ watch(actionKey, () => {
     @back-ask="backAsk"
     @confirm-ask-no="confirmAskNo"
     @submit-ask="submitAsk"
-  />
+  >
+    <template #auto-decision>
+      <div
+        v-if="autoDecisionText"
+        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
+        role="status"
+      >
+        {{ autoDecisionText }}
+      </div>
+    </template>
+  </AskUserInlinePrompt>
 </template>

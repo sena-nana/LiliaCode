@@ -47,6 +47,7 @@ export function isReadonlyDeniedClaudeTool(toolName) {
 export function normalizeClaudePermissionMode(permission) {
   switch (permission) {
     case "full":
+    case "free":
       return "bypassPermissions";
     case "ask":
     case "readonly":

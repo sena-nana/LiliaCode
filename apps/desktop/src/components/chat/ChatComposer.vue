@@ -328,6 +328,7 @@ const pendingInteractionController = measurePerfSync(
   "chat-composer.setup.pending",
   () => useLazyComposerPendingInteraction({
     clearContextState: () => clearComposerContextState(),
+    freeImplementation: computed(() => props.state.permission === "free"),
     pendingAsk: computed(() => props.pendingAsk),
     queueResize,
     resolveAsk: (result) => emit("resolve-ask-user", result),
@@ -359,6 +360,7 @@ const {
   askTitle,
   askTotal,
   askUsesInputActions,
+  autoDecisionText,
   backAsk,
   beginCommandEdit,
   canAskSubmit,
@@ -849,9 +851,10 @@ const sendAriaLabel = computed(() => {
 });
 
 const permissionOptions = [
-  { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },
   { value: "ask" as PermissionMode, label: "询问", hint: "敏感操作前询问" },
   { value: "readonly" as PermissionMode, label: "只读", hint: "禁止写操作" },
+  { value: "full" as PermissionMode, label: "完全访问", hint: "无需逐条确认" },
+  { value: "free" as PermissionMode, label: "自由实现", hint: "完全访问，交互倒计时按建议执行" },
 ];
 
 function updateInputSelection() {
@@ -1467,6 +1470,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
           :can-ask-submit="canAskSubmit"
           :ask-is-last="askIsLast"
           :ask-is-plan-approval="askIsPlanApproval"
+          :auto-decision-text="autoDecisionText"
           :has-pending-input-text="hasPendingInputText"
           :has-tool-consent="!!activeToolConsent"
           :tool-submitting="toolSubmitting"
@@ -1487,6 +1491,14 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
           @submit-entry="submitEntry"
         />
         <div v-else-if="hasPendingComposerUi" class="chat-composer__entry-actions">
+          <div
+            v-if="autoDecisionText"
+            class="composer-inline__auto-decision"
+            role="status"
+          >
+            {{ autoDecisionText }}
+          </div>
+
           <button
             v-if="askUsesInputActions && askQuestion?.skippable !== false && askTotal > 1"
             type="button"

@@ -237,8 +237,16 @@ pub(crate) fn normalize_agent_interaction_settings(
     AgentInteractionSettings {
         non_interrupt_mode: settings.non_interrupt_mode,
         debug: settings.debug,
+        permission_mode: normalize_permission_mode(&settings.permission_mode),
         codex_profile: normalize_codex_profile_settings(settings.codex_profile),
         subagent_mode: normalize_subagent_mode_settings(settings.subagent_mode),
+    }
+}
+
+pub(crate) fn normalize_permission_mode(value: &str) -> String {
+    match value {
+        "full" | "readonly" | "free" => value.to_string(),
+        _ => "ask".to_string(),
     }
 }
 
