@@ -19,4 +19,10 @@ export {
   PROJECTS,
 } from "../data/projects";
 
+export {
+  ensureProjectDashboardLoaded,
+  listProjectDashboardSummaries,
+  PROJECT_DASHBOARD_SUMMARIES,
+} from "../data/projectDashboard";
+
 export { archiveProjectConversations } from "../data/tasks";
