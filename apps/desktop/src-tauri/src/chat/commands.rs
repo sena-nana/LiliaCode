@@ -13,7 +13,9 @@ use crate::chat::state::{
     new_chat_message_id, normalize_composer_for_backend, now_millis, queue_pending_turn_for_app,
     set_guide_status_for_app, should_persist_user_message, stop_running_turn, ChatStore,
 };
-use crate::chat::timeline_sink::persist_and_emit_message_timeline_event;
+use crate::chat::timeline_sink::{
+    persist_and_emit_message_timeline_event, persist_and_emit_model_selection_timeline_event,
+};
 use crate::chat::types::{
     ChatAttachment, ChatComposerState, ChatConversationReference, ChatInterruptResult, ChatMessage,
     ChatModelOption, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatSendResult, ChatWorkflow,
@@ -28,6 +30,14 @@ pub(crate) struct ResetSessionPlan {
     pub(crate) cleared_guide_ids: Vec<String>,
     pub(crate) stopped_running: bool,
     pub(crate) immediate_cleanup: bool,
+}
+
+fn model_selection_from_runtime_options(
+    runtime_options: Option<&ProviderRuntimeOptions>,
+) -> Option<&JsonValue> {
+    runtime_options
+        .and_then(|options| options.common.as_ref())
+        .and_then(|common| common.model_selection.as_ref())
 }
 
 #[tauri::command]
@@ -95,6 +105,8 @@ pub fn chat_send_message(
         if running.contains_key(&task_id) {
             drop(running);
             set_guide_status_for_app(&app, guide_id.as_deref(), "queued")?;
+            let model_selection =
+                model_selection_from_runtime_options(runtime_options.as_ref()).cloned();
             let queued_count = queue_pending_turn_for_app(
                 &app,
                 &store,
@@ -121,6 +133,13 @@ pub fn chat_send_message(
                     None,
                 );
             }
+            persist_and_emit_model_selection_timeline_event(
+                &app,
+                &task_id,
+                &composer.backend,
+                &turn_id,
+                model_selection.as_ref(),
+            );
             return Ok(ChatSendResult {
                 message: user_msg,
                 dispatch: "queued".to_string(),
@@ -142,6 +161,13 @@ pub fn chat_send_message(
             None,
         );
     }
+    persist_and_emit_model_selection_timeline_event(
+        &app,
+        &task_id,
+        &composer.backend,
+        &turn_id,
+        model_selection_from_runtime_options(runtime_options.as_ref()),
+    );
 
     spawn_agent_turn(
         app,

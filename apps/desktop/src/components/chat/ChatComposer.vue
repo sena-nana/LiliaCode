@@ -15,6 +15,7 @@ import {
   watch,
   type Component,
   type EffectScope,
+  type ShallowRef,
 } from "vue";
 import {
   ArrowUp,
@@ -31,6 +32,7 @@ import type {
   ChatConversationReference,
   ChatContextSearchResult,
   ChatContextUsage,
+  ChatModelOption,
   ChatSlashCommandWorkflow,
   LiliaReviewTarget,
   PermissionMode,
@@ -42,6 +44,7 @@ import type {
   ToolConsentRequest,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
+import { previewAutoModelSelection } from "../../services/modelSelection";
 import ComposerRichInput from "./ComposerRichInput.vue";
 import { textPart } from "./composerParts";
 import {
@@ -175,6 +178,7 @@ async function loadComposerPasteModule() {
 
 const props = defineProps<{
   state: ChatComposerState;
+  modelOptions?: ChatModelOption[];
   attachments?: ChatAttachment[];
   appendAttachmentsToEndKey?: number;
   projectCwd?: string | null;
@@ -246,7 +250,7 @@ type ConversationSearchController = {
   loading: ValueRef<boolean>;
   error: ValueRef<string | null>;
   handleKeydown: (event: KeyboardEvent) => boolean;
-  selectResult: (result?: SearchResult | null) => void;
+  selectResult: (result: SearchResult | null) => void;
   activateResult: (index: number) => void;
   clear: () => void;
   resetSuppression: () => void;
@@ -261,7 +265,7 @@ type ContextSearchController = {
   missingPath: ValueRef<string | null>;
   showMissingPath: ValueRef<boolean>;
   handleKeydown: (event: KeyboardEvent) => boolean;
-  selectResult: (result?: ChatContextSearchResult | null) => void;
+  selectResult: (result: ChatContextSearchResult | null) => void;
   activateResult: (index: number) => void;
   clear: () => void;
   resetSuppression: () => void;
@@ -299,8 +303,8 @@ let composerDisposed = false;
 let composerChromeRequested = false;
 let specialInputRefreshScheduled = false;
 let specialInputRefreshSeq = 0;
-const composerToolbarComponent = shallowRef<Component | null>(null);
-const composerPendingEntryActionsComponent = shallowRef<Component | null>(null);
+const composerToolbarComponent: ShallowRef<Component | null> = shallowRef(null);
+const composerPendingEntryActionsComponent: ShallowRef<Component | null> = shallowRef(null);
 let conversationSearchScope: EffectScope | null = null;
 let contextSearchScope: EffectScope | null = null;
 let slashCommandsScope: EffectScope | null = null;
@@ -549,7 +553,7 @@ const {
       loading: computed(() => conversationSearchController.value?.loading.value ?? false),
       error: computed(() => conversationSearchController.value?.error.value ?? null),
       activateResult: (index: number) => conversationSearchController.value?.activateResult(index),
-      selectResult: (result?: SearchResult | null) => conversationSearchController.value?.selectResult(result),
+      selectResult: (result?: SearchResult | null) => conversationSearchController.value?.selectResult(result ?? null),
       clear: () => conversationSearchController.value?.clear(),
       resetSuppression: () => conversationSearchController.value?.resetSuppression(),
       noteInputChanged: () => conversationSearchController.value?.noteInputChanged(),
@@ -564,7 +568,7 @@ const {
       missingPath: computed(() => contextSearchController.value?.missingPath.value ?? null),
       showMissingPath: computed(() => contextSearchController.value?.showMissingPath.value ?? false),
       activateResult: (index: number) => contextSearchController.value?.activateResult(index),
-      selectResult: (result?: ChatContextSearchResult | null) => contextSearchController.value?.selectResult(result),
+      selectResult: (result?: ChatContextSearchResult | null) => contextSearchController.value?.selectResult(result ?? null),
       clear: () => contextSearchController.value?.clear(),
       resetSuppression: () => contextSearchController.value?.resetSuppression(),
       noteInputChanged: () => contextSearchController.value?.noteInputChanged(),
@@ -624,6 +628,19 @@ async function ensureComposerPasteLoaded() {
 }
 
 const previewAttachments = computed(() => attachmentsForView.value.filter(isImageAttachment));
+const autoModelPreview = computed(() =>
+  previewAutoModelSelection({
+    backend: props.state.backend,
+    modelOptions: props.modelOptions ?? [],
+    composer: props.state,
+    prompt: hasPending.value ? inputValue.value : richInput.serializedText.value,
+    attachments: attachmentsForView.value,
+    conversationReferences: richInput.conversationReferences.value,
+    contextUsage: contextUsageForToolbar.value,
+    workflow: null,
+    runtimeCommand: null,
+  }),
+);
 
 function invalidateSpecialInputControllerLoad(kind: SpecialInputControllerKind) {
   specialInputControllerIntentSeq[kind] += 1;
@@ -715,6 +732,7 @@ const canInterrupt = computed(() =>
 
 const canSubmitEntry = computed(() => canSend.value || canInterrupt.value);
 const hasPendingComposerUi = computed(() => hasPending.value && pendingInteractionReady.value);
+const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
 
 async function ensureComposerToolbarLoaded() {
   if (composerToolbarComponent.value) return composerToolbarComponent.value;
@@ -1323,7 +1341,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :can-go-prev="canGoPrev"
         :active-tool-consent="activeToolConsent"
         :tool-danger="toolDanger"
-        :tool-icon="toolIcon"
+        :tool-icon="toolIconForPanel"
         :tool-headline="toolHeadline"
         :tool-inline-preview="toolInlinePreview"
         :tool-input-json="toolInputJson"
@@ -1567,6 +1585,8 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :is="composerToolbarComponent"
         v-if="!hasPending && composerToolbarComponent"
         :state="state"
+        :model-options="modelOptions ?? []"
+        :auto-model-preview="autoModelPreview"
         :permission-options="permissionOptions"
         :preview-attachments="previewAttachments"
         :can-interrupt="canInterrupt"
@@ -1579,6 +1599,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         @pick-attachments="emit('pick-attachments')"
         @reference-conversation="triggerConversationReference"
         @set-permission="setPermission"
+        @update-composer="patch"
         @toggle-plan-mode="togglePlanMode"
         @toggle-goal-mode="toggleGoalMode"
         @start-lilia-compact="emit('start-lilia-compact')"

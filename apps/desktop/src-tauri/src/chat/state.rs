@@ -544,6 +544,33 @@ pub(crate) fn normalize_model_for_backend(model: &str, backend: &str) -> String 
     }
 }
 
+pub(crate) fn normalize_model_selection_mode(value: &str) -> String {
+    if value == "manual" {
+        "manual".to_string()
+    } else {
+        "auto".to_string()
+    }
+}
+
+pub(crate) fn normalize_reasoning_effort_for_backend(
+    effort: Option<String>,
+    backend: &str,
+) -> Option<String> {
+    let value = effort.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })?;
+    match (normalize_backend(backend), value.as_str()) {
+        (BACKEND_CODEX, "low" | "medium" | "high" | "xhigh") => Some(value),
+        (BACKEND_CLAUDE, "low" | "medium" | "high" | "xhigh" | "max") => Some(value),
+        _ => None,
+    }
+}
+
 pub(crate) fn normalize_composer_for_backend(
     mut composer: ChatComposerState,
     task_id: &str,
@@ -553,6 +580,9 @@ pub(crate) fn normalize_composer_for_backend(
     composer.task_id = task_id.to_string();
     composer.backend = backend.to_string();
     composer.model = normalize_model_for_backend(&composer.model, backend);
+    composer.model_selection_mode = normalize_model_selection_mode(&composer.model_selection_mode);
+    composer.reasoning_effort =
+        normalize_reasoning_effort_for_backend(composer.reasoning_effort, backend);
     composer
 }
 
@@ -561,6 +591,8 @@ pub(crate) fn default_composer(task_id: &str) -> ChatComposerState {
         task_id: task_id.to_string(),
         backend: BACKEND_CLAUDE.to_string(),
         model: default_model_for_backend(BACKEND_CLAUDE).to_string(),
+        model_selection_mode: "auto".to_string(),
+        reasoning_effort: None,
         plan_mode: false,
         goal_mode: false,
         permission: "ask".to_string(),

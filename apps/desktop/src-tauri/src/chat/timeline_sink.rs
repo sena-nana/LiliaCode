@@ -258,6 +258,48 @@ pub(crate) fn persist_and_emit_message_timeline_event<R: Runtime>(
     persist_and_emit_input(app_handle, input);
 }
 
+pub(crate) fn persist_and_emit_model_selection_timeline_event<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    task_id: &str,
+    backend: &str,
+    turn_id: &str,
+    model_selection: Option<&JsonValue>,
+) {
+    let Some(model_selection) = model_selection else {
+        return;
+    };
+    if !model_selection.is_object() {
+        return;
+    }
+    let now = now_millis();
+    let summary = model_selection
+        .get("summary")
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("已自动选择本轮模型")
+        .to_string();
+    let input = AgentTimelineEventInput {
+        id: Some(format!("{task_id}:{turn_id}:model-selection:{turn_id}")),
+        task_id: task_id.to_string(),
+        turn_id: Some(turn_id.to_string()),
+        backend: backend.to_string(),
+        kind: "diagnostic".to_string(),
+        status: "info".to_string(),
+        title: "模型选择".to_string(),
+        summary: Some(summary),
+        payload: serde_json::json!({
+            "backend": backend,
+            "sourceId": format!("model-selection:{turn_id}"),
+            "subkind": "model_selection",
+            "selection": model_selection,
+        }),
+        created_at: Some(now as i64),
+        updated_at: Some(now as i64),
+    };
+
+    persist_and_emit_input(app_handle, input);
+}
+
 pub(crate) fn persist_and_emit_error_timeline_event<R: Runtime>(
     app_handle: &AppHandle<R>,
     task_id: &str,

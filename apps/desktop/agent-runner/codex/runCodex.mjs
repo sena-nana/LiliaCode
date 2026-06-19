@@ -845,7 +845,7 @@ export async function syncCodexThreadHistory(server, threadId, cmd, protocol) {
   }
 }
 
-export function buildCodexCollaborationMode(kind, model, preset = null) {
+export function buildCodexCollaborationMode(kind, model, preset = null, reasoningEffort = null) {
   const fallbackModel = stringOrNull(model) || stringOrNull(preset?.model) || "gpt-5";
   return {
     mode: kind === "plan" ? "plan" : "default",
@@ -853,7 +853,7 @@ export function buildCodexCollaborationMode(kind, model, preset = null) {
       model: fallbackModel,
       reasoning_effort:
         kind === "plan"
-          ? stringOrNull(preset?.reasoning_effort) || "medium"
+          ? stringOrNull(reasoningEffort) || stringOrNull(preset?.reasoning_effort) || "medium"
           : null,
       developer_instructions: null,
     },
@@ -974,12 +974,13 @@ async function runCodexTurnLoop(
   let nextTurnKind = initialTurnKind === "plan" ? "plan" : "default";
   let shouldStartTurn = true;
   const subagentInstructions = readCodexSubagentInstructions(cmd);
+  const selectedReasoningEffort = normalizeCodexSettings(cmd).reasoningEffort;
   while (shouldStartTurn) {
     shouldStartTurn = false;
     ctx.activeTurnKind = nextTurnKind;
     const collaborationMode =
       nextTurnKind === "plan"
-        ? buildCodexCollaborationMode("plan", selectedModel, planPreset)
+        ? buildCodexCollaborationMode("plan", selectedModel, planPreset, selectedReasoningEffort)
         : buildCodexCollaborationMode("default", selectedModel, null);
     if (subagentInstructions) {
       collaborationMode.settings.developer_instructions = subagentInstructions;

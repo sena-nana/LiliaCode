@@ -593,8 +593,7 @@ mod agent_event_sink_tests {
             "action": "update"
         }))
         .unwrap();
-        let ChatRuntimeCommand::RuntimeSettings { action } = &provider_settings
-        else {
+        let ChatRuntimeCommand::RuntimeSettings { action } = &provider_settings else {
             panic!("unexpected runtime command: {provider_settings:?}");
         };
         assert_eq!(action, "update");
@@ -785,6 +784,8 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: true,
             goal_mode: false,
             permission: "ask".to_string(),
@@ -833,6 +834,8 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: false,
             goal_mode: false,
             permission: "ask".to_string(),
@@ -876,6 +879,8 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: false,
             goal_mode: false,
             permission: "ask".to_string(),
@@ -915,10 +920,7 @@ mod agent_event_sink_tests {
         assert_eq!(payload["turn"]["prompt"], json!(""));
         assert!(payload["workflow"].is_null());
         assert!(payload.get("protocol").is_none());
-        assert_eq!(
-            payload["runtimeCommand"]["type"],
-            json!("runtime_settings")
-        );
+        assert_eq!(payload["runtimeCommand"]["type"], json!("runtime_settings"));
         assert_eq!(payload["runtimeCommand"]["action"], json!("update"));
         assert!(payload["runtimeCommand"].get("common").is_none());
         assert!(payload["runtimeCommand"].get("runtimeOptions").is_none());
@@ -946,6 +948,8 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
             model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: false,
             goal_mode: false,
             permission: "ask".to_string(),
@@ -1117,6 +1121,8 @@ mod agent_event_sink_tests {
             task_id: "stale-task".to_string(),
             backend: BACKEND_CLAUDE.to_string(),
             model: "claude-sonnet-4-6".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: true,
             goal_mode: false,
             permission: "readonly".to_string(),
@@ -1138,6 +1144,8 @@ mod agent_event_sink_tests {
             task_id: "task-1".to_string(),
             backend: BACKEND_CLAUDE.to_string(),
             model: "gpt-5.4-mini".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
             plan_mode: false,
             goal_mode: false,
             permission: "ask".to_string(),
@@ -1148,6 +1156,45 @@ mod agent_event_sink_tests {
 
         assert_eq!(normalized.backend, BACKEND_CODEX);
         assert_eq!(normalized.model, "gpt-5.4-mini");
+    }
+
+    #[test]
+    fn composer_normalizes_model_selection_and_reasoning_effort_for_backend() {
+        let codex = normalize_composer_for_backend(
+            ChatComposerState {
+                task_id: "task-1".to_string(),
+                backend: BACKEND_CODEX.to_string(),
+                model: "gpt-5.4-mini".to_string(),
+                model_selection_mode: "manual".to_string(),
+                reasoning_effort: Some("max".to_string()),
+                plan_mode: false,
+                goal_mode: false,
+                permission: "ask".to_string(),
+                codex_settings: Default::default(),
+            },
+            "task-1",
+            BACKEND_CODEX,
+        );
+        assert_eq!(codex.model_selection_mode, "manual");
+        assert_eq!(codex.reasoning_effort, None);
+
+        let claude = normalize_composer_for_backend(
+            ChatComposerState {
+                task_id: "task-1".to_string(),
+                backend: BACKEND_CLAUDE.to_string(),
+                model: "claude-opus-4-7".to_string(),
+                model_selection_mode: "unexpected".to_string(),
+                reasoning_effort: Some("max".to_string()),
+                plan_mode: false,
+                goal_mode: false,
+                permission: "ask".to_string(),
+                codex_settings: Default::default(),
+            },
+            "task-1",
+            BACKEND_CLAUDE,
+        );
+        assert_eq!(claude.model_selection_mode, "auto");
+        assert_eq!(claude.reasoning_effort.as_deref(), Some("max"));
     }
 
     fn pending_turn(id: &str) -> PendingChatTurn {

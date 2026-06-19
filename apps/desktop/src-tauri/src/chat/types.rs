@@ -235,6 +235,8 @@ pub(crate) struct RuntimeSettingsCommon {
     pub(crate) reasoning_effort: Option<String>,
     #[serde(default)]
     pub(crate) runtime_workspace_roots: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) model_selection: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +271,10 @@ pub(crate) struct RuntimeSettingsCodex {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeSettingsClaude {
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub(crate) thinking: Option<JsonValue>,
     #[serde(default)]
     pub(crate) allowed_tools: Option<Vec<String>>,
     #[serde(default)]
@@ -434,6 +440,10 @@ pub(crate) struct ChatComposerState {
     /// "claude" | "codex"
     pub(crate) backend: String,
     pub(crate) model: String,
+    #[serde(default = "default_model_selection_mode")]
+    pub(crate) model_selection_mode: String,
+    #[serde(default)]
+    pub(crate) reasoning_effort: Option<String>,
     #[serde(default)]
     pub(crate) plan_mode: bool,
     #[serde(default)]
@@ -442,6 +452,10 @@ pub(crate) struct ChatComposerState {
     pub(crate) permission: String,
     #[serde(default)]
     pub(crate) codex_settings: CodexComposerSettings,
+}
+
+fn default_model_selection_mode() -> String {
+    "auto".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

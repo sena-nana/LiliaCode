@@ -8,6 +8,7 @@ import type {
   ChatComposerState,
   ChatConversationReference,
   ChatContextUsage,
+  ChatModelOption,
   ChatSlashCommandWorkflow,
   LiliaThreadGoal,
   LiliaReviewTarget,
@@ -119,6 +120,7 @@ const props = defineProps<{
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
+  modelOptions: ChatModelOption[];
   contextUsage: ChatContextUsage | null;
   attachments: ChatAttachment[];
   appendAttachmentsToEndKey: number;
@@ -411,6 +413,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   v-if="composerActivated"
                   ref="composerRef"
                   :state="composerState"
+                  :model-options="modelOptions"
                   :attachments="attachments"
                   :append-attachments-to-end-key="appendAttachmentsToEndKey"
                   :project-cwd="contextSearchCwd"

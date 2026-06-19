@@ -13,7 +13,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Basic MCP integration: discover and connect MCP servers from agent configuration.
 - [x] Unified interaction protocol: unify plan confirmations, tool confirmations, and agent questions across backends.
 - [x] Unified Lilia protocol: the UI exposes Lilia operations only, with user-facing workflows and runtime commands dispatched by provider internally.
-- [ ] Intelligent model selection: automatically choose model level and reasoning intensity based on request type.
+- [x] Intelligent model selection: automatically choose model level and reasoning intensity within the current backend based on workflow, plan mode, context size, and provider capability, with explicit send-time overrides.
 - [x] File context: mention files, directories, images, and other context with `@`.
 - [ ] Slash commands: support backend-native commands and project-defined commands.
 
@@ -25,6 +25,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Claude Skills: manage user-level and project-level Claude Skills.
 - [x] Claude MCP management: add, edit, and remove external Claude MCP servers in the UI.
 - [x] Claude Lilia protocol: support review, fix suggestion, batch apply, runtime-command session fork, and local Goal / diagnostic handling.
+- [x] Claude reasoning effort: automatically or manually set reasoning effort for a send and map it to Claude Agent SDK `effort` / adaptive thinking.
 - [ ] Claude Plugins: fully manage Claude Plugin installation, enablement, updates, and scope.
 - [ ] Claude Hooks: manage Claude Code Hooks and show execution results.
 - [ ] Claude Subagents: display and schedule Claude Code Subagents or custom agents.
@@ -36,6 +37,7 @@ The list below describes the intended product capabilities. Checked items are cu
 - [x] Codex environment checks: show whether the Codex CLI, API, and connection state are available.
 - [x] Codex MCP management: discover, create, edit, delete, and enable user-level stdio Codex MCP servers; HTTP / OAuth / unknown transports remain read-only.
 - [x] Codex profiles: support profiles, reasoning effort, runtime workspace roots, controlled permissions, and project-level defaults.
+- [x] Codex reasoning effort: automatically or manually set reasoning effort for a send; plan mode uses the selected effort for the turn.
 - [x] Codex Lilia adapter: support review, fix suggestion, batch apply, compact, Goal, memory, config diagnostics, and background-terminal cleanup in the workflow layer, with session fork handled as a runtime command.
 - [ ] Built-in browser interaction: interact with users or debug code through IAB.
 

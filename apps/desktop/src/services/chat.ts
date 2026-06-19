@@ -22,6 +22,7 @@ import type {
   ChatSlashCommandSearchResult,
   ChatComposerState,
   ChatContextUsage,
+  ChatModelOption,
   ChatRuntimeCommand,
   ChatRuntimeSnapshot,
   ChatWorkflow,
@@ -82,6 +83,7 @@ export type {
   ChatContextSearchResult,
   ChatConversationReference,
   ChatContextUsage,
+  ChatModelOption,
   ChatSlashCommandSearchResult,
   ChatWorkflow,
   ChatRuntimeCommand,
@@ -273,6 +275,10 @@ export async function pickAttachmentFiles(): Promise<string[]> {
 
 export function getComposerState(taskId: string): Promise<ChatComposerState> {
   return invoke<ChatComposerState>("chat_get_composer_state", { taskId });
+}
+
+export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {
+  return invoke<ChatModelOption[]>("chat_list_models", { backend });
 }
 
 export function getRuntimeSnapshot(taskId: string): Promise<ChatRuntimeSnapshot> {

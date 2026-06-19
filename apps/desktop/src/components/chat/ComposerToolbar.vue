@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch, type Component } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   ArrowUp,
   ListChecks,
@@ -15,6 +15,8 @@ import type {
   ChatAttachment,
   ChatComposerState,
   ChatContextUsage,
+  ChatModelOption,
+  ModelSelectionExplanation,
   PermissionMode,
 } from "@lilia/contracts";
 import Dropdown from "../Dropdown.vue";
@@ -23,9 +25,20 @@ import {
   SB_MENU_POP_TRANSITION_MS,
 } from "../../composables/menuMotion";
 import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
+import { measurePerfAsync } from "../../utils/perf";
+
+const ComposerModelPicker = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "chat-composer.model-picker.load",
+    async () => (await import("./ComposerModelPicker.vue")).default,
+  ),
+});
 
 const props = defineProps<{
   state: ChatComposerState;
+  modelOptions: ChatModelOption[];
+  autoModelPreview: ModelSelectionExplanation;
   permissionOptions: Array<{ value: PermissionMode; label: string; hint: string }>;
   previewAttachments: ChatAttachment[];
   canInterrupt: boolean;
@@ -41,6 +54,7 @@ const emit = defineEmits<{
   pickAttachments: [];
   referenceConversation: [];
   setPermission: [permission: PermissionMode];
+  updateComposer: [patch: Partial<ChatComposerState>];
   togglePlanMode: [];
   toggleGoalMode: [];
   startLiliaCompact: [];
@@ -217,6 +231,8 @@ watch(actionMenuOpen, (open) => {
 });
 
 onBeforeUnmount(() => {
+  actionTriggerEl.value = null;
+  actionMenuEl.value = null;
   document.removeEventListener("pointerdown", onDocPointer, true);
   document.removeEventListener("keydown", onKey);
 });
@@ -338,6 +354,12 @@ onBeforeUnmount(() => {
           :options="permissionOptions"
           :icon="ShieldCheck"
           @update:model-value="emit('setPermission', $event)"
+        />
+        <ComposerModelPicker
+          :state="state"
+          :model-options="modelOptions"
+          :auto-model-preview="autoModelPreview"
+          @update="emit('updateComposer', $event)"
         />
         <button
           v-for="chip in activeModeChips"

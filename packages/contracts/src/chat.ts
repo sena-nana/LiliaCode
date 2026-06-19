@@ -176,14 +176,33 @@ export interface SessionForkRuntimeCommand {
 export interface LiliaRuntimeSettingsCommon {
   model?: string;
   permission?: PermissionMode;
-  reasoningEffort?: string;
+  reasoningEffort?: ReasoningEffort;
   runtimeWorkspaceRoots?: string[];
+  modelSelection?: ModelSelectionExplanation;
 }
+
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export type ModelSelectionMode = "auto" | "manual";
+
+export interface ModelSelectionExplanation {
+  mode: ModelSelectionMode;
+  model: string;
+  reasoningEffort?: ReasoningEffort | null;
+  source: "auto" | "manual" | "runtimeOptions";
+  summary: string;
+  signals: string[];
+}
+
+export type ClaudeThinkingConfig =
+  | { type: "adaptive" }
+  | { type: "enabled"; budgetTokens: number }
+  | { type: "disabled" };
 
 export interface ProviderRuntimeOptionsCodex {
   profile?: string;
   model?: string | null;
-  reasoningEffort?: string;
+  reasoningEffort?: Exclude<ReasoningEffort, "max">;
   runtimeWorkspaceRoots?: string[];
   additionalContext?: string | null;
   persistExtendedHistory?: boolean;
@@ -195,6 +214,8 @@ export interface ProviderRuntimeOptionsCodex {
 }
 
 export interface ProviderRuntimeOptionsClaude {
+  reasoningEffort?: ReasoningEffort;
+  thinking?: ClaudeThinkingConfig;
   allowedTools?: string[];
   disallowedTools?: string[];
   additionalDirectories?: string[];
@@ -337,6 +358,8 @@ export interface ChatComposerState {
   taskId: string;
   backend: ChatBackendKind;
   model: string;
+  modelSelectionMode?: ModelSelectionMode;
+  reasoningEffort?: ReasoningEffort | null;
   planMode: boolean;
   goalMode: boolean;
   permission: PermissionMode;
