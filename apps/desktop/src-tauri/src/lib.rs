@@ -287,6 +287,7 @@ pub fn run() {
             agent_timeline::agent_timeline_clear_task,
             quota_usage::quota_usage_get_stats,
             quota_usage::quota_usage_get_codex_account_status,
+            quota_usage::quota_usage_consume_codex_rate_limit_reset_credit,
             automation::commands::automation_list_workflows,
             automation::commands::automation_save_draft,
             automation::commands::automation_publish,

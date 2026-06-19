@@ -53,6 +53,7 @@ import {
   resolveWindowsCommandScript,
 } from "../agent-runner/codex/appServer.mjs";
 import {
+  consumeCodexRateLimitResetCredit,
   readCodexAccountQuotaStatus,
 } from "../agent-runner/codex/accountQuota.mjs";
 import {
@@ -2576,6 +2577,22 @@ describe("Codex app-server mapping", () => {
 
   function mockQuotaServer(
     read: (attempt: number) => unknown,
+    {
+      usage = () => ({
+        summary: {
+          lifetimeTokens: 123456,
+          peakDailyTokens: 4567,
+          longestRunningTurnSec: 540,
+          currentStreakDays: 8,
+          longestStreakDays: 14,
+        },
+        dailyUsageBuckets: [{ startDate: "2026-06-18", tokens: 1234 }],
+      }),
+      consume = () => ({ outcome: "reset" }),
+    }: {
+      usage?: () => unknown;
+      consume?: () => unknown;
+    } = {},
   ): { server: any; requests: string[] } {
     const requests: string[] = [];
     let readAttempts = 0;
@@ -2589,6 +2606,8 @@ describe("Codex app-server mapping", () => {
             readAttempts += 1;
             return read(readAttempts);
           }
+          if (method === "account/usage/read") return usage();
+          if (method === "account/rateLimitResetCredit/consume") return consume();
           throw new Error(`unexpected method ${method}`);
         },
         notify: () => {},
@@ -2622,13 +2641,14 @@ describe("Codex app-server mapping", () => {
       createServer: () => server as any,
     });
 
-    expect(requests).toEqual(["initialize", "account/rateLimits/read"]);
+    expect(requests).toEqual(["initialize", "account/rateLimits/read", "account/usage/read"]);
     expect(status.fiveHour?.usedPercent).toBe(14);
     expect(status.weekly?.usedPercent).toBe(14);
     expect(status.sparkFiveHour?.usedPercent).toBe(0);
     expect(status.sparkWeekly?.usedPercent).toBe(18);
     expect(status.credits).toEqual({ hasCredits: true, unlimited: false, balance: "3" });
     expect(status.sparkCredits).toEqual({ hasCredits: true, unlimited: true, balance: null });
+    expect(status.accountUsage?.summary.currentStreakDays).toBe(8);
   });
 
   it("Codex account quota retries transient wham usage fetch failures", async () => {
@@ -2643,10 +2663,12 @@ describe("Codex app-server mapping", () => {
           codex: {
             limitId: "codex",
             planType: "pro",
+            rateLimitResetCredits: { availableCount: 99 },
             primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 10 },
             secondary: { usedPercent: 34, windowDurationMins: 10080, resetsAt: 20 },
           },
         },
+        rateLimitResetCredits: { availableCount: 2 },
       };
     });
 
@@ -2660,13 +2682,77 @@ describe("Codex app-server mapping", () => {
       "initialize",
       "account/rateLimits/read",
       "account/rateLimits/read",
+      "account/usage/read",
     ]);
     expect(status.error).toBeNull();
     expect(status.fiveHour?.usedPercent).toBe(12);
     expect(status.weekly?.usedPercent).toBe(34);
     expect(status.credits).toBeNull();
     expect(status.sparkCredits).toBeNull();
+    expect(status.rateLimitResetCredits).toEqual({ availableCount: 2 });
   });
+
+  it("Codex account quota keeps rate limits when account usage is unavailable", async () => {
+    const { server, requests } = mockQuotaServer(
+      () => ({
+        rateLimitsByLimitId: {
+          codex: {
+            limitId: "codex",
+            planType: "pro",
+            primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 10 },
+          },
+        },
+      }),
+      {
+        usage: () => {
+          throw new Error("usage unsupported");
+        },
+      },
+    );
+
+    const status = await readCodexAccountQuotaStatus({
+      createServer: () => server as any,
+    });
+
+    expect(requests).toEqual(["initialize", "account/rateLimits/read", "account/usage/read"]);
+    expect(status.available).toBe(true);
+    expect(status.accountUsage).toBeNull();
+    expect(status.usageError).toBe("usage unsupported");
+  });
+
+  for (const outcome of ["reset", "alreadyRedeemed", "nothingToReset", "noCredit"]) {
+    it(`Codex account quota consume reset credit handles ${outcome}`, async () => {
+      const { server, requests } = mockQuotaServer(
+        () => ({
+          rateLimitsByLimitId: {
+            codex: {
+              limitId: "codex",
+              planType: "pro",
+              primary: { usedPercent: 1, windowDurationMins: 300, resetsAt: 10 },
+            },
+          },
+          rateLimitResetCredits: { availableCount: 1 },
+        }),
+        {
+          consume: () => ({ outcome }),
+        },
+      );
+
+      const result = await consumeCodexRateLimitResetCredit("key-1", {
+        createServer: () => server as any,
+      });
+
+      expect(requests).toEqual([
+        "initialize",
+        "account/rateLimitResetCredit/consume",
+        "account/rateLimits/read",
+        "account/usage/read",
+      ]);
+      expect(result.outcome).toBe(outcome);
+      expect(result.status.fiveHour?.usedPercent).toBe(1);
+      expect(result.status.rateLimitResetCredits).toEqual({ availableCount: 1 });
+    });
+  }
 
   it("Codex 子对话工具调用可查询父对话上下文", async () => {
     const calls: any[] = [];

@@ -431,8 +431,34 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         sparkWeekly: null,
         credits: null,
         sparkCredits: null,
+        rateLimitResetCredits: null,
+        accountUsage: null,
+        usageError: null,
         fetchedAt: Date.now(),
         error: "dev-mock",
+      } as T;
+    case "quota_usage_consume_codex_rate_limit_reset_credit":
+      return {
+        outcome: "noCredit",
+        status: {
+          available: false,
+          connectionMode: "codex-account",
+          limitId: null,
+          limitName: null,
+          planType: null,
+          rateLimitReachedType: null,
+          fiveHour: null,
+          weekly: null,
+          sparkFiveHour: null,
+          sparkWeekly: null,
+          credits: null,
+          sparkCredits: null,
+          rateLimitResetCredits: null,
+          accountUsage: null,
+          usageError: null,
+          fetchedAt: Date.now(),
+          error: "dev-mock",
+        },
       } as T;
     default:
       console.warn(`[lilia:dev-mock] Unhandled Tauri command: ${cmd}`, args);

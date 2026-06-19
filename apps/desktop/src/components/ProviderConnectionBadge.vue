@@ -8,6 +8,8 @@ import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus } from "../services/chat";
 import {
   clampPercent,
+  codexQuotaUnavailableStatus,
+  formatCompactNumber,
   formatPercent,
   formatUnixSeconds,
   quotaPercentTone,
@@ -153,6 +155,18 @@ const quotaDetailRows = computed(() => [
   ...quotaRows.value,
   ...sparkQuotaRows.value.filter((row) => row.window),
 ]);
+const resetCreditAvailableCount = computed(() =>
+  officialQuota.value?.rateLimitResetCredits?.availableCount ?? 0,
+);
+const accountUsageSummary = computed(() => officialQuota.value?.accountUsage?.summary ?? null);
+const accountUsageLine = computed(() => {
+  const summary = accountUsageSummary.value;
+  if (!summary) return null;
+  const parts = [];
+  if (summary.lifetimeTokens !== null) parts.push(`累计 ${formatCompactNumber(summary.lifetimeTokens)} tokens`);
+  if (summary.currentStreakDays !== null) parts.push(`连续 ${summary.currentStreakDays} 天`);
+  return parts.join(" · ") || null;
+});
 
 const shouldShowQuotaRings = computed(() =>
   isCodexOfficialAccount.value && Boolean(officialQuota.value?.fiveHour || officialQuota.value?.weekly),
@@ -168,25 +182,6 @@ const codexUpdateTitle = computed(() => {
   return `更新 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
 });
 const codexReleaseNotes = computed(() => codexAppServer.value?.releaseNotes ?? []);
-
-function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
-  return {
-    available: false,
-    connectionMode: "codex-account",
-    limitId: null,
-    limitName: null,
-    planType: null,
-    rateLimitReachedType: null,
-    fiveHour: null,
-    weekly: null,
-    sparkFiveHour: null,
-    sparkWeekly: null,
-    credits: null,
-    sparkCredits: null,
-    fetchedAt: Date.now(),
-    error: String(error),
-  };
-}
 
 function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
   const remainingPercent = quotaRemainingPercent(window);
@@ -256,7 +251,7 @@ async function loadOfficialQuota() {
       const result = await getCodexAccountQuotaStatus();
       if (seq === quotaRequestSeq) officialQuota.value = result;
     } catch (err) {
-      if (seq === quotaRequestSeq) officialQuota.value = quotaUnavailableStatus(err);
+      if (seq === quotaRequestSeq) officialQuota.value = codexQuotaUnavailableStatus(err);
     } finally {
       if (seq === quotaRequestSeq) quotaLoading.value = false;
       quotaInflight = null;
@@ -465,6 +460,15 @@ onBeforeUnmount(() => {
       </span>
       <span v-if="officialQuota?.rateLimitReachedType" class="sb-conn-popover__warn">
         已触发 {{ officialQuota.rateLimitReachedType }}
+      </span>
+      <span v-if="resetCreditAvailableCount > 0" class="sb-conn-popover__warn">
+        重置次数可用 {{ resetCreditAvailableCount }} 次
+      </span>
+      <span v-if="accountUsageLine" class="sb-conn-popover__warn">
+        {{ accountUsageLine }}
+      </span>
+      <span v-if="officialQuota?.usageError" class="sb-conn-popover__warn">
+        {{ officialQuota.usageError }}
       </span>
       <span v-if="officialQuota?.error" class="sb-conn-popover__error">
         {{ officialQuota.error }}

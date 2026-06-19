@@ -28,6 +28,7 @@ import type {
   ProjectArchitectureInteractionPayload,
   ProviderRuntimeOptions,
   CodexAccountQuotaStatus,
+  CodexRateLimitResetCreditConsumeResult,
   QuotaUsageStats,
   AutomationRunSummary,
   HookDocumentUpdateInput,
@@ -524,10 +525,37 @@ export type CodexAccountQuotaStatusTypeTest = Assert<
         unlimited: true;
         balance: null;
       };
+      rateLimitResetCredits: {
+        availableCount: 2;
+      };
+      accountUsage: {
+        summary: {
+          lifetimeTokens: 123456;
+          peakDailyTokens: 4567;
+          longestRunningTurnSec: 540;
+          currentStreakDays: 8;
+          longestStreakDays: 14;
+        };
+        dailyUsageBuckets: [{
+          startDate: "2026-06-18";
+          tokens: 1234;
+        }];
+      };
+      usageError: null;
       fetchedAt: 3;
       error: null;
     },
     CodexAccountQuotaStatus
+  >
+>;
+
+export type CodexRateLimitResetCreditConsumeResultTypeTest = Assert<
+  Extends<
+    {
+      outcome: "reset";
+      status: CodexAccountQuotaStatus;
+    },
+    CodexRateLimitResetCreditConsumeResult
   >
 >;
 

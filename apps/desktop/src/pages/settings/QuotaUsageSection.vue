@@ -5,6 +5,7 @@ import {
   Coins,
   Database,
   Gauge,
+  RotateCcw,
   RefreshCw,
 } from "lucide-vue-next";
 import type {
@@ -16,8 +17,14 @@ import type {
   QuotaUsageStatsBackendFilter,
   QuotaUsageStatsDays,
 } from "@lilia/contracts";
-import { getCodexAccountQuotaStatus, getQuotaUsageStats } from "../../services/chat";
 import {
+  consumeCodexRateLimitResetCredit,
+  getCodexAccountQuotaStatus,
+  getQuotaUsageStats,
+} from "../../services/chat";
+import {
+  codexQuotaUnavailableStatus,
+  formatCompactNumber,
   formatDateTime,
   formatPercent,
   formatUnixSeconds,
@@ -56,6 +63,9 @@ const stats = ref<QuotaUsageStats | null>(null);
 const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const loading = ref(false);
 const quotaLoading = ref(false);
+const resetCreditLoading = ref(false);
+const resetCreditMessage = ref("");
+const resetCreditError = ref("");
 const error = ref("");
 let requestSeq = 0;
 let quotaRequestSeq = 0;
@@ -82,18 +92,44 @@ const officialQuotaGroups = computed(() => [
 const officialQuotaCreditRows = computed(() => [
   {
     key: "codex",
-    label: "重置次数",
+    label: "Workspace credit",
     credits: officialQuota.value?.credits ?? null,
   },
   ...(officialQuota.value?.sparkCredits
     ? [{
       key: "spark",
-      label: "Spark重置次数",
+      label: "Spark workspace credit",
       credits: officialQuota.value.sparkCredits,
     }]
     : []),
 ]);
 const hasOfficialQuotaWindow = computed(() => officialQuotaGroups.value.length > 0);
+const resetCreditAvailableCount = computed(() =>
+  officialQuota.value?.rateLimitResetCredits?.availableCount ?? 0,
+);
+const canConsumeResetCredit = computed(() =>
+  showOfficialQuota.value &&
+  Boolean(officialQuota.value?.available) &&
+  resetCreditAvailableCount.value > 0 &&
+  !quotaLoading.value &&
+  !resetCreditLoading.value,
+);
+const accountUsageSummaryRows = computed(() => {
+  const summary = officialQuota.value?.accountUsage?.summary;
+  if (!summary) return [];
+  return [
+    { key: "lifetime", label: "累计 Token", value: summary.lifetimeTokens, suffix: "tokens" },
+    { key: "peak", label: "单日峰值", value: summary.peakDailyTokens, suffix: "tokens" },
+    { key: "streak", label: "连续活跃", value: summary.currentStreakDays, suffix: "天" },
+    { key: "longest", label: "最长连续", value: summary.longestStreakDays, suffix: "天" },
+  ].filter((row) => row.value !== null);
+});
+const accountUsageBuckets = computed(() =>
+  (officialQuota.value?.accountUsage?.dailyUsageBuckets ?? []).slice(-14),
+);
+const maxAccountUsageTokens = computed(() =>
+  Math.max(1, ...accountUsageBuckets.value.map((bucket) => bucket.tokens)),
+);
 const maxDailyTokens = computed(() =>
   Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
 );
@@ -155,13 +191,6 @@ function backendLabel(backend: ChatBackendKind | QuotaUsageStatsBackendFilter) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(value);
-}
-
-function formatCompactNumber(value: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    notation: "compact",
-    maximumFractionDigits: value >= 1000 ? 1 : 0,
-  }).format(value);
 }
 
 function formatCost(value: number) {
@@ -344,10 +373,35 @@ function backendPercent(tokens: number) {
 }
 
 function quotaCreditsLabel(credits: CodexAccountQuotaCredits | null | undefined) {
-  if (!credits || !credits.hasCredits) return "暂无重置次数数据";
+  if (!credits || !credits.hasCredits) return "暂无 credit 数据";
   if (credits.unlimited) return "不限";
   if (credits.balance) return `剩余 ${credits.balance}`;
   return "可用";
+}
+
+function resetCreditText(count: number) {
+  return count > 0 ? `可用 ${formatNumber(count)} 次` : "暂无可用重置次数";
+}
+
+function accountUsageValue(value: number | null, suffix: string) {
+  if (value === null) return "--";
+  return suffix === "tokens" ? `${formatCompactNumber(value)} tokens` : `${formatNumber(value)} ${suffix}`;
+}
+
+function accountUsageBarHeight(tokens: number) {
+  return `${Math.max(4, Math.round((tokens / maxAccountUsageTokens.value) * 42))}px`;
+}
+
+function resetOutcomeText(outcome: string) {
+  if (outcome === "reset") return "已使用 1 次重置次数，官方额度已刷新";
+  if (outcome === "alreadyRedeemed") return "本次重置请求已处理，官方额度已刷新";
+  if (outcome === "nothingToReset") return "当前没有可重置的额度窗口";
+  if (outcome === "noCredit") return "没有可用的重置次数";
+  return "重置次数请求已完成";
+}
+
+function createIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function pieStyle(items: QuotaBreakdownItem[]) {
@@ -387,29 +441,34 @@ async function loadOfficialQuota() {
     if (seq === quotaRequestSeq) officialQuota.value = result;
   } catch (err) {
     if (seq === quotaRequestSeq) {
-      officialQuota.value = {
-        available: false,
-        connectionMode: "codex-account",
-        limitId: null,
-        limitName: null,
-        planType: null,
-        rateLimitReachedType: null,
-        fiveHour: null,
-        weekly: null,
-        sparkFiveHour: null,
-        sparkWeekly: null,
-        credits: null,
-        sparkCredits: null,
-        fetchedAt: Date.now(),
-        error: String(err),
-      };
+      officialQuota.value = codexQuotaUnavailableStatus(err);
     }
   } finally {
     if (seq === quotaRequestSeq) quotaLoading.value = false;
   }
 }
 
+async function consumeResetCredit() {
+  if (!canConsumeResetCredit.value) return;
+  resetCreditLoading.value = true;
+  resetCreditMessage.value = "";
+  resetCreditError.value = "";
+  try {
+    const result = await consumeCodexRateLimitResetCredit({
+      idempotencyKey: createIdempotencyKey(),
+    });
+    officialQuota.value = result.status;
+    resetCreditMessage.value = resetOutcomeText(result.outcome);
+  } catch (err) {
+    resetCreditError.value = String(err);
+  } finally {
+    resetCreditLoading.value = false;
+  }
+}
+
 async function refreshAll() {
+  resetCreditMessage.value = "";
+  resetCreditError.value = "";
   await Promise.all([loadStats(), loadOfficialQuota()]);
 }
 
@@ -494,6 +553,20 @@ onMounted(() => {
           {{ quotaLoading ? "读取中" : `查询 ${formatDateTime(officialQuota?.fetchedAt ?? Date.now())}` }}
         </span>
       </div>
+      <div class="quota-official__actions">
+        <span class="ui-badge ui-badge--muted">
+          重置次数 {{ resetCreditText(resetCreditAvailableCount) }}
+        </span>
+        <button
+          type="button"
+          class="ui-button ui-button--ghost quota-official__reset"
+          :disabled="!canConsumeResetCredit"
+          @click="consumeResetCredit"
+        >
+          <RotateCcw :size="12" :class="{ 'is-spinning': resetCreditLoading }" aria-hidden="true" />
+          {{ resetCreditLoading ? "使用中" : "使用重置次数" }}
+        </button>
+      </div>
       <div
         v-for="group in officialQuotaGroups"
         :key="group.key"
@@ -524,6 +597,40 @@ onMounted(() => {
       </div>
       <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
         暂无官方额度数据
+      </div>
+      <div v-if="resetCreditMessage" class="quota-official__message">
+        {{ resetCreditMessage }}
+      </div>
+      <div v-if="resetCreditError" class="quota-official__error">
+        {{ resetCreditError }}
+      </div>
+      <div
+        v-if="accountUsageSummaryRows.length || accountUsageBuckets.length || officialQuota?.usageError"
+        class="quota-official-usage"
+      >
+        <div class="quota-official-usage__head">
+          <strong>官方账号用量</strong>
+          <span v-if="officialQuota?.usageError">{{ officialQuota.usageError }}</span>
+        </div>
+        <div v-if="accountUsageSummaryRows.length" class="quota-official-usage__metrics">
+          <div
+            v-for="row in accountUsageSummaryRows"
+            :key="row.key"
+            class="quota-official-usage__metric"
+          >
+            <span>{{ row.label }}</span>
+            <strong>{{ accountUsageValue(row.value, row.suffix) }}</strong>
+          </div>
+        </div>
+        <div v-if="accountUsageBuckets.length" class="quota-official-usage__bars" aria-label="官方账号每日用量">
+          <span
+            v-for="bucket in accountUsageBuckets"
+            :key="bucket.startDate"
+            :title="`${bucket.startDate} · ${formatNumber(bucket.tokens)} tokens`"
+          >
+            <i :style="{ height: accountUsageBarHeight(bucket.tokens) }" />
+          </span>
+        </div>
       </div>
       <div v-if="officialQuota?.error" class="quota-official__error">
         {{ officialQuota.error }}
@@ -901,6 +1008,7 @@ onMounted(() => {
 .quota-official-window small,
 .quota-official-credit span,
 .quota-official__empty,
+.quota-official__message,
 .quota-official__error {
   overflow: hidden;
   color: var(--text-muted);
@@ -908,6 +1016,20 @@ onMounted(() => {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.quota-official__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quota-official__reset {
+  height: 28px;
+  padding-inline: 8px;
+  font-size: 12px;
 }
 
 .quota-official__grid {
@@ -970,8 +1092,98 @@ onMounted(() => {
   padding: 8px 2px;
 }
 
+.quota-official__message {
+  color: var(--ok);
+}
+
 .quota-official__error {
   color: var(--warn);
+}
+
+.quota-official-usage {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.quota-official-usage__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quota-official-usage__head strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.quota-official-usage__head span {
+  overflow: hidden;
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-official-usage__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quota-official-usage__metric {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+}
+
+.quota-official-usage__metric span,
+.quota-official-usage__metric strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-official-usage__metric span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.quota-official-usage__metric strong {
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quota-official-usage__bars {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(4px, 1fr));
+  align-items: end;
+  gap: 3px;
+  min-height: 46px;
+}
+
+.quota-official-usage__bars span {
+  display: flex;
+  align-items: end;
+  min-width: 0;
+  height: 46px;
+}
+
+.quota-official-usage__bars i {
+  display: block;
+  width: 100%;
+  min-height: 4px;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--accent);
+  opacity: 0.76;
 }
 
 .quota-chart-wrap {
@@ -1362,7 +1574,8 @@ onMounted(() => {
   }
 
   .quota-official__grid,
-  .quota-official__credits {
+  .quota-official__credits,
+  .quota-official-usage__metrics {
     grid-template-columns: 1fr;
   }
 
