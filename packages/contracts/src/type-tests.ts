@@ -305,6 +305,46 @@ export type SandboxDiagnosticsIsNotWorkflowTypeTest = Assert<
   > extends true ? false : true
 >;
 
+export type ProcessSessionRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "process_session";
+      action: "spawn";
+      command: "npm test -- --watch=false";
+      cwd: "D:/PROJECT/workspace/Lilia";
+      env: { CI: "1" };
+      tty: true;
+      rows: 24;
+      cols: 100;
+      permissionProfile: ":workspace";
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type ProcessSessionControlRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "process_session";
+      action: "write_stdin";
+      processId: "proc-1";
+      stdin: "q";
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type ProcessSessionIsNotWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "process_session";
+      action: "kill";
+      processId: "proc-1";
+    },
+    ChatWorkflow
+  > extends true ? false : true
+>;
+
 export type HooksOverviewShapeTypeTest = Assert<
   Extends<
     {

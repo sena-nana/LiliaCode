@@ -84,6 +84,7 @@ export function createInteractionBroker({
   let architectureSeq = 1;
   let settingsUpdateHandler = null;
   let liliaIabResultHandler = null;
+  let processSessionCommandHandler = null;
   const interruptHandlers = new Set();
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
@@ -315,6 +316,11 @@ export function createInteractionBroker({
     }
     if (msg.type === "lilia_iab_result") {
       liliaIabResultHandler?.(msg.snapshot);
+      return;
+    }
+    if (msg.type === "process_session_command") {
+      processSessionCommandHandler?.(msg.runtimeCommand);
+      return;
     }
   }
 
@@ -331,6 +337,12 @@ export function createInteractionBroker({
     },
     handleLiliaIabResult: (handler) => {
       liliaIabResultHandler = typeof handler === "function" ? handler : null;
+    },
+    handleProcessSessionCommand: (handler) => {
+      processSessionCommandHandler = typeof handler === "function" ? handler : null;
+      return () => {
+        if (processSessionCommandHandler === handler) processSessionCommandHandler = null;
+      };
     },
     handleInterruptTurn: (handler) => {
       if (typeof handler !== "function") return () => {};

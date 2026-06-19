@@ -1067,6 +1067,63 @@ mod agent_event_sink_tests {
     }
 
     #[test]
+    fn runner_stdin_payload_keeps_process_session_runtime_command() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
+            plan_mode: false,
+            goal_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
+            "type": "process_session",
+            "action": "spawn",
+            "command": "npm test -- --watch=false",
+            "cwd": "C:/repo",
+            "env": { "CI": "1" },
+            "tty": true,
+            "rows": 24,
+            "cols": 100,
+            "permissionProfile": ":workspace"
+        }))
+        .unwrap();
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "",
+            &[],
+            &[],
+            None,
+            Some(&runtime_command),
+            None,
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["turn"]["prompt"], json!(""));
+        assert!(payload["workflow"].is_null());
+        assert_eq!(payload["runtimeCommand"]["type"], json!("process_session"));
+        assert_eq!(payload["runtimeCommand"]["action"], json!("spawn"));
+        assert_eq!(
+            payload["runtimeCommand"]["command"],
+            json!("npm test -- --watch=false")
+        );
+        assert_eq!(payload["runtimeCommand"]["env"]["CI"], json!("1"));
+        assert_eq!(
+            payload["runtimeCommand"]["permissionProfile"],
+            json!(":workspace")
+        );
+        assert!(payload["runtimeCommand"].get("process_id").is_none());
+    }
+
+    #[test]
     fn chat_message_ids_do_not_reset_to_counter_values() {
         let first = new_chat_message_id();
         let second = new_chat_message_id();

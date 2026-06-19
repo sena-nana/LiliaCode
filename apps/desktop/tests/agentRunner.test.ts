@@ -1942,6 +1942,49 @@ describe("Claude helpers", () => {
     });
   });
 
+  it("Claude process session emits unsupported diagnostic without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-existing",
+      runtimeCommand: {
+        type: "process_session",
+        action: "spawn",
+        command: "npm test",
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Claude process session unsupported",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "process_session",
+          action: "spawn",
+          native: false,
+          unsupported: true,
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-existing",
+      subtype: "success",
+    });
+  });
+
   it("Claude experimental provider options emit diagnostics or stop by fallback", async () => {
     const diagnostic = captureProtocol();
     let queryCalled = false;
@@ -5433,6 +5476,165 @@ describe("Codex app-server mapping", () => {
           readiness: expect.objectContaining({
             available: true,
           }),
+        }),
+      }),
+    }));
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("keeps Codex process sessions alive for output and control commands", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const interactions = createInteractionBroker({
+      protocol,
+      emitToolConsentTimeline: () => {},
+      emitAskUserTimeline: () => {},
+    });
+    let controlSent = false;
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "thread/settings/update") return {};
+        if (method === "process/spawn") return { processId: "proc-1" };
+        if (method === "process/writeStdin") return {};
+        if (method === "process/resizePty") return {};
+        if (method === "process/kill") return {};
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => {
+        if (!controlSent) {
+          controlSent = true;
+          interactions.handleControlLine(JSON.stringify({
+            type: "process_session_command",
+            runtimeCommand: {
+              type: "process_session",
+              action: "write_stdin",
+              stdin: "q",
+            },
+          }));
+          interactions.handleControlLine(JSON.stringify({
+            type: "process_session_command",
+            runtimeCommand: {
+              type: "process_session",
+              action: "resize_pty",
+              rows: 32,
+              cols: 120,
+            },
+          }));
+          interactions.handleControlLine(JSON.stringify({
+            type: "process_session_command",
+            runtimeCommand: {
+              type: "process_session",
+              action: "kill",
+            },
+          }));
+          return [{
+            method: "process/outputDelta",
+            params: {
+              processId: "proc-1",
+              stream: "stdout",
+              delta: "ready\n",
+            },
+          }];
+        }
+        return [{
+          method: "process/exited",
+          params: {
+            processId: "proc-1",
+            exitCode: 0,
+          },
+        }];
+      },
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "process_session",
+        action: "spawn",
+        command: "npm test -- --watch=false",
+        cwd: "C:/repo",
+        env: { CI: "1" },
+        tty: true,
+        rows: 24,
+        cols: 100,
+        permissionProfile: ":workspace",
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions,
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "process/spawn")).toEqual({
+      method: "process/spawn",
+      params: {
+        command: "npm test -- --watch=false",
+        cwd: "C:/repo",
+        env: { CI: "1" },
+        tty: true,
+        rows: 24,
+        cols: 100,
+        permissionProfile: ":workspace",
+      },
+    });
+    expect(calls).toContainEqual({
+      method: "process/writeStdin",
+      params: { processId: "proc-1", stdin: "q" },
+    });
+    expect(calls).toContainEqual({
+      method: "process/resizePty",
+      params: { processId: "proc-1", rows: 32, cols: 120 },
+    });
+    expect(calls).toContainEqual({
+      method: "process/kill",
+      params: { processId: "proc-1" },
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "command",
+        status: "started",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "process_session",
+          action: "spawn",
+          method: "process/spawn",
+          processId: "proc-1",
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "command",
+        status: "running",
+        payload: expect.objectContaining({
+          subkind: "process_session",
+          action: "output",
+          delta: "ready\n",
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "command",
+        status: "success",
+        payload: expect.objectContaining({
+          subkind: "process_session",
+          action: "exited",
+          exitCode: 0,
         }),
       }),
     }));

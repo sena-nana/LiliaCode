@@ -278,6 +278,26 @@ export interface SandboxDiagnosticsRuntimeCommand {
   includeDetails?: boolean;
 }
 
+export type ProcessSessionAction =
+  | "spawn"
+  | "write_stdin"
+  | "kill"
+  | "resize_pty";
+
+export interface ProcessSessionRuntimeCommand {
+  type: "process_session";
+  action: ProcessSessionAction;
+  processId?: string;
+  command?: string;
+  cwd?: string;
+  stdin?: string;
+  rows?: number;
+  cols?: number;
+  env?: Record<string, string>;
+  tty?: boolean;
+  permissionProfile?: string;
+}
+
 export interface AutomationRunWorkflow {
   type: "automation";
   automationRunId: string;
@@ -319,7 +339,8 @@ export type ChatRuntimeCommand =
   | SessionManagementRuntimeCommand
   | RuntimeSettingsCommand
   | RemoteEnvironmentRuntimeCommand
-  | SandboxDiagnosticsRuntimeCommand;
+  | SandboxDiagnosticsRuntimeCommand
+  | ProcessSessionRuntimeCommand;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;
