@@ -106,12 +106,12 @@ The list below tracks the current real integration surface. Only capabilities th
 
 ### LiliaCode-Specific Features
 
-- [ ] Project management (partial): local projects, Git clone, project ordering, pinning, removal, and session counts are available; project-level progress, data, and cost views are not yet integrated.
+- [x] Project management: local projects, GitHub clone projects, dashboards, task status distribution, recent activity, session / task statistics, and known usage cost are available.
 - [x] Task-based conversations: conversations are persisted as tasks, with draft promotion, project conversations, orphan conversations, archiving, pinning, and ordering.
-- [ ] Task tree (partial): the data layer has `parent_id` and `depends_on`, but full parent-child tree, dependency view, and blocker management UI are not yet available.
+- [x] Task tree: parent-child relationships, dependency updates, tree drag-and-drop, and blocker status hints are available; automatic scheduling from blockers and dependencies is still not complete.
 - [ ] Plugin system (partial): Claude Skills / Plugins / MCP and Codex MCP management can feed runtime extensions; a generic plugin system with selectable behavior plugins is not yet complete.
-- [ ] Memory (partial): the project Memory tab and extension-host context candidate path exist; user-level / project-level memory storage, retrieval, and automatic injection are not yet user-facing.
-- [ ] Roadmap and milestones (partial): the project Roadmap page can aggregate the current project's task state into a first-release milestone, progress, status distribution, current focus, and recently completed tasks; persisted Milestone / TaskMilestoneLink data sources are not yet integrated.
+- [x] Memory: user-level and project-level memory can be saved manually and injected as the Layer 1 baseline at session start; external model retrieval and opportunity-window guidance are not implemented.
+- [x] Roadmap and milestones: persisted project milestones and task milestone links are available; explanatory metrics and advanced summary views still need polish.
 - [ ] Automatic orchestration: Lilia does not yet schedule multiple agents based on task state, dependencies, or user strategy.
 - [ ] Helper agents: lower-cost agents do not yet run inside a session to supervise or assist the main agent.
 - [x] Built-in Lilia protocol: keep a single built-in runtime path.

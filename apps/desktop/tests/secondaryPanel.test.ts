@@ -165,21 +165,35 @@ function seedSecondaryPanelOverflowConversations() {
   };
 }
 
-async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: number) {
+async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: number, targetX = 20) {
   await fireEvent.pointerDown(source, {
     button: 0,
     pointerId: 1,
     clientX: 20,
     clientY: 10,
   });
-  await fireEvent.pointerMove(window, {
+  await fireEvent.pointerMove(target, {
     pointerId: 1,
-    clientX: 20,
+    clientX: targetX,
     clientY: targetY,
   });
   await fireEvent.pointerUp(target, {
     pointerId: 1,
+    clientX: targetX,
+    clientY: targetY,
+  });
+}
+
+async function startDragOver(source: HTMLElement, target: HTMLElement, targetY: number, targetX = 20) {
+  await fireEvent.pointerDown(source, {
+    button: 0,
+    pointerId: 1,
     clientX: 20,
+    clientY: 10,
+  });
+  await fireEvent.pointerMove(target, {
+    pointerId: 1,
+    clientX: targetX,
     clientY: targetY,
   });
 }
@@ -778,6 +792,13 @@ describe("SecondaryPanel project tree drag", () => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
+    seedTreeExpansionState({
+      projects: {
+        lilia: true,
+        tools: true,
+      },
+      orphansExpanded: true,
+    });
   });
 
 
@@ -816,5 +837,77 @@ describe("SecondaryPanel project tree drag", () => {
         orderedIds: ["tools", "lilia"],
       }, undefined);
     });
+  });
+
+  it("任务拖入另一任务时会设置父任务", async () => {
+    const view = await renderSecondaryPanel();
+    const source = await findConversationRow(view, "整理窗口快捷键");
+    const target = await findConversationRow(view, "接入 Claude Code 会话发现");
+    target.getBoundingClientRect = () => box(40, 68);
+    mockInvoke.mockClear();
+
+    await startDragOver(source, target, 54, 80);
+
+    await waitFor(() => {
+      expect(target).toHaveClass("is-tree-drop-inside");
+      expect(target).not.toHaveClass("is-tree-drop-invalid");
+    });
+
+    await fireEvent.pointerUp(target, {
+      pointerId: 1,
+      clientX: 80,
+      clientY: 54,
+    });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("task_reparent", {
+        taskId: "t-003",
+        newProjectId: "lilia",
+        newParentId: "t-001",
+      }, undefined);
+    });
+  });
+
+  it("任务拖到任务前方时会继承目标父级并重排", async () => {
+    const view = await renderSecondaryPanel();
+    const source = await findConversationRow(view, "打通 tsconfig paths 搜索");
+    const target = await findConversationRow(view, "接入 Claude Code 会话发现");
+    target.getBoundingClientRect = () => box(40, 68);
+    mockInvoke.mockClear();
+
+    await dragFromTo(source, target, 42);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("task_reparent", {
+        taskId: "t-002",
+        newProjectId: "lilia",
+        newParentId: null,
+      }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith("task_reorder", {
+        projectId: "lilia",
+        orderedIds: expect.arrayContaining(["t-002", "t-001"]),
+      }, undefined);
+    });
+  });
+
+  it("任务拖到自身时显示无效落点并不会落库", async () => {
+    const view = await renderSecondaryPanel();
+    const row = await findConversationRow(view, "接入 Claude Code 会话发现");
+    row.getBoundingClientRect = () => box(40, 68);
+    mockInvoke.mockClear();
+
+    await startDragOver(row, row, 54, 80);
+
+    await waitFor(() => {
+      expect(row).toHaveClass("is-tree-drop-invalid");
+    });
+
+    await fireEvent.pointerUp(row, {
+      pointerId: 1,
+      clientX: 80,
+      clientY: 54,
+    });
+
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_reparent")).toBe(false);
   });
 });

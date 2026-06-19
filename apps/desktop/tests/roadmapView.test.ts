@@ -42,6 +42,8 @@ describe("RoadmapView", () => {
     expect(view.getAllByText("1/2 done").length).toBeGreaterThan(0);
     expect(view.getAllByText("接入 Claude Code 会话发现").length).toBeGreaterThan(0);
     expect(view.getAllByText("打通 tsconfig paths 搜索").length).toBeGreaterThan(0);
+    expect(view.getAllByText("1 子任务").length).toBeGreaterThan(0);
+    expect(view.getAllByText(/1 依赖/).length).toBeGreaterThan(0);
   });
 
   it("没有 milestone 时显示空状态并能新建", async () => {

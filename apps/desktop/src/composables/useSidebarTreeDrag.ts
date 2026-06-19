@@ -38,9 +38,11 @@ function normalizeDatasetId(value: string | undefined): string | null {
 }
 
 function isInteractiveTreeTarget(target: HTMLElement): boolean {
-  return !!target.closest(
+  const treeRow = target.closest<HTMLElement>("[data-tree-kind]");
+  const interactive = target.closest<HTMLElement>(
     "button,input,textarea,select,.sb-tree__hover-tools,.sb-menu,[data-no-tree-drag]",
   );
+  return !!interactive && interactive !== treeRow;
 }
 
 function sourceFromTreeRow(row: HTMLElement, event: PointerEvent): TreeDragSource | null {
@@ -97,6 +99,12 @@ function positionForElement(
   return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
 }
 
+function positionForTaskElement(event: PointerEvent, element: HTMLElement): TreeDropPosition {
+  const rect = element.getBoundingClientRect();
+  if (event.clientX > rect.left + 28) return "inside";
+  return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+}
+
 function isSameTreeRow(
   marker: TreeDragSource | TreeDropTarget | null | undefined,
   kind: TreeDragKind,
@@ -149,7 +157,7 @@ export function useSidebarTreeDrag(
             taskId: null,
             pinned: null,
             position: "inside",
-            valid: true,
+            valid: source.projectId !== null || taskParentId(null, source.taskId) !== null,
           }
         : null;
     }
@@ -174,7 +182,7 @@ export function useSidebarTreeDrag(
         taskId: null,
         pinned,
         position: "inside",
-        valid: source.projectId !== projectId,
+        valid: source.projectId !== projectId || taskParentId(source.projectId, source.taskId) !== null,
       };
     }
 
@@ -188,7 +196,7 @@ export function useSidebarTreeDrag(
         projectId,
         taskId,
         pinned,
-        position: positionForElement(event, element),
+        position: positionForTaskElement(event, element),
         valid: source.taskId !== taskId && source.pinned === pinned,
       };
     }
@@ -231,6 +239,13 @@ export function useSidebarTreeDrag(
       : orphans.value.map((orphan) => orphan.id);
   }
 
+  function taskParentId(projectId: string | null, taskId: string | null): string | null {
+    if (!taskId) return null;
+    return projectId
+      ? listProjectConversations(projectId).find((task) => task.id === taskId)?.parentId ?? null
+      : orphans.value.find((orphan) => orphan.id === taskId)?.parentId ?? null;
+  }
+
   async function applyProjectDrop(source: TreeDragSource, target: TreeDropTarget) {
     if (!source.projectId || !target.projectId || target.kind !== "project" || !target.valid) {
       return;
@@ -250,22 +265,30 @@ export function useSidebarTreeDrag(
     if (!source.taskId || !target.valid) return;
     const sourceProjectId = source.projectId;
     const targetProjectId = target.projectId;
+    const reorderPosition = target.position === "inside" ? null : target.position;
+    const shouldReorder = target.kind === "task" && !!target.taskId && reorderPosition !== null;
+    const targetParentId = target.kind === "task" && target.taskId
+      ? target.position === "inside"
+        ? target.taskId
+        : taskParentId(targetProjectId, target.taskId)
+      : null;
+    await reparentTask(source.taskId, sourceProjectId, targetProjectId, targetParentId);
+
     if (sourceProjectId === targetProjectId) {
-      if (target.kind !== "task" || !target.taskId || target.position === "inside") return;
+      if (!shouldReorder || !target.taskId || !reorderPosition) return;
       const orderedIds = insertRelative(
         taskIdsForProject(sourceProjectId),
         source.taskId,
         target.taskId,
-        target.position,
+        reorderPosition,
       );
       await reorderTasks(sourceProjectId, orderedIds);
       return;
     }
 
-    await reparentTask(source.taskId, sourceProjectId, targetProjectId);
     const targetIds = taskIdsForProject(targetProjectId);
-    const orderedIds = target.kind === "task" && target.taskId && target.position !== "inside"
-      ? insertRelative(targetIds, source.taskId, target.taskId, target.position)
+    const orderedIds = shouldReorder && target.taskId && reorderPosition
+      ? insertRelative(targetIds, source.taskId, target.taskId, reorderPosition)
       : targetIds;
     if (orderedIds.includes(source.taskId)) {
       await reorderTasks(targetProjectId, orderedIds);

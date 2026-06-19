@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { isProjectTasksLoaded, listProjectConversations } from "../../services/tasksStore";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
@@ -29,6 +30,12 @@ const overflowExpanded = ref(false);
 const projectConversations = computed(() => listProjectConversations(props.projectId));
 const projectTasksLoaded = computed(() => isProjectTasksLoaded(props.projectId));
 
+interface ConversationTreeRow {
+  task: Task;
+  depth: number;
+  metaParts: string[];
+}
+
 const activeTaskId = computed(() => {
   const taskId = route.params.taskId;
   return String(route.params.projectId ?? "") === props.projectId &&
@@ -37,17 +44,59 @@ const activeTaskId = computed(() => {
     : null;
 });
 
-function collapsedConversations() {
+function taskMetaParts(task: Task, childCount: number): string[] {
+  const parts: string[] = [];
+  if (task.parentId) parts.push("子任务");
+  if (task.status === "blocked") parts.push("阻塞");
+  if (task.dependsOn.length > 0) parts.push(`${task.dependsOn.length} 依赖`);
+  if (childCount > 0) parts.push(`${childCount} 子任务`);
+  return parts;
+}
+
+const projectConversationRows = computed<ConversationTreeRow[]>(() => {
   const conversations = projectConversations.value;
-  if (conversations.length <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
-    return conversations;
+  const byParent = new Map<string | null, Task[]>();
+  for (const task of conversations) {
+    const parentId = conversations.some((candidate) => candidate.id === task.parentId)
+      ? task.parentId
+      : null;
+    const list = byParent.get(parentId) ?? [];
+    list.push(task);
+    byParent.set(parentId, list);
   }
-  const first = conversations.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT);
+
+  const out: ConversationTreeRow[] = [];
+  const seen = new Set<string>();
+  function visit(parentId: string | null, depth: number) {
+    for (const task of byParent.get(parentId) ?? []) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      const childCount = byParent.get(task.id)?.length ?? 0;
+      out.push({ task, depth, metaParts: taskMetaParts(task, childCount) });
+      visit(task.id, depth + 1);
+    }
+  }
+
+  visit(null, 0);
+  for (const task of conversations) {
+    if (!seen.has(task.id)) {
+      out.push({ task, depth: 0, metaParts: taskMetaParts(task, 0) });
+    }
+  }
+  return out;
+});
+
+function collapsedConversations() {
+  const rows = projectConversationRows.value;
+  if (rows.length <= PROJECT_CONVERSATION_COLLAPSE_LIMIT) {
+    return rows;
+  }
+  const first = rows.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT);
   const currentActiveTaskId = activeTaskId.value;
-  if (!currentActiveTaskId || first.some((conversation) => conversation.id === currentActiveTaskId)) {
+  if (!currentActiveTaskId || first.some((row) => row.task.id === currentActiveTaskId)) {
     return first;
   }
-  const active = conversations.find((conversation) => conversation.id === currentActiveTaskId);
+  const active = rows.find((row) => row.task.id === currentActiveTaskId);
   if (!active) return first;
   return [
     ...first.slice(0, PROJECT_CONVERSATION_COLLAPSE_LIMIT - 1),
@@ -57,13 +106,13 @@ function collapsedConversations() {
 
 const visibleProjectConversations = computed(() =>
   overflowExpanded.value
-    ? projectConversations.value
+    ? projectConversationRows.value
     : collapsedConversations()
 );
 
 const showConversationOverflow = computed(() =>
   !overflowExpanded.value &&
-  visibleProjectConversations.value.length < projectConversations.value.length
+  visibleProjectConversations.value.length < projectConversationRows.value.length
 );
 
 watch(
@@ -87,12 +136,14 @@ function isActiveTask(taskId: string) {
 <template>
   <SidebarTaskRow
     v-for="conversation in visibleProjectConversations"
-    :key="conversation.id"
-    :task="conversation"
+    :key="conversation.task.id"
+    :task="conversation.task"
+    :depth="conversation.depth"
+    :meta-parts="conversation.metaParts"
     :project-id="projectId"
-    :activity="activityForTask(conversation.id)"
+    :activity="activityForTask(conversation.task.id)"
     row-kind="child"
-    :active="isActiveTask(conversation.id)"
+    :active="isActiveTask(conversation.task.id)"
     :archive="archive"
     :tree-row-state-class="treeRowStateClass"
     @open="open"
