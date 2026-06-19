@@ -194,6 +194,8 @@ pub fn run() {
             provider::provider_set_config,
             provider::provider_get_active_backend,
             provider::provider_set_active_backend,
+            provider::provider_codex_app_server_check_update,
+            provider::provider_codex_app_server_install_update,
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_test_connection,

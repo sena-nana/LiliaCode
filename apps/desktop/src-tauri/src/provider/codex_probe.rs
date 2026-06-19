@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
+use crate::store::resolve_lilia_home;
 use crate::{BACKEND_CODEX, MIN_CODEX_APP_SERVER_VERSION};
 
 use super::types::{CodexAppServerProbeStatus, CodexAppServerStatus};
@@ -47,121 +45,50 @@ pub(crate) fn codex_candidate_filenames() -> &'static [&'static str] {
     }
 }
 
-pub(crate) fn windows_native_codex_paths() -> Vec<String> {
-    if !cfg!(windows) {
-        return Vec::new();
-    }
-    let Some(local_app_data) = env::var_os("LOCALAPPDATA") else {
-        return Vec::new();
-    };
-    let bin = PathBuf::from(local_app_data)
-        .join("OpenAI")
-        .join("Codex")
-        .join("bin");
-    let mut paths = Vec::new();
-    let root_codex = bin.join("codex.exe");
-    if root_codex.exists() {
-        paths.push(root_codex.to_string_lossy().to_string());
-    }
-    if let Ok(entries) = fs::read_dir(&bin) {
-        for entry in entries.flatten() {
-            let path = entry.path().join("codex.exe");
-            if path.exists() {
-                paths.push(path.to_string_lossy().to_string());
-            }
-        }
-    }
-    paths
+pub(crate) fn managed_codex_install_dir() -> PathBuf {
+    resolve_lilia_home()
+        .join("runtime")
+        .join("codex")
+        .join("bin")
 }
 
-pub(crate) fn normalize_candidate_key(path: &str) -> String {
-    if cfg!(windows) {
-        path.to_ascii_lowercase()
-    } else {
-        path.to_string()
-    }
-}
-
-pub(crate) fn push_unique_candidate(
-    candidates: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-    path: String,
-) {
-    if path.trim().is_empty() {
-        return;
-    }
-    let key = normalize_candidate_key(path.trim());
-    if seen.insert(key) {
-        candidates.push(path.trim().to_string());
-    }
-}
-
-pub(crate) fn is_windows_apps_candidate(path: &str) -> bool {
-    cfg!(windows) && path.to_ascii_lowercase().contains("\\windowsapps\\")
-}
-
-pub(crate) fn where_codex_candidates() -> Vec<String> {
-    let output = Command::new(if cfg!(windows) { "where.exe" } else { "which" })
-        .arg("codex")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToString::to_string)
+pub(crate) fn managed_codex_paths() -> Vec<String> {
+    let bin = managed_codex_install_dir();
+    codex_candidate_filenames()
+        .iter()
+        .map(|filename| bin.join(filename).to_string_lossy().to_string())
         .collect()
 }
 
-pub(crate) fn path_codex_candidates() -> Vec<String> {
-    let mut paths = Vec::new();
-    if let Some(path_var) = env::var_os("PATH") {
-        for dir in env::split_paths(&path_var) {
-            for filename in codex_candidate_filenames() {
-                let candidate = dir.join(filename);
-                if candidate.exists() {
-                    paths.push(candidate.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    paths
+pub(crate) fn is_managed_codex_path(path: &str) -> bool {
+    let candidate = PathBuf::from(path.trim());
+    candidate
+        .parent()
+        .is_some_and(|parent| parent == managed_codex_install_dir())
 }
 
-pub(crate) fn codex_cli_candidate_paths() -> Vec<String> {
-    let mut candidates = Vec::new();
-    let mut seen = HashSet::new();
-    let path_candidates = path_codex_candidates();
-    let where_candidates = where_codex_candidates();
-    for path in &path_candidates {
-        if !is_windows_apps_candidate(path) {
-            push_unique_candidate(&mut candidates, &mut seen, path.clone());
-        }
+fn public_status(
+    version: Option<String>,
+    install_path: Option<String>,
+    available: bool,
+    supports_required_protocol: bool,
+    failure_kind: Option<&str>,
+    issues: Vec<String>,
+) -> CodexAppServerStatus {
+    let managed = install_path.as_deref().is_some_and(is_managed_codex_path);
+    CodexAppServerStatus {
+        version,
+        install_path,
+        managed,
+        available,
+        supports_required_protocol,
+        failure_kind: failure_kind.map(ToString::to_string),
+        issues,
+        latest_version: None,
+        update_available: false,
+        release_notes: Vec::new(),
+        update_error: None,
     }
-    for path in windows_native_codex_paths() {
-        push_unique_candidate(&mut candidates, &mut seen, path);
-    }
-    for path in &where_candidates {
-        if !is_windows_apps_candidate(path) {
-            push_unique_candidate(&mut candidates, &mut seen, path.clone());
-        }
-    }
-    for candidate in codex_candidate_filenames() {
-        push_unique_candidate(&mut candidates, &mut seen, (*candidate).to_string());
-    }
-    for path in path_candidates.into_iter().chain(where_candidates) {
-        if is_windows_apps_candidate(&path) {
-            push_unique_candidate(&mut candidates, &mut seen, path);
-        }
-    }
-    candidates
 }
 
 pub(crate) fn command_output_result(program: &str, args: &[&str]) -> Result<String, String> {
@@ -239,13 +166,14 @@ where
             Err(_) => {
                 if app_server_unavailable.is_none() {
                     app_server_unavailable = Some(CodexAppServerProbeStatus {
-                        public: CodexAppServerStatus {
-                            version: Some(version),
-                            available: false,
-                            supports_required_protocol: false,
-                            failure_kind: Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE.to_string()),
-                            issues: vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
-                        },
+                        public: public_status(
+                            Some(version),
+                            path.clone(),
+                            false,
+                            false,
+                            Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE),
+                            vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
+                        ),
                         path,
                     });
                 }
@@ -256,13 +184,14 @@ where
         if !available {
             if app_server_unavailable.is_none() {
                 app_server_unavailable = Some(CodexAppServerProbeStatus {
-                    public: CodexAppServerStatus {
-                        version: Some(version),
-                        available: false,
-                        supports_required_protocol: false,
-                        failure_kind: Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE.to_string()),
-                        issues: vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
-                    },
+                    public: public_status(
+                        Some(version),
+                        path.clone(),
+                        false,
+                        false,
+                        Some(CODEX_FAILURE_APP_SERVER_UNAVAILABLE),
+                        vec!["当前 codex CLI 不支持 app-server 子命令。".to_string()],
+                    ),
                     path,
                 });
             }
@@ -274,13 +203,7 @@ where
             .unwrap_or(false);
         if version_supported {
             return CodexAppServerProbeStatus {
-                public: CodexAppServerStatus {
-                    version: Some(version),
-                    available: true,
-                    supports_required_protocol: true,
-                    failure_kind: None,
-                    issues: Vec::new(),
-                },
+                public: public_status(Some(version), path.clone(), true, true, None, Vec::new()),
                 path,
             };
         }
@@ -292,13 +215,14 @@ where
                 "当前 codex CLI 版本过低，需要 0.136.0 或更新版本以支持 Lilia 的流式事件、工具审批、AskUser 和官方额度重置次数查询。".to_string()
             };
             experimental_unsupported = Some(CodexAppServerProbeStatus {
-                public: CodexAppServerStatus {
-                    version: Some(version),
-                    available: true,
-                    supports_required_protocol: false,
-                    failure_kind: Some(CODEX_FAILURE_EXPERIMENTAL_API_UNSUPPORTED.to_string()),
-                    issues: vec![issue],
-                },
+                public: public_status(
+                    Some(version),
+                    path.clone(),
+                    true,
+                    false,
+                    Some(CODEX_FAILURE_EXPERIMENTAL_API_UNSUPPORTED),
+                    vec![issue],
+                ),
                 path,
             });
         }
@@ -312,19 +236,22 @@ where
     }
 
     CodexAppServerProbeStatus {
-        public: CodexAppServerStatus {
-            version: None,
-            available: false,
-            supports_required_protocol: false,
-            failure_kind: Some(CODEX_FAILURE_MISSING_CLI.to_string()),
-            issues: vec!["未找到 codex CLI。请先安装 Codex CLI 后重新检测。".to_string()],
-        },
+        public: public_status(
+            None,
+            None,
+            false,
+            false,
+            Some(CODEX_FAILURE_MISSING_CLI),
+            vec![
+                "未找到 Lilia 内置 Codex app-server。请在 Provider 设置中安装或更新。".to_string(),
+            ],
+        ),
         path: None,
     }
 }
 
 pub(crate) fn build_codex_app_server_probe_status() -> CodexAppServerProbeStatus {
-    build_codex_app_server_probe_status_with(&codex_cli_candidate_paths(), command_output_result)
+    build_codex_app_server_probe_status_with(&managed_codex_paths(), command_output_result)
 }
 
 pub(crate) fn build_codex_app_server_probe_status_cached(
@@ -375,7 +302,7 @@ pub(crate) fn codex_send_block_reason(status: &CodexAppServerStatus) -> Option<S
     }
 
     Some(format!(
-        "{detail} 请安装或升级 Codex CLI 到 0.136.0 或更新版本后重新检测。"
+        "{detail} 请在 Provider 设置中安装或更新 Lilia 内置 Codex app-server 后重新检测。"
     ))
 }
 
@@ -397,13 +324,14 @@ mod tests {
 
     fn supported_status(path: &str) -> CodexAppServerProbeStatus {
         CodexAppServerProbeStatus {
-            public: CodexAppServerStatus {
-                version: Some("codex 0.136.0".to_string()),
-                available: true,
-                supports_required_protocol: true,
-                failure_kind: None,
-                issues: Vec::new(),
-            },
+            public: public_status(
+                Some("codex 0.136.0".to_string()),
+                Some(path.to_string()),
+                true,
+                true,
+                None,
+                Vec::new(),
+            ),
             path: Some(path.to_string()),
         }
     }
@@ -431,7 +359,7 @@ mod tests {
             status.public.failure_kind.as_deref(),
             Some(CODEX_FAILURE_MISSING_CLI)
         );
-        assert!(status.public.issues[0].contains("未找到 codex CLI"));
+        assert!(status.public.issues[0].contains("Lilia 内置 Codex app-server"));
     }
 
     #[test]

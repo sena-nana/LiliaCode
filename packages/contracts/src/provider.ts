@@ -67,6 +67,8 @@ export interface BackendEnvStatus {
 
 export interface CodexAppServerStatus {
   version: string | null;
+  installPath: string | null;
+  managed: boolean;
   available: boolean;
   supportsRequiredProtocol: boolean;
   failureKind:
@@ -76,6 +78,10 @@ export interface CodexAppServerStatus {
     | "providerIncompatible"
     | null;
   issues: string[];
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseNotes: string[];
+  updateError: string | null;
 }
 
 export interface EnvStatusReport {

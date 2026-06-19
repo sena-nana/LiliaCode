@@ -1893,13 +1893,40 @@ describe("Codex app-server mapping", () => {
     expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
   });
 
-  it("trusts injected Codex CLI path", () => {
-    expect(codexAppServerBinary({ LILIA_CODEX_CLI_PATH: "C:/bin/codex.cmd" }))
-      .toBe("C:/bin/codex.cmd");
+  it("resolves managed Codex CLI path from Lilia home", () => {
+    const expected = join("C:/Lilia", "runtime", "codex", "bin", "codex.cmd");
+    expect(codexAppServerBinary({
+      env: { LILIA_HOME: "C:/Lilia" } as any,
+      platform: "win32",
+      fileExists: (path: string) => path === expected,
+    })).toBe(expected);
   });
 
-  it("keeps a clear error when Codex CLI path is not injected", () => {
-    expect(() => codexAppServerBinary({})).toThrow("未找到满足协议要求的 codex CLI");
+  it("follows Lilia home redirect for managed Codex CLI path", () => {
+    const homeDir = join("C:/Users", "me");
+    const defaultHome = join(homeDir, ".lilia");
+    const redirectedHome = join("D:/Data", "Lilia");
+    const redirectFile = join(defaultHome, ".redirect");
+    const expected = join(redirectedHome, "runtime", "codex", "bin", "codex");
+
+    expect(codexAppServerBinary({
+      env: {} as any,
+      platform: "linux",
+      homeDir,
+      fileExists: (path: string) => path === redirectFile || path === expected,
+      readTextFile: (path: string) => {
+        expect(path).toBe(redirectFile);
+        return ` ${redirectedHome} \n`;
+      },
+    })).toBe(expected);
+  });
+
+  it("keeps a clear error when managed Codex CLI is missing", () => {
+    expect(() => codexAppServerBinary({
+      env: {} as any,
+      homeDir: "C:/Users/me",
+      fileExists: () => false,
+    })).toThrow("Lilia 内置 Codex CLI 未安装或不可用");
   });
 
   it("resolves Windows npm extensionless Codex shim to cmd script", () => {

@@ -30,13 +30,13 @@ export function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
     return `${issue} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。`;
   }
   if (status?.failureKind === "missingCli") {
-    return `${issue} 请安装 Codex CLI：npm i -g @openai/codex，并重新打开终端或 Lilia 以刷新 PATH。`;
+    return `${issue} 请在 Provider 设置中安装或更新 Lilia 内置 Codex app-server。`;
   }
   if (
     status?.failureKind === "appServerUnavailable" ||
     status?.failureKind === "experimentalApiUnsupported"
   ) {
-    return `${issue} 请升级 Codex CLI 到 0.136.0 或更新版本后重新检测。`;
+    return `${issue} 请在 Provider 设置中更新 Lilia 内置 Codex app-server 后重新检测。`;
   }
   return issue;
 }
@@ -63,8 +63,8 @@ export function runtimeDiagnostic(
     if (!report.codexCliAvailable) {
       return {
         tone: "err",
-        title: "Codex CLI 缺失",
-        hint: "未找到 codex CLI。请安装 Codex CLI：npm i -g @openai/codex，并重新打开终端或 Lilia 以刷新 PATH；使用官方账号模式前请先运行 codex login。",
+        title: "Codex app-server 缺失",
+        hint: "未找到 Lilia 内置 Codex app-server。请在 Provider 设置中安装或更新；使用官方账号模式前请先运行 codex login。",
       };
     }
     if (!report.codexAppServer.supportsRequiredProtocol) {
@@ -115,7 +115,7 @@ export function connectionDiagnostic(
     return {
       tone: "warn",
       title: "Codex 官方账号未就绪",
-      hint: "当前选择官方账号模式。请确认 Codex CLI 可用，并在终端运行 codex login。",
+      hint: "当前选择官方账号模式。请确认 Lilia 内置 Codex app-server 可用，并运行 codex login。",
     };
   }
   return {

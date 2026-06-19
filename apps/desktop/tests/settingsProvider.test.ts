@@ -397,21 +397,22 @@ describe("Settings provider switch", () => {
     });
   });
 
-  it("Codex CLI 缺失时显示安装和刷新 PATH 建议", async () => {
+  it("Codex app-server 缺失时显示内置安装建议", async () => {
     setMockActiveBackend("codex");
     setMockCodexAppServerStatus({
       available: false,
       supportsRequiredProtocol: false,
       failureKind: "missingCli",
-      issues: ["未找到 codex CLI。"],
+      issues: ["未找到 Lilia 内置 Codex app-server。"],
     });
 
     const view = await renderSettings("/settings?tab=providers");
 
     await waitFor(() => {
-      expect(view.getByText("Codex CLI 缺失")).toBeInTheDocument();
-      expect(view.getAllByText(/npm i -g @openai\/codex/).length).toBeGreaterThan(0);
-      expect(view.getAllByText(/刷新 PATH/).length).toBeGreaterThan(0);
+      expect(view.getByText("Codex app-server 缺失")).toBeInTheDocument();
+      expect(view.getAllByText(/Lilia 内置 Codex app-server/).length).toBeGreaterThan(0);
+      expect(view.queryByText(/npm i -g @openai\/codex/)).not.toBeInTheDocument();
+      expect(view.queryByText(/刷新 PATH/)).not.toBeInTheDocument();
     });
   });
 
@@ -429,7 +430,35 @@ describe("Settings provider switch", () => {
       expect(view.getByText("Codex app-server 不可用")).toBeInTheDocument();
       expect(view.getAllByText(/当前 codex CLI 版本过低/).length).toBeGreaterThan(0);
       expect(view.queryByText(/未找到 codex CLI/)).not.toBeInTheDocument();
+      expect(view.getAllByText(/更新 Lilia 内置 Codex app-server/).length).toBeGreaterThan(0);
       expect(view.queryByText(/模型白名单/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("Codex 官方账号模式可以从设置页更新 app-server", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      installPath: null,
+      managed: false,
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      releaseNotes: ["App-server update"],
+    });
+
+    const view = await renderSettings("/settings?tab=providers");
+
+    await waitFor(() => {
+      expect(view.getByText("codex-cli 0.136.0 / latest 0.141.0")).toBeInTheDocument();
+      expect(view.getByRole("button", { name: /更新到 0.141.0/ })).toBeEnabled();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: /更新到 0.141.0/ }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("provider_codex_app_server_install_update")).toEqual({});
+      expect(view.queryByRole("button", { name: /更新到 0.141.0/ })).not.toBeInTheDocument();
     });
   });
 

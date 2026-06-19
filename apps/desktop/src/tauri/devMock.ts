@@ -205,12 +205,39 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return {
         nodeAvailable: true,
         codexCliAvailable: true,
-        codexAppServer: { version: "dev-mock", available: true, supportsRequiredProtocol: true, failureKind: null, issues: [] },
+        codexAppServer: {
+          version: "dev-mock",
+          installPath: null,
+          managed: false,
+          available: true,
+          supportsRequiredProtocol: true,
+          failureKind: null,
+          issues: [],
+          latestVersion: null,
+          updateAvailable: false,
+          releaseNotes: [],
+          updateError: null,
+        },
         routerModes: { claude: "api", codex: "codex-account" },
         backends: {
           claude: { backend: "claude", hasApiKey: false, connectionMode: "api", effectiveUrl: null },
           codex: { backend: "codex", hasApiKey: true, connectionMode: "codex-account", effectiveUrl: null },
         },
+      } as T;
+    case "provider_codex_app_server_check_update":
+    case "provider_codex_app_server_install_update":
+      return {
+        version: "dev-mock",
+        installPath: null,
+        managed: false,
+        available: true,
+        supportsRequiredProtocol: true,
+        failureKind: null,
+        issues: [],
+        latestVersion: null,
+        updateAvailable: false,
+        releaseNotes: [],
+        updateError: null,
       } as T;
     case "provider_get_active_backend":
       return "codex" as T;

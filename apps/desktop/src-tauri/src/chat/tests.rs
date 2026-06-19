@@ -1032,14 +1032,14 @@ mod agent_event_sink_tests {
     }
 
     #[test]
-    fn codex_cli_probe_skips_failed_windowsapps_candidate() {
+    fn codex_cli_probe_skips_failed_managed_candidate() {
         let candidates = vec![
-            "C:\\Program Files\\WindowsApps\\OpenAI.Codex\\codex.exe".to_string(),
-            "C:\\Users\\me\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe".to_string(),
+            "C:\\Users\\me\\.lilia\\runtime\\codex\\bin\\codex.cmd".to_string(),
+            "C:\\Users\\me\\.lilia\\runtime\\codex\\bin\\codex.exe".to_string(),
         ];
         let status = build_codex_app_server_probe_status_with(&candidates, |program, args| {
-            if program.contains("WindowsApps") {
-                return Err("Access is denied.".to_string());
+            if program.ends_with("codex.cmd") {
+                return Err("command not found".to_string());
             }
             match args {
                 ["--version"] => Ok("codex-cli 0.136.0".to_string()),
@@ -1052,23 +1052,26 @@ mod agent_event_sink_tests {
 
         assert_eq!(
             status.path.as_deref(),
-            Some("C:\\Users\\me\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe")
+            Some("C:\\Users\\me\\.lilia\\runtime\\codex\\bin\\codex.exe")
         );
         assert!(status.public.supports_required_protocol);
-        assert_eq!(
-            status.public.version.as_deref(),
-            Some("codex-cli 0.136.0")
-        );
+        assert_eq!(status.public.version.as_deref(), Some("codex-cli 0.136.0"));
     }
 
     #[test]
     fn codex_send_block_reason_mentions_cli_and_responses_support() {
         let reason = codex_send_block_reason(&CodexAppServerStatus {
             version: Some("codex-cli 0.125.0".to_string()),
+            install_path: None,
+            managed: false,
             available: true,
             supports_required_protocol: false,
             failure_kind: Some("experimentalApiUnsupported".to_string()),
             issues: vec!["当前 codex CLI 版本过低，需要 0.136.0 或更新版本。".to_string()],
+            latest_version: None,
+            update_available: false,
+            release_notes: Vec::new(),
+            update_error: None,
         })
         .unwrap();
 
@@ -1078,20 +1081,32 @@ mod agent_event_sink_tests {
 
         let reason = codex_send_block_reason(&CodexAppServerStatus {
             version: Some("codex-cli 0.136.0".to_string()),
+            install_path: None,
+            managed: false,
             available: true,
             supports_required_protocol: false,
             failure_kind: Some("providerIncompatible".to_string()),
             issues: vec!["当前上游 provider 不兼容 Codex。".to_string()],
+            latest_version: None,
+            update_available: false,
+            release_notes: Vec::new(),
+            update_error: None,
         })
         .unwrap();
         assert!(reason.contains("OpenAI Responses API"));
 
         assert!(codex_send_block_reason(&CodexAppServerStatus {
             version: Some("codex-cli 0.136.0".to_string()),
+            install_path: None,
+            managed: false,
             available: true,
             supports_required_protocol: true,
             failure_kind: None,
             issues: Vec::new(),
+            latest_version: None,
+            update_available: false,
+            release_notes: Vec::new(),
+            update_error: None,
         })
         .is_none());
     }

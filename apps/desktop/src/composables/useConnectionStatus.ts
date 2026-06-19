@@ -5,18 +5,30 @@
 
 import { computed, ref } from "vue";
 import {
+  checkCodexAppServerUpdate as requestCodexAppServerUpdate,
   checkEnv,
   getActiveBackend,
+  installCodexAppServerUpdate as requestCodexAppServerInstall,
   setActiveBackend as persistActiveBackend,
   type EnvStatusReport,
 } from "../services/chat";
-import type { BackendEnvStatus, ChatBackendKind, RouterMode } from "@lilia/contracts";
+import type {
+  BackendEnvStatus,
+  ChatBackendKind,
+  CodexAppServerStatus,
+  RouterMode,
+} from "@lilia/contracts";
 
 const report = ref<EnvStatusReport | null>(null);
 const activeBackend = ref<ChatBackendKind>("claude");
 const probing = ref(false);
+const codexAppServerUpdateChecking = ref(false);
+const codexAppServerUpdating = ref(false);
+const codexAppServerUpdateError = ref<string | null>(null);
 let inflight: Promise<void> | null = null;
 let backendInflight: Promise<ChatBackendKind> | null = null;
+let codexUpdateCheckInflight: Promise<void> | null = null;
+let codexUpdateInstallInflight: Promise<void> | null = null;
 let activeBackendLoaded = false;
 
 async function probeOnce(forceRefresh = false) {
@@ -58,6 +70,51 @@ async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
 
 async function refreshAll(forceRefresh = true) {
   await Promise.all([probeOnce(forceRefresh), loadActiveBackend(true)]);
+}
+
+function mergeCodexAppServerStatus(status: CodexAppServerStatus) {
+  if (!report.value) return;
+  report.value = {
+    ...report.value,
+    codexAppServer: status,
+  };
+}
+
+async function checkCodexAppServerUpdate() {
+  if (codexUpdateCheckInflight) return codexUpdateCheckInflight;
+  codexAppServerUpdateChecking.value = true;
+  codexUpdateCheckInflight = (async () => {
+    try {
+      const status = await requestCodexAppServerUpdate();
+      mergeCodexAppServerStatus(status);
+      codexAppServerUpdateError.value = status.updateError;
+    } catch (err) {
+      codexAppServerUpdateError.value = String(err);
+    } finally {
+      codexAppServerUpdateChecking.value = false;
+      codexUpdateCheckInflight = null;
+    }
+  })();
+  return codexUpdateCheckInflight;
+}
+
+async function installCodexAppServerUpdate() {
+  if (codexUpdateInstallInflight) return codexUpdateInstallInflight;
+  codexAppServerUpdating.value = true;
+  codexAppServerUpdateError.value = null;
+  codexUpdateInstallInflight = (async () => {
+    try {
+      await requestCodexAppServerInstall();
+      await refreshAll(true);
+      await checkCodexAppServerUpdate();
+    } catch (err) {
+      codexAppServerUpdateError.value = String(err);
+    } finally {
+      codexAppServerUpdating.value = false;
+      codexUpdateInstallInflight = null;
+    }
+  })();
+  return codexUpdateInstallInflight;
 }
 
 async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKind> {
@@ -107,9 +164,14 @@ export function useConnectionStatus(options: UseConnectionStatusOptions = {}) {
     probing,
     refresh: refreshAll,
     setActiveBackend,
+    checkCodexAppServerUpdate,
+    installCodexAppServerUpdate,
     nodeAvailable,
     codexCliAvailable,
     codexAppServer,
+    codexAppServerUpdateChecking,
+    codexAppServerUpdating,
+    codexAppServerUpdateError,
     statusFor,
     routerFor,
   };

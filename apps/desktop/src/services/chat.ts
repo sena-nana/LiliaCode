@@ -60,6 +60,7 @@ import type {
   ProjectArchitectureRejectInput,
   ProjectArchitectureRollbackResult,
   CodexAccountQuotaStatus,
+  CodexAppServerStatus,
   CustomSubagentDefinition,
   CustomSubagentUpsertInput,
   QuotaUsageStats,
@@ -308,7 +309,7 @@ export function ackRestoredRollback(taskId: string): Promise<void> {
   return invoke<void>("chat_ack_restored_rollback", { taskId });
 }
 
-/** 健康检查：node / codex CLI 是否在 PATH，两个 backend 当前的连接模式。 */
+/** 健康检查：node、本机内置 Codex app-server，以及两个 backend 当前的连接模式。 */
 export function checkEnv(options: { forceRefresh?: boolean } = {}): Promise<EnvStatusReport> {
   return invoke<EnvStatusReport>("chat_check_env", {
     forceRefresh: options.forceRefresh ?? false,
@@ -329,6 +330,14 @@ export function getActiveBackend(): Promise<ChatBackendKind> {
 
 export function setActiveBackend(backend: ChatBackendKind): Promise<void> {
   return invoke<void>("provider_set_active_backend", { backend });
+}
+
+export function checkCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
+  return invoke<CodexAppServerStatus>("provider_codex_app_server_check_update");
+}
+
+export function installCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
+  return invoke<CodexAppServerStatus>("provider_codex_app_server_install_update");
 }
 
 export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {
