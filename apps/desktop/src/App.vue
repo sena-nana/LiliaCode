@@ -3,6 +3,11 @@ import { defineAsyncComponent, onBeforeUnmount, onMounted } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  consumePendingCliProjectOpen,
+  openCliProject,
+  type CliProjectOpenPayload,
+} from "./services/cliProjectOpen";
 import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
 
 const ContextMenuHost = defineAsyncComponent({
@@ -17,6 +22,7 @@ const ContextMenuHost = defineAsyncComponent({
 let unlistenInteraction: (() => void) | null = null;
 let unlistenConversationActivity: (() => void) | null = null;
 let unlistenMainNavigate: (() => void) | null = null;
+let unlistenCliProjectOpen: (() => void) | null = null;
 let unlistenPopupNavigate: (() => void) | null = null;
 let disposed = false;
 
@@ -31,6 +37,12 @@ function keepCleanup(cleanup: () => void): (() => void) | null {
     return null;
   }
   return cleanup;
+}
+
+function handleCliProjectOpen(payload: CliProjectOpenPayload, source: string) {
+  void openCliProject(payload, router).catch((err) => {
+    console.error(`[liliacode] open ${source} project failed`, err);
+  });
 }
 
 async function installDeferredBridges() {
@@ -76,6 +88,20 @@ onMounted(async () => {
     });
     unlistenMainNavigate = keepCleanup(mainNavigateCleanup);
     if (!unlistenMainNavigate) return;
+
+    const cliProjectOpenCleanup = await listen<CliProjectOpenPayload>(
+      "lilia:cli-project-open",
+      (event) => {
+        handleCliProjectOpen(event.payload, "event");
+      },
+    );
+    unlistenCliProjectOpen = keepCleanup(cliProjectOpenCleanup);
+    if (!unlistenCliProjectOpen) return;
+
+    const pendingCliProjectOpen = await consumePendingCliProjectOpen();
+    if (pendingCliProjectOpen && !disposed) {
+      handleCliProjectOpen(pendingCliProjectOpen, "pending");
+    }
   }
 
   if (isPopupWindow) {
@@ -94,10 +120,12 @@ onBeforeUnmount(() => {
   unlistenInteraction?.();
   unlistenConversationActivity?.();
   unlistenMainNavigate?.();
+  unlistenCliProjectOpen?.();
   unlistenPopupNavigate?.();
   unlistenInteraction = null;
   unlistenConversationActivity = null;
   unlistenMainNavigate = null;
+  unlistenCliProjectOpen = null;
   unlistenPopupNavigate = null;
 });
 </script>

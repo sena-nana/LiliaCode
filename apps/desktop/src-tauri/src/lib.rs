@@ -7,6 +7,7 @@ pub mod agent_timeline;
 mod automation;
 mod chat;
 mod claude_history;
+mod cli_project;
 mod codex_history;
 mod conversation_suggestions;
 mod github;
@@ -112,7 +113,15 @@ fn restore_runtime_sessions_on_startup<R: Runtime>(app: &tauri::AppHandle<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        cli_project::handle_second_instance(app, argv, cwd);
+    }));
+    #[cfg(not(desktop))]
+    let builder = builder;
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -128,6 +137,7 @@ pub fn run() {
                 .build(),
         )
         .manage(chat::state::ChatStore::default())
+        .manage(cli_project::CliProjectOpenState::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = window.set_background_color(Some(BG));
@@ -141,6 +151,7 @@ pub fn run() {
                 Ok(s) => {
                     app.manage(s);
                     restore_runtime_sessions_on_startup(app.handle());
+                    cli_project::handle_initial_args(app.handle());
                 }
                 Err(err) => {
                     eprintln!("[lilia-store] init failed at {}: {err}", home.display());
@@ -173,6 +184,7 @@ pub fn run() {
             chat::attachments::chat_save_clipboard_text,
             chat::attachments::chat_search_context_attachments,
             chat::slash_commands::chat_search_slash_commands,
+            cli_project::cli_project_open_consume_pending,
             chat::commands::chat_send_message,
             chat::commands::chat_interrupt_turn,
             chat::commands::chat_respond_agent_interaction,

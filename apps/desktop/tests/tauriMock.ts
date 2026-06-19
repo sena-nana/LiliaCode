@@ -24,6 +24,11 @@ interface ProjectRow {
   pinned: boolean;
 }
 
+interface CliProjectOpenPayload {
+  projectId: string;
+  cwd: string;
+}
+
 interface ProjectDashboardSummaryRow {
   id: string;
   name: string;
@@ -374,6 +379,7 @@ let automationRuns: AutomationRunRow[] = [];
 let automationRunNodes: Record<string, AutomationRunNodeStateRow[]> = {};
 let automationVersionSeq = 0;
 let automationRunSeq = 0;
+let pendingCliProjectOpen: CliProjectOpenPayload | null = null;
 
 function defaultAutomationScope(): AutomationScopeRow {
   return {
@@ -1621,6 +1627,7 @@ export function resetTauriMockData() {
   ];
   automationRuns = [];
   automationRunNodes = {};
+  pendingCliProjectOpen = null;
   timelineEvents = {
     "t-002": [
       {
@@ -1760,6 +1767,10 @@ export function emitTauriEvent(event: string, payload: unknown) {
   for (const handler of eventHandlers[event] ?? []) {
     handler({ payload });
   }
+}
+
+export function setMockPendingCliProjectOpen(payload: CliProjectOpenPayload | null) {
+  pendingCliProjectOpen = payload ? { ...payload } : null;
 }
 
 export function finishMockAutomationRun(runId: string) {
@@ -2302,6 +2313,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const id = String(args.id);
       refreshSessionCounts();
       return projects.find((project) => project.id === id) ?? null;
+    }
+
+    case "cli_project_open_consume_pending": {
+      const payload = pendingCliProjectOpen;
+      pendingCliProjectOpen = null;
+      return payload ? { ...payload } : null;
     }
 
     case "project_get_settings":
