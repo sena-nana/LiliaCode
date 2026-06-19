@@ -13,7 +13,10 @@ import {
   applyClaudeRuntimePermission,
   mapClaudeInitialPermission,
 } from "../agent-runner/claude/permissions.mjs";
-import { createLiliaAskUserServer, runClaude } from "../agent-runner/claude/runClaude.mjs";
+import {
+  createLiliaAskUserServer,
+  runClaude,
+} from "../agent-runner/claude/runClaude.mjs";
 import {
   createConversationContextHandler,
 } from "../agent-runner/conversationContext.mjs";
@@ -876,6 +879,54 @@ describe("Claude helpers", () => {
       usedTokens: 2000,
       source: "claude",
     });
+  });
+
+  it("Claude turn appends provider additionalContext to system prompt", async () => {
+    const { protocol } = captureProtocol();
+    let seenOptions: any = null;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "继续实现",
+      model: "claude-sonnet-4-6",
+      permission: "ask",
+      runtimeOptions: {
+        provider: {
+          claude: {
+            additionalContext: "[Lilia Memory Baseline]\nUser constraints:\n- PR: no emoji",
+          },
+        },
+      },
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      createSdkMcpServer: (config: any) => config,
+      createClaudeTool: (name: string) => ({ name }),
+      createClaudeQuery: ({ options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-session-1",
+          };
+        })();
+      },
+    } as any);
+
+    expect(seenOptions.systemPrompt).toMatchObject({
+      type: "preset",
+      preset: "claude_code",
+    });
+    expect(seenOptions.systemPrompt.append).toContain("运行平台：Windows");
+    expect(seenOptions.systemPrompt.append).toContain("[Lilia Memory Baseline]");
+    expect(seenOptions).not.toHaveProperty("additionalContext");
   });
 
   it("Claude onElicitation routes form accept through Lilia MCP interaction", async () => {

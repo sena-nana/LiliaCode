@@ -49,6 +49,8 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS automation_runs;
         DROP TABLE IF EXISTS automation_workflow_versions;
         DROP TABLE IF EXISTS automation_workflows;
+        DROP TABLE IF EXISTS memory_injection_states;
+        DROP TABLE IF EXISTS memories;
 
         PRAGMA foreign_keys = ON;
         "#,
@@ -149,6 +151,35 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX idx_task_milestone_links_milestone
           ON task_milestone_links(milestone_id);
+
+        CREATE TABLE memories (
+          id             TEXT PRIMARY KEY,
+          scope          TEXT NOT NULL CHECK (scope IN ('user','project')),
+          project_id     TEXT,
+          title          TEXT NOT NULL,
+          body           TEXT NOT NULL,
+          tags_json      TEXT NOT NULL DEFAULT '[]',
+          enabled        INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+          source_task_id TEXT,
+          created_at     INTEGER NOT NULL,
+          updated_at     INTEGER NOT NULL,
+          CHECK (
+            (scope = 'user' AND project_id IS NULL) OR
+            (scope = 'project' AND project_id IS NOT NULL)
+          ),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_memories_scope_project
+          ON memories(scope, project_id, enabled, updated_at DESC);
+
+        CREATE TABLE memory_injection_states (
+          task_id                TEXT PRIMARY KEY,
+          enabled                INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+          last_injected_turn_seq INTEGER,
+          updated_at             INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
 
         CREATE TABLE project_architecture_graphs (
           project_id TEXT PRIMARY KEY,
@@ -350,6 +381,22 @@ mod tests {
     use rusqlite::params;
 
     #[test]
+    fn current_schema_creates_memory_tables() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_current_schema(&mut conn).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                r#"SELECT COUNT(*) FROM sqlite_master
+                   WHERE type = 'table' AND name IN ('memories', 'memory_injection_states')"#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn old_development_database_is_rebuilt_from_current_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&format!(
@@ -425,11 +472,7 @@ mod tests {
         ensure_current_schema(&mut conn).unwrap();
 
         let project_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM projects",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
             .unwrap();
         assert_eq!(project_count, 0);
 

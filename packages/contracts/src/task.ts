@@ -48,6 +48,30 @@ export interface Memory {
   updatedAt: number;
 }
 
+export interface MemoryUpsertInput {
+  id?: string | null;
+  scope: MemoryScope;
+  projectId?: string | null;
+  title: string;
+  body: string;
+  tags?: string[];
+  enabled?: boolean;
+  sourceTaskId?: string | null;
+}
+
+export interface MemorySettings {
+  enabled: boolean;
+  baselineInjectionEnabled: boolean;
+  cooldownTurns: number;
+}
+
+export interface MemoryInjectionState {
+  taskId: string;
+  enabled: boolean;
+  lastInjectedTurnSeq: number | null;
+  updatedAt: number;
+}
+
 export type MilestoneStatus =
   | "upcoming"
   | "in-progress"

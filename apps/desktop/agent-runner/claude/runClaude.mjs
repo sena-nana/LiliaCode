@@ -68,6 +68,20 @@ export function buildClaudeSystemPrompt(platform = process.platform) {
   return append ? { ...base, append } : base;
 }
 
+export function appendClaudeAdditionalContext(systemPrompt, additionalContext) {
+  const context = stringOrNull(additionalContext)?.trim();
+  if (!context) return systemPrompt;
+  if (isRecord(systemPrompt)) {
+    const append = stringOrNull(systemPrompt.append)?.trim();
+    return {
+      ...systemPrompt,
+      append: append ? `${append}\n\n${context}` : context,
+    };
+  }
+  const prompt = stringOrNull(systemPrompt)?.trim();
+  return prompt ? `${prompt}\n\n${context}` : context;
+}
+
 export async function* singleClaudePromptStream(prompt) {
   yield {
     type: "user",
@@ -321,6 +335,7 @@ const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
   "allowedTools",
   "disallowedTools",
   "additionalDirectories",
+  "additionalContext",
   "reasoningEffort",
   "thinking",
   "settingSources",
@@ -775,6 +790,12 @@ function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null)
   });
 }
 
+function readClaudeAdditionalContext(runtimeOptions = {}) {
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  const claude = isRecord(provider.claude) ? provider.claude : {};
+  return readStringOption(claude.additionalContext);
+}
+
 function mergeClaudeHookMap(...maps) {
   const merged = {};
   for (const map of maps) {
@@ -835,6 +856,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const permOpts = mapClaudeInitialPermission(permission, planMode);
   let lastSessionId = null;
   const providerOptions = { ...(providerSettings?.options || {}) };
+  const additionalContext = readClaudeAdditionalContext(cmd.runtimeOptions);
   const managedAgents = readClaudeManagedAgents(providerOptions.managedSettings);
   if (managedAgents && !isRecord(providerOptions.agents)) {
     providerOptions.agents = managedAgents;
@@ -888,7 +910,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     canUseTool: createClaudeCanUseTool(ctx),
     hooks: mergeClaudeHookMap(runtimeExtensions.hooks, createClaudeHooks(ctx)),
     onElicitation: (request) => requestClaudeMcpElicitation(request, ctx),
-    systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform),
+    systemPrompt: appendClaudeAdditionalContext(
+      buildClaudeSystemPrompt(context.platform || process.platform),
+      additionalContext,
+    ),
     mcpServers: {
       lilia: liliaAskUserServer,
       ...runtimeExtensions.mcpServers,

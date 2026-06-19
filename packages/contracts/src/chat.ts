@@ -219,6 +219,7 @@ export interface ProviderRuntimeOptionsClaude {
   allowedTools?: string[];
   disallowedTools?: string[];
   additionalDirectories?: string[];
+  additionalContext?: string | null;
   maxTurns?: number;
   maxBudgetUsd?: number;
   tools?: string[] | { type: "preset"; preset: string };

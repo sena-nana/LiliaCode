@@ -13,6 +13,7 @@ mod conversation_suggestions;
 mod github;
 mod history_import;
 mod lilia_iab;
+mod memory;
 mod plugins;
 mod popup_windows;
 mod project_shell;
@@ -201,6 +202,15 @@ pub fn run() {
             history_import::history_import_clean_background_terminals,
             lilia_iab::lilia_iab_open,
             lilia_iab::lilia_iab_submit,
+            memory::memory_list,
+            memory::memory_upsert,
+            memory::memory_set_enabled,
+            memory::memory_delete,
+            memory::memory_get_settings,
+            memory::memory_set_settings,
+            memory::memory_get_injection_state,
+            memory::memory_set_task_enabled,
+            memory::memory_reset_task_cooldown,
             provider::chat_check_env,
             provider::provider_get_config,
             provider::provider_set_config,
