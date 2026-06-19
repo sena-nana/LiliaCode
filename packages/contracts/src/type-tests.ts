@@ -26,6 +26,7 @@ import type {
   ProjectArchitectureGraph,
   ProjectArchitectureChange,
   ProjectArchitectureInteractionPayload,
+  PermissionMode,
   ProviderRuntimeOptions,
   CodexAccountQuotaStatus,
   CodexRateLimitResetCreditConsumeResult,
@@ -723,6 +724,7 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
     {
       nonInterruptMode: false;
       debug: true;
+      permissionMode: "free";
       codexProfile: CodexProfileSettings;
       subagentMode: {
         enabled: false;
@@ -739,6 +741,8 @@ export type AgentInteractionSettingsIncludesCodexProfileTypeTest = Assert<
     AgentInteractionSettings
   >
 >;
+
+export type PermissionModeIncludesFreeTypeTest = Assert<Extends<"free", PermissionMode>>;
 
 export type CustomSubagentDefinitionShapeTypeTest = Assert<
   Extends<

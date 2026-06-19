@@ -106,6 +106,7 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
   const askTitle = controllerReadonlyRef(controller, (value) => value.askTitle, "");
   const askTotal = controllerReadonlyRef(controller, (value) => value.askTotal, 0);
   const askUsesInputActions = controllerReadonlyRef(controller, (value) => value.askUsesInputActions, false);
+  const autoDecisionText = controllerReadonlyRef(controller, (value) => value.autoDecisionText, "");
   const canAskSubmit = controllerReadonlyRef(controller, (value) => value.canAskSubmit, false);
   const canGoPrev = controllerReadonlyRef(controller, (value) => value.canGoPrev, false);
   const hasEditableCommand = controllerReadonlyRef(controller, (value) => value.hasEditableCommand, false);
@@ -157,13 +158,15 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
     askTitle,
     askTotal,
     askUsesInputActions,
+    autoDecisionText,
     backAsk: () => controllerRef.value?.backAsk(),
     beginCommandEdit: () => controllerRef.value?.beginCommandEdit(),
     canAskSubmit,
     canGoPrev,
     cancelAsk: () => controllerRef.value?.cancelAsk(),
     cancelCommandEdit: () => controllerRef.value?.cancelCommandEdit(),
-    clearOptionHighlight: () => controllerRef.value?.clearOptionHighlight(),
+    clearOptionHighlight: (...args: Parameters<ComposerPendingInteractionController["clearOptionHighlight"]>) =>
+      controllerRef.value?.clearOptionHighlight(...args),
     confirmAskNo: () => controllerRef.value?.confirmAskNo(),
     decideToolConsent: (...args: Parameters<ComposerPendingInteractionController["decideToolConsent"]>) =>
       controllerRef.value?.decideToolConsent(...args),

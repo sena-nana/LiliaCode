@@ -10,6 +10,8 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) non_interrupt_mode: bool,
     #[serde(default)]
     pub(crate) debug: bool,
+    #[serde(default = "default_permission_mode")]
+    pub(crate) permission_mode: String,
     #[serde(default)]
     pub(crate) codex_profile: CodexProfileSettings,
     #[serde(default)]
@@ -79,6 +81,10 @@ fn default_codex_profile_name() -> String {
 
 fn default_enabled_true() -> bool {
     true
+}
+
+fn default_permission_mode() -> String {
+    "ask".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

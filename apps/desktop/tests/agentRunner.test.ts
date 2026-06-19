@@ -1856,6 +1856,10 @@ describe("Claude helpers", () => {
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
     });
+    expect(mapClaudeInitialPermission("free", false)).toMatchObject({
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+    });
   });
 
   it("runtime permission update changes Claude SDK mode and Lilia gate", async () => {
@@ -1878,7 +1882,11 @@ describe("Claude helpers", () => {
     expect(applyClaudeRuntimePermission(ctx, "full")).toBe(true);
     expect(ctx.executionPermission).toBe("full");
     expect(modeCalls).toEqual(["default", "bypassPermissions"]);
-    expect(json().filter((line) => line.type === "timeline")).toHaveLength(2);
+
+    expect(applyClaudeRuntimePermission(ctx, "free")).toBe(true);
+    expect(ctx.executionPermission).toBe("free");
+    expect(modeCalls).toEqual(["default", "bypassPermissions", "bypassPermissions"]);
+    expect(json().filter((line) => line.type === "timeline")).toHaveLength(3);
   });
 });
 
@@ -1887,6 +1895,10 @@ describe("Codex app-server mapping", () => {
     expect(mapCodexApprovalPolicy("full")).toBe("never");
     expect(mapCodexSandboxMode("full")).toBe("danger-full-access");
     expect(codexPermissionProfileIdForMode("full")).toBe(":danger-no-sandbox");
+
+    expect(mapCodexApprovalPolicy("free")).toBe("never");
+    expect(mapCodexSandboxMode("free")).toBe("danger-full-access");
+    expect(codexPermissionProfileIdForMode("free")).toBe(":danger-no-sandbox");
 
     expect(mapCodexApprovalPolicy("ask")).toBe("on-request");
     expect(mapCodexSandboxMode("ask")).toBe("workspace-write");

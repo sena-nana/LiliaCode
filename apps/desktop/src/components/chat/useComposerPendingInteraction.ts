@@ -10,9 +10,14 @@ import type {
   ToolConsentRequest,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
+import {
+  recommendedAskUserResult,
+  useFreeImplementationCountdown,
+} from "./freeImplementationMode";
 
 export interface UseComposerPendingInteractionOptions {
   clearContextState: () => void;
+  freeImplementation: ComputedRef<boolean>;
   pendingAsk: ComputedRef<PendingAsk | null | undefined>;
   queueResize: () => void;
   resolveAsk: (result: AskUserResult) => void;
@@ -43,6 +48,7 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
   const inputValue = computed({
     get: () => pendingText.value,
     set: (value: string) => {
+      cancelAutoDecision();
       pendingText.value = value;
     },
   });
@@ -68,14 +74,14 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     focusOption,
     highlightOption,
     clearOptionHighlight,
-    selectSingleOption,
-    toggleMulti,
-    submitAsk,
-    submitAskFreeform,
-    confirmAskNo,
-    skipAsk,
-    backAsk,
-    cancelAsk,
+    selectSingleOption: selectSingleOptionBase,
+    toggleMulti: toggleMultiBase,
+    submitAsk: submitAskBase,
+    submitAskFreeform: submitAskFreeformBase,
+    confirmAskNo: confirmAskNoBase,
+    skipAsk: skipAskBase,
+    backAsk: backAskBase,
+    cancelAsk: cancelAskBase,
   } = useAskUserInteraction(activeAsk, pendingText, options.resolveAsk);
 
   const hasPendingPanel = computed(() =>
@@ -103,14 +109,21 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     toolSubtitle,
   } = useToolConsentPresentation(activeToolConsent);
   const {
-    commandDraft: toolCommandDraft,
+    commandDraft: toolCommandDraftBase,
     isEditingCommand: isEditingToolCommand,
     hasEditableCommand,
     commandIsEmpty: toolCommandIsEmpty,
     updatedCommandInput,
-    beginCommandEdit,
-    cancelCommandEdit,
+    beginCommandEdit: beginCommandEditBase,
+    cancelCommandEdit: cancelCommandEditBase,
   } = useEditableToolCommand(activeToolConsent);
+  const toolCommandDraft = computed({
+    get: () => toolCommandDraftBase.value,
+    set: (value: string) => {
+      if (value !== toolCommandDraftBase.value) cancelAutoDecision();
+      toolCommandDraftBase.value = value;
+    },
+  });
 
   const inputPlaceholder = computed(() => {
     if (activeToolConsent.value) return "输入拒绝理由，Enter 拒绝此次调用";
@@ -124,11 +137,17 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
   });
 
   function modifyPlanApproval() {
+    cancelAutoDecision();
     if (!hasPendingInputText.value) return;
-    submitAskFreeform();
+    submitAskFreeformBase();
   }
 
-  function decideToolConsent(decision: ToolConsentDecision, explicitMessage?: string) {
+  function decideToolConsent(
+    decision: ToolConsentDecision,
+    explicitMessage?: string,
+    source: "manual" | "auto" = "manual",
+  ) {
+    if (source === "manual") cancelAutoDecision();
     const c = activeToolConsent.value;
     if (!c || toolSubmitting.value) return;
     if (decision === "allow" && toolCommandIsEmpty.value) return;
@@ -145,7 +164,115 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     if (decision === "deny") pendingText.value = "";
   }
 
+  function submitAsk() {
+    cancelAutoDecision();
+    submitAskBase();
+  }
+
+  function submitAskFreeform(value?: string) {
+    cancelAutoDecision();
+    submitAskFreeformBase(value);
+  }
+
+  function confirmAskNo() {
+    cancelAutoDecision();
+    confirmAskNoBase();
+  }
+
+  function skipAsk() {
+    cancelAutoDecision();
+    skipAskBase();
+  }
+
+  function backAsk() {
+    cancelAutoDecision();
+    backAskBase();
+  }
+
+  function cancelAsk() {
+    cancelAutoDecision();
+    cancelAskBase();
+  }
+
+  function selectSingleOption(id: string) {
+    cancelAutoDecision();
+    selectSingleOptionBase(id);
+  }
+
+  function toggleMulti(id: string) {
+    cancelAutoDecision();
+    toggleMultiBase(id);
+  }
+
+  function beginCommandEdit() {
+    cancelAutoDecision();
+    beginCommandEditBase();
+  }
+
+  function cancelCommandEdit() {
+    cancelAutoDecision();
+    cancelCommandEditBase();
+  }
+
+  function autoDecisionKeyForCurrentState(): string {
+    if (activeAsk.value) {
+      const result = recommendedAskUserResult(activeAsk.value.spec);
+      if (!result) return "";
+      return `ask:${activeAsk.value.id}:${askQuestion.value?.id ?? ""}`;
+    }
+    const tool = activeToolConsent.value;
+    if (
+      tool &&
+      !toolDanger.value &&
+      !toolSubmitting.value &&
+      !isEditingToolCommand.value &&
+      !toolCommandIsEmpty.value
+    ) {
+      return `tool:${tool.requestId}`;
+    }
+    return "";
+  }
+
+  const autoDecisionKey = computed(autoDecisionKeyForCurrentState);
+
+  function autoDecisionLabelForCurrentState(): string {
+    if (activeAsk.value) return askIsPlanApproval.value ? "同意计划" : "选择推荐项";
+    if (activeToolConsent.value) return "同意工具调用";
+    return "";
+  }
+
+  function runAutoDecision() {
+    const ask = activeAsk.value;
+    if (ask) {
+      const result = recommendedAskUserResult(ask.spec);
+      if (result) options.resolveAsk(result);
+      return;
+    }
+    const tool = activeToolConsent.value;
+    if (
+      tool &&
+      !toolDanger.value &&
+      !toolSubmitting.value &&
+      !isEditingToolCommand.value &&
+      !toolCommandIsEmpty.value
+    ) {
+      decideToolConsent("allow", undefined, "auto");
+    }
+  }
+
+  const {
+    text: autoDecisionText,
+    cancel: cancelAutoDecision,
+    reset: resetAutoDecision,
+  } = useFreeImplementationCountdown({
+    enabled: options.freeImplementation,
+    decisionKey: autoDecisionKey,
+    decisionLabel: autoDecisionLabelForCurrentState,
+    runDecision: runAutoDecision,
+  });
+
   watch(pendingKey, () => {
+    resetAutoDecision();
     if (!activeAsk.value) pendingText.value = "";
     toolExpanded.value = false;
     toolSubmitting.value = null;
@@ -177,6 +304,7 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     askTitle,
     askTotal,
     askUsesInputActions,
+    autoDecisionText,
     backAsk,
     beginCommandEdit,
     canAskSubmit,

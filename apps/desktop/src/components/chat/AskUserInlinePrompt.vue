@@ -182,6 +182,8 @@ const emit = defineEmits<{
       </div>
     </div>
 
+    <slot name="auto-decision" />
+
     <footer
       v-if="showConfirmFooter && askQuestion.mode === 'confirm' && !askIsPlanApproval"
       class="composer-inline__actions"

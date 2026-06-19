@@ -18,7 +18,7 @@ export function mapClaudeExecutionPermission(permission) {
   const permissionMode = normalizeClaudePermissionMode(permission);
   return {
     permissionMode,
-    ...(permission === "full" ? { allowDangerouslySkipPermissions: true } : {}),
+    ...(permission === "full" || permission === "free" ? { allowDangerouslySkipPermissions: true } : {}),
   };
 }
 
@@ -282,7 +282,7 @@ export function createClaudeCanUseTool(ctx) {
     if (isClaudePlanTool(toolName)) {
       return handleClaudePlanPermission(toolName, safeInput, opts, ctx);
     }
-    if (ctx.executionPermission === "full") {
+    if (ctx.executionPermission === "full" || ctx.executionPermission === "free") {
       return { behavior: "allow", updatedInput: safeInput };
     }
     if (ctx.executionPermission === "readonly" && isReadonlyDeniedClaudeTool(toolName)) {

@@ -199,6 +199,7 @@ describe("chat AskUser bridge service", () => {
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: false,
       debug: false,
+      permissionMode: "ask",
       codexProfile: {
         profile: "default",
         model: null,
@@ -209,11 +210,13 @@ describe("chat AskUser bridge service", () => {
 
     await setAgentInteractionSettings({
       nonInterruptMode: true,
+      permissionMode: "free",
     });
 
     await expect(getAgentInteractionSettings()).resolves.toMatchObject({
       nonInterruptMode: true,
       debug: false,
+      permissionMode: "free",
       codexProfile: {
         profile: "default",
         model: null,

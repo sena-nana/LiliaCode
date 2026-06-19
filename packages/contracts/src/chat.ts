@@ -350,7 +350,7 @@ export interface ChatRuntimeSnapshot {
   rollback?: ChatRollbackResult | null;
 }
 
-export type PermissionMode = "full" | "ask" | "readonly";
+export type PermissionMode = "full" | "ask" | "readonly" | "free";
 
 export type ChatBackendKind = "claude" | "codex";
 
@@ -441,6 +441,7 @@ export interface CustomSubagentUpsertInput {
 export interface AgentInteractionSettings {
   nonInterruptMode: boolean;
   debug: boolean;
+  permissionMode: PermissionMode;
   codexProfile: CodexProfileSettings;
   subagentMode: AgentSubagentModeSettings;
 }

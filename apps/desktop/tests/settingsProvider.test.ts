@@ -589,6 +589,32 @@ describe("Settings provider switch", () => {
     });
 
     expect(view.queryByText("Agent 交互")).toBeInTheDocument();
+    expect(view.queryByText("权限行为")).toBeInTheDocument();
+    expect(view.getByRole("radio", { name: "询问" })).toHaveAttribute("aria-checked", "true");
+    expect(view.getByRole("radio", { name: "只读" })).toBeInTheDocument();
+    expect(view.getByRole("radio", { name: "完全访问" })).toBeInTheDocument();
+    expect(view.getByRole("radio", { name: "自由实现" })).toBeInTheDocument();
+    expect(view.getByText("完全访问，并在 8 秒后按建议项处理交互。")).toBeInTheDocument();
+  });
+
+  it("Agent 设置页可以保存自由实现权限行为", async () => {
+    const view = await renderSettings("/settings?tab=agent");
+
+    await waitFor(() => {
+      expect(
+        mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_get_settings"),
+      ).toBe(true);
+    });
+
+    await fireEvent.click(view.getByRole("radio", { name: "自由实现" }));
+
+    await waitFor(() => {
+      expect(lastInvokeInput("agent_interaction_set_settings")).toMatchObject({
+        settings: expect.objectContaining({
+          permissionMode: "free",
+        }),
+      });
+    });
   });
 
   it("Agent 设置页会在首屏后再加载自定义 Agent 目录", async () => {

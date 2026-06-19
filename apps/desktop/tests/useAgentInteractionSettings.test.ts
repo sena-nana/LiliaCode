@@ -25,6 +25,22 @@ describe("useAgentInteractionSettings", () => {
         agentProgressSummaries: true,
       },
     });
+    expect(store.settings.value.permissionMode).toBe("ask");
+  });
+
+  it("saves supported permission modes", async () => {
+    const { useAgentInteractionSettings } = await loadStoreModule();
+    const store = useAgentInteractionSettings();
+    await store.load();
+
+    await store.update({ permissionMode: "readonly" });
+    expect(store.settings.value.permissionMode).toBe("readonly");
+
+    await store.update({ permissionMode: "full" });
+    expect(store.settings.value.permissionMode).toBe("full");
+
+    await store.update({ permissionMode: "free" });
+    expect(store.settings.value.permissionMode).toBe("free");
   });
 
   it("rolls back subagent settings when saving fails", async () => {

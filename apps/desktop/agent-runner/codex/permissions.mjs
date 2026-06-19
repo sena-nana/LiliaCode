@@ -10,6 +10,7 @@ import {
 export function mapCodexPermission(p) {
   switch (p) {
     case "full":
+    case "free":
       return { sandboxMode: "danger-full-access" };
     case "readonly":
       return { sandboxMode: "read-only" };
@@ -20,7 +21,7 @@ export function mapCodexPermission(p) {
 }
 
 export function codexPermissionProfileIdForMode(permission) {
-  if (permission === "full") return codexPermissionProfileId("dangerFullAccess");
+  if (permission === "full" || permission === "free") return codexPermissionProfileId("dangerFullAccess");
   if (permission === "readonly") return codexPermissionProfileId("readOnly");
   return codexPermissionProfileId("workspaceWrite");
 }
@@ -30,13 +31,13 @@ export function mapCodexSandboxMode(permission) {
 }
 
 export function mapCodexSandboxPolicy(permission) {
-  if (permission === "full") return { type: "dangerFullAccess" };
+  if (permission === "full" || permission === "free") return { type: "dangerFullAccess" };
   if (permission === "readonly") return { type: "readOnly" };
   return { type: "workspaceWrite" };
 }
 
 export function mapCodexApprovalPolicy(permission) {
-  if (permission === "full") return "never";
+  if (permission === "full" || permission === "free") return "never";
   if (permission === "readonly") return "never";
   return "on-request";
 }

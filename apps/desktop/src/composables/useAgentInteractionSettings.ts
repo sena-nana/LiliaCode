@@ -3,6 +3,7 @@ import type {
   AgentInteractionSettings,
   CustomSubagentDefinition,
   CustomSubagentUpsertInput,
+  PermissionMode,
 } from "@lilia/contracts";
 import {
   deleteCustomSubagent,
@@ -15,6 +16,7 @@ import {
 const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
   nonInterruptMode: false,
   debug: false,
+  permissionMode: "ask",
   codexProfile: {
     profile: "default",
     model: null,
@@ -66,6 +68,7 @@ export function normalizeAgentInteractionSettings(
   return {
     nonInterruptMode: input?.nonInterruptMode === true,
     debug: input?.debug === true,
+    permissionMode: normalizePermissionMode(input?.permissionMode),
     codexProfile: {
       profile: normalizeProfile(codexProfile?.profile),
       model: normalizeNullableText(codexProfile?.model),
@@ -113,6 +116,10 @@ function normalizeReasoningEffort(value: unknown): AgentInteractionSettings["cod
 
 function normalizeProfile(value: unknown): AgentInteractionSettings["codexProfile"]["profile"] {
   return value === "fast" || value === "balanced" || value === "deep" ? value : "default";
+}
+
+export function normalizePermissionMode(value: unknown): PermissionMode {
+  return value === "full" || value === "readonly" || value === "free" ? value : "ask";
 }
 
 function sameJsonValue(a: unknown, b: unknown): boolean {
@@ -172,6 +179,7 @@ export async function updateAgentInteractionSettings(
   if (
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&
+    next.permissionMode === previous.permissionMode &&
     sameCodexProfile(next.codexProfile, previous.codexProfile) &&
     sameSubagentMode(next.subagentMode, previous.subagentMode)
   ) {
@@ -193,6 +201,7 @@ export function useAgentInteractionSettings() {
     subagents: readonly(subagents),
     nonInterruptMode: computed(() => settings.value.nonInterruptMode),
     debug: computed(() => settings.value.debug),
+    permissionMode: computed(() => settings.value.permissionMode),
     load: loadAgentInteractionSettings,
     loadSubagents: loadCustomSubagentDefinitions,
     saveSubagent: saveCustomSubagentDefinition,

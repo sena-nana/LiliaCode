@@ -966,6 +966,7 @@ function defaultAgentInteractionSettings() {
   return {
     nonInterruptMode: false,
     debug: false,
+    permissionMode: "ask" as "ask" | "readonly" | "full" | "free",
     codexProfile: {
       profile: "default",
       model: null,
@@ -3533,6 +3534,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const settings = args.settings as {
         nonInterruptMode?: unknown;
         debug?: unknown;
+        permissionMode?: unknown;
         codexProfile?: {
           profile?: unknown;
           model?: unknown;
@@ -3561,6 +3563,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       agentInteractionSettings = {
         nonInterruptMode: settings?.nonInterruptMode === true,
         debug: settings?.debug === true,
+        permissionMode: settings?.permissionMode === "readonly" ||
+          settings?.permissionMode === "full" ||
+          settings?.permissionMode === "free"
+          ? settings.permissionMode
+          : "ask",
         codexProfile: {
           profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
           model: typeof codexProfile?.model === "string" && codexProfile.model.trim()

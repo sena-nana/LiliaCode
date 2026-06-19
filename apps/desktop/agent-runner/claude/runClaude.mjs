@@ -399,7 +399,7 @@ function claudeConfigDiagnosticsPayload(cmd) {
   return {
     cwd: stringOrNull(cmd.cwd),
     model: stringOrNull(cmd.model),
-    permission: cmd.permission === "full" || cmd.permission === "readonly" ? cmd.permission : "ask",
+    permission: normalizeRuntimePermission(cmd.permission) || "ask",
     planMode: cmd.planMode === true,
     hasResumeSession: Boolean(stringOrNull(cmd.resumeSessionId)),
     runtimeExtensions: {
@@ -830,9 +830,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const { prompt, model, resumeSessionId } = cmd;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
-  const permission = cmd.permission === "full" || cmd.permission === "readonly"
-    ? cmd.permission
-    : "ask";
+  const permission = normalizeRuntimePermission(cmd.permission) || "ask";
   const planMode = cmd.planMode === true;
   const permOpts = mapClaudeInitialPermission(permission, planMode);
   let lastSessionId = null;

@@ -10,6 +10,7 @@ defineProps<{
   canAskSubmit: boolean;
   askIsLast: boolean;
   askIsPlanApproval: boolean;
+  autoDecisionText: string;
   hasPendingInputText: boolean;
   hasToolConsent: boolean;
   toolSubmitting: ToolConsentDecision | null;
@@ -36,6 +37,14 @@ const emit = defineEmits<{
 
 <template>
   <div class="chat-composer__entry-actions">
+    <div
+      v-if="autoDecisionText"
+      class="composer-inline__auto-decision"
+      role="status"
+    >
+      {{ autoDecisionText }}
+    </div>
+
     <button
       v-if="askUsesInputActions && askQuestionSkippable && askTotal > 1"
       type="button"
