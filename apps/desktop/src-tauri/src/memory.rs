@@ -572,12 +572,12 @@ fn append_context(existing: Option<&JsonValue>, baseline: &str) -> String {
     }
 }
 
-pub(crate) fn append_baseline_to_runtime_options(
+pub(crate) fn append_context_to_runtime_options(
     backend: &str,
     runtime_options: Option<JsonValue>,
-    baseline: &str,
+    context: &str,
 ) -> Option<JsonValue> {
-    if baseline.trim().is_empty() {
+    if context.trim().is_empty() {
         return runtime_options;
     }
     let provider_key = match backend {
@@ -600,7 +600,7 @@ pub(crate) fn append_baseline_to_runtime_options(
     }
     let next = append_context(
         value["provider"][provider_key].get("additionalContext"),
-        baseline,
+        context,
     );
     value["provider"][provider_key]["additionalContext"] = JsonValue::String(next);
     Some(value)
@@ -622,7 +622,7 @@ pub(crate) fn apply_memory_baseline_to_runtime_options<R: Runtime>(
     let settings = load_memory_settings(app);
     match build_memory_baseline_core(&conn, task_id, project_cwd, &settings) {
         Ok(Some(baseline)) => {
-            append_baseline_to_runtime_options(backend, runtime_options, &baseline)
+            append_context_to_runtime_options(backend, runtime_options, &baseline)
         }
         Ok(None) => runtime_options,
         Err(err) => {
@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn runtime_options_append_existing_additional_context() {
-        let value = append_baseline_to_runtime_options(
+        let value = append_context_to_runtime_options(
             BACKEND_CODEX,
             Some(serde_json::json!({
                 "provider": {
