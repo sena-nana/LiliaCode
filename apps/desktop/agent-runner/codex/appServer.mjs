@@ -1,16 +1,64 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { stringOrNull } from "../utils.mjs";
 
-export function codexAppServerBinary(env = process.env) {
-  const injected = stringOrNull(env.LILIA_CODEX_CLI_PATH)?.trim();
-  if (!injected) {
-    throw new Error(
-      "Codex app-server 环境不满足：Lilia 未找到满足协议要求的 codex CLI。请升级 Codex CLI 到 0.136.0 或更新版本后重新检测。",
-    );
+const DEFAULT_HOME_SUBDIR = ".lilia";
+const REDIRECT_FILE = ".redirect";
+
+function trimmedString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveLiliaHome({
+  env = process.env,
+  homeDir = homedir(),
+  fileExists = existsSync,
+  readTextFile = readFileSync,
+} = {}) {
+  const envHome = trimmedString(env.LILIA_HOME);
+  if (envHome) return envHome;
+
+  const defaultHome = join(homeDir || ".", DEFAULT_HOME_SUBDIR);
+  const redirect = join(defaultHome, REDIRECT_FILE);
+  if (fileExists(redirect)) {
+    try {
+      const redirected = trimmedString(readTextFile(redirect, "utf8"));
+      if (redirected) return redirected;
+    } catch {
+      // Ignore unreadable redirect files and fall back to the default home.
+    }
   }
-  return injected;
+  return defaultHome;
+}
+
+function codexCandidateFilenames(platform = process.platform) {
+  return platform === "win32"
+    ? ["codex.cmd", "codex.exe", "codex.bat", "codex"]
+    : ["codex"];
+}
+
+export function codexAppServerBinary({
+  env = process.env,
+  platform = process.platform,
+  homeDir = homedir(),
+  fileExists = existsSync,
+  readTextFile = readFileSync,
+} = {}) {
+  const installDir = join(
+    resolveLiliaHome({ env, homeDir, fileExists, readTextFile }),
+    "runtime",
+    "codex",
+    "bin",
+  );
+  for (const filename of codexCandidateFilenames(platform)) {
+    const candidate = join(installDir, filename);
+    if (fileExists(candidate)) return candidate;
+  }
+  throw new Error(
+    "Codex app-server 环境不满足：Lilia 内置 Codex CLI 未安装或不可用。请在 Provider 设置中安装或更新 Codex app-server。",
+  );
 }
 
 export function isWindowsCommandScript(binary, platform = process.platform) {
@@ -87,7 +135,7 @@ export function createCodexAppServer({
   resolveBinary = codexAppServerBinary,
   spawnServer = spawnCodexAppServer,
 } = {}) {
-  const binary = resolveBinary(env);
+  const binary = resolveBinary({ env });
   const child = spawnServer(binary, {
     stdio: ["pipe", "pipe", "pipe"],
     env: {

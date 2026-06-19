@@ -480,6 +480,8 @@ function createMockLiliaIabSnapshot(args: Record<string, unknown>) {
 }
 let codexAppServerStatus = {
   version: "codex-cli 0.136.0",
+  installPath: null as string | null,
+  managed: false,
   available: true,
   supportsRequiredProtocol: true,
   failureKind: null as
@@ -489,6 +491,10 @@ let codexAppServerStatus = {
     | "providerIncompatible"
     | null,
   issues: [] as string[],
+  latestVersion: null as string | null,
+  updateAvailable: false,
+  releaseNotes: [] as string[],
+  updateError: null as string | null,
 };
 let composerStateHandler: ((taskId: string) => unknown | Promise<unknown>) | null = null;
 type MockHookTrustState = "unknown" | "required" | "managed" | "n_a";
@@ -1561,10 +1567,16 @@ export function resetTauriMockData() {
   nodeAvailable = true;
   codexAppServerStatus = {
     version: "codex-cli 0.136.0",
+    installPath: null,
+    managed: false,
     available: true,
     supportsRequiredProtocol: true,
     failureKind: null,
     issues: [],
+    latestVersion: null,
+    updateAvailable: false,
+    releaseNotes: [],
+    updateError: null,
   };
   composerStateHandler = null;
   claudePlugins = baseClaudePlugins.map((plugin) => ({ ...plugin }));
@@ -2105,6 +2117,7 @@ export function setMockCodexAppServerStatus(status: Partial<typeof codexAppServe
     ...codexAppServerStatus,
     ...status,
     issues: status.issues ? [...status.issues] : codexAppServerStatus.issues,
+    releaseNotes: status.releaseNotes ? [...status.releaseNotes] : codexAppServerStatus.releaseNotes,
   };
 }
 
@@ -2862,6 +2875,28 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           claude: mockBackendEnvStatus("claude"),
           codex: mockBackendEnvStatus("codex"),
         },
+      };
+
+    case "provider_codex_app_server_check_update":
+      return {
+        ...codexAppServerStatus,
+        issues: [...codexAppServerStatus.issues],
+        releaseNotes: [...codexAppServerStatus.releaseNotes],
+      };
+
+    case "provider_codex_app_server_install_update":
+      codexAppServerStatus = {
+        ...codexAppServerStatus,
+        managed: true,
+        updateAvailable: false,
+        installPath: codexAppServerStatus.installPath ?? "C:/Users/me/.lilia/runtime/codex/bin/codex.exe",
+        issues: [...codexAppServerStatus.issues],
+        releaseNotes: [...codexAppServerStatus.releaseNotes],
+      };
+      return {
+        ...codexAppServerStatus,
+        issues: [...codexAppServerStatus.issues],
+        releaseNotes: [...codexAppServerStatus.releaseNotes],
       };
 
     case "provider_get_active_backend":

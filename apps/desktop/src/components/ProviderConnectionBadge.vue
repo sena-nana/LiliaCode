@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
-import { AlertTriangle, Sparkles } from "lucide-vue-next";
+import { AlertTriangle, Download, Loader2, Sparkles } from "lucide-vue-next";
 import type { CodexAccountQuotaStatus, CodexAccountQuotaWindow } from "@lilia/contracts";
 import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
@@ -33,6 +33,11 @@ const {
   codexCliAvailable,
   codexAppServer,
   refresh,
+  checkCodexAppServerUpdate,
+  installCodexAppServerUpdate,
+  codexAppServerUpdateChecking,
+  codexAppServerUpdating,
+  codexAppServerUpdateError,
 } = useConnectionStatus({ probe: false, loadBackend: false });
 
 const activeStatus = computed(() => statusFor(activeBackend.value));
@@ -40,10 +45,14 @@ const badgeAnchorEl = ref<HTMLElement | null>(null);
 const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const quotaLoading = ref(false);
 const quotaTooltipOpen = ref(false);
+const updateAnchorEl = ref<HTMLElement | null>(null);
+const updateTooltipOpen = ref(false);
 const closeTimerId = ref<number | null>(null);
+const updateCloseTimerId = ref<number | null>(null);
 let quotaRequestSeq = 0;
 let quotaInflight: Promise<void> | null = null;
 const openState = computed(() => quotaTooltipOpen.value);
+const updateOpenState = computed(() => updateTooltipOpen.value);
 const preferredPlacement = computed(() => props.preferredPlacement);
 const {
   overlayEl: quotaPopoverEl,
@@ -56,6 +65,19 @@ const {
   preferredPlacement,
   offset: 8,
 });
+const {
+  overlayEl: updatePopoverEl,
+  overlayStyle: updatePopoverStyle,
+  resolvedPlacement: resolvedUpdatePlacement,
+  updatePosition: updatePopoverPosition,
+} = useAnchoredOverlay({
+  open: updateOpenState,
+  anchorEl: updateAnchorEl,
+  preferredPlacement,
+  offset: 8,
+});
+void quotaPopoverEl;
+void updatePopoverEl;
 
 const backendLabel = computed(() =>
   activeBackend.value === "codex" ? "Codex" : "Claude",
@@ -76,7 +98,7 @@ function codexRuntimeIssueText(): string {
 const runtimeIssue = computed(() => {
   if (!nodeAvailable.value) return "未找到 node（v18+）。点击进入设置。";
   if (activeBackend.value === "codex" && !codexCliAvailable.value) {
-    return "未找到 codex CLI。点击进入设置。";
+    return "未找到 Lilia 内置 Codex app-server。点击进入设置。";
   }
   if (
     activeBackend.value === "codex" &&
@@ -135,6 +157,17 @@ const quotaDetailRows = computed(() => [
 const shouldShowQuotaRings = computed(() =>
   isCodexOfficialAccount.value && Boolean(officialQuota.value?.fiveHour || officialQuota.value?.weekly),
 );
+const shouldShowCodexUpdate = computed(() =>
+  activeBackend.value === "codex" &&
+  activeStatus.value?.connectionMode === "codex-account" &&
+  Boolean(codexAppServer.value?.updateAvailable),
+);
+const codexUpdateTarget = computed(() => codexAppServer.value?.latestVersion ?? "最新版本");
+const codexUpdateTitle = computed(() => {
+  const current = codexAppServer.value?.version ?? "未安装";
+  return `更新 Codex app-server：${current} -> ${codexUpdateTarget.value}`;
+});
+const codexReleaseNotes = computed(() => codexAppServer.value?.releaseNotes ?? []);
 
 function quotaUnavailableStatus(error: unknown): CodexAccountQuotaStatus {
   return {
@@ -191,6 +224,13 @@ function cancelCloseTimer() {
   }
 }
 
+function cancelUpdateCloseTimer() {
+  if (updateCloseTimerId.value !== null) {
+    window.clearTimeout(updateCloseTimerId.value);
+    updateCloseTimerId.value = null;
+  }
+}
+
 function scheduleCloseQuotaDetails() {
   cancelCloseTimer();
   closeTimerId.value = window.setTimeout(() => {
@@ -237,6 +277,29 @@ function closeQuotaDetails() {
   scheduleCloseQuotaDetails();
 }
 
+function scheduleCloseUpdateDetails() {
+  cancelUpdateCloseTimer();
+  updateCloseTimerId.value = window.setTimeout(() => {
+    updateTooltipOpen.value = false;
+    updateCloseTimerId.value = null;
+  }, 80);
+}
+
+function openUpdateDetails() {
+  if (!shouldShowCodexUpdate.value && !codexAppServerUpdating.value) return;
+  cancelUpdateCloseTimer();
+  updateTooltipOpen.value = true;
+  void nextTick(() => updatePopoverPosition());
+}
+
+function closeUpdateDetails() {
+  scheduleCloseUpdateDetails();
+}
+
+async function installUpdate() {
+  await installCodexAppServerUpdate();
+}
+
 function clearOfficialQuota() {
   cancelCloseTimer();
   quotaRequestSeq += 1;
@@ -271,14 +334,32 @@ watch(
   },
 );
 
+watch(
+  () => [
+    updateTooltipOpen.value,
+    codexAppServer.value?.latestVersion ?? "",
+    codexAppServer.value?.releaseNotes.join("\n") ?? "",
+    codexAppServerUpdating.value,
+    codexAppServerUpdateError.value ?? "",
+  ] as const,
+  ([open]) => {
+    if (!open) return;
+    void updatePopoverPosition();
+  },
+);
+
 onMounted(() => {
   window.setTimeout(() => {
-    void refresh(false).then(() => loadOfficialQuota());
+    void refresh(false).then(() => {
+      void checkCodexAppServerUpdate();
+      void loadOfficialQuota();
+    });
   }, 0);
 });
 
 onBeforeUnmount(() => {
   cancelCloseTimer();
+  cancelUpdateCloseTimer();
 });
 </script>
 
@@ -286,8 +367,6 @@ onBeforeUnmount(() => {
   <span
     ref="badgeAnchorEl"
     class="sb-conn-anchor"
-    @mouseenter="openQuotaDetails"
-    @mouseleave="closeQuotaDetails"
   >
     <component
       :is="badgeTag"
@@ -331,6 +410,29 @@ onBeforeUnmount(() => {
         <span class="sb-conn__label sb-conn__label--probing">检测中...</span>
       </template>
     </component>
+    <button
+      v-if="shouldShowCodexUpdate || codexAppServerUpdating"
+      ref="updateAnchorEl"
+      type="button"
+      class="sb-conn-update"
+      :disabled="codexAppServerUpdating"
+      :title="codexUpdateTitle"
+      :aria-label="codexUpdateTitle"
+      :aria-describedby="updateTooltipOpen ? `${popoverId}-update` : undefined"
+      @mouseenter="openUpdateDetails"
+      @mouseleave="closeUpdateDetails"
+      @focus="openUpdateDetails"
+      @blur="closeUpdateDetails"
+      @click.stop.prevent="installUpdate"
+    >
+      <Loader2
+        v-if="codexAppServerUpdating || codexAppServerUpdateChecking"
+        :size="12"
+        class="is-spinning"
+        aria-hidden="true"
+      />
+      <Download v-else :size="12" aria-hidden="true" />
+    </button>
   </span>
   <Teleport to="body">
     <span
@@ -366,6 +468,29 @@ onBeforeUnmount(() => {
       </span>
       <span v-if="officialQuota?.error" class="sb-conn-popover__error">
         {{ officialQuota.error }}
+      </span>
+    </span>
+  </Teleport>
+  <Teleport to="body">
+    <span
+      v-if="updateTooltipOpen"
+      :id="`${popoverId}-update`"
+      ref="updatePopoverEl"
+      role="tooltip"
+      class="sb-conn-popover sb-conn-popover--update"
+      :class="`sb-conn-popover--${resolvedUpdatePlacement}`"
+      :data-placement="resolvedUpdatePlacement"
+      :style="updatePopoverStyle"
+      @mouseenter="openUpdateDetails"
+      @mouseleave="closeUpdateDetails"
+    >
+      <span class="sb-conn-popover__update-title">{{ codexUpdateTitle }}</span>
+      <span v-if="codexReleaseNotes.length" class="sb-conn-popover__update-list">
+        <span v-for="note in codexReleaseNotes" :key="note">{{ note }}</span>
+      </span>
+      <span v-else class="sb-conn-popover__warn">暂未获取更新内容。</span>
+      <span v-if="codexAppServerUpdateError" class="sb-conn-popover__error">
+        {{ codexAppServerUpdateError }}
       </span>
     </span>
   </Teleport>

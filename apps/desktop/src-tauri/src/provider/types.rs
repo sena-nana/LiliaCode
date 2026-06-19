@@ -166,10 +166,16 @@ pub(crate) struct BackendEnvStatus {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CodexAppServerStatus {
     pub(crate) version: Option<String>,
+    pub(crate) install_path: Option<String>,
+    pub(crate) managed: bool,
     pub(crate) available: bool,
     pub(crate) supports_required_protocol: bool,
     pub(crate) failure_kind: Option<String>,
     pub(crate) issues: Vec<String>,
+    pub(crate) latest_version: Option<String>,
+    pub(crate) update_available: bool,
+    pub(crate) release_notes: Vec<String>,
+    pub(crate) update_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

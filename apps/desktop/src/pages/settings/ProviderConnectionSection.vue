@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import {
   AlertTriangle,
+  Download,
   KeyRound,
   Loader2,
   Network,
@@ -35,6 +36,11 @@ const {
   statusFor,
   probing,
   refresh,
+  checkCodexAppServerUpdate,
+  installCodexAppServerUpdate,
+  codexAppServerUpdating,
+  codexAppServerUpdateChecking,
+  codexAppServerUpdateError,
 } = useConnectionStatus();
 
 const backendOptions: { value: ChatBackendKind; label: string }[] = [
@@ -89,6 +95,27 @@ const apiDescription = computed(() =>
 );
 const showApiConfig = computed(() =>
   selectedBackend.value === "claude" || selectedRouterMode.value === "api",
+);
+const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null);
+const showCodexUpdateAction = computed(() =>
+  selectedBackend.value === "codex" &&
+  selectedRouterMode.value === "codex-account" &&
+  Boolean(codexAppServerStatus.value?.updateAvailable),
+);
+const codexUpdateLabel = computed(() =>
+  codexAppServerStatus.value?.latestVersion
+    ? `更新到 ${codexAppServerStatus.value.latestVersion}`
+    : "安装更新",
+);
+const codexVersionText = computed(() => {
+  const current = codexAppServerStatus.value?.version ?? "未安装";
+  const latest = codexAppServerStatus.value?.latestVersion;
+  return latest ? `${current} / latest ${latest}` : current;
+});
+const codexInstallPathText = computed(() =>
+  codexAppServerStatus.value?.installPath
+    ? `路径：${codexAppServerStatus.value.installPath}`
+    : "将安装到 Lilia 管理目录",
 );
 
 async function loadProvider(backend: ChatBackendKind) {
@@ -193,6 +220,11 @@ async function ensureClaudeApiMode() {
 
 async function probe() {
   await refresh();
+  await checkCodexAppServerUpdate();
+}
+
+async function installCodexUpdate() {
+  await installCodexAppServerUpdate();
 }
 
 async function selectBackend(backend: ChatBackendKind) {
@@ -210,6 +242,7 @@ async function selectBackend(backend: ChatBackendKind) {
 
 onMounted(async () => {
   await Promise.all([loadAllConfig(), refresh()]);
+  await checkCodexAppServerUpdate();
   await ensureClaudeApiMode();
 });
 </script>
@@ -271,7 +304,7 @@ onMounted(async () => {
       <div class="settings-row settings-row--stacked">
         <div class="settings-row__label">官方账号</div>
         <div class="settings-row__status muted">
-          使用本机 Codex CLI 的登录态。首次使用前在终端运行 <code>codex login</code>。
+          使用 Lilia 内置 Codex app-server 与 Codex 登录态。首次使用前运行 <code>codex login</code>。
         </div>
       </div>
 
@@ -280,12 +313,39 @@ onMounted(async () => {
         <div class="settings-row__control">
           <span class="muted" style="display: inline-flex; gap: 4px; align-items: center;">
             <UserRound :size="12" aria-hidden="true" />
-            {{ report?.codexAppServer.supportsRequiredProtocol ? "Codex CLI 可用" : "Codex CLI 不可用" }}
+            {{ codexAppServerStatus?.supportsRequiredProtocol ? "内置 app-server 可用" : "内置 app-server 不可用" }}
           </span>
           <button type="button" class="ui-button ui-button--ghost" :disabled="probing" @click="probe">
             <RotateCw :size="11" aria-hidden="true" />
             重新检测
           </button>
+        </div>
+      </div>
+
+      <div class="settings-row settings-row--stacked">
+        <div class="settings-row__label">app-server</div>
+        <div class="settings-row__control settings-row__control--loose">
+          <span class="settings-row__status-text muted">{{ codexVersionText }}</span>
+          <button
+            v-if="showCodexUpdateAction || codexAppServerUpdating"
+            type="button"
+            class="ui-button ui-button--ghost"
+            :disabled="codexAppServerUpdating"
+            @click="installCodexUpdate"
+          >
+            <Loader2
+              v-if="codexAppServerUpdating || codexAppServerUpdateChecking"
+              :size="12"
+              class="is-spinning"
+              aria-hidden="true"
+            />
+            <Download v-else :size="12" aria-hidden="true" />
+            {{ codexAppServerUpdating ? "更新中..." : codexUpdateLabel }}
+          </button>
+        </div>
+        <div class="settings-row__status muted">
+          {{ codexInstallPathText }}
+          <span v-if="codexAppServerUpdateError">；{{ codexAppServerUpdateError }}</span>
         </div>
       </div>
     </template>

@@ -9,6 +9,7 @@ import {
   mockInvoke,
   setMockActiveBackend,
   setMockCodexAccountQuotaStatus,
+  setMockCodexAppServerStatus,
   setMockRouterMode,
 } from "./tauriMock";
 
@@ -102,6 +103,11 @@ describe("SidebarConnectionFooter provider quota badge", () => {
   it("does not show quota rings when Codex uses API mode", async () => {
     setMockActiveBackend("codex");
     setMockRouterMode("codex", "api");
+    setMockCodexAppServerStatus({
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      releaseNotes: ["App-server update"],
+    });
     const view = await renderFooter();
 
     await waitFor(() => {
@@ -111,6 +117,43 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       );
     });
     expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: /更新 Codex app-server/ })).not.toBeInTheDocument();
+  });
+
+  it("shows Codex app-server update action with hover details and hides after update", async () => {
+    setMockActiveBackend("codex");
+    setMockRouterMode("codex", "codex-account");
+    setMockCodexAppServerStatus({
+      version: "codex-cli 0.136.0",
+      latestVersion: "0.141.0",
+      updateAvailable: true,
+      releaseNotes: ["App-server clients can list immediate child threads."],
+    });
+
+    const view = await renderFooter();
+
+    const updateButton = await view.findByRole("button", { name: /更新 Codex app-server/ });
+    expect(updateButton).toHaveAttribute(
+      "title",
+      "更新 Codex app-server：codex-cli 0.136.0 -> 0.141.0",
+    );
+
+    await fireEvent.mouseEnter(updateButton);
+
+    expect(await view.findByRole("tooltip")).toHaveTextContent(
+      "App-server clients can list immediate child threads.",
+    );
+
+    await fireEvent.click(updateButton);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "provider_codex_app_server_install_update",
+        {},
+        undefined,
+      );
+      expect(view.queryByRole("button", { name: /更新 Codex app-server/ })).not.toBeInTheDocument();
+    });
   });
 
   it("shows Codex official account quota rings and hover details", async () => {

@@ -8,10 +8,7 @@ use tauri::{AppHandle, Runtime, State};
 
 use crate::agent_timeline::AgentTimelineEvent;
 use crate::chat::runner::locate_agent_runner;
-use crate::provider::{
-    build_codex_app_server_probe_status_cached, resolve_connection_for,
-    validate_backend_ready_for_send, ConnectionMode,
-};
+use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
@@ -275,14 +272,10 @@ fn locate_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> std::pa
         .unwrap_or_else(|| std::path::PathBuf::from("codex-account-quota.mjs"))
 }
 
-fn run_codex_account_quota_utility<R: Runtime>(
-    app: &AppHandle<R>,
-    codex_path: String,
-) -> CodexAccountQuotaStatus {
+fn run_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> CodexAccountQuotaStatus {
     let script = locate_codex_account_quota_utility(app);
     let output = match Command::new("node")
         .arg(script)
-        .env("LILIA_CODEX_CLI_PATH", codex_path)
         .env_remove("OPENAI_BASE_URL")
         .env_remove("OPENAI_API_KEY")
         .env_remove("CODEX_API_KEY")
@@ -1160,16 +1153,7 @@ pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuota
     if let Err(err) = validate_backend_ready_for_send(BACKEND_CODEX) {
         return codex_account_quota_unavailable("codex-account", Some(err));
     }
-    let codex_app_server = build_codex_app_server_probe_status_cached(false);
-    let Some(codex_path) = codex_app_server.path else {
-        let detail = if codex_app_server.public.issues.is_empty() {
-            "未找到满足要求的 Codex CLI，无法读取官方额度。".to_string()
-        } else {
-            codex_app_server.public.issues.join(" ")
-        };
-        return codex_account_quota_unavailable("codex-account", Some(detail));
-    };
-    run_codex_account_quota_utility(&app, codex_path)
+    run_codex_account_quota_utility(&app)
 }
 
 #[cfg(test)]
