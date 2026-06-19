@@ -438,6 +438,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     let automation_run_id_for_thread = automation_run_id(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
     let resume_session_id = invocation.resume_session_id;
+    let is_new_session = resume_session_id.is_none();
     let queued_count = invocation.queued_count;
     let script_path = invocation.script_path;
     let backend_for_thread = composer_for_thread.backend.clone();
@@ -456,6 +457,13 @@ pub(crate) fn start_runner_session<R: Runtime>(
         &project_cwd,
         &backend_for_thread,
         runtime_options,
+    );
+    let runtime_options = apply_dependency_context_to_runtime_options(
+        app_handle,
+        &task_id_for_thread,
+        &backend_for_thread,
+        runtime_options,
+        is_new_session,
     );
     let mut stdin_payload = build_runner_stdin_payload(
         &backend_for_thread,
@@ -1515,6 +1523,174 @@ fn plan_next_turn_dispatch<R: Runtime>(
 const CONVERSATION_CONTEXT_TASK_LIMIT: i64 = 24;
 const CONVERSATION_CONTEXT_MESSAGE_LIMIT: i64 = 24;
 const CONVERSATION_CONTEXT_TEXT_LIMIT: usize = 2_000;
+const DEPENDENCY_CONTEXT_MESSAGE_SCAN_LIMIT: i64 = 64;
+
+struct DependencyTaskRow {
+    id: String,
+    title: String,
+    status: String,
+}
+
+struct DependencyContextItem {
+    task_id: String,
+    title: String,
+    status: String,
+    summary: String,
+}
+
+fn apply_dependency_context_to_runtime_options<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+    backend: &str,
+    runtime_options: Option<JsonValue>,
+    is_new_session: bool,
+) -> Option<JsonValue> {
+    if !is_new_session {
+        return runtime_options;
+    }
+    let Some(store) = app.try_state::<LiliaStore>() else {
+        return runtime_options;
+    };
+    let Ok(conn) = store.conn() else {
+        return runtime_options;
+    };
+    match build_dependency_context_core(&conn, task_id) {
+        Ok(Some(context)) => {
+            crate::memory::append_context_to_runtime_options(backend, runtime_options, &context)
+        }
+        Ok(None) => runtime_options,
+        Err(err) => {
+            eprintln!("[dependency-context] skipped: {err}");
+            runtime_options
+        }
+    }
+}
+
+fn build_dependency_context_core(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<String>, String> {
+    let mut items = Vec::new();
+    for task in load_dependency_tasks(conn, task_id)? {
+        let Some(summary) = load_dependency_final_summary(conn, &task.id)? else {
+            continue;
+        };
+        items.push(DependencyContextItem {
+            task_id: task.id,
+            title: task.title,
+            status: task.status,
+            summary,
+        });
+    }
+    Ok(format_dependency_context(&items))
+}
+
+fn load_dependency_tasks(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Vec<DependencyTaskRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT t.id, t.title, t.status
+               FROM task_dependencies d
+               INNER JOIN tasks t ON t.id = d.depends_on_id
+               WHERE d.task_id = ?1 AND t.archived = 0
+               ORDER BY t.created_at ASC, t.id ASC"#,
+        )
+        .map_err(|e| format!("dependency context: prepare dependencies failed: {e}"))?;
+    let rows = stmt
+        .query_map(params![task_id], |row| {
+            Ok(DependencyTaskRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("dependency context: query dependencies failed: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("dependency context: dependency row failed: {e}"))?);
+    }
+    Ok(out)
+}
+
+fn load_dependency_final_summary(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT summary, payload
+               FROM agent_timeline_events
+               WHERE task_id = ?1 AND kind = 'message' AND status = 'success'
+               ORDER BY turn_seq DESC, intra_turn_order DESC, created_at DESC
+               LIMIT ?2"#,
+        )
+        .map_err(|e| format!("dependency context: prepare messages failed: {e}"))?;
+    let rows = stmt
+        .query_map(
+            params![task_id, DEPENDENCY_CONTEXT_MESSAGE_SCAN_LIMIT],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|e| format!("dependency context: query messages failed: {e}"))?;
+    for row in rows {
+        let (summary, payload_text) =
+            row.map_err(|e| format!("dependency context: message row failed: {e}"))?;
+        let payload = serde_json::from_str::<JsonValue>(&payload_text).unwrap_or(JsonValue::Null);
+        let role = payload
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or("assistant");
+        if role != "assistant" {
+            continue;
+        }
+        let content = payload
+            .get("content")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .or_else(|| {
+                summary
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            });
+        let Some(content) = content else {
+            continue;
+        };
+        return Ok(Some(clip_context_text(content)));
+    }
+    Ok(None)
+}
+
+fn format_dependency_context(items: &[DependencyContextItem]) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut lines = vec![
+        "[Lilia Dependency Context]".to_string(),
+        "These are final summaries from user-declared prerequisite tasks. Treat them as default context for this new session; inspect the full conversations if you need details.".to_string(),
+        String::new(),
+    ];
+    for item in items {
+        lines.push(format!(
+            "- {} (status: {}, task: {}): {}",
+            item.title.trim(),
+            item.status.trim(),
+            item.task_id,
+            compact_context_line(&item.summary)
+        ));
+    }
+    Some(lines.join("\n"))
+}
+
+fn compact_context_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 fn build_runner_conversation_context<R: Runtime>(
     app: &AppHandle<R>,
@@ -1772,6 +1948,205 @@ mod tests {
         fn record(&mut self, event: RunnerLifecycleEvent) {
             self.events.push(event);
         }
+    }
+
+    fn create_dependency_context_schema(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              archived INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE task_dependencies (
+              task_id TEXT NOT NULL,
+              depends_on_id TEXT NOT NULL,
+              PRIMARY KEY (task_id, depends_on_id)
+            );
+            CREATE TABLE agent_timeline_events (
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn insert_dependency_task(
+        conn: &rusqlite::Connection,
+        id: &str,
+        title: &str,
+        status: &str,
+        created_at: i64,
+        archived: bool,
+    ) {
+        conn.execute(
+            r#"INSERT INTO tasks (id, title, status, created_at, archived)
+               VALUES (?1, ?2, ?3, ?4, ?5)"#,
+            params![id, title, status, created_at, if archived { 1 } else { 0 }],
+        )
+        .unwrap();
+    }
+
+    fn insert_dependency_link(conn: &rusqlite::Connection, task_id: &str, depends_on_id: &str) {
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
+            params![task_id, depends_on_id],
+        )
+        .unwrap();
+    }
+
+    fn insert_dependency_message(
+        conn: &rusqlite::Connection,
+        task_id: &str,
+        id: &str,
+        role: &str,
+        content: &str,
+        summary: Option<&str>,
+        turn_seq: i64,
+        order: i64,
+    ) {
+        conn.execute(
+            r#"INSERT INTO agent_timeline_events
+               (id, task_id, turn_id, backend, kind, status, title, summary, payload,
+                created_at, updated_at, turn_seq, intra_turn_order)
+               VALUES (?1, ?2, 'turn-1', 'codex', 'message', 'success', 'Message', ?3, ?4,
+                       ?5, ?5, ?6, ?7)"#,
+            params![
+                id,
+                task_id,
+                summary,
+                serde_json::json!({ "role": role, "content": content }).to_string(),
+                1_000 + turn_seq,
+                turn_seq,
+                order
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn dependency_context_uses_latest_successful_assistant_summary() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "running", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Design pass", "done", 2, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+        insert_dependency_message(
+            &conn,
+            "dep-1",
+            "dep-1-old",
+            "assistant",
+            "Old conclusion",
+            None,
+            1,
+            1,
+        );
+        insert_dependency_message(
+            &conn,
+            "dep-1",
+            "dep-1-final",
+            "assistant",
+            "Final conclusion\nwith detail",
+            None,
+            2,
+            1,
+        );
+        insert_dependency_message(
+            &conn,
+            "dep-1",
+            "dep-1-user",
+            "user",
+            "User follow-up should not be injected",
+            None,
+            3,
+            1,
+        );
+
+        let context = build_dependency_context_core(&conn, "task-1")
+            .unwrap()
+            .expect("dependency context");
+
+        assert!(context.contains("[Lilia Dependency Context]"));
+        assert!(context.contains("Design pass"));
+        assert!(context.contains("status: done"));
+        assert!(context.contains("task: dep-1"));
+        assert!(context.contains("Final conclusion with detail"));
+        assert!(!context.contains("Old conclusion"));
+        assert!(!context.contains("User follow-up"));
+    }
+
+    #[test]
+    fn dependency_context_skips_archived_and_empty_dependencies() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "running", 1, false);
+        insert_dependency_task(&conn, "archived", "Archived", "done", 2, true);
+        insert_dependency_task(&conn, "empty", "Empty", "done", 3, false);
+        insert_dependency_link(&conn, "task-1", "archived");
+        insert_dependency_link(&conn, "task-1", "empty");
+        insert_dependency_message(
+            &conn,
+            "archived",
+            "archived-final",
+            "assistant",
+            "Archived summary",
+            None,
+            1,
+            1,
+        );
+        insert_dependency_message(
+            &conn,
+            "empty",
+            "empty-final",
+            "assistant",
+            "   ",
+            None,
+            1,
+            1,
+        );
+
+        let context = build_dependency_context_core(&conn, "task-1").unwrap();
+
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn dependency_context_falls_back_to_timeline_summary() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "running", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Summary fallback", "done", 2, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+        insert_dependency_message(
+            &conn,
+            "dep-1",
+            "dep-1-final",
+            "assistant",
+            "",
+            Some("Summary fallback text"),
+            1,
+            1,
+        );
+
+        let context = build_dependency_context_core(&conn, "task-1")
+            .unwrap()
+            .expect("dependency context");
+
+        assert!(context.contains("Summary fallback text"));
     }
 
     #[test]
