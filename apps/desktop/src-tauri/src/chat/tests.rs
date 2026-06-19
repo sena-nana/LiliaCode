@@ -512,6 +512,11 @@ mod agent_event_sink_tests {
             "action": "diagnose",
         }))
         .is_err());
+        assert!(serde_json::from_value::<ChatWorkflow>(json!({
+            "type": "sandbox_diagnostics",
+            "includeDetails": true,
+        }))
+        .is_err());
 
         let fork = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "session_fork",
@@ -597,6 +602,23 @@ mod agent_event_sink_tests {
             panic!("unexpected runtime command: {provider_settings:?}");
         };
         assert_eq!(action, "update");
+        let sandbox_diagnostics = serde_json::from_value::<ChatRuntimeCommand>(json!({
+            "type": "sandbox_diagnostics",
+            "includeDetails": true
+        }))
+        .unwrap();
+        let ChatRuntimeCommand::SandboxDiagnostics { include_details } = &sandbox_diagnostics
+        else {
+            panic!("unexpected runtime command: {sandbox_diagnostics:?}");
+        };
+        assert_eq!(*include_details, Some(true));
+        let sandbox_diagnostics_json = serde_json::to_value(&sandbox_diagnostics).unwrap();
+        assert_eq!(
+            sandbox_diagnostics_json["type"],
+            json!("sandbox_diagnostics")
+        );
+        assert_eq!(sandbox_diagnostics_json["includeDetails"], json!(true));
+        assert!(sandbox_diagnostics_json.get("include_details").is_none());
         let runtime_options = serde_json::from_value::<ProviderRuntimeOptions>(json!({
             "common": { "model": "gpt-5.5", "permission": "ask" },
             "provider": {
@@ -998,6 +1020,50 @@ mod agent_event_sink_tests {
             json!(true)
         );
         assert!(payload["runtimeCommand"].get("session_id").is_none());
+    }
+
+    #[test]
+    fn runner_stdin_payload_keeps_sandbox_diagnostics_runtime_command() {
+        let composer = ChatComposerState {
+            task_id: "task-1".to_string(),
+            backend: BACKEND_CODEX.to_string(),
+            model: "gpt-5.5".to_string(),
+            model_selection_mode: "auto".to_string(),
+            reasoning_effort: None,
+            plan_mode: false,
+            goal_mode: false,
+            permission: "ask".to_string(),
+            codex_settings: CodexComposerSettings::default(),
+        };
+        let runtime_command = serde_json::from_value::<ChatRuntimeCommand>(json!({
+            "type": "sandbox_diagnostics",
+            "includeDetails": true,
+        }))
+        .unwrap();
+
+        let payload = build_runner_stdin_payload(
+            BACKEND_CODEX,
+            "C:\\Files\\workspace\\Lilia",
+            "",
+            &[],
+            &[],
+            None,
+            Some(&runtime_command),
+            None,
+            &composer,
+            Some("thread-1"),
+            &json!({ "mcpServers": [], "warnings": [] }),
+        );
+
+        assert_eq!(payload["backend"], json!("codex"));
+        assert_eq!(payload["turn"]["prompt"], json!(""));
+        assert!(payload["workflow"].is_null());
+        assert_eq!(
+            payload["runtimeCommand"]["type"],
+            json!("sandbox_diagnostics")
+        );
+        assert_eq!(payload["runtimeCommand"]["includeDetails"], json!(true));
+        assert!(payload["runtimeCommand"].get("include_details").is_none());
     }
 
     #[test]

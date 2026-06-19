@@ -262,6 +262,26 @@ export type RuntimeSettingsIsNotWorkflowTypeTest = Assert<
   > extends true ? false : true
 >;
 
+export type SandboxDiagnosticsRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "sandbox_diagnostics";
+      includeDetails: true;
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type SandboxDiagnosticsIsNotWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "sandbox_diagnostics";
+      includeDetails: true;
+    },
+    ChatWorkflow
+  > extends true ? false : true
+>;
+
 export type HooksOverviewShapeTypeTest = Assert<
   Extends<
     {

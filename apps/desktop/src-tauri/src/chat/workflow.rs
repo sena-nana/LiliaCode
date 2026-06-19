@@ -26,6 +26,7 @@ pub(crate) fn runtime_command_kind(command: Option<&ChatRuntimeCommand>) -> Opti
         ChatRuntimeCommand::SessionFork { .. } => "session_fork",
         ChatRuntimeCommand::SessionManagement { .. } => "session_management",
         ChatRuntimeCommand::RuntimeSettings { .. } => "runtime_settings",
+        ChatRuntimeCommand::SandboxDiagnostics { .. } => "sandbox_diagnostics",
     };
     Some(kind.to_string())
 }
@@ -129,6 +130,9 @@ mod tests {
             },
             ChatRuntimeCommand::RuntimeSettings {
                 action: "update".to_string(),
+            },
+            ChatRuntimeCommand::SandboxDiagnostics {
+                include_details: Some(true),
             },
         ];
         let manifest: TestLiliaProtocolManifest =

@@ -572,6 +572,14 @@ function readCodexRuntimeSettingsCommand(cmd) {
   };
 }
 
+function readCodexSandboxDiagnosticsCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "sandbox_diagnostics") return null;
+  return {
+    includeDetails: command.includeDetails === true,
+  };
+}
+
 function codexSettingsCmdFromRuntimeCommand(cmd, command) {
   const codexSettings = {
     ...normalizeCodexSettings(cmd),
@@ -1626,6 +1634,49 @@ async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
   return true;
 }
 
+async function runCodexSandboxDiagnosticsCommand(server, threadId, cmd, ctx) {
+  const command = readCodexSandboxDiagnosticsCommand(cmd);
+  if (!command) return false;
+  await flushCodexRuntimeSettings(ctx);
+  try {
+    const readiness = await server.request("windowsSandbox/readiness", null);
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "info",
+      title: "Codex sandbox diagnostics",
+      summary: "已读取 Codex Windows sandbox readiness",
+      payload: {
+        backend: "codex",
+        subkind: "sandbox_diagnostics",
+        method: "windowsSandbox/readiness",
+        threadId,
+        includeDetails: command.includeDetails,
+        readiness,
+      },
+      sourceId: `codex:sandbox-diagnostics:${threadId}`,
+    });
+  } catch (err) {
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "error",
+      title: "Codex sandbox diagnostics failed",
+      summary: err?.message || String(err),
+      payload: {
+        backend: "codex",
+        subkind: "sandbox_diagnostics",
+        method: "windowsSandbox/readiness",
+        threadId,
+        includeDetails: command.includeDetails,
+        error: err?.message || String(err),
+      },
+      sourceId: `codex:sandbox-diagnostics:error:${threadId}`,
+    });
+    throw err;
+  }
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
 async function runCodexRequestWorkflow(server, threadId, cmd, ctx, config) {
   const workflow = config.read(cmd);
   if (!workflow) return false;
@@ -1819,6 +1870,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexThreadForkRuntimeCommand, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
   { run: runCodexRuntimeSettingsCommand },
+  { run: runCodexSandboxDiagnosticsCommand },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
   { run: runCodexReviewWorkflow, finalize: true },

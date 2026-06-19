@@ -353,6 +353,11 @@ pub(crate) enum ChatRuntimeCommand {
     },
     #[serde(rename = "runtime_settings")]
     RuntimeSettings { action: String },
+    #[serde(rename = "sandbox_diagnostics")]
+    SandboxDiagnostics {
+        #[serde(default)]
+        include_details: Option<bool>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

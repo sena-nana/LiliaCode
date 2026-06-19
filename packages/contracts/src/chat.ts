@@ -266,6 +266,11 @@ export interface RuntimeSettingsCommand {
   runtimeOptions?: never;
 }
 
+export interface SandboxDiagnosticsRuntimeCommand {
+  type: "sandbox_diagnostics";
+  includeDetails?: boolean;
+}
+
 export interface AutomationRunWorkflow {
   type: "automation";
   automationRunId: string;
@@ -305,7 +310,8 @@ export type ChatWorkflow =
 export type ChatRuntimeCommand =
   | SessionForkRuntimeCommand
   | SessionManagementRuntimeCommand
-  | RuntimeSettingsCommand;
+  | RuntimeSettingsCommand
+  | SandboxDiagnosticsRuntimeCommand;
 
 export interface ChatInterruptResult {
   rolledBack: boolean;
