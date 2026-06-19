@@ -61,6 +61,8 @@ import type {
   ProjectArchitectureRollbackResult,
   CodexAccountQuotaStatus,
   CodexAppServerStatus,
+  CodexRateLimitResetCreditConsumeInput,
+  CodexRateLimitResetCreditConsumeResult,
   CustomSubagentDefinition,
   CustomSubagentUpsertInput,
   QuotaUsageStats,
@@ -403,6 +405,15 @@ export function getQuotaUsageStats(
 
 export function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
   return invoke<CodexAccountQuotaStatus>("quota_usage_get_codex_account_status");
+}
+
+export function consumeCodexRateLimitResetCredit(
+  input: CodexRateLimitResetCreditConsumeInput,
+): Promise<CodexRateLimitResetCreditConsumeResult> {
+  return invoke<CodexRateLimitResetCreditConsumeResult>(
+    "quota_usage_consume_codex_rate_limit_reset_credit",
+    { input },
+  );
 }
 
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {

@@ -1200,6 +1200,9 @@ function createMockCodexAccountQuotaStatus() {
       sparkWeekly: null,
       credits: null,
       sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
       fetchedAt: Date.now(),
       error: null,
     };
@@ -1242,6 +1245,23 @@ function createMockCodexAccountQuotaStatus() {
       unlimited: true,
       balance: null,
     },
+    rateLimitResetCredits: {
+      availableCount: 2,
+    },
+    accountUsage: {
+      summary: {
+        lifetimeTokens: 123456,
+        peakDailyTokens: 4567,
+        longestRunningTurnSec: 540,
+        currentStreakDays: 8,
+        longestStreakDays: 14,
+      },
+      dailyUsageBuckets: [
+        { startDate: "2026-06-17", tokens: 1200 },
+        { startDate: "2026-06-18", tokens: 3400 },
+      ],
+    },
+    usageError: null,
     fetchedAt: Date.now(),
     error: null,
   };
@@ -3118,6 +3138,17 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
 
     case "quota_usage_get_codex_account_status":
       return codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
+
+    case "quota_usage_consume_codex_rate_limit_reset_credit": {
+      const status = codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
+      return {
+        outcome: "reset",
+        status: {
+          ...status,
+          rateLimitResetCredits: { availableCount: 1 },
+        },
+      };
+    }
 
     case "chat_get_composer_state": {
       const taskId = String(args.taskId);

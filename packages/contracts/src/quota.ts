@@ -114,6 +114,28 @@ export interface CodexAccountQuotaCredits {
   balance: string | null;
 }
 
+export interface CodexRateLimitResetCredits {
+  availableCount: number;
+}
+
+export interface CodexAccountUsageSummary {
+  lifetimeTokens: number | null;
+  peakDailyTokens: number | null;
+  longestRunningTurnSec: number | null;
+  currentStreakDays: number | null;
+  longestStreakDays: number | null;
+}
+
+export interface CodexAccountUsageDailyBucket {
+  startDate: string;
+  tokens: number;
+}
+
+export interface CodexAccountUsage {
+  summary: CodexAccountUsageSummary;
+  dailyUsageBuckets: CodexAccountUsageDailyBucket[] | null;
+}
+
 export interface CodexAccountQuotaStatus {
   available: boolean;
   connectionMode: string;
@@ -127,6 +149,24 @@ export interface CodexAccountQuotaStatus {
   sparkWeekly: CodexAccountQuotaWindow | null;
   credits: CodexAccountQuotaCredits | null;
   sparkCredits: CodexAccountQuotaCredits | null;
+  rateLimitResetCredits: CodexRateLimitResetCredits | null;
+  accountUsage: CodexAccountUsage | null;
+  usageError: string | null;
   fetchedAt: number;
   error: string | null;
+}
+
+export interface CodexRateLimitResetCreditConsumeInput {
+  idempotencyKey: string;
+}
+
+export type CodexRateLimitResetCreditConsumeOutcome =
+  | "reset"
+  | "alreadyRedeemed"
+  | "nothingToReset"
+  | "noCredit";
+
+export interface CodexRateLimitResetCreditConsumeResult {
+  outcome: CodexRateLimitResetCreditConsumeOutcome;
+  status: CodexAccountQuotaStatus;
 }

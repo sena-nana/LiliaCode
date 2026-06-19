@@ -233,10 +233,15 @@ describe("Settings provider switch", () => {
     expect(view.getByText("剩余 85%")).toBeInTheDocument();
     expect(view.getByText("剩余 30%")).toBeInTheDocument();
     expect(view.getAllByText(/^重置 /)).toHaveLength(4);
-    expect(view.getByText("重置次数")).toBeInTheDocument();
+    expect(view.getByText("重置次数 可用 2 次")).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "使用重置次数" })).toBeEnabled();
+    expect(view.getByText("Workspace credit")).toBeInTheDocument();
     expect(view.getByText("剩余 3")).toBeInTheDocument();
-    expect(view.getByText("Spark重置次数")).toBeInTheDocument();
+    expect(view.getByText("Spark workspace credit")).toBeInTheDocument();
     expect(view.getByText("不限")).toBeInTheDocument();
+    expect(view.getByText("官方账号用量")).toBeInTheDocument();
+    expect(view.getByText("累计 Token")).toBeInTheDocument();
+    expect(view.getByText("连续活跃")).toBeInTheDocument();
   });
 
   it("额度页在 Codex API 模式隐藏官方额度", async () => {
@@ -265,6 +270,24 @@ describe("Settings provider switch", () => {
     });
   });
 
+  it("额度页可以使用 Codex 官方重置次数并刷新官方额度", async () => {
+    const view = await renderSettings("/settings?tab=quota");
+    await view.findByText("Codex 官方额度");
+    mockInvoke.mockClear();
+
+    await fireEvent.click(view.getByRole("button", { name: "使用重置次数" }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "quota_usage_consume_codex_rate_limit_reset_credit",
+        { input: { idempotencyKey: expect.any(String) } },
+        undefined,
+      );
+    });
+    expect(await view.findByText("已使用 1 次重置次数，官方额度已刷新")).toBeInTheDocument();
+    expect(view.getByText("重置次数 可用 1 次")).toBeInTheDocument();
+  });
+
   it("额度页官方额度失败不影响本地统计", async () => {
     setMockCodexAccountQuotaStatus({
       available: false,
@@ -279,6 +302,9 @@ describe("Settings provider switch", () => {
       sparkWeekly: null,
       credits: null,
       sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
       fetchedAt: Date.now(),
       error: "Codex 未登录",
     });

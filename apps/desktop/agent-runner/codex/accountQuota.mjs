@@ -8,6 +8,12 @@ const FIVE_HOUR_TOLERANCE = 90;
 const WEEKLY_TOLERANCE = 1440;
 const RATE_LIMIT_READ_RETRIES = 2;
 const RATE_LIMIT_READ_RETRY_DELAY_MS = 500;
+const RESET_CREDIT_OUTCOMES = new Set([
+  "reset",
+  "alreadyRedeemed",
+  "nothingToReset",
+  "noCredit",
+]);
 
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -19,6 +25,43 @@ function normalizeCredits(value) {
     hasCredits: Boolean(value.hasCredits),
     unlimited: Boolean(value.unlimited),
     balance: stringOrNull(value.balance),
+  };
+}
+
+function normalizeResetCredits(value) {
+  if (!isRecord(value)) return null;
+  const availableCount = numberOrNull(value.availableCount);
+  if (availableCount === null) return null;
+  return { availableCount: Math.max(0, Math.trunc(availableCount)) };
+}
+
+function normalizeUsageSummary(value) {
+  const input = isRecord(value) ? value : {};
+  return {
+    lifetimeTokens: numberOrNull(input.lifetimeTokens),
+    peakDailyTokens: numberOrNull(input.peakDailyTokens),
+    longestRunningTurnSec: numberOrNull(input.longestRunningTurnSec),
+    currentStreakDays: numberOrNull(input.currentStreakDays),
+    longestStreakDays: numberOrNull(input.longestStreakDays),
+  };
+}
+
+function normalizeUsageDailyBucket(value) {
+  if (!isRecord(value)) return null;
+  const startDate = stringOrNull(value.startDate);
+  const tokens = numberOrNull(value.tokens);
+  if (!startDate || tokens === null) return null;
+  return { startDate, tokens };
+}
+
+function normalizeAccountUsage(value) {
+  if (!isRecord(value)) return null;
+  const dailyUsageBuckets = Array.isArray(value.dailyUsageBuckets)
+    ? value.dailyUsageBuckets.map(normalizeUsageDailyBucket).filter(Boolean)
+    : null;
+  return {
+    summary: normalizeUsageSummary(value.summary),
+    dailyUsageBuckets,
   };
 }
 
@@ -109,6 +152,9 @@ function normalizeRateLimitSnapshot(result) {
     sparkWeekly: spark?.weekly ?? null,
     credits: codex?.credits ?? null,
     sparkCredits: spark?.credits ?? null,
+    rateLimitResetCredits: normalizeResetCredits(result.rateLimitResetCredits),
+    accountUsage: null,
+    usageError: null,
     fetchedAt: Date.now(),
     error: null,
   };
@@ -132,6 +178,48 @@ async function requestRateLimits(server, { retries = RATE_LIMIT_READ_RETRIES, re
   throw lastError;
 }
 
+function unavailableQuotaStatus(error) {
+  return {
+    available: false,
+    connectionMode: "codex-account",
+    limitId: null,
+    limitName: null,
+    planType: null,
+    rateLimitReachedType: null,
+    fiveHour: null,
+    weekly: null,
+    sparkFiveHour: null,
+    sparkWeekly: null,
+    credits: null,
+    sparkCredits: null,
+    rateLimitResetCredits: null,
+    accountUsage: null,
+    usageError: null,
+    fetchedAt: Date.now(),
+    error,
+  };
+}
+
+async function readQuotaStatusFromServer(server, { retries, retryDelayMs } = {}) {
+  const result = await requestRateLimits(server, { retries, retryDelayMs });
+  const snapshot = normalizeRateLimitSnapshot(result);
+  if (!snapshot) {
+    return unavailableQuotaStatus("Codex 官方额度接口未返回可识别的额度数据。");
+  }
+  try {
+    const usage = normalizeAccountUsage(await server.request("account/usage/read"));
+    if (usage) {
+      snapshot.accountUsage = usage;
+      return snapshot;
+    }
+    snapshot.usageError = "Codex 官方用量接口未返回可识别的用量数据。";
+    return snapshot;
+  } catch (err) {
+    snapshot.usageError = err?.message || String(err);
+    return snapshot;
+  }
+}
+
 export async function readCodexAccountQuotaStatus(
   {
     createServer = createCodexAppServer,
@@ -142,25 +230,34 @@ export async function readCodexAccountQuotaStatus(
   const server = createServer();
   try {
     await initializeCodexAppServer(server);
-    const result = await requestRateLimits(server, { retries, retryDelayMs });
-    const snapshot = normalizeRateLimitSnapshot(result);
-    if (snapshot) return snapshot;
-    return {
-      available: false,
-      connectionMode: "codex-account",
-      limitId: null,
-      limitName: null,
-      planType: null,
-      rateLimitReachedType: null,
-      fiveHour: null,
-      weekly: null,
-      sparkFiveHour: null,
-      sparkWeekly: null,
-      credits: null,
-      sparkCredits: null,
-      fetchedAt: Date.now(),
-      error: "Codex 官方额度接口未返回可识别的额度数据。",
-    };
+    return await readQuotaStatusFromServer(server, { retries, retryDelayMs });
+  } finally {
+    server.close();
+  }
+}
+
+export async function consumeCodexRateLimitResetCredit(
+  idempotencyKey,
+  {
+    createServer = createCodexAppServer,
+    retries = RATE_LIMIT_READ_RETRIES,
+    retryDelayMs = RATE_LIMIT_READ_RETRY_DELAY_MS,
+  } = {},
+) {
+  const key = stringOrNull(idempotencyKey)?.trim();
+  if (!key) throw new Error("idempotencyKey is required");
+  const server = createServer();
+  try {
+    await initializeCodexAppServer(server);
+    const result = await server.request("account/rateLimitResetCredit/consume", {
+      idempotencyKey: key,
+    });
+    const outcome = stringOrNull(result?.outcome);
+    if (!RESET_CREDIT_OUTCOMES.has(outcome)) {
+      throw new Error("Codex 官方额度重置接口返回了未知结果。");
+    }
+    const status = await readQuotaStatusFromServer(server, { retries, retryDelayMs });
+    return { outcome, status };
   } finally {
     server.close();
   }

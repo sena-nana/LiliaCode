@@ -72,6 +72,23 @@ function officialQuota(overrides: Record<string, unknown> = {}) {
       unlimited: true,
       balance: null,
     },
+    rateLimitResetCredits: {
+      availableCount: 2,
+    },
+    accountUsage: {
+      summary: {
+        lifetimeTokens: 123456,
+        peakDailyTokens: 4567,
+        longestRunningTurnSec: 540,
+        currentStreakDays: 8,
+        longestStreakDays: 14,
+      },
+      dailyUsageBuckets: [
+        { startDate: "2026-06-17", tokens: 1200 },
+        { startDate: "2026-06-18", tokens: 3400 },
+      ],
+    },
+    usageError: null,
     fetchedAt: 1_800_000_000_000,
     error: null,
     ...overrides,
@@ -189,6 +206,8 @@ describe("SidebarConnectionFooter provider quota badge", () => {
     expect(view.getByText(refreshText(1_800_300_000))).toBeInTheDocument();
     expect(view.getByText(refreshText(1_800_060_000))).toBeInTheDocument();
     expect(view.getByText(refreshText(1_800_360_000))).toBeInTheDocument();
+    expect(view.getByText("重置次数可用 2 次")).toBeInTheDocument();
+    expect(view.getByText("累计 12.3万 tokens · 连续 8 天")).toBeInTheDocument();
     const meters = popoverMeters();
     expect(meters).toHaveLength(4);
     expect(meters[0]).toHaveStyle({ "--quota-progress": "58" });
@@ -208,6 +227,9 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       sparkWeekly: null,
       credits: null,
       sparkCredits: null,
+      rateLimitResetCredits: null,
+      accountUsage: null,
+      usageError: null,
       error: "Codex 官方额度接口未返回可识别的额度数据。",
     }));
 
