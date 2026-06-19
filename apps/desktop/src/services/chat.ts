@@ -373,6 +373,16 @@ export function testAssistantAIConnection(
   return invoke<AssistantAITestResult>("assistant_ai_test_connection", { config });
 }
 
+export interface PromptOptimizeInput {
+  prompt: string;
+  attachments?: ChatAttachment[];
+  conversationReferences?: ChatConversationReference[];
+}
+
+export function optimizePrompt(input: PromptOptimizeInput): Promise<string> {
+  return invoke<string>("assistant_ai_optimize_prompt", { input });
+}
+
 export function getConversationSuggestions(
   projectId?: string | null,
   forceRefresh = false,

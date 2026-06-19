@@ -3079,6 +3079,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case "assistant_ai_test_connection":
       return { ok: false, error: "baseUrl / apiKey / model 必须全部填写", models: null, modelMatched: null };
 
+    case "assistant_ai_optimize_prompt": {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      return `优化后：${typeof input.prompt === "string" ? input.prompt : ""}`;
+    }
+
     case "conversation_suggestions_get_settings":
       return { ...conversationSuggestionSettings };
 

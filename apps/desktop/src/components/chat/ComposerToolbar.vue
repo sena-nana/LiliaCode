@@ -9,6 +9,7 @@ import {
   Goal,
   ShieldCheck,
   Square,
+  WandSparkles,
   X,
 } from "lucide-vue-next";
 import type {
@@ -45,6 +46,9 @@ const props = defineProps<{
   canSubmitEntry: boolean;
   actionsBlocked: boolean;
   compactDisabled: boolean;
+  canOptimizePrompt: boolean;
+  promptOptimizing: boolean;
+  promptOptimizeError?: string | null;
   contextUsage?: ChatContextUsage | null;
   sendTitle: string;
   sendAriaLabel: string;
@@ -58,6 +62,7 @@ const emit = defineEmits<{
   togglePlanMode: [];
   toggleGoalMode: [];
   startLiliaCompact: [];
+  optimizePrompt: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -383,6 +388,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="chat-composer__entry-actions">
+        <span
+          v-if="promptOptimizeError"
+          class="chat-composer__optimize-status"
+          role="status"
+        >
+          {{ promptOptimizeError }}
+        </span>
         <div
           v-if="supportsBuiltinAgentActions(state.backend)"
           class="chat-composer__context-wrap"
@@ -413,6 +425,16 @@ onBeforeUnmount(() => {
             </dl>
           </div>
         </div>
+        <button
+          type="button"
+          class="chat-composer__optimize"
+          :disabled="!canOptimizePrompt"
+          :title="promptOptimizing ? '正在优化提示词' : '优化提示词'"
+          :aria-label="promptOptimizing ? '正在优化提示词' : '优化提示词'"
+          @click="emit('optimizePrompt')"
+        >
+          <WandSparkles :size="15" aria-hidden="true" />
+        </button>
         <button
           type="button"
           class="chat-composer__send"
