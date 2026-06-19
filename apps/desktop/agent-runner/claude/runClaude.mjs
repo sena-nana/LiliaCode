@@ -776,6 +776,28 @@ function runClaudeProviderSettingsRuntimeCommand(cmd, context) {
   return true;
 }
 
+function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "sandbox_diagnostics") return false;
+  context.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: "info",
+    title: "Claude sandbox diagnostics unsupported",
+    summary: "Claude SDK has no equivalent sandbox readiness endpoint.",
+    payload: {
+      backend: "claude",
+      subkind: "sandbox_diagnostics",
+      includeDetails: command.includeDetails === true,
+      native: false,
+      unsupported: true,
+      reason: "Claude SDK has no equivalent Lilia-controllable sandbox readiness endpoint.",
+    },
+    sourceId: `claude:sandbox-diagnostics:${Date.now()}`,
+  });
+  emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
+  return true;
+}
+
 function normalizeClaudeMcpElicitationPayload(request, ctx) {
   if (!isRecord(request)) return null;
   const serverName = stringOrNull(request.serverName) || stringOrNull(request.mcp_server_name);
@@ -1173,6 +1195,7 @@ export async function runClaude(cmd, context) {
   if (await runClaudeCompactWorkflow(cmd, context, workingDir)) return;
   if (await runClaudeSessionManagementRuntimeCommand(cmd, context, workingDir)) return;
   if (await runClaudeProviderSettingsRuntimeCommand(cmd, context)) return;
+  if (runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context)) return;
   if (await runClaudeLocalLiliaWorkflow(cmd, context)) return;
   await runClaudeQueryTurn(cmd, context, workingDir);
 }

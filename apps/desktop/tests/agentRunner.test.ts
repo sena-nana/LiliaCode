@@ -394,6 +394,7 @@ describe("runner core", () => {
       { type: "session_fork" },
       { type: "session_management", action: "list" },
       { type: "runtime_settings", action: "diagnose" },
+      { type: "sandbox_diagnostics", includeDetails: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -1845,6 +1846,48 @@ describe("Claude helpers", () => {
           settingsKeys: expect.arrayContaining(["model", "permission", "allowedTools"]),
           ignoredProviderKeys: ["reasoningEffort"],
           unsupportedKeys: ["unknownClaudeOption"],
+        }),
+      }),
+    }));
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-existing",
+      subtype: "success",
+    });
+  });
+
+  it("Claude sandbox diagnostics emits unsupported diagnostic without SDK query", async () => {
+    const { protocol, json } = captureProtocol();
+    let queryCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "",
+      resumeSessionId: "claude-existing",
+      runtimeCommand: {
+        type: "sandbox_diagnostics",
+        includeDetails: true,
+      },
+    }, claudeRunnerContext(protocol, {
+      createClaudeQuery: () => {
+        queryCalled = true;
+        return emptyClaudeQuery();
+      },
+    }));
+
+    expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Claude sandbox diagnostics unsupported",
+        payload: expect.objectContaining({
+          backend: "claude",
+          subkind: "sandbox_diagnostics",
+          includeDetails: true,
+          native: false,
+          unsupported: true,
         }),
       }),
     }));
@@ -5121,6 +5164,110 @@ describe("Codex app-server mapping", () => {
           action: "update",
           method: "thread/settings/update",
           error: "settings update failed",
+        }),
+      }),
+    }));
+  });
+
+  it("handles Codex sandbox diagnostics without starting a turn", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "windowsSandbox/readiness") {
+          return {
+            available: true,
+            detail: { backend: "windows-sandbox" },
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await runCodexAppServerTestTurn({
+      protocol,
+      server,
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "sandbox_diagnostics",
+        includeDetails: true,
+      },
+    });
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(calls.find((call) => call.method === "windowsSandbox/readiness")).toEqual({
+      method: "windowsSandbox/readiness",
+      params: null,
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "info",
+        title: "Codex sandbox diagnostics",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "sandbox_diagnostics",
+          method: "windowsSandbox/readiness",
+          threadId: "thread-1",
+          includeDetails: true,
+          readiness: expect.objectContaining({
+            available: true,
+          }),
+        }),
+      }),
+    }));
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-1")).toBe(true);
+  });
+
+  it("emits Codex sandbox diagnostics errors explicitly", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/start") return { thread: { id: "thread-1" }, model: "gpt-5.5" };
+        if (method === "windowsSandbox/readiness") throw new Error("sandbox not available");
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [],
+      close: () => {},
+    };
+
+    await expect(runCodexAppServerTestTurn({
+      protocol,
+      server,
+      backend: "codex",
+      prompt: "",
+      permission: "ask",
+      runtimeCommand: {
+        type: "sandbox_diagnostics",
+      },
+    })).rejects.toThrow("sandbox not available");
+
+    expect(calls.some((call) => call.method === "turn/start")).toBe(false);
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "error",
+        title: "Codex sandbox diagnostics failed",
+        payload: expect.objectContaining({
+          backend: "codex",
+          subkind: "sandbox_diagnostics",
+          method: "windowsSandbox/readiness",
+          includeDetails: false,
+          error: "sandbox not available",
         }),
       }),
     }));
