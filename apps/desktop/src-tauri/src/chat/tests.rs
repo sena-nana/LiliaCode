@@ -521,15 +521,26 @@ mod agent_event_sink_tests {
         let fork = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "session_fork",
             "excludeTurns": false,
+            "sourceTurnId": "turn-source",
+            "mode": "fork",
         }))
         .unwrap();
-        let ChatRuntimeCommand::SessionFork { exclude_turns } = &fork else {
+        let ChatRuntimeCommand::SessionFork {
+            exclude_turns,
+            source_turn_id,
+            mode,
+        } = &fork else {
             panic!("unexpected runtime command: {fork:?}");
         };
         assert_eq!(*exclude_turns, Some(false));
+        assert_eq!(source_turn_id.as_deref(), Some("turn-source"));
+        assert_eq!(mode.as_deref(), Some("fork"));
         let fork_json = serde_json::to_value(&fork).unwrap();
         assert_eq!(fork_json["excludeTurns"], json!(false));
+        assert_eq!(fork_json["sourceTurnId"], json!("turn-source"));
+        assert_eq!(fork_json["mode"], json!("fork"));
         assert!(fork_json.get("exclude_turns").is_none());
+        assert!(fork_json.get("source_turn_id").is_none());
 
         let session_management = serde_json::from_value::<ChatRuntimeCommand>(json!({
             "type": "session_management",

@@ -94,7 +94,7 @@ pub(crate) fn prepare_turn_for_start<R: Runtime>(
     resume_session_id: Option<&str>,
 ) -> Result<PreparedTurn, String> {
     let backend = composer.backend.clone();
-    if runtime_command.is_some() {
+    if runtime_command_skips_auto_decision(runtime_command, content) {
         return Ok(PreparedTurn {
             composer,
             runtime_options,
@@ -157,6 +157,17 @@ pub(crate) fn prepare_turn_for_start<R: Runtime>(
         raw,
         resume_session_id,
     )
+}
+
+fn runtime_command_skips_auto_decision(
+    runtime_command: Option<&ChatRuntimeCommand>,
+    content: &str,
+) -> bool {
+    match runtime_command {
+        None => false,
+        Some(ChatRuntimeCommand::SessionFork { .. }) => content.trim().is_empty(),
+        Some(_) => true,
+    }
 }
 
 fn has_explicit_runtime_model_or_effort(

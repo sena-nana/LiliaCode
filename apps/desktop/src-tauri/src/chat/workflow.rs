@@ -118,6 +118,8 @@ mod tests {
         let runtime_commands = [
             ChatRuntimeCommand::SessionFork {
                 exclude_turns: None,
+                source_turn_id: None,
+                mode: None,
             },
             ChatRuntimeCommand::SessionManagement {
                 action: "rename".to_string(),

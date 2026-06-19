@@ -2,6 +2,8 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   ArrowUp,
+  CornerDownRight,
+  GitFork,
   ListChecks,
   Paperclip,
   Plus,
@@ -14,6 +16,7 @@ import {
 } from "lucide-vue-next";
 import type {
   ChatAttachment,
+  ChatBranchAnchor,
   ChatComposerState,
   ChatContextUsage,
   ChatModelOption,
@@ -50,6 +53,7 @@ const props = defineProps<{
   promptOptimizing: boolean;
   promptOptimizeError?: string | null;
   contextUsage?: ChatContextUsage | null;
+  pendingBranchAnchor?: ChatBranchAnchor | null;
   sendTitle: string;
   sendAriaLabel: string;
 }>();
@@ -63,6 +67,7 @@ const emit = defineEmits<{
   toggleGoalMode: [];
   startLiliaCompact: [];
   optimizePrompt: [];
+  clearBranchAnchor: [];
   submitEntry: [];
   openImage: [attachment: ChatAttachment];
 }>();
@@ -85,7 +90,7 @@ const actionMenuPlacementClass = computed(() =>
 );
 
 type ModeChip = {
-  key: "plan" | "goal";
+  key: "plan" | "goal" | "branch";
   label: string;
   title: string;
   icon: Component;
@@ -175,6 +180,17 @@ const contextUsageRows = computed(() => {
 
 const activeModeChips = computed<ModeChip[]>(() => {
   const chips: ModeChip[] = [];
+  const branchAnchor = props.pendingBranchAnchor;
+  if (branchAnchor) {
+    const isFork = branchAnchor.mode === "fork";
+    chips.push({
+      key: "branch",
+      label: isFork ? "分叉锚点" : "继续锚点",
+      title: `${isFork ? "清除分叉锚点" : "清除继续锚点"}：${branchAnchor.sourceTurnId}`,
+      icon: isFork ? GitFork : CornerDownRight,
+      toggle: () => emit("clearBranchAnchor"),
+    });
+  }
   if (props.state.planMode) {
     chips.push({
       key: "plan",

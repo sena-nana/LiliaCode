@@ -419,7 +419,7 @@ describe("chat AskUser prompt", () => {
     });
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
-    await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
+    await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
     expect(view.getByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
 
     emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
@@ -880,6 +880,44 @@ describe("chat AskUser prompt", () => {
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
+      },
+    });
+  });
+
+  it("Codex timeline 分支锚点会随下一条消息发送", async () => {
+    const view = await renderCodexTaskDetail();
+
+    emitMockTimelineEvent("t-002", {
+      id: "reply-anchor-1",
+      taskId: "t-002",
+      turnId: "turn-anchor",
+      backend: "codex",
+      kind: "message",
+      status: "success",
+      title: "Assistant",
+      summary: "可分叉回复",
+      payload: {
+        role: "assistant",
+        backend: "codex",
+        content: "可分叉回复",
+      },
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      turnSeq: 1,
+      intraTurnOrder: 0,
+    });
+
+    await fireEvent.click(await view.findByRole("button", { name: "从这里分叉" }));
+    await setComposerText(view, "从这里继续处理");
+    await fireEvent.click(view.getByRole("button", { name: "发送" }));
+
+    await expectLatestChatSend({
+      content: "从这里继续处理",
+      runtimeCommand: {
+        type: "session_fork",
+        excludeTurns: true,
+        sourceTurnId: "turn-anchor",
+        mode: "fork",
       },
     });
   });

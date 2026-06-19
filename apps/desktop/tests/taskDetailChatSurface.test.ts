@@ -112,6 +112,7 @@ function surfaceProps() {
     restoreDraftContent: "",
     insertDraftTextKey: 0,
     insertDraftTextContent: "",
+    pendingBranchAnchor: null,
     pendingAgentActions: [],
     hasBlockingPendingAction: false,
     currentLiliaGoal: null,

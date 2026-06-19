@@ -792,6 +792,24 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("显示并可清除分支锚点 chip", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        pendingBranchAnchor: { sourceTurnId: "turn-1", mode: "fork" },
+      },
+    });
+
+    await requestComposerChrome(view);
+    const chip = await view.findByRole("button", { name: /清除分叉锚点：turn-1/ });
+    expect(chip).toHaveTextContent("分叉锚点");
+
+    await fireEvent.click(chip);
+
+    expect(view.emitted("clear-branch-anchor")?.length).toBe(1);
+  });
+
   it("加号菜单会 Teleport 到 body，并在外部点击或 Escape 后关闭", async () => {
     const view = render(ChatComposer, {
       props: {

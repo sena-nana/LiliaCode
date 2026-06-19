@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -50,7 +50,7 @@ const emit = defineEmits<{
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
-  "start-session-fork": [];
+  "start-session-fork": [anchor: ChatBranchAnchor];
 }>();
 
 const toggledIds = ref<Set<string>>(new Set());
@@ -243,7 +243,7 @@ function pendingState(event: AgentTimelineEvent) {
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
           @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
-          @start-session-fork="emit('start-session-fork')"
+          @start-session-fork="emit('start-session-fork', $event)"
         />
       </template>
       <li

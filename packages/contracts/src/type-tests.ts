@@ -188,6 +188,8 @@ export type SessionForkRuntimeCommandTypeTest = Assert<
     {
       type: "session_fork";
       excludeTurns: true;
+      sourceTurnId: "turn-1";
+      mode: "fork";
     },
     ChatRuntimeCommand
   >

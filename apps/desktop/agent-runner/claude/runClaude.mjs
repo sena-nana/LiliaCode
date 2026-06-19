@@ -151,9 +151,24 @@ function readLiliaWorkflow(cmd) {
   return isRecord(cmd?.workflow) ? cmd.workflow : null;
 }
 
+function setClaudeResumeSessionAt(cmd, sourceTurnId) {
+  if (!sourceTurnId) return;
+  if (!isRecord(cmd.runtimeOptions)) cmd.runtimeOptions = {};
+  if (!isRecord(cmd.runtimeOptions.provider)) cmd.runtimeOptions.provider = {};
+  if (!isRecord(cmd.runtimeOptions.provider.claude)) cmd.runtimeOptions.provider.claude = {};
+  cmd.runtimeOptions.provider.claude.resumeSessionAt = sourceTurnId;
+}
+
 async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
   if (command?.type !== "session_fork") return false;
+  const sourceTurnId = stringOrNull(command.sourceTurnId)?.trim() || null;
+  const mode = command.mode === "continue" ? "continue" : "fork";
+  const hasAnchoredPrompt = Boolean(sourceTurnId && stringOrNull(cmd?.prompt)?.trim());
+  if (mode === "continue" && hasAnchoredPrompt) {
+    setClaudeResumeSessionAt(cmd, sourceTurnId);
+    return false;
+  }
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -164,15 +179,22 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
       backend: "claude",
       subkind: "session_fork",
       sourceSessionId: sourceSessionId || null,
+      sourceTurnId,
+      mode,
     },
     sourceId: `claude:session-fork:start:${sourceSessionId || "missing"}`,
   });
   try {
     if (!sourceSessionId) throw new Error("当前 Claude task 没有可 fork 的 session");
     const forkClaudeSession = context.forkClaudeSession || forkSession;
-    const result = await forkClaudeSession(sourceSessionId, { dir: cwd });
+    const result = await forkClaudeSession(sourceSessionId, {
+      dir: cwd,
+      ...(sourceTurnId ? { resumeSessionAt: sourceTurnId } : {}),
+    });
     const sessionId = typeof result?.sessionId === "string" ? result.sessionId.trim() : "";
     if (!sessionId) throw new Error("Claude forkSession did not return a session id");
+    setClaudeResumeSessionAt(cmd, sourceTurnId);
+    cmd.resumeSessionId = sessionId;
     context.protocol.emitTimeline({
       kind: "diagnostic",
       status: "success",
@@ -182,10 +204,13 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
         backend: "claude",
         subkind: "session_fork",
         sourceSessionId,
+        sourceTurnId,
         sessionId,
+        mode,
       },
       sourceId: `claude:session-fork:completed:${sourceSessionId}:${sessionId}`,
     });
+    if (hasAnchoredPrompt) return false;
     context.protocol.emit({ type: "done", sessionId, subtype: "success" });
   } catch (err) {
     context.protocol.emitTimeline({
@@ -197,6 +222,8 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
         backend: "claude",
         subkind: "session_fork",
         sourceSessionId: sourceSessionId || null,
+        sourceTurnId,
+        mode,
         error: err?.message || String(err),
       },
       sourceId: `claude:session-fork:error:${sourceSessionId || "missing"}`,
@@ -978,6 +1005,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   if (providerSettings?.action === "update") {
     emitClaudeProviderSettingsTimeline(context, providerSettings, "success");
   }
+  const runtimeProviderSettings = readClaudeRuntimeSettingsCommand(
+    { type: "runtime_settings", action: "diagnose" },
+    isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
+  );
   const { prompt, model, resumeSessionId } = cmd;
   const workflowPrompt = buildClaudeWorkflowPrompt(cmd, providerSettings);
   const runtimeExtensions = readClaudeRuntimeExtensions(cmd);
@@ -985,7 +1016,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
   const planMode = cmd.planMode === true;
   const permOpts = mapClaudeInitialPermission(permission, planMode);
   let lastSessionId = null;
-  const providerOptions = { ...(providerSettings?.options || {}) };
+  const providerOptions = {
+    ...(runtimeProviderSettings?.options || {}),
+    ...(providerSettings?.options || {}),
+  };
   const additionalContext = readClaudeAdditionalContext(cmd.runtimeOptions);
   const managedAgents = readClaudeManagedAgents(providerOptions.managedSettings);
   if (managedAgents && !isRecord(providerOptions.agents)) {

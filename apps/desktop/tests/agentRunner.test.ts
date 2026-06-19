@@ -1215,6 +1215,105 @@ describe("Claude helpers", () => {
     });
   });
 
+  it("Claude session fork continue mode resumes at the selected turn for the next prompt", async () => {
+    const { protocol } = captureProtocol();
+    let seenOptions: any = null;
+    let forkCalled = false;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "从这里继续",
+      resumeSessionId: "claude-source",
+      runtimeCommand: {
+        type: "session_fork",
+        sourceTurnId: "message-uuid",
+        mode: "continue",
+      },
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      forkClaudeSession: async () => {
+        forkCalled = true;
+        return { sessionId: "claude-forked" };
+      },
+      createClaudeQuery: ({ options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-source",
+            uuid: "result-1",
+            usage: { input_tokens: 10, output_tokens: 2 },
+          };
+        })();
+      },
+    } as any);
+
+    expect(forkCalled).toBe(false);
+    expect(seenOptions).toMatchObject({
+      resume: "claude-source",
+      resumeSessionAt: "message-uuid",
+    });
+  });
+
+  it("Claude session fork mode forks from the selected turn before continuing the prompt", async () => {
+    const { protocol } = captureProtocol();
+    let forkInput: any = null;
+    let seenOptions: any = null;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "从分叉继续",
+      resumeSessionId: "claude-source",
+      runtimeCommand: {
+        type: "session_fork",
+        sourceTurnId: "message-uuid",
+        mode: "fork",
+      },
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      forkClaudeSession: async (sessionId: string, options: any) => {
+        forkInput = { sessionId, options };
+        return { sessionId: "claude-forked" };
+      },
+      createClaudeQuery: ({ options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-forked",
+            uuid: "result-1",
+            usage: { input_tokens: 10, output_tokens: 2 },
+          };
+        })();
+      },
+    } as any);
+
+    expect(forkInput).toEqual({
+      sessionId: "claude-source",
+      options: { dir: "C:/repo", resumeSessionAt: "message-uuid" },
+    });
+    expect(seenOptions).toMatchObject({
+      resume: "claude-forked",
+      resumeSessionAt: "message-uuid",
+    });
+  });
+
   it("Claude session fork runtime command requires an existing session checkpoint", async () => {
     const { protocol, json } = captureProtocol();
     let forkCalled = false;
@@ -4909,6 +5008,61 @@ describe("Codex app-server mapping", () => {
       line.event.payload.threadId === "thread-fork"
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-fork")).toBe(true);
+  });
+
+  it("forks Codex thread from a selected turn before continuing the prompt", async () => {
+    const { protocol } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "thread-source" }, model: "gpt-5.5" };
+        if (method === "thread/turns/list") return { data: [], nextCursor: null, backwardsCursor: null };
+        if (method === "thread/fork") return { thread: { id: "thread-fork" } };
+        if (method === "turn/start") return { turn: { id: "turn-anchored" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-fork", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "从这里继续修复",
+      permission: "ask",
+      resumeSessionId: "thread-source",
+      runtimeCommand: {
+        type: "session_fork",
+        sourceTurnId: "turn-source",
+        mode: "fork",
+        excludeTurns: true,
+      },
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.find((call) => call.method === "thread/fork")).toMatchObject({
+      params: {
+        threadId: "thread-source",
+        turnId: "turn-source",
+        excludeTurns: true,
+      },
+    });
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart).toMatchObject({
+      params: { threadId: "thread-fork" },
+    });
+    expect(turnStart.params.input[0].text).toBe("从这里继续修复");
   });
 
   it("reads Codex config diagnostics through config/read and configRequirements/read", async () => {

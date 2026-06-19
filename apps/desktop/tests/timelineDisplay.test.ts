@@ -700,7 +700,7 @@ describe("timeline event expansion", () => {
     });
   });
 
-  it("每条非流式 Agent 最终回复都可发起分叉当前会话", async () => {
+  it("每条非流式 Agent 最终回复都可设置继续或分叉锚点", async () => {
     const view = await renderAgentTimeline({
         canStartSessionFork: true,
         events: [
@@ -710,14 +710,20 @@ describe("timeline event expansion", () => {
     });
 
     await waitFor(() => {
-      expect(view.getAllByRole("button", { name: "分叉当前会话" })).toHaveLength(2);
+      expect(view.getAllByRole("button", { name: "从这里继续" })).toHaveLength(2);
+      expect(view.getAllByRole("button", { name: "从这里分叉" })).toHaveLength(2);
     });
-    const forkButtons = view.getAllByRole("button", { name: "分叉当前会话" });
+    const continueButtons = view.getAllByRole("button", { name: "从这里继续" });
+    const forkButtons = view.getAllByRole("button", { name: "从这里分叉" });
     expect(forkButtons).toHaveLength(2);
 
+    await fireEvent.click(continueButtons[0]);
     await fireEvent.click(forkButtons[0]);
 
-    expect(view.emitted("start-session-fork")?.length).toBe(1);
+    expect(view.emitted("start-session-fork")).toEqual([
+      [{ sourceTurnId: "reply-fork-1", mode: "continue" }],
+      [{ sourceTurnId: "reply-fork-1", mode: "fork" }],
+    ]);
   });
 
   it("流式最终回复不显示分叉当前会话入口", async () => {
@@ -731,7 +737,8 @@ describe("timeline event expansion", () => {
     });
 
     await waitFor(() => {
-      expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+      expect(view.queryByRole("button", { name: "从这里继续" })).toBeNull();
+      expect(view.queryByRole("button", { name: "从这里分叉" })).toBeNull();
     });
   });
 
@@ -744,7 +751,8 @@ describe("timeline event expansion", () => {
     });
 
     await waitFor(() => {
-      expect(view.queryByRole("button", { name: "分叉当前会话" })).toBeNull();
+      expect(view.queryByRole("button", { name: "从这里继续" })).toBeNull();
+      expect(view.queryByRole("button", { name: "从这里分叉" })).toBeNull();
     });
   });
 

@@ -330,6 +330,10 @@ pub(crate) enum ChatRuntimeCommand {
     SessionFork {
         #[serde(default)]
         exclude_turns: Option<bool>,
+        #[serde(default)]
+        source_turn_id: Option<String>,
+        #[serde(default)]
+        mode: Option<String>,
     },
     #[serde(rename = "session_management")]
     SessionManagement {
