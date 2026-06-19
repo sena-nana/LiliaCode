@@ -4,6 +4,7 @@ import { Plus } from "lucide-vue-next";
 import type {
   AgentTimelineEvent,
   AskUserResult,
+  ChatBranchAnchor,
   ChatAttachment,
   ChatComposerState,
   ChatConversationReference,
@@ -114,6 +115,7 @@ const props = defineProps<{
   restoreDraftConversationReferences?: ChatConversationReference[];
   insertDraftTextKey: number;
   insertDraftTextContent: string;
+  pendingBranchAnchor: ChatBranchAnchor | null;
   pendingAgentActions: PendingAgentAction[];
   hasBlockingPendingAction: boolean;
   currentLiliaGoal: LiliaThreadGoal | null;
@@ -145,6 +147,7 @@ const emit = defineEmits<{
   "refresh-lilia-goal": [];
   "clear-lilia-goal": [];
   "insert-draft-text": [text: string];
+  "clear-branch-anchor": [];
   send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
   "start-lilia-review": [
     content: string,
@@ -159,7 +162,7 @@ const emit = defineEmits<{
     target: LiliaReviewTarget,
   ];
   "start-lilia-compact": [];
-  "start-session-fork": [];
+  "start-session-fork": [anchor: ChatBranchAnchor];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
@@ -384,7 +387,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
             @open-image="emit('open-image', $event)"
             @insert-draft-text="emit('insert-draft-text', $event)"
             @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
-            @start-session-fork="emit('start-session-fork')"
+            @start-session-fork="emit('start-session-fork', $event)"
           >
             <template #empty-actions>
               <ChatSuggestions
@@ -427,6 +430,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   :restore-draft-conversation-references="restoreDraftConversationReferences"
                   :insert-draft-text-key="insertDraftTextKey"
                   :insert-draft-text-content="insertDraftTextContent"
+                  :pending-branch-anchor="pendingBranchAnchor"
                   @send="emitSend"
                   @start-lilia-review="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-review', content, outgoingAttachments, conversationReferences, target)"
                   @start-lilia-fix-suggestion="(content, outgoingAttachments, conversationReferences, target) => emit('start-lilia-fix-suggestion', content, outgoingAttachments, conversationReferences, target)"
@@ -441,6 +445,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @resolve-tool-consent="(decision, message, updatedInput) => emit('resolve-tool-consent', decision, message, updatedInput)"
                   @open-image="emit('open-image', $event)"
                   @draft-empty-change="composerDraftEmpty = $event"
+                  @clear-branch-anchor="emit('clear-branch-anchor')"
                 />
                 <div
                   v-else

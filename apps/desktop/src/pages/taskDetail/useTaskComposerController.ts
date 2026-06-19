@@ -3,6 +3,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
 import type {
   AskUserResult,
+  ChatBranchAnchor,
   ChatAttachment,
   ChatBackendKind,
   ChatContextUsage,
@@ -143,6 +144,7 @@ export function useTaskComposerController(options: {
   const restoreDraftConversationReferences = ref<ChatConversationReference[]>([]);
   const insertDraftTextKey = ref(0);
   const insertDraftTextContent = ref("");
+  const pendingBranchAnchor = ref<ChatBranchAnchor | null>(null);
   const pendingAskUser = useAskUserForTask(() => props.taskId);
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
@@ -376,7 +378,21 @@ export function useTaskComposerController(options: {
     }
 
     try {
-      await sendAgentMessage({ turn: { content, outgoingAttachments, outgoingConversationReferences } });
+      const branchAnchor = pendingBranchAnchor.value;
+      await sendAgentMessage({
+        turn: { content, outgoingAttachments, outgoingConversationReferences },
+        runtimeCommand: branchAnchor
+          ? {
+            type: "session_fork",
+            excludeTurns: true,
+            sourceTurnId: branchAnchor.sourceTurnId,
+            mode: branchAnchor.mode,
+          }
+          : null,
+      });
+      if (branchAnchor && pendingBranchAnchor.value === branchAnchor) {
+        pendingBranchAnchor.value = null;
+      }
       attachments.value = [];
     } catch {
       // sendAgentMessage 已经把失败写入 timeline；这里吞掉异常避免 Vue 事件处理链重复报错。
@@ -462,9 +478,20 @@ export function useTaskComposerController(options: {
     await actions.onStartLiliaCompact();
   }
 
-  async function onStartSessionFork() {
+  async function onStartSessionFork(anchor?: ChatBranchAnchor) {
+    if (anchor?.sourceTurnId) {
+      pendingBranchAnchor.value = {
+        sourceTurnId: anchor.sourceTurnId,
+        mode: anchor.mode,
+      };
+      return;
+    }
     const actions = await getLiliaWorkflowActions();
     await actions.onStartSessionFork();
+  }
+
+  function onClearBranchAnchor() {
+    pendingBranchAnchor.value = null;
   }
 
   async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
@@ -887,6 +914,7 @@ export function useTaskComposerController(options: {
     restoreDraftConversationReferences,
     insertDraftTextKey,
     insertDraftTextContent,
+    pendingBranchAnchor,
     pendingAskUser,
     pendingAskUsers,
     pendingToolConsent,
@@ -905,6 +933,7 @@ export function useTaskComposerController(options: {
     onStartLiliaFixSuggestion,
     onStartLiliaCompact,
     onStartSessionFork,
+    onClearBranchAnchor,
     onStartLiliaBatchApply,
     onSetLiliaGoal,
     onRefreshLiliaGoal,

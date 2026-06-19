@@ -10,7 +10,7 @@ import {
   type CSSProperties,
 } from "vue";
 import { Copy, MessageSquarePlus, Quote } from "lucide-vue-next";
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import type { AgentTimelineEvent, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -62,7 +62,7 @@ const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "insert-draft-text": [text: string];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
-  "start-session-fork": [];
+  "start-session-fork": [anchor: ChatBranchAnchor];
 }>();
 
 const scroller = ref<HTMLElement | null>(null);
@@ -448,7 +448,7 @@ watch(
           @retry-event="emit('retry-event', $event)"
           @open-image="emit('open-image', $event)"
           @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
-          @start-session-fork="emit('start-session-fork')"
+          @start-session-fork="emit('start-session-fork', $event)"
         />
         <div
           v-else-if="shouldRenderTimeline"

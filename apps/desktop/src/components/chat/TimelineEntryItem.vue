@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-vue-next";
-import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
+import type { AgentTimelineEvent, AgentTimelineEventStatus, ChatBranchAnchor } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -76,7 +76,7 @@ const emit = defineEmits<{
   "retry-event": [event: AgentTimelineEvent];
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
-  "start-session-fork": [];
+  "start-session-fork": [anchor: ChatBranchAnchor];
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
@@ -433,7 +433,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 @retry-event="emit('retry-event', $event)"
                 @open-image="emit('open-image', $event)"
                 @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
-                @start-session-fork="emit('start-session-fork')"
+                @start-session-fork="emit('start-session-fork', $event)"
               />
             </ol>
           </div>
@@ -451,7 +451,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
               :can-start-session-fork="canStartSessionFork"
               @open-image="emit('open-image', $event)"
               @start-lilia-batch-apply="emit('start-lilia-batch-apply', $event)"
-              @start-session-fork="emit('start-session-fork')"
+              @start-session-fork="emit('start-session-fork', $event)"
             />
             <TimelineDeclaredEvent
               v-else

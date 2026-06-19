@@ -168,9 +168,18 @@ export interface LiliaConfigDiagnosticsWorkflow {
   includeLayers?: boolean;
 }
 
+export type SessionForkMode = "continue" | "fork";
+
 export interface SessionForkRuntimeCommand {
   type: "session_fork";
   excludeTurns?: boolean;
+  sourceTurnId?: string;
+  mode?: SessionForkMode;
+}
+
+export interface ChatBranchAnchor {
+  sourceTurnId: string;
+  mode: SessionForkMode;
 }
 
 export interface LiliaRuntimeSettingsCommon {

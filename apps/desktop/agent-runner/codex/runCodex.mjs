@@ -505,8 +505,12 @@ function readCodexMemoryResetWorkflow(cmd) {
 function readCodexThreadForkRuntimeCommand(cmd) {
   const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
   if (command?.type !== "session_fork") return null;
+  const sourceTurnId = stringOrNull(command.sourceTurnId)?.trim() || null;
   return {
     excludeTurns: command.excludeTurns !== false,
+    sourceTurnId,
+    mode: command.mode === "continue" ? "continue" : "fork",
+    continueAfterFork: Boolean(sourceTurnId && stringOrNull(cmd?.prompt)?.trim()),
   };
 }
 
@@ -1468,11 +1472,7 @@ async function runCodexMemoryResetWorkflow(server, threadId, cmd, ctx) {
   });
 }
 
-async function runCodexThreadForkRuntimeCommand(server, threadId, cmd, ctx, cwdFn = process.cwd) {
-  const command = readCodexThreadForkRuntimeCommand(cmd);
-  if (!command) return false;
-  await flushCodexRuntimeSettings(ctx);
-  emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "started");
+function buildCodexThreadForkParams(threadId, cmd, command, cwdFn) {
   const settings = normalizeCodexSettings(cmd);
   const params = {
     threadId,
@@ -1480,35 +1480,69 @@ async function runCodexThreadForkRuntimeCommand(server, threadId, cmd, ctx, cwdF
     approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
     excludeTurns: command.excludeTurns,
   };
+  if (command.sourceTurnId) params.turnId = command.sourceTurnId;
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   assignCodexAdvancedThreadParams(params, settings);
+  return params;
+}
+
+async function forkCodexThreadForCommand(server, threadId, cmd, ctx, command, cwdFn, options = {}) {
+  await flushCodexRuntimeSettings(ctx);
+  emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "started");
+  const params = buildCodexThreadForkParams(threadId, cmd, command, cwdFn);
   try {
     const result = await server.request("thread/fork", params);
     const forkedThreadId = codexThreadIdFromForkResult(result);
     if (!forkedThreadId) throw new Error("Codex thread/fork did not return a thread id");
     ctx.lastThreadId = forkedThreadId;
     ctx.threadId = forkedThreadId;
+    if (options.updateCommandResume) cmd.resumeSessionId = forkedThreadId;
     ctx.protocol.emitTimeline({
       kind: "diagnostic",
       status: "success",
       title: CODEX_THREAD_FORK_TIMELINE.successTitle,
-      summary: CODEX_THREAD_FORK_TIMELINE.successSummary,
+      summary: options.summary || CODEX_THREAD_FORK_TIMELINE.successSummary,
       payload: {
         backend: "codex",
         subkind: CODEX_THREAD_FORK_TIMELINE.subkind,
         method: CODEX_THREAD_FORK_TIMELINE.method,
         sourceThreadId: threadId,
+        sourceTurnId: command.sourceTurnId,
         threadId: forkedThreadId,
         excludeTurns: command.excludeTurns,
+        mode: command.mode,
       },
-      sourceId: `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:completed:${threadId}:${forkedThreadId}`,
+      sourceId: options.sourceId?.(forkedThreadId)
+        || `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:completed:${threadId}:${forkedThreadId}`,
     });
-    emitCodexWorkflowDone(ctx, forkedThreadId);
+    return forkedThreadId;
   } catch (err) {
     emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "error", err);
     throw err;
   }
+}
+
+async function runCodexThreadForkRuntimeCommand(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const command = readCodexThreadForkRuntimeCommand(cmd);
+  if (!command) return false;
+  if (command.continueAfterFork) return false;
+  const forkedThreadId = await forkCodexThreadForCommand(server, threadId, cmd, ctx, command, cwdFn);
+  emitCodexWorkflowDone(ctx, forkedThreadId);
   return true;
+}
+
+async function runCodexPromptSessionFork(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  const command = readCodexThreadForkRuntimeCommand(cmd);
+  if (!command?.continueAfterFork) return threadId;
+  if (!threadId) throw new Error("当前 Codex task 没有可 fork 的 thread");
+  return forkCodexThreadForCommand(server, threadId, cmd, ctx, command, cwdFn, {
+    updateCommandResume: true,
+    summary: command.mode === "continue"
+      ? "Codex thread 已从所选轮次继续"
+      : "Codex thread 已从所选轮次 fork，本轮将在分叉 thread 中继续",
+    sourceId: (forkedThreadId) =>
+      `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:anchored:${threadId}:${command.sourceTurnId}:${forkedThreadId}`,
+  });
 }
 
 function shouldRunCodexAutoSessionFork(cmd) {
@@ -2470,6 +2504,13 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
       ? await requireCodexPlanModePreset(server, context.protocol)
       : null;
     threadId = await runCodexAutoSessionFork(
+      server,
+      threadId,
+      cmd,
+      ctx,
+      context.cwd || process.cwd,
+    );
+    threadId = await runCodexPromptSessionFork(
       server,
       threadId,
       cmd,

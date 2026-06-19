@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
-import { GitFork, WandSparkles } from "lucide-vue-next";
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import { CornerDownRight, GitFork, WandSparkles } from "lucide-vue-next";
+import type { AgentTimelineEvent, ChatBranchAnchor, SessionForkMode } from "@lilia/contracts";
 import type { LiliaBatchApplyInput } from "./liliaBatchApply";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { measurePerfAsync } from "../../utils/perf";
@@ -51,14 +51,16 @@ const canApplySuggestion = computed(() =>
 const canStartSessionFork = computed(() =>
   props.canStartSessionFork &&
   !props.streaming &&
-  props.event.status === "success" &&
-  props.event.kind === "message",
+  props.event.kind === "message" &&
+  typeof props.event.turnId === "string" &&
+  props.event.turnId.length > 0 &&
+  ["success", "completed", "done"].includes(props.event.status),
 );
 
 const emit = defineEmits<{
   "open-image": [image: ChatImageViewerSource];
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
-  "start-session-fork": [];
+  "start-session-fork": [anchor: ChatBranchAnchor];
 }>();
 
 function startLiliaBatchApply() {
@@ -67,6 +69,14 @@ function startLiliaBatchApply() {
     sourceTurnId: props.event.turnId,
     sourceKind: sourceKind.value,
     sourceSummary: content.value,
+  });
+}
+
+function startBranchAnchor(mode: SessionForkMode) {
+  if (!canStartSessionFork.value || !props.event.turnId) return;
+  emit("start-session-fork", {
+    sourceTurnId: props.event.turnId,
+    mode,
   });
 }
 </script>
@@ -103,9 +113,19 @@ function startLiliaBatchApply() {
         v-if="canStartSessionFork"
         type="button"
         class="timeline-card--final-reply__action timeline-card--final-reply__action--ghost"
-        title="分叉当前会话"
-        aria-label="分叉当前会话"
-        @click="emit('start-session-fork')"
+        title="从这里继续"
+        aria-label="从这里继续"
+        @click="startBranchAnchor('continue')"
+      >
+        <CornerDownRight :size="14" aria-hidden="true" />
+      </button>
+      <button
+        v-if="canStartSessionFork"
+        type="button"
+        class="timeline-card--final-reply__action timeline-card--final-reply__action--ghost"
+        title="从这里分叉"
+        aria-label="从这里分叉"
+        @click="startBranchAnchor('fork')"
       >
         <GitFork :size="14" aria-hidden="true" />
       </button>

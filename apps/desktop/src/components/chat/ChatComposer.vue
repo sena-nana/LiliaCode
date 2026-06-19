@@ -27,6 +27,7 @@ import {
 } from "lucide-vue-next";
 import type {
   AskUserResult,
+  ChatBranchAnchor,
   ChatAttachment,
   ChatComposerState,
   ChatConversationReference,
@@ -193,6 +194,7 @@ const props = defineProps<{
   restoreDraftConversationReferences?: ChatConversationReference[];
   insertDraftTextKey?: number;
   insertDraftTextContent?: string;
+  pendingBranchAnchor?: ChatBranchAnchor | null;
 }>();
 
 const emit = defineEmits<{
@@ -223,6 +225,7 @@ const emit = defineEmits<{
   ];
   "open-image": [image: ChatImageViewerSource];
   "draft-empty-change": [empty: boolean];
+  "clear-branch-anchor": [];
   interrupt: [];
 }>();
 
@@ -830,9 +833,10 @@ watch(
     Boolean(contextUsageForToolbar.value),
     props.state.planMode,
     props.state.goalMode,
+    Boolean(props.pendingBranchAnchor),
   ] as const,
-  ([attachmentsCount, hasContextUsage, planMode, goalMode]) => {
-    if (attachmentsCount > 0 || hasContextUsage || planMode || goalMode) {
+  ([attachmentsCount, hasContextUsage, planMode, goalMode, hasBranchAnchor]) => {
+    if (attachmentsCount > 0 || hasContextUsage || planMode || goalMode || hasBranchAnchor) {
       requestComposerChrome();
     }
   },
@@ -1653,6 +1657,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :prompt-optimize-error="promptOptimizeError"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
         :context-usage="contextUsageForToolbar"
+        :pending-branch-anchor="pendingBranchAnchor ?? null"
         :send-title="sendTitle"
         :send-aria-label="sendAriaLabel"
         @pick-attachments="emit('pick-attachments')"
@@ -1663,6 +1668,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         @toggle-goal-mode="toggleGoalMode"
         @start-lilia-compact="emit('start-lilia-compact')"
         @optimize-prompt="optimizeCurrentPrompt"
+        @clear-branch-anchor="emit('clear-branch-anchor')"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />
