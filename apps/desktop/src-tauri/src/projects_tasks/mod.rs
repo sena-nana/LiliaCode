@@ -4,6 +4,7 @@ mod milestone_commands;
 mod ordering;
 mod project_commands;
 mod queries;
+mod relations;
 mod task_commands;
 mod types;
 

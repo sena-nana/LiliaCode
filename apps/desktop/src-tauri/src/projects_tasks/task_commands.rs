@@ -10,6 +10,9 @@ use crate::BACKEND_CODEX;
 use super::events::emit_tasks_changed;
 use super::ordering::next_task_sort_order;
 use super::queries::{build_task, insert_task_with_deps, load_project_deps, load_task_deps};
+use super::relations::{
+    normalize_dependency_ids, replace_task_dependencies, task_project_id, validate_parent,
+};
 use super::types::{NewTask, SidebarConversationSummaryRow, TaskRow};
 
 #[tauri::command]
@@ -102,9 +105,7 @@ pub fn task_list_sidebar_conversations(
         .map_err(|e| format!("task_list_sidebar_conversations: query 失败：{e}"))?;
     let mut out = Vec::new();
     for row in rows {
-        out.push(
-            row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?,
-        );
+        out.push(row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?);
     }
     Ok(out)
 }
@@ -137,6 +138,15 @@ pub fn task_create(
 ) -> Result<TaskRow, String> {
     let conn = store.conn()?;
     let id = Uuid::new_v4().to_string();
+    validate_parent(
+        &conn,
+        &id,
+        project_id.as_deref(),
+        parent_id.as_deref(),
+        "task_create",
+    )?;
+    let depends_on =
+        normalize_dependency_ids(&id, project_id.as_deref(), depends_on, &conn, "task_create")?;
     let now = now_millis();
     let sort_order = next_task_sort_order(&conn, project_id.as_deref(), "task_create")?;
     insert_task_with_deps(
@@ -253,6 +263,20 @@ pub fn task_promote(
 ) -> Result<TaskRow, String> {
     let conn = store.conn()?;
     let now = now_millis();
+    validate_parent(
+        &conn,
+        &id,
+        project_id.as_deref(),
+        parent_id.as_deref(),
+        "task_promote",
+    )?;
+    let depends_on = normalize_dependency_ids(
+        &id,
+        project_id.as_deref(),
+        depends_on,
+        &conn,
+        "task_promote",
+    )?;
     let sort_order = next_task_sort_order(&conn, project_id.as_deref(), "task_promote")?;
     insert_task_with_deps(
         &conn,
@@ -292,6 +316,37 @@ pub fn task_promote(
         None,
     );
     Ok(row)
+}
+
+#[tauri::command]
+pub fn task_update_dependencies(
+    id: String,
+    depends_on: Vec<String>,
+    store: State<'_, LiliaStore>,
+    app: AppHandle,
+) -> Result<TaskRow, String> {
+    let conn = store.conn()?;
+    let project_id = task_project_id(&conn, &id, "task_update_dependencies")?
+        .ok_or_else(|| "task_update_dependencies: 任务不存在".to_string())?;
+    let depends_on = normalize_dependency_ids(
+        &id,
+        project_id.as_deref(),
+        depends_on,
+        &conn,
+        "task_update_dependencies",
+    )?;
+    replace_task_dependencies(&conn, &id, &depends_on, "task_update_dependencies")?;
+    let deps_map = load_task_deps(&conn, &id)?;
+    let task = conn
+        .query_row(
+            r#"SELECT id, project_id, session_id, title, title_source, status, created_at, parent_id, sort_order, pinned
+               FROM tasks WHERE id = ?1 AND archived = 0"#,
+            params![id],
+            |row| build_task(row, &deps_map),
+        )
+        .map_err(|e| format!("task_update_dependencies: 更新后读取失败：{e}"))?;
+    emit_tasks_changed(&app, project_id);
+    Ok(task)
 }
 
 #[tauri::command]

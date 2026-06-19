@@ -277,7 +277,7 @@ const baseTasks: TaskRow[] = [
     titleSource: "auto",
     status: "running",
     createdAt: 2000,
-    parentId: null,
+    parentId: "t-001",
     dependsOn: ["t-001"],
     sortOrder: 1,
     pinned: false,
@@ -2752,12 +2752,38 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const newProjectId = args.newProjectId === null || args.newProjectId === undefined
         ? null
         : String(args.newProjectId);
+      const newParentId = args.newParentId === null || args.newParentId === undefined
+        ? null
+        : String(args.newParentId);
       tasks = tasks.map((task) =>
         task.id === taskId
-          ? { ...task, projectId: newProjectId, sortOrder: Number.MAX_SAFE_INTEGER }
+          ? {
+              ...task,
+              projectId: newProjectId,
+              parentId: newParentId,
+              sortOrder: Number.MAX_SAFE_INTEGER,
+            }
+          : task.parentId === taskId && task.projectId !== newProjectId
+            ? { ...task, projectId: newProjectId }
           : task
       );
       return undefined;
+    }
+
+    case "task_update_dependencies": {
+      const id = String(args.id);
+      const dependsOn = Array.isArray(args.dependsOn)
+        ? [...new Set(args.dependsOn.map(String).filter((dep) => dep && dep !== id))]
+        : [];
+      let row: TaskRow | null = null;
+      tasks = tasks.map((task) => {
+        if (task.id !== id) return task;
+        row = { ...task, dependsOn };
+        return row;
+      });
+      if (!row) throw new Error("task_update_dependencies: 任务不存在");
+      emitTauriEvent("tasks:changed", { projectId: row.projectId });
+      return cloneTask(row);
     }
 
     case "task_archive": {

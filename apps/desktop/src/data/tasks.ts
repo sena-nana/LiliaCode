@@ -465,8 +465,13 @@ export async function reparentTask(
   taskId: string,
   sourceProjectId: string | null,
   targetProjectId: string | null,
+  targetParentId: string | null = null,
 ): Promise<void> {
-  await invoke("task_reparent", { taskId, newProjectId: targetProjectId });
+  await invoke("task_reparent", {
+    taskId,
+    newProjectId: targetProjectId,
+    newParentId: targetParentId,
+  });
   if (sourceProjectId) {
     const list = TASKS.value[sourceProjectId] ?? [];
     TASKS.value = {
@@ -479,6 +484,20 @@ export async function reparentTask(
   if (targetProjectId) {
     await refreshTasks(targetProjectId);
   } else {
+    await refreshOrphans();
+  }
+}
+
+export async function updateTaskDependencies(
+  taskId: string,
+  projectId: string | null,
+  dependsOn: string[],
+): Promise<void> {
+  const row = await invoke<TaskRow>("task_update_dependencies", { id: taskId, dependsOn });
+  upsertTaskRow(row);
+  if (projectId && row.projectId !== projectId) {
+    await refreshTasks(projectId);
+  } else if (!projectId && row.projectId !== null) {
     await refreshOrphans();
   }
 }

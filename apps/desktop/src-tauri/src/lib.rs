@@ -300,6 +300,7 @@ pub fn run() {
             projects_tasks::task_get,
             projects_tasks::task_create,
             projects_tasks::task_update,
+            projects_tasks::task_update_dependencies,
             projects_tasks::task_delete,
             projects_tasks::task_promote,
             projects_tasks::task_archive_project,

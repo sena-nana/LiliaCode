@@ -26,6 +26,15 @@ const emit = defineEmits<{
 }>();
 
 const taskById = computed(() => new Map(props.tasks.map((task) => [task.id, task])));
+const childCountByTaskId = computed(() => {
+  const out = new Map<string, number>();
+  const taskIds = new Set(props.tasks.map((task) => task.id));
+  for (const task of props.tasks) {
+    if (!task.parentId || !taskIds.has(task.parentId)) continue;
+    out.set(task.parentId, (out.get(task.parentId) ?? 0) + 1);
+  }
+  return out;
+});
 
 const linkedTasks = computed(() => {
   const seen = new Set<string>();
@@ -89,6 +98,15 @@ const milestoneViews = computed(() =>
 
 function isSaving(milestoneId: string): boolean {
   return props.savingMilestoneId === milestoneId;
+}
+
+function taskRelationMeta(task: Task): string {
+  const parts: string[] = [];
+  const childCount = childCountByTaskId.value.get(task.id) ?? 0;
+  if (task.parentId) parts.push("子任务");
+  if (childCount > 0) parts.push(`${childCount} 子任务`);
+  if (task.dependsOn.length > 0) parts.push(`${task.dependsOn.length} 依赖`);
+  return parts.join(" · ");
 }
 </script>
 
@@ -242,6 +260,9 @@ function isSaving(milestoneId: string): boolean {
                     <span :class="`roadmap-task__status roadmap-task__status--${task.status}`">
                       {{ statusLabel(task.status) }}
                     </span>
+                    <span v-if="taskRelationMeta(task)" class="roadmap-task__relation">
+                      {{ taskRelationMeta(task) }}
+                    </span>
                   </span>
                 </RouterLink>
               </li>
@@ -265,6 +286,9 @@ function isSaving(milestoneId: string): boolean {
                   <span class="roadmap-task-choice__title">{{ task.title }}</span>
                   <span :class="`roadmap-task__status roadmap-task__status--${task.status}`">
                     {{ statusLabel(task.status) }}
+                  </span>
+                  <span v-if="taskRelationMeta(task)" class="roadmap-task__relation">
+                    {{ taskRelationMeta(task) }}
                   </span>
                 </label>
               </li>

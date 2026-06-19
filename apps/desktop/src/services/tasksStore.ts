@@ -23,6 +23,7 @@ export {
   promoteDraftTask,
   reorderTasks,
   reparentTask,
+  updateTaskDependencies,
   resolveConversationRouteState,
 } from "../data/tasks";
 

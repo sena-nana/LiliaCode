@@ -1,4 +1,4 @@
-import { render, fireEvent, waitFor } from "@testing-library/vue";
+import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
@@ -119,6 +119,14 @@ async function waitForProjectConversations(view: Awaited<ReturnType<typeof rende
     await vi.dynamicImportSettled();
   }
   await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+}
+
+function getConversationRow(view: ReturnType<typeof render>, title: string): HTMLElement {
+  const row = view.getByText(title).closest(".sb-tree__row");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error(`未找到对话行：${title}`);
+  }
+  return row;
 }
 
 describe("ProjectTreeItem", () => {
@@ -245,5 +253,17 @@ describe("ProjectTreeItem", () => {
     expect(view.getByText("对话 5")).toBeInTheDocument();
     expect(view.getByText("对话 6")).toBeInTheDocument();
     expect(view.queryByRole("button", { name: "显示剩余对话" })).not.toBeInTheDocument();
+  });
+
+  it("项目对话会展示任务树层级和依赖提示", async () => {
+    const view = await renderProjectTreeItem();
+    await waitForProjectConversations(view);
+
+    const parentRow = getConversationRow(view, "接入 Claude Code 会话发现");
+    const childRow = getConversationRow(view, "打通 tsconfig paths 搜索");
+
+    expect(within(parentRow).getByText("1 子任务")).toHaveClass("sb-tree__meta");
+    expect(within(childRow).getByText(/子任务.*1 依赖/)).toHaveClass("sb-tree__meta");
+    expect(childRow).toHaveStyle("--task-tree-depth: 1");
   });
 });

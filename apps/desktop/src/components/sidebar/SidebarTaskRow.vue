@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
@@ -17,6 +17,8 @@ const props = defineProps<{
   active: boolean;
   archive?: (taskId: string) => Promise<boolean>;
   activity?: ConversationActivity | null;
+  depth?: number;
+  metaParts?: string[];
   projectLabel?: string | null;
   projectId: string | null;
   readonly?: boolean;
@@ -37,6 +39,9 @@ const emit = defineEmits<{
 }>();
 
 const confirming = ref(false);
+const taskDepthStyle = computed(() => ({
+  "--task-tree-depth": String(Math.min(Math.max(props.depth ?? 0, 0), 6)),
+}));
 
 const activityLabel: Record<ConversationActivity, string> = {
   running: "对话中",
@@ -161,6 +166,7 @@ function onClick() {
     :to="to"
     type="button"
     class="sb-tree__row"
+    :style="taskDepthStyle"
     :class="[
       `sb-tree__row--${rowKind}`,
       { 'is-active': active },
@@ -180,6 +186,7 @@ function onClick() {
     @mouseleave="onRowLeave"
   >
     <span class="sb-tree__name">{{ task.title }}</span>
+    <span v-if="metaParts?.length" class="sb-tree__meta">{{ metaParts.join(" · ") }}</span>
     <span v-if="projectLabel" class="sb-tree__project-label">{{ projectLabel }}</span>
     <span
       v-if="activity && !active"
