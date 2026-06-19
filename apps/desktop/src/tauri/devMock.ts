@@ -411,6 +411,13 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       } as T;
     case "assistant_ai_test_connection":
       return { ok: true, error: null, models: ["mock-assistant"], modelMatched: true } as T;
+    case "assistant_ai_optimize_prompt":
+      return [
+        "请基于当前上下文处理以下任务：",
+        text((args.input ?? {}) as Args, "prompt"),
+        "",
+        "要求：先做简单定位，明确本次修改范围，保留现有数据契约，不自动扩大任务。",
+      ].join("\n") as T;
     case "conversation_suggestions_get_settings":
       return { enabled: false, maxItems: 5 } as T;
     case "conversation_suggestions_get_sources":

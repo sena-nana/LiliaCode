@@ -282,6 +282,48 @@ describe("ChatComposer", () => {
     expect(view.emitted("send")).toBeUndefined();
   });
 
+  it("空输入时禁用提示词优化", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await requestComposerChrome(view);
+
+    expect(view.getByRole("button", { name: "优化提示词" })).toBeDisabled();
+  });
+
+  it("提示词优化按钮在发送按钮左侧且成功后替换草稿", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+    const input = await setComposerText(view, "修一下输入框按钮");
+    await requestComposerChrome(view);
+
+    const optimize = view.getByRole("button", { name: "优化提示词" });
+    const send = view.getByRole("button", { name: "发送" });
+    expect(optimize.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await fireEvent.click(optimize);
+    await waitFor(() => {
+      expect(composerText(input)).toBe("优化后：修一下输入框按钮");
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("assistant_ai_optimize_prompt", {
+      input: {
+        prompt: "修一下输入框按钮",
+        attachments: [],
+        conversationReferences: [],
+      },
+    }, undefined);
+    expect(view.emitted("send")).toBeUndefined();
+  });
+
 
   it("主输入框清空后只有浏览器填充 br 时显示 placeholder", async () => {
     const view = render(ChatComposer, {

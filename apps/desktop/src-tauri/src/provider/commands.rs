@@ -160,6 +160,14 @@ pub fn assistant_ai_test_connection(config: AssistantAIConfig) -> AssistantAITes
 }
 
 #[tauri::command]
+pub(crate) fn assistant_ai_optimize_prompt(
+    app: AppHandle,
+    input: assistant_ai::PromptOptimizeInput,
+) -> Result<String, String> {
+    assistant_ai::optimize_prompt(app, input)
+}
+
+#[tauri::command]
 pub fn router_get_mode(app: AppHandle, backend: String) -> String {
     load_router_mode(&app, &backend)
 }

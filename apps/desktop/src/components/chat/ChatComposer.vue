@@ -305,6 +305,8 @@ let specialInputRefreshScheduled = false;
 let specialInputRefreshSeq = 0;
 const composerToolbarComponent: ShallowRef<Component | null> = shallowRef(null);
 const composerPendingEntryActionsComponent: ShallowRef<Component | null> = shallowRef(null);
+const promptOptimizing = ref(false);
+const promptOptimizeError = ref<string | null>(null);
 let conversationSearchScope: EffectScope | null = null;
 let contextSearchScope: EffectScope | null = null;
 let slashCommandsScope: EffectScope | null = null;
@@ -733,6 +735,13 @@ const canInterrupt = computed(() =>
 );
 
 const canSubmitEntry = computed(() => canSend.value || canInterrupt.value);
+const canOptimizePrompt = computed(() =>
+  !hasPending.value &&
+  props.sending !== true &&
+  !actionsBlocked.value &&
+  !promptOptimizing.value &&
+  richInput.plainText.value.trim().length > 0
+);
 const hasPendingComposerUi = computed(() => hasPending.value && pendingInteractionReady.value);
 const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
 
@@ -999,6 +1008,41 @@ function blockActionsBriefly() {
     actionsBlocked.value = false;
     actionBlockTimerId = null;
   }, COMPOSER_ACTION_BLOCK_MS);
+}
+
+function promptOptimizeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || "提示词优化失败");
+}
+
+async function optimizeCurrentPrompt() {
+  if (!canOptimizePrompt.value) return;
+  promptOptimizing.value = true;
+  promptOptimizeError.value = null;
+  const prompt = richInput.plainText.value.trim();
+  try {
+    const { optimizePrompt } = await import("../../services/chat");
+    const optimized = await optimizePrompt({
+      prompt,
+      attachments: attachmentsForView.value,
+      conversationReferences: richInput.conversationReferences.value,
+    });
+    const nextPrompt = optimized.trim();
+    if (!nextPrompt) {
+      promptOptimizeError.value = "辅助模型返回空提示词";
+      return;
+    }
+    richInput.replaceWithText(
+      nextPrompt,
+      attachmentsForView.value,
+      richInput.conversationReferences.value,
+    );
+    clearComposerContextState();
+    blockActionsBriefly();
+  } catch (error) {
+    promptOptimizeError.value = promptOptimizeErrorMessage(error);
+  } finally {
+    promptOptimizing.value = false;
+  }
 }
 
 function send() {
@@ -1604,6 +1648,9 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :can-interrupt="canInterrupt"
         :can-submit-entry="canSubmitEntry"
         :actions-blocked="actionsBlocked"
+        :can-optimize-prompt="canOptimizePrompt"
+        :prompt-optimizing="promptOptimizing"
+        :prompt-optimize-error="promptOptimizeError"
         :compact-disabled="compactDisabled === true || sending === true || hasPending"
         :context-usage="contextUsageForToolbar"
         :send-title="sendTitle"
@@ -1615,6 +1662,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         @toggle-plan-mode="togglePlanMode"
         @toggle-goal-mode="toggleGoalMode"
         @start-lilia-compact="emit('start-lilia-compact')"
+        @optimize-prompt="optimizeCurrentPrompt"
         @submit-entry="submitEntry"
         @open-image="openAttachmentImage"
       />

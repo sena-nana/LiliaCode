@@ -221,6 +221,7 @@ pub fn run() {
             provider::assistant_ai_get_config,
             provider::assistant_ai_set_config,
             provider::assistant_ai_test_connection,
+            provider::assistant_ai_optimize_prompt,
             provider::agent_interaction_get_settings,
             provider::agent_interaction_set_settings,
             provider::agent_interaction_list_subagents,
