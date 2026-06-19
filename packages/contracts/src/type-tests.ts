@@ -262,6 +262,29 @@ export type RuntimeSettingsIsNotWorkflowTypeTest = Assert<
   > extends true ? false : true
 >;
 
+export type RemoteEnvironmentRuntimeCommandTypeTest = Assert<
+  Extends<
+    {
+      type: "remote_environment";
+      action: "add";
+      environmentId: "env-1";
+      environment: { id: "env-1"; name: "Windows VM" };
+    },
+    ChatRuntimeCommand
+  >
+>;
+
+export type RemoteEnvironmentIsNotWorkflowTypeTest = Assert<
+  Extends<
+    {
+      type: "remote_environment";
+      action: "select";
+      environmentId: "env-1";
+    },
+    ChatWorkflow
+  > extends true ? false : true
+>;
+
 export type SandboxDiagnosticsRuntimeCommandTypeTest = Assert<
   Extends<
     {

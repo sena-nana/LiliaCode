@@ -519,6 +519,8 @@ function readCodexConfigDiagnosticsWorkflow(cmd) {
 }
 
 const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
+const REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS = ["diagnose", "add", "select"];
+const REMOTE_ENVIRONMENT_ACTIONS = new Set(REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS);
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -569,6 +571,31 @@ function readCodexRuntimeSettingsCommand(cmd) {
     action,
     updates,
     ignoredProviderKeys,
+  };
+}
+
+function readCodexRemoteEnvironmentCommand(cmd) {
+  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  if (command?.type !== "remote_environment") return null;
+  const action = stringOrNull(command.action);
+  if (!REMOTE_ENVIRONMENT_ACTIONS.has(action)) {
+    throw new Error("Lilia remote environment command missing a valid action");
+  }
+  const environmentId = stringOrNull(command.environmentId)?.trim() || "";
+  const environment = jsonObjectOrNull(command.environment);
+  if (action === "add" && !environment) {
+    throw new Error("Lilia remote environment add requires environment");
+  }
+  if (action === "select" && !environmentId) {
+    throw new Error("Lilia remote environment select requires environmentId");
+  }
+  if (action === "add" && environmentId && !environment.id) {
+    environment.id = environmentId;
+  }
+  return {
+    action,
+    environmentId,
+    environment,
   };
 }
 
@@ -1634,6 +1661,119 @@ async function runCodexRuntimeSettingsCommand(server, threadId, cmd, ctx) {
   return true;
 }
 
+function emitCodexRemoteEnvironmentTimeline(ctx, input) {
+  const failed = input.status === "error";
+  const errorMessage = failed ? input.error?.message || String(input.error) : null;
+  ctx.protocol.emitTimeline({
+    kind: "diagnostic",
+    status: input.status,
+    title: input.title,
+    summary: errorMessage || input.summary,
+    payload: {
+      backend: "codex",
+      subkind: "remote_environment",
+      action: input.command.action,
+      threadId: input.threadId,
+      ...(input.method ? { method: input.method } : {}),
+      ...(input.environmentId ? { environmentId: input.environmentId } : {}),
+      ...(input.environments ? { environments: input.environments } : {}),
+      ...(input.result !== undefined ? { result: input.result } : {}),
+      ...(failed ? { error: errorMessage } : { native: true }),
+      ...(input.extraPayload || {}),
+    },
+    sourceId: input.sourceId,
+  });
+}
+
+async function runCodexRemoteEnvironmentCommand(server, threadId, cmd, ctx) {
+  const command = readCodexRemoteEnvironmentCommand(cmd);
+  if (!command) return false;
+  await flushCodexRuntimeSettings(ctx);
+  if (command.action === "diagnose") {
+    const environments = normalizeCodexSettings(cmd).environments || [];
+    emitCodexRemoteEnvironmentTimeline(ctx, {
+      status: "info",
+      title: "Codex remote environment diagnostics",
+      summary: environments.length
+        ? `当前配置 ${environments.length} 个 Codex remote environment`
+        : "当前没有配置 Codex remote environment",
+      threadId,
+      command,
+      environments,
+      extraPayload: {
+        supportedActions: REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS,
+      },
+      sourceId: `codex:remote-environment:diagnose:${threadId}`,
+    });
+    emitCodexWorkflowDone(ctx, threadId);
+    return true;
+  }
+
+  if (command.action === "add") {
+    try {
+      const result = await server.request("environment/add", command.environment);
+      emitCodexRemoteEnvironmentTimeline(ctx, {
+        status: "success",
+        title: "Codex remote environment added",
+        summary: command.environmentId || "Codex remote environment 已注册",
+        threadId,
+        command,
+        method: "environment/add",
+        environmentId: command.environmentId || stringOrNull(result?.environmentId) || stringOrNull(result?.environment?.id),
+        result,
+        sourceId: `codex:remote-environment:add:${threadId}:${command.environmentId || Date.now()}`,
+      });
+    } catch (err) {
+      emitCodexRemoteEnvironmentTimeline(ctx, {
+        status: "error",
+        title: "Codex remote environment add failed",
+        threadId,
+        command,
+        method: "environment/add",
+        environmentId: command.environmentId,
+        error: err,
+        sourceId: `codex:remote-environment:add:error:${threadId}`,
+      });
+      throw err;
+    }
+    emitCodexWorkflowDone(ctx, threadId);
+    return true;
+  }
+
+  const environments = [{ id: command.environmentId }];
+  try {
+    await server.request("thread/settings/update", {
+      threadId,
+      environments,
+    });
+    emitCodexRemoteEnvironmentTimeline(ctx, {
+      status: "success",
+      title: "Codex remote environment selected",
+      summary: command.environmentId,
+      threadId,
+      command,
+      method: "thread/settings/update",
+      environmentId: command.environmentId,
+      environments,
+      sourceId: `codex:remote-environment:select:${threadId}:${command.environmentId}`,
+    });
+  } catch (err) {
+    emitCodexRemoteEnvironmentTimeline(ctx, {
+      status: "error",
+      title: "Codex remote environment select failed",
+      threadId,
+      command,
+      method: "thread/settings/update",
+      environmentId: command.environmentId,
+      error: err,
+      sourceId: `codex:remote-environment:select:error:${threadId}:${command.environmentId}`,
+    });
+    throw err;
+  }
+  emitCodexWorkflowDone(ctx, threadId);
+  return true;
+}
+
 async function runCodexSandboxDiagnosticsCommand(server, threadId, cmd, ctx) {
   const command = readCodexSandboxDiagnosticsCommand(cmd);
   if (!command) return false;
@@ -1870,6 +2010,7 @@ const CODEX_WORKFLOW_RUNNERS = [
   { run: runCodexThreadForkRuntimeCommand, needsCwd: true },
   { run: runCodexConfigDiagnosticsWorkflow, needsCwd: true },
   { run: runCodexRuntimeSettingsCommand },
+  { run: runCodexRemoteEnvironmentCommand },
   { run: runCodexSandboxDiagnosticsCommand },
   { run: runCodexBatchApplyWorkflow, needsCwd: true },
   { run: runCodexFixSuggestionWorkflow, needsCwd: true, finalize: true },
