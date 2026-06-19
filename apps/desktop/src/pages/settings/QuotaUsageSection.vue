@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import type { ChartData, ChartOptions, ChartType, TooltipItem } from "chart.js";
 import {
   AlertTriangle,
   Coins,
@@ -12,11 +13,11 @@ import type {
   ChatBackendKind,
   CodexAccountQuotaCredits,
   CodexAccountQuotaStatus,
-  QuotaUsageDailyBucket,
   QuotaUsageStats,
   QuotaUsageStatsBackendFilter,
   QuotaUsageStatsDays,
 } from "@lilia/contracts";
+import QuotaChartCanvas from "./QuotaChartCanvas.vue";
 import {
   consumeCodexRateLimitResetCredit,
   getCodexAccountQuotaStatus,
@@ -40,12 +41,7 @@ type QuotaBreakdownItem = {
   meta: string;
   color: string;
 };
-type QuotaHeatmapCell = QuotaUsageDailyBucket & {
-  date: string;
-  weekStart: string;
-  level: number;
-  inRange: boolean;
-};
+type NumericChartData = ChartData<ChartType, number[], string>;
 
 const backendOptions: BackendOption[] = [
   { value: "all", label: "全部" },
@@ -55,6 +51,22 @@ const backendOptions: BackendOption[] = [
 const daysOptions: DaysOption[] = [
   { value: 7, label: "7 天" },
   { value: 30, label: "30 天" },
+];
+const chartPalette = {
+  input: "var(--accent)",
+  output: "var(--ok)",
+  cacheRead: "var(--warn)",
+  cacheCreate: "var(--text-muted)",
+  total: "var(--text)",
+  grid: "var(--border-soft)",
+  muted: "var(--text-muted)",
+};
+const breakdownPalette = [
+  "var(--accent)",
+  "var(--ok)",
+  "var(--warn)",
+  "var(--text)",
+  "var(--text-muted)",
 ];
 
 const selectedBackend = ref<QuotaUsageStatsBackendFilter>("all");
@@ -127,18 +139,6 @@ const accountUsageSummaryRows = computed(() => {
 const accountUsageBuckets = computed(() =>
   (officialQuota.value?.accountUsage?.dailyUsageBuckets ?? []).slice(-14),
 );
-const maxAccountUsageTokens = computed(() =>
-  Math.max(1, ...accountUsageBuckets.value.map((bucket) => bucket.tokens)),
-);
-const maxDailyTokens = computed(() =>
-  Math.max(1, ...(stats.value?.daily.map((bucket) => bucket.totalTokens) ?? [0])),
-);
-const heatmapWeeks = computed(() => buildHeatmapWeeks(stats.value?.daily ?? []));
-const heatmapMonthLabels = computed(() => buildHeatmapMonthLabels(heatmapWeeks.value));
-const heatmapSubtitle = computed(() => `${backendLabel(selectedBackend.value)} · 近 ${selectedDays.value} 天`);
-const heatmapLabel = computed(
-  () => `Token 消耗热度图（${heatmapSubtitle.value}）`,
-);
 const sortedBackends = computed(() =>
   [...(stats.value?.backends ?? [])].sort((a, b) => b.totalTokens - a.totalTokens),
 );
@@ -169,6 +169,215 @@ const toolBreakdown = computed(() =>
     (row) => `${formatNumber(row.callCount)} 次`,
   ),
 );
+const usageTrendChartLabel = computed(
+  () => `Token 用量趋势（${backendLabel(selectedBackend.value)} · 近 ${selectedDays.value} 天）`,
+);
+const usageTrendChartData = computed<NumericChartData>(() => {
+  const daily = stats.value?.daily ?? [];
+  return {
+    labels: daily.map((bucket) => formatDay(bucket.dayStart)),
+    datasets: [
+      tokenBarDataset("输入", daily.map((bucket) => bucket.inputTokens), chartPalette.input),
+      tokenBarDataset("输出", daily.map((bucket) => bucket.outputTokens), chartPalette.output),
+      tokenBarDataset("缓存命中", daily.map((bucket) => bucket.cacheReadTokens), chartPalette.cacheRead),
+      tokenBarDataset("缓存写入", daily.map((bucket) => bucket.cacheCreationTokens), chartPalette.cacheCreate),
+      {
+        type: "line",
+        label: "总量",
+        data: daily.map((bucket) => bucket.totalTokens),
+        yAxisID: "total",
+        borderColor: chartPalette.total,
+        backgroundColor: chartPalette.total,
+        borderWidth: 2,
+        pointRadius: 2,
+        pointHoverRadius: 3,
+        tension: 0.25,
+        fill: false,
+        order: 0,
+      },
+    ],
+  };
+});
+const usageTrendChartOptions = computed<ChartOptions>(() => ({
+  interaction: {
+    intersect: false,
+    mode: "index",
+  },
+  plugins: {
+    legend: {
+      position: "bottom",
+      labels: {
+        boxWidth: 10,
+        boxHeight: 10,
+        color: chartPalette.muted,
+        usePointStyle: true,
+      },
+    },
+    tooltip: {
+      callbacks: {
+        label(context: TooltipItem<ChartType>) {
+          const value = typeof context.parsed.y === "number" ? context.parsed.y : context.parsed;
+          return `${context.dataset.label ?? ""}: ${formatCompactNumber(Number(value))} tokens`;
+        },
+        footer(items: TooltipItem<ChartType>[]) {
+          const index = items[0]?.dataIndex;
+          const bucket = typeof index === "number" ? stats.value?.daily[index] : null;
+          if (!bucket) return "";
+          return [
+            `成本 ${formatRecordCost(bucket.knownCostUsd)}`,
+            `记录 ${formatNumber(bucket.recordCount)}`,
+          ];
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      stacked: true,
+      grid: {
+        display: false,
+      },
+      ticks: {
+        autoSkip: selectedDays.value === 30,
+        maxRotation: 0,
+        color: chartPalette.muted,
+      },
+    },
+    y: {
+      stacked: true,
+      beginAtZero: true,
+      grid: {
+        color: chartPalette.grid,
+      },
+      ticks: {
+        color: chartPalette.muted,
+        callback(value) {
+          return formatCompactNumber(Number(value));
+        },
+      },
+    },
+    total: {
+      display: false,
+      beginAtZero: true,
+      grid: {
+        display: false,
+      },
+    },
+  },
+}));
+const backendChartData = computed<NumericChartData>(() => ({
+  labels: sortedBackends.value.map((row) => backendLabel(row.backend)),
+  datasets: [
+    {
+      label: "Token",
+      data: sortedBackends.value.map((row) => row.totalTokens),
+      backgroundColor: sortedBackends.value.map((_, index) =>
+        breakdownPalette[index % breakdownPalette.length]
+      ),
+      borderWidth: 0,
+      borderRadius: 4,
+    },
+  ],
+}));
+const backendChartOptions = computed<ChartOptions>(() => ({
+  indexAxis: "y",
+  plugins: {
+    legend: {
+      display: false,
+    },
+    tooltip: {
+      callbacks: {
+        label(context: TooltipItem<ChartType>) {
+          const value = Number(context.raw ?? 0);
+          return `${formatCompactNumber(value)} tokens · ${backendShareText(value)}`;
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      beginAtZero: true,
+      grid: {
+        color: chartPalette.grid,
+      },
+      ticks: {
+        color: chartPalette.muted,
+        callback(value) {
+          return formatCompactNumber(Number(value));
+        },
+      },
+    },
+    y: {
+      grid: {
+        display: false,
+      },
+      ticks: {
+        color: chartPalette.muted,
+      },
+    },
+  },
+}));
+const projectBreakdownChartData = computed(() => breakdownChartData(projectBreakdown.value));
+const conversationBreakdownChartData = computed(() => breakdownChartData(conversationBreakdown.value));
+const toolBreakdownChartData = computed(() => breakdownChartData(toolBreakdown.value));
+const breakdownChartOptions = computed<ChartOptions>(() => ({
+  cutout: "62%",
+  plugins: {
+    legend: {
+      display: false,
+    },
+    tooltip: {
+      callbacks: {
+        label(context: TooltipItem<ChartType>) {
+          const value = Number(context.raw ?? 0);
+          return `${context.label}: ${formatCompactNumber(value)} · ${breakdownShareText(context)}`;
+        },
+      },
+    },
+  },
+}));
+const accountUsageChartData = computed<NumericChartData>(() => ({
+  labels: accountUsageBuckets.value.map((bucket) => bucket.startDate.slice(5)),
+  datasets: [
+    {
+      label: "Token",
+      data: accountUsageBuckets.value.map((bucket) => bucket.tokens),
+      backgroundColor: chartPalette.input,
+      borderColor: chartPalette.input,
+      borderWidth: 0,
+      borderRadius: 3,
+    },
+  ],
+}));
+const accountUsageChartOptions = computed<ChartOptions>(() => ({
+  plugins: {
+    legend: {
+      display: false,
+    },
+    tooltip: {
+      callbacks: {
+        label(context: TooltipItem<ChartType>) {
+          return `${formatNumber(Number(context.raw ?? 0))} tokens`;
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      display: false,
+      grid: {
+        display: false,
+      },
+    },
+    y: {
+      display: false,
+      beginAtZero: true,
+      grid: {
+        display: false,
+      },
+    },
+  },
+}));
 const costText = computed(() => {
   const coverage = stats.value?.cost;
   if (!coverage || coverage.totalRecordCount === 0 || coverage.knownCostUsd === null) return "--";
@@ -208,7 +417,6 @@ function topBreakdown<T>(
   valueOf: (row: T) => number,
   metaOf: (row: T) => string,
 ): QuotaBreakdownItem[] {
-  const palette = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--text)", "var(--text-muted)"];
   const normalized = rows
     .map((row) => ({
       key: keyOf(row),
@@ -221,7 +429,7 @@ function topBreakdown<T>(
     .slice(0, 5);
   return normalized.map((row, index) => ({
     ...row,
-    color: palette[index % palette.length],
+    color: breakdownPalette[index % breakdownPalette.length],
   }));
 }
 
@@ -232,144 +440,44 @@ function formatDay(value: number) {
   }).format(new Date(value));
 }
 
-function formatDayKey(value: number) {
-  return new Date(value).toISOString().slice(0, 10);
-}
-
-function parseDateOnly(date: string) {
-  return new Date(`${date}T00:00:00Z`);
-}
-
-function formatHeatmapMonth(month: string) {
-  const [, rawMonth] = month.split("-");
-  return `${Number(rawMonth)}月`;
-}
-
-function heatmapLevel(tokens: number, maxTokens: number) {
-  if (tokens <= 0) return 0;
-  return Math.min(4, Math.max(1, Math.ceil((tokens / maxTokens) * 4)));
-}
-
-function emptyHeatmapBucket(timestamp: number): QuotaUsageDailyBucket {
+function tokenBarDataset(label: string, data: number[], color: string) {
   return {
-    dayStart: timestamp,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheCreationTokens: 0,
-    totalTokens: 0,
-    knownCostUsd: null,
-    costRecordCount: 0,
-    recordCount: 0,
+    type: "bar" as const,
+    label,
+    data,
+    backgroundColor: color,
+    borderColor: color,
+    borderWidth: 0,
+    borderRadius: 3,
+    stack: "tokens",
   };
 }
 
-function buildHeatmapWeeks(days: readonly QuotaUsageDailyBucket[]): QuotaHeatmapCell[][] {
-  if (!days.length) return [];
-  const sorted = [...days].sort((a, b) => a.dayStart - b.dayStart);
-  const maxTokens = Math.max(1, ...sorted.map((day) => day.totalTokens));
-  const rangeStart = formatDayKey(sorted[0].dayStart);
-  const rangeEnd = formatDayKey(sorted[sorted.length - 1].dayStart);
-  const start = parseDateOnly(rangeStart);
-  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
-  const end = parseDateOnly(rangeEnd);
-  end.setUTCDate(end.getUTCDate() + (6 - end.getUTCDay()));
-  const byDate = new Map(sorted.map((day) => [formatDayKey(day.dayStart), day]));
-  const weeks: QuotaHeatmapCell[][] = [];
-  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
-    const week: QuotaHeatmapCell[] = [];
-    for (let offset = 0; offset < 7; offset += 1) {
-      const date = new Date(cursor);
-      date.setUTCDate(cursor.getUTCDate() + offset);
-      const key = date.toISOString().slice(0, 10);
-      const bucket = byDate.get(key) ?? emptyHeatmapBucket(date.getTime());
-      const inRange = key >= rangeStart && key <= rangeEnd;
-      week.push({
-        ...bucket,
-        date: key,
-        weekStart: cursor.toISOString().slice(0, 10),
-        level: inRange ? heatmapLevel(bucket.totalTokens, maxTokens) : 0,
-        inRange,
-      });
-    }
-    weeks.push(week);
-  }
-  return weeks;
+function backendShareText(tokens: number) {
+  if (totalTokens.value <= 0) return "0%";
+  return `${Math.round((tokens / totalTokens.value) * 100)}%`;
 }
 
-function buildHeatmapMonthLabels(weeks: readonly QuotaHeatmapCell[][]) {
-  let lastMonth = "";
-  return weeks.map((week, index) => {
-    const weekStart = week[0]?.weekStart ?? String(index);
-    const month = week
-      .filter((day) => day.inRange)
-      .map((day) => day.date.slice(0, 7))
-      .find((value) => value && value !== lastMonth) ?? "";
-    const label = month && month !== lastMonth ? formatHeatmapMonth(month) : "";
-    if (month) lastMonth = month;
-    return { key: weekStart, label };
-  });
+function breakdownChartData(items: QuotaBreakdownItem[]): NumericChartData {
+  return {
+    labels: items.map((item) => item.label),
+    datasets: [
+      {
+        data: items.map((item) => item.value),
+        backgroundColor: items.map((item) => item.color),
+        borderColor: "var(--bg)",
+        borderWidth: 2,
+        hoverOffset: 3,
+      },
+    ],
+  };
 }
 
-function heatmapDayParts(day: QuotaHeatmapCell) {
-  if (!day.inRange) return [`${day.date}`, "不在当前统计范围"];
-  const cacheTokens = day.cacheReadTokens + day.cacheCreationTokens;
-  return [
-    day.date,
-    `总 ${formatNumber(day.totalTokens)} tokens`,
-    `输入 ${formatNumber(day.inputTokens)}`,
-    `输出 ${formatNumber(day.outputTokens)}`,
-    `缓存 ${formatNumber(cacheTokens)}`,
-  ];
-}
-
-function heatmapDayTitle(day: QuotaHeatmapCell) {
-  const parts = heatmapDayParts(day);
-  if (!day.inRange) return parts.join("\n");
-  return [parts[0], parts.slice(1).join(" · ")].join("\n");
-}
-
-function heatmapDayLabel(day: QuotaHeatmapCell) {
-  return heatmapDayParts(day).join("，");
-}
-
-function chartX(index: number, count: number) {
-  if (count <= 1) return 42;
-  return 42 + index * (620 / (count - 1));
-}
-
-function barWidth(count: number) {
-  return Math.max(6, Math.min(22, 520 / Math.max(1, count)));
-}
-
-function barHeight(tokens: number) {
-  return Math.round((tokens / maxDailyTokens.value) * 112);
-}
-
-function stackSegments(bucket: QuotaUsageDailyBucket) {
-  const max = Math.max(1, bucket.totalTokens);
-  const input = barHeight(bucket.inputTokens);
-  const output = barHeight(bucket.outputTokens);
-  const cache = barHeight(bucket.cacheReadTokens + bucket.cacheCreationTokens);
-  const normalized = [
-    { key: "input", height: input, class: "quota-chart__segment--input" },
-    { key: "output", height: output, class: "quota-chart__segment--output" },
-    { key: "cache", height: cache, class: "quota-chart__segment--cache" },
-  ].filter((item) => item.height > 0);
-  if (bucket.totalTokens > 0 && normalized.length === 0) {
-    const height = Math.max(2, barHeight(max));
-    return [{ key: "total", height, y: 136 - height, class: "quota-chart__segment--input" }];
-  }
-  let y = 136;
-  return normalized.map((item) => {
-    y -= item.height;
-    return { ...item, y };
-  });
-}
-
-function backendPercent(tokens: number) {
-  if (totalTokens.value <= 0) return 0;
-  return Math.max(4, Math.round((tokens / totalTokens.value) * 100));
+function breakdownShareText(context: TooltipItem<ChartType>) {
+  const values = context.dataset.data.map((value) => Number(value) || 0);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return "0%";
+  return `${Math.round((Number(context.raw ?? 0) / total) * 100)}%`;
 }
 
 function quotaCreditsLabel(credits: CodexAccountQuotaCredits | null | undefined) {
@@ -388,10 +496,6 @@ function accountUsageValue(value: number | null, suffix: string) {
   return suffix === "tokens" ? `${formatCompactNumber(value)} tokens` : `${formatNumber(value)} ${suffix}`;
 }
 
-function accountUsageBarHeight(tokens: number) {
-  return `${Math.max(4, Math.round((tokens / maxAccountUsageTokens.value) * 42))}px`;
-}
-
 function resetOutcomeText(outcome: string) {
   if (outcome === "reset") return "已使用 1 次重置次数，官方额度已刷新";
   if (outcome === "alreadyRedeemed") return "本次重置请求已处理，官方额度已刷新";
@@ -402,18 +506,6 @@ function resetOutcomeText(outcome: string) {
 
 function createIdempotencyKey() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function pieStyle(items: QuotaBreakdownItem[]) {
-  const total = items.reduce((sum, item) => sum + item.value, 0);
-  if (total <= 0) return { background: "var(--bg-subtle)" };
-  let cursor = 0;
-  const stops = items.map((item) => {
-    const start = cursor;
-    cursor += (item.value / total) * 100;
-    return `${item.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
-  });
-  return { background: `conic-gradient(${stops.join(", ")})` };
 }
 
 async function loadStats() {
@@ -622,15 +714,14 @@ onMounted(() => {
             <strong>{{ accountUsageValue(row.value, row.suffix) }}</strong>
           </div>
         </div>
-        <div v-if="accountUsageBuckets.length" class="quota-official-usage__bars" aria-label="官方账号每日用量">
-          <span
-            v-for="bucket in accountUsageBuckets"
-            :key="bucket.startDate"
-            :title="`${bucket.startDate} · ${formatNumber(bucket.tokens)} tokens`"
-          >
-            <i :style="{ height: accountUsageBarHeight(bucket.tokens) }" />
-          </span>
-        </div>
+        <QuotaChartCanvas
+          v-if="accountUsageBuckets.length"
+          class="quota-official-usage__chart"
+          type="bar"
+          label="官方账号每日用量"
+          :data="accountUsageChartData"
+          :options="accountUsageChartOptions"
+        />
       </div>
       <div v-if="officialQuota?.error" class="quota-official__error">
         {{ officialQuota.error }}
@@ -659,10 +750,12 @@ onMounted(() => {
         <strong>{{ formatNumber(stats?.totals.outputTokens ?? 0) }}</strong>
       </div>
       <div class="quota-metric">
-        <span>缓存</span>
-        <strong>
-          {{ formatNumber((stats?.totals.cacheReadTokens ?? 0) + (stats?.totals.cacheCreationTokens ?? 0)) }}
-        </strong>
+        <span>缓存命中</span>
+        <strong>{{ formatNumber(stats?.totals.cacheReadTokens ?? 0) }}</strong>
+      </div>
+      <div class="quota-metric">
+        <span>缓存写入</span>
+        <strong>{{ formatNumber(stats?.totals.cacheCreationTokens ?? 0) }}</strong>
       </div>
       <div class="quota-metric quota-metric--cost">
         <span>已知成本</span>
@@ -686,102 +779,13 @@ onMounted(() => {
     </div>
 
     <div v-else class="quota-chart-wrap">
-      <svg class="quota-chart" viewBox="0 0 704 170" role="img" aria-label="每日 Token 趋势">
-        <line x1="34" y1="136" x2="684" y2="136" class="quota-chart__axis" />
-        <g v-for="(bucket, index) in stats?.daily ?? []" :key="bucket.dayStart">
-          <g
-            v-for="segment in stackSegments(bucket)"
-            :key="segment.key"
-          >
-            <rect
-              :x="chartX(index, stats?.daily.length ?? 0) - barWidth(stats?.daily.length ?? 0) / 2"
-              :y="segment.y"
-              :width="barWidth(stats?.daily.length ?? 0)"
-              :height="segment.height"
-              rx="3"
-              :class="segment.class"
-            />
-          </g>
-          <text
-            v-if="selectedDays === 7 || index % 4 === 0"
-            :x="chartX(index, stats?.daily.length ?? 0)"
-            y="157"
-            text-anchor="middle"
-            class="quota-chart__label"
-          >
-            {{ formatDay(bucket.dayStart) }}
-          </text>
-          <title>{{ formatDay(bucket.dayStart) }} · {{ formatNumber(bucket.totalTokens) }} tokens</title>
-        </g>
-      </svg>
-      <div class="quota-chart__legend">
-        <span><i class="quota-dot quota-dot--input" />输入</span>
-        <span><i class="quota-dot quota-dot--output" />输出</span>
-        <span><i class="quota-dot quota-dot--cache" />缓存</span>
-      </div>
-      <section class="quota-heatmap">
-        <div class="quota-heatmap__head">
-          <div>
-            <strong>Token 热度</strong>
-            <span>{{ heatmapSubtitle }}</span>
-          </div>
-          <div class="quota-heatmap__scale" aria-hidden="true">
-            <span>低</span>
-            <div class="quota-heatmap__scale-dots">
-              <i class="quota-heatmap__day quota-heatmap__day--0" />
-              <i class="quota-heatmap__day quota-heatmap__day--1" />
-              <i class="quota-heatmap__day quota-heatmap__day--2" />
-              <i class="quota-heatmap__day quota-heatmap__day--3" />
-              <i class="quota-heatmap__day quota-heatmap__day--4" />
-            </div>
-            <span>高</span>
-          </div>
-        </div>
-        <div class="quota-heatmap__chart" role="img" :aria-label="heatmapLabel">
-          <div class="quota-heatmap__week-labels" aria-hidden="true">
-            <span class="quota-heatmap__month-spacer" />
-            <span />
-            <span>Mon</span>
-            <span />
-            <span>Wed</span>
-            <span />
-            <span>Fri</span>
-            <span />
-          </div>
-          <div class="quota-heatmap__window">
-            <div class="quota-heatmap__grid">
-              <div class="quota-heatmap__months" aria-hidden="true">
-                <span
-                  v-for="month in heatmapMonthLabels"
-                  :key="month.key"
-                  class="quota-heatmap__month"
-                >
-                  {{ month.label }}
-                </span>
-              </div>
-              <div class="quota-heatmap__weeks">
-                <div
-                  v-for="(week, weekIndex) in heatmapWeeks"
-                  :key="weekIndex"
-                  class="quota-heatmap__week"
-                >
-                  <span
-                    v-for="day in week"
-                    :key="day.date"
-                    class="quota-heatmap__day"
-                    :class="[
-                      `quota-heatmap__day--${day.level}`,
-                      { 'is-outside': !day.inRange },
-                    ]"
-                    :title="heatmapDayTitle(day)"
-                    :aria-label="heatmapDayLabel(day)"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <QuotaChartCanvas
+        class="quota-chart"
+        type="bar"
+        :label="usageTrendChartLabel"
+        :data="usageTrendChartData"
+        :options="usageTrendChartOptions"
+      />
     </div>
   </div>
 
@@ -794,17 +798,21 @@ onMounted(() => {
     </h2>
 
     <div v-if="sortedBackends.length" class="quota-backends">
-      <div
-        v-for="row in sortedBackends"
-        :key="row.backend"
-        class="quota-backend-row"
-      >
-        <div class="quota-backend-row__head">
+      <QuotaChartCanvas
+        class="quota-backends__chart"
+        type="bar"
+        label="后端 Token 分布"
+        :data="backendChartData"
+        :options="backendChartOptions"
+      />
+      <div class="quota-backends__list">
+        <div
+          v-for="row in sortedBackends"
+          :key="row.backend"
+          class="quota-backend-row"
+        >
           <span>{{ backendLabel(row.backend) }}</span>
-          <strong>{{ formatCompactNumber(row.totalTokens) }} tokens</strong>
-        </div>
-        <div class="quota-backend-row__track">
-          <span :style="{ width: `${backendPercent(row.totalTokens)}%` }" />
+          <strong>{{ formatCompactNumber(row.totalTokens) }} tokens · {{ backendShareText(row.totalTokens) }}</strong>
         </div>
       </div>
     </div>
@@ -816,7 +824,15 @@ onMounted(() => {
           <span>按 Token</span>
         </div>
         <div class="quota-breakdown__body">
-          <div class="quota-pie" :style="pieStyle(projectBreakdown)" aria-hidden="true" />
+          <QuotaChartCanvas
+            v-if="projectBreakdown.length"
+            class="quota-breakdown__chart"
+            type="doughnut"
+            label="项目消耗图表"
+            :data="projectBreakdownChartData"
+            :options="breakdownChartOptions"
+          />
+          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
           <div class="quota-breakdown__list">
             <div
               v-for="item in projectBreakdown"
@@ -840,7 +856,15 @@ onMounted(() => {
           <span>按 Token</span>
         </div>
         <div class="quota-breakdown__body">
-          <div class="quota-pie" :style="pieStyle(conversationBreakdown)" aria-hidden="true" />
+          <QuotaChartCanvas
+            v-if="conversationBreakdown.length"
+            class="quota-breakdown__chart"
+            type="doughnut"
+            label="对话消耗图表"
+            :data="conversationBreakdownChartData"
+            :options="breakdownChartOptions"
+          />
+          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
           <div class="quota-breakdown__list">
             <div
               v-for="item in conversationBreakdown"
@@ -864,7 +888,15 @@ onMounted(() => {
           <span>按调用次数统计</span>
         </div>
         <div class="quota-breakdown__body">
-          <div class="quota-pie" :style="pieStyle(toolBreakdown)" aria-hidden="true" />
+          <QuotaChartCanvas
+            v-if="toolBreakdown.length"
+            class="quota-breakdown__chart"
+            type="doughnut"
+            label="工具活跃度图表"
+            :data="toolBreakdownChartData"
+            :options="breakdownChartOptions"
+          />
+          <div v-else class="quota-breakdown__chart quota-breakdown__chart--empty" aria-hidden="true" />
           <div class="quota-breakdown__list">
             <div
               v-for="item in toolBreakdown"
@@ -937,7 +969,7 @@ onMounted(() => {
 
 .quota-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1162,28 +1194,8 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
-.quota-official-usage__bars {
-  display: grid;
-  grid-template-columns: repeat(14, minmax(4px, 1fr));
-  align-items: end;
-  gap: 3px;
-  min-height: 46px;
-}
-
-.quota-official-usage__bars span {
-  display: flex;
-  align-items: end;
-  min-width: 0;
-  height: 46px;
-}
-
-.quota-official-usage__bars i {
-  display: block;
-  width: 100%;
-  min-height: 4px;
-  border-radius: 3px 3px 1px 1px;
-  background: var(--accent);
-  opacity: 0.76;
+.quota-official-usage__chart {
+  height: 52px;
 }
 
 .quota-chart-wrap {
@@ -1197,198 +1209,25 @@ onMounted(() => {
 }
 
 .quota-chart {
-  display: block;
-  width: 100%;
-  height: 170px;
-}
-
-.quota-chart__axis {
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.quota-chart__label {
-  fill: var(--text-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.quota-chart__segment--input {
-  fill: var(--accent);
-}
-
-.quota-chart__segment--output {
-  fill: var(--ok);
-}
-
-.quota-chart__segment--cache {
-  fill: var(--warn);
-}
-
-.quota-chart__legend {
-  display: flex;
-  gap: 14px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.quota-chart__legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.quota-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-pill);
-}
-
-.quota-dot--input {
-  background: var(--accent);
-}
-
-.quota-dot--output {
-  background: var(--ok);
-}
-
-.quota-dot--cache {
-  background: var(--warn);
-}
-
-.quota-heatmap {
-  display: grid;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.quota-heatmap__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.quota-heatmap__head > div:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.quota-heatmap__head strong {
-  color: var(--text);
-  font-size: 13px;
-}
-
-.quota-heatmap__head span,
-.quota-heatmap__scale {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.quota-heatmap__scale {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.quota-heatmap__scale-dots {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.quota-heatmap__chart {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 8px;
-  min-width: 0;
-}
-
-.quota-heatmap__week-labels {
-  display: grid;
-  grid-template-rows: 14px repeat(7, 11px);
-  gap: 3px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 11px;
-}
-
-.quota-heatmap__month-spacer {
-  height: 14px;
-}
-
-.quota-heatmap__window {
-  min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.quota-heatmap__grid {
-  min-width: max-content;
-}
-
-.quota-heatmap__months,
-.quota-heatmap__weeks {
-  display: flex;
-  gap: 3px;
-  min-width: max-content;
-}
-
-.quota-heatmap__months {
-  margin-bottom: 3px;
-}
-
-.quota-heatmap__month {
-  width: 11px;
-  height: 14px;
-  overflow: visible;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 14px;
-  white-space: nowrap;
-}
-
-.quota-heatmap__week {
-  display: grid;
-  grid-template-rows: repeat(7, 11px);
-  gap: 3px;
-}
-
-.quota-heatmap__day {
-  width: 11px;
-  height: 11px;
-  border: 1px solid color-mix(in srgb, var(--bg) 18%, transparent);
-  border-radius: 2px;
-  background: var(--bg-subtle);
-}
-
-.quota-heatmap__day.is-outside {
-  opacity: 0.4;
-}
-
-.quota-heatmap__day--1 {
-  background: color-mix(in srgb, var(--accent) 20%, var(--bg-subtle));
-}
-
-.quota-heatmap__day--2 {
-  background: color-mix(in srgb, var(--accent) 40%, var(--bg-subtle));
-}
-
-.quota-heatmap__day--3 {
-  background: color-mix(in srgb, var(--accent) 62%, var(--bg-subtle));
-}
-
-.quota-heatmap__day--4 {
-  background: color-mix(in srgb, var(--accent) 84%, var(--bg-subtle));
-  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  height: 248px;
 }
 
 .quota-backends {
   display: grid;
   gap: 8px;
+}
+
+.quota-backends__chart {
+  height: 116px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg);
+}
+
+.quota-backends__list {
+  display: grid;
+  gap: 6px;
 }
 
 .quota-breakdowns {
@@ -1431,17 +1270,20 @@ onMounted(() => {
 
 .quota-breakdown__body {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 66px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
 }
 
-.quota-pie {
-  width: 58px;
-  height: 58px;
+.quota-breakdown__chart {
+  width: 66px;
+  height: 66px;
+}
+
+.quota-breakdown__chart--empty {
   border: 1px solid var(--border-soft);
   border-radius: 50%;
-  box-shadow: inset 0 0 0 12px var(--bg);
+  background: var(--bg-subtle);
 }
 
 .quota-breakdown__list {
@@ -1479,36 +1321,26 @@ onMounted(() => {
 }
 
 .quota-backend-row {
-  display: grid;
-  gap: 6px;
-}
-
-.quota-backend-row__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+  padding: 0 2px;
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.quota-backend-row__head strong {
+.quota-backend-row span,
+.quota-backend-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-backend-row strong {
   color: var(--text);
   font-variant-numeric: tabular-nums;
-}
-
-.quota-backend-row__track {
-  height: 7px;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: var(--bg-subtle);
-}
-
-.quota-backend-row__track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
 }
 
 .quota-recent {
@@ -1591,8 +1423,17 @@ onMounted(() => {
     display: none;
   }
 
-  .quota-heatmap__head {
-    display: grid;
+  .quota-chart {
+    height: 220px;
+  }
+
+  .quota-breakdown__body {
+    grid-template-columns: 74px minmax(0, 1fr);
+  }
+
+  .quota-breakdown__chart {
+    width: 74px;
+    height: 74px;
   }
 }
 </style>
