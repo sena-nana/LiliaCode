@@ -19,6 +19,7 @@ const assistantAIForm = ref<AssistantAIConfig>({
   baseUrl: null,
   apiKey: null,
   model: null,
+  codexAccountSparkEnabled: false,
   hasApiKey: false,
 });
 const suggestionSettings = ref<SuggestionSettings>({ enabled: true, source: "assistant-ai" });
@@ -50,6 +51,7 @@ function normalizedAssistantAI(): AssistantAIConfig {
     baseUrl: assistantAIForm.value.baseUrl?.trim() || null,
     apiKey: assistantAIForm.value.apiKey?.trim() || null,
     model: assistantAIForm.value.model?.trim() || null,
+    codexAccountSparkEnabled: assistantAIForm.value.codexAccountSparkEnabled === true,
     hasApiKey: assistantAIForm.value.hasApiKey,
   };
 }
@@ -169,6 +171,29 @@ onMounted(() => {
         :value="assistantAIForm.model ?? ''"
         @input="(e) => (assistantAIForm.model = (e.target as HTMLInputElement).value)"
       />
+    </div>
+    <div class="settings-row">
+      <div class="settings-row__label">Codex 官方账号</div>
+      <div class="ui-segmented" role="radiogroup" aria-label="Codex 官方账号 Spark 辅助模型">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="assistantAIForm.codexAccountSparkEnabled"
+          :class="{ 'is-active': assistantAIForm.codexAccountSparkEnabled }"
+          @click="assistantAIForm.codexAccountSparkEnabled = true"
+        >
+          使用 Spark
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="!assistantAIForm.codexAccountSparkEnabled"
+          :class="{ 'is-active': !assistantAIForm.codexAccountSparkEnabled }"
+          @click="assistantAIForm.codexAccountSparkEnabled = false"
+        >
+          关闭
+        </button>
+      </div>
     </div>
 
     <div class="settings-row">

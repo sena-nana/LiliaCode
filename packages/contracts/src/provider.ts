@@ -45,6 +45,7 @@ export interface AssistantAIConfig {
   baseUrl: string | null;
   apiKey: string | null;
   model: string | null;
+  codexAccountSparkEnabled: boolean;
   hasApiKey: boolean;
   clearApiKey?: boolean;
 }

@@ -115,7 +115,12 @@ pub fn assistant_ai_set_config(app: AppHandle, config: AssistantAIConfig) -> Res
         config.api_key.as_deref(),
         config.clear_api_key,
     )?;
-    save_assistant_ai_config_metadata(&app, config.base_url, config.model)
+    save_assistant_ai_config_metadata(
+        &app,
+        config.base_url,
+        config.model,
+        config.codex_account_spark_enabled,
+    )
 }
 
 #[tauri::command]

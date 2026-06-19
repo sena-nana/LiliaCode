@@ -5,21 +5,51 @@ use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 
 use crate::provider::{
-    assistant_ai_secret, backend_api_key_env, load_active_backend, load_assistant_ai_config,
-    resolve_connection_for, AssistantAIConfig, BackendConnectionPlan, ConnectionMode,
+    assistant_ai_secret, backend_api_key_env, codex_account_spark_enabled,
+    is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
+    request_codex_account_spark, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
+    ConnectionMode, CODEX_SPARK_BASE_URL, CODEX_SPARK_MODEL,
 };
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
 
 use super::types::{ModelRequest, SuggestionSettings, SuggestionSource};
 
-pub(super) fn resolve_model_request(
+const SUGGESTION_SPARK_INSTRUCTION: &str = "只输出严格 JSON。";
+
+pub(super) fn resolve_model_requests(
     app: &AppHandle,
     settings: &SuggestionSettings,
-) -> Option<ModelRequest> {
-    match settings.source {
-        SuggestionSource::AssistantAi => assistant_ai_model_request(app),
-        SuggestionSource::Provider => provider_model_request(app),
+) -> Vec<ModelRequest> {
+    let mut requests = Vec::new();
+    if let Some(request) = codex_spark_model_request(app, settings.source.clone()) {
+        requests.push(request);
     }
+    match &settings.source {
+        SuggestionSource::AssistantAi => {
+            requests.extend(assistant_ai_model_request(app));
+        }
+        SuggestionSource::Provider => {
+            requests.extend(provider_model_request(app));
+        }
+    }
+    requests
+}
+
+fn codex_spark_model_request(app: &AppHandle, source: SuggestionSource) -> Option<ModelRequest> {
+    if !codex_account_spark_enabled(app) {
+        return None;
+    }
+    Some(ModelRequest {
+        source,
+        backend: Some(BACKEND_CODEX.to_string()),
+        model: CODEX_SPARK_MODEL.to_string(),
+        base_url: CODEX_SPARK_BASE_URL.to_string(),
+        api_key: String::new(),
+    })
+}
+
+fn is_codex_spark_request(model: &ModelRequest) -> bool {
+    is_codex_account_spark_request(model.backend.as_deref(), &model.model, &model.base_url)
 }
 
 fn assistant_ai_model_request(app: &AppHandle) -> Option<ModelRequest> {
@@ -85,7 +115,15 @@ fn effective_base_url(backend: &str, plan: &BackendConnectionPlan) -> Option<Str
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-pub(super) fn request_model(model: &ModelRequest, prompt: &str) -> Result<String, String> {
+pub(super) fn request_model(
+    app: &AppHandle,
+    model: &ModelRequest,
+    prompt: &str,
+) -> Result<String, String> {
+    if is_codex_spark_request(model) {
+        return request_codex_account_spark(app, prompt, SUGGESTION_SPARK_INSTRUCTION)
+            .map_err(|err| format!("Codex Spark 请求失败：{err}"));
+    }
     let client = Client::builder()
         .timeout(Duration::from_secs(12))
         .build()
