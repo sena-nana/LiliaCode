@@ -11,6 +11,7 @@ import {
   seedMockAutomationRun,
   setMockAgentTimelineDelay,
   setMockCurrentWindowLabel,
+  setMockPendingCliProjectOpen,
 } from "./tauriMock";
 
 const vueFlowImportState = vi.hoisted(() => ({
@@ -150,6 +151,40 @@ describe("App main navigation events", () => {
     });
   });
 
+  it("主窗口收到 CLI 项目打开事件时刷新项目并打开项目页", async () => {
+    const view = await renderApp("main");
+
+    await waitFor(() => {
+      expect(mockListenerCount("lilia:cli-project-open")).toBe(1);
+    });
+    mockInvoke.mockClear();
+
+    emitTauriEvent("lilia:cli-project-open", {
+      projectId: "lilia",
+      cwd: "D:\\PROJECT\\workspace\\Lilia",
+    });
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/projects/lilia");
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "project_list")).toBe(false);
+  });
+
+  it("主窗口挂载后会消费首启 CLI 项目打开请求", async () => {
+    setMockPendingCliProjectOpen({
+      projectId: "tools",
+      cwd: "D:\\PROJECT\\workspace\\tools",
+    });
+
+    const view = await renderApp("main");
+
+    await waitFor(() => {
+      expect(view.router.currentRoute.value.fullPath).toBe("/projects/tools");
+    });
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "cli_project_open_consume_pending"))
+      .toHaveLength(1);
+  });
+
   it("主窗口不会订阅弹窗导航事件", async () => {
     const view = await renderApp("main");
 
@@ -188,6 +223,7 @@ describe("App main navigation events", () => {
     );
 
     expect(mockListenerCount("lilia:main:navigate")).toBe(0);
+    expect(mockListenerCount("lilia:cli-project-open")).toBe(0);
     expect(mockListenerCount("lilia:popup:navigate")).toBe(1);
     expect(view.router.currentRoute.value.fullPath).toBe(
       "/popup/projects/lilia/tasks/t-001",
