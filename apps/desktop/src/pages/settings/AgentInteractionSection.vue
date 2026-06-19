@@ -43,6 +43,20 @@ const permissionModeOptions: Array<{ value: PermissionMode; label: string; descr
   { value: "free", label: "自由实现", description: "完全访问，并在 8 秒后按建议项处理交互。" },
 ];
 
+type AutoTurnDecisionPermissionKey = Exclude<keyof AgentInteractionSettings["autoTurnDecision"], "enabled">;
+
+const autoTurnDecisionPermissionOptions: Array<{
+  key: AutoTurnDecisionPermissionKey;
+  label: string;
+  ariaLabel: string;
+}> = [
+  { key: "allowModelTier", label: "模型层级", ariaLabel: "辅助模型操作模型层级" },
+  { key: "allowReasoningEffort", label: "思考强度", ariaLabel: "辅助模型操作思考强度" },
+  { key: "allowPlanMode", label: "计划模式", ariaLabel: "辅助模型操作计划模式" },
+  { key: "allowGoalMode", label: "Goal 模式", ariaLabel: "辅助模型操作 Goal 模式" },
+  { key: "allowSessionFork", label: "会话分叉", ariaLabel: "辅助模型操作会话分叉" },
+];
+
 function activePermissionDescription(): string {
   return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
     ?.description ?? permissionModeOptions[0].description;
@@ -108,6 +122,24 @@ async function setClaudeSubagentField(
     subagentMode: nextSubagentMode({
       claude: { [key]: value },
     }),
+  });
+}
+
+function nextAutoTurnDecision(
+  patch: Partial<AgentInteractionSettings["autoTurnDecision"]>,
+): AgentInteractionSettings["autoTurnDecision"] {
+  return {
+    ...agentInteraction.value.autoTurnDecision,
+    ...patch,
+  };
+}
+
+async function setAutoTurnDecisionField(
+  key: keyof AgentInteractionSettings["autoTurnDecision"],
+  value: boolean,
+) {
+  await setAgentInteraction({
+    autoTurnDecision: nextAutoTurnDecision({ [key]: value }),
   });
 }
 
@@ -262,6 +294,69 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <section class="auto-turn-card" aria-label="自动轮次策略">
+      <div class="auto-turn-card__head">
+        <div>
+          <div class="settings-row__label">自动轮次策略</div>
+          <p class="auto-turn-card__hint">Auto 模式下，由辅助模型在轮次启动前决定本轮执行策略。</p>
+        </div>
+        <div class="ui-segmented" role="radiogroup" aria-label="自动轮次策略">
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="!agentInteraction.autoTurnDecision.enabled"
+            :class="{ 'is-active': !agentInteraction.autoTurnDecision.enabled }"
+            :disabled="savingAgentInteraction"
+            @click="setAutoTurnDecisionField('enabled', false)"
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="agentInteraction.autoTurnDecision.enabled"
+            :class="{ 'is-active': agentInteraction.autoTurnDecision.enabled }"
+            :disabled="savingAgentInteraction"
+            @click="setAutoTurnDecisionField('enabled', true)"
+          >
+            开启
+          </button>
+        </div>
+      </div>
+
+      <div class="auto-turn-card__grid">
+        <div
+          v-for="option in autoTurnDecisionPermissionOptions"
+          :key="option.key"
+          class="settings-row settings-row--nested"
+        >
+          <div class="settings-row__label">{{ option.label }}</div>
+          <div class="ui-segmented" role="radiogroup" :aria-label="option.ariaLabel">
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="!agentInteraction.autoTurnDecision[option.key]"
+              :class="{ 'is-active': !agentInteraction.autoTurnDecision[option.key] }"
+              :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
+              @click="setAutoTurnDecisionField(option.key, false)"
+            >
+              禁止
+            </button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="agentInteraction.autoTurnDecision[option.key]"
+              :class="{ 'is-active': agentInteraction.autoTurnDecision[option.key] }"
+              :disabled="savingAgentInteraction || !agentInteraction.autoTurnDecision.enabled"
+              @click="setAutoTurnDecisionField(option.key, true)"
+            >
+              允许
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section
       class="subagent-mode-card"
@@ -454,6 +549,32 @@ onBeforeUnmount(() => {
   border: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
   border-radius: 14px;
   background: var(--bg-elev-2, rgba(255, 255, 255, 0.02));
+}
+
+.auto-turn-card {
+  display: grid;
+  gap: 12px;
+  margin: 10px 0 12px;
+  padding: 12px 0;
+  border-block: 1px solid var(--ui-border, rgba(255, 255, 255, 0.08));
+}
+
+.auto-turn-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.auto-turn-card__hint {
+  margin: 4px 0 0;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+  font-size: 13px;
+}
+
+.auto-turn-card__grid {
+  display: grid;
+  gap: 4px;
 }
 
 .permission-mode-panel {

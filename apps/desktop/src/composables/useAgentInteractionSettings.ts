@@ -39,6 +39,14 @@ const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
       agentProgressSummaries: true,
     },
   },
+  autoTurnDecision: {
+    enabled: true,
+    allowModelTier: true,
+    allowReasoningEffort: true,
+    allowPlanMode: true,
+    allowGoalMode: true,
+    allowSessionFork: true,
+  },
 };
 
 const settings = ref<AgentInteractionSettings>({
@@ -91,6 +99,20 @@ export function normalizeAgentInteractionSettings(
         agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
       },
     },
+    autoTurnDecision: normalizeAutoTurnDecisionSettings(input?.autoTurnDecision),
+  };
+}
+
+function normalizeAutoTurnDecisionSettings(
+  input: Partial<AgentInteractionSettings["autoTurnDecision"]> | null | undefined,
+): AgentInteractionSettings["autoTurnDecision"] {
+  return {
+    enabled: input?.enabled !== false,
+    allowModelTier: input?.allowModelTier !== false,
+    allowReasoningEffort: input?.allowReasoningEffort !== false,
+    allowPlanMode: input?.allowPlanMode !== false,
+    allowGoalMode: input?.allowGoalMode !== false,
+    allowSessionFork: input?.allowSessionFork !== false,
   };
 }
 
@@ -181,7 +203,8 @@ export async function updateAgentInteractionSettings(
     next.debug === previous.debug &&
     next.permissionMode === previous.permissionMode &&
     sameCodexProfile(next.codexProfile, previous.codexProfile) &&
-    sameSubagentMode(next.subagentMode, previous.subagentMode)
+    sameSubagentMode(next.subagentMode, previous.subagentMode) &&
+    sameJsonValue(next.autoTurnDecision, previous.autoTurnDecision)
   ) {
     return previous;
   }

@@ -420,6 +420,42 @@ describe("runner core", () => {
     }
   });
 
+  it("model selection session fork metadata enables runner auto session fork", async () => {
+    const { protocol } = captureProtocol();
+    let seenCmd: any = null;
+    const result = await runAgentTurn({
+      backend: "codex",
+      turn: runnerTurn("继续实现", {
+        resumeSessionId: "thread-source",
+      }),
+      runtimeOptions: {
+        common: {
+          modelSelection: {
+            source: "auto",
+            sessionFork: true,
+          },
+        },
+      },
+    }, {
+      protocol,
+      env: {},
+      runCodex: async (cmd: any) => {
+        seenCmd = cmd;
+        protocol.emit({ type: "done", sessionId: "thread-fork" });
+      },
+      runClaude: async () => {
+        throw new Error("wrong backend");
+      },
+    });
+
+    expect(result).toEqual({ ok: true, exitCode: 0 });
+    expect(seenCmd).toMatchObject({
+      prompt: "继续实现",
+      resumeSessionId: "thread-source",
+      autoSessionFork: true,
+    });
+  });
+
   it("Claude session fork runtime command 允许空 prompt 进入 Claude 后端", async () => {
     const { protocol, json } = captureProtocol();
     const result = await runAgentTurn({
@@ -1103,6 +1139,74 @@ describe("Claude helpers", () => {
       options: { dir: "C:/repo" },
     });
     expect(queryCalled).toBe(false);
+    expect(json()).toContainEqual({
+      type: "done",
+      sessionId: "claude-forked",
+      subtype: "success",
+    });
+  });
+
+  it("Claude auto session fork continues the current prompt in the forked session", async () => {
+    const { protocol, json } = captureProtocol();
+    let forkInput: any = null;
+    let seenOptions: any = null;
+
+    await runClaude({
+      cwd: "C:/repo",
+      prompt: "继续实现",
+      resumeSessionId: "claude-source",
+      autoSessionFork: true,
+    }, {
+      protocol,
+      platform: "win32",
+      interactions: {
+        requestAskUser: async () => ({ cancelled: true, answers: {} }),
+        handleSettingsUpdate: () => {},
+      },
+      emitToolConsentTimeline: () => {},
+      forkClaudeSession: async (sessionId: string, options: any) => {
+        forkInput = { sessionId, options };
+        return { sessionId: "claude-forked" };
+      },
+      createClaudeQuery: ({ options }: any) => {
+        seenOptions = options;
+        return (async function* () {
+          yield {
+            type: "result",
+            is_error: false,
+            subtype: "success",
+            session_id: "claude-forked",
+            uuid: "result-1",
+            usage: {
+              input_tokens: 10,
+              output_tokens: 2,
+            },
+          };
+        })();
+      },
+    } as any);
+
+    expect(forkInput).toEqual({
+      sessionId: "claude-source",
+      options: { dir: "C:/repo" },
+    });
+    expect(seenOptions).toMatchObject({
+      cwd: "C:/repo",
+      resume: "claude-forked",
+    });
+    expect(json()).toContainEqual(expect.objectContaining({
+      type: "timeline",
+      event: expect.objectContaining({
+        kind: "diagnostic",
+        status: "success",
+        title: "Claude session fork completed",
+        payload: expect.objectContaining({
+          autoTurnDecision: true,
+          sourceSessionId: "claude-source",
+          sessionId: "claude-forked",
+        }),
+      }),
+    }));
     expect(json()).toContainEqual({
       type: "done",
       sessionId: "claude-forked",
@@ -4606,6 +4710,72 @@ describe("Codex app-server mapping", () => {
       line.event.kind === "diagnostic" &&
       line.event.status === "success" &&
       line.event.payload.sourceThreadId === "thread-1" &&
+      line.event.payload.threadId === "thread-fork"
+    )).toBe(true);
+    expect(json().some((line) => line.type === "done" && line.sessionId === "thread-fork")).toBe(true);
+  });
+
+  it("auto forks Codex thread before continuing the current prompt", async () => {
+    const { protocol, json } = captureProtocol();
+    const calls: any[] = [];
+    const server = {
+      request: async (method: string, params: any) => {
+        calls.push({ method, params });
+        if (method === "thread/resume") return { thread: { id: "thread-source" }, model: "gpt-5.5" };
+        if (method === "thread/turns/list") {
+          return { data: [], nextCursor: null, backwardsCursor: null };
+        }
+        if (method === "thread/fork") return { thread: { id: "thread-fork" } };
+        if (method === "turn/start") return { turn: { id: "turn-1" } };
+        return {};
+      },
+      notify: () => {},
+      respond: () => {},
+      drainNotifications: () => [{
+        method: "turn/completed",
+        params: { threadId: "thread-fork", turn: { status: "completed" } },
+      }],
+      close: () => {},
+    };
+
+    await runCodexAppServer({
+      backend: "codex",
+      prompt: "继续实现",
+      permission: "ask",
+      resumeSessionId: "thread-source",
+      autoSessionFork: true,
+    }, { mcpServers: [], warnings: [] }, {
+      protocol,
+      interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
+      emitToolConsentTimeline: () => {},
+      createCodexAppServer: () => server,
+      env: {},
+      cwd: () => "C:/repo",
+    });
+
+    expect(calls.find((call) => call.method === "thread/fork")).toMatchObject({
+      params: {
+        threadId: "thread-source",
+        cwd: "C:/repo",
+        excludeTurns: true,
+      },
+    });
+    const turnStart = calls.find((call) => call.method === "turn/start");
+    expect(turnStart).toMatchObject({
+      params: {
+        threadId: "thread-fork",
+        cwd: "C:/repo",
+      },
+    });
+    expect(turnStart.params.input[0].text).toBe("继续实现");
+    expect(calls.findIndex((call) => call.method === "thread/fork"))
+      .toBeLessThan(calls.findIndex((call) => call.method === "turn/start"));
+    expect(json().some((line) =>
+      line.type === "timeline" &&
+      line.event.kind === "diagnostic" &&
+      line.event.status === "success" &&
+      line.event.payload.autoTurnDecision === true &&
+      line.event.payload.sourceThreadId === "thread-source" &&
       line.event.payload.threadId === "thread-fork"
     )).toBe(true);
     expect(json().some((line) => line.type === "done" && line.sessionId === "thread-fork")).toBe(true);

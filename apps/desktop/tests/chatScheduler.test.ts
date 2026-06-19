@@ -230,40 +230,23 @@ describe("chat scheduler", () => {
     expect(send?.[1]).toMatchObject({
       composer: expect.objectContaining({
         backend: "codex",
-        model: "gpt-5.4-mini",
       }),
     });
   });
 
-  it("默认发送会携带模型选择 metadata", async () => {
+  it("默认发送不再由前端携带模型选择 metadata", async () => {
     const view = await renderTaskDetail();
 
-    await sendText(view, "短消息自动选择模型");
+    await sendText(view, "短消息交给后端自动决策");
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
         .toBe(true);
     });
     const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
-    expect(send?.[1]).toMatchObject({
-      runtimeOptions: {
-        common: {
-          model: "claude-haiku-4-5",
-          reasoningEffort: "low",
-          modelSelection: expect.objectContaining({
-            mode: "auto",
-            model: "claude-haiku-4-5",
-            reasoningEffort: "low",
-            source: "auto",
-          }),
-        },
-        provider: {
-          claude: {
-            reasoningEffort: "low",
-            thinking: { type: "adaptive" },
-          },
-        },
-      },
+    expect(send?.[1].runtimeOptions).toBeNull();
+    expect(send?.[1].composer).toMatchObject({
+      modelSelectionMode: "auto",
     });
   });
 
@@ -293,27 +276,11 @@ describe("chat scheduler", () => {
         model: "claude-opus-4-7",
         reasoningEffort: "max",
       }),
-      runtimeOptions: {
-        common: {
-          model: "claude-opus-4-7",
-          reasoningEffort: "max",
-          modelSelection: expect.objectContaining({
-            source: "manual",
-            model: "claude-opus-4-7",
-            reasoningEffort: "max",
-          }),
-        },
-        provider: {
-          claude: {
-            reasoningEffort: "max",
-            thinking: { type: "adaptive" },
-          },
-        },
-      },
     });
+    expect(send?.[1].runtimeOptions).toBeNull();
   });
 
-  it("计划模式会触发 deep 档模型选择", async () => {
+  it("计划模式作为 composer 状态交给后端决策", async () => {
     setMockComposerStateHandler((taskId) => ({
       taskId,
       backend: "claude",
@@ -333,13 +300,11 @@ describe("chat scheduler", () => {
         .toBe(true);
     });
     const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
-    expect(send?.[1].runtimeOptions.common.modelSelection).toMatchObject({
-      model: "claude-opus-4-7",
-      reasoningEffort: "high",
-      source: "auto",
+    expect(send?.[1].composer).toMatchObject({
+      modelSelectionMode: "auto",
+      planMode: true,
     });
-    expect(send?.[1].runtimeOptions.common.modelSelection.signals)
-      .toContain("计划模式");
+    expect(send?.[1].runtimeOptions).toBeNull();
   });
 
   it("Claude 后端可以在右侧栏打开 Lilia IAB", async () => {
@@ -436,7 +401,6 @@ describe("chat scheduler", () => {
       taskId: draft.id,
       composer: expect.objectContaining({
         backend: "codex",
-        model: "gpt-5.4-mini",
       }),
     });
     expect(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "task_promote"))

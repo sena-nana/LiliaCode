@@ -69,7 +69,6 @@ import {
 } from "./usePendingInteractionActions";
 import type { ChatRuntimePhase } from "@lilia/contracts";
 import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
-import { selectModelForTurn } from "../../services/modelSelection";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 type GuideDispatchWindow = "tool" | "user" | "idle";
@@ -318,19 +317,6 @@ export function useTaskComposerController(options: {
     try {
       await ensureComposerLoaded();
       const currentComposer = composerForView.value;
-      const modelOptions = await ensureModelOptions(currentComposer.backend);
-      const selected = selectModelForTurn({
-        backend: currentComposer.backend,
-        modelOptions,
-        composer: currentComposer,
-        prompt: content,
-        attachments: outgoingAttachments,
-        conversationReferences: outgoingConversationReferences,
-        contextUsage: contextUsage.value,
-        workflow,
-        runtimeCommand,
-        runtimeOptions,
-      });
       await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
       const cwd = context.project.value?.cwd ?? (await context.ensureOrphanCwd());
 
@@ -346,7 +332,7 @@ export function useTaskComposerController(options: {
         taskId: props.taskId,
         turn: {
           content,
-          composer: selected.composer,
+          composer: currentComposer,
           projectCwd: cwd,
           attachments: outgoingAttachments,
           conversationReferences: outgoingConversationReferences,
@@ -354,7 +340,7 @@ export function useTaskComposerController(options: {
         },
         workflow,
         runtimeCommand,
-        runtimeOptions: selected.runtimeOptions,
+        runtimeOptions,
       };
       await sendMessage(sendInput);
       timeline.removeTimelineEvent(optimistic.id);

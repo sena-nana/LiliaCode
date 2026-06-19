@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::agent_events::{AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_extensions::TodoMirrorExtension;
+use crate::chat::auto_turn_decision::{prepare_turn_for_start, resolve_resume_session_id};
 use crate::chat::process_registry::{
     JsonlProcessPoll, JsonlProcessRegistry, JsonlProcessStdinStatus,
 };
@@ -20,17 +21,17 @@ use crate::chat::process_registry::{
 use crate::chat::state::take_next_pending_turn;
 use crate::chat::state::{
     clear_runtime_state_for_app, clear_task_runtime_state_for_reset, finish_running_turn_handles,
-    is_turn_marked_reset, load_persisted_resume_session_id, persist_agent_session_id,
-    persist_and_emit_interrupted_timeline_event, persist_runtime_state_for_app, session_key,
-    set_context_usage, set_guide_status_for_app, should_emit_runner_exit_error,
-    should_persist_user_message, take_next_pending_turn_for_app,
+    is_turn_marked_reset, persist_agent_session_id, persist_and_emit_interrupted_timeline_event,
+    persist_runtime_state_for_app, session_key, set_context_usage, set_guide_status_for_app,
+    should_emit_runner_exit_error, should_persist_user_message, take_next_pending_turn_for_app,
     take_next_recoverable_pending_turn, take_pending_finalization_for_app, ChatStore,
     PersistedRuntimeState, RunningTurn,
 };
 use crate::chat::timeline_sink::{
     assistant_error_text, log_agent_event_effect, normalize_timeline_text,
     persist_and_emit_error_timeline_event, persist_and_emit_message_timeline_event,
-    timeline_input_from_runtime_event, TimelineThrottle,
+    persist_and_emit_model_selection_timeline_event, timeline_input_from_runtime_event,
+    TimelineThrottle,
 };
 use crate::chat::title_update::spawn_title_update;
 use crate::chat::types::{
@@ -266,21 +267,7 @@ pub(crate) fn spawn_agent_turn<R: Runtime>(
     turn_id: String,
 ) {
     let backend = composer.backend.clone();
-    let resume_session_id = {
-        let store = app.state::<ChatStore>();
-        let session = store
-            .sdk_sessions
-            .lock()
-            .unwrap()
-            .get(&session_key(&backend, &task_id))
-            .cloned();
-        session
-    }
-    .or_else(|| {
-        let store = app.try_state::<LiliaStore>()?;
-        let conn = store.conn().ok()?;
-        load_persisted_resume_session_id(&conn, &task_id, &backend)
-    });
+    let resume_session_id = resolve_resume_session_id(&app, &task_id, &backend);
 
     let script_path = locate_agent_runner(&app);
     let app_handle = app.clone();
@@ -427,21 +414,46 @@ pub(crate) fn start_runner_session<R: Runtime>(
     observer: &mut dyn RunnerLifecycleObserver,
 ) -> Result<RunnerSession, String> {
     let task_id_for_thread = invocation.task_id;
-    let composer_for_thread = invocation.composer;
+    let mut composer_for_thread = invocation.composer;
     let prompt_for_thread = invocation.content;
     let project_cwd = invocation.project_cwd;
     let attachments_for_thread = invocation.attachments;
     let conversation_references_for_thread = invocation.conversation_references;
     let workflow_for_thread = invocation.workflow;
     let runtime_command_for_thread = invocation.runtime_command;
-    let runtime_options_for_thread = invocation.runtime_options;
+    let mut runtime_options_for_thread = invocation.runtime_options;
     let automation_run_id_for_thread = automation_run_id(workflow_for_thread.as_ref());
     let turn_id_for_thread = invocation.turn_id;
     let resume_session_id = invocation.resume_session_id;
     let is_new_session = resume_session_id.is_none();
     let queued_count = invocation.queued_count;
     let script_path = invocation.script_path;
+    let prepared = prepare_turn_for_start(
+        app_handle,
+        &task_id_for_thread,
+        &prompt_for_thread,
+        composer_for_thread,
+        &project_cwd,
+        &attachments_for_thread,
+        &conversation_references_for_thread,
+        workflow_for_thread.as_ref(),
+        runtime_command_for_thread.as_ref(),
+        runtime_options_for_thread,
+        resume_session_id.as_deref(),
+    )?;
+    composer_for_thread = prepared.composer;
+    runtime_options_for_thread = prepared.runtime_options;
     let backend_for_thread = composer_for_thread.backend.clone();
+    persist_and_emit_model_selection_timeline_event(
+        app_handle,
+        &task_id_for_thread,
+        &backend_for_thread,
+        &turn_id_for_thread,
+        runtime_options_for_thread
+            .as_ref()
+            .and_then(|options| options.common.as_ref())
+            .and_then(|common| common.model_selection.as_ref()),
+    );
     let connection = resolve_connection_for(app_handle, &backend_for_thread);
     let extensions = plugins::runtime_extensions(app_handle, Some(&project_cwd));
     let runtime_options = build_provider_runtime_options(
@@ -1129,6 +1141,7 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
         "model": composer.model,
         "resumeSessionId": resume_session_id,
         "planMode": composer.plan_mode,
+        "goalMode": composer.goal_mode,
         "permission": composer.permission,
     });
     serde_json::json!({

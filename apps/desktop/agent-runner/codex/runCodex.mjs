@@ -1447,6 +1447,54 @@ async function runCodexThreadForkRuntimeCommand(server, threadId, cmd, ctx, cwdF
   return true;
 }
 
+function shouldRunCodexAutoSessionFork(cmd) {
+  return cmd?.autoSessionFork === true && cmd?.runtimeCommand?.type !== "session_fork";
+}
+
+async function runCodexAutoSessionFork(server, threadId, cmd, ctx, cwdFn = process.cwd) {
+  if (!shouldRunCodexAutoSessionFork(cmd)) return threadId;
+  if (!threadId) throw new Error("辅助模型建议会话分叉，但当前 Codex task 没有可 fork 的 thread");
+  await flushCodexRuntimeSettings(ctx);
+  emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "started");
+  const settings = normalizeCodexSettings(cmd);
+  const params = {
+    threadId,
+    cwd: cmd.cwd || cwdFn(),
+    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
+    excludeTurns: true,
+  };
+  assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
+  assignCodexAdvancedThreadParams(params, settings);
+  try {
+    const result = await server.request("thread/fork", params);
+    const forkedThreadId = codexThreadIdFromForkResult(result);
+    if (!forkedThreadId) throw new Error("Codex thread/fork did not return a thread id");
+    ctx.lastThreadId = forkedThreadId;
+    ctx.threadId = forkedThreadId;
+    cmd.resumeSessionId = forkedThreadId;
+    ctx.protocol.emitTimeline({
+      kind: "diagnostic",
+      status: "success",
+      title: CODEX_THREAD_FORK_TIMELINE.successTitle,
+      summary: "Codex thread 已 fork，本轮将在分叉 thread 中继续",
+      payload: {
+        backend: "codex",
+        subkind: CODEX_THREAD_FORK_TIMELINE.subkind,
+        method: CODEX_THREAD_FORK_TIMELINE.method,
+        sourceThreadId: threadId,
+        threadId: forkedThreadId,
+        excludeTurns: true,
+        autoTurnDecision: true,
+      },
+      sourceId: `${CODEX_THREAD_FORK_TIMELINE.sourcePrefix}:auto:${threadId}:${forkedThreadId}`,
+    });
+    return forkedThreadId;
+  } catch (err) {
+    emitCodexWorkflowTimeline(ctx, CODEX_THREAD_FORK_TIMELINE, threadId, "error", err);
+    throw err;
+  }
+}
+
 async function runCodexConfigDiagnosticsWorkflow(server, threadId, cmd, ctx, cwdFn = process.cwd) {
   const workflow = readCodexConfigDiagnosticsWorkflow(cmd);
   if (!workflow) return false;
@@ -1895,7 +1943,7 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
       return;
     }
     const session = await startCodexAppServerSession(server, cmd, context.cwd || process.cwd);
-    const threadId = session.threadId;
+    let threadId = session.threadId;
     if (!threadId) throw new Error("Codex app-server did not return a thread id");
     await updateCodexThreadSettings(
       server,
@@ -1947,6 +1995,13 @@ export async function runCodexAppServer(cmd, runtimeExtensions, context) {
     const planPreset = cmd.planMode === true
       ? await requireCodexPlanModePreset(server, context.protocol)
       : null;
+    threadId = await runCodexAutoSessionFork(
+      server,
+      threadId,
+      cmd,
+      ctx,
+      context.cwd || process.cwd,
+    );
     if (await runCodexWorkflowIfPresent(
       server,
       threadId,
