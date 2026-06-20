@@ -24,6 +24,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "chat_backend_contract",
         apply: relax_chat_backend_enums,
     },
+    SchemaMigration {
+        version: 28,
+        name: "task_worktrees",
+        apply: create_task_worktree_table,
+    },
 ];
 
 fn create_memory_tables(conn: &Connection) -> Result<(), String> {
@@ -258,6 +263,29 @@ fn relax_chat_backend_enums(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 迁移后端 schema 失败：{e}"))
+}
+
+fn create_task_worktree_table(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS task_worktrees (
+          task_id        TEXT PRIMARY KEY,
+          project_id     TEXT,
+          base_repo_path TEXT NOT NULL,
+          worktree_path  TEXT NOT NULL UNIQUE,
+          branch_name    TEXT NOT NULL,
+          base_branch    TEXT NOT NULL,
+          status         TEXT NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active','merged','removed')),
+          created_at     INTEGER NOT NULL,
+          updated_at     INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_worktrees_project_status
+          ON task_worktrees(project_id, status, updated_at DESC);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 创建 task worktree schema 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(

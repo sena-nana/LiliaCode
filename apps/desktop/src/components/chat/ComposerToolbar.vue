@@ -7,6 +7,7 @@ import {
   Plus,
   MessageSquareQuote,
   Goal,
+  GitBranch,
   ShieldCheck,
   Square,
   WandSparkles,
@@ -40,6 +41,10 @@ const ComposerModelPicker = defineAsyncComponent({
 
 const props = defineProps<{
   state: ChatComposerState;
+  worktreeValue: string;
+  worktreeOptions: Array<{ value: string; label: string; hint?: string }>;
+  worktreeBusy: boolean;
+  worktreeError?: string | null;
   modelOptions: ChatModelOption[];
   autoModelPreview: ModelSelectionExplanation;
   permissionOptions: Array<{ value: PermissionMode; label: string; hint: string }>;
@@ -60,6 +65,7 @@ const emit = defineEmits<{
   pickAttachments: [];
   referenceConversation: [];
   setPermission: [permission: PermissionMode];
+  selectWorktree: [value: string];
   updateComposer: [patch: Partial<ChatComposerState>];
   togglePlanMode: [];
   toggleGoalMode: [];
@@ -193,6 +199,10 @@ const activeModeChips = computed<ModeChip[]>(() => {
   }
   return chips;
 });
+
+const worktreeTitle = computed(() =>
+  props.worktreeError || props.worktreeOptions.find((option) => option.value === props.worktreeValue)?.hint || "工作树",
+);
 
 function toggleActionMenu(event: MouseEvent) {
   captureActionMenuAnchor(event);
@@ -366,6 +376,17 @@ onBeforeUnmount(() => {
           :options="permissionOptions"
           :icon="ShieldCheck"
           @update:model-value="emit('setPermission', $event)"
+        />
+        <Dropdown
+          class="chat-composer__worktree-dropdown"
+          :class="{ 'is-error': worktreeError }"
+          :model-value="worktreeValue"
+          :options="worktreeOptions"
+          :icon="GitBranch"
+          :disabled="worktreeBusy"
+          :placeholder="worktreeBusy ? '工作树...' : '当前环境'"
+          :title="worktreeTitle"
+          @update:model-value="emit('selectWorktree', $event)"
         />
         <ComposerModelPicker
           :state="state"

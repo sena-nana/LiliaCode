@@ -186,6 +186,10 @@ async function loadComposerPasteModule() {
 
 const props = defineProps<{
   state: ChatComposerState;
+  worktreeValue?: string;
+  worktreeOptions?: Array<{ value: string; label: string; hint?: string }>;
+  worktreeBusy?: boolean;
+  worktreeError?: string | null;
   modelOptions?: ChatModelOption[];
   attachments?: ChatAttachment[];
   appendAttachmentsToEndKey?: number;
@@ -220,6 +224,7 @@ const emit = defineEmits<{
   "start-lilia-compact": [];
   "execute-slash-command": [workflow: ChatSlashCommandWorkflow];
   "update:state": [next: ChatComposerState];
+  "select-worktree": [value: string];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
   "add-context-attachment": [attachment: ChatAttachment];
@@ -1666,6 +1671,10 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :is="composerToolbarComponent"
         v-if="!hasPending && composerToolbarComponent"
         :state="state"
+        :worktree-value="worktreeValue ?? '__current__'"
+        :worktree-options="worktreeOptions ?? []"
+        :worktree-busy="worktreeBusy === true"
+        :worktree-error="worktreeError ?? null"
         :model-options="modelOptions ?? []"
         :auto-model-preview="autoModelPreview"
         :permission-options="permissionOptions"
@@ -1683,6 +1692,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         @pick-attachments="emit('pick-attachments')"
         @reference-conversation="triggerConversationReference"
         @set-permission="setPermission"
+        @select-worktree="emit('select-worktree', $event)"
         @update-composer="patch"
         @toggle-plan-mode="togglePlanMode"
         @toggle-goal-mode="toggleGoalMode"

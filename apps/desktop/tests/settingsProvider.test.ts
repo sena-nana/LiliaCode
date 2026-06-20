@@ -885,9 +885,9 @@ describe("Settings provider switch", () => {
       mockInvoke.mockClear();
 
       await waitFor(() => {
-        expect(view.getByRole("button", { name: "选择" })).toBeEnabled();
+        expect(view.getAllByRole("button", { name: "选择" })[0]).toBeEnabled();
       });
-      await fireEvent.click(view.getByRole("button", { name: "选择" }));
+      await fireEvent.click(view.getAllByRole("button", { name: "选择" })[0]);
       await waitFor(() => {
         expect(typeof resolvePickedFolder).toBe("function");
       });

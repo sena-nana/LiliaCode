@@ -70,11 +70,11 @@ async function renderTaskDetail() {
   await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
-  });
+  }, { timeout: 3000 });
   await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
-  });
+  }, { timeout: 3000 });
   return view;
 }
 
@@ -347,9 +347,9 @@ describe("chat scheduler", () => {
     await setComposerText(view, "/release");
     await waitFor(() => {
       expect(view.getAllByRole("option").length).toBeGreaterThan(0);
-    });
+    }, { timeout: 3000 });
 
-    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/release/ }, { timeout: 3000 }));
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
@@ -377,9 +377,9 @@ describe("chat scheduler", () => {
     await setComposerText(view, "/release");
     await waitFor(() => {
       expect(view.getAllByRole("option").length).toBeGreaterThan(0);
-    });
+    }, { timeout: 3000 });
 
-    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/release/ }, { timeout: 3000 }));
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))

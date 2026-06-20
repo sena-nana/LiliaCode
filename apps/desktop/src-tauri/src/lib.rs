@@ -53,6 +53,7 @@ mod todos;
 mod tray;
 mod util;
 mod window_state;
+mod worktrees;
 
 pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -276,6 +277,13 @@ pub fn run() {
             project_shell::system_open_path,
             project_shell::system_open_url,
             project_shell::system_open_in_vscode,
+            worktrees::worktree_list,
+            worktrees::worktree_create_for_task,
+            worktrees::worktree_attach_task,
+            worktrees::worktree_get_for_task,
+            worktrees::worktree_clear_task,
+            worktrees::worktree_cleanup_archive,
+            worktrees::worktree_merge_delete_archive,
             plugins::plugins_overview,
             plugins::plugins_hooks_overview,
             plugins::plugins_create_skill,

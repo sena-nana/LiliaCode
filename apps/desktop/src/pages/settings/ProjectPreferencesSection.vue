@@ -6,6 +6,7 @@ import {
   Copy,
   FolderOpen,
   FolderTree,
+  GitBranch,
   Github,
   Link2,
   LoaderCircle,
@@ -15,6 +16,7 @@ import type {
   GitHubBindingStatus,
   GitHubDeviceFlowStart,
   ProjectSettings,
+  WorktreeSettings,
 } from "@lilia/contracts";
 import {
   getGitHubBindingStatus,
@@ -39,6 +41,29 @@ const copiedCode = ref(false);
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollSeq = 0;
 let disposed = false;
+
+const DEFAULT_WORKTREE_SETTINGS: WorktreeSettings = {
+  defaultMode: "current",
+  parentDir: null,
+  autoInstructions: [
+    "This task is running inside a dedicated git worktree managed by Lilia.",
+    "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+  ].join("\n"),
+  cleanupOnArchive: true,
+};
+
+function normalizeWorktreeSettings(settings?: WorktreeSettings | null): WorktreeSettings {
+  return {
+    ...DEFAULT_WORKTREE_SETTINGS,
+    ...(settings ?? {}),
+    defaultMode: settings?.defaultMode === "create" || settings?.defaultMode === "existing"
+      ? settings.defaultMode
+      : "current",
+    parentDir: settings?.parentDir ?? null,
+    autoInstructions: settings?.autoInstructions ?? DEFAULT_WORKTREE_SETTINGS.autoInstructions,
+    cleanupOnArchive: settings?.cleanupOnArchive !== false,
+  };
+}
 
 const isBound = computed(() => bindingStatus.value?.state === "bound");
 const boundLogin = computed(() => bindingStatus.value?.binding?.login ?? "");
@@ -86,7 +111,10 @@ function clearPollTimer() {
 async function loadProjectSettings() {
   try {
     const settings = await getProjectSettings();
-    if (!disposed) projectSettings.value = settings;
+    if (!disposed) projectSettings.value = {
+      ...settings,
+      worktree: normalizeWorktreeSettings(settings.worktree),
+    };
   } catch (err) {
     if (!disposed) projectError.value = `读取项目偏好失败：${String(err)}`;
   }
@@ -127,6 +155,52 @@ async function pickCloneParent() {
   } catch (err) {
     if (!disposed) projectError.value = `选择文件夹失败：${String(err)}`;
   }
+}
+
+async function pickWorktreeParent() {
+  projectError.value = null;
+  try {
+    const worktree = normalizeWorktreeSettings(projectSettings.value.worktree);
+    const picked = await pickFolder({
+      title: "选择工作树父目录",
+      defaultPath: worktree.parentDir,
+    });
+    if (!picked) return;
+    projectSettings.value = {
+      ...projectSettings.value,
+      worktree: { ...worktree, parentDir: picked },
+    };
+    await persistProjectSettings();
+  } catch (err) {
+    projectError.value = `选择工作树父目录失败：${String(err)}`;
+  }
+}
+
+async function setWorktreeDefaultMode(mode: WorktreeSettings["defaultMode"]) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: { ...normalizeWorktreeSettings(projectSettings.value.worktree), defaultMode: mode },
+  };
+  await persistProjectSettings();
+}
+
+async function setWorktreeCleanup(value: boolean) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: { ...normalizeWorktreeSettings(projectSettings.value.worktree), cleanupOnArchive: value },
+  };
+  await persistProjectSettings();
+}
+
+async function saveWorktreeInstructions(event: Event) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: {
+      ...normalizeWorktreeSettings(projectSettings.value.worktree),
+      autoInstructions: (event.target as HTMLTextAreaElement).value,
+    },
+  };
+  await persistProjectSettings();
 }
 
 async function schedulePoll(intervalSeconds: number) {
@@ -268,6 +342,79 @@ onBeforeUnmount(() => {
           选择
         </button>
       </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">
+        <div class="settings-row__label-with-icon">
+          <GitBranch :size="14" aria-hidden="true" />
+          工作树
+        </div>
+      </div>
+      <div class="settings-row__control settings-row__control--loose">
+        <div class="ui-segmented" role="group" aria-label="工作树默认行为">
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'current' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('current')"
+          >
+            当前环境
+          </button>
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'create' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('create')"
+          >
+            自动新建
+          </button>
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'existing' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('existing')"
+          >
+            已有工作树
+          </button>
+        </div>
+        <label class="ui-checkbox">
+          <input
+            type="checkbox"
+            :checked="normalizeWorktreeSettings(projectSettings.worktree).cleanupOnArchive"
+            :disabled="savingProject"
+            @change="setWorktreeCleanup(($event.target as HTMLInputElement).checked)"
+          />
+          <span>归档时自动清理工作树</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">工作树父目录</div>
+      <div class="settings-row__control">
+        <span class="settings-row__value muted">
+          {{ normalizeWorktreeSettings(projectSettings.worktree).parentDir || "未设置（使用主仓库同级目录）" }}
+        </span>
+        <button type="button" class="ui-button ui-button--ghost" :disabled="savingProject" @click="pickWorktreeParent">
+          <FolderOpen :size="12" aria-hidden="true" />
+          选择
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-row settings-row--stacked">
+      <div class="settings-row__label">创建后自动指令</div>
+      <textarea
+        class="ui-input ui-textarea"
+        rows="4"
+        :value="normalizeWorktreeSettings(projectSettings.worktree).autoInstructions"
+        :disabled="savingProject"
+        @change="saveWorktreeInstructions"
+      />
     </div>
 
     <div class="settings-row">

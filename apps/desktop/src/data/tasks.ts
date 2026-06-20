@@ -353,17 +353,21 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
 export async function archiveTask(taskId: string): Promise<boolean> {
   const ok = await invoke<boolean>(TASK_ARCHIVE_COMMAND, { id: taskId });
   if (!ok) return false;
+  removeArchivedTaskFromLists(taskId);
+  return true;
+}
+
+export function removeArchivedTaskFromLists(taskId: string): void {
   for (const [pid, list] of Object.entries(TASKS.value)) {
     const idx = list.findIndex((t) => t.id === taskId);
     if (idx !== -1) {
       const next = [...list];
       next.splice(idx, 1);
       TASKS.value = { ...TASKS.value, [pid]: next };
-      return true;
+      return;
     }
   }
   ORPHAN_LIST.value = ORPHAN_LIST.value.filter((o) => o.id !== taskId);
-  return true;
 }
 
 export async function archiveProjectConversations(projectId: string): Promise<number> {

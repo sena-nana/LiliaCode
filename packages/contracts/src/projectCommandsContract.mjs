@@ -13,3 +13,11 @@ export const PROJECT_TOGGLE_PIN_COMMAND = manifest.commands.togglePin;
 export const PROJECT_REORDER_COMMAND = manifest.commands.reorder;
 export const PROJECT_GET_SETTINGS_COMMAND = manifest.commands.getSettings;
 export const PROJECT_SET_SETTINGS_COMMAND = manifest.commands.setSettings;
+export const WORKTREE_LIST_COMMAND = manifest.commands.worktreeList;
+export const WORKTREE_GET_FOR_TASK_COMMAND = manifest.commands.worktreeGetForTask;
+export const WORKTREE_CLEAR_TASK_COMMAND = manifest.commands.worktreeClearTask;
+export const WORKTREE_CREATE_FOR_TASK_COMMAND = manifest.commands.worktreeCreateForTask;
+export const WORKTREE_ATTACH_TASK_COMMAND = manifest.commands.worktreeAttachTask;
+export const WORKTREE_CLEANUP_ARCHIVE_COMMAND = manifest.commands.worktreeCleanupArchive;
+export const WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND =
+  manifest.commands.worktreeMergeDeleteArchive;

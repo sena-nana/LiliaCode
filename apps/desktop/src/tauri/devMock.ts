@@ -119,6 +119,13 @@ import {
   TASK_REPARENT_COMMAND,
   TASK_TOGGLE_PIN_COMMAND,
   TODO_LIST_COMMAND,
+  WORKTREE_ATTACH_TASK_COMMAND,
+  WORKTREE_CLEANUP_ARCHIVE_COMMAND,
+  WORKTREE_CLEAR_TASK_COMMAND,
+  WORKTREE_CREATE_FOR_TASK_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
+  WORKTREE_LIST_COMMAND,
+  WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
   countProjectTaskStatuses,
   createChatBackendRecord,
   deriveProjectDashboardCounts,
@@ -191,6 +198,20 @@ const tasks = [
     archived: false,
   },
 ];
+
+let taskWorktrees: Record<string, any> = {};
+
+const defaultWorktreeSettings = {
+  defaultMode: "current",
+  parentDir: null,
+  autoInstructions: [
+    "This task is running inside a dedicated git worktree managed by Lilia.",
+    "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+  ].join("\n"),
+  cleanupOnArchive: true,
+};
+
+const statusKeys = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
 
 function projectDashboardRows() {
   return projects.map((project) => {
@@ -382,7 +403,12 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
     case PROJECT_TOGGLE_PIN_COMMAND:
       return false as T;
     case PROJECT_GET_SETTINGS_COMMAND:
-      return { cloneParentDir: "C:\\Files\\workspace", codexDefaults: null, githubBinding: null } as T;
+      return {
+        cloneParentDir: "C:\\Files\\workspace",
+        codexDefaults: null,
+        githubBinding: null,
+        worktree: defaultWorktreeSettings,
+      } as T;
     case MEMORY_LIST_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       return clone(memories.filter((item) => item.scope === "user" || item.projectId === projectId)) as T;
@@ -483,6 +509,80 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return true as T;
     case TASK_ARCHIVE_PROJECT_COMMAND:
       return 0 as T;
+    case WORKTREE_LIST_COMMAND:
+      return [
+        {
+          path: text(args, "baseRepoPath") || "C:\\Files\\workspace\\Lilia",
+          head: null,
+          branch: "main",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: true,
+          isTaskBound: false,
+        },
+        {
+          path: "C:\\Files\\workspace\\Lilia-task-worktree",
+          head: null,
+          branch: "lilia/mock-task",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: false,
+          isTaskBound: false,
+        },
+      ] as T;
+    case WORKTREE_GET_FOR_TASK_COMMAND:
+      return clone(taskWorktrees[text(args, "taskId")] ?? null) as T;
+    case WORKTREE_CLEAR_TASK_COMMAND:
+      delete taskWorktrees[text(args, "taskId")];
+      return undefined as T;
+    case WORKTREE_CREATE_FOR_TASK_COMMAND: {
+      const input = (args.input ?? {}) as Args;
+      const taskId = text(input, "taskId");
+      const saved = {
+        taskId,
+        projectId: text(input, "projectId") || null,
+        baseRepoPath: text(input, "baseRepoPath"),
+        worktreePath: `${text(input, "baseRepoPath") || "C:\\Files\\workspace\\Lilia"}-task-worktree`,
+        branchName: `lilia/${taskId || "mock-task"}`,
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return clone(saved) as T;
+    }
+    case WORKTREE_ATTACH_TASK_COMMAND: {
+      const input = (args.input ?? {}) as Args;
+      const taskId = text(input, "taskId");
+      const saved = {
+        taskId,
+        projectId: text(input, "projectId") || null,
+        baseRepoPath: text(input, "baseRepoPath"),
+        worktreePath: text(input, "worktreePath"),
+        branchName: "lilia/mock-task",
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return clone(saved) as T;
+    }
+    case WORKTREE_CLEANUP_ARCHIVE_COMMAND: {
+      const taskId = text(args, "taskId");
+      delete taskWorktrees[taskId];
+      return { merged: false, removed: true, archived: true, message: "mock cleaned" } as T;
+    }
+    case WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND: {
+      const taskId = text(args, "taskId");
+      delete taskWorktrees[taskId];
+      return { merged: true, removed: true, archived: true, message: "mock merged" } as T;
+    }
     case MILESTONE_LIST_COMMAND:
       return { milestones: [], links: [] } as T;
     case MILESTONE_CREATE_COMMAND:
