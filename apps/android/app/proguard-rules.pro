@@ -1,0 +1,4 @@
+-keep class computer.iroh.** { *; }
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.Library { *; }
+-dontwarn com.sun.jna.**
