@@ -129,6 +129,13 @@ import {
   TODO_DELETE_COMMAND,
   TODO_LIST_COMMAND,
   TODO_UPDATE_COMMAND,
+  WORKTREE_ATTACH_TASK_COMMAND,
+  WORKTREE_CLEANUP_ARCHIVE_COMMAND,
+  WORKTREE_CLEAR_TASK_COMMAND,
+  WORKTREE_CREATE_FOR_TASK_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
+  WORKTREE_LIST_COMMAND,
+  WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
   countProjectTaskStatuses,
   createAutomationChangedEvent,
   createAutomationRunEvent,
@@ -1131,7 +1138,17 @@ let projectSettings = {
   cloneParentDir: null as string | null,
   codexDefaults: null as unknown,
   githubBinding: null as Record<string, unknown> | null,
+  worktree: {
+    defaultMode: "current",
+    parentDir: null as string | null,
+    autoInstructions: [
+      "This task is running inside a dedicated git worktree managed by Lilia.",
+      "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+    ].join("\n"),
+    cleanupOnArchive: true,
+  },
 };
+let taskWorktrees: Record<string, Record<string, unknown>> = {};
 let mockPickedFolderPath: string | null = "C:\\Users\\mock";
 let githubBindingStatus = {
   state: "unbound" as "unbound" | "bound",
@@ -1819,7 +1836,21 @@ export function resetTauriMockData() {
   nextConversationSuggestionsError = null;
   conversationSuggestionsDelayMs = 0;
   runtimeSnapshotDelayMs = 0;
-  projectSettings = { cloneParentDir: null, codexDefaults: null, githubBinding: null };
+  projectSettings = {
+    cloneParentDir: null,
+    codexDefaults: null,
+    githubBinding: null,
+    worktree: {
+      defaultMode: "current",
+      parentDir: null,
+      autoInstructions: [
+        "This task is running inside a dedicated git worktree managed by Lilia.",
+        "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+      ].join("\n"),
+      cleanupOnArchive: true,
+    },
+  };
+  taskWorktrees = {};
   mockPickedFolderPath = "C:\\Users\\mock";
   githubBindingStatus = {
     state: "unbound",
@@ -2475,6 +2506,9 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         githubBinding: "githubBinding" in settings
           ? settings.githubBinding as Record<string, unknown> | null
           : null,
+        worktree: settings.worktree && typeof settings.worktree === "object" && !Array.isArray(settings.worktree)
+          ? settings.worktree as typeof projectSettings.worktree
+          : projectSettings.worktree,
       };
       return undefined;
     }
@@ -2905,6 +2939,98 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       tasks = tasks.filter((task) => task.projectId !== projectId);
       refreshSessionCounts();
       return count;
+    }
+
+    case WORKTREE_LIST_COMMAND: {
+      const baseRepoPath = String(args.baseRepoPath ?? "D:\\PROJECT\\workspace\\Lilia");
+      return [
+        {
+          path: baseRepoPath,
+          head: null,
+          branch: "main",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: true,
+          isTaskBound: false,
+        },
+        {
+          path: `${baseRepoPath}-task-worktree`,
+          head: null,
+          branch: "lilia/mock-task",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: false,
+          isTaskBound: false,
+        },
+      ];
+    }
+
+    case WORKTREE_GET_FOR_TASK_COMMAND:
+      return taskWorktrees[String(args.taskId)] ?? null;
+
+    case WORKTREE_CLEAR_TASK_COMMAND:
+      delete taskWorktrees[String(args.taskId)];
+      return undefined;
+
+    case WORKTREE_CREATE_FOR_TASK_COMMAND: {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const taskId = String(input.taskId ?? "");
+      const baseRepoPath = String(input.baseRepoPath ?? "D:\\PROJECT\\workspace\\Lilia");
+      const saved = {
+        taskId,
+        projectId: input.projectId === null || input.projectId === undefined ? null : String(input.projectId),
+        baseRepoPath,
+        worktreePath: `${baseRepoPath}-task-worktree`,
+        branchName: `lilia/${taskId || "mock-task"}`,
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return saved;
+    }
+
+    case WORKTREE_ATTACH_TASK_COMMAND: {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const taskId = String(input.taskId ?? "");
+      const saved = {
+        taskId,
+        projectId: input.projectId === null || input.projectId === undefined ? null : String(input.projectId),
+        baseRepoPath: String(input.baseRepoPath ?? "D:\\PROJECT\\workspace\\Lilia"),
+        worktreePath: String(input.worktreePath ?? "D:\\PROJECT\\workspace\\Lilia-task-worktree"),
+        branchName: "lilia/mock-task",
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return saved;
+    }
+
+    case WORKTREE_CLEANUP_ARCHIVE_COMMAND: {
+      const taskId = String(args.taskId);
+      delete taskWorktrees[taskId];
+      tasks = tasks.filter((task) => task.id !== taskId);
+      refreshSessionCounts();
+      return { merged: false, removed: true, archived: true, message: "mock cleaned" };
+    }
+
+    case WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND: {
+      const taskId = String(args.taskId);
+      delete taskWorktrees[taskId];
+      tasks = tasks.filter((task) => task.id !== taskId);
+      refreshSessionCounts();
+      return { merged: true, removed: true, archived: true, message: "mock merged" };
     }
 
     case AUTOMATION_LIST_WORKFLOWS_COMMAND:

@@ -23,6 +23,9 @@ import type {
   LiliaThreadGoal,
   LiliaReviewTarget,
   PermissionMode,
+  ProviderRuntimeOptions,
+  TaskWorktree,
+  WorktreeListItem,
 } from "@lilia/contracts";
 import {
   findPlanApprovalAsk,
@@ -65,6 +68,14 @@ import {
   sendMessage,
   setComposerState,
 } from "../../services/chat";
+import { getProjectSettings } from "../../services/projects";
+import {
+  attachWorktreeToTask,
+  clearTaskWorktree,
+  createWorktreeForTask,
+  getTaskWorktree,
+  listWorktrees,
+} from "../../services/worktrees";
 import type {
   SendMessageInput,
   ToolConsentDecision,
@@ -91,6 +102,10 @@ function emptyModelOptionsByBackend(): Record<ChatBackendKind, ChatModelOption[]
   return createChatBackendRecord(() => []);
 }
 type GuideDispatchWindow = "tool" | "user" | "idle";
+type WorktreeOption = { value: string; label: string; hint?: string };
+
+const WORKTREE_CURRENT_VALUE = "__current__";
+const WORKTREE_CREATE_VALUE = "__create__";
 
 interface GuideDispatchController {
   createGuideFromComposer: (
@@ -162,6 +177,13 @@ export function useTaskComposerController(options: {
   const restoreDraftConversationReferences = ref<ChatConversationReference[]>([]);
   const insertDraftTextKey = ref(0);
   const insertDraftTextContent = ref("");
+  const taskWorktree = ref<TaskWorktree | null>(null);
+  const worktreeOptions = ref<WorktreeOption[]>([
+    { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: "使用项目目录" },
+    { value: WORKTREE_CREATE_VALUE, label: "新建工作树", hint: "为当前对话创建独立 worktree" },
+  ]);
+  const worktreeBusy = ref(false);
+  const worktreeError = ref<string | null>(null);
   const pendingAskUser = useAskUserForTask(() => props.taskId);
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
@@ -231,6 +253,12 @@ export function useTaskComposerController(options: {
   const currentLiliaGoal = computed<LiliaThreadGoal | null>(() =>
     latestLiliaGoalFromTimeline(timeline.timelineEvents.value),
   );
+  const effectiveProjectCwd = computed(() =>
+    taskWorktree.value?.worktreePath ?? context.project.value?.cwd ?? null,
+  );
+  const worktreeSelectionValue = computed(() =>
+    taskWorktree.value?.worktreePath ?? WORKTREE_CURRENT_VALUE,
+  );
 
   function withActiveBackend(
     state: ChatComposerState,
@@ -244,6 +272,142 @@ export function useTaskComposerController(options: {
       reasoningEffort: state.reasoningEffort ?? null,
       permission: permissionOverride ?? permissionMode.value,
     };
+  }
+
+  function mergeAdditionalContext(
+    runtimeOptions: ProviderRuntimeOptions | null,
+    backend: ChatBackendKind,
+    contextText: string,
+  ): ProviderRuntimeOptions {
+    const current = runtimeOptions ?? {};
+    const provider = current.provider ?? {};
+    if (backend === "codex") {
+      const codex = provider.codex ?? {};
+      const previous = codex.additionalContext?.trim();
+      return {
+        ...current,
+        provider: {
+          ...provider,
+          codex: {
+            ...codex,
+            additionalContext: previous ? `${previous}\n\n${contextText}` : contextText,
+          },
+        },
+      };
+    }
+    const claude = provider.claude ?? {};
+    const previous = claude.additionalContext?.trim();
+    return {
+      ...current,
+      provider: {
+        ...provider,
+        claude: {
+          ...claude,
+          additionalContext: previous ? `${previous}\n\n${contextText}` : contextText,
+        },
+      },
+    };
+  }
+
+  async function runtimeOptionsWithWorktreeContext(
+    currentComposer: ChatComposerState,
+    runtimeOptions: ProviderRuntimeOptions | null,
+  ): Promise<ProviderRuntimeOptions | null> {
+    if (!taskWorktree.value) return runtimeOptions;
+    try {
+      const settings = await getProjectSettings();
+      const text = settings.worktree?.autoInstructions?.trim();
+      if (!text) return runtimeOptions;
+      return mergeAdditionalContext(runtimeOptions, currentComposer.backend, text);
+    } catch (err) {
+      console.error("[worktree] load settings failed", err);
+      return runtimeOptions;
+    }
+  }
+
+  function worktreeOptionFromItem(item: WorktreeListItem): WorktreeOption | null {
+    if (item.isMain || item.bare || item.prunable) return null;
+    const branch = item.branch ? ` · ${item.branch}` : "";
+    return {
+      value: item.path,
+      label: item.branch || item.path.split(/[\\/]/).pop() || item.path,
+      hint: `${item.path}${branch}`,
+    };
+  }
+
+  async function refreshTaskWorktree() {
+    try {
+      taskWorktree.value = await getTaskWorktree(props.taskId);
+      if (!taskWorktree.value && !worktreeBusy.value && context.project.value?.cwd) {
+        const settings = await getProjectSettings();
+        if (settings.worktree?.defaultMode === "create") {
+          await onSelectWorktree(WORKTREE_CREATE_VALUE);
+        }
+      }
+    } catch (err) {
+      taskWorktree.value = null;
+      worktreeError.value = `读取工作树失败：${String(err)}`;
+    }
+  }
+
+  async function refreshWorktreeOptions() {
+    const base = context.project.value?.cwd;
+    const current: WorktreeOption[] = [
+      { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: base || "使用当前项目目录" },
+      { value: WORKTREE_CREATE_VALUE, label: "新建工作树", hint: "为当前对话创建独立 worktree" },
+    ];
+    if (!base) {
+      worktreeOptions.value = current;
+      return;
+    }
+    try {
+      const items = await listWorktrees(base);
+      const existing = items
+        .map(worktreeOptionFromItem)
+        .filter((item): item is WorktreeOption => Boolean(item));
+      worktreeOptions.value = [...current, ...existing];
+      worktreeError.value = null;
+    } catch (err) {
+      worktreeOptions.value = current;
+      worktreeError.value = `读取工作树列表失败：${String(err)}`;
+    }
+  }
+
+  async function onSelectWorktree(value: string) {
+    const base = context.project.value?.cwd;
+    if (!base || worktreeBusy.value) return;
+    worktreeBusy.value = true;
+    worktreeError.value = null;
+    try {
+      if (value === WORKTREE_CURRENT_VALUE) {
+        await clearTaskWorktree(props.taskId);
+        taskWorktree.value = null;
+        return;
+      }
+      const settings = await getProjectSettings();
+      taskWorktree.value = value === WORKTREE_CREATE_VALUE
+        ? await createWorktreeForTask({
+          taskId: props.taskId,
+          projectId: props.projectId ?? null,
+          baseRepoPath: base,
+          parentDir: settings.worktree?.parentDir ?? null,
+        })
+        : await attachWorktreeToTask({
+          taskId: props.taskId,
+          projectId: props.projectId ?? null,
+          baseRepoPath: base,
+          worktreePath: value,
+        });
+      const nextComposer = withActiveBackend(composerForView.value);
+      composer.value = nextComposer;
+      await setComposerState(nextComposer);
+      await refreshWorktreeOptions();
+    } catch (err) {
+      worktreeError.value = `切换工作树失败：${String(err)}`;
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(worktreeError.value));
+    } finally {
+      worktreeBusy.value = false;
+    }
   }
 
   async function ensureModelOptions(backend: ChatBackendKind): Promise<ChatModelOption[]> {
@@ -326,7 +490,7 @@ export function useTaskComposerController(options: {
     const outgoingConversationReferences = input.turn.outgoingConversationReferences ?? [];
     const workflow = input.workflow ?? null;
     const runtimeCommand = input.runtimeCommand ?? null;
-    const runtimeOptions = input.runtimeOptions ?? null;
+    let runtimeOptions = input.runtimeOptions ?? null;
     const titleContent = input.turn.titleContent;
     const content = input.turn.content;
     if (
@@ -342,7 +506,10 @@ export function useTaskComposerController(options: {
       await ensureComposerLoaded();
       const currentComposer = composerForView.value;
       await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
-      const cwd = context.project.value?.cwd ?? (await context.ensureOrphanCwd());
+      const cwd = taskWorktree.value?.worktreePath ??
+        context.project.value?.cwd ??
+        (await context.ensureOrphanCwd());
+      runtimeOptions = await runtimeOptionsWithWorktreeContext(currentComposer, runtimeOptions);
 
       const optimistic = timeline.createOptimisticMessageEvent({
         content,
@@ -384,6 +551,15 @@ export function useTaskComposerController(options: {
     activeBackend,
     (backend) => {
       void ensureModelOptions(backend);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => [props.taskId, context.project.value?.cwd ?? ""] as const,
+    () => {
+      void refreshTaskWorktree();
+      void refreshWorktreeOptions();
     },
     { immediate: true },
   );
@@ -617,6 +793,7 @@ export function useTaskComposerController(options: {
   ): Promise<ChatComposerState | null> {
     const comp = await getComposerState(taskId);
     if (seq !== loadSeq || taskId !== props.taskId) return null;
+    await refreshTaskWorktree();
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
@@ -624,6 +801,7 @@ export function useTaskComposerController(options: {
   async function loadComposerForSend(taskId: string): Promise<ChatComposerState | null> {
     const comp = await getComposerState(taskId);
     if (taskId !== props.taskId) return null;
+    await refreshTaskWorktree();
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
@@ -924,6 +1102,7 @@ export function useTaskComposerController(options: {
     isTurnRunning.value = false;
     interruptInFlight.value = false;
     composer.value = null;
+    taskWorktree.value = null;
     contextUsage.value = null;
     restoreDraftConversationReferences.value = [];
   }
@@ -959,6 +1138,12 @@ export function useTaskComposerController(options: {
     blockingPendingAgentActions,
     pendingPlanApproval,
     currentLiliaGoal,
+    taskWorktree,
+      worktreeOptions,
+      worktreeSelectionValue,
+      worktreeBusy,
+    worktreeError,
+    effectiveProjectCwd,
     agentInteractionSettings,
     nonInterruptMode,
     activeBackend,
@@ -980,6 +1165,7 @@ export function useTaskComposerController(options: {
     onResolveToolConsent,
     onResolvePendingAgentAction,
     onComposerUpdate,
+    onSelectWorktree,
     onRetryTimelineEvent,
     loadAll,
     loadAgentInteractionSettings,

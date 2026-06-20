@@ -21,6 +21,7 @@ const props = defineProps<{
   options: Option[];
   icon?: any;
   placeholder?: string;
+  title?: string;
   placement?: "top" | "bottom";
   disabled?: boolean;
 }>();
@@ -122,6 +123,7 @@ onBeforeUnmount(() => {
       class="chat-chip"
       :class="{ 'is-open': open, 'is-disabled': disabled }"
       :disabled="disabled"
+      :title="title"
       :aria-haspopup="true"
       :aria-expanded="open"
       @click="toggle"

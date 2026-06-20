@@ -9,6 +9,13 @@
     "togglePin": "project_toggle_pin",
     "reorder": "project_reorder",
     "getSettings": "project_get_settings",
-    "setSettings": "project_set_settings"
+    "setSettings": "project_set_settings",
+    "worktreeList": "worktree_list",
+    "worktreeGetForTask": "worktree_get_for_task",
+    "worktreeClearTask": "worktree_clear_task",
+    "worktreeCreateForTask": "worktree_create_for_task",
+    "worktreeAttachTask": "worktree_attach_task",
+    "worktreeCleanupArchive": "worktree_cleanup_archive",
+    "worktreeMergeDeleteArchive": "worktree_merge_delete_archive"
   }
 }

@@ -122,6 +122,10 @@ const props = defineProps<{
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
+  worktreeValue: string;
+  worktreeOptions: Array<{ value: string; label: string; hint?: string }>;
+  worktreeBusy: boolean;
+  worktreeError: string | null;
   modelOptions: ChatModelOption[];
   contextUsage: ChatContextUsage | null;
   attachments: ChatAttachment[];
@@ -166,6 +170,7 @@ const emit = defineEmits<{
   "start-lilia-batch-apply": [input: LiliaBatchApplyInput];
   interrupt: [];
   "update-composer": [next: ChatComposerState];
+  "select-worktree": [value: string];
   "remove-attachment": [attachmentId: string];
   "pick-attachments": [];
   "add-context-attachment": [attachment: ChatAttachment];
@@ -468,6 +473,10 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   v-if="composerActivated"
                   ref="composerRef"
                   :state="composerState"
+                  :worktree-value="worktreeValue"
+                  :worktree-options="worktreeOptions"
+                  :worktree-busy="worktreeBusy"
+                  :worktree-error="worktreeError"
                   :model-options="modelOptions"
                   :attachments="attachments"
                   :append-attachments-to-end-key="appendAttachmentsToEndKey"
@@ -489,6 +498,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @execute-slash-command="emit('execute-slash-command', $event)"
                   @interrupt="emit('interrupt')"
                   @update:state="emit('update-composer', $event)"
+                  @select-worktree="emit('select-worktree', $event)"
                   @remove-attachment="emit('remove-attachment', $event)"
                   @pick-attachments="emit('pick-attachments')"
                   @add-context-attachment="emit('add-context-attachment', $event)"

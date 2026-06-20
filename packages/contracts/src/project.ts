@@ -19,6 +19,13 @@ import {
   PROJECT_REORDER_COMMAND,
   PROJECT_SET_SETTINGS_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
+  WORKTREE_ATTACH_TASK_COMMAND,
+  WORKTREE_CLEANUP_ARCHIVE_COMMAND,
+  WORKTREE_CLEAR_TASK_COMMAND,
+  WORKTREE_CREATE_FOR_TASK_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
+  WORKTREE_LIST_COMMAND,
+  WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
 } from "./projectCommandsContract.mjs";
 import {
   SYSTEM_OPEN_IN_VSCODE_COMMAND,
@@ -55,6 +62,13 @@ export {
   PROJECT_ROADMAP_STATUS_ORDER,
   PROJECT_SET_SETTINGS_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
+  WORKTREE_ATTACH_TASK_COMMAND,
+  WORKTREE_CLEANUP_ARCHIVE_COMMAND,
+  WORKTREE_CLEAR_TASK_COMMAND,
+  WORKTREE_CREATE_FOR_TASK_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
+  WORKTREE_LIST_COMMAND,
+  WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
   SYSTEM_OPEN_IN_VSCODE_COMMAND,
   SYSTEM_OPEN_PATH_COMMAND,
   SYSTEM_OPEN_URL_COMMAND,
@@ -187,10 +201,67 @@ export interface GitHubRepoPage {
   nextPage: number | null;
 }
 
+export type WorktreeSelectionMode = "current" | "create" | "existing";
+
+export type TaskWorktreeStatus = "active" | "merged" | "removed";
+
+export interface WorktreeSettings {
+  defaultMode: WorktreeSelectionMode;
+  parentDir: string | null;
+  autoInstructions: string;
+  cleanupOnArchive: boolean;
+}
+
+export interface TaskWorktree {
+  taskId: string;
+  projectId: string | null;
+  baseRepoPath: string;
+  worktreePath: string;
+  branchName: string;
+  baseBranch: string;
+  status: TaskWorktreeStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorktreeListItem {
+  path: string;
+  head: string | null;
+  branch: string | null;
+  bare: boolean;
+  detached: boolean;
+  prunable: boolean;
+  locked: boolean;
+  isMain: boolean;
+  isTaskBound?: boolean;
+}
+
+export interface WorktreeCreateInput {
+  taskId: string;
+  projectId?: string | null;
+  baseRepoPath: string;
+  parentDir?: string | null;
+}
+
+export interface WorktreeAttachInput {
+  taskId: string;
+  projectId?: string | null;
+  baseRepoPath: string;
+  worktreePath: string;
+}
+
+export interface WorktreeMergeResult {
+  merged: boolean;
+  removed: boolean;
+  archived: boolean;
+  message: string;
+}
+
 export interface ProjectSettings {
   cloneParentDir: string | null;
   codexDefaults?: CodexComposerSettings | null;
   githubBinding?: GitHubBindingMetadata | null;
+  worktree?: WorktreeSettings | null;
 }
 
 export interface PopupWindowSettings {

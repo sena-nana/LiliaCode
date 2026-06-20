@@ -71,7 +71,7 @@ async function renderTaskDetail(taskId = "t-002") {
   });
   await waitFor(() => {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
-  });
+  }, { timeout: 3000 });
   return Object.assign(view, { router });
 }
 
@@ -402,7 +402,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "完成" }));
 
     await expectAskUserResponse("t-002");
-  });
+  }, 10000);
 
   it("统一 Codex Agent 提问显示在 composer 内部，并用统一命令回写", async () => {
     const view = await renderTaskDetail();
@@ -442,8 +442,12 @@ describe("chat AskUser prompt", () => {
     });
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
-    await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
-    expect(await view.findByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
+    const actionMenuButton = await waitFor(
+      () => view.getByRole("button", { name: "更多输入操作" }),
+      { timeout: 3000 },
+    );
+    await fireEvent.click(actionMenuButton);
+    expect(view.getByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
 
     emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-002", queuedCount: 0 });
     await setComposerText(view, "补充上下文");

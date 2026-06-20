@@ -37,6 +37,7 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS task_runtime_finalizations;
         DROP TABLE IF EXISTS task_pending_turns;
         DROP TABLE IF EXISTS task_agent_sessions;
+        DROP TABLE IF EXISTS task_worktrees;
         DROP TABLE IF EXISTS project_architecture_changes;
         DROP TABLE IF EXISTS project_architecture_graphs;
         DROP TABLE IF EXISTS task_milestone_links;
@@ -221,6 +222,23 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE task_worktrees (
+          task_id        TEXT PRIMARY KEY,
+          project_id     TEXT,
+          base_repo_path TEXT NOT NULL,
+          worktree_path  TEXT NOT NULL UNIQUE,
+          branch_name    TEXT NOT NULL,
+          base_branch    TEXT NOT NULL,
+          status         TEXT NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active','merged','removed')),
+          created_at     INTEGER NOT NULL,
+          updated_at     INTEGER NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_task_worktrees_project_status
+          ON task_worktrees(project_id, status, updated_at DESC);
+
         CREATE TABLE task_runtime_states (
           task_id         TEXT PRIMARY KEY,
           turn_id         TEXT NOT NULL,
@@ -394,6 +412,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn current_schema_creates_task_worktrees() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        ensure_current_schema(&mut conn).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                r#"SELECT COUNT(*) FROM sqlite_master
+                   WHERE type = 'table' AND name = 'task_worktrees'"#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

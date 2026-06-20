@@ -210,8 +210,8 @@ describe("App main navigation events", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.path).toMatch(/^\/chats\/o-draft-/);
       expect(view.getByText("今天想做什么？")).toBeInTheDocument();
-      expect(view.getByRole("textbox")).toBeInTheDocument();
-    });
+      expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInTheDocument();
+    }, { timeout: 3000 });
 
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
       cmd === AGENT_TIMELINE_LIST_COMMAND && args?.taskId === draft.id

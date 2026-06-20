@@ -195,16 +195,17 @@ async function archiveProjectTask(taskId: string): Promise<boolean> {
   try {
     const archived = await archiveTask(taskId);
     if (disposed) return false;
-    if (
-      archived &&
-      route.path === `/projects/${props.project.id}/tasks/${taskId}`
-    ) {
-      emit("archived");
-    }
+    if (archived) onProjectTaskArchived(taskId);
     return archived;
   } catch (err) {
     if (!disposed) emit("error", `归档对话失败：${String(err)}`);
     return false;
+  }
+}
+
+function onProjectTaskArchived(taskId: string) {
+  if (route.path === `/projects/${props.project.id}/tasks/${taskId}`) {
+    emit("archived");
   }
 }
 
@@ -443,6 +444,7 @@ onBeforeUnmount(() => {
           :archive="archiveProjectTask"
           :open="openTask"
           :tree-row-state-class="treeRowStateClass"
+          @archived="onProjectTaskArchived"
           @error="emit('error', $event)"
         />
         <p v-else-if="isExpanded" class="sb-tree__empty">
