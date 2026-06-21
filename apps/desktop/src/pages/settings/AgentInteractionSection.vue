@@ -121,7 +121,7 @@ async function setClaudeSubagentField(
 ) {
   await setAgentInteraction({
     subagentMode: nextSubagentMode({
-      claude: { [key]: value },
+      claude: { ...agentInteraction.value.subagentMode.claude, [key]: value },
     }),
   });
 }

@@ -135,6 +135,12 @@ import type {
   CustomSubagentUpsertInput,
   QuotaUsageStats,
   QuotaUsageStatsInput,
+  RemoteControlStatus,
+  RemotePairDeviceInput,
+  RemotePairingTicket,
+  RemotePeerSummary,
+  RemoteRequestEnvelope,
+  RemoteResponseEnvelope,
 } from "@lilia/contracts";
 
 export type {
@@ -192,6 +198,12 @@ export type {
   CodexAccountQuotaStatus,
   QuotaUsageStats,
   QuotaUsageStatsInput,
+  RemoteControlStatus,
+  RemotePairDeviceInput,
+  RemotePairingTicket,
+  RemotePeerSummary,
+  RemoteRequestEnvelope,
+  RemoteResponseEnvelope,
 };
 
 export type TurnStartedEvent = ChatTurnStartedEvent;
@@ -484,6 +496,40 @@ export function consumeCodexRateLimitResetCredit(
     QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
     { input },
   );
+}
+
+export function getRemoteControlStatus(): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>("remote_control_status");
+}
+
+export function setRemoteControlHostEnabled(enabled: boolean): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>("remote_control_set_host_enabled", { enabled });
+}
+
+export function setRemoteControlPcName(name: string): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>("remote_control_set_pc_name", { name });
+}
+
+export function startRemoteControlPairing(): Promise<RemotePairingTicket> {
+  return invoke<RemotePairingTicket>("remote_control_start_pairing");
+}
+
+export function cancelRemoteControlPairing(): Promise<void> {
+  return invoke<void>("remote_control_cancel_pairing");
+}
+
+export function pairRemoteControlDevice(input: RemotePairDeviceInput): Promise<RemotePeerSummary> {
+  return invoke<RemotePeerSummary>("remote_control_pair_device", { input });
+}
+
+export function revokeRemoteControlDevice(deviceId: string): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>("remote_control_revoke_device", { deviceId });
+}
+
+export function dispatchRemoteControlRequest(
+  envelope: RemoteRequestEnvelope,
+): Promise<RemoteResponseEnvelope> {
+  return invoke<RemoteResponseEnvelope>("remote_control_dispatch_request", { envelope });
 }
 
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {

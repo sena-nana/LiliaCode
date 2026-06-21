@@ -29,6 +29,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         name: "task_worktrees",
         apply: create_task_worktree_table,
     },
+    SchemaMigration {
+        version: 29,
+        name: "remote_control",
+        apply: create_remote_control_tables,
+    },
 ];
 
 fn create_memory_tables(conn: &Connection) -> Result<(), String> {
@@ -286,6 +291,47 @@ fn create_task_worktree_table(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("lilia-store: 创建 task worktree schema 失败：{e}"))
+}
+
+fn create_remote_control_tables(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS remote_control_settings (
+          key        TEXT PRIMARY KEY,
+          value      TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS remote_control_trusted_devices (
+          id                TEXT PRIMARY KEY,
+          display_name      TEXT NOT NULL,
+          endpoint_id       TEXT NOT NULL UNIQUE,
+          protocol_version  INTEGER NOT NULL,
+          trusted           INTEGER NOT NULL DEFAULT 1 CHECK (trusted IN (0, 1)),
+          first_paired_at   INTEGER NOT NULL,
+          last_seen_at      INTEGER,
+          revoked_at        INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_remote_control_trusted_devices_endpoint
+          ON remote_control_trusted_devices(endpoint_id);
+
+        CREATE TABLE IF NOT EXISTS remote_control_pairing_tickets (
+          id             TEXT PRIMARY KEY,
+          challenge      TEXT NOT NULL,
+          pc_name        TEXT NOT NULL,
+          endpoint_id    TEXT NOT NULL,
+          pairing_uri    TEXT NOT NULL,
+          expires_at     INTEGER NOT NULL,
+          consumed_at    INTEGER,
+          created_at     INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_remote_control_pairing_tickets_active
+          ON remote_control_pairing_tickets(expires_at, consumed_at);
+        "#,
+    )
+    .map_err(|e| format!("lilia-store: 创建 Remote Control schema 失败：{e}"))
 }
 
 pub(super) fn ensure_schema_with_migrations(
