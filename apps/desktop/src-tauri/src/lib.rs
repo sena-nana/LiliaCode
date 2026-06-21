@@ -39,6 +39,7 @@ mod projects_tasks;
 mod provider;
 mod quota_usage;
 mod quota_usage_contract;
+mod remote_control;
 mod runner_protocol_contract;
 mod settings_store;
 mod store;
@@ -174,6 +175,7 @@ pub fn run() {
             match store::LiliaStore::new(&home) {
                 Ok(s) => {
                     app.manage(s);
+                    remote_control::restore_http_bridge_if_enabled(app.handle());
                     restore_runtime_sessions_on_startup(app.handle());
                     cli_project::handle_initial_args(app.handle());
                 }
@@ -342,6 +344,14 @@ pub fn run() {
             quota_usage::quota_usage_get_stats,
             quota_usage::quota_usage_get_codex_account_status,
             quota_usage::quota_usage_consume_codex_rate_limit_reset_credit,
+            remote_control::remote_control_status,
+            remote_control::remote_control_set_host_enabled,
+            remote_control::remote_control_set_pc_name,
+            remote_control::remote_control_start_pairing,
+            remote_control::remote_control_cancel_pairing,
+            remote_control::remote_control_pair_device,
+            remote_control::remote_control_revoke_device,
+            remote_control::remote_control_dispatch_request,
             automation::commands::automation_list_workflows,
             automation::commands::automation_save_draft,
             automation::commands::automation_publish,

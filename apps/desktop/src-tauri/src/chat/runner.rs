@@ -793,6 +793,14 @@ fn handle_runner_runtime_event<R: Runtime>(
                     payload: payload.clone(),
                 },
             );
+            crate::remote_control::record_pending_interaction(
+                session.task_id.clone(),
+                session.turn_id.clone(),
+                backend.clone().unwrap_or_else(|| session.backend.clone()),
+                id.clone(),
+                kind.clone(),
+                payload.clone(),
+            );
             crate::automation::emit_interaction_signal(
                 app_handle,
                 session.task_id.clone(),

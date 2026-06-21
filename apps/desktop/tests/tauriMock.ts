@@ -625,6 +625,48 @@ let routerModes: Record<MockProviderBackend, MockRouterMode> = {
   codex: DEFAULT_ROUTER_MODE_BY_BACKEND.codex,
 };
 let nodeAvailable = true;
+const remoteControlBridgeUrl = "http://127.0.0.1:41478";
+let remoteControlEnabled = false;
+let remoteControlPcName = "Lilia Test PC";
+let remoteControlTicket: Record<string, unknown> | null = null;
+let remoteControlDevices: Record<string, unknown>[] = [];
+
+function mockRemoteControlStatus() {
+  return {
+    hostEnabled: remoteControlEnabled,
+    state: remoteControlEnabled ? (remoteControlTicket ? "pairing" : "listening") : "disabled",
+    pcName: remoteControlPcName,
+    endpoint: remoteControlEnabled
+      ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }
+      : null,
+    activeTicket: remoteControlTicket ? { ...remoteControlTicket } : null,
+    trustedDevices: remoteControlDevices.map((device) => ({ ...device })),
+    capabilities: {
+      protocolVersion: 1,
+      minProtocolVersion: 1,
+      alpn: "lilia.remote-control.v1",
+      supportsPairing: true,
+      supportsTaskInbox: true,
+      supportsTimelineSubscription: true,
+      supportsChatSend: true,
+      supportsInteractionResponse: true,
+      supportsInterrupt: true,
+    },
+  };
+}
+
+function createMockRemoteControlTicket() {
+  return {
+    id: "mock-ticket",
+    pcName: remoteControlPcName,
+    pcEndpoint: { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] },
+    protocolVersion: 1,
+    challenge: "mock-challenge",
+    expiresAt: Date.now() + 600_000,
+    bridgeUrl: remoteControlBridgeUrl,
+    pairingUri: `lilia-remote://pair?v=1&ticket=mock-ticket&challenge=mock-challenge&endpoint=mock-pc-endpoint&name=${encodeURIComponent(remoteControlPcName)}&bridge=${encodeURIComponent(remoteControlBridgeUrl)}`,
+  };
+}
 
 function createMockLiliaIabSnapshot(args: Record<string, unknown>) {
   const taskId = String(args.taskId);
@@ -1788,6 +1830,10 @@ export function resetTauriMockData() {
     codex: DEFAULT_ROUTER_MODE_BY_BACKEND.codex,
   };
   nodeAvailable = true;
+  remoteControlEnabled = false;
+  remoteControlPcName = "Lilia Test PC";
+  remoteControlTicket = null;
+  remoteControlDevices = [];
   codexAppServerStatus = {
     version: "codex-cli 0.136.0",
     installPath: null,
@@ -2597,6 +2643,68 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
     case SYSTEM_OPEN_URL_COMMAND:
     case SYSTEM_OPEN_IN_VSCODE_COMMAND:
       return undefined;
+
+    case "remote_control_status":
+      return mockRemoteControlStatus();
+
+    case "remote_control_set_host_enabled":
+      remoteControlEnabled = args.enabled === true;
+      if (!remoteControlEnabled) {
+        remoteControlTicket = null;
+      }
+      return mockRemoteControlStatus();
+
+    case "remote_control_set_pc_name": {
+      const name = String(args.name ?? "").trim();
+      remoteControlPcName = name || "Lilia Test PC";
+      if (remoteControlTicket) {
+        remoteControlTicket = createMockRemoteControlTicket();
+      }
+      return mockRemoteControlStatus();
+    }
+
+    case "remote_control_start_pairing":
+      remoteControlEnabled = true;
+      remoteControlTicket = createMockRemoteControlTicket();
+      return { ...remoteControlTicket };
+
+    case "remote_control_cancel_pairing":
+      remoteControlTicket = null;
+      return undefined;
+
+    case "remote_control_revoke_device": {
+      const deviceId = String(args.deviceId ?? "");
+      remoteControlDevices = remoteControlDevices.map((device) =>
+        device.id === deviceId
+          ? { ...device, trusted: false, revokedAt: Date.now() }
+          : device
+      );
+      return mockRemoteControlStatus();
+    }
+
+    case "remote_control_pair_device": {
+      const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
+        ? args.input as Record<string, unknown>
+        : {};
+      const endpoint = input.androidEndpoint && typeof input.androidEndpoint === "object" && !Array.isArray(input.androidEndpoint)
+        ? input.androidEndpoint as Record<string, unknown>
+        : {};
+      const now = Date.now();
+      const device = {
+        id: `mock-android-${now}`,
+        kind: "android",
+        displayName: String(input.deviceName ?? "Android device"),
+        endpointId: String(endpoint.endpointId ?? "mock-android-endpoint"),
+        protocolVersion: Number(input.protocolVersion ?? 1),
+        trusted: true,
+        firstPairedAt: now,
+        lastSeenAt: now,
+        revokedAt: null,
+      };
+      remoteControlDevices = [device, ...remoteControlDevices];
+      remoteControlTicket = null;
+      return { ...device };
+    }
 
     case PROJECT_CREATE_COMMAND: {
       const name = String(args.name || "未命名项目");

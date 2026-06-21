@@ -42,6 +42,8 @@ const {
   captureAnchor,
   updateOrigin,
 } = useAnchoredMenuMotion(open, placement);
+void triggerEl;
+void menuEl;
 
 const current = computed(() =>
   props.options.find((o) => o.value === props.modelValue),

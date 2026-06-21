@@ -37,6 +37,7 @@ import {
   setProviderConfig,
   setRouterMode,
 } from "../../services/chat";
+import RemoteControlSection from "./RemoteControlSection.vue";
 
 const {
   report,
@@ -479,4 +480,5 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  <RemoteControlSection />
 </template>

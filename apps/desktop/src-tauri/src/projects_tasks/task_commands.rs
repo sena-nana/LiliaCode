@@ -73,6 +73,7 @@ pub fn task_list_sidebar_conversations(
                    t.project_id,
                    p.name,
                    t.title,
+                   t.status,
                    t.created_at,
                    t.pinned
                FROM tasks t
@@ -87,8 +88,9 @@ pub fn task_list_sidebar_conversations(
             let project_id = row.get::<_, Option<String>>(1)?;
             let project_name = row.get::<_, Option<String>>(2)?;
             let title = row.get::<_, String>(3)?;
-            let created_at = row.get::<_, i64>(4)?;
-            let pinned = row.get::<_, i64>(5)? != 0;
+            let status = row.get::<_, String>(4)?;
+            let created_at = row.get::<_, i64>(5)?;
+            let pinned = row.get::<_, i64>(6)? != 0;
             let route = match project_id.as_deref() {
                 Some(project_id) => format!("/projects/{project_id}/tasks/{task_id}"),
                 None => format!("/chats/{task_id}"),
@@ -98,6 +100,7 @@ pub fn task_list_sidebar_conversations(
                 project_id,
                 project_name,
                 title,
+                status,
                 created_at,
                 pinned,
                 route,
