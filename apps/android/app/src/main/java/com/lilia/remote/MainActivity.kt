@@ -85,33 +85,35 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
 
+    fun acceptPairedPc(pc: SavedPc) {
+        activePc = pc
+        selectedTask = null
+        inboxTasks = emptyList()
+        pairingError = ""
+    }
+
     fun pairWithTicket(ticket: RemotePairingTicket) {
         val remoteClient = client
         pairingBusy = true
         pairingError = ""
         remoteError = ""
         if (remoteClient == null) {
-            activePc = SavedPc(
-                endpointId = ticket.endpointId,
-                displayName = ticket.pcName,
-                protocolVersion = ticket.protocolVersion,
-                pairingUri = ticket.rawUri,
-                bridgeUrl = ticket.bridgeUrl,
-                lastActiveAt = System.currentTimeMillis(),
+            acceptPairedPc(
+                SavedPc(
+                    endpointId = ticket.endpointId,
+                    displayName = ticket.pcName,
+                    protocolVersion = ticket.protocolVersion,
+                    pairingUri = ticket.rawUri,
+                    bridgeUrl = ticket.bridgeUrl,
+                    lastActiveAt = System.currentTimeMillis(),
+                ),
             )
-            selectedTask = null
-            inboxTasks = emptyList()
             pairingBusy = false
             return
         }
         scope.launch {
             remoteClient.pair(ticket)
-                .onSuccess {
-                    activePc = it
-                    selectedTask = null
-                    inboxTasks = emptyList()
-                    pairingError = ""
-                }
+                .onSuccess { acceptPairedPc(it) }
                 .onFailure {
                     val message = it.message ?: "Pairing failed"
                     pairingError = message
@@ -147,6 +149,18 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteError = err.message ?: fallback
     }
 
+    suspend fun refreshProviderStatus(pc: SavedPc, remoteClient: RemoteHttpClient) {
+        remoteClient.providerStatus(pc)
+            .onSuccess {
+                if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
+                providerStatus = it
+            }
+            .onFailure {
+                if (shouldIgnorePcResult(activePc, pc)) return@onFailure
+                providerStatus = null
+            }
+    }
+
     suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient) {
         val accepted = remoteClient.resume(pc).getOrElse {
             if (shouldIgnorePcResult(activePc, pc)) return
@@ -172,15 +186,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             }
             .getOrNull()
         if (shouldIgnorePcResult(activePc, pc)) return
-        remoteClient.providerStatus(pc)
-            .onSuccess {
-                if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                providerStatus = it
-            }
-            .onFailure {
-                if (shouldIgnorePcResult(activePc, pc)) return@onFailure
-                providerStatus = null
-            }
+        refreshProviderStatus(pc, remoteClient)
         if (shouldIgnorePcResult(activePc, pc)) return
         if (status?.capabilities?.supportsTaskInbox == false) {
             inboxTasks = emptyList()
@@ -200,15 +206,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         detailLoading = true
         remoteError = ""
         scope.launch {
-            remoteClient.providerStatus(pc)
-                .onSuccess {
-                    if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                    providerStatus = it
-                }
-                .onFailure {
-                    if (shouldIgnorePcResult(activePc, pc)) return@onFailure
-                    providerStatus = null
-                }
+            refreshProviderStatus(pc, remoteClient)
             remoteClient.taskDetail(pc, taskId)
                 .onSuccess {
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess

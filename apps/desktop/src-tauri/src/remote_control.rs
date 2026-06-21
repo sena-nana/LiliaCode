@@ -110,13 +110,8 @@ pub struct RemoteControlStatus {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct RemoteEndpointInput {
     pub endpoint_id: String,
-    #[serde(default)]
-    pub relay_url: Option<String>,
-    #[serde(default)]
-    pub direct_addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -131,11 +126,9 @@ pub struct RemotePairDeviceInput {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct RemoteRequestEnvelope {
     pub id: String,
     pub protocol_version: i64,
-    pub sent_at: i64,
     pub device_id: String,
     pub request: JsonValue,
 }
@@ -1125,10 +1118,7 @@ fn ensure_http_bridge(app: AppHandle) -> Result<String, String> {
 fn handle_http_stream(app: AppHandle, mut stream: TcpStream) {
     let response = match read_http_request(&mut stream) {
         Ok(request) => handle_http_request(app, request),
-        Err(err) => http_json_response(
-            400,
-            http_error_payload("invalidRequest", err, false),
-        ),
+        Err(err) => http_json_response(400, http_error_payload("invalidRequest", err, false)),
     };
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
@@ -1226,7 +1216,9 @@ fn handle_http_request(app: AppHandle, request: HttpRequest) -> String {
             };
             match store.conn().and_then(|conn| pair_device(&conn, input)) {
                 Ok(peer) => http_json_response(200, json!({ "ok": true, "peer": peer })),
-                Err(err) => http_json_response(403, http_error_payload("invalidRequest", err, false)),
+                Err(err) => {
+                    http_json_response(403, http_error_payload("invalidRequest", err, false))
+                }
             }
         }
         ("POST", "/dispatch") => {
@@ -1273,7 +1265,11 @@ fn http_json_response(status: u16, payload: JsonValue) -> String {
     )
 }
 
-fn http_error_payload(code: &'static str, message: impl Into<String>, retryable: bool) -> JsonValue {
+fn http_error_payload(
+    code: &'static str,
+    message: impl Into<String>,
+    retryable: bool,
+) -> JsonValue {
     json!({
         "ok": false,
         "error": {
@@ -1430,7 +1426,6 @@ mod tests {
         let envelope = RemoteRequestEnvelope {
             id: "request-1".to_string(),
             protocol_version: 1,
-            sent_at: now_millis(),
             device_id: "android-endpoint".to_string(),
             request: json!({ "type": "connection.resume" }),
         };
@@ -1472,8 +1467,6 @@ mod tests {
                 device_name: "Pixel".to_string(),
                 android_endpoint: RemoteEndpointInput {
                     endpoint_id: "android-endpoint".to_string(),
-                    relay_url: None,
-                    direct_addresses: Vec::new(),
                 },
                 protocol_version: 1,
             },
@@ -1507,8 +1500,6 @@ mod tests {
                 device_name: "Pixel".to_string(),
                 android_endpoint: RemoteEndpointInput {
                     endpoint_id: "android-endpoint".to_string(),
-                    relay_url: None,
-                    direct_addresses: Vec::new(),
                 },
                 protocol_version: 1,
             },
@@ -1531,8 +1522,6 @@ mod tests {
                 device_name: "Pixel".to_string(),
                 android_endpoint: RemoteEndpointInput {
                     endpoint_id: "android-endpoint".to_string(),
-                    relay_url: None,
-                    direct_addresses: Vec::new(),
                 },
                 protocol_version: 1,
             },
@@ -1548,7 +1537,6 @@ mod tests {
         let envelope = RemoteRequestEnvelope {
             id: "request-1".to_string(),
             protocol_version: 1,
-            sent_at: now_millis(),
             device_id: "unknown-endpoint".to_string(),
             request: json!({ "type": "tasks.list" }),
         };
@@ -1610,16 +1598,21 @@ mod tests {
         let conn = conn();
         enable_host(&conn);
 
-        let status =
-            remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
         let wire = serde_json::to_value(status).unwrap();
 
         assert_eq!(wire["hostEnabled"], true);
         assert_eq!(wire["state"], "listening");
         assert_eq!(wire["pcName"], "Lilia PC");
-        assert!(wire["endpoint"]["endpointId"].as_str().unwrap().starts_with("pc-"));
+        assert!(wire["endpoint"]["endpointId"]
+            .as_str()
+            .unwrap()
+            .starts_with("pc-"));
         assert_eq!(wire["capabilities"]["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(wire["capabilities"]["minProtocolVersion"], MIN_PROTOCOL_VERSION);
+        assert_eq!(
+            wire["capabilities"]["minProtocolVersion"],
+            MIN_PROTOCOL_VERSION
+        );
         assert_eq!(wire["capabilities"]["supportsPairing"], true);
         assert_eq!(wire["capabilities"]["supportsTaskInbox"], true);
         assert_eq!(wire["capabilities"]["supportsChatSend"], true);
@@ -1648,8 +1641,7 @@ mod tests {
         enable_host(&conn);
         insert_ticket(&conn);
 
-        let status =
-            remote_status_with_bridge(&conn, Some("http://192.168.1.99:41478")).unwrap();
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.99:41478")).unwrap();
         let ticket = status.active_ticket.unwrap();
 
         assert_eq!(
