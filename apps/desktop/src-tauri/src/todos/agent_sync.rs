@@ -129,7 +129,7 @@ pub(crate) fn apply_agent_event_impl(
 
 #[cfg(test)]
 mod tests {
-    use super::super::types::PRIORITY_HIGH;
+    use super::super::contract;
     use super::*;
 
     fn create_task_todos_schema(conn: &Connection) {
@@ -185,7 +185,13 @@ mod tests {
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].text, "重复任务");
         assert!(!updated[0].done);
-        assert_eq!(updated[0].priority, PRIORITY_HIGH);
+        assert_eq!(
+            updated[0].priority,
+            contract::priorities()
+                .first()
+                .map(String::as_str)
+                .unwrap_or("high")
+        );
 
         let row_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM task_todos", [], |row| row.get(0))

@@ -1,20 +1,51 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { AskUserResult } from "@lilia/contracts";
+import {
+  ARCHITECTURE_INTERACTION_KIND,
+  MCP_ELICITATION_INTERACTION_KIND,
+  PERMISSION_APPROVAL_INTERACTION_KIND,
+  PLAN_APPROVAL_INTERACTION_KIND,
+  projectArchitectureChangeText,
+  TITLE_UPDATE_ACTION_KIND,
+  TOOL_CONSENT_INTERACTION_KIND,
+  type AskUserResult,
+} from "@lilia/contracts";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
 import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
+import {
+  pendingAgentActionAutoDecisionLabel,
+  isPendingAskUserAgentAction,
+  pendingAgentActionAutoDecisionKey,
+  pendingAgentActionAutoResolution,
+  pendingAgentActionKey,
+  pendingAgentActionResolutionSubmittingTarget,
+  pendingAgentActionResolution,
+} from "../../composables/pendingAgentActions";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type { ToolConsentDecision } from "../../services/chat";
 import {
   recommendedAskUserResult,
   useFreeImplementationCountdown,
 } from "./freeImplementationMode";
+import {
+  timelineMcpCanSubmit,
+  timelineMcpContentFromForm,
+  timelineMcpFieldInputType,
+  timelineMcpFieldsForSchema,
+  timelineMcpInitialValues,
+  timelineMcpMultiSelected,
+  timelineMcpToggleMultiValue,
+} from "./timelineMcpForm";
 import AskUserInlinePrompt from "./AskUserInlinePrompt.vue";
+import TimelineArchitectureAction from "./TimelineArchitectureAction.vue";
+import TimelineMcpAction from "./TimelineMcpAction.vue";
+import TimelinePermissionAction from "./TimelinePermissionAction.vue";
+import TimelineTitleUpdateAction from "./TimelineTitleUpdateAction.vue";
 import ToolConsentInlinePrompt from "./ToolConsentInlinePrompt.vue";
 
 const props = defineProps<{
@@ -36,21 +67,9 @@ const mcpJsonText = ref("{}");
 const agentInteractionSettings = useAgentInteractionSettings();
 const freeImplementation = computed(() => agentInteractionSettings.permissionMode.value === "free");
 
-const actionKey = computed(() =>
-  props.action.kind === "tool_consent"
-    ? `tool:${props.action.requestId}`
-    : props.action.kind === "title_update"
-      ? `title:${props.action.requestId}`
-      : props.action.kind === "mcp_elicitation"
-        ? `mcp:${props.action.requestId}`
-        : props.action.kind === "permission_approval"
-          ? `permission:${props.action.requestId}`
-          : props.action.kind === "architecture_change"
-            ? `architecture:${props.action.requestId}`
-            : `ask:${props.action.ask.id}`,
-);
+const actionKey = computed(() => pendingAgentActionKey(props.action));
 const activeAsk = computed(() =>
-  props.action.kind === "ask_user" || props.action.kind === "plan_approval"
+  isPendingAskUserAgentAction(props.action)
     ? props.action.ask
     : null,
 );
@@ -84,10 +103,10 @@ const {
 } = useAskUserInteraction(activeAsk, freeformText, resolveAsk);
 
 const toolRequest = computed(() =>
-  props.action.kind === "tool_consent" ? props.action.request : null,
+  props.action.kind === TOOL_CONSENT_INTERACTION_KIND ? props.action.request : null,
 );
 const titleUpdateAction = computed(() =>
-  props.action.kind === "title_update" ? props.action : null,
+  props.action.kind === TITLE_UPDATE_ACTION_KIND ? props.action : null,
 );
 const { toolDanger, toolIcon, toolHeadline, toolInputJson, toolSubtitle } =
   useToolConsentPresentation(toolRequest);
@@ -131,66 +150,33 @@ const mcpJsonTextModel = computed({
 const hasFreeformText = computed(() => freeformText.value.trim().length > 0);
 const hasToolMessage = computed(() => toolMessage.value.trim().length > 0);
 const mcpAction = computed(() =>
-  props.action.kind === "mcp_elicitation" ? props.action : null,
+  props.action.kind === MCP_ELICITATION_INTERACTION_KIND ? props.action : null,
 );
 const permissionAction = computed(() =>
-  props.action.kind === "permission_approval" ? props.action : null,
+  props.action.kind === PERMISSION_APPROVAL_INTERACTION_KIND ? props.action : null,
 );
 const architectureAction = computed(() =>
-  props.action.kind === "architecture_change" ? props.action : null,
+  props.action.kind === ARCHITECTURE_INTERACTION_KIND ? props.action : null,
 );
 const architectureChangeRows = computed(() => {
   const changes = architectureAction.value?.payload.changes ?? [];
   return changes.slice(0, 5).map((change, index) => ({
     key: `${index}:${change.type}`,
-    text: architectureChangeText(change),
+    text: projectArchitectureChangeText(change),
   }));
 });
 const architectureExtraCount = computed(() =>
   Math.max(0, (architectureAction.value?.payload.changes.length ?? 0) - architectureChangeRows.value.length),
 );
 const mcpFields = computed(() => {
-  const schema = mcpAction.value?.payload.requestedSchema;
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return [];
-  const row = schema as Record<string, unknown>;
-  const properties = row.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
-  const required = Array.isArray(row.required)
-    ? new Set(row.required.filter((item): item is string => typeof item === "string"))
-    : new Set<string>();
-  return Object.entries(properties as Record<string, unknown>).map(([key, value]) => {
-    const field = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-    const options = enumOptions(field);
-    return {
-      key,
-      label: stringValue(field.title) || key,
-      description: stringValue(field.description),
-      type: stringValue(field.type) || "string",
-      required: required.has(key),
-      options,
-      multi: stringValue(field.type) === "array",
-      defaultValue: field.default,
-    };
-  });
+  return timelineMcpFieldsForSchema(mcpAction.value?.payload.requestedSchema);
 });
 const canSubmitMcp = computed(() => {
-  if (mcpAction.value?.payload.mode !== "form") return true;
-  if (mcpFields.value.length === 0) {
-    try {
-      JSON.parse(mcpJsonText.value || "{}");
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return mcpFields.value.every((field) => {
-    if (!field.required) return true;
-    const value = mcpValues.value[field.key];
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === "boolean") return true;
-    return String(value ?? "").trim().length > 0;
+  return timelineMcpCanSubmit({
+    fields: mcpFields.value,
+    jsonText: mcpJsonText.value,
+    mode: mcpAction.value?.payload.mode,
+    values: mcpValues.value,
   });
 });
 const permissionJson = computed(() =>
@@ -200,206 +186,150 @@ const permissionCwd = computed(() =>
   permissionAction.value?.payload.providerContext?.codex?.cwd ?? "",
 );
 
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function enumOptions(field: Record<string, unknown>): Array<{ value: string; label: string }> {
-  const rawEnum = Array.isArray(field.enum) ? field.enum : null;
-  if (rawEnum) {
-    return rawEnum
-      .map((value) => typeof value === "string" ? { value, label: value } : null)
-      .filter((value): value is { value: string; label: string } => value !== null);
-  }
-  const oneOf = Array.isArray(field.oneOf)
-    ? field.oneOf
-    : Array.isArray((field.items as Record<string, unknown> | undefined)?.anyOf)
-      ? (field.items as Record<string, unknown>).anyOf as unknown[]
-      : null;
-  if (!oneOf) return [];
-  return oneOf
-    .map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const row = item as Record<string, unknown>;
-      const value = stringValue(row.const);
-      if (!value) return null;
-      return { value, label: stringValue(row.title) || value };
-    })
-    .filter((value): value is { value: string; label: string } => value !== null);
-}
-
 function mcpFieldInputType(type: string): string {
-  if (type === "number" || type === "integer") return "number";
-  return "text";
+  return timelineMcpFieldInputType(type);
 }
 
 function mcpMultiSelected(key: string, value: string): boolean {
-  const current = mcpValues.value[key];
-  return Array.isArray(current) && current.includes(value);
+  return timelineMcpMultiSelected(mcpValues.value, key, value);
 }
 
 function toggleMcpMultiValue(key: string, value: string) {
   cancelAutoDecision();
-  const current = mcpValues.value[key];
-  const values = Array.isArray(current)
-    ? current.filter((item): item is string => typeof item === "string")
-    : [];
-  mcpValues.value[key] = values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value];
+  mcpValues.value = timelineMcpToggleMultiValue(mcpValues.value, key, value);
 }
 
 function mcpContentFromForm(): Record<string, unknown> {
-  if (mcpFields.value.length === 0) {
-    const parsed = JSON.parse(mcpJsonText.value || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  return timelineMcpContentFromForm({
+    fields: mcpFields.value,
+    jsonText: mcpJsonText.value,
+    values: mcpValues.value,
+  });
+}
+
+function emitResolution(
+  resolution: PendingAgentActionResolution | null,
+): boolean {
+  if (!resolution) return false;
+  emit("resolve", resolution);
+  return true;
+}
+
+function applySubmittingStateForResolution(resolution: PendingAgentActionResolution) {
+  const target = pendingAgentActionResolutionSubmittingTarget(resolution);
+  if (target === "tool" && resolution.kind === TOOL_CONSENT_INTERACTION_KIND) {
+    toolSubmitting.value = resolution.decision;
+  } else if (target === "codex") {
+    codexSubmitting.value = true;
   }
-  const content: Record<string, unknown> = {};
-  for (const field of mcpFields.value) {
-    const raw = mcpValues.value[field.key];
-    if (field.type === "number" || field.type === "integer") {
-      const number = typeof raw === "number" ? raw : Number(raw);
-      if (Number.isFinite(number)) content[field.key] = field.type === "integer"
-        ? Math.trunc(number)
-        : number;
-      continue;
-    }
-    if (field.type === "boolean") {
-      content[field.key] = raw === true;
-      continue;
-    }
-    if (Array.isArray(raw)) {
-      content[field.key] = raw;
-      continue;
-    }
-    const text = String(raw ?? "");
-    if (text || field.required) content[field.key] = text;
-  }
-  return content;
 }
 
 function resolveAsk(result: AskUserResult) {
-  if (props.action.kind !== "ask_user" && props.action.kind !== "plan_approval") return;
-  emit("resolve", {
-    kind: props.action.kind,
-    requestId: props.action.requestId,
-    askId: props.action.ask.id,
-    result,
-  });
+  emitResolution(pendingAgentActionResolution(props.action, { askResult: result }));
 }
 
 function decideTool(decision: ToolConsentDecision, source: "manual" | "auto" = "manual") {
   if (source === "manual") cancelAutoDecision();
-  if (props.action.kind !== "tool_consent" || toolSubmitting.value) return;
+  if (props.action.kind !== TOOL_CONSENT_INTERACTION_KIND || toolSubmitting.value) return;
   if (decision === "allow" && toolCommandIsEmpty.value) return;
-  toolSubmitting.value = decision;
   const updatedInput = decision === "allow" ? updatedCommandInput.value : undefined;
-  emit("resolve", {
-    kind: "tool_consent",
-    requestId: props.action.requestId,
-    decision,
-    message: decision === "deny"
+  const resolution = pendingAgentActionResolution(props.action, {
+    toolDecision: decision,
+    toolMessage: decision === "deny"
       ? toolMessage.value.trim() || "用户拒绝了此次工具调用"
       : undefined,
-    ...(updatedInput ? { updatedInput } : {}),
+    toolUpdatedInput: updatedInput,
   });
+  if (!resolution) return;
+  applySubmittingStateForResolution(resolution);
+  emitResolution(resolution);
 }
 
 function decideTitleUpdate(decision: "accept" | "decline", source: "manual" | "auto" = "manual") {
   if (source === "manual") cancelAutoDecision();
-  if (props.action.kind !== "title_update") return;
-  emit("resolve", {
-    kind: "title_update",
-    requestId: props.action.requestId,
-    decision,
-  });
+  if (props.action.kind !== TITLE_UPDATE_ACTION_KIND) return;
+  emitResolution(pendingAgentActionResolution(props.action, { titleDecision: decision }));
 }
 
 function decideMcp(action: "accept" | "decline" | "cancel", source: "manual" | "auto" = "manual") {
   if (source === "manual") cancelAutoDecision();
-  if (props.action.kind !== "mcp_elicitation" || codexSubmitting.value) return;
+  if (props.action.kind !== MCP_ELICITATION_INTERACTION_KIND || codexSubmitting.value) return;
   if (action === "accept" && !canSubmitMcp.value) return;
-  codexSubmitting.value = true;
-  emit("resolve", {
-    kind: "mcp_elicitation",
-    requestId: props.action.requestId,
-    action,
-    ...(action === "accept" && props.action.payload.mode === "form"
-      ? { content: mcpContentFromForm() }
-      : {}),
+  const resolution = pendingAgentActionResolution(props.action, {
+    mcpDecision: action,
+    mcpContent: action === "accept" ? mcpContentFromForm() : undefined,
   });
+  if (!resolution) return;
+  applySubmittingStateForResolution(resolution);
+  emitResolution(resolution);
 }
 
 function decidePermission(decision: "allow" | "deny", source: "manual" | "auto" = "manual") {
   if (source === "manual") cancelAutoDecision();
-  if (props.action.kind !== "permission_approval" || codexSubmitting.value) return;
-  codexSubmitting.value = true;
-  emit("resolve", {
-    kind: "permission_approval",
-    requestId: props.action.requestId,
-    decision,
-  });
+  if (props.action.kind !== PERMISSION_APPROVAL_INTERACTION_KIND || codexSubmitting.value) return;
+  const resolution = pendingAgentActionResolution(props.action, { permissionDecision: decision });
+  if (!resolution) return;
+  applySubmittingStateForResolution(resolution);
+  emitResolution(resolution);
 }
 
 function decideArchitecture(decision: "allow" | "deny", source: "manual" | "auto" = "manual") {
   if (source === "manual") cancelAutoDecision();
-  if (props.action.kind !== "architecture_change" || codexSubmitting.value) return;
-  codexSubmitting.value = true;
-  emit("resolve", {
-    kind: "architecture_change",
-    requestId: props.action.requestId,
-    decision,
-  });
+  if (props.action.kind !== ARCHITECTURE_INTERACTION_KIND || codexSubmitting.value) return;
+  const resolution = pendingAgentActionResolution(props.action, { architectureDecision: decision });
+  if (!resolution) return;
+  applySubmittingStateForResolution(resolution);
+  emitResolution(resolution);
+}
+
+function runManualAction(action: () => void) {
+  cancelAutoDecision();
+  action();
+}
+
+function runManualActionWith<T>(action: (value: T) => void, value: T) {
+  cancelAutoDecision();
+  action(value);
 }
 
 function submitAsk() {
-  cancelAutoDecision();
-  submitAskBase();
+  runManualAction(submitAskBase);
 }
 
 function submitAskFreeform(value?: string) {
-  cancelAutoDecision();
-  submitAskFreeformBase(value);
+  runManualAction(() => submitAskFreeformBase(value));
 }
 
 function confirmAskNo() {
-  cancelAutoDecision();
-  confirmAskNoBase();
+  runManualAction(confirmAskNoBase);
 }
 
 function skipAsk() {
-  cancelAutoDecision();
-  skipAskBase();
+  runManualAction(skipAskBase);
 }
 
 function backAsk() {
-  cancelAutoDecision();
-  backAskBase();
+  runManualAction(backAskBase);
 }
 
 function cancelAsk() {
-  cancelAutoDecision();
-  cancelAskBase();
+  runManualAction(cancelAskBase);
 }
 
 function selectSingleOption(id: string) {
-  cancelAutoDecision();
-  selectSingleOptionBase(id);
+  runManualActionWith(selectSingleOptionBase, id);
 }
 
 function toggleMulti(id: string) {
-  cancelAutoDecision();
-  toggleMultiBase(id);
+  runManualActionWith(toggleMultiBase, id);
 }
 
 function beginCommandEdit() {
-  cancelAutoDecision();
-  beginCommandEditBase();
+  runManualAction(beginCommandEditBase);
 }
 
 function cancelCommandEdit() {
-  cancelAutoDecision();
-  cancelCommandEditBase();
+  runManualAction(cancelCommandEditBase);
 }
 
 function updateMcpField(key: string, value: unknown) {
@@ -408,67 +338,42 @@ function updateMcpField(key: string, value: unknown) {
 }
 
 function autoDecisionKeyForCurrentState(): string {
-  if (activeAsk.value) {
-    const result = recommendedAskUserResult(activeAsk.value.spec);
-    if (!result) return "";
-    return `ask:${activeAsk.value.id}:${askQuestion.value?.id ?? ""}`;
-  }
-  if (
-    props.action.kind === "tool_consent" &&
-    !toolDanger.value &&
-    !toolSubmitting.value &&
-    !isEditingToolCommand.value &&
-    !toolCommandIsEmpty.value
-  ) {
-    return `tool:${props.action.requestId}`;
-  }
-  if (props.action.kind === "title_update") return `title:${props.action.requestId}`;
-  if (
-    props.action.kind === "mcp_elicitation" &&
-    props.action.payload.mode === "form" &&
-    canSubmitMcp.value &&
-    !codexSubmitting.value
-  ) {
-    return `mcp:${props.action.requestId}`;
-  }
-  if (props.action.kind === "architecture_change" && !codexSubmitting.value) {
-    return `architecture:${props.action.requestId}`;
-  }
-  if (props.action.kind === "permission_approval" && !codexSubmitting.value) {
-    return `permission:${props.action.requestId}`;
-  }
-  return "";
+  return pendingAgentActionAutoDecisionKey(props.action, autoResolutionState());
+}
+
+function autoResolutionState() {
+  return {
+    askHasRecommendedResult: !!recommendedAskUserResult(activeAsk.value?.spec),
+    askQuestionId: askQuestion.value?.id,
+    editingToolCommand: isEditingToolCommand.value,
+    mcpCanSubmit: canSubmitMcp.value,
+    submitting: codexSubmitting.value,
+    toolCommandIsEmpty: toolCommandIsEmpty.value,
+    toolDanger: toolDanger.value,
+    toolSubmitting: !!toolSubmitting.value,
+  };
 }
 
 const autoDecisionKey = computed(autoDecisionKeyForCurrentState);
 
 function autoDecisionLabelForCurrentState(): string {
-  if (activeAsk.value) return props.action.kind === "plan_approval" ? "同意计划" : "选择推荐项";
-  if (props.action.kind === "tool_consent") return "同意工具调用";
-  if (props.action.kind === "title_update") return "同意标题";
-  if (props.action.kind === "mcp_elicitation") return "提交 MCP 表单";
-  if (props.action.kind === "architecture_change") return "应用架构变更";
-  if (props.action.kind === "permission_approval") return "同意权限请求";
-  return "";
+  return pendingAgentActionAutoDecisionLabel(props.action);
 }
 
 function runAutoDecision() {
-  if (activeAsk.value) {
-    const result = recommendedAskUserResult(activeAsk.value.spec);
-    if (result) resolveAsk(result);
-    return;
-  }
-  if (props.action.kind === "tool_consent") {
-    decideTool("allow", "auto");
-  } else if (props.action.kind === "title_update") {
-    decideTitleUpdate("accept", "auto");
-  } else if (props.action.kind === "mcp_elicitation") {
-    decideMcp("accept", "auto");
-  } else if (props.action.kind === "architecture_change") {
-    decideArchitecture("allow", "auto");
-  } else if (props.action.kind === "permission_approval") {
-    decidePermission("allow", "auto");
-  }
+  const resolution = pendingAgentActionAutoResolution(props.action, {
+    ...autoResolutionState(),
+    askResult: activeAsk.value ? recommendedAskUserResult(activeAsk.value.spec) : null,
+    mcpContent: props.action.kind === MCP_ELICITATION_INTERACTION_KIND && canSubmitMcp.value
+      ? mcpContentFromForm()
+      : undefined,
+    toolUpdatedInput: props.action.kind === TOOL_CONSENT_INTERACTION_KIND
+      ? updatedCommandInput.value
+      : undefined,
+  });
+  if (!resolution) return;
+  applySubmittingStateForResolution(resolution);
+  emit("resolve", resolution);
 }
 
 const {
@@ -482,25 +387,6 @@ const {
   runDecision: runAutoDecision,
 });
 
-function architectureChangeText(change: { type: string; [key: string]: unknown }): string {
-  if (change.type === "upsert_node") {
-    const node = change.node && typeof change.node === "object" && !Array.isArray(change.node)
-      ? change.node as Record<string, unknown>
-      : {};
-    return `更新节点：${stringValue(node.label) || stringValue(node.id) || "未命名节点"}`;
-  }
-  if (change.type === "remove_node") return `移除节点：${stringValue(change.nodeId)}`;
-  if (change.type === "upsert_edge") {
-    const edge = change.edge && typeof change.edge === "object" && !Array.isArray(change.edge)
-      ? change.edge as Record<string, unknown>
-      : {};
-    return `更新关系：${stringValue(edge.label) || stringValue(edge.id) || "未命名关系"}`;
-  }
-  if (change.type === "remove_edge") return `移除关系：${stringValue(change.edgeId)}`;
-  if (change.type === "set_summary") return "更新架构摘要";
-  return change.type;
-}
-
 watch(actionKey, () => {
   resetAutoDecision();
   toolExpanded.value = false;
@@ -508,24 +394,13 @@ watch(actionKey, () => {
   toolSubmitting.value = null;
   codexSubmitting.value = false;
   mcpJsonText.value = "{}";
-  mcpValues.value = {};
-  for (const field of mcpFields.value) {
-    if (field.defaultValue !== undefined) {
-      mcpValues.value[field.key] = field.defaultValue;
-    } else if (field.type === "boolean") {
-      mcpValues.value[field.key] = false;
-    } else if (field.multi) {
-      mcpValues.value[field.key] = [];
-    } else {
-      mcpValues.value[field.key] = "";
-    }
-  }
+  mcpValues.value = timelineMcpInitialValues(mcpFields.value);
 }, { immediate: true });
 </script>
 
 <template>
   <ToolConsentInlinePrompt
-    v-if="props.action.kind === 'tool_consent' && toolRequest"
+    v-if="props.action.kind === TOOL_CONSENT_INTERACTION_KIND && toolRequest"
     root-class="timeline-pending-action composer-inline composer-inline--tool"
     :active-tool-consent="toolRequest"
     :tool-danger="toolDanger"
@@ -576,249 +451,57 @@ watch(actionKey, () => {
     </div>
   </ToolConsentInlinePrompt>
 
-  <section
+  <TimelineTitleUpdateAction
     v-else-if="titleUpdateAction"
-    class="timeline-pending-action timeline-pending-action--title"
-    role="region"
-    aria-label="标题更新确认"
-  >
-    <span class="timeline-pending-action__title-preview">
-      {{ titleUpdateAction.proposedTitle }}
-    </span>
-    <div
-      v-if="autoDecisionText"
-      class="composer-inline__auto-decision timeline-pending-action__auto-decision"
-      role="status"
-    >
-      {{ autoDecisionText }}
-    </div>
-    <div class="composer-inline__actions">
-      <button
-        type="button"
-        class="ui-button ui-button--ghost composer-inline__btn"
-        @click="decideTitleUpdate('decline')"
-      >
-        忽略
-      </button>
-      <button
-        type="button"
-        class="ui-button ui-button--primary composer-inline__btn"
-        @click="decideTitleUpdate('accept')"
-      >
-        同意
-      </button>
-    </div>
-  </section>
+    :proposed-title="titleUpdateAction.proposedTitle"
+    :auto-decision-text="autoDecisionText"
+    @decline="decideTitleUpdate('decline')"
+    @accept="decideTitleUpdate('accept')"
+  />
 
-  <section
+  <TimelineMcpAction
     v-else-if="mcpAction"
-    class="timeline-pending-action timeline-pending-action--codex"
-    role="region"
-    aria-label="MCP 确认"
-  >
-    <div class="timeline-pending-action__stack">
-      <div class="timeline-pending-action__title-preview">
-        {{ mcpAction.payload.serverName }} · {{ mcpAction.payload.message }}
-      </div>
-      <a
-        v-if="mcpAction.payload.mode === 'url' && mcpAction.payload.url"
-        class="timeline-pending-action__link"
-        :href="mcpAction.payload.url"
-        target="_blank"
-        rel="noreferrer"
-      >
-        {{ mcpAction.payload.url }}
-      </a>
-      <div
-        v-else-if="mcpAction.payload.mode === 'form'"
-        class="timeline-pending-action__fields"
-      >
-        <label
-          v-for="field in mcpFields"
-          :key="field.key"
-          class="timeline-pending-action__field"
-        >
-          <span class="timeline-pending-action__field-label">
-            {{ field.label }}{{ field.required ? " *" : "" }}
-          </span>
-          <select
-            v-if="field.options.length && !field.multi"
-            :value="String(mcpValues[field.key] ?? '')"
-            class="timeline-pending-action__input"
-            @change="updateMcpField(field.key, ($event.target as HTMLSelectElement).value)"
-          >
-            <option
-              v-for="option in field.options"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-          <div v-else-if="field.options.length && field.multi" class="timeline-pending-action__checks">
-            <label
-              v-for="option in field.options"
-              :key="option.value"
-              class="timeline-pending-action__check"
-            >
-              <input
-                :checked="mcpMultiSelected(field.key, option.value)"
-                type="checkbox"
-                :value="option.value"
-                @change="toggleMcpMultiValue(field.key, option.value)"
-              />
-              <span>{{ option.label }}</span>
-            </label>
-          </div>
-          <label v-else-if="field.type === 'boolean'" class="timeline-pending-action__check">
-            <input
-              :checked="mcpValues[field.key] === true"
-              type="checkbox"
-              @change="updateMcpField(field.key, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ field.description || "启用" }}</span>
-          </label>
-          <input
-            v-else
-            :value="String(mcpValues[field.key] ?? '')"
-            class="timeline-pending-action__input"
-            :type="mcpFieldInputType(field.type)"
-            @input="updateMcpField(field.key, ($event.target as HTMLInputElement).value)"
-          />
-        </label>
-        <textarea
-          v-if="mcpFields.length === 0"
-          v-model="mcpJsonTextModel"
-          class="timeline-pending-action__input timeline-pending-action__input--json"
-          rows="3"
-          placeholder="JSON content"
-        />
-      </div>
-      <div
-        v-if="autoDecisionText"
-        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
-        role="status"
-      >
-        {{ autoDecisionText }}
-      </div>
-      <div class="composer-inline__actions">
-        <button
-          type="button"
-          class="ui-button ui-button--ghost composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decideMcp('cancel')"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button--ghost composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decideMcp('decline')"
-        >
-          拒绝
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button--primary composer-inline__btn"
-          :disabled="codexSubmitting || !canSubmitMcp"
-          @click="decideMcp('accept')"
-        >
-          同意
-        </button>
-      </div>
-    </div>
-  </section>
+    :action="mcpAction"
+    :fields="mcpFields"
+    :values="mcpValues"
+    :json-text="mcpJsonText"
+    :auto-decision-text="autoDecisionText"
+    :can-submit="canSubmitMcp"
+    :disabled="codexSubmitting"
+    :field-input-type="mcpFieldInputType"
+    :multi-selected="mcpMultiSelected"
+    @update-field="updateMcpField"
+    @toggle-multi-value="toggleMcpMultiValue"
+    @update-json-text="mcpJsonTextModel = $event"
+    @cancel="decideMcp('cancel')"
+    @decline="decideMcp('decline')"
+    @accept="decideMcp('accept')"
+  />
 
-  <section
+  <TimelineArchitectureAction
     v-else-if="architectureAction"
-    class="timeline-pending-action timeline-pending-action--architecture"
-    role="region"
-    aria-label="架构图变更确认"
-  >
-    <div class="timeline-pending-action__stack">
-      <div class="timeline-pending-action__title-preview">
-        {{ architectureAction.payload.reason || "Agent 提议更新项目架构图" }}
-      </div>
-      <ul class="timeline-pending-action__mini-list">
-        <li
-          v-for="row in architectureChangeRows"
-          :key="row.key"
-        >
-          {{ row.text }}
-        </li>
-        <li v-if="architectureExtraCount > 0">另有 {{ architectureExtraCount }} 项变更</li>
-      </ul>
-      <div
-        v-if="autoDecisionText"
-        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
-        role="status"
-      >
-        {{ autoDecisionText }}
-      </div>
-      <div class="composer-inline__actions">
-        <button
-          type="button"
-          class="ui-button ui-button--ghost composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decideArchitecture('deny')"
-        >
-          拒绝
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button--primary composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decideArchitecture('allow')"
-        >
-          应用
-        </button>
-      </div>
-    </div>
-  </section>
+    :reason="architectureAction.payload.reason || 'Agent 提议更新项目架构图'"
+    :rows="architectureChangeRows"
+    :extra-count="architectureExtraCount"
+    :auto-decision-text="autoDecisionText"
+    :disabled="codexSubmitting"
+    @deny="decideArchitecture('deny')"
+    @allow="decideArchitecture('allow')"
+  />
 
-  <section
+  <TimelinePermissionAction
     v-else-if="permissionAction"
-    class="timeline-pending-action timeline-pending-action--codex"
-    role="region"
-    aria-label="权限确认"
-  >
-    <div class="timeline-pending-action__stack">
-      <div class="timeline-pending-action__title-preview">
-        {{ permissionAction.payload.reason || "Codex 请求额外权限" }}
-      </div>
-      <div class="timeline-pending-action__meta">{{ permissionCwd }}</div>
-      <pre class="timeline-code-block">{{ permissionJson }}</pre>
-      <div
-        v-if="autoDecisionText"
-        class="composer-inline__auto-decision timeline-pending-action__auto-decision"
-        role="status"
-      >
-        {{ autoDecisionText }}
-      </div>
-      <div class="composer-inline__actions">
-        <button
-          type="button"
-          class="ui-button ui-button--ghost composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decidePermission('deny')"
-        >
-          拒绝
-        </button>
-        <button
-          type="button"
-          class="ui-button ui-button--primary composer-inline__btn"
-          :disabled="codexSubmitting"
-          @click="decidePermission('allow')"
-        >
-          同意
-        </button>
-      </div>
-    </div>
-  </section>
+    :reason="permissionAction.payload.reason || 'Codex 请求额外权限'"
+    :cwd="permissionCwd"
+    :permission-json="permissionJson"
+    :auto-decision-text="autoDecisionText"
+    :disabled="codexSubmitting"
+    @deny="decidePermission('deny')"
+    @allow="decidePermission('allow')"
+  />
 
   <section
-    v-else-if="props.action.kind === 'plan_approval'"
+    v-else-if="props.action.kind === PLAN_APPROVAL_INTERACTION_KIND"
     class="timeline-pending-action timeline-pending-action--plan"
     role="region"
     :aria-label="askTitle"

@@ -57,9 +57,12 @@ const orphans = computed(() => listOrphanConversations());
 const orphansLoaded = computed(() => areOrphansLoaded());
 const projectError = ref<string | null>(null);
 let activityHydrationTimer: number | null = null;
+let mountIdleMeasureHandle: number | null = null;
 let activityHydrationSeq = 0;
+let disposed = false;
 
 function reportProjectError(message: string) {
+  if (disposed) return;
   projectError.value = message;
 }
 
@@ -79,9 +82,11 @@ function scheduleConversationActivityHydration(
   taskIds: string[],
   priorityTaskIds: string[],
 ) {
-  if (taskIds.length === 0) return;
+  if (disposed || taskIds.length === 0) return;
+  const seq = activityHydrationSeq;
   activityHydrationTimer = runWhenIdle(() => {
     activityHydrationTimer = null;
+    if (disposed || seq !== activityHydrationSeq) return;
     void measurePerfAsync(
       "sidebar.grouped.activity",
       () => hydrateConversationActivities(taskIds, { priorityTaskIds }),
@@ -153,15 +158,25 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   installPerfObservers();
   const stage = beginPerfStage("sidebar.grouped.mount", { detail: route.fullPath });
-  runWhenIdle(() => stage.end("idle"));
+  mountIdleMeasureHandle = runWhenIdle(() => {
+    mountIdleMeasureHandle = null;
+    if (disposed) return;
+    stage.end("idle");
+  });
   void loadInitialSidebarData().catch((err) => {
     reportProjectError(`加载首屏数据失败：${String(err)}`);
   });
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  if (mountIdleMeasureHandle !== null) {
+    cancelIdleRun(mountIdleMeasureHandle);
+    mountIdleMeasureHandle = null;
+  }
   cancelConversationActivityHydration();
 });
 

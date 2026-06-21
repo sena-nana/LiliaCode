@@ -1,5 +1,8 @@
 mod cache;
 mod claude_native;
+#[cfg(test)]
+mod command_contract;
+mod contract;
 mod generation;
 mod github_context;
 mod local_git;

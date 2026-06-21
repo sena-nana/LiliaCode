@@ -2,6 +2,10 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use tauri::{AppHandle, Manager, State};
 
+use crate::agent_events::{
+    runner_interaction_response_control_type, runner_interrupt_turn_control_type,
+    runner_settings_update_control_type,
+};
 use crate::chat::auto_turn_decision::{prepare_turn_for_start, resolve_resume_session_id};
 use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
 use crate::chat::slash_commands::{
@@ -243,7 +247,7 @@ fn write_runner_stdin(
 }
 
 pub(crate) fn interrupt_turn_control_payload() -> JsonValue {
-    serde_json::json!({ "type": "interrupt_turn" })
+    serde_json::json!({ "type": runner_interrupt_turn_control_type() })
 }
 
 pub(crate) fn agent_interaction_response_payload(
@@ -252,7 +256,7 @@ pub(crate) fn agent_interaction_response_payload(
     result: JsonValue,
 ) -> JsonValue {
     serde_json::json!({
-        "type": "interaction_response",
+        "type": runner_interaction_response_control_type(),
         "id": request_id,
         "kind": kind,
         "result": result,
@@ -268,7 +272,7 @@ pub(crate) fn composer_runtime_settings_update_payload(
     };
     let mut payload = serde_json::Map::from_iter([(
         "type".to_string(),
-        JsonValue::String("settings_update".to_string()),
+        JsonValue::String(runner_settings_update_control_type().to_string()),
     )]);
     if previous.permission != next.permission {
         match next.permission.as_str() {

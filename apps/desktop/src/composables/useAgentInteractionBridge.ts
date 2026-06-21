@@ -1,10 +1,13 @@
-import type {
-  AgentInteractionRequest,
-  AskUserSpec,
-  ProjectArchitectureInteractionPayload,
-  ToolConsentRequest,
+import {
+  ARCHITECTURE_INTERACTION_KIND,
+  isAskUserInteractionKind,
+  normalizeToolConsentRequestFromInteraction,
+  TOOL_CONSENT_INTERACTION_KIND,
+  type AgentInteractionRequest,
+  type AskUserInteractionKind,
 } from "@lilia/contracts";
 import { onAgentInteractionRequest } from "../services/chat";
+import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
 import { handleAgentAskUserRequest, type AgentAskUserRequest } from "./useAgentAskUserBridge";
 import { handleAgentPendingInteractionRequest } from "./useAgentPendingInteractions";
 import { handleProjectArchitectureInteractionRequest } from "./useProjectArchitectureInteractions";
@@ -13,71 +16,45 @@ import { handleToolConsentRequest } from "./useToolConsentBridge";
 let installed = false;
 let unlistenAll: Array<() => void> = [];
 
-function stringOrNull(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function recordOrEmpty(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function askRequestFromInteraction(req: AgentInteractionRequest): AgentAskUserRequest {
+function askRequestFromInteraction(
+  req: Extract<
+    AgentInteractionRequest,
+    { kind: AskUserInteractionKind }
+  >,
+): AgentAskUserRequest {
   return {
     taskId: req.taskId,
     turnId: req.turnId,
     backend: req.backend,
     requestId: req.requestId,
-    spec: req.payload as AskUserSpec,
+    spec: req.payload,
   };
 }
 
-function toolRequestFromInteraction(req: AgentInteractionRequest): ToolConsentRequest {
-  const payload = recordOrEmpty(req.payload);
-  return {
-    taskId: req.taskId,
-    turnId: req.turnId,
-    backend: req.backend,
-    requestId: req.requestId,
-    toolName: stringOrNull(payload.toolName) || "tool",
-    input: recordOrEmpty(payload.input),
-    title: stringOrNull(payload.title),
-    displayName: stringOrNull(payload.displayName),
-    description: stringOrNull(payload.description),
-    blockedPath: stringOrNull(payload.blockedPath),
-    decisionReason: stringOrNull(payload.decisionReason),
-    toolUseId: stringOrNull(payload.toolUseId) || stringOrNull(payload.toolUseID),
-    additionalPermissions: payload.additionalPermissions,
-    availableDecisions: Array.isArray(payload.availableDecisions)
-      ? payload.availableDecisions.filter((item): item is string => typeof item === "string")
-      : undefined,
-    proposedExecpolicyAmendment: payload.proposedExecpolicyAmendment,
-    proposedNetworkPolicyAmendments: payload.proposedNetworkPolicyAmendments,
-    networkApprovalContext: payload.networkApprovalContext,
-    cwd: stringOrNull(payload.cwd),
-    reason: stringOrNull(payload.reason),
-    commandActions: payload.commandActions,
-  };
+function isAskUserInteractionRequest(
+  req: AgentInteractionRequest,
+): req is Extract<AgentInteractionRequest, { kind: AskUserInteractionKind }> {
+  return isAskUserInteractionKind(req.kind);
 }
 
 function handleInteraction(req: AgentInteractionRequest) {
   if (handleAgentPendingInteractionRequest(req)) return;
-  if (req.kind === "architecture_change") {
+  if (req.kind === ARCHITECTURE_INTERACTION_KIND) {
     handleProjectArchitectureInteractionRequest({
       taskId: req.taskId,
       turnId: req.turnId || null,
       backend: req.backend,
       requestId: req.requestId,
-      payload: req.payload as ProjectArchitectureInteractionPayload,
+      payload: req.payload,
     });
     return;
   }
-  if (req.kind === "tool_consent") {
-    handleToolConsentRequest(toolRequestFromInteraction(req));
+  if (req.kind === TOOL_CONSENT_INTERACTION_KIND) {
+    const toolRequest = normalizeToolConsentRequestFromInteraction(req);
+    if (toolRequest) handleToolConsentRequest(toolRequest);
     return;
   }
-  if (req.kind === "ask_user" || req.kind === "plan_approval") {
+  if (isAskUserInteractionRequest(req)) {
     void handleAgentAskUserRequest(askRequestFromInteraction(req), req.kind);
   }
 }
@@ -85,9 +62,17 @@ function handleInteraction(req: AgentInteractionRequest) {
 export async function installAgentInteractionBridge(): Promise<() => void> {
   if (installed) return () => {};
   installed = true;
-  unlistenAll = [await onAgentInteractionRequest(handleInteraction)];
+  try {
+    unlistenAll = await installUnlistenFns([
+      () => onAgentInteractionRequest(handleInteraction),
+    ]);
+  } catch (err) {
+    unlistenAll = [];
+    installed = false;
+    throw err;
+  }
   return () => {
-    for (const unlisten of unlistenAll) unlisten();
+    runUnlistenFns(unlistenAll.splice(0).reverse());
     unlistenAll = [];
     installed = false;
   };

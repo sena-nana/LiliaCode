@@ -1,6 +1,7 @@
+import { codexPermissionRuntime } from "@lilia/contracts/permissionModes.mjs";
+import { TOOL_CONSENT_INTERACTION_KIND } from "@lilia/contracts/agentInteractionContract.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { stringifyCodexCommand } from "../toolConsentTimeline.mjs";
-import { codexPermissionProfileId } from "./settings.mjs";
 import {
   buildEditedCommandAdditionalContext,
   emitLiliaEditedCommandTimeline,
@@ -8,22 +9,11 @@ import {
 } from "./editedCommand.mjs";
 
 export function mapCodexPermission(p) {
-  switch (p) {
-    case "full":
-    case "free":
-      return { sandboxMode: "danger-full-access" };
-    case "readonly":
-      return { sandboxMode: "read-only" };
-    case "ask":
-    default:
-      return { sandboxMode: "workspace-write" };
-  }
+  return { sandboxMode: codexPermissionRuntime(p).sandboxMode };
 }
 
 export function codexPermissionProfileIdForMode(permission) {
-  if (permission === "full" || permission === "free") return codexPermissionProfileId("dangerFullAccess");
-  if (permission === "readonly") return codexPermissionProfileId("readOnly");
-  return codexPermissionProfileId("workspaceWrite");
+  return codexPermissionRuntime(permission).permissionProfileId;
 }
 
 export function mapCodexSandboxMode(permission) {
@@ -31,15 +21,28 @@ export function mapCodexSandboxMode(permission) {
 }
 
 export function mapCodexSandboxPolicy(permission) {
-  if (permission === "full" || permission === "free") return { type: "dangerFullAccess" };
-  if (permission === "readonly") return { type: "readOnly" };
-  return { type: "workspaceWrite" };
+  return { type: codexPermissionRuntime(permission).sandboxPolicy };
 }
 
 export function mapCodexApprovalPolicy(permission) {
-  if (permission === "full" || permission === "free") return "never";
-  if (permission === "readonly") return "never";
-  return "on-request";
+  return codexPermissionRuntime(permission).approvalPolicy;
+}
+
+export function codexPermissionRuntimeParams(permission) {
+  const runtime = codexPermissionRuntime(permission);
+  return {
+    approvalPolicy: runtime.approvalPolicy,
+    permissions: runtime.permissionProfileId,
+    sandboxPolicy: { type: runtime.sandboxPolicy },
+  };
+}
+
+export function codexLegacyPermissionRuntimeParams(permission) {
+  const runtime = codexPermissionRuntime(permission);
+  return {
+    approvalPolicy: runtime.approvalPolicy,
+    sandbox: runtime.sandboxMode,
+  };
 }
 
 function codexApprovalDecisionFromConsent(response, availableDecisions) {
@@ -154,7 +157,7 @@ export async function maybeHandleCodexApprovalRequest(server, msg, ctx) {
       : "Codex tool approval";
   const payload = buildCodexApprovalPayload(toolName, params, requestId, title, description);
   const response = await (ctx.withCodexElicitation
-    ? ctx.withCodexElicitation("tool_consent", () =>
+    ? ctx.withCodexElicitation(TOOL_CONSENT_INTERACTION_KIND, () =>
       ctx.interactions.requestUserConsent(payload))
     : ctx.interactions.requestUserConsent(payload));
   const { id, decision, message, updatedInput } = response;

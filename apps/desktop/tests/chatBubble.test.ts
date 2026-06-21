@@ -1,9 +1,12 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
-import type { ChatConversationReference, ChatMessage } from "@lilia/contracts";
+import {
+  serializeConversationReference,
+  type ChatConversationReference,
+  type ChatMessage,
+} from "@lilia/contracts";
 import ChatBubble from "../src/components/chat/ChatBubble.vue";
 import { readChatBubbleDisplay } from "../src/components/chat/chatBubbleDisplay";
-import { serializeConversationReference } from "../src/services/chatConversationReferences";
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
   return {

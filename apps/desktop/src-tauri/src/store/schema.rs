@@ -194,10 +194,10 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           project_id        TEXT NOT NULL,
           task_id           TEXT NOT NULL,
           turn_id           TEXT,
-          backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          backend           TEXT NOT NULL,
           status            TEXT NOT NULL CHECK (status IN
                             ('proposed','pending','applied','rejected','rolled_back')),
-          permission_mode   TEXT NOT NULL CHECK (permission_mode IN ('ask','full','readonly')),
+          permission_mode   TEXT NOT NULL,
           summary           TEXT NOT NULL DEFAULT '',
           changes_json      TEXT NOT NULL,
           before_graph_json TEXT,
@@ -214,7 +214,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE TABLE task_agent_sessions (
           task_id         TEXT NOT NULL,
-          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          backend         TEXT NOT NULL,
           session_id      TEXT NOT NULL,
           updated_at      INTEGER NOT NULL,
           PRIMARY KEY (task_id, backend),
@@ -224,7 +224,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
         CREATE TABLE task_runtime_states (
           task_id         TEXT PRIMARY KEY,
           turn_id         TEXT NOT NULL,
-          backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          backend         TEXT NOT NULL,
           phase           TEXT NOT NULL CHECK (phase IN
                             ('running','interrupted_pending_finish','reset_pending_finish')),
           process_session_id TEXT,
@@ -270,7 +270,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           id                TEXT PRIMARY KEY,
           task_id           TEXT NOT NULL,
           turn_id           TEXT,
-          backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          backend           TEXT NOT NULL,
           kind              TEXT NOT NULL,
           status            TEXT NOT NULL,
           title             TEXT NOT NULL,
@@ -289,7 +289,7 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           event_id              TEXT PRIMARY KEY,
           task_id               TEXT NOT NULL,
           turn_id               TEXT,
-          backend               TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+          backend               TEXT NOT NULL,
           session_id            TEXT,
           input_tokens          INTEGER NOT NULL DEFAULT 0,
           output_tokens         INTEGER NOT NULL DEFAULT 0,
@@ -440,6 +440,205 @@ mod tests {
             params!["fresh-todo", "task-1", "当前 Todo", 2, 2],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn architecture_permission_mode_migration_removes_stale_database_enum() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE projects (
+              id         TEXT PRIMARY KEY,
+              name       TEXT NOT NULL,
+              cwd        TEXT,
+              created_at INTEGER NOT NULL
+            );
+            CREATE TABLE tasks (
+              id TEXT PRIMARY KEY
+            );
+            INSERT INTO projects (id, name, cwd, created_at)
+              VALUES ('project-1', '项目', NULL, 1);
+            INSERT INTO tasks (id) VALUES ('task-1'), ('task-2');
+
+            CREATE TABLE project_architecture_changes (
+              id                TEXT PRIMARY KEY,
+              project_id        TEXT NOT NULL,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              status            TEXT NOT NULL CHECK (status IN
+                                ('proposed','pending','applied','rejected','rolled_back')),
+              permission_mode   TEXT NOT NULL CHECK (permission_mode IN ('ask','full','readonly')),
+              summary           TEXT NOT NULL DEFAULT '',
+              changes_json      TEXT NOT NULL,
+              before_graph_json TEXT,
+              after_graph_json  TEXT,
+              created_at        INTEGER NOT NULL,
+              resolved_at       INTEGER,
+              FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            CREATE INDEX idx_project_architecture_changes_project_created
+              ON project_architecture_changes(project_id, created_at DESC);
+            CREATE INDEX idx_project_architecture_changes_task
+              ON project_architecture_changes(task_id, created_at DESC);
+
+            CREATE TABLE task_agent_sessions (
+              task_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              session_id      TEXT NOT NULL,
+              updated_at      INTEGER NOT NULL,
+              PRIMARY KEY (task_id, backend)
+            );
+
+            CREATE TABLE task_runtime_states (
+              task_id         TEXT PRIMARY KEY,
+              turn_id         TEXT NOT NULL,
+              backend         TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              phase           TEXT NOT NULL CHECK (phase IN
+                                ('running','interrupted_pending_finish','reset_pending_finish')),
+              process_session_id TEXT,
+              runtime_epoch   TEXT NOT NULL,
+              context_json    TEXT,
+              updated_at      INTEGER NOT NULL
+            );
+            CREATE INDEX idx_task_runtime_states_epoch_backend
+              ON task_runtime_states(runtime_epoch, backend, updated_at);
+
+            CREATE TABLE agent_timeline_events (
+              id                TEXT PRIMARY KEY,
+              task_id           TEXT NOT NULL,
+              turn_id           TEXT,
+              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              kind              TEXT NOT NULL,
+              status            TEXT NOT NULL,
+              title             TEXT NOT NULL,
+              summary           TEXT,
+              payload           TEXT NOT NULL,
+              created_at        INTEGER NOT NULL,
+              updated_at        INTEGER NOT NULL,
+              turn_seq          INTEGER NOT NULL,
+              intra_turn_order  INTEGER NOT NULL
+            );
+            CREATE INDEX idx_agent_timeline_events_task_id_turn
+              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+
+            CREATE TABLE agent_usage_records (
+              event_id              TEXT PRIMARY KEY,
+              task_id               TEXT NOT NULL,
+              turn_id               TEXT,
+              backend               TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+              session_id            TEXT,
+              input_tokens          INTEGER NOT NULL DEFAULT 0,
+              output_tokens         INTEGER NOT NULL DEFAULT 0,
+              cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+              cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+              total_tokens          INTEGER NOT NULL DEFAULT 0,
+              known_cost_usd        REAL,
+              raw_usage_json        TEXT NOT NULL,
+              created_at            INTEGER NOT NULL,
+              updated_at            INTEGER NOT NULL
+            );
+            CREATE INDEX idx_agent_usage_records_created_at
+              ON agent_usage_records(created_at);
+            CREATE INDEX idx_agent_usage_records_backend_created
+              ON agent_usage_records(backend, created_at);
+            CREATE INDEX idx_agent_usage_records_task
+              ON agent_usage_records(task_id, created_at);
+
+            INSERT INTO project_architecture_changes
+              (id, project_id, task_id, backend, status, permission_mode, summary,
+               changes_json, created_at)
+              VALUES ('change-1', 'project-1', 'task-1', 'codex', 'applied', 'ask',
+                      '旧记录', '[]', 1);
+            INSERT INTO task_agent_sessions
+              (task_id, backend, session_id, updated_at)
+              VALUES ('task-1', 'codex', 'session-1', 1);
+            INSERT INTO task_runtime_states
+              (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
+              VALUES ('task-1', 'turn-1', 'codex', 'running', 'epoch-1', 1);
+            INSERT INTO agent_timeline_events
+              (id, task_id, backend, kind, status, title, payload, created_at,
+               updated_at, turn_seq, intra_turn_order)
+              VALUES ('event-1', 'task-1', 'codex', 'message', 'done', '事件',
+                      '{}', 1, 1, 0, 0);
+            INSERT INTO agent_usage_records
+              (event_id, task_id, backend, raw_usage_json, created_at, updated_at)
+              VALUES ('event-1', 'task-1', 'codex', '{}', 1, 1);
+            PRAGMA user_version = 25;
+            "#,
+        )
+        .unwrap();
+
+        ensure_current_schema(&mut conn).unwrap();
+
+        conn.execute(
+            r#"INSERT INTO project_architecture_changes
+               (id, project_id, task_id, backend, status, permission_mode, summary,
+                changes_json, created_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+            params![
+                "change-2",
+                "project-1",
+                "task-1",
+                "custom-backend",
+                "applied",
+                "free",
+                "契约扩展记录",
+                "[]",
+                2
+            ],
+        )
+        .unwrap();
+
+        conn.execute_batch(
+            r#"
+            INSERT INTO task_agent_sessions
+              (task_id, backend, session_id, updated_at)
+              VALUES ('task-1', 'custom-backend', 'session-2', 2);
+            INSERT INTO task_runtime_states
+              (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
+              VALUES ('task-2', 'turn-2', 'custom-backend', 'running', 'epoch-2', 2);
+            INSERT INTO agent_timeline_events
+              (id, task_id, backend, kind, status, title, payload, created_at,
+               updated_at, turn_seq, intra_turn_order)
+              VALUES ('event-2', 'task-2', 'custom-backend', 'message', 'done',
+                      '事件', '{}', 2, 2, 0, 0);
+            INSERT INTO agent_usage_records
+              (event_id, task_id, backend, raw_usage_json, created_at, updated_at)
+              VALUES ('event-2', 'task-2', 'custom-backend', '{}', 2, 2);
+            "#,
+        )
+        .unwrap();
+
+        let change_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_architecture_changes",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(change_count, 2);
+
+        let custom_backend_records: i64 = conn
+            .query_row(
+                r#"
+                SELECT
+                  (SELECT COUNT(*) FROM project_architecture_changes WHERE backend = 'custom-backend') +
+                  (SELECT COUNT(*) FROM task_agent_sessions WHERE backend = 'custom-backend') +
+                  (SELECT COUNT(*) FROM task_runtime_states WHERE backend = 'custom-backend') +
+                  (SELECT COUNT(*) FROM agent_timeline_events WHERE backend = 'custom-backend') +
+                  (SELECT COUNT(*) FROM agent_usage_records WHERE backend = 'custom-backend')
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(custom_backend_records, 5);
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, current_schema_version());
     }
 
     fn add_future_project_label_migration(conn: &Connection) -> Result<(), String> {

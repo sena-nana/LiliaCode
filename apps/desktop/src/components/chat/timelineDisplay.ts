@@ -1,11 +1,38 @@
 import {
+  aggregateTimelineStatus,
   deriveTimelineDisplay,
+  isHiddenTimelineEvent,
+  isTimelineErrorReply,
+  isTimelineFinalReply,
+  isTimelineFinalReplyStreaming,
+  isTimelineInterruptEvent,
+  isTimelineMessageEvent,
+  isTimelineProcessAnchor,
+  isTimelineUserMessage,
+  readTimelineEventPayloadRecord,
+  readTimelineFinalText,
+  timelineDeclaredGroupUnitFromDisplay,
+  timelineEventLabelFromDisplay,
+  timelineGroupLabelFromDisplay,
   type AgentTimelineDisplay,
   type AgentTimelineEvent,
   type AgentTimelineEventStatus,
   type AgentTimelinePayload,
+  type TimelineDeclaredGroupUnit,
 } from "@lilia/contracts";
 import { measurePerfSync } from "../../utils/perf";
+
+export {
+  aggregateTimelineStatus,
+  isHiddenTimelineEvent,
+  isTimelineErrorReply,
+  isTimelineFinalReply,
+  isTimelineFinalReplyStreaming,
+  isTimelineInterruptEvent,
+  isTimelineMessageEvent,
+  isTimelineProcessAnchor,
+  isTimelineUserMessage,
+};
 
 export type MarkdownBlockTone = "default" | "muted";
 
@@ -22,23 +49,10 @@ export interface TimelineMarkdownView {
   singleLine: boolean;
 }
 
-interface TimelineDeclaredGroupUnit {
-  key: string;
-  count: number;
-  unit: string | null;
-}
-
 export interface TimelineDisplayContext {
   projectCwd?: string | null;
   activePlanApprovalTurnId?: string | null;
 }
-
-const RUNNING_STATUSES = new Set<AgentTimelineEventStatus>([
-  "pending",
-  "started",
-  "running",
-  "in_progress",
-]);
 
 type DisplayDerivableEvent = Pick<
   AgentTimelineEvent,
@@ -48,14 +62,11 @@ type DisplayDerivableEvent = Pick<
 export function readTimelinePayloadRecord(
   event: Pick<AgentTimelineEvent, "payload">,
 ): TimelinePayloadRecord {
-  if (typeof event === "object" && event !== null) {
-    const cached = timelinePayloadRecordCache.get(event);
-    if (cached) return cached;
-    const record = readPayloadRecord(event.payload);
-    timelinePayloadRecordCache.set(event, record);
-    return record;
-  }
-  return readPayloadRecord(event.payload);
+  const cached = timelinePayloadRecordCache.get(event);
+  if (cached) return cached;
+  const record = readTimelineEventPayloadRecord(event);
+  timelinePayloadRecordCache.set(event, record);
+  return record;
 }
 
 /**
@@ -67,16 +78,6 @@ export function readTimelineDisplay(
   event: DisplayDerivableEvent,
   context: TimelineDisplayContext = {},
 ): AgentTimelineDisplay {
-  if (typeof event !== "object" || event === null) {
-    return deriveTimelineDisplay({
-      kind: event.kind,
-      status: event.status,
-      title: event.title,
-      summary: event.summary,
-      payload: event.payload,
-      projectCwd: context.projectCwd,
-    });
-  }
   const cacheKey = context.projectCwd ?? "";
   let cachedByContext = timelineDisplayCache.get(event);
   const cached = cachedByContext?.get(cacheKey);
@@ -101,88 +102,14 @@ export function readTimelineDisplay(
   return display;
 }
 
-function readPayloadRecord(payload: unknown): TimelinePayloadRecord {
-  return payload && typeof payload === "object" && !Array.isArray(payload)
-    ? payload as TimelinePayloadRecord
-    : {};
-}
-
 export function timelineFinalText(
   event: Pick<AgentTimelineEvent, "kind" | "status" | "title" | "summary" | "payload">,
 ): string {
-  if (typeof event === "object" && event !== null) {
-    const cached = timelineFinalTextCache.get(event);
-    if (cached !== undefined) return cached;
-    const text = readTimelineFinalText(event);
-    timelineFinalTextCache.set(event, text);
-    return text;
-  }
-  return readTimelineFinalText(event);
-}
-
-function readTimelineFinalText(
-  event: Pick<AgentTimelineEvent, "kind" | "status" | "title" | "summary" | "payload">,
-): string {
-  if (isTimelineErrorReply(event)) return timelineErrorReplyText(event);
-  if (event.kind !== "message") return "";
-  const payload = readTimelinePayloadRecord(event);
-  if (payload.role !== "assistant") return "";
-  const content = payload.content;
-  return typeof content === "string" ? content : "";
-}
-
-/** 「最终回复」= assistant message 或顶层运行失败错误。流式中（status=running）
- * 也算，避免 token 增量到达时组件树展开/折叠状态抖动。 */
-export function isTimelineFinalReply(
-  event: Pick<AgentTimelineEvent, "kind" | "status" | "payload">,
-): boolean {
-  if (isTimelineErrorReply(event)) return true;
-  if (event.kind !== "message") return false;
-  return readTimelinePayloadRecord(event).role === "assistant";
-}
-
-export function isTimelineErrorReply(
-  event: Pick<AgentTimelineEvent, "kind" | "status" | "payload">,
-): boolean {
-  if (event.kind !== "error") return false;
-  if (isTimelineInterruptEvent(event)) return false;
-  return event.status === "error" || event.status === "failed";
-}
-
-export function isTimelineInterruptEvent(
-  event: Pick<AgentTimelineEvent, "kind" | "payload">,
-): boolean {
-  return event.kind === "error" && readTimelinePayloadRecord(event).interrupted === true;
-}
-
-/**
- * runner 会保留恢复/调试用的内部事件；主时间线只展示用户可操作的过程。
- */
-export function isHiddenTimelineEvent(
-  event: Pick<AgentTimelineEvent, "kind">,
-): boolean {
-  return event.kind === "turn" || event.kind === "reasoning";
-}
-
-export function isTimelineFinalReplyStreaming(
-  event: Pick<AgentTimelineEvent, "kind" | "payload" | "status">,
-): boolean {
-  return !isTimelineErrorReply(event) &&
-    isTimelineFinalReply(event) &&
-    RUNNING_STATUSES.has(event.status);
-}
-
-function timelineErrorReplyText(
-  event: Pick<AgentTimelineEvent, "title" | "summary" | "payload">,
-): string {
-  const summary = event.summary?.trim() ?? "";
-  if (summary) return summary;
-  const payload = readTimelinePayloadRecord(event);
-  for (const key of ["message", "error", "reason", "details", "stderr"]) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return event.title.trim();
+  const cached = timelineFinalTextCache.get(event);
+  if (cached !== undefined) return cached;
+  const text = readTimelineFinalText(event);
+  timelineFinalTextCache.set(event, text);
+  return text;
 }
 
 function timelineDefaultExpanded(
@@ -241,16 +168,7 @@ export function timelineEventLabel(
   context: TimelineDisplayContext = {},
 ): string {
   const display = readTimelineDisplay(event, context);
-  const label = display.label?.trim();
-  if (label) return label;
-  const action = display.action?.trim();
-  if (!action) return "事件";
-  const verb = formatTimelineActionLabel(event.status, action);
-  if (display.objectInLabel) {
-    const object = display.object?.trim() ?? "";
-    if (object) return `${verb} ${object}`;
-  }
-  return verb;
+  return timelineEventLabelFromDisplay(display, event.status);
 }
 
 export function timelineGroupKey(event: DisplayDerivableEvent): string | null {
@@ -260,18 +178,6 @@ export function timelineGroupKey(event: DisplayDerivableEvent): string | null {
   return null;
 }
 
-export function aggregateTimelineStatus(
-  events: ReadonlyArray<Pick<AgentTimelineEvent, "status">>,
-): AgentTimelineEventStatus {
-  if (events.some((e) =>
-    e.status === "failed" || e.status === "error" || e.status === "cancelled"
-  )) {
-    return "failed";
-  }
-  if (events.some((e) => RUNNING_STATUSES.has(e.status))) return "running";
-  return "completed";
-}
-
 export function timelineGroupLabel(
   representative: DisplayDerivableEvent,
   count: number,
@@ -279,16 +185,7 @@ export function timelineGroupLabel(
   context: TimelineDisplayContext = {},
 ): string {
   const display = readTimelineDisplay(representative, context);
-  const group = display.group;
-  if (group?.key) {
-    const unit = group.unit?.trim() || "项";
-    const action = display.action?.trim();
-    if (action) return `${formatTimelineActionLabel(status, action)} ${count} ${unit}`;
-    const label = display.label?.trim() || "事件";
-    return `${label} ${count} ${unit}`;
-  }
-
-  return `事件 ${count} 项`;
+  return timelineGroupLabelFromDisplay(display, count, status);
 }
 
 export function timelineDisplayIcon(
@@ -298,47 +195,18 @@ export function timelineDisplayIcon(
   return readTimelineDisplay(event, context).icon ?? null;
 }
 
+export function timelineStatusClass(status: AgentTimelineEventStatus): string {
+  return `is-status-${status.replace(/_/g, "-")}`;
+}
+
+export function timelineKindClass(prefix: string, kind: string): string {
+  return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 export function timelineDeclaredGroupUnit(
   event: DisplayDerivableEvent,
 ): TimelineDeclaredGroupUnit | null {
-  const group = readTimelineDisplay(event).group;
-  const key = group?.bucket?.trim() || group?.key?.trim();
-  if (!key) return null;
-  const count = typeof group?.count === "number" && Number.isFinite(group.count) && group.count > 0
-    ? group.count
-    : 1;
-  return {
-    key,
-    count,
-    unit: group?.unit?.trim() || null,
-  };
-}
-
-function formatTimelineActionLabel(
-  status: AgentTimelineEventStatus,
-  verb: string,
-): string {
-  switch (status) {
-    case "pending":
-    case "started":
-    case "running":
-    case "in_progress":
-      return `正在${verb}`;
-    case "failed":
-    case "error":
-      return `${verb}失败`;
-    case "cancelled":
-      return `已取消${verb}`;
-    case "skipped":
-      return `已跳过${verb}`;
-    case "info":
-    case "requires_action":
-    case "completed":
-    case "done":
-    case "success":
-    default:
-      return `已${verb}`;
-  }
+  return timelineDeclaredGroupUnitFromDisplay(readTimelineDisplay(event));
 }
 
 export function timelineInlinePreview(

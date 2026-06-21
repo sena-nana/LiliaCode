@@ -108,4 +108,74 @@ describe("ArchitectureSidebarPanel", () => {
     expect(section).toHaveTextContent(`时间：${expectedRollbackTime}`);
     expect(section).toHaveTextContent("backend：codex");
   });
+
+  it("项目切换时忽略较早返回的架构加载结果", async () => {
+    const nextGraph: ProjectArchitectureGraph = {
+      ...graph,
+      projectId: "p2",
+      version: 9,
+      summary: "新项目架构",
+    };
+    let resolveOldGraph: (value: ProjectArchitectureGraph) => void = () => {};
+    vi.mocked(getProjectArchitecture).mockImplementation((projectId) => {
+      if (projectId === "p2") return Promise.resolve(nextGraph);
+      return new Promise((resolve) => {
+        resolveOldGraph = resolve;
+      });
+    });
+    vi.mocked(listProjectArchitectureChanges).mockResolvedValue([]);
+
+    const rendered = render(ArchitectureSidebarPanel, {
+      props: {
+        taskId: "t1",
+        projectId: "p1",
+        projectCwd: "C:\\Files\\workspace\\Lilia",
+      },
+    });
+
+    expect(await screen.findByText("正在加载架构图…")).toBeInTheDocument();
+
+    await rendered.rerender({
+      taskId: "t1",
+      projectId: "p2",
+      projectCwd: "C:\\Files\\workspace\\Lilia",
+    });
+
+    expect(await screen.findByText("新项目架构")).toBeInTheDocument();
+    expect(screen.getByText("版本 9")).toBeInTheDocument();
+
+    resolveOldGraph({
+      ...graph,
+      summary: "旧项目架构",
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("旧项目架构")).not.toBeInTheDocument();
+      expect(screen.getByText("版本 9")).toBeInTheDocument();
+    });
+  });
+
+  it("卸载后忽略仍在返回的架构加载结果", async () => {
+    let resolveGraph: (value: ProjectArchitectureGraph) => void = () => {};
+    vi.mocked(getProjectArchitecture).mockReturnValue(
+      new Promise((resolve) => {
+        resolveGraph = resolve;
+      }),
+    );
+    vi.mocked(listProjectArchitectureChanges).mockResolvedValue([]);
+
+    const rendered = render(ArchitectureSidebarPanel, {
+      props: {
+        taskId: "t1",
+        projectId: "p1",
+        projectCwd: "C:\\Files\\workspace\\Lilia",
+      },
+    });
+
+    expect(await screen.findByText("正在加载架构图…")).toBeInTheDocument();
+    rendered.unmount();
+    resolveGraph(graph);
+
+    await Promise.resolve();
+  });
 });

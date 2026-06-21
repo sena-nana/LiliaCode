@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Bot, Pencil, Plus, Trash2 } from "lucide-vue-next";
 import type { CustomSubagentDefinition } from "@lilia/contracts";
 import { useAgentInteractionSettings } from "../../composables/useAgentInteractionSettings";
@@ -19,6 +19,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const editing = ref(false);
 const draft = ref<DraftState>(emptyDraft());
+let disposed = false;
 
 const hasSubagents = computed(() => subagents.value.length > 0);
 
@@ -67,30 +68,33 @@ function cancelEdit() {
 }
 
 async function loadSubagents() {
+  if (disposed) return;
   loading.value = true;
   try {
     await store.loadSubagents();
   } catch (err) {
-    error.value = `读取自定义 Agent 失败：${String(err)}`;
+    if (!disposed) error.value = `读取自定义 Agent 失败：${String(err)}`;
   } finally {
-    loading.value = false;
+    if (!disposed) loading.value = false;
   }
 }
 
 async function saveDraft() {
+  if (disposed) return;
   saving.value = true;
   error.value = null;
   try {
     await store.saveSubagent(toSubagentInput(draft.value));
-    cancelEdit();
+    if (!disposed) cancelEdit();
   } catch (err) {
-    error.value = `保存自定义 Agent 失败：${String(err)}`;
+    if (!disposed) error.value = `保存自定义 Agent 失败：${String(err)}`;
   } finally {
-    saving.value = false;
+    if (!disposed) saving.value = false;
   }
 }
 
 async function toggleEnabled(item: CustomSubagentDefinition) {
+  if (disposed) return;
   saving.value = true;
   error.value = null;
   try {
@@ -99,26 +103,34 @@ async function toggleEnabled(item: CustomSubagentDefinition) {
       enabled: !item.enabled,
     });
   } catch (err) {
-    error.value = `更新自定义 Agent 状态失败：${String(err)}`;
+    if (!disposed) error.value = `更新自定义 Agent 状态失败：${String(err)}`;
   } finally {
-    saving.value = false;
+    if (!disposed) saving.value = false;
   }
 }
 
 async function remove(item: CustomSubagentDefinition) {
+  if (disposed) return;
   saving.value = true;
   error.value = null;
   try {
     await store.deleteSubagent(item.id);
-    if (draft.value.id === item.id) cancelEdit();
+    if (!disposed && draft.value.id === item.id) cancelEdit();
   } catch (err) {
-    error.value = `删除自定义 Agent 失败：${String(err)}`;
+    if (!disposed) error.value = `删除自定义 Agent 失败：${String(err)}`;
   } finally {
-    saving.value = false;
+    if (!disposed) saving.value = false;
   }
 }
 
-onMounted(loadSubagents);
+onMounted(() => {
+  disposed = false;
+  void loadSubagents();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+});
 </script>
 
 <template>

@@ -4,10 +4,17 @@ import { RouterView, useRouter } from "vue-router";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  CLI_PROJECT_OPEN_EVENT_NAME,
+  MAIN_NAVIGATE_EVENT_NAME,
+  POPUP_NAVIGATE_EVENT_NAME,
+  type AppNavigateEvent,
+} from "@lilia/contracts";
+import {
   consumePendingCliProjectOpen,
   openCliProject,
   type CliProjectOpenPayload,
 } from "./services/cliProjectOpen";
+import { installCombinedUnlisten } from "./utils/eventListeners";
 import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
 
 const ContextMenuHost = defineAsyncComponent({
@@ -19,11 +26,9 @@ const ContextMenuHost = defineAsyncComponent({
   suspensible: false,
 });
 
-let unlistenInteraction: (() => void) | null = null;
-let unlistenConversationActivity: (() => void) | null = null;
-let unlistenMainNavigate: (() => void) | null = null;
-let unlistenCliProjectOpen: (() => void) | null = null;
-let unlistenPopupNavigate: (() => void) | null = null;
+let unlistenDeferredBridges: (() => void) | null = null;
+let unlistenWindowNavigation: (() => void) | null = null;
+let cancelDeferredBridgePaint: (() => void) | null = null;
 let disposed = false;
 
 const router = useRouter();
@@ -57,76 +62,80 @@ async function installDeferredBridges() {
     );
   if (disposed) return;
 
-  unlistenInteraction = keepCleanup(await measurePerfAsync(
-    "app.bridge.agent.install",
-    () => installAgentInteractionBridge(),
-    { detail: appWindow.label },
-  ));
-  if (!unlistenInteraction) return;
-
-  unlistenConversationActivity = keepCleanup(await measurePerfAsync(
-    "app.bridge.activity.install",
-    () => installConversationActivityBridge(),
-    { detail: appWindow.label },
-  ));
+  unlistenDeferredBridges = keepCleanup(await installCombinedUnlisten([
+    () => measurePerfAsync(
+      "app.bridge.agent.install",
+      () => installAgentInteractionBridge(),
+      { detail: appWindow.label },
+    ),
+    () => measurePerfAsync(
+      "app.bridge.activity.install",
+      () => installConversationActivityBridge(),
+      { detail: appWindow.label },
+    ),
+  ]));
 }
 
-onMounted(async () => {
-  scheduleAfterPaint(() => {
-    if (disposed) return;
-    void installDeferredBridges().catch((err) => {
-      console.error("[app] install deferred bridges failed", err);
-    });
-  });
-
+async function installWindowNavigationListeners() {
   if (isMainWindow) {
-    const mainNavigateCleanup = await listen<{ route: string }>("lilia:main:navigate", (event) => {
-      const route = event.payload.route;
-      if (typeof route === "string" && route.startsWith("/")) {
-        void router.push(route);
-      }
-    });
-    unlistenMainNavigate = keepCleanup(mainNavigateCleanup);
-    if (!unlistenMainNavigate) return;
-
-    const cliProjectOpenCleanup = await listen<CliProjectOpenPayload>(
-      "lilia:cli-project-open",
-      (event) => {
-        handleCliProjectOpen(event.payload, "event");
-      },
-    );
-    unlistenCliProjectOpen = keepCleanup(cliProjectOpenCleanup);
-    if (!unlistenCliProjectOpen) return;
+    const unlisten = await installCombinedUnlisten([
+      () => listen<AppNavigateEvent>(MAIN_NAVIGATE_EVENT_NAME, (event) => {
+        const route = event.payload.route;
+        if (typeof route === "string" && route.startsWith("/")) {
+          void router.push(route);
+        }
+      }),
+      () => listen<CliProjectOpenPayload>(
+        CLI_PROJECT_OPEN_EVENT_NAME,
+        (event) => {
+          handleCliProjectOpen(event.payload, "event");
+        },
+      ),
+    ]);
+    unlistenWindowNavigation = keepCleanup(unlisten);
+    if (!unlistenWindowNavigation) return;
 
     const pendingCliProjectOpen = await consumePendingCliProjectOpen();
     if (pendingCliProjectOpen && !disposed) {
       handleCliProjectOpen(pendingCliProjectOpen, "pending");
     }
+    return;
   }
 
   if (isPopupWindow) {
-    const popupNavigateCleanup = await listen<{ route: string }>("lilia:popup:navigate", (event) => {
-      const route = event.payload.route;
-      if (typeof route === "string" && route.startsWith("/popup/")) {
-        void router.replace(route);
-      }
-    });
-    unlistenPopupNavigate = keepCleanup(popupNavigateCleanup);
+    unlistenWindowNavigation = keepCleanup(await listen<AppNavigateEvent>(
+      POPUP_NAVIGATE_EVENT_NAME,
+      (event) => {
+        const route = event.payload.route;
+        if (typeof route === "string" && route.startsWith("/popup/")) {
+          void router.replace(route);
+        }
+      },
+    ));
   }
+}
+
+onMounted(async () => {
+  cancelDeferredBridgePaint = scheduleAfterPaint(() => {
+    cancelDeferredBridgePaint = null;
+    if (disposed) return;
+    void installDeferredBridges().catch((err) => {
+      console.error("[app] install deferred bridges failed", err);
+    });
+  });
+  await installWindowNavigationListeners().catch((err) => {
+    console.error("[app] install window navigation listeners failed", err);
+  });
 });
 
 onBeforeUnmount(() => {
   disposed = true;
-  unlistenInteraction?.();
-  unlistenConversationActivity?.();
-  unlistenMainNavigate?.();
-  unlistenCliProjectOpen?.();
-  unlistenPopupNavigate?.();
-  unlistenInteraction = null;
-  unlistenConversationActivity = null;
-  unlistenMainNavigate = null;
-  unlistenCliProjectOpen = null;
-  unlistenPopupNavigate = null;
+  cancelDeferredBridgePaint?.();
+  cancelDeferredBridgePaint = null;
+  unlistenDeferredBridges?.();
+  unlistenWindowNavigation?.();
+  unlistenDeferredBridges = null;
+  unlistenWindowNavigation = null;
 });
 </script>
 

@@ -481,6 +481,25 @@ mod tests {
     };
 
     #[test]
+    fn provider_serialization_matches_contract_manifest() {
+        let providers = [
+            serde_json::to_value(HistoryImportProvider::Codex).unwrap(),
+            serde_json::to_value(HistoryImportProvider::Claude).unwrap(),
+        ];
+        assert_eq!(
+            crate::history_import_contract::providers(),
+            &["codex".to_string(), "claude".to_string()]
+        );
+        assert_eq!(
+            providers,
+            [
+                serde_json::Value::String("codex".to_string()),
+                serde_json::Value::String("claude".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn codex_thread_summary_converts_to_history_import_item() {
         let thread = CodexThreadSummary {
             id: "thread-1".into(),

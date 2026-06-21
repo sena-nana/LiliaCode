@@ -1,0 +1,73 @@
+{
+  "agentTimelineRunningStatuses": [
+    "pending",
+    "started",
+    "running",
+    "in_progress"
+  ],
+  "agentTimelineTerminalStatuses": [
+    "success",
+    "completed",
+    "done",
+    "error",
+    "failed",
+    "cancelled"
+  ],
+  "timelineStatusAliases": {
+    "failed": "error",
+    "completed": "success",
+    "in_progress": "running"
+  },
+  "defaultTimelineStatus": "info",
+  "agentTimelineActionKindByEventKind": {
+    "title_update": "title_update",
+    "plan": "plan_approval",
+    "ask_user": "ask_user",
+    "architecture_change": "architecture_change"
+  },
+  "agentTimelineToolWindowKinds": [
+    "tool",
+    "command",
+    "mcp",
+    "search",
+    "web_search",
+    "web_fetch",
+    "file_read",
+    "file_change",
+    "todo_list",
+    "architecture_change",
+    "subagent"
+  ],
+  "displayTextLimits": {
+    "title": 200,
+    "summary": 1200,
+    "detail": 6000,
+    "inline": 600,
+    "short": 200,
+    "tiny": 80,
+    "oneLine": 400,
+    "errorSummary": 400,
+    "todoItem": 120,
+    "todoStep": 160,
+    "pathPreview": 240,
+    "askUserHeader": 40,
+    "askUserQuestionPreview": 240,
+    "allowedPrompt": 400,
+    "claudePlan": 12000,
+    "commandInlineThreshold": 180,
+    "fileChangePath": 600
+  },
+  "payload": {
+    "maxDepth": 5,
+    "reservedKeys": [
+      "taskId",
+      "task_id",
+      "turnId",
+      "turn_id",
+      "order",
+      "thinking",
+      "redacted_thinking",
+      "signature"
+    ]
+  }
+}

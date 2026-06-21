@@ -1,0 +1,39 @@
+{
+  "runtimeEventTypes": {
+    "toolUse": "tool_use",
+    "todoList": "todo_list",
+    "timeline": "timeline",
+    "interactionRequest": "interaction_request",
+    "quotaUsageRequest": "quota_usage_request",
+    "contextUsage": "context_usage",
+    "done": "done",
+    "promptSuggestion": "prompt_suggestion",
+    "error": "error"
+  },
+  "controlMessageTypes": {
+    "interactionResponse": "interaction_response",
+    "settingsUpdate": "settings_update",
+    "interruptTurn": "interrupt_turn",
+    "quotaUsageResult": "quota_usage_result",
+    "liliaIabResult": "lilia_iab_result"
+  },
+  "stdinPayloadKeys": {
+    "backend": "backend",
+    "turn": "turn",
+    "workflow": "workflow",
+    "runtimeCommand": "runtimeCommand",
+    "runtimeOptions": "runtimeOptions",
+    "extensions": "extensions"
+  },
+  "stdinTurnKeys": {
+    "cwd": "cwd",
+    "prompt": "prompt",
+    "attachments": "attachments",
+    "conversationReferences": "conversationReferences",
+    "model": "model",
+    "resumeSessionId": "resumeSessionId",
+    "planMode": "planMode",
+    "goalMode": "goalMode",
+    "permission": "permission"
+  }
+}

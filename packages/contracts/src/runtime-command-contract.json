@@ -1,0 +1,30 @@
+{
+  "runtimeSettings": {
+    "type": "runtime_settings",
+    "actions": [
+      "diagnose",
+      "update"
+    ]
+  },
+  "remoteEnvironment": {
+    "type": "remote_environment",
+    "actions": [
+      "diagnose",
+      "add",
+      "select"
+    ],
+    "requiresEnvironment": [
+      "add"
+    ],
+    "requiresEnvironmentId": [
+      "select"
+    ]
+  },
+  "sandboxDiagnostics": {
+    "type": "sandbox_diagnostics"
+  },
+  "sessionFork": {
+    "type": "session_fork",
+    "defaultExcludeTurns": true
+  }
+}

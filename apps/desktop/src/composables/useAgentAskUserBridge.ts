@@ -1,6 +1,12 @@
 import { askUserForTask, hydrateAskUserForTask } from "./useAskUser";
 import { respondAgentInteraction } from "../services/chat";
-import type { AskUserResult, AskUserSpec, ChatBackendKind } from "@lilia/contracts";
+import {
+  askUserInteractionKindForSpec,
+  type AskUserInteractionKind,
+  type AskUserResult,
+  type AskUserSpec,
+  type ChatBackendKind,
+} from "@lilia/contracts";
 
 export interface AgentAskUserRequest {
   taskId: string;
@@ -12,7 +18,7 @@ export interface AgentAskUserRequest {
 
 export async function handleAgentAskUserRequest(
   req: AgentAskUserRequest,
-  kind: "ask_user" | "plan_approval" = req.spec.intent === "plan_approval" ? "plan_approval" : "ask_user",
+  kind: AskUserInteractionKind = askUserInteractionKindForSpec(req.spec),
 ) {
   let result: AskUserResult;
   try {
@@ -34,7 +40,7 @@ export async function handleAgentAskUserRequest(
 
 export function hydrateAgentAskUserRequest(
   req: AgentAskUserRequest,
-  kind: "ask_user" | "plan_approval" = req.spec.intent === "plan_approval" ? "plan_approval" : "ask_user",
+  kind: AskUserInteractionKind = askUserInteractionKindForSpec(req.spec),
 ) {
   hydrateAskUserForTask(
     req.taskId,

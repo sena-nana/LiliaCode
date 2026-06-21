@@ -8,11 +8,15 @@ use uuid::Uuid;
 
 use crate::settings_store::{load_store_value, save_store_value};
 use crate::store::LiliaStore;
+use crate::task_contract::{self, MemorySettingsDefaults};
 use crate::util::now_millis;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 const MEMORY_SETTINGS_KEY: &str = "memory.settings";
-const DEFAULT_COOLDOWN_TURNS: u64 = 5;
+
+fn default_memory_settings() -> MemorySettingsDefaults {
+    task_contract::default_memory_settings()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,17 +54,21 @@ pub struct MemoryUpsertInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemorySettings {
+    #[serde(default = "default_memory_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_memory_baseline_injection_enabled")]
     pub baseline_injection_enabled: bool,
+    #[serde(default = "default_memory_cooldown_turns")]
     pub cooldown_turns: u64,
 }
 
 impl Default for MemorySettings {
     fn default() -> Self {
+        let defaults = default_memory_settings();
         Self {
-            enabled: true,
-            baseline_injection_enabled: true,
-            cooldown_turns: DEFAULT_COOLDOWN_TURNS,
+            enabled: defaults.enabled,
+            baseline_injection_enabled: defaults.baseline_injection_enabled,
+            cooldown_turns: defaults.cooldown_turns,
         }
     }
 }
@@ -78,10 +86,22 @@ fn default_true() -> bool {
     true
 }
 
+fn default_memory_enabled() -> bool {
+    default_memory_settings().enabled
+}
+
+fn default_memory_baseline_injection_enabled() -> bool {
+    default_memory_settings().baseline_injection_enabled
+}
+
+fn default_memory_cooldown_turns() -> u64 {
+    default_memory_settings().cooldown_turns
+}
+
 fn normalize_memory_settings(settings: Option<MemorySettings>) -> MemorySettings {
     let mut settings = settings.unwrap_or_default();
     if settings.cooldown_turns == 0 {
-        settings.cooldown_turns = DEFAULT_COOLDOWN_TURNS;
+        settings.cooldown_turns = default_memory_settings().cooldown_turns;
     }
     settings
 }
@@ -837,6 +857,38 @@ mod tests {
         let conn = conn();
         let err = upsert_memory_core(&conn, input("project", None, "标题", "正文")).unwrap_err();
         assert!(err.contains("项目级记忆必须关联项目"));
+    }
+
+    #[test]
+    fn memory_settings_defaults_follow_contract_manifest() {
+        let defaults = default_memory_settings();
+        let settings = MemorySettings::default();
+        assert_eq!(settings.enabled, defaults.enabled);
+        assert_eq!(
+            settings.baseline_injection_enabled,
+            defaults.baseline_injection_enabled
+        );
+        assert_eq!(settings.cooldown_turns, defaults.cooldown_turns);
+        let partial: MemorySettings = serde_json::from_value(serde_json::json!({
+            "enabled": false
+        }))
+        .unwrap();
+        assert_eq!(
+            partial,
+            MemorySettings {
+                enabled: false,
+                baseline_injection_enabled: defaults.baseline_injection_enabled,
+                cooldown_turns: defaults.cooldown_turns,
+            }
+        );
+        assert_eq!(
+            normalize_memory_settings(Some(MemorySettings {
+                cooldown_turns: 0,
+                ..settings
+            }))
+            .cooldown_turns,
+            defaults.cooldown_turns
+        );
     }
 
     #[test]

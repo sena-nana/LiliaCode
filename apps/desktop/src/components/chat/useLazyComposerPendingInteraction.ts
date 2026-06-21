@@ -14,10 +14,19 @@ import {
 } from "../../utils/perf";
 import type {
   ComposerPendingInteractionController,
+  ComposerPendingEntryActionsMode,
   UseComposerPendingInteractionOptions,
 } from "./useComposerPendingInteraction";
 
 type ComposerPendingInteractionModule = typeof import("./useComposerPendingInteraction");
+type ControllerMethodKey = {
+  [K in keyof ComposerPendingInteractionController]:
+    ComposerPendingInteractionController[K] extends (...args: any[]) => any ? K : never;
+}[keyof ComposerPendingInteractionController];
+type ControllerMethod<K extends ControllerMethodKey> = Extract<
+  ComposerPendingInteractionController[K],
+  (...args: any[]) => any
+>;
 
 let pendingInteractionModuleLoad: Promise<ComposerPendingInteractionModule> | null = null;
 
@@ -64,16 +73,27 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
   const controller = computed(() => controllerRef.value);
   const pendingSource = computed(() => !!options.pendingAsk.value || !!options.toolConsent.value);
   let controllerScope: EffectScope | null = null;
+  let controllerSeq = 0;
+  let disposed = false;
 
   async function ensureController(): Promise<ComposerPendingInteractionController> {
     if (controllerRef.value) return controllerRef.value;
+    if (disposed) throw new Error("composer pending interaction controller disposed");
+    const seq = ++controllerSeq;
     const module = await loadPendingInteractionModule();
     if (controllerRef.value) return controllerRef.value;
+    if (disposed || seq !== controllerSeq) {
+      throw new Error("composer pending interaction controller disposed");
+    }
     const scope = effectScope();
     const instance = measurePerfSync(
       "chat-composer.pending-controller.init",
       () => scope.run(() => module.useComposerPendingInteraction(options))!,
     );
+    if (disposed || seq !== controllerSeq) {
+      scope.stop();
+      throw new Error("composer pending interaction controller disposed");
+    }
     controllerScope = scope;
     controllerRef.value = instance;
     return instance;
@@ -81,11 +101,13 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
 
   watch(pendingSource, (active) => {
     if (active) {
-      void ensureController();
+      void ensureController().catch(() => undefined);
     }
   }, { immediate: true });
 
   onBeforeUnmount(() => {
+    disposed = true;
+    controllerSeq += 1;
     controllerScope?.stop();
     controllerScope = null;
     controllerRef.value = null;
@@ -126,6 +148,11 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
   const inputValue = controllerWritableRef(controller, (value) => value.inputValue, "");
   const isEditingToolCommand = controllerReadonlyRef(controller, (value) => value.isEditingToolCommand, false);
   const multiPicks = controllerReadonlyRef(controller, (value) => value.multiPicks, new Set<string>());
+  const pendingEntryActionsMode = controllerReadonlyRef(
+    controller,
+    (value) => value.pendingEntryActionsMode,
+    "none" satisfies ComposerPendingEntryActionsMode,
+  );
   const pendingEntryActionsKey = controllerReadonlyRef(controller, (value) => value.pendingEntryActionsKey, "none");
   const pendingText = controllerReadonlyRef(controller, (value) => value.pendingText, "");
   const pendingKey = controllerReadonlyRef(controller, (value) => value.pendingKey, "none");
@@ -141,6 +168,13 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
   const toolInputJson = controllerReadonlyRef(controller, (value) => value.toolInputJson, "");
   const toolSubmitting = controllerReadonlyRef(controller, (value) => value.toolSubmitting, null);
   const toolSubtitle = controllerReadonlyRef(controller, (value) => value.toolSubtitle, "");
+
+  function controllerMethod<K extends ControllerMethodKey>(key: K) {
+    return (...args: Parameters<ControllerMethod<K>>): ReturnType<ControllerMethod<K>> | undefined => {
+      const method = controllerRef.value?.[key] as ((...args: any[]) => unknown) | undefined;
+      return method?.apply(undefined, args as any[]) as ReturnType<ControllerMethod<K>> | undefined;
+    };
+  }
 
   return {
     activeAsk,
@@ -159,44 +193,38 @@ export function useLazyComposerPendingInteraction(options: UseComposerPendingInt
     askTotal,
     askUsesInputActions,
     autoDecisionText,
-    backAsk: () => controllerRef.value?.backAsk(),
-    beginCommandEdit: () => controllerRef.value?.beginCommandEdit(),
+    backAsk: controllerMethod("backAsk"),
+    beginCommandEdit: controllerMethod("beginCommandEdit"),
     canAskSubmit,
     canGoPrev,
-    cancelAsk: () => controllerRef.value?.cancelAsk(),
-    cancelCommandEdit: () => controllerRef.value?.cancelCommandEdit(),
-    clearOptionHighlight: (...args: Parameters<ComposerPendingInteractionController["clearOptionHighlight"]>) =>
-      controllerRef.value?.clearOptionHighlight(...args),
-    confirmAskNo: () => controllerRef.value?.confirmAskNo(),
-    decideToolConsent: (...args: Parameters<ComposerPendingInteractionController["decideToolConsent"]>) =>
-      controllerRef.value?.decideToolConsent(...args),
-    focusOption: (...args: Parameters<ComposerPendingInteractionController["focusOption"]>) =>
-      controllerRef.value?.focusOption(...args),
+    cancelAsk: controllerMethod("cancelAsk"),
+    cancelCommandEdit: controllerMethod("cancelCommandEdit"),
+    clearOptionHighlight: controllerMethod("clearOptionHighlight"),
+    confirmAskNo: controllerMethod("confirmAskNo"),
+    decideToolConsent: controllerMethod("decideToolConsent"),
+    focusOption: controllerMethod("focusOption"),
     hasEditableCommand,
     hasPending,
     pendingInteractionReady,
     hasPendingInputText,
     hasPendingPanel,
-    highlightOption: (...args: Parameters<ComposerPendingInteractionController["highlightOption"]>) =>
-      controllerRef.value?.highlightOption(...args),
+    highlightOption: controllerMethod("highlightOption"),
     inputPlaceholder,
     inputValue,
     isEditingToolCommand,
-    modifyPlanApproval: () => controllerRef.value?.modifyPlanApproval(),
+    modifyPlanApproval: controllerMethod("modifyPlanApproval"),
     multiPicks,
+    pendingEntryActionsMode,
     pendingEntryActionsKey,
     pendingText,
     pendingKey,
-    selectSingleOption: (...args: Parameters<ComposerPendingInteractionController["selectSingleOption"]>) =>
-      controllerRef.value?.selectSingleOption(...args),
+    selectSingleOption: controllerMethod("selectSingleOption"),
     singleFocus,
     singlePick,
-    skipAsk: () => controllerRef.value?.skipAsk(),
-    submitAsk: () => controllerRef.value?.submitAsk(),
-    submitAskFreeform: (...args: Parameters<ComposerPendingInteractionController["submitAskFreeform"]>) =>
-      controllerRef.value?.submitAskFreeform(...args),
-    toggleMulti: (...args: Parameters<ComposerPendingInteractionController["toggleMulti"]>) =>
-      controllerRef.value?.toggleMulti(...args),
+    skipAsk: controllerMethod("skipAsk"),
+    submitAsk: controllerMethod("submitAsk"),
+    submitAskFreeform: controllerMethod("submitAskFreeform"),
+    toggleMulti: controllerMethod("toggleMulti"),
     toolCommandDraft,
     toolCommandIsEmpty,
     toolDanger,

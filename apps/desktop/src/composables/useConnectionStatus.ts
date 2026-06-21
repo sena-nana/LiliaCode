@@ -12,15 +12,17 @@ import {
   setActiveBackend as persistActiveBackend,
   type EnvStatusReport,
 } from "../services/chat";
-import type {
-  BackendEnvStatus,
-  ChatBackendKind,
-  CodexAppServerStatus,
-  RouterMode,
+import {
+  DEFAULT_CHAT_BACKEND,
+  normalizeChatBackendKind,
+  type BackendEnvStatus,
+  type ChatBackendKind,
+  type CodexAppServerStatus,
+  type RouterMode,
 } from "@lilia/contracts";
 
 const report = ref<EnvStatusReport | null>(null);
-const activeBackend = ref<ChatBackendKind>("claude");
+const activeBackend = ref<ChatBackendKind>(DEFAULT_CHAT_BACKEND);
 const probing = ref(false);
 const codexAppServerUpdateChecking = ref(false);
 const codexAppServerUpdating = ref(false);
@@ -52,13 +54,13 @@ async function loadActiveBackend(force = false): Promise<ChatBackendKind> {
   if (activeBackendLoaded && !force) return activeBackend.value;
   backendInflight = getActiveBackend()
     .then((backend) => {
-      activeBackend.value = backend === "codex" ? "codex" : "claude";
+      activeBackend.value = normalizeChatBackendKind(backend);
       activeBackendLoaded = true;
       return activeBackend.value;
     })
     .catch((err) => {
       console.error("[connection] getActiveBackend failed", err);
-      activeBackend.value = "claude";
+      activeBackend.value = DEFAULT_CHAT_BACKEND;
       activeBackendLoaded = true;
       return activeBackend.value;
     })
@@ -118,7 +120,7 @@ async function installCodexAppServerUpdate() {
 }
 
 async function setActiveBackend(backend: ChatBackendKind): Promise<ChatBackendKind> {
-  const next = backend === "codex" ? "codex" : "claude";
+  const next = normalizeChatBackendKind(backend);
   const previous = activeBackend.value;
   activeBackend.value = next;
   try {

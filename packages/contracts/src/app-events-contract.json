@@ -1,0 +1,6 @@
+{
+  "mainNavigateEventName": "lilia:main:navigate",
+  "popupNavigateEventName": "lilia:popup:navigate",
+  "cliProjectOpenEventName": "lilia:cli-project-open",
+  "cliProjectOpenConsumePendingCommand": "cli_project_open_consume_pending"
+}

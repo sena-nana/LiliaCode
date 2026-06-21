@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTimelineEvent, ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import {
-  attachmentsToTimelinePayload,
+  chatAttachmentsToPayload,
   createErrorTimelineEvent,
   createMessageTimelineEvent,
   mergeLoadedTimelineEvents,
   mergeTimelineEvents,
   retryContextForTimelineEvent,
   upsertTimelineEventsById,
-} from "../src/pages/taskDetail/useTaskTimeline";
+  type AgentTimelineEvent,
+  type ChatAttachment,
+  type ChatConversationReference,
+} from "@lilia/contracts";
 
 function event(overrides: Partial<AgentTimelineEvent>): AgentTimelineEvent {
   return {
@@ -100,6 +102,17 @@ describe("task detail timeline helpers", () => {
     const merged = mergeLoadedTimelineEvents([persisted], [optimistic]);
 
     expect(merged.map((item) => item.id)).toEqual(["db-1"]);
+  });
+
+  it("完整加载合并时保留显式指定的当前同 id 事件", () => {
+    const loaded = event({ id: "tool-1", status: "running", summary: "旧快照", updatedAt: 10 });
+    const live = event({ id: "tool-1", status: "requires_action", summary: "实时更新", updatedAt: 20 });
+
+    const merged = mergeLoadedTimelineEvents([loaded], [live], new Set(["tool-1"]));
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.status).toBe("requires_action");
+    expect(merged[0]?.summary).toBe("实时更新");
   });
 
   it("从错误事件内嵌 payload 读取重试上下文", () => {
@@ -200,7 +213,7 @@ describe("task detail timeline helpers", () => {
   });
 
   it("附件 payload 保留目录摘要并补齐 nullable 字段", () => {
-    const payload = attachmentsToTimelinePayload([
+    const payload = chatAttachmentsToPayload([
       {
         ...attachment,
         directory: {

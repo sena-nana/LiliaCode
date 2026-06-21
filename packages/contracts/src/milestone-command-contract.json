@@ -1,0 +1,10 @@
+{
+  "commands": {
+    "list": "milestone_list",
+    "create": "milestone_create",
+    "update": "milestone_update",
+    "delete": "milestone_delete",
+    "reorder": "milestone_reorder",
+    "setTasks": "milestone_set_tasks"
+  }
+}

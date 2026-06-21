@@ -1,5 +1,6 @@
 import { waitFor } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
+import { TASK_CREATE_COMMAND } from "@lilia/contracts";
 import { listProjectConversations } from "../src/data/tasks";
 import { mockInvoke } from "./tauriMock";
 
@@ -9,7 +10,7 @@ describe("tasks:changed sync", () => {
       listProjectConversations("lilia").some((task) => task.title === "弹窗首条消息"),
     ).toBe(false);
 
-    await mockInvoke("task_create", {
+    await mockInvoke(TASK_CREATE_COMMAND, {
       projectId: "lilia",
       title: "弹窗首条消息",
       status: "running",

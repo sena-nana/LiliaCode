@@ -7,7 +7,13 @@ import {
   CircleHelp,
   X,
 } from "lucide-vue-next";
-import type { AskUserOption, AskUserQuestion } from "@lilia/contracts";
+import {
+  ASK_USER_MULTI_SELECT_MODE,
+  ASK_USER_SINGLE_SELECT_MODE,
+  DEFAULT_ASK_USER_MODE,
+  type AskUserOption,
+  type AskUserQuestion,
+} from "@lilia/contracts";
 import type { PendingAsk } from "../../composables/useAskUser";
 
 type AskOptionView = AskUserOption & { id: string };
@@ -118,13 +124,13 @@ const emit = defineEmits<{
       </div>
 
       <div
-        v-if="askQuestion.mode !== 'confirm'"
+        v-if="askQuestion.mode !== DEFAULT_ASK_USER_MODE"
         class="composer-inline__main"
         :class="{ 'composer-inline__main--with-preview': askHasPreview }"
       >
         <ul
           class="composer-inline__options"
-          :role="askQuestion.mode === 'single' ? 'radiogroup' : 'group'"
+          :role="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE ? 'radiogroup' : 'group'"
         >
           <li
             v-for="opt in askOptionsWithId"
@@ -132,7 +138,7 @@ const emit = defineEmits<{
             class="composer-inline__option"
             :class="{
               'is-active': activeOptionId === opt.id,
-              'is-picked': askQuestion.mode === 'single'
+              'is-picked': askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE
                 ? singlePick === opt.id
                 : multiPicks.has(opt.id),
               'is-recommended': opt.recommended,
@@ -142,19 +148,19 @@ const emit = defineEmits<{
             <button
               type="button"
               class="composer-inline__option-btn"
-              :role="askQuestion.mode === 'single' ? 'radio' : 'checkbox'"
-              :aria-checked="askQuestion.mode === 'single'
+              :role="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE ? 'radio' : 'checkbox'"
+              :aria-checked="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE
                 ? singlePick === opt.id
                 : multiPicks.has(opt.id)"
               @mouseenter="emit('highlightOption', opt.id)"
               @mouseleave="emit('clearOptionHighlight', opt.id)"
               @focus="emit('focusOption', opt.id)"
-              @click="askQuestion.mode === 'single'
+              @click="askQuestion.mode === ASK_USER_SINGLE_SELECT_MODE
                 ? emit('selectSingleOption', opt.id)
                 : emit('toggleMulti', opt.id)"
             >
               <span class="composer-inline__option-indicator" aria-hidden="true">
-                <Check v-if="askQuestion.mode === 'multi' && multiPicks.has(opt.id)" :size="12" />
+                <Check v-if="askQuestion.mode === ASK_USER_MULTI_SELECT_MODE && multiPicks.has(opt.id)" :size="12" />
               </span>
               <span class="composer-inline__option-main">
                 <span class="composer-inline__option-label">
@@ -185,7 +191,7 @@ const emit = defineEmits<{
     <slot name="auto-decision" />
 
     <footer
-      v-if="showConfirmFooter && askQuestion.mode === 'confirm' && !askIsPlanApproval"
+      v-if="showConfirmFooter && askQuestion.mode === DEFAULT_ASK_USER_MODE && !askIsPlanApproval"
       class="composer-inline__actions"
     >
       <button
@@ -250,7 +256,7 @@ const emit = defineEmits<{
         上一题
       </button>
       <textarea
-        v-if="askQuestion.mode !== 'confirm' && askOtherSelected"
+        v-if="askQuestion.mode !== DEFAULT_ASK_USER_MODE && askOtherSelected"
         :value="freeformText"
         :class="inputClass"
         rows="1"
@@ -258,7 +264,7 @@ const emit = defineEmits<{
         @input="emit('update:freeformText', ($event.target as HTMLTextAreaElement).value)"
       />
       <button
-        v-if="askQuestion.mode === 'confirm'"
+        v-if="askQuestion.mode === DEFAULT_ASK_USER_MODE"
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
         :disabled="actionsBlocked"
@@ -270,11 +276,11 @@ const emit = defineEmits<{
         type="button"
         class="composer-inline__btn"
         :class="askQuestion.danger ? 'ui-button ui-button--ghost ui-button--danger' : 'ui-button ui-button--primary'"
-        :disabled="actionsBlocked || (askQuestion.mode !== 'confirm' && !canAskSubmit)"
+        :disabled="actionsBlocked || (askQuestion.mode !== DEFAULT_ASK_USER_MODE && !canAskSubmit)"
         @click="emit('submitAsk')"
       >
-        {{ askQuestion.mode === "confirm" ? (askQuestion.confirmLabel ?? "好的") : askIsLast ? "完成" : "继续" }}
-        <ArrowRight v-if="askQuestion.mode !== 'confirm' && !askIsLast" :size="13" aria-hidden="true" />
+        {{ askQuestion.mode === DEFAULT_ASK_USER_MODE ? (askQuestion.confirmLabel ?? "好的") : askIsLast ? "完成" : "继续" }}
+        <ArrowRight v-if="askQuestion.mode !== DEFAULT_ASK_USER_MODE && !askIsLast" :size="13" aria-hidden="true" />
       </button>
     </footer>
   </section>

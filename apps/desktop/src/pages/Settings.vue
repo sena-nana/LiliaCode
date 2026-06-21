@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, watch, type Component } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, watch, type Component } from "vue";
 import { useRoute } from "vue-router";
 import {
   normalizeSettingsTab,
@@ -44,17 +44,30 @@ const activeTabSection = computed(() => SETTINGS_SECTIONS[activeTab.value]);
 const isFullPageSection = computed(() =>
   activeTab.value === "plugins" || activeTab.value === "import",
 );
+let cancelTabSwitchPaintMeasure: (() => void) | null = null;
 
 installPerfObservers();
 
 watch(
   () => activeTab.value,
   (tab) => {
+    cancelTabSwitchPaintMeasure?.();
     const stage = beginPerfStage("settings.tab.switch", { detail: tab });
-    scheduleAfterPaint(() => stage.end("paint"));
+    const cancelPaint = scheduleAfterPaint(() => {
+      if (cancelTabSwitchPaintMeasure === cancelPaint) {
+        cancelTabSwitchPaintMeasure = null;
+      }
+      stage.end("paint");
+    });
+    cancelTabSwitchPaintMeasure = cancelPaint;
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  cancelTabSwitchPaintMeasure?.();
+  cancelTabSwitchPaintMeasure = null;
+});
 </script>
 
 <template>

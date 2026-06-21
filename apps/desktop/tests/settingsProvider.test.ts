@@ -1,8 +1,22 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ASSISTANT_AI_GET_CONFIG_COMMAND,
+  ASSISTANT_AI_SET_CONFIG_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  POPUP_SET_WINDOW_SETTINGS_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
+  QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+  QUOTA_USAGE_GET_STATS_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+} from "@lilia/contracts";
 import Settings from "../src/pages/Settings.vue";
 import { createLiliaRouter } from "../src/router";
+import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../src/tauri/pluginCommands";
 import {
   failNextPopupSettingsSave,
   mockInvoke,
@@ -82,6 +96,18 @@ function emptyQuotaStats() {
 describe("Settings provider switch", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("卸载时取消设置 tab paint 打点调度", async () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 53));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = await renderSettings("/settings?tab=appearance");
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(53);
   });
 
   it("非法 tab 默认显示外观分类", async () => {
@@ -116,13 +142,13 @@ describe("Settings provider switch", () => {
     mockInvoke.mockClear();
     const view = await renderSettings("/settings?tab=appearance");
 
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "quota_usage_get_stats")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === QUOTA_USAGE_GET_STATS_COMMAND)).toBe(false);
 
     await view.router.push("/settings?tab=quota");
     await view.router.isReady();
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "quota_usage_get_stats")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === QUOTA_USAGE_GET_STATS_COMMAND)).toBe(true);
     });
   });
 
@@ -167,7 +193,7 @@ describe("Settings provider switch", () => {
 
     expect(view.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+      expect(mockInvoke).toHaveBeenCalledWith(QUOTA_USAGE_GET_STATS_COMMAND, {
         input: { days: 7, backend: "all" },
       }, undefined);
     });
@@ -187,7 +213,7 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("radio", { name: "Codex" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("quota_usage_get_stats")).toMatchObject({
+      expect(lastInvokeInput(QUOTA_USAGE_GET_STATS_COMMAND)).toMatchObject({
         input: { days: 7, backend: "codex" },
       });
     });
@@ -198,7 +224,7 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("radio", { name: "30 天" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("quota_usage_get_stats")).toMatchObject({
+      expect(lastInvokeInput(QUOTA_USAGE_GET_STATS_COMMAND)).toMatchObject({
         input: { days: 30, backend: "codex" },
       });
     });
@@ -250,9 +276,25 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=quota");
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith(
+        QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+        {},
+        undefined,
+      );
     });
     expect(view.queryByText("Codex 官方额度")).not.toBeInTheDocument();
+  });
+
+  it("额度 mock 在 Codex API 未配置时返回真实连接模式", async () => {
+    setMockRouterMode("codex", "api");
+    setMockProviderConfig("codex", { baseUrl: null, hasApiKey: false });
+
+    const status = await mockInvoke(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND, {}, undefined);
+
+    expect(status).toMatchObject({
+      available: false,
+      connectionMode: "unconfigured",
+    });
   });
 
   it("额度页刷新按钮同时刷新本地统计和官方额度", async () => {
@@ -263,10 +305,14 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "刷新" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_stats", {
+      expect(mockInvoke).toHaveBeenCalledWith(QUOTA_USAGE_GET_STATS_COMMAND, {
         input: { days: 7, backend: "all" },
       }, undefined);
-      expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith(
+        QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+        {},
+        undefined,
+      );
     });
   });
 
@@ -279,7 +325,7 @@ describe("Settings provider switch", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(
-        "quota_usage_consume_codex_rate_limit_reset_credit",
+        QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
         { input: { idempotencyKey: expect.any(String) } },
         undefined,
       );
@@ -401,6 +447,43 @@ describe("Settings provider switch", () => {
         config: { apiKey: "sk-new" },
       });
     });
+  });
+
+  it("连接页卸载后保存完成不会继续刷新 provider 配置", async () => {
+    setMockRouterMode("claude", "api");
+    setMockProviderConfig("claude", { baseUrl: "https://api.anthropic.com", hasApiKey: true });
+    const originalInvoke = vi.mocked(mockInvoke).getMockImplementation();
+    const view = await renderSettings("/settings?tab=providers");
+    const baseUrlInput = await view.findByPlaceholderText("https://api.anthropic.com") as HTMLInputElement;
+    let resolveSave: () => void;
+    vi.mocked(mockInvoke).mockImplementation((cmd: string, args: Record<string, unknown> = {}) => {
+      if (cmd === "provider_set_config") {
+        return new Promise((resolve) => {
+          resolveSave = () => resolve(undefined);
+        });
+      }
+      return originalInvoke?.(cmd, args) ?? Promise.resolve(null);
+    });
+
+    try {
+      mockInvoke.mockClear();
+      await fireEvent.update(baseUrlInput, "https://anthropic-late.example/v1");
+      await fireEvent.click(view.getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        expect(typeof resolveSave).toBe("function");
+      });
+
+      view.unmount();
+      resolveSave!();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const commandsAfterSave = mockInvoke.mock.calls.map(([cmd]) => cmd);
+      expect(commandsAfterSave).toContain("provider_set_config");
+      expect(commandsAfterSave.filter((cmd) => cmd === "provider_get_config")).toHaveLength(0);
+    } finally {
+      vi.mocked(mockInvoke).mockImplementation(originalInvoke);
+    }
   });
 
   it("Codex 切换到 API 模式后可以显式清除已保存的 API key", async () => {
@@ -536,7 +619,7 @@ describe("Settings provider switch", () => {
     await fireEvent.click(within(card).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("popup_set_window_settings", {
+      expect(mockInvoke).toHaveBeenCalledWith(POPUP_SET_WINDOW_SETTINGS_COMMAND, {
         settings: { shortcut: "Ctrl+Shift+L" },
       }, undefined);
     });
@@ -636,6 +719,28 @@ describe("Settings provider switch", () => {
       ).toBe(true);
     });
     expect(await view.findByText("Reviewer")).toBeInTheDocument();
+  });
+
+  it("Agent 设置页卸载后取消自定义 Agent 目录延迟挂载", async () => {
+    let rafCallback: FrameRequestCallback | null = null;
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      rafCallback = callback;
+      return 15;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    mockInvoke.mockClear();
+
+    const view = await renderSettings("/settings?tab=agent");
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(15);
+    rafCallback?.(0);
+    await Promise.resolve();
+
+    expect(
+      mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_interaction_list_subagents"),
+    ).toBe(false);
   });
 
   it("Agent 设置页可以保存 subagent 模式开关", async () => {
@@ -754,11 +859,47 @@ describe("Settings provider switch", () => {
     const view = await renderSettings("/settings?tab=project");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "project_get_settings")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_GET_SETTINGS_COMMAND)).toBe(true);
     });
 
     expect(view.queryByText("Codex 项目默认高级字段")).not.toBeInTheDocument();
     expect(view.queryByText("Codex 高级字段")).not.toBeInTheDocument();
+  });
+
+  it("项目设置页卸载后不保存迟到的目录选择结果", async () => {
+    const originalInvoke = vi.mocked(mockInvoke).getMockImplementation();
+    let resolvePickedFolder: (path: string | null) => void;
+    vi.mocked(mockInvoke).mockImplementation((cmd: string, args: Record<string, unknown> = {}) => {
+      if (cmd === TAURI_PLUGIN_DIALOG_OPEN_COMMAND) {
+        return new Promise((resolve) => {
+          resolvePickedFolder = resolve;
+        });
+      }
+      return originalInvoke?.(cmd, args) ?? Promise.resolve(null);
+    });
+    try {
+      const view = await renderSettings("/settings?tab=project");
+      await waitFor(() => {
+        expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_GET_SETTINGS_COMMAND)).toBe(true);
+      });
+      mockInvoke.mockClear();
+
+      await waitFor(() => {
+        expect(view.getByRole("button", { name: "选择" })).toBeEnabled();
+      });
+      await fireEvent.click(view.getByRole("button", { name: "选择" }));
+      await waitFor(() => {
+        expect(typeof resolvePickedFolder).toBe("function");
+      });
+      view.unmount();
+      resolvePickedFolder!("C:\\late-picked");
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_SET_SETTINGS_COMMAND)).toBe(false);
+    } finally {
+      vi.mocked(mockInvoke).mockImplementation(originalInvoke);
+    }
   });
 
   it("新对话建议生成来源可切换到当前 Provider", async () => {
@@ -783,10 +924,10 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
         config: { apiKey: null },
       });
-      expect(lastInvokeInput("assistant_ai_set_config")?.config).not.toMatchObject({
+      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)?.config).not.toMatchObject({
         clearApiKey: true,
       });
     });
@@ -801,7 +942,7 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
         config: { apiKey: "sk-new" },
       });
     });
@@ -809,11 +950,47 @@ describe("Settings provider switch", () => {
     await fireEvent.click(view.getByRole("button", { name: "清除" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("assistant_ai_set_config")).toMatchObject({
+      expect(lastInvokeInput(ASSISTANT_AI_SET_CONFIG_COMMAND)).toMatchObject({
         config: { clearApiKey: true },
       });
       expect(view.getByText("未保存密钥")).toBeInTheDocument();
     });
+  });
+
+  it("辅助模型设置页卸载后不重新加载迟到的保存结果", async () => {
+    const originalInvoke = vi.mocked(mockInvoke).getMockImplementation();
+    let resolveSave: (() => void) | undefined;
+    vi.mocked(mockInvoke).mockImplementation((cmd: string, args: Record<string, unknown> = {}) => {
+      if (cmd === ASSISTANT_AI_SET_CONFIG_COMMAND) {
+        return new Promise((resolve) => {
+          resolveSave = () => resolve(undefined);
+        });
+      }
+      return originalInvoke?.(cmd, args) ?? Promise.resolve(null);
+    });
+
+    try {
+      const view = await renderSettings("/settings?tab=assistant");
+      await view.findByPlaceholderText("已保存，留空保留现有值");
+      mockInvoke.mockClear();
+
+      await fireEvent.click(view.getByRole("button", { name: "保存" }));
+      await waitFor(() => {
+        expect(mockInvoke.mock.calls.some(([cmd]) => cmd === ASSISTANT_AI_SET_CONFIG_COMMAND))
+          .toBe(true);
+        expect(typeof resolveSave).toBe("function");
+      });
+
+      view.unmount();
+      resolveSave?.();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === ASSISTANT_AI_GET_CONFIG_COMMAND))
+        .toBe(false);
+    } finally {
+      vi.mocked(mockInvoke).mockImplementation(originalInvoke);
+    }
   });
 
   it("项目设置页 GitHub 绑定流程冒烟", async () => {
@@ -863,14 +1040,14 @@ describe("Settings provider switch", () => {
     });
     expect(writeText).toHaveBeenCalledWith("ABCD-EFGH");
     expect(
-      mockInvoke.mock.calls.some(([cmd]) => cmd === "github_start_device_flow"),
+      mockInvoke.mock.calls.some(([cmd]) => cmd === GITHUB_START_DEVICE_FLOW_COMMAND),
     ).toBe(true);
     expect(
-      mockInvoke.mock.calls.some(([cmd]) => cmd === "github_poll_device_flow"),
+      mockInvoke.mock.calls.some(([cmd]) => cmd === GITHUB_POLL_DEVICE_FLOW_COMMAND),
     ).toBe(true);
     expect(
       mockInvoke.mock.calls.some(([cmd, args]) =>
-        cmd === "system_open_url" &&
+        cmd === SYSTEM_OPEN_URL_COMMAND &&
         typeof args === "object" &&
         args !== null &&
         "url" in args &&

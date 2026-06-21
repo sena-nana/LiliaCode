@@ -1,5 +1,11 @@
 import * as claudeSdk from "@anthropic-ai/claude-agent-sdk";
 import {
+  HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_TITLE_TEXT_LIMIT,
+} from "@lilia/contracts/historyImportContract.mjs";
+import { RUNNER_DONE_EVENT_TYPE } from "@lilia/contracts/runnerProtocolContract.mjs";
+import { normalizeSessionManagementRuntimeCommand } from "@lilia/contracts/sessionManagementContract.mjs";
+import {
   codexPreviewMessagesFromTurns,
   previewCodexThreadLiteWithServer,
   readCodexThreadTurns,
@@ -7,16 +13,8 @@ import {
   archiveCodexThreadWithServer,
   searchCodexThreadsWithServer,
 } from "./codex/threadData.mjs";
+import { readRunnerRuntimeCommand } from "./runnerCommand.mjs";
 import { isRecord, shortText, stringOrNull } from "./utils.mjs";
-
-const SESSION_MANAGEMENT_ACTIONS = new Set(["list", "info", "messages", "rename", "tag", "delete", "archive"]);
-const DEFAULT_LIMIT = 20;
-
-function limitValue(value, fallback = DEFAULT_LIMIT, max = 100) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.max(1, Math.min(max, Math.trunc(number)));
-}
 
 function cursorOffset(value) {
   const number = Number(stringOrNull(value)?.trim() || 0);
@@ -24,39 +22,9 @@ function cursorOffset(value) {
 }
 
 function readSessionManagementRuntimeCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "session_management") return null;
-  const action = stringOrNull(command.action);
-  if (!SESSION_MANAGEMENT_ACTIONS.has(action)) {
-    throw new Error("Lilia session management runtime command missing a valid action");
-  }
-  const sessionId = stringOrNull(command.sessionId)?.trim() || "";
-  const title = stringOrNull(command.title)?.trim() || "";
-  const tag = hasOwn(command, "tag") ? stringOrNull(command.tag)?.trim() || null : null;
-  if (action !== "list" && !sessionId) {
-    throw new Error("Lilia session management runtime command missing sessionId");
-  }
-  if (action === "rename" && !title) {
-    throw new Error("Lilia session management rename requires a non-empty title");
-  }
-  if (action === "tag" && !hasOwn(command, "tag")) {
-    throw new Error("Lilia session management tag requires tag");
-  }
-  return {
-    action,
-    sessionId,
-    title,
-    tag,
-    archived: command.archived === true,
-    limit: limitValue(command.limit),
-    cursor: stringOrNull(command.cursor)?.trim() || null,
-    searchTerm: stringOrNull(command.searchTerm)?.trim() || "",
-    includeSystemMessages: command.includeSystemMessages === true,
-  };
-}
-
-function hasOwn(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
+  return normalizeSessionManagementRuntimeCommand(
+    readRunnerRuntimeCommand(cmd),
+  );
 }
 
 function emitSessionManagementTimeline(protocol, backend, command, status, config) {
@@ -87,7 +55,7 @@ function emitSessionManagementTimeline(protocol, backend, command, status, confi
 
 function emitSessionManagementDone(protocol, command, fallbackSessionId = null) {
   protocol.emit({
-    type: "done",
+    type: RUNNER_DONE_EVENT_TYPE,
     sessionId: command.sessionId || fallbackSessionId || null,
     subtype: "success",
   });
@@ -115,7 +83,7 @@ function normalizeClaudeSessionInfo(info) {
         stringOrNull(info.title) ||
         stringOrNull(info.customTitle) ||
         "Claude session",
-      160,
+      HISTORY_IMPORT_TITLE_TEXT_LIMIT,
     ),
     sourceKind: "claude",
     createdAt: typeof info.createdAt === "number" ? info.createdAt : null,
@@ -150,7 +118,7 @@ function normalizeClaudeSessionMessage(message, index = 0) {
   return {
     id: stringOrNull(message.uuid) || `${role}:${index}`,
     role,
-    summary: shortText(text, 1200) || null,
+    summary: shortText(text, HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT) || null,
   };
 }
 

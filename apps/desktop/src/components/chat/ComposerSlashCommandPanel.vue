@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CodeXml, FileQuestion, GitBranch, GitCommit, TerminalSquare } from "lucide-vue-next";
+import { chatSlashCommandSourceLabel, chatWorkflowSlashKindLabel } from "@lilia/contracts";
 import type {
   ComposerSlashCommandItem,
   ComposerSlashTargetItem,
@@ -23,11 +24,7 @@ const emit = defineEmits<{
 
 function sourceLabel(result: ComposerSlashCommandItem): string {
   if (result.kind === "workflow") return "工作流";
-  return result.command.source === "project" ? "项目" : "内置";
-}
-
-function workflowTitle(kind: ComposerWorkflowSlashKind | null): string {
-  return kind === "fix_suggestion" ? "修复建议" : "代码审查";
+  return chatSlashCommandSourceLabel(result.command.source);
 }
 
 function targetIcon(target: ComposerSlashTargetItem) {
@@ -68,7 +65,7 @@ function commandIcon(result: ComposerSlashCommandItem) {
           <span class="chat-composer__context-path">{{ target.hint }}</span>
         </span>
         <span class="chat-composer__context-meta">
-          {{ workflowTitle(activeWorkflowKind) }}
+          {{ chatWorkflowSlashKindLabel(activeWorkflowKind) }}
         </span>
       </button>
     </div>

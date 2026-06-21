@@ -9,19 +9,25 @@ import {
   liliaRuntimeCommandMetadata,
   liliaWorkflowMetadata,
 } from "@lilia/contracts/liliaAgentProtocol.mjs";
+import {
+  RUNNER_ERROR_EVENT_TYPE,
+  RUNNER_STDIN_PAYLOAD_KEYS,
+  RUNNER_STDIN_TURN_KEYS,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
 
 function isRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
 export function normalizeRunnerCommand(cmd) {
-  const turn = isRecord(cmd?.turn) ? cmd.turn : {};
-  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  const keys = RUNNER_STDIN_PAYLOAD_KEYS;
+  const turn = isRecord(cmd?.[keys.turn]) ? cmd[keys.turn] : {};
+  const runtimeOptions = isRecord(cmd?.[keys.runtimeOptions]) ? cmd[keys.runtimeOptions] : {};
   return {
     ...cmd,
     turn,
-    workflow: isRecord(cmd?.workflow) ? cmd.workflow : null,
-    runtimeCommand: isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null,
+    workflow: isRecord(cmd?.[keys.workflow]) ? cmd[keys.workflow] : null,
+    runtimeCommand: isRecord(cmd?.[keys.runtimeCommand]) ? cmd[keys.runtimeCommand] : null,
     runtimeOptions,
   };
 }
@@ -53,30 +59,37 @@ export async function runAgentTurn(cmd, deps = {}) {
   const workflowMetadata = workflowType ? liliaWorkflowMetadata(workflowType) : null;
   const runtimeCommandMetadata = runtimeCommandType ? liliaRuntimeCommandMetadata(runtimeCommandType) : null;
   if (workflowType && !workflowMetadata) {
-    context.protocol.emit({ type: "error", message: `unknown workflow: ${workflowType}` });
+    context.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: `unknown workflow: ${workflowType}` });
     return { ok: false, exitCode: 1 };
   }
   if (runtimeCommandType && !runtimeCommandMetadata) {
-    context.protocol.emit({ type: "error", message: `unknown runtimeCommand: ${runtimeCommandType}` });
+    context.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: `unknown runtimeCommand: ${runtimeCommandType}` });
     return { ok: false, exitCode: 1 };
   }
+  const turnKeys = RUNNER_STDIN_TURN_KEYS;
   const turn = isRecord(cmd.turn) ? cmd.turn : null;
-  if (typeof turn?.prompt !== "string") {
-    context.protocol.emit({ type: "error", message: "missing prompt" });
+  if (typeof turn?.[turnKeys.prompt] !== "string") {
+    context.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }
-  const turnAttachments = Array.isArray(turn.attachments) ? turn.attachments : undefined;
+  const turnAttachments = Array.isArray(turn[turnKeys.attachments])
+    ? turn[turnKeys.attachments]
+    : undefined;
   const nextCmd = {
     ...cmd,
-    prompt: buildPromptWithAttachments(turn.prompt, turnAttachments),
-    cwd: typeof turn.cwd === "string" ? turn.cwd : undefined,
+    prompt: buildPromptWithAttachments(turn[turnKeys.prompt], turnAttachments),
+    cwd: typeof turn[turnKeys.cwd] === "string" ? turn[turnKeys.cwd] : undefined,
     attachments: turnAttachments,
-    model: typeof turn.model === "string" ? turn.model : undefined,
-    resumeSessionId: typeof turn.resumeSessionId === "string" ? turn.resumeSessionId : undefined,
-    planMode: typeof turn.planMode === "boolean" ? turn.planMode : undefined,
-    goalMode: typeof turn.goalMode === "boolean" ? turn.goalMode : undefined,
+    model: typeof turn[turnKeys.model] === "string" ? turn[turnKeys.model] : undefined,
+    resumeSessionId: typeof turn[turnKeys.resumeSessionId] === "string"
+      ? turn[turnKeys.resumeSessionId]
+      : undefined,
+    planMode: typeof turn[turnKeys.planMode] === "boolean" ? turn[turnKeys.planMode] : undefined,
+    goalMode: typeof turn[turnKeys.goalMode] === "boolean" ? turn[turnKeys.goalMode] : undefined,
     autoSessionFork: cmd.runtimeOptions?.common?.modelSelection?.sessionFork === true,
-    permission: typeof turn.permission === "string" ? turn.permission : undefined,
+    permission: typeof turn[turnKeys.permission] === "string"
+      ? turn[turnKeys.permission]
+      : undefined,
   };
   const allowsEmptyWorkflowPrompt = workflowMetadata?.requiresPrompt === false;
   const allowsEmptyRuntimeCommandPrompt = runtimeCommandMetadata?.requiresPrompt === false;
@@ -85,7 +98,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     !allowsEmptyWorkflowPrompt &&
     !allowsEmptyRuntimeCommandPrompt
   ) {
-    context.protocol.emit({ type: "error", message: "missing prompt" });
+    context.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: "missing prompt" });
     return { ok: false, exitCode: 1 };
   }
 
@@ -103,7 +116,7 @@ export async function runAgentTurn(cmd, deps = {}) {
     }
     return { ok: true, exitCode: 0 };
   } catch (err) {
-    context.protocol.emit({ type: "error", message: err?.message || String(err) });
+    context.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: err?.message || String(err) });
     return { ok: false, exitCode: 1 };
   }
 }

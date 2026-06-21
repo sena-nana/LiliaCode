@@ -13,8 +13,10 @@ use crate::chat::types::{
     ChatModelOption, ChatRollbackResult, ChatRuntimeCommand, ChatRuntimeSnapshot, ChatWorkflow,
     ProviderRuntimeOptions,
 };
+use crate::chat_backends_contract::chat_backends_contract;
+use crate::provider::normalize_permission_mode;
 use crate::store::LiliaStore;
-use crate::{agent_timeline, todos, BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
+use crate::{agent_timeline, todos};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingChatTurn {
@@ -461,8 +463,9 @@ pub(crate) fn clear_task_runtime_state_for_reset<R: Runtime>(
     task_id: &str,
 ) {
     let mut sessions = chat_store.sdk_sessions.lock().unwrap();
-    sessions.remove(&session_key(BACKEND_CLAUDE, task_id));
-    sessions.remove(&session_key(BACKEND_CODEX, task_id));
+    for backend in chat_backends() {
+        sessions.remove(&session_key(backend, task_id));
+    }
     drop(sessions);
 
     if let Some(store) = app.try_state::<LiliaStore>() {
@@ -489,55 +492,72 @@ pub(crate) fn new_chat_message_id() -> String {
 }
 
 pub(crate) fn normalize_backend(value: &str) -> &'static str {
-    match value {
-        BACKEND_CODEX => BACKEND_CODEX,
-        _ => BACKEND_CLAUDE,
-    }
+    try_normalize_backend(value).unwrap_or_else(default_backend)
+}
+
+pub(crate) fn chat_backends() -> &'static [String] {
+    &chat_backends_contract().chat_backends
+}
+
+pub(crate) fn chat_backend_supported(value: &str) -> bool {
+    try_normalize_backend(value).is_some()
+}
+
+pub(crate) fn try_normalize_backend(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    chat_backends()
+        .iter()
+        .find(|backend| backend.as_str() == value)
+        .map(String::as_str)
+}
+
+pub(crate) fn default_backend() -> &'static str {
+    chat_backends_contract().default_backend.as_str()
 }
 
 pub(crate) fn default_model_for_backend(backend: &str) -> &'static str {
-    match normalize_backend(backend) {
-        BACKEND_CODEX => CODEX_MODEL_OPTIONS[0].0,
-        _ => "claude-sonnet-4-6",
-    }
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .default_models
+        .get(backend)
+        .map(String::as_str)
+        .expect("chat-backends.json missing defaultModels backend")
 }
 
 pub(crate) fn model_options_for_backend(backend: &str) -> Vec<ChatModelOption> {
-    match normalize_backend(backend) {
-        BACKEND_CODEX => CODEX_MODEL_OPTIONS
-            .iter()
-            .map(|(id, label)| ChatModelOption {
-                id: (*id).to_string(),
-                label: (*label).to_string(),
-                backend: BACKEND_CODEX.to_string(),
-            })
-            .collect(),
-        _ => vec![
-            ChatModelOption {
-                id: "claude-opus-4-7".to_string(),
-                label: "Opus 4.7".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-            ChatModelOption {
-                id: "claude-sonnet-4-6".to_string(),
-                label: "Sonnet 4.6".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-            ChatModelOption {
-                id: "claude-haiku-4-5".to_string(),
-                label: "Haiku 4.5".to_string(),
-                backend: BACKEND_CLAUDE.to_string(),
-            },
-        ],
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .backend_models
+        .get(backend)
+        .expect("chat-backends.json missing backendModels backend")
+        .iter()
+        .map(|option| ChatModelOption {
+            id: option.id.clone(),
+            label: option.label.clone(),
+            backend: backend.to_string(),
+        })
+        .collect()
+}
+
+fn model_belongs_to_backend(model: &str, backend: &str) -> bool {
+    let model = model.trim();
+    if model.is_empty() {
+        return false;
     }
+    model_options_for_backend(backend)
+        .iter()
+        .any(|option| option.id == model)
+        || chat_backends_contract()
+            .allowed_model_prefixes
+            .get(backend)
+            .map(|prefixes| prefixes.iter().any(|prefix| model.starts_with(prefix)))
+            .unwrap_or(false)
 }
 
 pub(crate) fn normalize_model_for_backend(model: &str, backend: &str) -> String {
     let backend = normalize_backend(backend);
-    if model_options_for_backend(backend)
-        .iter()
-        .any(|option| option.id == model)
-    {
+    let model = model.trim();
+    if model_belongs_to_backend(model, backend) {
         model.to_string()
     } else {
         default_model_for_backend(backend).to_string()
@@ -564,11 +584,24 @@ pub(crate) fn normalize_reasoning_effort_for_backend(
             Some(trimmed.to_string())
         }
     })?;
-    match (normalize_backend(backend), value.as_str()) {
-        (BACKEND_CODEX, "low" | "medium" | "high" | "xhigh") => Some(value),
-        (BACKEND_CLAUDE, "low" | "medium" | "high" | "xhigh" | "max") => Some(value),
-        _ => None,
+    let backend = normalize_backend(backend);
+    let manifest = chat_backends_contract();
+    let supported_efforts = manifest.backend_reasoning_efforts.get(backend)?;
+    let value_index = manifest
+        .reasoning_efforts
+        .iter()
+        .position(|item| item == &value)?;
+    if supported_efforts.iter().any(|item| item == &value) {
+        return Some(value);
     }
+    manifest
+        .reasoning_efforts
+        .iter()
+        .take(value_index)
+        .rev()
+        .find(|candidate| supported_efforts.iter().any(|item| item == *candidate))
+        .cloned()
+        .or_else(|| supported_efforts.first().cloned())
 }
 
 pub(crate) fn normalize_composer_for_backend(
@@ -583,19 +616,21 @@ pub(crate) fn normalize_composer_for_backend(
     composer.model_selection_mode = normalize_model_selection_mode(&composer.model_selection_mode);
     composer.reasoning_effort =
         normalize_reasoning_effort_for_backend(composer.reasoning_effort, backend);
+    composer.permission = normalize_permission_mode(&composer.permission);
     composer
 }
 
 pub(crate) fn default_composer(task_id: &str) -> ChatComposerState {
+    let backend = default_backend();
     ChatComposerState {
         task_id: task_id.to_string(),
-        backend: BACKEND_CLAUDE.to_string(),
-        model: default_model_for_backend(BACKEND_CLAUDE).to_string(),
+        backend: backend.to_string(),
+        model: default_model_for_backend(backend).to_string(),
         model_selection_mode: "auto".to_string(),
         reasoning_effort: None,
         plan_mode: false,
         goal_mode: false,
-        permission: "ask".to_string(),
+        permission: normalize_permission_mode(""),
         codex_settings: Default::default(),
     }
 }
@@ -1445,6 +1480,101 @@ pub(crate) fn persist_and_emit_interrupted_timeline_event<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+
+    #[test]
+    fn reasoning_effort_normalization_uses_contract_manifest() {
+        let manifest = chat_backends_contract();
+        assert_eq!(
+            manifest.reasoning_efforts,
+            vec![
+                "low".to_string(),
+                "medium".to_string(),
+                "high".to_string(),
+                "xhigh".to_string(),
+                "max".to_string()
+            ]
+        );
+        assert_eq!(
+            manifest.backend_reasoning_efforts.get(BACKEND_CODEX),
+            Some(&vec![
+                "low".to_string(),
+                "medium".to_string(),
+                "high".to_string(),
+                "xhigh".to_string()
+            ])
+        );
+        assert_eq!(
+            normalize_reasoning_effort_for_backend(Some(" xhigh ".to_string()), BACKEND_CODEX)
+                .as_deref(),
+            Some("xhigh")
+        );
+        assert_eq!(
+            normalize_reasoning_effort_for_backend(Some("max".to_string()), BACKEND_CODEX)
+                .as_deref(),
+            Some("xhigh")
+        );
+        assert_eq!(
+            normalize_reasoning_effort_for_backend(Some("max".to_string()), BACKEND_CLAUDE)
+                .as_deref(),
+            Some("max")
+        );
+    }
+
+    #[test]
+    fn model_options_are_loaded_from_contract_manifest() {
+        assert_eq!(
+            chat_backends(),
+            &[BACKEND_CLAUDE.to_string(), BACKEND_CODEX.to_string()]
+        );
+        assert!(chat_backend_supported(BACKEND_CLAUDE));
+        assert!(!chat_backend_supported("unknown"));
+        assert_eq!(
+            try_normalize_backend(&format!(" {BACKEND_CODEX} ")),
+            Some(BACKEND_CODEX)
+        );
+        assert_eq!(try_normalize_backend("unknown"), None);
+        assert_eq!(default_backend(), BACKEND_CLAUDE);
+        assert_eq!(normalize_backend("unknown"), default_backend());
+        assert_eq!(
+            default_model_for_backend(BACKEND_CLAUDE),
+            "claude-sonnet-4-6"
+        );
+        assert_eq!(default_model_for_backend(BACKEND_CODEX), "gpt-5.5");
+
+        let claude_models = model_options_for_backend(BACKEND_CLAUDE);
+        assert_eq!(claude_models.len(), 3);
+        assert_eq!(claude_models[0].id, "claude-opus-4-7");
+        assert_eq!(claude_models[1].label, "Sonnet 4.6");
+        assert!(claude_models
+            .iter()
+            .all(|option| option.backend == BACKEND_CLAUDE));
+
+        let codex_models = model_options_for_backend(BACKEND_CODEX);
+        assert_eq!(codex_models[0].id, "gpt-5.5");
+        assert_eq!(
+            normalize_model_for_backend(" gpt-6-preview ", BACKEND_CODEX),
+            "gpt-6-preview"
+        );
+        assert_eq!(
+            normalize_model_for_backend("claude-sonnet-4-6", BACKEND_CODEX),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            normalize_model_for_backend("unknown", BACKEND_CODEX),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            default_composer("task-1").permission,
+            normalize_permission_mode("")
+        );
+        let mut composer = default_composer("task-1");
+        composer.permission = "danger".to_string();
+        assert_eq!(
+            normalize_composer_for_backend(composer, "task-1", BACKEND_CODEX).permission,
+            normalize_permission_mode("")
+        );
+    }
 
     #[test]
     fn runtime_snapshot_includes_latest_context_usage() {

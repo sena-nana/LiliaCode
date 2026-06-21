@@ -1,11 +1,17 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
+import {
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+} from "@lilia/contracts";
 import Plugins from "../src/pages/Plugins.vue";
 import { mockInvoke } from "./tauriMock";
 
 function lastCodexMcpCreateInput() {
   const call = mockInvoke.mock.calls
-    .filter(([command, args]) => command === "plugins_create_mcp_server" && args?.backend === "codex")
+    .filter(([command, args]) => command === PLUGINS_CREATE_MCP_SERVER_COMMAND && args?.backend === "codex")
     .at(-1);
   return call?.[1]?.input;
 }
@@ -54,7 +60,7 @@ describe("Plugins page", () => {
     expect(
       mockInvoke.mock.calls.some(
         ([command, args]) =>
-          command === "plugins_set_mcp_server_enabled" && args?.backend === "claude",
+          command === PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND && args?.backend === "claude",
       ),
     ).toBe(true);
 
@@ -73,7 +79,7 @@ describe("Plugins page", () => {
     expect(
       mockInvoke.mock.calls.some(
         ([command, args]) =>
-          command === "plugins_create_mcp_server" && args?.backend === "claude",
+          command === PLUGINS_CREATE_MCP_SERVER_COMMAND && args?.backend === "claude",
       ),
     ).toBe(true);
     await fireEvent.click(within(list).getByRole("button", { name: /linear/ }));
@@ -109,7 +115,7 @@ describe("Plugins page", () => {
     expect(
       mockInvoke.mock.calls.some(
         ([command, args]) =>
-          command === "plugins_set_mcp_server_enabled" && args?.backend === "codex",
+          command === PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND && args?.backend === "codex",
       ),
     ).toBe(true);
 
@@ -167,7 +173,7 @@ describe("Plugins page", () => {
     expect(
       mockInvoke.mock.calls.some(
         ([command, args]) =>
-          command === "plugins_update_hook_source" &&
+          command === PLUGINS_UPDATE_HOOK_SOURCE_COMMAND &&
           Array.isArray(args?.input?.handlers) &&
           args.input.handlers[0]?.advancedJson?.includes?.("MODE"),
       ),
@@ -194,7 +200,7 @@ describe("Plugins page", () => {
     expect(
       mockInvoke.mock.calls.some(
         ([command, args]) =>
-          command === "plugins_create_hook_source" &&
+          command === PLUGINS_CREATE_HOOK_SOURCE_COMMAND &&
           args?.backend === "claude" &&
           args?.scope === "local",
       ),

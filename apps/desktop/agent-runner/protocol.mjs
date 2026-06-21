@@ -1,4 +1,13 @@
 import {
+  TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TITLE_TEXT_LIMIT,
+} from "@lilia/contracts/timelineContract.mjs";
+import {
+  RUNNER_CONTEXT_USAGE_EVENT_TYPE,
+  RUNNER_ERROR_EVENT_TYPE,
+  RUNNER_TIMELINE_EVENT_TYPE,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
+import {
   sanitizeTimelinePayload,
   shortText,
   stringOrNull,
@@ -26,8 +35,8 @@ export function createProtocolEmitter({ write } = {}) {
     if (!kind) return;
 
     const status = stringOrNull(input.status) || "info";
-    const title = shortText(input.title, 200) || kind;
-    const summary = shortText(input.summary, 1200) || "";
+    const title = shortText(input.title, TIMELINE_DISPLAY_TITLE_TEXT_LIMIT) || kind;
+    const summary = shortText(input.summary, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "";
     const payload = sanitizeTimelinePayload(input.payload);
     const sourceId = stringOrNull(input.sourceId);
     if (
@@ -60,11 +69,11 @@ export function createProtocolEmitter({ write } = {}) {
     if (typeof input.updatedAt === "number" && Number.isFinite(input.updatedAt)) {
       event.updatedAt = Math.trunc(input.updatedAt);
     }
-    emit({ type: "timeline", event });
+    emit({ type: RUNNER_TIMELINE_EVENT_TYPE, event });
   }
 
   function emitError(message, payload) {
-    emit({ type: "error", message, ...(payload ? { payload } : {}) });
+    emit({ type: RUNNER_ERROR_EVENT_TYPE, message, ...(payload ? { payload } : {}) });
   }
 
   function emitContextUsage(input) {
@@ -74,7 +83,7 @@ export function createProtocolEmitter({ write } = {}) {
     const limitValue = Number(input.limitTokens ?? input.limit_tokens);
     const percentValue = Number(input.usedPercent ?? input.used_percent);
     const event = {
-      type: "context_usage",
+      type: RUNNER_CONTEXT_USAGE_EVENT_TYPE,
       usedTokens: Math.trunc(usedTokens),
       source: stringOrNull(input.source) || "runtime",
     };

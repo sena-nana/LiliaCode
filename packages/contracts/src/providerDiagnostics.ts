@@ -1,10 +1,22 @@
+import {
+  chatBackendLabel,
+  type ChatBackendKind,
+} from "./chat";
 import type {
   BackendEnvStatus,
-  ChatBackendKind,
   CodexAppServerStatus,
   EnvStatusReport,
   RouterMode,
-} from "@lilia/contracts";
+} from "./provider";
+import {
+  apiKeyEnvForBackend,
+  connectionModeUsesCodexAccount,
+  connectionModeUsesCustomUrl,
+  connectionModeUsesDefaultApi,
+  routerModeUsesCodexAccount,
+} from "./provider";
+
+export { DIRECT_DEFAULT_URLS } from "./provider";
 
 export type DiagnosticTone = "warn" | "err" | "probing";
 
@@ -12,15 +24,6 @@ export interface ProviderDiagnostic {
   tone: DiagnosticTone;
   title: string;
   hint: string;
-}
-
-export const DIRECT_DEFAULT_URLS: Record<ChatBackendKind, string> = {
-  claude: "https://api.anthropic.com",
-  codex: "https://api.openai.com/v1",
-};
-
-export function backendLabel(backend: ChatBackendKind): string {
-  return backend === "codex" ? "Codex" : "Claude";
 }
 
 export function codexRuntimeIssue(status: CodexAppServerStatus | null): string {
@@ -90,28 +93,28 @@ export function connectionDiagnostic(
       hint: "正在读取连接配置。",
     };
   }
-  const label = backendLabel(backend);
-  if (status.connectionMode === "codex-account") {
+  const label = chatBackendLabel(backend);
+  if (connectionModeUsesCodexAccount(status.connectionMode)) {
     return null;
   }
-  if (status.connectionMode === "custom") {
+  if (connectionModeUsesCustomUrl(status.connectionMode)) {
     return status.hasApiKey ? null : {
       tone: "warn",
       title: `${label} 自定义 API 来源`,
       hint: `将通过 ${status.effectiveUrl ?? "-"} 发送请求，未设置密钥；仅适用于本地代理或不需要鉴权的兼容来源。`,
     };
   }
-  if (status.connectionMode === "api" && status.hasApiKey) {
+  if (connectionModeUsesDefaultApi(status.connectionMode) && status.hasApiKey) {
     return null;
   }
-  if (status.connectionMode === "api") {
+  if (connectionModeUsesDefaultApi(status.connectionMode)) {
     return {
       tone: "warn",
       title: `${label} API 缺少 API key`,
-      hint: `当前选择 API，但未保存 ${backend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"} 或设置页密钥。请填写 API key 后保存。`,
+      hint: `当前选择 API，但未保存 ${apiKeyEnvForBackend(backend)} 或设置页密钥。请填写 API key 后保存。`,
     };
   }
-  if (routerMode === "codex-account") {
+  if (routerModeUsesCodexAccount(routerMode)) {
     return {
       tone: "warn",
       title: "Codex 官方账号未就绪",
@@ -124,4 +127,3 @@ export function connectionDiagnostic(
     hint: "当前选择 API。请填写 API key；Base URL 留空时使用官方 API，也可以填写本地代理或兼容 API 地址。",
   };
 }
-

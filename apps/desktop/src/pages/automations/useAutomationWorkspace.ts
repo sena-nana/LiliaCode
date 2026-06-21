@@ -1,5 +1,10 @@
 import { computed, ref, type Ref } from "vue";
-import type { AutomationScopeFilter, AutomationWorkflow, ChatBackendKind } from "@lilia/contracts";
+import {
+  normalizeAutomationScope,
+  type AutomationScopeFilter,
+  type AutomationWorkflow,
+  type ChatBackendKind,
+} from "@lilia/contracts";
 import {
   deleteAutomation,
   listAutomations,
@@ -7,7 +12,6 @@ import {
   saveAutomationDraft,
   setAutomationEnabled,
 } from "../../services/automations";
-import { DEFAULT_SCOPE } from "./constants";
 import type { AutomationFlowEdge, AutomationFlowNode } from "./types";
 
 export function useAutomationWorkspace(options: {
@@ -23,15 +27,17 @@ export function useAutomationWorkspace(options: {
   refreshRuns: () => Promise<void>;
   resetRunSelection: () => void;
   setError: (message: string) => void;
+  isDisposed?: () => boolean;
 }) {
   const workflowRows = ref<AutomationWorkflow[]>([]);
   const selectedWorkflowId = options.selectedWorkflowId;
   const workflowName = ref("新自动化");
-  const scope = ref<AutomationScopeFilter>({ ...DEFAULT_SCOPE });
+  const scope = ref<AutomationScopeFilter>(normalizeAutomationScope(null));
   const loading = ref(false);
   const saving = ref(false);
   const publishing = ref(false);
   let blankWorkflowCreation: Promise<AutomationWorkflow> | null = null;
+  const isDisposed = () => options.isDisposed?.() === true;
 
   const selectedWorkflow = computed(() =>
     workflowRows.value.find((workflow) => workflow.id === selectedWorkflowId.value) ?? null,
@@ -41,19 +47,22 @@ export function useAutomationWorkspace(options: {
     const workflow = selectedWorkflow.value;
     if (!workflow) {
       workflowName.value = "新自动化";
-      scope.value = { ...DEFAULT_SCOPE };
+      scope.value = normalizeAutomationScope(null);
       return;
     }
     workflowName.value = workflow.name;
-    scope.value = { ...DEFAULT_SCOPE, ...workflow.scope };
+    scope.value = normalizeAutomationScope(workflow.scope);
   }
 
   async function refreshWorkflows() {
+    if (isDisposed()) return;
     loading.value = true;
     options.setError("");
     try {
       const rows = await listAutomations();
+      if (isDisposed()) return;
       workflowRows.value = rows.length ? rows : [await createBlankWorkflow()];
+      if (isDisposed()) return;
       if (
         !selectedWorkflowId.value ||
         !workflowRows.value.some((workflow) => workflow.id === selectedWorkflowId.value)
@@ -65,13 +74,14 @@ export function useAutomationWorkspace(options: {
         options.setError(String(err));
       });
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      loading.value = false;
+      if (!isDisposed()) loading.value = false;
     }
   }
 
   function selectWorkflow(workflow: AutomationWorkflow) {
+    if (isDisposed()) return;
     selectedWorkflowId.value = workflow.id;
     options.resetRunSelection();
     syncSelectedWorkflowState();
@@ -82,7 +92,7 @@ export function useAutomationWorkspace(options: {
 
   async function createBlankWorkflow() {
     if (blankWorkflowCreation) return blankWorkflowCreation;
-    const blankScope = { ...DEFAULT_SCOPE };
+    const blankScope = normalizeAutomationScope(null);
     blankWorkflowCreation = saveAutomationDraft({
       id: null,
       name: "未命名自动化",
@@ -96,10 +106,12 @@ export function useAutomationWorkspace(options: {
   }
 
   async function newWorkflow() {
+    if (isDisposed()) return;
     saving.value = true;
     options.setError("");
     try {
       const saved = await createBlankWorkflow();
+      if (isDisposed()) return;
       workflowRows.value = [saved, ...workflowRows.value.filter((workflow) => workflow.id !== saved.id)];
       selectedWorkflowId.value = saved.id;
       options.resetRunSelection();
@@ -108,13 +120,14 @@ export function useAutomationWorkspace(options: {
         options.setError(String(err));
       });
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      saving.value = false;
+      if (!isDisposed()) saving.value = false;
     }
   }
 
   async function saveDraft() {
+    if (isDisposed()) return;
     saving.value = true;
     options.setError("");
     try {
@@ -125,31 +138,34 @@ export function useAutomationWorkspace(options: {
         nodes: options.automationNodes(),
         edges: options.automationEdges(),
       });
+      if (isDisposed()) return;
       selectedWorkflowId.value = saved.id;
       await refreshWorkflows();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      saving.value = false;
+      if (!isDisposed()) saving.value = false;
     }
   }
 
   async function publishCurrent() {
+    if (isDisposed()) return;
     if (!selectedWorkflowId.value) await saveDraft();
-    if (!selectedWorkflowId.value) return;
+    if (isDisposed() || !selectedWorkflowId.value) return;
     publishing.value = true;
     options.setError("");
     try {
       await publishAutomation(selectedWorkflowId.value);
       await refreshWorkflows();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      publishing.value = false;
+      if (!isDisposed()) publishing.value = false;
     }
   }
 
   async function toggleEnabled() {
+    if (isDisposed()) return;
     const workflow = selectedWorkflow.value;
     if (!workflow) return;
     options.setError("");
@@ -157,22 +173,25 @@ export function useAutomationWorkspace(options: {
       await setAutomationEnabled(workflow.id, !workflow.enabled);
       await refreshWorkflows();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     }
   }
 
   async function deleteWorkflow(id: string) {
+    if (isDisposed()) return;
     options.setError("");
     try {
       await deleteAutomation(id);
+      if (isDisposed()) return;
       if (selectedWorkflowId.value === id) selectedWorkflowId.value = null;
       await refreshWorkflows();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     }
   }
 
   function toggleScopeList(key: "projectIds" | "taskStatuses" | "eventKinds", value: string) {
+    if (isDisposed()) return;
     const current = scope.value[key];
     scope.value = {
       ...scope.value,
@@ -183,6 +202,7 @@ export function useAutomationWorkspace(options: {
   }
 
   function toggleScopeBackend(value: ChatBackendKind) {
+    if (isDisposed()) return;
     scope.value = {
       ...scope.value,
       backends: scope.value.backends.includes(value)

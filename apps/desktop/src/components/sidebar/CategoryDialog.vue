@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { FolderPlus } from "lucide-vue-next";
 
 const emit = defineEmits<{
@@ -9,14 +9,18 @@ const emit = defineEmits<{
 
 const categoryName = ref("");
 const categoryInput = ref<HTMLInputElement | null>(null);
+let disposed = false;
 
 async function init() {
+  if (disposed) return;
   categoryName.value = "";
   await nextTick();
+  if (disposed) return;
   categoryInput.value?.focus();
 }
 
 async function confirm() {
+  if (disposed) return;
   const name = categoryName.value.trim();
   if (!name) return;
   emit("confirm", name);
@@ -24,7 +28,12 @@ async function confirm() {
 }
 
 onMounted(() => {
+  disposed = false;
   void init();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
 });
 </script>
 

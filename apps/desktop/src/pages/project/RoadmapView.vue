@@ -16,7 +16,13 @@ import {
   setMilestoneTasks,
   updateMilestone,
 } from "../../services/milestonesStore";
-import type { Milestone, MilestoneStatus, Task, TaskStatus } from "@lilia/contracts";
+import {
+  MILESTONE_STATUSES,
+  milestoneStatusLabel,
+  normalizeMilestoneStatus,
+  type Milestone,
+  type Task,
+} from "@lilia/contracts";
 import {
   beginPerfStage,
   cancelIdleRun,
@@ -36,21 +42,10 @@ const RoadmapMilestoneInsights = defineAsyncComponent({
   ),
 });
 
-const milestoneStatusOptions: Array<{ value: MilestoneStatus; label: string }> = [
-  { value: "upcoming", label: "待开始" },
-  { value: "in-progress", label: "进行中" },
-  { value: "done", label: "完成" },
-  { value: "abandoned", label: "已放弃" },
-];
-
-const taskStatusMeta: Record<TaskStatus, { label: string }> = {
-  blocked: { label: "阻塞" },
-  running: { label: "运行中" },
-  waiting: { label: "等待" },
-  draft: { label: "草稿" },
-  done: { label: "完成" },
-  cancelled: { label: "取消" },
-};
+const milestoneStatusOptions = MILESTONE_STATUSES.map((value) => ({
+  value,
+  label: milestoneStatusLabel(value),
+}));
 
 const newMilestoneTitle = ref("");
 const creatingMilestone = ref(false);
@@ -64,15 +59,28 @@ const tasksReady = computed(() => isProjectTasksLoaded(props.projectId));
 const loaded = roadmapLoaded;
 const insightsReady = ref(false);
 let tasksLoadHandle: number | null = null;
+let cancelTasksLoadPaint: (() => void) | null = null;
+let cancelInsightsPaint: (() => void) | null = null;
 let roadmapLoadSeq = 0;
+let disposed = false;
 
-function statusLabel(status: TaskStatus): string {
-  return taskStatusMeta[status].label;
+function cancelDeferredLoads() {
+  cancelTasksLoadPaint?.();
+  cancelTasksLoadPaint = null;
+  cancelInsightsPaint?.();
+  cancelInsightsPaint = null;
+  if (tasksLoadHandle !== null) {
+    cancelIdleRun(tasksLoadHandle);
+    tasksLoadHandle = null;
+  }
 }
 
 function scheduleTaskHydration(projectId: string, seq: number) {
   if (tasksReady.value) return;
-  scheduleAfterPaint(() => {
+  cancelTasksLoadPaint?.();
+  cancelTasksLoadPaint = null;
+  cancelTasksLoadPaint = scheduleAfterPaint(() => {
+    cancelTasksLoadPaint = null;
     if (seq !== roadmapLoadSeq || tasksReady.value) return;
     tasksLoadHandle = runWhenIdle(() => {
       tasksLoadHandle = null;
@@ -82,6 +90,7 @@ function scheduleTaskHydration(projectId: string, seq: number) {
         () => ensureProjectTasksLoaded(projectId),
         { detail: projectId },
       ).catch((err) => {
+        if (disposed || seq !== roadmapLoadSeq) return;
         errorMessage.value = err instanceof Error ? err.message : String(err);
       });
     });
@@ -107,33 +116,39 @@ function parseDateInput(value: string): number | null {
 
 async function addMilestone() {
   const title = newMilestoneTitle.value.trim();
-  if (!title || creatingMilestone.value) return;
+  if (disposed || !title || creatingMilestone.value) return;
   creatingMilestone.value = true;
   errorMessage.value = "";
   try {
     await createMilestone(props.projectId, title);
+    if (disposed) return;
     newMilestoneTitle.value = "";
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   } finally {
-    creatingMilestone.value = false;
+    if (!disposed) creatingMilestone.value = false;
   }
 }
 
 async function saveMilestoneChange(milestoneId: string, run: () => Promise<void>) {
+  if (disposed) return;
   savingMilestoneId.value = milestoneId;
   errorMessage.value = "";
   try {
     await run();
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   } finally {
-    savingMilestoneId.value = null;
+    if (!disposed) savingMilestoneId.value = null;
   }
 }
 
 async function changeMilestoneStatus(milestoneId: string, event: Event) {
-  const status = (event.target as HTMLSelectElement).value as MilestoneStatus;
+  const currentStatus = milestones.value.find((milestone) => milestone.id === milestoneId)?.status;
+  const status = normalizeMilestoneStatus(
+    (event.target as HTMLSelectElement).value,
+    currentStatus ?? "upcoming",
+  );
   await saveMilestoneChange(milestoneId, () =>
     updateMilestone(props.projectId, milestoneId, { status }),
   );
@@ -198,10 +213,7 @@ watch(
     const seq = ++roadmapLoadSeq;
     insightsReady.value = false;
     errorMessage.value = "";
-    if (tasksLoadHandle !== null) {
-      cancelIdleRun(tasksLoadHandle);
-      tasksLoadHandle = null;
-    }
+    cancelDeferredLoads();
     const stage = beginPerfStage("project.roadmap.switch", { detail: projectId });
     void measurePerfAsync(
       "project.roadmap.load",
@@ -212,7 +224,8 @@ watch(
         stage.end("cancelled");
         return;
       }
-      scheduleAfterPaint(() => {
+      cancelInsightsPaint = scheduleAfterPaint(() => {
+        cancelInsightsPaint = null;
         if (seq !== roadmapLoadSeq) {
           stage.end("cancelled");
           return;
@@ -222,6 +235,7 @@ watch(
         scheduleTaskHydration(projectId, seq);
       });
     }).catch((err) => {
+      if (disposed || seq !== roadmapLoadSeq) return;
       errorMessage.value = err instanceof Error ? err.message : String(err);
       stage.end("error");
     });
@@ -230,11 +244,9 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  disposed = true;
   roadmapLoadSeq += 1;
-  if (tasksLoadHandle !== null) {
-    cancelIdleRun(tasksLoadHandle);
-    tasksLoadHandle = null;
-  }
+  cancelDeferredLoads();
 });
 </script>
 
@@ -271,7 +283,6 @@ onBeforeUnmount(() => {
       :saving-milestone-id="savingMilestoneId"
       :milestone-status-options="milestoneStatusOptions"
       :format-date-input="formatDateInput"
-      :status-label="statusLabel"
       @change-status="changeMilestoneStatus"
       @change-description="changeMilestoneDescription"
       @change-due-date="changeMilestoneDueDate"

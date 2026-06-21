@@ -1,12 +1,23 @@
 import { computed, shallowRef, watch, type ComputedRef } from "vue";
-import type {
-  AutomationEdge,
-  AutomationNode,
-  AutomationNodeKind,
-  AutomationRunNodeState,
-  AutomationWorkflow,
+import {
+  DEFAULT_AUTOMATION_AGENT_PROMPT,
+  DEFAULT_AUTOMATION_HUMAN_PROMPT,
+  DEFAULT_AUTOMATION_LOGIC_KIND,
+  DEFAULT_AUTOMATION_LOGIC_PATH,
+  DEFAULT_AUTOMATION_TRIGGER_KIND,
+  DEFAULT_AUTOMATION_TOOL_ACTION,
+  DEFAULT_CHAT_BACKEND,
+  DEFAULT_MODEL_BY_BACKEND,
+  normalizeAutomationLogicKind,
+  normalizeAutomationScope,
+  normalizePermissionMode,
+  type AutomationEdge,
+  type AutomationNode,
+  type AutomationNodeKind,
+  type AutomationRunNodeState,
+  type AutomationWorkflow,
 } from "@lilia/contracts";
-import { DEFAULT_SCOPE, NODE_KIND_LABELS } from "./constants";
+import { NODE_KIND_LABELS } from "./constants";
 import type {
   AutomationFlowConnection,
   AutomationFlowEdge,
@@ -37,26 +48,26 @@ export function useAutomationGraph(options: {
         source: trigger.id,
         target: agent.id,
       }],
-      scope: { ...DEFAULT_SCOPE },
+      scope: normalizeAutomationScope(null),
     };
   }
 
   function createAutomationNode(kind: AutomationNodeKind, x = 160, y = 160): AutomationNode {
     const id = `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const config: Record<string, unknown> = {};
-    if (kind === "trigger") config.triggerKind = "manual";
+    if (kind === "trigger") config.triggerKind = DEFAULT_AUTOMATION_TRIGGER_KIND;
     if (kind === "agent") {
-      config.backend = "claude";
-      config.model = "claude-sonnet-4-6";
-      config.permission = "ask";
-      config.prompt = "请根据当前上下文继续推进。";
+      config.backend = DEFAULT_CHAT_BACKEND;
+      config.model = DEFAULT_MODEL_BY_BACKEND[DEFAULT_CHAT_BACKEND];
+      config.permission = normalizePermissionMode(null);
+      config.prompt = DEFAULT_AUTOMATION_AGENT_PROMPT;
     }
-    if (kind === "tool") config.action = "record_timeline";
+    if (kind === "tool") config.action = DEFAULT_AUTOMATION_TOOL_ACTION;
     if (kind === "logic") {
-      config.logic = "condition";
-      config.path = "trigger.kind";
+      config.logic = DEFAULT_AUTOMATION_LOGIC_KIND;
+      config.path = DEFAULT_AUTOMATION_LOGIC_PATH;
     }
-    if (kind === "human") config.prompt = "确认后继续执行自动化。";
+    if (kind === "human") config.prompt = DEFAULT_AUTOMATION_HUMAN_PROMPT;
     return {
       id,
       kind,
@@ -94,7 +105,7 @@ export function useAutomationGraph(options: {
     node: AutomationNode,
   ): Array<{ id: string; label: string; top: string }> {
     if (node.kind !== "logic") return [{ id: "success", label: "out", top: "50%" }];
-    const logic = typeof node.config.logic === "string" ? node.config.logic : "condition";
+    const logic = normalizeAutomationLogicKind(node.config.logic);
     if (logic === "condition") {
       return [
         { id: "true", label: "true", top: "38%" },

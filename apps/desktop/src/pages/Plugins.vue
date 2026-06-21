@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import "../styles/pages/plugins.css";
-import { computed, defineAsyncComponent, ref, watch, type Component } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   AlertTriangle,
   Check,
@@ -11,6 +11,17 @@ import {
   Search,
   Trash2,
 } from "lucide-vue-next";
+import {
+  hookScopeLabel,
+  hookSourceEditLabel,
+  hookSourceFormatLabel,
+  hookSourceStateLabel,
+  hookTrustStateLabel,
+  pluginEnabledLabel,
+  pluginMcpBackendLabel,
+  pluginMcpTransportLabel,
+  pluginToggleActionLabel,
+} from "@lilia/contracts";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
   createHookSource,
@@ -112,7 +123,9 @@ const {
   loading,
   errorText,
   refresh,
-} = usePluginsOverview();
+} = usePluginsOverview({
+  isDisposed: () => disposed,
+});
 
 const showCreate = ref(false);
 const newName = ref("");
@@ -129,20 +142,25 @@ const selectedHookDocument = ref<HookDocumentView | null>(null);
 const hookDocumentLoading = ref(false);
 const hookDocumentError = ref<string | null>(null);
 let hookDocumentRequestId = 0;
+let disposed = false;
 
 const mcpEditor = useMcpServerEditor<PluginMcpServer>({
   backend: "claude",
   label: "Claude MCP",
   refresh,
+  isDisposed: () => disposed,
 });
 const codexMcpEditor = useMcpServerEditor<PluginMcpServer>({
   backend: "codex",
   label: "Codex MCP",
   refresh,
+  isDisposed: () => disposed,
 });
 const hookEditor = useHookSourceEditor({
   refresh,
+  isDisposed: () => disposed,
   onSaved: (document) => {
+    if (disposed) return;
     selectedHookDocument.value = document;
     hookDocumentError.value = null;
   },
@@ -193,27 +211,12 @@ interface DetailRow {
 
 type HookEntry = Extract<PluginEntry, { kind: "claude-hook" | "codex-hook" }>;
 
-function enabledLabel(enabled: boolean) {
-  return enabled ? "已启用" : "已停用";
-}
-
-function codexTransportLabel(server: PluginMcpServer) {
-  if (server.transport === "stdio") return "stdio";
-  if (server.transport === "http") return "HTTP";
-  if (server.transport === "oauth") return "OAuth";
-  return "未知";
-}
-
 function commandLine(command: string, args: string[]) {
   return [command, ...args].filter(Boolean).join(" ").trim();
 }
 
 function codexServerSummary(server: PluginMcpServer) {
-  return commandLine(server.command, server.args) || `${codexTransportLabel(server)} MCP server`;
-}
-
-function mcpBackendLabel(server: PluginMcpServer) {
-  return server.backend === "claude" ? "Claude MCP" : "Codex MCP";
+  return commandLine(server.command, server.args) || `${pluginMcpTransportLabel(server.transport)} MCP server`;
 }
 
 function normalizePath(value: string | null | undefined) {
@@ -257,68 +260,6 @@ function skillLocation(skill: PluginSkill) {
   return project
     ? `${project.value}\\.claude\\skills\\`
     : projectSkillsRootFromPath(skill.path) || "未选择项目";
-}
-
-function hookScopeLabel(scope: HookSourceSummary["scope"]) {
-  switch (scope) {
-    case "user":
-      return "全局";
-    case "project":
-      return "项目";
-    case "local":
-      return "本地";
-    case "managed":
-      return "Managed";
-    case "plugin":
-      return "Plugin";
-    case "system":
-      return "System";
-    default:
-      return scope;
-  }
-}
-
-function hookFormatLabel(format: HookSourceSummary["format"]) {
-  switch (format) {
-    case "claude_settings_json":
-      return "settings.json";
-    case "codex_hooks_json":
-      return "hooks.json";
-    case "codex_config_toml":
-      return "config.toml [hooks]";
-    case "managed_settings":
-      return "managed settings";
-    case "requirements_toml":
-      return "requirements.toml";
-    case "plugin_manifest":
-      return "plugin.json";
-    default:
-      return format;
-  }
-}
-
-function hookTrustLabel(trustState: HookSourceSummary["trustState"]) {
-  switch (trustState) {
-    case "required":
-      return "需要 review/trust";
-    case "managed":
-      return "Managed";
-    case "n_a":
-      return "不适用";
-    default:
-      return "未知";
-  }
-}
-
-function hookSourceStateLabel(source: HookSourceSummary) {
-  if (!source.exists) return "未创建";
-  if (source.handlerCount === 0) return "空来源";
-  return `${source.handlerCount} 条 Handler`;
-}
-
-function hookSourceEditLabel(source: HookSourceSummary) {
-  if (!source.editable) return "只读";
-  return source.exists ? "可写" : "可创建";
 }
 
 function hookSourceMeta(source: HookSourceSummary) {
@@ -376,7 +317,7 @@ const allEntries = computed<PluginEntry[]>(() => {
         kind: "skill",
         key: `skill:${skill.scope}:${skill.path}`,
         title: skill.name,
-        meta: [enabledLabel(skill.enabled), projectLabel].filter(Boolean).join(" · "),
+        meta: [pluginEnabledLabel(skill.enabled), projectLabel].filter(Boolean).join(" · "),
         searchText: [skill.name, skill.description, skill.path, projectLabel].join("\n"),
         item: skill,
       };
@@ -388,7 +329,7 @@ const allEntries = computed<PluginEntry[]>(() => {
       kind: "plugin",
       key: `plugin:${plugin.path}`,
       title: plugin.name,
-      meta: [enabledLabel(plugin.enabled), plugin.version ? `v${plugin.version}` : ""]
+      meta: [pluginEnabledLabel(plugin.enabled), plugin.version ? `v${plugin.version}` : ""]
         .filter(Boolean)
         .join(" · "),
       searchText: [plugin.name, plugin.description, plugin.version, plugin.path].join("\n"),
@@ -405,7 +346,7 @@ const allEntries = computed<PluginEntry[]>(() => {
       kind: "claude-mcp",
       key: `claude-mcp:${server.name}`,
       title: server.name,
-      meta: enabledLabel(server.enabled),
+      meta: pluginEnabledLabel(server.enabled),
       searchText: [server.name, server.command, server.args.join(" "), server.envKeys.join(" ")].join(
         "\n",
       ),
@@ -422,8 +363,8 @@ const allEntries = computed<PluginEntry[]>(() => {
     key: `codex-mcp:${server.name}`,
     title: server.name,
     meta: [
-      server.editable ? enabledLabel(server.enabled) : "只读",
-      codexTransportLabel(server),
+      server.editable ? pluginEnabledLabel(server.enabled) : "只读",
+      pluginMcpTransportLabel(server.transport),
     ].join(" · "),
     searchText: [
       server.name,
@@ -480,8 +421,8 @@ const selectedMeta = computed(() => {
   if (!entry) return "";
   if (entry.kind === "skill") return `${entry.item.scope === "user" ? "全局" : "项目"} · ${entry.meta}`;
   if (entry.kind === "plugin") return `Claude Plugin · ${entry.meta}`;
-  if (entry.kind === "claude-mcp") return `Claude MCP · ${entry.meta}`;
-  if (entry.kind === "codex-mcp") return `Codex MCP · ${entry.meta}`;
+  if (entry.kind === "claude-mcp") return `${pluginMcpBackendLabel(entry.item.backend)} · ${entry.meta}`;
+  if (entry.kind === "codex-mcp") return `${pluginMcpBackendLabel(entry.item.backend)} · ${entry.meta}`;
   const backendLabel = entry.kind === "claude-hook" ? "Claude Hooks" : "Codex Hooks";
   return `${backendLabel} · ${entry.meta}`;
 });
@@ -520,7 +461,7 @@ const detailRows = computed<DetailRow[]>(() => {
   }
   if (entry.kind === "codex-mcp") {
     return [
-      { label: "Transport", value: codexTransportLabel(entry.item) },
+      { label: "Transport", value: pluginMcpTransportLabel(entry.item.transport) },
       { label: "命令", value: codexServerSummary(entry.item), code: true },
       { label: "环境变量", value: entry.item.envKeys.join(", ") || "-" },
       { label: "权限", value: entry.item.editable ? "可编辑" : "只读" },
@@ -530,11 +471,11 @@ const detailRows = computed<DetailRow[]>(() => {
   const source = selectedHookSourceData.value ?? entry.item;
   return [
     { label: "Scope", value: hookScopeLabel(source.scope) },
-    { label: "格式", value: hookFormatLabel(source.format) },
+    { label: "格式", value: hookSourceFormatLabel(source.format) },
     { label: "路径", value: source.path, code: true },
     { label: "状态", value: hookSourceStateLabel(source) },
     { label: "权限", value: hookSourceEditLabel(source) },
-    { label: "Trust", value: hookTrustLabel(source.trustState) },
+    { label: "Trust", value: hookTrustStateLabel(source.trustState) },
     { label: "Handlers", value: String(source.handlerCount) },
     ...(source.description ? [{ label: "说明", value: source.description }] : []),
   ];
@@ -576,6 +517,7 @@ watch(
   async (source) => {
     hookDocumentRequestId += 1;
     const requestId = hookDocumentRequestId;
+    if (disposed) return;
     selectedHookDocument.value = null;
     hookDocumentError.value = null;
     if (!source) {
@@ -585,13 +527,13 @@ watch(
     hookDocumentLoading.value = true;
     try {
       const document = await readHookSource(source);
-      if (requestId !== hookDocumentRequestId) return;
+      if (disposed || requestId !== hookDocumentRequestId) return;
       selectedHookDocument.value = document;
     } catch (err) {
-      if (requestId !== hookDocumentRequestId) return;
+      if (disposed || requestId !== hookDocumentRequestId) return;
       hookDocumentError.value = String(err);
     } finally {
-      if (requestId === hookDocumentRequestId) {
+      if (!disposed && requestId === hookDocumentRequestId) {
         hookDocumentLoading.value = false;
       }
     }
@@ -600,6 +542,7 @@ watch(
 );
 
 function openCreate() {
+  if (disposed) return;
   newName.value = "";
   newDesc.value = "";
   createError.value = null;
@@ -608,7 +551,7 @@ function openCreate() {
 }
 
 async function confirmCreate() {
-  if (creating.value) return;
+  if (disposed || creating.value) return;
   createError.value = null;
   creating.value = true;
   try {
@@ -618,16 +561,18 @@ async function confirmCreate() {
       newName.value,
       newDesc.value,
     );
+    if (disposed) return;
     showCreate.value = false;
     await refresh();
   } catch (err) {
-    createError.value = String(err);
+    if (!disposed) createError.value = String(err);
   } finally {
-    creating.value = false;
+    if (!disposed) creating.value = false;
   }
 }
 
 async function toggleSkill(skill: PluginSkill) {
+  if (disposed) return;
   try {
     await setSkillEnabled(
       skill.scope,
@@ -635,58 +580,66 @@ async function toggleSkill(skill: PluginSkill) {
       skill.name,
       !skill.enabled,
     );
+    if (disposed) return;
     skill.enabled = !skill.enabled;
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function togglePlugin(plugin: PluginPackage) {
+  if (disposed) return;
   try {
     await setPackageEnabled(plugin.backend, plugin.scope, plugin.name, !plugin.enabled);
+    if (disposed) return;
     plugin.enabled = !plugin.enabled;
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function toggleMcp(server: PluginMcpServer) {
-  if (!server.editable) return;
+  if (disposed || !server.editable) return;
   try {
     await setMcpServerEnabled(server.backend, server.name, !server.enabled);
+    if (disposed) return;
     server.enabled = !server.enabled;
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function createSelectedHookSource(entry: HookEntry) {
+  if (disposed) return;
   try {
     await createHookSource(
       entry.item.backend,
       entry.item.scope,
       entry.item.scope === "project" || entry.item.scope === "local" ? projectCwd.value : null,
     );
+    if (disposed) return;
     await refresh();
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function openSelectedHookEditor(entry: HookEntry) {
+  if (disposed) return;
   try {
     const document = hookDocumentFor(entry.item) ?? await readHookSource(entry.item);
+    if (disposed) return;
     selectedHookDocument.value = document;
     hookDocumentError.value = null;
     void loadHookSourceEditorDialog();
     hookEditor.openHookEditor(document);
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function confirmRemove() {
-  if (removing.value) return;
+  if (disposed || removing.value) return;
   removing.value = true;
   try {
     if (pendingRemoveSkill.value) {
@@ -696,35 +649,40 @@ async function confirmRemove() {
         skill.scope === "project" ? projectCwd.value : null,
         skill.name,
       );
+      if (disposed) return;
       pendingRemoveSkill.value = null;
     } else if (pendingRemoveMcp.value) {
       await deleteMcpServer(pendingRemoveMcp.value.backend, pendingRemoveMcp.value.name);
+      if (disposed) return;
       pendingRemoveMcp.value = null;
     } else if (pendingRemoveHook.value) {
       await deleteHookSource(pendingRemoveHook.value);
+      if (disposed) return;
       pendingRemoveHook.value = null;
     }
     await refresh();
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   } finally {
-    removing.value = false;
+    if (!disposed) removing.value = false;
   }
 }
 
 async function openMcp(server: PluginMcpServer) {
+  if (disposed) return;
   try {
     await openMcpConfig(server.backend);
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
 async function openHookSourceConfig(source: HookSourceSummary) {
+  if (disposed) return;
   try {
     await openHookConfig(source);
   } catch (err) {
-    errorText.value = String(err);
+    if (!disposed) errorText.value = String(err);
   }
 }
 
@@ -733,6 +691,7 @@ function selectEntry(entry: PluginEntry) {
 }
 
 function openMcpCreate() {
+  if (disposed) return;
   void loadMcpServerEditorDialog();
   if (tab.value === "claude-mcp") mcpEditor.openCreateMcp();
   else if (tab.value === "codex-mcp") codexMcpEditor.openCreateMcp();
@@ -773,6 +732,7 @@ function editSelected(entry: PluginEntry) {
 }
 
 function removeSelected(entry: PluginEntry) {
+  if (disposed) return;
   if (entry.kind === "skill") pendingRemoveSkill.value = entry.item;
   else if (entry.kind === "claude-mcp") pendingRemoveMcp.value = entry.item;
   else if (entry.kind === "codex-mcp" && entry.item.editable) {
@@ -787,8 +747,13 @@ function openSelectedConfig(entry: PluginEntry) {
   else if (isHookEntry(entry)) void openHookSourceConfig(entry.item);
 }
 
+onBeforeUnmount(() => {
+  disposed = true;
+  hookDocumentRequestId += 1;
+});
+
 function actionLabel(entry: PluginEntry) {
-  return entry.item.enabled ? "停用" : "启用";
+  return pluginToggleActionLabel(entry.item.enabled);
 }
 
 function canToggle(entry: PluginEntry) {
@@ -1119,7 +1084,7 @@ function canOpenConfig(entry: PluginEntry) {
       :title="pendingRemoveSkill
         ? `删除 skill「${pendingRemoveSkill?.name ?? ''}」？`
         : pendingRemoveMcp
-          ? `删除 ${mcpBackendLabel(pendingRemoveMcp)}「${pendingRemoveMcp?.name ?? ''}」？`
+          ? `删除 ${pluginMcpBackendLabel(pendingRemoveMcp.backend)}「${pendingRemoveMcp?.name ?? ''}」？`
           : `删除 Hooks 来源「${pendingRemoveHook?.name ?? ''}」？`"
       :message="pendingRemoveSkill
         ? '该 skill 目录会被整体删除，不可恢复。'

@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/vue";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AskUserSpec, ChatComposerState } from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -98,14 +98,18 @@ function pendingAsk(spec: AskUserSpec): PendingAsk {
   };
 }
 
-function renderComposer(spec: AskUserSpec) {
-  return render(ChatComposer, {
+async function renderComposer(spec: AskUserSpec) {
+  const view = render(ChatComposer, {
     props: {
       state: baseState,
       attachments: [],
       pendingAsk: pendingAsk(spec),
     },
   });
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  return view;
 }
 
 function optionItem(button: HTMLElement): HTMLElement {
@@ -116,7 +120,7 @@ function optionItem(button: HTMLElement): HTMLElement {
 
 describe("ChatComposer AskUser pending prompt", () => {
   it("从问题 2 回到问题 1 后再前进，会保留问题 2 已选项", async () => {
-    const view = renderComposer(multiStepSpec);
+    const view = await renderComposer(multiStepSpec);
     const alpha = await view.findByRole("radio", { name: "Alpha" });
     const beta = await view.findByRole("radio", { name: "Beta" });
 
@@ -144,7 +148,7 @@ describe("ChatComposer AskUser pending prompt", () => {
   });
 
   it("推荐单选项不默认高亮，鼠标离开后清除临时高亮", async () => {
-    const view = renderComposer(recommendedSingleSpec);
+    const view = await renderComposer(recommendedSingleSpec);
     const alpha = await view.findByRole("radio", { name: /Alpha/ });
     const beta = await view.findByRole("radio", { name: "Beta" });
     const alphaItem = optionItem(alpha);
@@ -171,7 +175,7 @@ describe("ChatComposer AskUser pending prompt", () => {
   });
 
   it("允许 other 的单选题点击其他后才显示输入框", async () => {
-    const view = renderComposer(singleWithOtherSpec);
+    const view = await renderComposer(singleWithOtherSpec);
     const other = await view.findByRole("radio", { name: "其他" });
 
     expect(view.queryByRole("textbox")).toBeNull();
@@ -182,15 +186,15 @@ describe("ChatComposer AskUser pending prompt", () => {
     expect(view.getByRole("textbox")).toBeInTheDocument();
   });
 
-  it("未允许 other 的单选题不显示其他选项和输入框", () => {
-    const view = renderComposer(recommendedSingleSpec);
+  it("未允许 other 的单选题不显示其他选项和输入框", async () => {
+    const view = await renderComposer(recommendedSingleSpec);
 
     expect(view.queryByRole("radio", { name: "其他" })).toBeNull();
     expect(view.queryByRole("textbox")).toBeNull();
   });
 
   it("计划确认提示作为 composer 内部一行紧凑扩展", async () => {
-    const view = renderComposer(planApprovalSpec);
+    const view = await renderComposer(planApprovalSpec);
 
     const prompt = await view.findByRole("region", { name: "确认 Claude 计划" });
     expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");

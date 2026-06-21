@@ -5,9 +5,20 @@
  * - 草稿（draft）留在前端内存，不落库；`promote` 后才 INSERT。
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ref } from "vue";
-import type { Task } from "@lilia/contracts";
+import type { Task, TasksChangedEvent } from "@lilia/contracts";
+import {
+  TASK_ARCHIVE_COMMAND,
+  TASK_ARCHIVE_PROJECT_COMMAND,
+  TASK_GET_COMMAND,
+  TASK_LIST_COMMAND,
+  TASK_PROMOTE_COMMAND,
+  TASK_REORDER_COMMAND,
+  TASK_REPARENT_COMMAND,
+  TASKS_CHANGED_EVENT_NAME,
+  TASK_TOGGLE_PIN_COMMAND,
+} from "@lilia/contracts";
 import {
   ensureProjectsLoaded,
   listProjects,
@@ -37,10 +48,9 @@ interface TaskRow {
   pinned: boolean;
 }
 
-interface TasksChangedPayload {
-  projectId?: string | null;
+type TasksChangedPayload = TasksChangedEvent & {
   project_id?: string | null;
-}
+};
 
 export const TASKS = ref<Record<string, Task[]>>({});
 export const ORPHAN_LIST = ref<OrphanConversation[]>([]);
@@ -53,6 +63,9 @@ const DRAFT_TASK_PROMOTIONS = new Map<string, Promise<void>>();
 const DRAFT_ORPHAN_PROMOTIONS = new Map<string, Promise<void>>();
 const projectTaskLoads = new Map<string, Promise<void>>();
 let orphanLoad: Promise<void> | null = null;
+let tasksChangedListenerInstalled = false;
+let tasksChangedListenerInstallPromise: Promise<void> | null = null;
+let tasksChangedListenerUnlisten: UnlistenFn | null = null;
 
 function rememberDraftPromotion(
   promotions: Map<string, Promise<void>>,
@@ -69,7 +82,7 @@ function rememberDraftPromotion(
 }
 
 async function refreshTasks(projectId: string): Promise<void> {
-  const rows = await invoke<TaskRow[]>("task_list", { projectId });
+  const rows = await invoke<TaskRow[]>(TASK_LIST_COMMAND, { projectId });
   TASKS.value = {
     ...TASKS.value,
     [projectId]: rows.map(rowToTask),
@@ -81,7 +94,7 @@ async function refreshTasks(projectId: string): Promise<void> {
 }
 
 async function refreshOrphans(): Promise<void> {
-  const rows = await invoke<TaskRow[]>("task_list", { projectId: null });
+  const rows = await invoke<TaskRow[]>(TASK_LIST_COMMAND, { projectId: null });
   ORPHAN_LIST.value = rows.map(rowToOrphan);
   ORPHANS_LOADED.value = true;
 }
@@ -206,12 +219,27 @@ async function refreshChangedTasks(payload: TasksChangedPayload) {
   }
 }
 
-export function installTasksChangedListener() {
-  void listen<TasksChangedPayload>("tasks:changed", (event) => {
+export function installTasksChangedListener(options: { force?: boolean } = {}) {
+  if (options.force) {
+    tasksChangedListenerUnlisten?.();
+    tasksChangedListenerUnlisten = null;
+    tasksChangedListenerInstalled = false;
+    tasksChangedListenerInstallPromise = null;
+  }
+  if (tasksChangedListenerInstalled || tasksChangedListenerInstallPromise) return;
+  tasksChangedListenerInstallPromise = listen<TasksChangedPayload>(TASKS_CHANGED_EVENT_NAME, (event) => {
     void refreshChangedTasks(event.payload);
-  }).catch((err) => {
-    console.error("[tasks] listen tasks:changed failed", err);
-  });
+  })
+    .then((unlisten) => {
+      tasksChangedListenerUnlisten = unlisten;
+      tasksChangedListenerInstalled = true;
+    })
+    .catch((err) => {
+      console.error(`[tasks] listen ${TASKS_CHANGED_EVENT_NAME} failed`, err);
+    })
+    .finally(() => {
+      tasksChangedListenerInstallPromise = null;
+    });
 }
 
 installTasksChangedListener();
@@ -238,7 +266,7 @@ export async function ensureTaskLoaded(
     if (existing) return existing;
   }
 
-  const row = await invoke<TaskRow | null>("task_get", { id: taskId });
+  const row = await invoke<TaskRow | null>(TASK_GET_COMMAND, { id: taskId });
   if (!row) return null;
   if (expectedProjectId !== undefined && row.projectId !== expectedProjectId) return null;
   return upsertTaskRow(row);
@@ -303,7 +331,7 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
   const draft = DRAFT_TASKS.get(id);
   if (!draft) return DRAFT_TASK_PROMOTIONS.get(id);
   return rememberDraftPromotion(DRAFT_TASK_PROMOTIONS, id, async () => {
-    const row = await invoke<TaskRow>("task_promote", {
+    const row = await invoke<TaskRow>(TASK_PROMOTE_COMMAND, {
       id,
       projectId: draft.projectId,
       title: title || draft.title,
@@ -323,7 +351,7 @@ export async function promoteDraftTask(id: string, title: string): Promise<void>
 }
 
 export async function archiveTask(taskId: string): Promise<boolean> {
-  const ok = await invoke<boolean>("task_archive", { id: taskId });
+  const ok = await invoke<boolean>(TASK_ARCHIVE_COMMAND, { id: taskId });
   if (!ok) return false;
   for (const [pid, list] of Object.entries(TASKS.value)) {
     const idx = list.findIndex((t) => t.id === taskId);
@@ -339,7 +367,7 @@ export async function archiveTask(taskId: string): Promise<boolean> {
 }
 
 export async function archiveProjectConversations(projectId: string): Promise<number> {
-  const dbCount = await invoke<number>("task_archive_project", { projectId });
+  const dbCount = await invoke<number>(TASK_ARCHIVE_PROJECT_COMMAND, { projectId });
   const next = { ...TASKS.value };
   delete next[projectId];
   TASKS.value = next;
@@ -354,7 +382,7 @@ export async function archiveProjectConversations(projectId: string): Promise<nu
 }
 
 export async function toggleTaskPin(taskId: string): Promise<boolean> {
-  const pinned = await invoke<boolean>("task_toggle_pin", { id: taskId });
+  const pinned = await invoke<boolean>(TASK_TOGGLE_PIN_COMMAND, { id: taskId });
   for (const [pid, list] of Object.entries(TASKS.value)) {
     if (list.some((t) => t.id === taskId)) {
       await refreshTasks(pid);
@@ -417,7 +445,7 @@ export async function promoteDraftOrphan(id: string, title: string): Promise<voi
   const draft = DRAFT_ORPHANS.get(id);
   if (!draft) return DRAFT_ORPHAN_PROMOTIONS.get(id);
   return rememberDraftPromotion(DRAFT_ORPHAN_PROMOTIONS, id, async () => {
-    const row = await invoke<TaskRow>("task_promote", {
+    const row = await invoke<TaskRow>(TASK_PROMOTE_COMMAND, {
       id,
       projectId: null,
       title: title || draft.title,
@@ -445,7 +473,7 @@ export async function reorderTasks(
   projectId: string | null,
   orderedIds: string[],
 ): Promise<void> {
-  await invoke("task_reorder", { projectId, orderedIds });
+  await invoke(TASK_REORDER_COMMAND, { projectId, orderedIds });
   if (projectId) {
     const list = TASKS.value[projectId] ?? [];
     const byId = new Map(list.map((t) => [t.id, t]));
@@ -466,7 +494,7 @@ export async function reparentTask(
   sourceProjectId: string | null,
   targetProjectId: string | null,
 ): Promise<void> {
-  await invoke("task_reparent", { taskId, newProjectId: targetProjectId });
+  await invoke(TASK_REPARENT_COMMAND, { taskId, newProjectId: targetProjectId });
   if (sourceProjectId) {
     const list = TASKS.value[sourceProjectId] ?? [];
     TASKS.value = {

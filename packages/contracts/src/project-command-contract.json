@@ -1,0 +1,14 @@
+{
+  "commands": {
+    "list": "project_list",
+    "dashboardList": "project_dashboard_list",
+    "get": "project_get",
+    "create": "project_create",
+    "rename": "project_rename",
+    "remove": "project_remove",
+    "togglePin": "project_toggle_pin",
+    "reorder": "project_reorder",
+    "getSettings": "project_get_settings",
+    "setSettings": "project_set_settings"
+  }
+}

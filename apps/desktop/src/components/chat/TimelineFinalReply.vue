@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
 import { GitFork, WandSparkles } from "lucide-vue-next";
-import type { AgentTimelineEvent } from "@lilia/contracts";
-import type { LiliaBatchApplyInput } from "./liliaBatchApply";
+import {
+  timelineFinalReplyBatchApplyInput,
+  type AgentTimelineEvent,
+  type LiliaBatchApplyInput,
+} from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { measurePerfAsync } from "../../utils/perf";
-import { readTimelinePayloadRecord, timelineFinalText } from "./timelineDisplay";
+import { isTimelineMessageEvent, timelineFinalText } from "./timelineDisplay";
 
 const MarkdownBlock = defineAsyncComponent({
   suspensible: false,
@@ -28,31 +31,19 @@ const props = withDefaults(defineProps<{
 
 const content = computed(() => timelineFinalText(props.event));
 const hasContent = computed(() => content.value.trim().length > 0);
-const isAssistantMessage = computed(() => props.event.kind === "message");
-const payload = computed(() => readTimelinePayloadRecord(props.event));
-const workflowSource = computed(() => {
-  const source = payload.value.workflowSource;
-  return source && typeof source === "object" && !Array.isArray(source)
-    ? source as Record<string, unknown>
-    : null;
-});
-const sourceKind = computed(() => {
-  const value = workflowSource.value?.sourceKind;
-  return value === "review" || value === "fix_suggestion" ? value : null;
-});
+const isAssistantMessage = computed(() => isTimelineMessageEvent(props.event));
+const batchApplyInput = computed(() =>
+  timelineFinalReplyBatchApplyInput(props.event, content.value)
+);
 const canApplySuggestion = computed(() =>
   props.canStartLiliaBatchApply &&
-  props.event.status === "success" &&
-  sourceKind.value !== null &&
-  hasContent.value &&
-  typeof props.event.turnId === "string" &&
-  props.event.turnId.length > 0,
+  batchApplyInput.value !== null,
 );
 const canStartSessionFork = computed(() =>
   props.canStartSessionFork &&
   !props.streaming &&
   props.event.status === "success" &&
-  props.event.kind === "message",
+  isTimelineMessageEvent(props.event),
 );
 
 const emit = defineEmits<{
@@ -62,12 +53,9 @@ const emit = defineEmits<{
 }>();
 
 function startLiliaBatchApply() {
-  if (!canApplySuggestion.value || !props.event.turnId || !sourceKind.value) return;
-  emit("start-lilia-batch-apply", {
-    sourceTurnId: props.event.turnId,
-    sourceKind: sourceKind.value,
-    sourceSummary: content.value,
-  });
+  const input = batchApplyInput.value;
+  if (!canApplySuggestion.value || !input) return;
+  emit("start-lilia-batch-apply", input);
 }
 </script>
 

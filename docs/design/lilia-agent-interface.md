@@ -63,7 +63,7 @@ runner stdin 的稳定形状是：
 | `automation` | 自动化触发 agent turn。 | 支持 |
 | `slash_command` | 执行 Lilia native / project slash command。 | 支持 |
 
-空 prompt 规则来自 `packages/contracts/src/lilia-agent-protocol.json` 中按 kind 声明的 `requiresPrompt`。不要再新增散落字符串集合维护空 prompt workflow。
+空 prompt 规则由 `packages/contracts/src/liliaAgentProtocol.mjs` 从拆分后的 workflow / runtime command contract manifest 生成。不要再新增散落字符串集合维护空 prompt workflow。
 
 ## ChatRuntimeCommand
 

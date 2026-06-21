@@ -11,7 +11,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::settings_store::{load_store_value, normalize_optional_string, save_store_value};
 use crate::store::LiliaStore;
-use crate::{BG, MAIN_WINDOW_LABEL};
+use crate::{app_events_contract, BG, MAIN_WINDOW_LABEL};
 
 const POPUP_WINDOW_SETTINGS_KEY: &str = "popup-window.config";
 const POPUP_LAST_PROJECT_KEY: &str = "popup-window.lastProjectId";
@@ -146,7 +146,7 @@ pub(crate) fn build_popup_window(
     if let Some(existing) = app.get_webview_window(&label) {
         existing
             .emit(
-                "lilia:popup:navigate",
+                app_events_contract::popup_navigate_event_name(),
                 MainNavigateEvent {
                     route: normalize_popup_route(&route),
                 },
@@ -410,7 +410,10 @@ pub fn popup_focus_main(app: AppHandle, route: String) -> Result<(), String> {
         return Err("主窗口不存在".to_string());
     };
     window
-        .emit("lilia:main:navigate", MainNavigateEvent { route })
+        .emit(
+            app_events_contract::main_navigate_event_name(),
+            MainNavigateEvent { route },
+        )
         .map_err(|e| format!("通知主窗口导航失败：{e}"))?;
     focus_window(&window);
     Ok(())

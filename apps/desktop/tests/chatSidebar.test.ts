@@ -272,6 +272,41 @@ describe("chat sidebar host", () => {
     expect(loadDebug).toHaveBeenCalledTimes(1);
   });
 
+  it("关闭侧栏后忽略仍在返回的异步 panel 加载", async () => {
+    let resolveStaleLoad: (component: typeof FirstPanel) => void = () => {};
+    const loadDebug = vi.fn()
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleLoad = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(FirstPanel);
+    trackPanel({
+      id: "debug",
+      title: "Debug",
+      order: 10,
+      loader: loadDebug,
+    });
+    openChatSidebar("debug");
+
+    const view = renderHost();
+
+    await waitFor(() => {
+      expect(view.getByText("正在加载...")).toBeInTheDocument();
+    });
+
+    closeChatSidebar();
+    resolveStaleLoad(FirstPanel);
+    await nextTick();
+
+    openChatSidebar("debug");
+
+    await waitFor(() => {
+      expect(loadDebug).toHaveBeenCalledTimes(2);
+      expect(view.getByTestId("first-panel")).toBeInTheDocument();
+    });
+  });
+
 
   it("可从左边缘拖动调整宽度并在松手后写回本地存储", async () => {
     openChatSidebar();

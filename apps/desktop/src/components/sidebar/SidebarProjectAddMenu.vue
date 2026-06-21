@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
 import {
   FolderOpen,
   FolderPlus,
@@ -35,6 +35,7 @@ const CloneRepoDialog = defineAsyncComponent(
 
 const cloneOpen = ref(false);
 const categoryOpen = ref(false);
+let disposed = false;
 const openState = computed(() => props.open);
 const preferredPlacement = computed(() => "bottom-start" as const);
 const {
@@ -49,45 +50,59 @@ const {
 });
 
 async function pickLocalFolder() {
+  if (disposed) return;
   emit("close");
   try {
     const picked = await pickFolder({ title: "选择项目根目录" });
-    if (!picked) return;
+    if (disposed || !picked) return;
     const project = await createProject({
       name: deriveProjectName(picked) || "新项目",
       cwd: picked,
     });
+    if (disposed) return;
     emit("created", project);
   } catch (err) {
+    if (disposed) return;
     emit("error", `选择文件夹失败：${String(err)}`);
   }
 }
 
 function openClone() {
+  if (disposed) return;
   emit("close");
   cloneOpen.value = true;
 }
 
 function openCategory() {
+  if (disposed) return;
   emit("close");
   categoryOpen.value = true;
 }
 
 function onCloneCreated(project: Project) {
+  if (disposed) return;
   emit("created", project);
   cloneOpen.value = false;
 }
 
 function onCategoryCreated(project: Project) {
+  if (disposed) return;
   emit("created", project);
   categoryOpen.value = false;
 }
 
+function setMenuEl(el: Element | ComponentPublicInstance | null) {
+  menuEl.value = el instanceof HTMLElement ? el : null;
+}
+
 async function confirmCategory(name: string) {
+  if (disposed) return;
   try {
     const project = await createProject({ name, cwd: null });
+    if (disposed) return;
     onCategoryCreated(project);
   } catch (err) {
+    if (disposed) return;
     emit("error", `创建空分类失败：${String(err)}`);
   }
 }
@@ -110,6 +125,10 @@ watch(
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  disposed = true;
+});
 </script>
 
 <template>
@@ -117,7 +136,7 @@ watch(
     <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
       <div
         v-if="open"
-        ref="menuEl"
+        :ref="setMenuEl"
         class="sb-menu"
         role="menu"
         :style="overlayStyle"

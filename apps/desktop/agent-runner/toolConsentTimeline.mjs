@@ -1,4 +1,6 @@
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
+import { TOOL_CONSENT_INTERACTION_KIND } from "@lilia/contracts/agentInteractionContract.mjs";
+import { TIMELINE_DISPLAY_SHORT_TEXT_LIMIT } from "@lilia/contracts/timelineContract.mjs";
 import { isRecord, oneLineSummary, shortText, stringOrNull } from "./utils.mjs";
 
 export function stringifyCodexCommand(value) {
@@ -40,7 +42,7 @@ export function normalizeCodexConsentTool(toolName, input) {
     return {
       kind: "command",
       payload: { command },
-      summary: shortText(command, 200),
+      summary: shortText(command, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   }
   if (
@@ -53,13 +55,16 @@ export function normalizeCodexConsentTool(toolName, input) {
         changes: Array.isArray(input?.fileChanges) ? input.fileChanges : undefined,
         grantRoot: stringOrNull(input?.grantRoot),
       },
-      summary: shortText(stringOrNull(input?.grantRoot) || "Patch approval", 200),
+      summary: shortText(
+        stringOrNull(input?.grantRoot) || "Patch approval",
+        TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+      ),
     };
   }
   return {
     kind: "tool",
     payload: {},
-    summary: shortText(name, 200),
+    summary: shortText(name, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
   };
 }
 
@@ -82,7 +87,7 @@ export function emitToolConsentTimeline(protocol, id, payload, status, decisionM
     toolName;
   const eventPayload = {
     backend,
-    interaction: "tool_consent",
+    interaction: TOOL_CONSENT_INTERACTION_KIND,
     requestId: id,
     toolName,
     ...normalized.payload,

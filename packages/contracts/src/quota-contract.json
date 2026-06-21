@@ -1,0 +1,78 @@
+{
+  "usageStatsDays": [
+    7,
+    30
+  ],
+  "defaultUsageStatsDays": 7,
+  "usageStatsBackendFilters": [
+    "all"
+  ],
+  "usageStatsBackendFilterLabels": {
+    "all": "全部"
+  },
+  "usageQueryScopes": [
+    "summary",
+    "projects",
+    "conversations",
+    "tools",
+    "all"
+  ],
+  "defaultUsageQueryScope": "all",
+  "commands": {
+    "getStats": "quota_usage_get_stats",
+    "getCodexAccountStatus": "quota_usage_get_codex_account_status",
+    "consumeCodexRateLimitResetCredit": "quota_usage_consume_codex_rate_limit_reset_credit"
+  },
+  "quotaUsageToolNames": [
+    "QueryQuotaUsage",
+    "query_quota_usage",
+    "mcp__lilia__query_quota_usage"
+  ],
+  "queryQuotaUsageInputSchema": {
+    "type": "object",
+    "properties": {
+      "days": {
+        "type": "integer",
+        "enum": [
+          7,
+          30
+        ],
+        "default": 7
+      },
+      "backend": {
+        "type": "string",
+        "enum": [
+          "all",
+          "claude",
+          "codex"
+        ],
+        "default": "all"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "summary",
+          "projects",
+          "conversations",
+          "tools",
+          "all"
+        ],
+        "default": "all"
+      }
+    },
+    "additionalProperties": false
+  },
+  "rateLimitResetCreditConsumeOutcomes": [
+    "reset",
+    "alreadyRedeemed",
+    "nothingToReset",
+    "noCredit"
+  ],
+  "rateLimitResetCreditConsumeOutcomeLabels": {
+    "reset": "已使用 1 次重置次数，官方额度已刷新",
+    "alreadyRedeemed": "本次重置请求已处理，官方额度已刷新",
+    "nothingToReset": "当前没有可重置的额度窗口",
+    "noCredit": "没有可用的重置次数"
+  },
+  "defaultRateLimitResetCreditConsumeOutcomeLabel": "重置次数请求已完成"
+}

@@ -1,35 +1,48 @@
 use crate::chat::types::{ChatRuntimeCommand, ChatWorkflow};
-
-#[cfg(test)]
-const LILIA_AGENT_PROTOCOL_MANIFEST: &str =
-    include_str!("../../../../../packages/contracts/src/lilia-agent-protocol.json");
+use crate::chat::workflow_contract;
 
 pub(crate) fn workflow_kind(workflow: Option<&ChatWorkflow>) -> Option<String> {
     let kind = match workflow? {
-        ChatWorkflow::LiliaReview { .. } => "lilia_review",
-        ChatWorkflow::LiliaFixSuggestion { .. } => "lilia_fix_suggestion",
-        ChatWorkflow::LiliaBatchApply { .. } => "lilia_batch_apply",
-        ChatWorkflow::LiliaGoal { .. } => "lilia_goal",
-        ChatWorkflow::LiliaCompact => "lilia_compact",
-        ChatWorkflow::LiliaBackgroundTerminalsClean => "lilia_background_terminals_clean",
-        ChatWorkflow::LiliaMemoryMode { .. } => "lilia_memory_mode",
-        ChatWorkflow::LiliaMemoryReset => "lilia_memory_reset",
-        ChatWorkflow::LiliaConfigDiagnostics { .. } => "lilia_config_diagnostics",
-        ChatWorkflow::Automation { .. } => "automation",
-        ChatWorkflow::SlashCommand { .. } => "slash_command",
+        ChatWorkflow::LiliaReview { .. } => workflow_contract::review_workflow_type(),
+        ChatWorkflow::LiliaFixSuggestion { .. } => {
+            workflow_contract::fix_suggestion_workflow_type()
+        }
+        ChatWorkflow::LiliaBatchApply { .. } => workflow_contract::batch_apply_workflow_type(),
+        ChatWorkflow::LiliaGoal { .. } => workflow_contract::goal_workflow_type(),
+        ChatWorkflow::LiliaCompact => workflow_contract::compact_workflow_type(),
+        ChatWorkflow::LiliaBackgroundTerminalsClean => {
+            workflow_contract::background_terminals_clean_workflow_type()
+        }
+        ChatWorkflow::LiliaMemoryMode { .. } => workflow_contract::memory_mode_workflow_type(),
+        ChatWorkflow::LiliaMemoryReset => workflow_contract::memory_reset_workflow_type(),
+        ChatWorkflow::LiliaConfigDiagnostics { .. } => {
+            workflow_contract::config_diagnostics_workflow_type()
+        }
+        ChatWorkflow::Automation { .. } => workflow_contract::automation_workflow_type(),
+        ChatWorkflow::SlashCommand { .. } => workflow_contract::slash_command_workflow_type(),
     };
-    Some(kind.to_string())
+    Some(kind.to_owned())
 }
 
 pub(crate) fn runtime_command_kind(command: Option<&ChatRuntimeCommand>) -> Option<String> {
     let kind = match command? {
-        ChatRuntimeCommand::SessionFork { .. } => "session_fork",
-        ChatRuntimeCommand::SessionManagement { .. } => "session_management",
-        ChatRuntimeCommand::RuntimeSettings { .. } => "runtime_settings",
-        ChatRuntimeCommand::RemoteEnvironment { .. } => "remote_environment",
-        ChatRuntimeCommand::SandboxDiagnostics { .. } => "sandbox_diagnostics",
+        ChatRuntimeCommand::SessionFork { .. } => {
+            workflow_contract::session_fork_runtime_command_type()
+        }
+        ChatRuntimeCommand::SessionManagement { .. } => {
+            workflow_contract::session_management_runtime_command_type()
+        }
+        ChatRuntimeCommand::RuntimeSettings { .. } => {
+            workflow_contract::runtime_settings_command_type()
+        }
+        ChatRuntimeCommand::RemoteEnvironment { .. } => {
+            workflow_contract::remote_environment_command_type()
+        }
+        ChatRuntimeCommand::SandboxDiagnostics { .. } => {
+            workflow_contract::sandbox_diagnostics_command_type()
+        }
     };
-    Some(kind.to_string())
+    Some(kind.to_owned())
 }
 
 pub(crate) fn automation_run_id(workflow: Option<&ChatWorkflow>) -> Option<String> {
@@ -43,19 +56,6 @@ pub(crate) fn automation_run_id(workflow: Option<&ChatWorkflow>) -> Option<Strin
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
-
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct TestLiliaProtocolManifest {
-        workflow: Vec<LiliaProtocolManifestEntry>,
-        runtime_command: Vec<LiliaProtocolManifestEntry>,
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct LiliaProtocolManifestEntry {
-        kind: String,
-    }
 
     #[test]
     fn workflow_kind_names_cover_automation() {
@@ -72,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_kinds_are_declared_in_protocol_manifest() {
+    fn typed_kinds_are_declared_in_contract_manifests() {
         let workflows = [
             ChatWorkflow::LiliaReview {
                 target: crate::chat::types::LiliaReviewTarget::UncommittedChanges,
@@ -141,31 +141,51 @@ mod tests {
                 include_details: Some(true),
             },
         ];
-        let manifest: TestLiliaProtocolManifest =
-            serde_json::from_str(LILIA_AGENT_PROTOCOL_MANIFEST).unwrap();
-        let workflow_kinds: BTreeSet<_> = manifest
-            .workflow
-            .into_iter()
-            .map(|entry| entry.kind)
-            .collect();
-        let runtime_command_kinds: BTreeSet<_> = manifest
-            .runtime_command
-            .into_iter()
-            .map(|entry| entry.kind)
-            .collect();
+        let workflow_kinds = BTreeSet::from([
+            workflow_contract::review_workflow_type().to_string(),
+            workflow_contract::fix_suggestion_workflow_type().to_string(),
+            workflow_contract::batch_apply_workflow_type().to_string(),
+            workflow_contract::goal_workflow_type().to_string(),
+            workflow_contract::compact_workflow_type().to_string(),
+            workflow_contract::background_terminals_clean_workflow_type().to_string(),
+            workflow_contract::memory_mode_workflow_type().to_string(),
+            workflow_contract::memory_reset_workflow_type().to_string(),
+            workflow_contract::config_diagnostics_workflow_type().to_string(),
+            workflow_contract::automation_workflow_type().to_string(),
+            workflow_contract::slash_command_workflow_type().to_string(),
+        ]);
+        let runtime_command_kinds = BTreeSet::from([
+            workflow_contract::session_fork_runtime_command_type().to_string(),
+            workflow_contract::session_management_runtime_command_type().to_string(),
+            workflow_contract::runtime_settings_command_type().to_string(),
+            workflow_contract::remote_environment_command_type().to_string(),
+            workflow_contract::sandbox_diagnostics_command_type().to_string(),
+        ]);
 
         for workflow in &workflows {
             let kind = workflow_kind(Some(workflow)).unwrap();
+            let serialized = serde_json::to_value(workflow).unwrap();
             assert!(
                 workflow_kinds.contains(&kind),
-                "{kind} workflow must be declared in lilia-agent-protocol.json"
+                "{kind} workflow must be declared in contract manifests"
+            );
+            assert_eq!(
+                serialized.get("type").and_then(serde_json::Value::as_str),
+                Some(kind.as_str()),
+                "{kind} workflow serde type must match contract manifests"
             );
         }
         for command in &runtime_commands {
             let kind = runtime_command_kind(Some(command)).unwrap();
+            let serialized = serde_json::to_value(command).unwrap();
             assert!(
                 runtime_command_kinds.contains(&kind),
-                "{kind} runtime command must be declared in lilia-agent-protocol.json"
+                "{kind} runtime command must be declared in contract manifests"
+            );
+            assert_eq!(
+                serialized.get("type").and_then(serde_json::Value::as_str),
+                Some(kind.as_str()),
+                "{kind} runtime command serde type must match contract manifests"
             );
         }
         assert_eq!(workflow_kinds.len(), workflows.len());

@@ -1,0 +1,7 @@
+{
+  "commands": {
+    "openPath": "system_open_path",
+    "openUrl": "system_open_url",
+    "openInVSCode": "system_open_in_vscode"
+  }
+}

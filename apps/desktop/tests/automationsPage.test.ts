@@ -1,6 +1,16 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { useVueFlow } from "@vue-flow/core";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AUTOMATION_DELETE_WORKFLOW_COMMAND,
+  AUTOMATION_GET_RUN_COMMAND,
+  AUTOMATION_LIST_RUNS_COMMAND,
+  AUTOMATION_PUBLISH_COMMAND,
+  AUTOMATION_RESUME_RUN_COMMAND,
+  AUTOMATION_RUN_ONCE_COMMAND,
+  AUTOMATION_SAVE_DRAFT_COMMAND,
+  AUTOMATION_SET_ENABLED_COMMAND,
+} from "@lilia/contracts";
 import Automations from "../src/pages/Automations.vue";
 import { clearMockAutomations, finishMockAutomationRun, mockInvoke } from "./tauriMock";
 
@@ -114,6 +124,21 @@ async function waitForWorkflowActionEnabled(view: AutomationsView, name: string)
 }
 
 describe("Automations page", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("卸载时取消自动化工作区入口的 paint 挂载调度", () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 91));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = render(Automations);
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(91);
+  });
+
   it("展示全局自动化列表、节点画布和检查器", async () => {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();
@@ -167,7 +192,7 @@ describe("Automations page", () => {
 
     await fireEvent.click(view.getByRole("button", { name: "新建自动化" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input).toMatchObject({
         name: "未命名自动化",
       });
       expect(workflowNameInput(view)).toHaveValue("未命名自动化");
@@ -182,7 +207,7 @@ describe("Automations page", () => {
     expect(within(newWorkflowRow).getByRole("button", { name: "确认删除" })).toBeInTheDocument();
     await fireEvent.click(within(newWorkflowRow).getByRole("button", { name: "确认删除" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-2" });
+      expect(lastInvokeInput(AUTOMATION_DELETE_WORKFLOW_COMMAND)).toEqual({ id: "auto-2" });
       expect(within(list).queryByRole("button", { name: /未命名自动化/ })).not.toBeInTheDocument();
       expect(workflowNameInput(view)).toHaveValue("任务完成后复盘");
     });
@@ -194,13 +219,13 @@ describe("Automations page", () => {
 
     expect(inspector).toHaveAttribute("aria-busy", "true");
     expect(within(inspector).getByText("首屏加载后补齐检查器与运行历史…")).toBeInTheDocument();
-    expect(invokeCount("automation_list_runs")).toBe(0);
-    expect(invokeCount("automation_get_run")).toBe(0);
+    expect(invokeCount(AUTOMATION_LIST_RUNS_COMMAND)).toBe(0);
+    expect(invokeCount(AUTOMATION_GET_RUN_COMMAND)).toBe(0);
 
     await waitForInspectorReady(view);
 
     await waitFor(() => {
-      expect(invokeCount("automation_list_runs")).toBeGreaterThan(0);
+      expect(invokeCount(AUTOMATION_LIST_RUNS_COMMAND)).toBeGreaterThan(0);
     });
   });
 
@@ -230,7 +255,7 @@ describe("Automations page", () => {
       expect(within(list).queryByText("没有自动化")).not.toBeInTheDocument();
       expect(within(list).getByRole("button", { name: /未命名自动化/ })).toBeInTheDocument();
       expect(workflowNameInput(view)).toHaveValue("未命名自动化");
-      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input).toMatchObject({
         name: "未命名自动化",
         nodes: [],
         edges: [],
@@ -242,8 +267,8 @@ describe("Automations page", () => {
     await fireEvent.click(within(row).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("automation_delete_workflow")).toEqual({ id: "auto-1" });
-      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+      expect(lastInvokeInput(AUTOMATION_DELETE_WORKFLOW_COMMAND)).toEqual({ id: "auto-1" });
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input).toMatchObject({
         name: "未命名自动化",
         nodes: [],
         edges: [],
@@ -274,7 +299,7 @@ describe("Automations page", () => {
     await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_save_draft")?.input.nodes).toEqual(
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input.nodes).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             id: "agent-1",
@@ -301,7 +326,7 @@ describe("Automations page", () => {
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("automation_run_once")).toEqual({
+      expect(lastInvokeInput(AUTOMATION_RUN_ONCE_COMMAND)).toEqual({
         id: "auto-1",
         input: {},
       });
@@ -318,13 +343,13 @@ describe("Automations page", () => {
     await editWorkflowName(view, "自动复盘");
     const inspector = await waitForInspectorReady(view);
     await fireEvent.click(within(inspector).getByRole("button", { name: "Lilia" }));
-    await fireEvent.click(within(inspector).getByRole("button", { name: "running" }));
+    await fireEvent.click(within(inspector).getByRole("button", { name: "运行" }));
     await fireEvent.click(within(inspector).getByRole("button", { name: "claude" }));
     await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("automation_save_draft")?.input).toMatchObject({
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input).toMatchObject({
         name: "自动复盘",
         scope: {
           projectIds: ["lilia"],
@@ -341,19 +366,19 @@ describe("Automations page", () => {
     await waitForWorkflowActionEnabled(view, "发布");
     await fireEvent.click(view.getByRole("button", { name: "发布" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_publish")).toEqual({ id: "auto-1" });
+      expect(lastInvokeInput(AUTOMATION_PUBLISH_COMMAND)).toEqual({ id: "auto-1" });
     });
 
     await waitForWorkflowActionEnabled(view, "启用");
     await fireEvent.click(view.getByRole("button", { name: "启用" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_set_enabled")).toEqual({ id: "auto-1", enabled: true });
+      expect(lastInvokeInput(AUTOMATION_SET_ENABLED_COMMAND)).toEqual({ id: "auto-1", enabled: true });
     });
 
     await waitForWorkflowActionEnabled(view, "手动运行");
     await fireEvent.click(view.getByRole("button", { name: "手动运行" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_run_once")).toEqual({ id: "auto-1", input: {} });
+      expect(lastInvokeInput(AUTOMATION_RUN_ONCE_COMMAND)).toEqual({ id: "auto-1", input: {} });
     });
 
     await waitFor(() => {
@@ -393,7 +418,7 @@ describe("Automations page", () => {
     await waitForWorkflowActionEnabled(view, "保存草稿");
     await fireEvent.click(view.getByRole("button", { name: "保存草稿" }));
     await waitFor(() => {
-      expect(lastInvokeInput("automation_save_draft")?.input.nodes).toEqual(
+      expect(lastInvokeInput(AUTOMATION_SAVE_DRAFT_COMMAND)?.input.nodes).toEqual(
         expect.arrayContaining([expect.objectContaining({ kind: "human" })]),
       );
     });
@@ -421,7 +446,7 @@ describe("Automations page", () => {
     await fireEvent.click(within(inspector).getByRole("button", { name: "继续" }));
 
     await waitFor(() => {
-      expect(lastInvokeInput("automation_resume_run")).toMatchObject({
+      expect(lastInvokeInput(AUTOMATION_RESUME_RUN_COMMAND)).toMatchObject({
         runId: "run-1",
         input: {
           nodeId: expect.stringMatching(/^human-/),

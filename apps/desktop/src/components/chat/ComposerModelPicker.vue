@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Brain, Check, Sparkles } from "lucide-vue-next";
-import type {
-  ChatComposerState,
-  ChatModelOption,
-  ModelSelectionExplanation,
-  ReasoningEffort,
+import {
+  reasoningEffortsForBackend,
+  type ChatComposerState,
+  type ChatModelOption,
+  type ModelSelectionExplanation,
+  type ReasoningEffort,
 } from "@lilia/contracts";
-import { REASONING_EFFORTS } from "../../services/modelSelection";
+import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 
 const props = defineProps<{
   state: ChatComposerState;
@@ -21,6 +22,7 @@ const emit = defineEmits<{
 
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
+let documentUnlisteners: Array<() => void> = [];
 
 const manualMode = computed(() => props.state.modelSelectionMode === "manual");
 const labelForModel = (model: string) => props.modelOptions.find((option) => option.id === model)?.label ?? model;
@@ -38,9 +40,7 @@ const triggerLabel = computed(() =>
     : `自动 · ${autoModelLabel.value} · ${effortLabel.value}`,
 );
 const effortOptions = computed(() =>
-  props.state.backend === "codex"
-    ? REASONING_EFFORTS.filter((effort) => effort !== "max")
-    : REASONING_EFFORTS,
+  reasoningEffortsForBackend(props.state.backend),
 );
 
 function close() {
@@ -81,19 +81,27 @@ function onKey(event: KeyboardEvent) {
   event.stopPropagation();
 }
 
+function clearDocumentListeners() {
+  runUnlistenFns(documentUnlisteners.splice(0).reverse());
+}
+
+function installDocumentListeners() {
+  clearDocumentListeners();
+  documentUnlisteners = [
+    addDomEventListener(document, "pointerdown", onDocPointer, true),
+    addDomEventListener(document, "keydown", onKey),
+  ];
+}
+
 watch(open, (visible) => {
+  clearDocumentListeners();
   if (visible) {
-    document.addEventListener("pointerdown", onDocPointer, true);
-    document.addEventListener("keydown", onKey);
-  } else {
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onKey);
+    installDocumentListeners();
   }
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onKey);
+  clearDocumentListeners();
 });
 </script>
 

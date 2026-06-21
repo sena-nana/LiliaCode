@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, Runtime};
 use uuid::Uuid;
 
 use crate::agent_timeline::{self, AgentTimelineEventInput};
+use crate::agent_timeline_contract;
 use crate::chat::state::default_model_for_backend;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::codex_history;
@@ -22,7 +23,6 @@ use crate::provider::{
 use crate::store::LiliaStore;
 use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
-const TITLE_KIND: &str = "title_update";
 const TITLE_LABEL: &str = "标题已更新";
 const TITLE_MAX_CHARS: usize = 18;
 const TITLE_MIN_CHARS: usize = 2;
@@ -137,7 +137,9 @@ pub fn chat_respond_title_update(
         .into_iter()
         .find(|event| event.id == event_id)
         .ok_or_else(|| "标题更新请求已失效".to_string())?;
-    if event.kind != TITLE_KIND || event.status != "requires_action" {
+    if event.kind != agent_timeline_contract::title_update_action_kind()
+        || event.status != "requires_action"
+    {
         return Ok(());
     }
     let payload = read_payload_record(&event.payload);
@@ -174,7 +176,7 @@ pub fn chat_respond_title_update(
             task_id,
             turn_id: event.turn_id,
             backend: event.backend,
-            kind: TITLE_KIND.to_string(),
+            kind: agent_timeline_contract::title_update_action_kind().to_string(),
             status: status.to_string(),
             title: TITLE_LABEL.to_string(),
             summary: Some(proposed),
@@ -496,7 +498,7 @@ fn persist_title_event<R: Runtime>(
             task_id: task.id.clone(),
             turn_id: turn_id.map(str::to_string),
             backend: backend.to_string(),
-            kind: TITLE_KIND.to_string(),
+            kind: agent_timeline_contract::title_update_action_kind().to_string(),
             status: status.to_string(),
             title: TITLE_LABEL.to_string(),
             summary: Some(proposed.to_string()),

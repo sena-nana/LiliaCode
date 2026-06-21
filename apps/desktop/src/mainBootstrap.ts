@@ -9,8 +9,8 @@ import "./styles/components.css";
 import "./styles/shell.css";
 import { installPerfObservers, measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
 
-function scheduleGlobalInstallers() {
-  scheduleAfterPaint(() => {
+export function scheduleGlobalInstallers(): () => void {
+  return scheduleAfterPaint(() => {
     void measurePerfAsync("bootstrap.context-menu.install", async () => {
       const { installContextMenu } = await import("./composables/useContextMenuInstall");
       installContextMenu();

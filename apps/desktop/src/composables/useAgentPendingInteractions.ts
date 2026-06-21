@@ -1,20 +1,28 @@
 import { computed, reactive, type ComputedRef } from "vue";
-import type {
-  AgentInteractionRequest,
-  AgentInteractionResponse,
-  McpElicitationPayload,
-  McpElicitationResult,
-  PermissionApprovalPayload,
-  PermissionApprovalResult,
+import {
+  MCP_ELICITATION_INTERACTION_KIND,
+  normalizeMcpElicitationPayload,
+  normalizePermissionApprovalPayload,
+  PERMISSION_APPROVAL_INTERACTION_KIND,
+  type AgentInteractionRequest,
+  type AgentInteractionResponse,
+  type McpElicitationPayload,
+  type McpElicitationResult,
+  type PermissionApprovalPayload,
+  type PermissionApprovalResult,
 } from "@lilia/contracts";
 import { respondAgentInteraction } from "../services/chat";
 import {
   clearConversationRequiresAction,
   markConversationRequiresAction,
 } from "./useConversationActivity";
+import {
+  shouldClearPendingInteraction,
+  type ClearPendingInteractionsOptions,
+} from "./pendingInteractionClearOptions";
 
 interface PendingMcpElicitation {
-  kind: "mcp_elicitation";
+  kind: typeof MCP_ELICITATION_INTERACTION_KIND;
   taskId: string;
   turnId: string | null;
   requestId: string;
@@ -22,7 +30,7 @@ interface PendingMcpElicitation {
 }
 
 interface PendingPermissionApproval {
-  kind: "permission_approval";
+  kind: typeof PERMISSION_APPROVAL_INTERACTION_KIND;
   taskId: string;
   turnId: string | null;
   requestId: string;
@@ -41,11 +49,6 @@ function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
 }
 
-interface ClearAgentPendingInteractionsForTaskOptions {
-  turnId?: string | null;
-  keepRequestIds?: Set<string>;
-}
-
 function taskBucket(taskId: string): Record<string, PendingAgentInteraction> {
   if (!pending[taskId]) pending[taskId] = {};
   return pending[taskId];
@@ -56,44 +59,9 @@ function clearPending(taskId: string, requestId: string) {
   clearConversationRequiresAction(taskId, requestId);
 }
 
-function mcpPayload(value: unknown): McpElicitationPayload | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const mode = row.mode === "url" ? "url" : row.mode === "form" ? "form" : null;
-  const threadId = typeof row.threadId === "string" ? row.threadId : "";
-  const serverName = typeof row.serverName === "string" ? row.serverName : "";
-  const message = typeof row.message === "string" ? row.message : "";
-  if (!mode || !threadId || !serverName) return null;
-  return {
-    threadId,
-    turnId: typeof row.turnId === "string" ? row.turnId : null,
-    serverName,
-    mode,
-    message,
-    requestedSchema: row.requestedSchema,
-    url: typeof row.url === "string" ? row.url : undefined,
-    elicitationId: typeof row.elicitationId === "string" ? row.elicitationId : undefined,
-    _meta: row._meta,
-  };
-}
-
-function permissionPayload(value: unknown): PermissionApprovalPayload | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const providerContext = row.providerContext && typeof row.providerContext === "object" && !Array.isArray(row.providerContext)
-    ? row.providerContext as PermissionApprovalPayload["providerContext"]
-    : undefined;
-  return {
-    reason: typeof row.reason === "string" ? row.reason : null,
-    requestedAccess: row.requestedAccess ?? {},
-    scopeSuggestion: row.scopeSuggestion,
-    providerContext,
-  };
-}
-
 export function handleAgentPendingInteractionRequest(req: AgentInteractionRequest): boolean {
-  if (req.kind === "mcp_elicitation") {
-    const payload = mcpPayload(req.payload);
+  if (req.kind === MCP_ELICITATION_INTERACTION_KIND) {
+    const payload = normalizeMcpElicitationPayload(req.payload);
     if (!payload) return false;
     hydrateAgentPendingInteraction({
       kind: req.kind,
@@ -104,8 +72,8 @@ export function handleAgentPendingInteractionRequest(req: AgentInteractionReques
     });
     return true;
   }
-  if (req.kind !== "permission_approval") return false;
-  const payload = permissionPayload(req.payload);
+  if (req.kind !== PERMISSION_APPROVAL_INTERACTION_KIND) return false;
+  const payload = normalizePermissionApprovalPayload(req.payload);
   if (!payload) return false;
   hydrateAgentPendingInteraction({
     kind: req.kind,
@@ -124,13 +92,12 @@ export function hydrateAgentPendingInteraction(interaction: PendingAgentInteract
 
 export function clearAgentPendingInteractionsForTask(
   taskId: string,
-  options: ClearAgentPendingInteractionsForTaskOptions = {},
+  options: ClearPendingInteractionsOptions = {},
 ) {
   const bucket = pending[taskId];
   if (!bucket) return;
   for (const [requestId, interaction] of Object.entries(bucket)) {
-    if (options.turnId !== undefined && interaction.turnId !== options.turnId) continue;
-    if (options.keepRequestIds?.has(requestId)) continue;
+    if (!shouldClearPendingInteraction(interaction, taskId, options)) continue;
     delete bucket[requestId];
     clearConversationRequiresAction(taskId, requestId);
   }
@@ -154,7 +121,7 @@ export async function respondMcpElicitation(
   await respondAgentInteraction({
     taskId,
     requestId,
-    kind: "mcp_elicitation",
+    kind: MCP_ELICITATION_INTERACTION_KIND,
     result,
   } satisfies AgentInteractionResponse);
   clearPending(taskId, requestId);
@@ -168,7 +135,7 @@ export async function respondPermissionApproval(
   await respondAgentInteraction({
     taskId,
     requestId,
-    kind: "permission_approval",
+    kind: PERMISSION_APPROVAL_INTERACTION_KIND,
     result,
   } satisfies AgentInteractionResponse);
   clearPending(taskId, requestId);

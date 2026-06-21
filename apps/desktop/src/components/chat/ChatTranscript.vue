@@ -14,8 +14,8 @@ import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
-import type { LiliaBatchApplyInput } from "./liliaBatchApply";
+} from "../../composables/pendingAgentActions";
+import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
 import {
   cancelIdleRun,
@@ -24,6 +24,7 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 
 const AgentTimeline = defineAsyncComponent({
   suspensible: false,
@@ -78,6 +79,13 @@ const scrollMapRequested = ref(false);
 const timelineActivated = ref(false);
 let pointerSelectionStarted = false;
 let scrollMapIdleHandle: number | null = null;
+let cancelScrollMapPaint: (() => void) | null = null;
+let cancelTimelineActivationPaint: (() => void) | null = null;
+let documentUnlisteners: Array<() => void> = [];
+let scrollToBottomSeq = 0;
+let planRevealSeq = 0;
+let selectionToolbarSeq = 0;
+let disposed = false;
 
 const PLAN_REVEAL_PADDING = 8;
 const SELECTION_TOOLBAR_GAP = 8;
@@ -100,7 +108,10 @@ function onScroll() {
 }
 
 async function scrollToBottom() {
+  if (disposed) return;
+  const seq = ++scrollToBottomSeq;
   await nextTick();
+  if (disposed || seq !== scrollToBottomSeq) return;
   const el = scroller.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
@@ -108,8 +119,10 @@ async function scrollToBottom() {
 }
 
 async function onTimelineEventToggled(payload: { event: AgentTimelineEvent; expanded: boolean }) {
-  if (!payload.expanded || payload.event.kind !== "plan") return;
+  if (disposed || !payload.expanded || payload.event.kind !== "plan") return;
+  const seq = ++planRevealSeq;
   await nextTick();
+  if (disposed || seq !== planRevealSeq) return;
   revealPlanEvent(payload.event.id);
 }
 
@@ -191,23 +204,36 @@ const isEmpty = computed(() =>
 const shouldRenderTimeline = computed(() => !isEmpty.value);
 
 function scheduleTimelineActivation() {
-  if (timelineActivated.value || !shouldRenderTimeline.value) return;
-  scheduleAfterPaint(() => {
-    if (timelineActivated.value || !shouldRenderTimeline.value) return;
+  if (disposed || timelineActivated.value || !shouldRenderTimeline.value) return;
+  cancelTimelineActivationPaint?.();
+  const cancelPaint = scheduleAfterPaint(() => {
+    if (cancelTimelineActivationPaint === cancelPaint) {
+      cancelTimelineActivationPaint = null;
+    }
+    if (disposed || timelineActivated.value || !shouldRenderTimeline.value) return;
     measurePerfSync("chat.timeline.activate", () => {
       timelineActivated.value = true;
     });
   });
+  cancelTimelineActivationPaint = cancelPaint;
+}
+
+function cancelTimelineActivationSchedule() {
+  cancelTimelineActivationPaint?.();
+  cancelTimelineActivationPaint = null;
 }
 
 function cancelScrollMapSchedule() {
-  if (scrollMapIdleHandle === null) return;
-  cancelIdleRun(scrollMapIdleHandle);
-  scrollMapIdleHandle = null;
+  cancelScrollMapPaint?.();
+  cancelScrollMapPaint = null;
+  if (scrollMapIdleHandle !== null) {
+    cancelIdleRun(scrollMapIdleHandle);
+    scrollMapIdleHandle = null;
+  }
 }
 
 function requestScrollMapRender() {
-  if (shouldRenderScrollMap.value || scrollMapIdleHandle !== null) return;
+  if (disposed || shouldRenderScrollMap.value || scrollMapIdleHandle !== null) return;
   cancelScrollMapSchedule();
   if (isEmpty.value || !timelineActivated.value) {
     shouldRenderScrollMap.value = false;
@@ -215,9 +241,12 @@ function requestScrollMapRender() {
     return;
   }
   scrollMapRequested.value = true;
-  scheduleAfterPaint(() => {
+  cancelScrollMapPaint = scheduleAfterPaint(() => {
+    cancelScrollMapPaint = null;
+    if (disposed || isEmpty.value || !timelineActivated.value) return;
     scrollMapIdleHandle = runWhenIdle(() => {
       scrollMapIdleHandle = null;
+      if (disposed || isEmpty.value || !timelineActivated.value) return;
       shouldRenderScrollMap.value = true;
     });
   });
@@ -248,11 +277,14 @@ function selectionSelectable(selection: Selection): HTMLElement | null {
 }
 
 function hideSelectionToolbar() {
+  selectionToolbarSeq += 1;
   selectionToolbarVisible.value = false;
   selectedAgentText.value = "";
 }
 
 async function updateSelectionToolbar() {
+  if (disposed) return;
+  const seq = ++selectionToolbarSeq;
   const selection = window.getSelection();
   if (!selection) {
     hideSelectionToolbar();
@@ -275,6 +307,7 @@ async function updateSelectionToolbar() {
   selectedAgentText.value = text;
   selectionToolbarVisible.value = true;
   await nextTick();
+  if (disposed || seq !== selectionToolbarSeq || !selectionToolbarVisible.value) return;
   placeSelectionToolbar(rect);
 }
 
@@ -366,25 +399,36 @@ function onDocumentKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") hideSelectionToolbar();
 }
 
+function clearDocumentListeners() {
+  runUnlistenFns(documentUnlisteners.splice(0).reverse());
+}
+
 onMounted(() => {
-  document.addEventListener("pointerdown", onDocumentPointerDown, true);
-  document.addEventListener("pointerup", onDocumentPointerUp, true);
-  document.addEventListener("keydown", onDocumentKeydown);
-  window.addEventListener("resize", hideSelectionToolbar);
+  disposed = false;
+  clearDocumentListeners();
+  documentUnlisteners = [
+    addDomEventListener(document, "pointerdown", onDocumentPointerDown, true),
+    addDomEventListener(document, "pointerup", onDocumentPointerUp, true),
+    addDomEventListener(document, "keydown", onDocumentKeydown),
+    addDomEventListener(window, "resize", hideSelectionToolbar),
+  ];
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  scrollToBottomSeq += 1;
+  planRevealSeq += 1;
+  selectionToolbarSeq += 1;
+  cancelTimelineActivationSchedule();
   cancelScrollMapSchedule();
-  document.removeEventListener("pointerdown", onDocumentPointerDown, true);
-  document.removeEventListener("pointerup", onDocumentPointerUp, true);
-  document.removeEventListener("keydown", onDocumentKeydown);
-  window.removeEventListener("resize", hideSelectionToolbar);
+  clearDocumentListeners();
 });
 
 watch(
   () => isEmpty.value,
   (empty) => {
     if (empty) {
+      cancelTimelineActivationSchedule();
       cancelScrollMapSchedule();
       shouldRenderScrollMap.value = false;
       scrollMapRequested.value = false;

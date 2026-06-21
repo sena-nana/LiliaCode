@@ -1,0 +1,24 @@
+import providerCommandsContract from "./provider-commands-contract.json" with { type: "json" };
+
+const manifest = Object.freeze(providerCommandsContract);
+
+export const PROVIDER_COMMANDS_CONTRACT = manifest;
+export const CHAT_CHECK_ENV_COMMAND = manifest.chatCheckEnvCommand;
+export const PROVIDER_GET_CONFIG_COMMAND = manifest.providerGetConfigCommand;
+export const PROVIDER_SET_CONFIG_COMMAND = manifest.providerSetConfigCommand;
+export const PROVIDER_GET_ACTIVE_BACKEND_COMMAND =
+  manifest.providerGetActiveBackendCommand;
+export const PROVIDER_SET_ACTIVE_BACKEND_COMMAND =
+  manifest.providerSetActiveBackendCommand;
+export const PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND =
+  manifest.providerCodexAppServerCheckUpdateCommand;
+export const PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND =
+  manifest.providerCodexAppServerInstallUpdateCommand;
+export const ROUTER_GET_MODE_COMMAND = manifest.routerGetModeCommand;
+export const ROUTER_SET_MODE_COMMAND = manifest.routerSetModeCommand;
+export const ASSISTANT_AI_GET_CONFIG_COMMAND = manifest.assistantAiGetConfigCommand;
+export const ASSISTANT_AI_SET_CONFIG_COMMAND = manifest.assistantAiSetConfigCommand;
+export const ASSISTANT_AI_TEST_CONNECTION_COMMAND =
+  manifest.assistantAiTestConnectionCommand;
+export const ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND =
+  manifest.assistantAiOptimizePromptCommand;

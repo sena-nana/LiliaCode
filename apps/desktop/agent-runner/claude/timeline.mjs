@@ -1,4 +1,6 @@
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
+import { ASK_USER_INTERACTION_KIND } from "@lilia/contracts/agentInteractionContract.mjs";
+import { TIMELINE_DISPLAY_ERROR_SUMMARY_TEXT_LIMIT } from "@lilia/contracts/timelineContract.mjs";
 import { finalizeClaudeReasoningBlocks } from "../claudeStream.mjs";
 import { buildPlanPayload, isClaudePlanTool } from "../claudePlan.mjs";
 import { isLiliaAskUserTool } from "../askUser.mjs";
@@ -128,7 +130,7 @@ export function emitClaudeToolTimeline(block, msg, ctx) {
   if (isLiliaAskUserTool(name)) {
     rememberClaudeTool(ctx, sourceId, {
       name,
-      kind: "ask_user",
+      kind: ASK_USER_INTERACTION_KIND,
       subkind: null,
       hiddenAskUserTool: true,
       payload: {},
@@ -227,8 +229,10 @@ export function emitClaudeToolResultTimeline(block, msg, ctx) {
       .map((c) => c.text)
       .join("\n");
   }
-  const askUserCancelled = kind === "ask_user" && isAskUserCancelledOutput(text);
-  const summary = isError && !askUserCancelled ? shortText(text, 400) || "" : "";
+  const askUserCancelled = kind === ASK_USER_INTERACTION_KIND && isAskUserCancelledOutput(text);
+  const summary = isError && !askUserCancelled
+    ? shortText(text, TIMELINE_DISPLAY_ERROR_SUMMARY_TEXT_LIMIT) || ""
+    : "";
   const planPayload = kind === "plan"
     ? buildPlanPayload({
         input: cachedPayload,

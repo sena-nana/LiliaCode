@@ -1,0 +1,11 @@
+{
+  "commands": {
+    "gitCloneRepo": "git_clone_repo",
+    "getBindingStatus": "github_get_binding_status",
+    "startDeviceFlow": "github_start_device_flow",
+    "pollDeviceFlow": "github_poll_device_flow",
+    "unbind": "github_unbind",
+    "listRepos": "github_list_repos",
+    "cloneRepo": "github_clone_repo"
+  }
+}

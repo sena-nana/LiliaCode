@@ -3,10 +3,30 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::store::LiliaStore;
+use crate::task_contract;
 use crate::util::now_millis;
 
 use super::queries::row_to_project;
 use super::types::{ProjectDashboardSummaryRow, ProjectRow, ProjectTaskStatusCountsRow};
+
+fn project_task_status_count(counts: &ProjectTaskStatusCountsRow, status: &str) -> i64 {
+    match status {
+        "draft" => counts.draft,
+        "waiting" => counts.waiting,
+        "running" => counts.running,
+        "blocked" => counts.blocked,
+        "done" => counts.done,
+        "cancelled" => counts.cancelled,
+        _ => 0,
+    }
+}
+
+fn sum_project_task_statuses(counts: &ProjectTaskStatusCountsRow, statuses: &[String]) -> i64 {
+    statuses
+        .iter()
+        .map(|status| project_task_status_count(counts, status))
+        .sum()
+}
 
 fn row_to_project_dashboard_summary(
     row: &rusqlite::Row<'_>,
@@ -15,6 +35,22 @@ fn row_to_project_dashboard_summary(
     let waiting: i64 = row.get(6)?;
     let running: i64 = row.get(7)?;
     let blocked: i64 = row.get(8)?;
+    let status_counts = ProjectTaskStatusCountsRow {
+        waiting,
+        running,
+        blocked,
+        draft: row.get(9)?,
+        done: row.get(10)?,
+        cancelled: row.get(11)?,
+    };
+    let blocked_count = sum_project_task_statuses(
+        &status_counts,
+        task_contract::project_dashboard_blocked_statuses(),
+    );
+    let active_count = sum_project_task_statuses(
+        &status_counts,
+        task_contract::project_dashboard_active_statuses(),
+    );
     Ok(ProjectDashboardSummaryRow {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -22,16 +58,9 @@ fn row_to_project_dashboard_summary(
         pinned: pinned != 0,
         task_count: row.get(4)?,
         session_count: row.get(5)?,
-        status_counts: ProjectTaskStatusCountsRow {
-            waiting,
-            running,
-            blocked,
-            draft: row.get(9)?,
-            done: row.get(10)?,
-            cancelled: row.get(11)?,
-        },
-        blocked_count: blocked,
-        active_count: waiting + running,
+        status_counts,
+        blocked_count,
+        active_count,
         recent_activity_at: row.get(12)?,
         total_tokens: row.get(13)?,
         known_cost_usd: row.get(14)?,

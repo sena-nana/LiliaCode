@@ -2,8 +2,12 @@ use rusqlite::{params, OptionalExtension};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::automation::{
+    task_created_event_kind, task_status_changed_event_kind, task_updated_event_kind,
+};
 use crate::codex_history::spawn_codex_thread_archive_sync;
 use crate::store::LiliaStore;
+use crate::task_contract;
 use crate::util::now_millis;
 use crate::BACKEND_CODEX;
 
@@ -102,9 +106,7 @@ pub fn task_list_sidebar_conversations(
         .map_err(|e| format!("task_list_sidebar_conversations: query 失败：{e}"))?;
     let mut out = Vec::new();
     for row in rows {
-        out.push(
-            row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?,
-        );
+        out.push(row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?);
     }
     Ok(out)
 }
@@ -173,7 +175,7 @@ pub fn task_create(
         row.project_id.clone(),
         Some(row.id.clone()),
         Some(row.status.clone()),
-        "task_created",
+        task_created_event_kind(),
         None,
     );
     Ok(row)
@@ -224,9 +226,9 @@ pub fn task_update(
         Some(id),
         Some(next_status),
         if status_changed {
-            "task_status_changed"
+            task_status_changed_event_kind()
         } else {
-            "task_updated"
+            task_updated_event_kind()
         },
         None,
     );
@@ -254,6 +256,7 @@ pub fn task_promote(
     let conn = store.conn()?;
     let now = now_millis();
     let sort_order = next_task_sort_order(&conn, project_id.as_deref(), "task_promote")?;
+    let status = task_contract::running_task_status();
     insert_task_with_deps(
         &conn,
         NewTask {
@@ -261,7 +264,7 @@ pub fn task_promote(
             project_id: project_id.as_deref(),
             session_id: &id,
             title: &title,
-            status: "running",
+            status,
             created_at: now,
             parent_id: parent_id.as_deref(),
             sort_order,
@@ -275,7 +278,7 @@ pub fn task_promote(
         session_id: id,
         title,
         title_source: "auto".to_string(),
-        status: "running".to_string(),
+        status: status.to_string(),
         created_at: now,
         parent_id,
         depends_on,
@@ -288,7 +291,7 @@ pub fn task_promote(
         row.project_id.clone(),
         Some(row.id.clone()),
         Some(row.status.clone()),
-        "task_created",
+        task_created_event_kind(),
         None,
     );
     Ok(row)

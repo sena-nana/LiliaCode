@@ -1,5 +1,6 @@
 mod agent_sync;
 mod commands;
+pub(crate) mod contract;
 mod repository;
 mod types;
 

@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
 import { ChevronDown, ChevronRight } from "lucide-vue-next";
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import {
+  agentTimelinePlanAllowedPromptRows,
+  agentTimelinePlanArchitectureImpactRows,
+  timelinePlanStatusKind,
+  timelinePlanStatusLabel,
+  type AgentTimelineEvent,
+  type TimelinePlanStatusKind,
+} from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
 import { measurePerfAsync } from "../../utils/perf";
 import {
@@ -31,25 +38,6 @@ const TimelineCardDetails = defineAsyncComponent({
   ),
 });
 
-type PlanStatusKind =
-  | "pending"
-  | "revision"
-  | "approved"
-  | "rejected"
-  | "cancelled"
-  | "expired"
-  | "neutral";
-
-const STATUS_LABELS: Record<PlanStatusKind, string> = {
-  pending: "待确认",
-  revision: "修改要求",
-  approved: "已同意",
-  rejected: "已拒绝",
-  cancelled: "已取消",
-  expired: "已失效",
-  neutral: "计划",
-};
-
 const props = defineProps<{
   event: AgentTimelineEvent;
   expanded: boolean;
@@ -69,40 +57,20 @@ const display = computed(() =>
 );
 const payload = computed(() => readTimelinePayloadRecord(props.event));
 const details = computed(() => display.value.details ?? []);
-const planText = computed(() => readPayloadText(payload.value.plan));
-const revisionRequest = computed(() => readPayloadText(payload.value.revisionRequest));
-const allowedPromptRows = computed(() => {
-  const prompts = payload.value.allowedPrompts;
-  if (!Array.isArray(prompts)) return [];
-  return prompts.flatMap((item, index) => {
-    if (!isRecord(item)) return [];
-    const tool = compactPayloadLine(item.tool, 80);
-    const prompt = compactPayloadLine(item.prompt, 400);
-    const text = [tool, prompt].filter(Boolean).join("：");
-    return text ? [{ key: `${index}:${text}`, text }] : [];
-  });
-});
-const architectureImpactRows = computed(() => {
-  const impacts = payload.value.architectureImpacts;
-  if (!Array.isArray(impacts)) return [];
-  return impacts.flatMap((impact, impactIndex) => {
-    if (!isRecord(impact)) return [];
-    const reason = compactPayloadLine(impact.reason, 240);
-    const changes = Array.isArray(impact.changes) ? impact.changes : [];
-    const changeRows = changes
-      .map((change) => {
-        if (!isRecord(change)) return "";
-        return compactPayloadLine(architectureChangeText(change), 240) ||
-          compactPayloadLine(change.type, 80);
-      })
-      .filter(Boolean);
-    const rows = reason ? [reason, ...changeRows] : changeRows;
-    return rows.map((text, rowIndex) => ({
-      key: `${impactIndex}:${rowIndex}:${text}`,
-      text,
-    }));
-  });
-});
+const planText = computed(() => stringPayload(payload.value.plan));
+const revisionRequest = computed(() => stringPayload(payload.value.revisionRequest));
+const allowedPromptRows = computed(() =>
+  agentTimelinePlanAllowedPromptRows(payload.value).map((row) => ({
+    key: `${row.index}:${row.text}`,
+    text: row.text,
+  })),
+);
+const architectureImpactRows = computed(() =>
+  agentTimelinePlanArchitectureImpactRows(payload.value).map((row) => ({
+    key: `${row.impactIndex}:${row.rowIndex}:${row.text}`,
+    text: row.text,
+  })),
+);
 const hasStructuredBody = computed(() =>
   Boolean(
     planText.value ||
@@ -112,16 +80,9 @@ const hasStructuredBody = computed(() =>
   ),
 );
 const eventTitle = computed(() => props.event.title?.trim() ?? "");
-const statusKind = computed<PlanStatusKind>(() => {
-  if (props.actionExpired) return "expired";
-  if (revisionRequest.value) return "revision";
-  if (payload.value.approved === null) return "pending";
-  if (payload.value.approved === true) return "approved";
-  if (payload.value.approved === false) return "rejected";
-  if (props.event.status === "requires_action") return "pending";
-  if (props.event.status === "cancelled") return "cancelled";
-  return "neutral";
-});
+const statusKind = computed<TimelinePlanStatusKind>(() =>
+  timelinePlanStatusKind(props.event, props.actionExpired),
+);
 const neutralEventTitle = computed(() =>
   statusKind.value === "neutral" && eventTitle.value && eventTitle.value !== props.event.kind
     ? eventTitle.value
@@ -141,7 +102,7 @@ const summaryLine = computed(() =>
 const compactSummaryText = computed(() =>
   truncateTimelineText(summaryLine.value.replace(/\s+/g, " ").trim(), 180),
 );
-const statusBadge = computed(() => STATUS_LABELS[statusKind.value]);
+const statusBadge = computed(() => timelinePlanStatusLabel(statusKind.value));
 const detailsId = computed(() => `agent-timeline-details-${props.event.id}`);
 const titleId = computed(() => `agent-timeline-title-${props.event.id}`);
 const titleAriaLabel = computed(() =>
@@ -161,33 +122,8 @@ function onToggle() {
   emit("toggle", props.event);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function readPayloadText(value: unknown): string {
+function stringPayload(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function compactPayloadLine(value: unknown, max: number): string {
-  const text = readPayloadText(value).replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max)}...` : text;
-}
-
-function architectureChangeText(change: Record<string, unknown>): string {
-  const type = readPayloadText(change.type);
-  if (type === "upsert_node") {
-    const node = isRecord(change.node) ? change.node : {};
-    return `更新节点：${compactPayloadLine(node.label, 120) || compactPayloadLine(node.id, 120)}`;
-  }
-  if (type === "remove_node") return `移除节点：${compactPayloadLine(change.nodeId, 120)}`;
-  if (type === "upsert_edge") {
-    const edge = isRecord(change.edge) ? change.edge : {};
-    return `更新关系：${compactPayloadLine(edge.label, 120) || compactPayloadLine(edge.id, 120)}`;
-  }
-  if (type === "remove_edge") return `移除关系：${compactPayloadLine(change.edgeId, 120)}`;
-  if (type === "set_summary") return "更新架构摘要";
-  return type;
 }
 
 </script>

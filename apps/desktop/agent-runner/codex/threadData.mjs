@@ -1,8 +1,18 @@
+import {
+  CODEX_HISTORY_DEFAULT_TURN_LIMIT,
+  CODEX_HISTORY_PREVIEW_TURN_LIMIT,
+  HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT,
+  HISTORY_IMPORT_INLINE_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_MAX_SEARCH_LIMIT,
+  HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT,
+  HISTORY_IMPORT_TITLE_TEXT_LIMIT,
+} from "@lilia/contracts/historyImportContract.mjs";
 import { isRecord, shortText, stringOrNull } from "../utils.mjs";
 
-export const DEFAULT_TURN_LIMIT = 50;
-export const PREVIEW_TURN_LIMIT = 8;
-export const PREVIEW_MESSAGE_LIMIT = 5;
+export const DEFAULT_TURN_LIMIT = CODEX_HISTORY_DEFAULT_TURN_LIMIT;
+export const PREVIEW_TURN_LIMIT = CODEX_HISTORY_PREVIEW_TURN_LIMIT;
+export const PREVIEW_MESSAGE_LIMIT = HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT;
 const ITEM_BACKFILL_CONCURRENCY = 4;
 
 function numberOrNull(value) {
@@ -56,7 +66,7 @@ function previewFromTurns(turns) {
       const item = items[itemIndex];
       if (!previewRoleForItem(item)) continue;
       const text = pickMessageText(item);
-      if (text.trim()) return shortText(text, 180);
+      if (text.trim()) return shortText(text, HISTORY_IMPORT_INLINE_PREVIEW_TEXT_LIMIT);
     }
   }
   return null;
@@ -76,7 +86,7 @@ export function normalizeCodexThread(row, turns = []) {
   ) || "Codex thread";
   return {
     id,
-    title: shortText(title, 160) || "Codex thread",
+    title: shortText(title, HISTORY_IMPORT_TITLE_TEXT_LIMIT) || "Codex thread",
     status: firstString(row.status, thread.status),
     model: firstString(row.model, row.modelProvider, thread.model, thread.modelProvider),
     sourceKind: firstString(row.sourceKind, row.source_kind, row.source?.kind),
@@ -106,7 +116,10 @@ export function normalizeCodexSearchResult(result) {
 
 export async function searchCodexThreadsWithServer(server, input = {}) {
   const params = {
-    limit: Math.max(1, Math.min(50, Number(input.limit) || 20)),
+    limit: Math.max(1, Math.min(
+      HISTORY_IMPORT_MAX_SEARCH_LIMIT,
+      Number(input.limit) || HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT,
+    )),
     sortDirection: "desc",
     archived: input.archived === true,
   };
@@ -237,7 +250,7 @@ export function codexPreviewMessagesFromTurns(turns, messageLimit = PREVIEW_MESS
       messages.push({
         id: firstString(item.id, item.clientId) || `${role}:${messages.length}`,
         role,
-        summary: shortText(pickMessageText(item), 1200) || null,
+        summary: shortText(pickMessageText(item), HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT) || null,
       });
     }
   }

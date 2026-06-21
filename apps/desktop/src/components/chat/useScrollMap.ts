@@ -6,6 +6,7 @@ import {
   readScrollbarMetrics,
   scrollOffsetForThumbDrag,
 } from "../../utils/scrollbarMetrics";
+import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 
 export { clamp } from "../../utils/scrollbarMetrics";
 
@@ -86,6 +87,10 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   let measurePending = false;
   let resizeObserver: ResizeObserver | null = null;
   let dragState: ScrollDragState | null = null;
+  let scrollerUnlisten: (() => void) | null = null;
+  let dragUnlisteners: Array<() => void> = [];
+  let measureSeq = 0;
+  let disposed = false;
 
   const thumbStyle = computed<CSSProperties>(() => ({
     transform: `translateY(${metrics.value.thumbTop}px)`,
@@ -97,14 +102,13 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
 
   watch(
     () => [options.scroller.value, isEnabled()] as const,
-    (nextState, previousState) => {
+    (nextState) => {
       const [next, enabled] = nextState;
-      const previous = previousState?.[0] ?? null;
-      if (previous) previous.removeEventListener("scroll", scheduleMeasure);
+      clearScrollerListener();
       disconnectResizeObserver();
 
       if (next && enabled) {
-        next.addEventListener("scroll", scheduleMeasure, { passive: true });
+        scrollerUnlisten = addDomEventListener(next, "scroll", scheduleMeasure, { passive: true });
         if (typeof ResizeObserver !== "undefined") {
           resizeObserver = new ResizeObserver(scheduleMeasure);
           resizeObserver.observe(next);
@@ -119,8 +123,12 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   );
 
   onBeforeUnmount(() => {
+    disposed = true;
+    measureSeq += 1;
+    measurePending = false;
     if (frameId !== null) window.cancelAnimationFrame(frameId);
-    options.scroller.value?.removeEventListener("scroll", scheduleMeasure);
+    frameId = null;
+    clearScrollerListener();
     clearDragListeners();
     disconnectResizeObserver();
   });
@@ -133,6 +141,11 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
     resizeObserver?.disconnect();
     resizeObserver = null;
     observedTargets.clear();
+  }
+
+  function clearScrollerListener() {
+    scrollerUnlisten?.();
+    scrollerUnlisten = null;
   }
 
   function refreshResizeTargets(scroller: HTMLElement) {
@@ -150,25 +163,28 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   }
 
   function scheduleMeasure() {
-    if (measurePending) return;
+    if (disposed || measurePending) return;
     measurePending = true;
+    const seq = ++measureSeq;
     if (options.scheduleMode === "frame") {
       frameId = window.requestAnimationFrame(() => {
         frameId = null;
-        void nextTick(runPendingMeasure);
+        void nextTick(() => runPendingMeasure(seq));
       });
       return;
     }
 
-    void nextTick(runPendingMeasure);
+    void nextTick(() => runPendingMeasure(seq));
   }
 
-  function runPendingMeasure() {
+  function runPendingMeasure(seq: number) {
+    if (disposed || seq !== measureSeq) return;
     measurePending = false;
     measure();
   }
 
   function measure() {
+    if (disposed) return;
     const scroller = options.scroller.value;
     if (!scroller || !isEnabled()) {
       resetMeasurements();
@@ -210,6 +226,7 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   }
 
   function setTrackElement(element: unknown) {
+    if (disposed) return;
     const next = element instanceof HTMLElement ? element : null;
     if (track.value === next) return;
     track.value = next;
@@ -217,6 +234,7 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   }
 
   function scrollTo(top: number, behavior: ScrollBehavior) {
+    if (disposed) return;
     const scroller = options.scroller.value;
     if (!scroller) return;
 
@@ -230,6 +248,7 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   }
 
   function onTrackPointerDown(event: PointerEvent) {
+    if (disposed) return;
     const scroller = options.scroller.value;
     const trackElement = track.value;
     if (!scroller || !trackElement) return;
@@ -252,12 +271,14 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   }
 
   function onThumbPointerDown(event: PointerEvent) {
+    if (disposed) return;
     const scroller = options.scroller.value;
     const currentMetrics = metrics.value;
     if (!scroller || !currentMetrics.scrollable || currentMetrics.trackHeight <= 0) return;
 
     event.preventDefault();
     event.stopPropagation();
+    clearDragListeners();
     dragState = {
       pointerId: event.pointerId,
       startScrollTop: scroller.scrollTop,
@@ -265,12 +286,15 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
       metrics: currentMetrics,
     };
     isDragging.value = true;
-    window.addEventListener("pointermove", onWindowPointerMove);
-    window.addEventListener("pointerup", onWindowPointerEnd);
-    window.addEventListener("pointercancel", onWindowPointerEnd);
+    dragUnlisteners = [
+      addDomEventListener(window, "pointermove", onWindowPointerMove),
+      addDomEventListener(window, "pointerup", onWindowPointerEnd),
+      addDomEventListener(window, "pointercancel", onWindowPointerEnd),
+    ];
   }
 
   function onWindowPointerMove(event: PointerEvent) {
+    if (disposed) return;
     const scroller = options.scroller.value;
     if (!scroller || !dragState || event.pointerId !== dragState.pointerId) return;
 
@@ -293,9 +317,7 @@ export function useScrollMap(options: UseScrollMapOptions): ScrollMapController 
   function clearDragListeners() {
     dragState = null;
     isDragging.value = false;
-    window.removeEventListener("pointermove", onWindowPointerMove);
-    window.removeEventListener("pointerup", onWindowPointerEnd);
-    window.removeEventListener("pointercancel", onWindowPointerEnd);
+    runUnlistenFns(dragUnlisteners.splice(0).reverse());
   }
 
   return {
@@ -315,18 +337,18 @@ export function useScrollMapVisibility(options: UseScrollMapVisibilityOptions) {
   const isVisible = ref(false);
   const isPointerInZone = ref(false);
   let hideTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let scrollerUnlisteners: Array<() => void> = [];
+  let hoverUnlisteners: Array<() => void> = [];
 
   watch(
     () => [options.scroller.value, isEnabled()] as const,
-    ([next, enabled], previousState) => {
-      const previous = previousState?.[0] ?? null;
-      if (previous) {
-        previous.removeEventListener("scroll", onScroll);
-        previous.removeEventListener("scrollend", onScrollEnd);
-      }
+    ([next, enabled]) => {
+      clearScrollerListeners();
       if (next && enabled) {
-        next.addEventListener("scroll", onScroll, { passive: true });
-        next.addEventListener("scrollend", onScrollEnd);
+        scrollerUnlisteners = [
+          addDomEventListener(next, "scroll", onScroll, { passive: true }),
+          addDomEventListener(next, "scrollend", onScrollEnd),
+        ];
       }
     },
     { immediate: true },
@@ -334,15 +356,13 @@ export function useScrollMapVisibility(options: UseScrollMapVisibilityOptions) {
 
   watch(
     () => [options.hoverTarget?.value ?? options.scroller.value, isEnabled()] as const,
-    ([next, enabled], previousState) => {
-      const previous = previousState?.[0] ?? null;
-      if (previous) {
-        previous.removeEventListener("mousemove", onMouseMove);
-        previous.removeEventListener("mouseleave", onMouseLeave);
-      }
+    ([next, enabled]) => {
+      clearHoverListeners();
       if (next && enabled) {
-        next.addEventListener("mousemove", onMouseMove);
-        next.addEventListener("mouseleave", onMouseLeave);
+        hoverUnlisteners = [
+          addDomEventListener(next, "mousemove", onMouseMove),
+          addDomEventListener(next, "mouseleave", onMouseLeave),
+        ];
       }
     },
     { immediate: true },
@@ -370,11 +390,8 @@ export function useScrollMapVisibility(options: UseScrollMapVisibilityOptions) {
   );
 
   onBeforeUnmount(() => {
-    options.scroller.value?.removeEventListener("scroll", onScroll);
-    options.scroller.value?.removeEventListener("scrollend", onScrollEnd);
-    const hoverTarget = options.hoverTarget?.value ?? options.scroller.value;
-    hoverTarget?.removeEventListener("mousemove", onMouseMove);
-    hoverTarget?.removeEventListener("mouseleave", onMouseLeave);
+    clearScrollerListeners();
+    clearHoverListeners();
     clearHideTimer();
   });
 
@@ -386,6 +403,14 @@ export function useScrollMapVisibility(options: UseScrollMapVisibilityOptions) {
     if (hideTimer === null) return;
     window.clearTimeout(hideTimer);
     hideTimer = null;
+  }
+
+  function clearScrollerListeners() {
+    runUnlistenFns(scrollerUnlisteners.splice(0).reverse());
+  }
+
+  function clearHoverListeners() {
+    runUnlistenFns(hoverUnlisteners.splice(0).reverse());
   }
 
   function show() {

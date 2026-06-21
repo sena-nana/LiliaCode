@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::chat::model_selection_contract;
 use crate::chat::state::{
     default_model_for_backend, load_persisted_resume_session_id, model_options_for_backend,
     normalize_model_for_backend, normalize_reasoning_effort_for_backend, session_key, ChatStore,
@@ -21,7 +22,7 @@ use crate::provider::{
     AutoTurnDecisionSettings,
 };
 use crate::store::LiliaStore;
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::BACKEND_CODEX;
 
 const AUTO_DECISION_INSTRUCTION: &str = "只输出严格 JSON，不要输出 Markdown。";
 
@@ -163,33 +164,60 @@ fn has_explicit_runtime_model_or_effort(
     backend: &str,
     runtime_options: Option<&ProviderRuntimeOptions>,
 ) -> bool {
-    let Some(options) = runtime_options else {
-        return false;
-    };
-    if options.common.as_ref().is_some_and(|common| {
-        common
-            .model
-            .as_deref()
-            .is_some_and(|v| !v.trim().is_empty())
-            || common.reasoning_effort.is_some()
-    }) {
-        return true;
-    }
-    match backend {
-        BACKEND_CODEX => options
-            .provider
-            .as_ref()
+    runtime_options_model_for_backend(backend, runtime_options).is_some()
+        || runtime_options_reasoning_effort_for_backend(backend, runtime_options).is_some()
+}
+
+fn runtime_options_model_for_backend(
+    backend: &str,
+    runtime_options: Option<&ProviderRuntimeOptions>,
+) -> Option<String> {
+    let options = runtime_options?;
+    options
+        .common
+        .as_ref()
+        .and_then(|common| non_empty_string(common.model.as_deref()))
+        .or_else(|| {
+            if backend == BACKEND_CODEX {
+                options
+                    .provider
+                    .as_ref()
+                    .and_then(|provider| provider.codex.as_ref())
+                    .and_then(|codex| non_empty_string(codex.model.as_deref()))
+            } else {
+                None
+            }
+        })
+}
+
+fn runtime_options_reasoning_effort_for_backend(
+    backend: &str,
+    runtime_options: Option<&ProviderRuntimeOptions>,
+) -> Option<String> {
+    let options = runtime_options?;
+    let provider = options.provider.as_ref();
+    let provider_effort = if backend == BACKEND_CODEX {
+        provider
             .and_then(|p| p.codex.as_ref())
-            .is_some_and(|codex| {
-                codex.model.as_deref().is_some_and(|v| !v.trim().is_empty())
-                    || codex.reasoning_effort.is_some()
-            }),
-        _ => options
-            .provider
-            .as_ref()
+            .and_then(|codex| codex.reasoning_effort.clone())
+    } else {
+        provider
             .and_then(|p| p.claude.as_ref())
-            .is_some_and(|claude| claude.reasoning_effort.is_some()),
-    }
+            .and_then(|claude| claude.reasoning_effort.clone())
+    };
+    provider_effort.or_else(|| {
+        options
+            .common
+            .as_ref()
+            .and_then(|common| common.reasoning_effort.clone())
+    })
+}
+
+fn non_empty_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn apply_runtime_or_manual_selection(
@@ -199,40 +227,9 @@ fn apply_runtime_or_manual_selection(
     source: &str,
     mut signals: Vec<String>,
 ) -> PreparedTurn {
-    let runtime_model = runtime_options
-        .as_ref()
-        .and_then(|options| options.common.as_ref())
-        .and_then(|common| common.model.clone())
-        .or_else(|| {
-            if backend == BACKEND_CODEX {
-                runtime_options
-                    .as_ref()
-                    .and_then(|options| options.provider.as_ref())
-                    .and_then(|provider| provider.codex.as_ref())
-                    .and_then(|codex| codex.model.clone())
-            } else {
-                None
-            }
-        });
-    let runtime_effort = runtime_options
-        .as_ref()
-        .and_then(|options| options.common.as_ref())
-        .and_then(|common| common.reasoning_effort.clone())
-        .or_else(|| {
-            if backend == BACKEND_CODEX {
-                runtime_options
-                    .as_ref()
-                    .and_then(|options| options.provider.as_ref())
-                    .and_then(|provider| provider.codex.as_ref())
-                    .and_then(|codex| codex.reasoning_effort.clone())
-            } else {
-                runtime_options
-                    .as_ref()
-                    .and_then(|options| options.provider.as_ref())
-                    .and_then(|provider| provider.claude.as_ref())
-                    .and_then(|claude| claude.reasoning_effort.clone())
-            }
-        });
+    let runtime_model = runtime_options_model_for_backend(backend, runtime_options.as_ref());
+    let runtime_effort =
+        runtime_options_reasoning_effort_for_backend(backend, runtime_options.as_ref());
     if source == "runtimeOptions" {
         signals.push("runtimeOptions 显式覆盖".to_string());
     }
@@ -337,7 +334,7 @@ fn apply_auto_turn_decision(
         normalize_reasoning_effort_for_backend(composer.reasoning_effort.clone(), backend)
     };
     if selected_effort.is_none() && settings.allow_reasoning_effort {
-        selected_effort = Some(default_effort_for_tier(backend, selected_tier).to_string());
+        selected_effort = Some(default_effort_for_tier(selected_tier));
     }
 
     let plan_mode = if settings.allow_plan_mode {
@@ -592,26 +589,14 @@ fn parse_reasoning_effort(value: Option<&str>, backend: &str) -> Result<Option<S
     if trimmed.is_empty() {
         return Err("辅助模型决策缺少有效 reasoningEffort".to_string());
     }
-    let normalized = if backend == BACKEND_CODEX && trimmed == "max" {
-        "xhigh"
-    } else {
-        trimmed
-    };
-    normalize_reasoning_effort_for_backend(Some(normalized.to_string()), backend)
+    normalize_reasoning_effort_for_backend(Some(trimmed.to_string()), backend)
         .ok_or_else(|| "辅助模型决策包含无效 reasoningEffort".to_string())
         .map(Some)
 }
 
 fn model_for_tier(backend: &str, tier: ModelTier) -> String {
-    let desired = match (backend, tier) {
-        (BACKEND_CODEX, ModelTier::Light) => "gpt-5.4-mini",
-        (BACKEND_CODEX, ModelTier::Normal) => "gpt-5.4",
-        (BACKEND_CODEX, ModelTier::Deep) => "gpt-5.5",
-        (BACKEND_CLAUDE, ModelTier::Light) => "claude-haiku-4-5",
-        (BACKEND_CLAUDE, ModelTier::Normal) => "claude-sonnet-4-6",
-        (BACKEND_CLAUDE, ModelTier::Deep) => "claude-opus-4-7",
-        _ => default_model_for_backend(backend),
-    };
+    let desired = model_selection_contract::auto_model_for_tier(backend, tier.as_str())
+        .unwrap_or_else(|| default_model_for_backend(backend));
     if model_options_for_backend(backend)
         .iter()
         .any(|option| option.id == desired)
@@ -623,20 +608,20 @@ fn model_for_tier(backend: &str, tier: ModelTier) -> String {
 }
 
 fn tier_for_model(backend: &str, model: &str) -> ModelTier {
-    match (backend, model) {
-        (BACKEND_CODEX, "gpt-5.4-mini") | (BACKEND_CLAUDE, "claude-haiku-4-5") => ModelTier::Light,
-        (BACKEND_CODEX, "gpt-5.5") | (BACKEND_CLAUDE, "claude-opus-4-7") => ModelTier::Deep,
-        _ => ModelTier::Normal,
+    if let Some(tier_name) = model_selection_contract::tier_for_model(backend, model) {
+        return parse_tier(Some(tier_name)).unwrap_or(ModelTier::Normal);
     }
+    ModelTier::Normal
 }
 
-fn default_effort_for_tier(backend: &str, tier: ModelTier) -> &'static str {
-    match (backend, tier) {
-        (BACKEND_CLAUDE, ModelTier::Deep) => "high",
-        (_, ModelTier::Light) => "low",
-        (_, ModelTier::Normal) => "medium",
-        (_, ModelTier::Deep) => "high",
-    }
+fn default_effort_for_tier(tier: ModelTier) -> String {
+    model_selection_contract::auto_reasoning_effort_for_tier(tier.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| match tier {
+            ModelTier::Light => "low".to_string(),
+            ModelTier::Normal => "medium".to_string(),
+            ModelTier::Deep => "high".to_string(),
+        })
 }
 
 fn truncate_chars(text: &str, max: usize) -> String {
@@ -646,7 +631,10 @@ fn truncate_chars(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::types::CodexComposerSettings;
+    use crate::chat::types::{
+        CodexComposerSettings, ProviderRuntimeOptionsProvider, RuntimeSettingsCommon,
+    };
+    use crate::BACKEND_CLAUDE;
 
     fn composer(backend: &str) -> ChatComposerState {
         ChatComposerState {
@@ -776,6 +764,81 @@ mod tests {
     }
 
     #[test]
+    fn runtime_options_helpers_match_contracts_precedence() {
+        let options = ProviderRuntimeOptions {
+            common: Some(RuntimeSettingsCommon {
+                model: Some(" gpt-5.4-mini ".to_string()),
+                reasoning_effort: Some("medium".to_string()),
+                ..RuntimeSettingsCommon::default()
+            }),
+            provider: Some(ProviderRuntimeOptionsProvider {
+                codex: Some(RuntimeSettingsCodex {
+                    model: Some("gpt-5.5".to_string()),
+                    reasoning_effort: Some("high".to_string()),
+                    ..RuntimeSettingsCodex::default()
+                }),
+                claude: Some(RuntimeSettingsClaude {
+                    reasoning_effort: Some("xhigh".to_string()),
+                    ..RuntimeSettingsClaude::default()
+                }),
+            }),
+            ..ProviderRuntimeOptions::default()
+        };
+
+        assert_eq!(
+            runtime_options_model_for_backend(BACKEND_CODEX, Some(&options)).as_deref(),
+            Some("gpt-5.4-mini")
+        );
+        assert_eq!(
+            runtime_options_reasoning_effort_for_backend(BACKEND_CODEX, Some(&options)).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            runtime_options_reasoning_effort_for_backend(BACKEND_CLAUDE, Some(&options)).as_deref(),
+            Some("xhigh")
+        );
+        assert!(has_explicit_runtime_model_or_effort(
+            BACKEND_CODEX,
+            Some(&options)
+        ));
+    }
+
+    #[test]
+    fn runtime_options_selection_uses_provider_effort_before_common_effort() {
+        let options = ProviderRuntimeOptions {
+            common: Some(RuntimeSettingsCommon {
+                model: Some("gpt-5.4-mini".to_string()),
+                reasoning_effort: Some("medium".to_string()),
+                ..RuntimeSettingsCommon::default()
+            }),
+            provider: Some(ProviderRuntimeOptionsProvider {
+                codex: Some(RuntimeSettingsCodex {
+                    reasoning_effort: Some("high".to_string()),
+                    ..RuntimeSettingsCodex::default()
+                }),
+                ..ProviderRuntimeOptionsProvider::default()
+            }),
+            ..ProviderRuntimeOptions::default()
+        };
+        let prepared = apply_runtime_or_manual_selection(
+            BACKEND_CODEX,
+            composer(BACKEND_CODEX),
+            Some(options),
+            "runtimeOptions",
+            Vec::new(),
+        );
+        let common = prepared
+            .runtime_options
+            .expect("runtime options")
+            .common
+            .expect("common settings");
+
+        assert_eq!(prepared.composer.model, "gpt-5.4-mini");
+        assert_eq!(common.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(common.model_selection.unwrap()["source"], "runtimeOptions");
+    }
+
+    #[test]
     fn invalid_decision_enums_block_turn() {
         let mut invalid_tier = raw_decision();
         invalid_tier.tier = Some("huge".to_string());
@@ -817,6 +880,24 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("没有可分叉的 session"));
+    }
+
+    #[test]
+    fn model_selection_defaults_are_loaded_from_contracts_manifest() {
+        assert_eq!(
+            model_for_tier(BACKEND_CODEX, ModelTier::Light),
+            "gpt-5.4-mini"
+        );
+        assert_eq!(model_for_tier(BACKEND_CODEX, ModelTier::Deep), "gpt-5.5");
+        assert_eq!(
+            model_for_tier(BACKEND_CLAUDE, ModelTier::Normal),
+            "claude-sonnet-4-6",
+        );
+        assert_eq!(
+            tier_for_model(BACKEND_CLAUDE, "claude-opus-4-7"),
+            ModelTier::Deep
+        );
+        assert_eq!(default_effort_for_tier(ModelTier::Normal), "medium");
     }
 
     #[test]

@@ -4,7 +4,7 @@ import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 import TimelinePendingAction from "./TimelinePendingAction.vue";
 import { measurePerfAsync } from "../../utils/perf";
 import {

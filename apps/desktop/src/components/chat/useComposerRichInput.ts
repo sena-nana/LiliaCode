@@ -1,4 +1,4 @@
-import { computed, nextTick, ref, watch, type ComputedRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComputedRef } from "vue";
 import type { ChatAttachment, ChatConversationReference } from "@lilia/contracts";
 import {
   attachmentPart,
@@ -43,6 +43,8 @@ export function useComposerRichInput(options: {
   const richEditor = ref<HTMLDivElement | null>(null);
   const inputSelection = ref(0);
   let observedAppendToEndKey = options.appendAttachmentsToEndKey.value;
+  let disposed = false;
+  let focusSeq = 0;
 
   const serializedText = computed(() => serializeComposerParts(composerParts.value));
   const plainText = computed(() =>
@@ -288,7 +290,10 @@ export function useComposerRichInput(options: {
   }
 
   function focusAt(offset = inputSelection.value) {
+    if (disposed) return;
+    const seq = ++focusSeq;
     void nextTick(() => {
+      if (disposed || seq !== focusSeq) return;
       const editor = richEditor.value;
       if (!editor) return;
       editor.focus();
@@ -599,6 +604,11 @@ export function useComposerRichInput(options: {
     },
     { immediate: true },
   );
+
+  onBeforeUnmount(() => {
+    disposed = true;
+    focusSeq += 1;
+  });
 
   return {
     inputSelection,

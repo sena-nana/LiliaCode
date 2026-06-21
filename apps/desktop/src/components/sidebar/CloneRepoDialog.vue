@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { FolderOpen, Github, Lock, Sparkles } from "lucide-vue-next";
 import type {
@@ -44,6 +44,9 @@ const repoLoadingMore = ref(false);
 const repoLoadError = ref<string | null>(null);
 const nextRepoPage = ref<number | null>(null);
 const selectedRepo = ref<GitHubRepoSummary | null>(null);
+let disposed = false;
+let initSeq = 0;
+let repoLoadSeq = 0;
 
 const isBound = computed(() => bindingStatus.value?.state === "bound");
 const queryTrimmed = computed(() => query.value.trim());
@@ -133,7 +136,8 @@ async function safeHomeDir(): Promise<string> {
 }
 
 async function loadBindingStatus() {
-  bindingStatus.value = await getGitHubBindingStatus();
+  const status = await getGitHubBindingStatus();
+  if (!disposed) bindingStatus.value = status;
 }
 
 async function loadRepoPage(
@@ -141,7 +145,8 @@ async function loadRepoPage(
   append = false,
   options: { force?: boolean; showLoading?: boolean } = {},
 ) {
-  if (!isBound.value) return;
+  if (disposed || !isBound.value) return;
+  const seq = ++repoLoadSeq;
   const showLoading = options.showLoading ?? !append;
   if (append) {
     repoLoadingMore.value = true;
@@ -152,10 +157,12 @@ async function loadRepoPage(
     const result = page === 1
       ? await preloadGitHubRepos({ force: options.force })
       : await listGitHubRepos(page);
+    if (disposed || seq !== repoLoadSeq) return;
     applyRepoPage(result, append);
   } catch (err) {
-    showRepoLoadError(err);
+    if (!disposed && seq === repoLoadSeq) showRepoLoadError(err);
   } finally {
+    if (disposed || seq !== repoLoadSeq) return;
     if (showLoading) {
       repoLoading.value = false;
     }
@@ -169,12 +176,14 @@ function startReposLoad() {
 }
 
 async function maybeLoadMoreRepos() {
-  if (!isBound.value || !nextRepoPage.value || repoLoadingMore.value) return;
+  if (disposed || !isBound.value || !nextRepoPage.value || repoLoadingMore.value) return;
   if (filteredRepos.value.length > 0 && queryTrimmed.value) return;
   await loadRepoPage(nextRepoPage.value, true);
 }
 
 async function init() {
+  if (disposed) return;
+  const seq = ++initSeq;
   query.value = "";
   cloneError.value = null;
   cloneBusy.value = false;
@@ -188,10 +197,13 @@ async function init() {
       getProjectSettings(),
       loadBindingStatus(),
     ]);
+    if (disposed || seq !== initSeq) return;
     if (settings.cloneParentDir && settings.cloneParentDir.trim()) {
       cloneParent.value = settings.cloneParentDir.trim();
     } else {
-      cloneParent.value = await safeHomeDir();
+      const home = await safeHomeDir();
+      if (disposed || seq !== initSeq) return;
+      cloneParent.value = home;
     }
     if (isBound.value) {
       const cached = readCachedGitHubRepos();
@@ -204,26 +216,32 @@ async function init() {
       }).catch(() => undefined);
     }
   } catch {
-    cloneParent.value = await safeHomeDir();
+    const home = await safeHomeDir();
+    if (disposed || seq !== initSeq) return;
+    cloneParent.value = home;
   }
   await nextTick();
+  if (disposed || seq !== initSeq) return;
   cloneInput.value?.focus({ open: false });
 }
 
 async function openGitHubBindingSettings() {
+  if (disposed) return;
   emit("close");
   await router.push({ path: "/settings", query: { tab: "project" } });
 }
 
 async function pickCloneParent() {
+  if (disposed) return;
   try {
     const picked = await pickFolder({
       title: "选择 clone 目标父目录",
       defaultPath: cloneParent.value || null,
     });
+    if (disposed) return;
     if (picked) cloneParent.value = picked;
   } catch (err) {
-    cloneError.value = `选择文件夹失败：${String(err)}`;
+    if (!disposed) cloneError.value = `选择文件夹失败：${String(err)}`;
   }
 }
 
@@ -254,7 +272,7 @@ function handleSearchInput() {
 }
 
 async function confirmClone() {
-  if (cloneBusy.value) return;
+  if (disposed || cloneBusy.value) return;
   cloneError.value = null;
   const input = queryTrimmed.value;
   const parent = cloneParent.value.trim();
@@ -278,21 +296,30 @@ async function confirmClone() {
       name: deriveProjectName(cloned) || "新项目",
       cwd: cloned,
     });
+    if (disposed) return;
     emit("cloned", project);
     emit("close");
   } catch (err) {
+    if (disposed) return;
     if (isGitHubBindingExpiredError(err)) {
       showRepoLoadError(err);
     } else {
       cloneError.value = String(err);
     }
   } finally {
-    cloneBusy.value = false;
+    if (!disposed) cloneBusy.value = false;
   }
 }
 
 onMounted(() => {
+  disposed = false;
   void init();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  initSeq += 1;
+  repoLoadSeq += 1;
 });
 </script>
 

@@ -41,6 +41,7 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { installUnlistenFns, runUnlistenFns } from "../../utils/eventListeners";
 
 const AutomationInspectorPanel = defineAsyncComponent({
   suspensible: false,
@@ -77,42 +78,52 @@ const workflowHydrating = ref(false);
 const unlisteners = ref<Array<() => void>>([]);
 const canvasFitRequestKey = ref(0);
 let canvasMountSeq = 0;
+let cancelCanvasMountPaint: (() => void) | null = null;
 let inspectorIdleHandle: number | null = null;
+let cancelInspectorMountPaint: (() => void) | null = null;
 let inspectorMountSeq = 0;
 let pendingRunsRefresh = true;
 let workspaceDisposed = false;
 let listenerInstallSeq = 0;
+let cancelListenerInstallPaint: (() => void) | null = null;
 let workflowHydrationSeq = 0;
+let cancelWorkflowHydrationPaint: (() => void) | null = null;
 let pendingCanvasFitAfterHydration = false;
 
 function setError(message: string) {
+  if (workspaceDisposed) return;
   errorText.value = message || null;
 }
 
 const runsController = useAutomationRuns({
   selectedWorkflowId,
   setError,
+  isDisposed: () => workspaceDisposed,
 });
 const graph = useAutomationGraph({
   runNodeStates: runsController.selectedRunNodeStates,
 });
 
 async function refreshRuns() {
+  if (workspaceDisposed) return;
   if (!inspectorReady.value) {
     pendingRunsRefresh = true;
     return;
   }
   pendingRunsRefresh = false;
   await runsController.refreshRuns();
+  if (workspaceDisposed) return;
   graph.refreshNodeStatuses();
 }
 
 async function refreshAfterRunEvent(run: AutomationRun) {
+  if (workspaceDisposed) return;
   if (!inspectorReady.value) {
     pendingRunsRefresh = true;
     return;
   }
   await runsController.refreshAfterRunEvent(run);
+  if (workspaceDisposed) return;
   graph.refreshNodeStatuses();
 }
 
@@ -123,6 +134,7 @@ const workspace = useAutomationWorkspace({
   refreshRuns,
   resetRunSelection: runsController.resetRunSelection,
   setError,
+  isDisposed: () => workspaceDisposed,
 });
 
 const {
@@ -227,9 +239,12 @@ function toggleScopeIncludeInbox() {
 
 function scheduleCanvasMount() {
   if (canvasReady.value) return;
+  cancelCanvasMountPaint?.();
+  cancelCanvasMountPaint = null;
   const seq = ++canvasMountSeq;
   const stage = beginPerfStage("automations.canvas.mount");
-  scheduleAfterPaint(() => {
+  cancelCanvasMountPaint = scheduleAfterPaint(() => {
+    cancelCanvasMountPaint = null;
     if (seq !== canvasMountSeq || canvasReady.value) {
       stage.end("cancelled");
       return;
@@ -241,9 +256,12 @@ function scheduleCanvasMount() {
 
 function scheduleInspectorMount() {
   if (inspectorReady.value) return;
+  cancelInspectorMountPaint?.();
+  cancelInspectorMountPaint = null;
   const seq = ++inspectorMountSeq;
   const stage = beginPerfStage("automations.inspector.mount");
-  scheduleAfterPaint(() => {
+  cancelInspectorMountPaint = scheduleAfterPaint(() => {
+    cancelInspectorMountPaint = null;
     if (seq !== inspectorMountSeq || inspectorReady.value) {
       stage.end("cancelled");
       return;
@@ -299,9 +317,12 @@ function applySelectedWorkflowGraph(detail: string) {
 
 function scheduleWorkflowHydration(detail: string) {
   const seq = ++workflowHydrationSeq;
+  cancelWorkflowHydrationPaint?.();
+  cancelWorkflowHydrationPaint = null;
   workflowHydrating.value = true;
   const stage = beginPerfStage("automations.workflow.switch", { detail });
-  scheduleAfterPaint(() => {
+  cancelWorkflowHydrationPaint = scheduleAfterPaint(() => {
+    cancelWorkflowHydrationPaint = null;
     if (workspaceDisposed || seq !== workflowHydrationSeq) {
       if (seq === workflowHydrationSeq) workflowHydrating.value = false;
       stage.end("cancelled");
@@ -324,27 +345,34 @@ function scheduleWorkflowHydration(detail: string) {
 
 function installAutomationListenersInBackground() {
   const seq = ++listenerInstallSeq;
-  scheduleAfterPaint(() => {
+  cancelListenerInstallPaint?.();
+  cancelListenerInstallPaint = null;
+  cancelListenerInstallPaint = scheduleAfterPaint(() => {
+    cancelListenerInstallPaint = null;
     if (workspaceDisposed || seq !== listenerInstallSeq) return;
     void measurePerfAsync(
       "automations.listeners.install",
       async () => {
-        const changed = await onAutomationChanged(() => {
-          void refreshWorkflows();
-        });
-        const runListeners = await onAutomationRunUpdated((event) => {
-          if (!selectedWorkflowId.value || event.run.workflowId === selectedWorkflowId.value) {
-            void refreshAfterRunEvent(event.run).catch((err) => {
-              setError(String(err));
+        const installed = await installUnlistenFns([
+          () => onAutomationChanged(() => {
+            void refreshWorkflows();
+          }),
+          async () => {
+            const runListeners = await onAutomationRunUpdated((event) => {
+              if (!selectedWorkflowId.value || event.run.workflowId === selectedWorkflowId.value) {
+                void refreshAfterRunEvent(event.run).catch((err) => {
+                  setError(String(err));
+                });
+              }
             });
-          }
-        });
+            return () => runUnlistenFns(runListeners);
+          },
+        ]);
         if (workspaceDisposed || seq !== listenerInstallSeq) {
-          changed();
-          for (const unlisten of runListeners) unlisten();
+          runUnlistenFns(installed);
           return;
         }
-        unlisteners.value = [changed, ...runListeners];
+        unlisteners.value = installed;
       },
       { detail: "workspace" },
     ).catch((err) => {
@@ -380,6 +408,7 @@ onMounted(async () => {
     () => refreshWorkflows(),
     { detail: "mount" },
   );
+  if (workspaceDisposed) return;
   installAutomationListenersInBackground();
 });
 
@@ -389,11 +418,19 @@ onBeforeUnmount(() => {
   inspectorMountSeq += 1;
   listenerInstallSeq += 1;
   workflowHydrationSeq += 1;
+  cancelCanvasMountPaint?.();
+  cancelCanvasMountPaint = null;
+  cancelInspectorMountPaint?.();
+  cancelInspectorMountPaint = null;
+  cancelListenerInstallPaint?.();
+  cancelListenerInstallPaint = null;
+  cancelWorkflowHydrationPaint?.();
+  cancelWorkflowHydrationPaint = null;
   if (inspectorIdleHandle !== null) {
     cancelIdleRun(inspectorIdleHandle);
     inspectorIdleHandle = null;
   }
-  for (const unlisten of unlisteners.value) unlisten();
+  runUnlistenFns(unlisteners.value.splice(0).reverse());
 });
 </script>
 

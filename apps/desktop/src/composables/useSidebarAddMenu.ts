@@ -3,10 +3,13 @@ import {
   createAnchoredMenuPosition,
   type AnchoredMenuPosition,
 } from "./menuMotion";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 export function useSidebarAddMenu() {
   const addMenuOpen = ref(false);
   const menuPos = ref<AnchoredMenuPosition>(createAnchoredMenuPosition(0, 0));
+  let listenerSeq = 0;
+  let documentUnlisteners: Array<() => void> = [];
 
   function openAddMenu(e: MouseEvent) {
     menuPos.value = createAnchoredMenuPosition(
@@ -35,20 +38,31 @@ export function useSidebarAddMenu() {
     }
   }
 
+  function clearDocumentListeners() {
+    runUnlistenFns(documentUnlisteners.splice(0).reverse());
+  }
+
+  function installDocumentListeners() {
+    clearDocumentListeners();
+    documentUnlisteners = [
+      addDomEventListener(document, "pointerdown", onDocPointer, true),
+      addDomEventListener(document, "keydown", onDocKey),
+    ];
+  }
+
   watch(addMenuOpen, async (v) => {
+    const seq = ++listenerSeq;
+    clearDocumentListeners();
     if (v) {
       await nextTick();
-      document.addEventListener("pointerdown", onDocPointer, true);
-      document.addEventListener("keydown", onDocKey);
-    } else {
-      document.removeEventListener("pointerdown", onDocPointer, true);
-      document.removeEventListener("keydown", onDocKey);
+      if (seq !== listenerSeq || !addMenuOpen.value) return;
+      installDocumentListeners();
     }
   });
 
   onBeforeUnmount(() => {
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onDocKey);
+    listenerSeq += 1;
+    clearDocumentListeners();
   });
 
   return {

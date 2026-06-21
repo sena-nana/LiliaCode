@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   HookDocumentUpdateInput,
   HookDocumentView,
+  HookHandlerUpdateInput,
+  HookHandlerView,
   HooksOverview,
   HookSourceSummary,
   PluginBackendKind,
@@ -17,10 +19,31 @@ import type {
   PluginSkill,
   PluginsOverview,
 } from "@lilia/contracts";
+import {
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_CREATE_SKILL_COMMAND,
+  PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
+  PLUGINS_HOOKS_OVERVIEW_COMMAND,
+  PLUGINS_OPEN_HOOK_CONFIG_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_OVERVIEW_COMMAND,
+  PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_UPDATE_MCP_SERVER_COMMAND,
+} from "@lilia/contracts";
 
 export type {
   HookDocumentUpdateInput,
   HookDocumentView,
+  HookHandlerUpdateInput,
+  HookHandlerView,
   HooksOverview,
   HookSourceSummary,
   PluginBackendKind,
@@ -33,13 +56,13 @@ export type {
 };
 
 export function pluginsOverview(projectCwd?: string | null): Promise<PluginsOverview> {
-  return invoke<PluginsOverview>("plugins_overview", {
+  return invoke<PluginsOverview>(PLUGINS_OVERVIEW_COMMAND, {
     projectCwd: projectCwd ?? null,
   });
 }
 
 export function hooksOverview(projectCwd?: string | null): Promise<HooksOverview> {
-  return invoke<HooksOverview>("plugins_hooks_overview", {
+  return invoke<HooksOverview>(PLUGINS_HOOKS_OVERVIEW_COMMAND, {
     projectCwd: projectCwd ?? null,
   });
 }
@@ -50,7 +73,7 @@ export function createSkill(
   name: string,
   description: string,
 ): Promise<PluginSkill> {
-  return invoke<PluginSkill>("plugins_create_skill", {
+  return invoke<PluginSkill>(PLUGINS_CREATE_SKILL_COMMAND, {
     scope,
     projectCwd,
     name,
@@ -63,7 +86,7 @@ export function deleteSkill(
   projectCwd: string | null,
   name: string,
 ): Promise<void> {
-  return invoke<void>("plugins_delete_skill", {
+  return invoke<void>(PLUGINS_DELETE_SKILL_COMMAND, {
     scope,
     projectCwd,
     name,
@@ -76,7 +99,7 @@ export function setSkillEnabled(
   name: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("plugins_set_skill_enabled", {
+  return invoke<void>(PLUGINS_SET_SKILL_ENABLED_COMMAND, {
     scope,
     projectCwd,
     name,
@@ -90,7 +113,7 @@ export function setPackageEnabled(
   name: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("plugins_set_package_enabled", {
+  return invoke<void>(PLUGINS_SET_PACKAGE_ENABLED_COMMAND, {
     backend,
     scope,
     name,
@@ -102,7 +125,7 @@ export function createMcpServer(
   backend: PluginBackendKind,
   input: PluginMcpServerInput,
 ): Promise<PluginMcpServer> {
-  return invoke<PluginMcpServer>("plugins_create_mcp_server", { backend, input });
+  return invoke<PluginMcpServer>(PLUGINS_CREATE_MCP_SERVER_COMMAND, { backend, input });
 }
 
 export function updateMcpServer(
@@ -110,11 +133,11 @@ export function updateMcpServer(
   name: string,
   input: PluginMcpServerInput,
 ): Promise<PluginMcpServer> {
-  return invoke<PluginMcpServer>("plugins_update_mcp_server", { backend, name, input });
+  return invoke<PluginMcpServer>(PLUGINS_UPDATE_MCP_SERVER_COMMAND, { backend, name, input });
 }
 
 export function deleteMcpServer(backend: PluginBackendKind, name: string): Promise<void> {
-  return invoke<void>("plugins_delete_mcp_server", { backend, name });
+  return invoke<void>(PLUGINS_DELETE_MCP_SERVER_COMMAND, { backend, name });
 }
 
 export function setMcpServerEnabled(
@@ -122,22 +145,22 @@ export function setMcpServerEnabled(
   name: string,
   enabled: boolean,
 ): Promise<void> {
-  return invoke<void>("plugins_set_mcp_server_enabled", { backend, name, enabled });
+  return invoke<void>(PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND, { backend, name, enabled });
 }
 
 export function openMcpConfig(backend: PluginBackendKind): Promise<void> {
-  return invoke<void>("plugins_open_mcp_config", { backend });
+  return invoke<void>(PLUGINS_OPEN_MCP_CONFIG_COMMAND, { backend });
 }
 
 export function readHookSource(source: HookSourceSummary): Promise<HookDocumentView> {
-  return invoke<HookDocumentView>("plugins_read_hook_source", { source });
+  return invoke<HookDocumentView>(PLUGINS_READ_HOOK_SOURCE_COMMAND, { source });
 }
 
 export function updateHookSource(
   source: HookSourceSummary,
   input: HookDocumentUpdateInput,
 ): Promise<HookDocumentView> {
-  return invoke<HookDocumentView>("plugins_update_hook_source", { source, input });
+  return invoke<HookDocumentView>(PLUGINS_UPDATE_HOOK_SOURCE_COMMAND, { source, input });
 }
 
 export function createHookSource(
@@ -145,7 +168,7 @@ export function createHookSource(
   scope: string,
   projectCwd?: string | null,
 ): Promise<HookSourceSummary> {
-  return invoke<HookSourceSummary>("plugins_create_hook_source", {
+  return invoke<HookSourceSummary>(PLUGINS_CREATE_HOOK_SOURCE_COMMAND, {
     backend,
     scope,
     projectCwd: projectCwd ?? null,
@@ -153,19 +176,19 @@ export function createHookSource(
 }
 
 export function deleteHookSource(source: HookSourceSummary): Promise<void> {
-  return invoke<void>("plugins_delete_hook_source", { source });
+  return invoke<void>(PLUGINS_DELETE_HOOK_SOURCE_COMMAND, { source });
 }
 
 export function setHookSourceEnabled(
   source: HookSourceSummary,
   enabled: boolean,
 ): Promise<HookSourceSummary> {
-  return invoke<HookSourceSummary>("plugins_set_hook_source_enabled", {
+  return invoke<HookSourceSummary>(PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND, {
     source,
     enabled,
   });
 }
 
 export function openHookConfig(source: HookSourceSummary): Promise<void> {
-  return invoke<void>("plugins_open_hook_config", { source });
+  return invoke<void>(PLUGINS_OPEN_HOOK_CONFIG_COMMAND, { source });
 }
