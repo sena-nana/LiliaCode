@@ -47,6 +47,7 @@ const {
   preferredPlacement,
   offset: 0,
 });
+void menuEl;
 
 async function pickLocalFolder() {
   emit("close");

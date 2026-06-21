@@ -28,6 +28,7 @@ import {
   connectionDiagnostic,
   runtimeDiagnostic,
 } from "./providerDiagnostics";
+import RemoteControlSection from "./RemoteControlSection.vue";
 
 const {
   report,
@@ -440,4 +441,5 @@ onMounted(async () => {
       </div>
     </div>
   </div>
+  <RemoteControlSection />
 </template>

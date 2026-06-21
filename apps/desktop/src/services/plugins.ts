@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   HookDocumentUpdateInput,
   HookDocumentView,
+  HookHandlerUpdateInput,
+  HookHandlerView,
   HooksOverview,
   HookSourceSummary,
   PluginBackendKind,
@@ -21,6 +23,8 @@ import type {
 export type {
   HookDocumentUpdateInput,
   HookDocumentView,
+  HookHandlerUpdateInput,
+  HookHandlerView,
   HooksOverview,
   HookSourceSummary,
   PluginBackendKind,

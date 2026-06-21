@@ -23,6 +23,7 @@ export interface SidebarConversationSummary {
   projectId: string | null;
   projectName: string | null;
   title: string;
+  status: TaskStatus;
   createdAt: number;
   pinned: boolean;
   route: string;

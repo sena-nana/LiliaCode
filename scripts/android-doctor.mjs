@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { formatDeviceList, parseAdbDevices } from "./android-smoke-lib.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedNdk = "28.2.13676358";
@@ -28,7 +29,11 @@ checkSdkTool(androidHome, join("platforms", "android-36", "android.jar"));
 checkSdkTool(androidHome, join("build-tools", "36.0.0", "aapt2.exe"));
 checkSdkTool(androidHome, join("ndk", expectedNdk, "source.properties"));
 checkSdkManager(androidHome);
+checkAdbDevices(androidHome);
+checkWindowsVirtualizationFirmware();
+checkEmulatorAcceleration(androidHome);
 checkRustTargets();
+checkIrohFfiSource();
 
 const maxName = Math.max(...checks.map((check) => check.name.length));
 for (const check of checks) {
@@ -96,12 +101,103 @@ function checkSdkManager(home) {
   addCheck("sdkmanager", Boolean(found), found ?? "Android command-line tools missing");
 }
 
+function checkAdbDevices(home) {
+  const adb = home ? join(home, "platform-tools", "adb.exe") : "adb";
+  const result = run(adb, ["devices", "-l"]);
+  if (result.status !== 0) {
+    addCheck("adb-devices", false, "could not list Android devices", false);
+    return;
+  }
+  const devices = parseAdbDevices(result.stdout ?? "");
+  const online = devices.filter((device) => device.state === "device");
+  if (online.length > 0) {
+    addCheck(
+      "adb-devices",
+      true,
+      `${online.length} online: ${online.map((device) => device.serial).join(", ")}`,
+      false,
+    );
+    return;
+  }
+  const unauthorized = devices.filter((device) => device.state === "unauthorized");
+  if (unauthorized.length > 0) {
+    addCheck(
+      "adb-devices",
+      false,
+      `authorization pending: ${unauthorized.map((device) => device.serial).join(", ")}; unlock phone and accept USB debugging RSA dialog`,
+      false,
+    );
+    return;
+  }
+  addCheck("adb-devices", false, `no online devices: ${formatDeviceList(devices)}`, false);
+}
+
+function checkEmulatorAcceleration(home) {
+  const emulator = home ? join(home, "emulator", "emulator.exe") : null;
+  if (!emulator || !existsSync(emulator)) {
+    addCheck("emulator-accel", false, "emulator.exe missing", false);
+    return;
+  }
+  const result = run(emulator, ["-accel-check"]);
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  addCheck(
+    "emulator-accel",
+    result.status === 0,
+    result.status === 0
+      ? firstLine(output)
+      : `${emulatorAccelSummary(output)}; required for x86_64 AVD end-to-end testing`,
+    false,
+  );
+}
+
+function checkWindowsVirtualizationFirmware() {
+  if (process.platform !== "win32") return;
+  const result = run("powershell", [
+    "-NoProfile",
+    "-Command",
+    "Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty VirtualizationFirmwareEnabled",
+  ]);
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  if (result.status !== 0) {
+    addCheck("virtualization-firmware", false, "could not read firmware virtualization state", false);
+    return;
+  }
+  const enabled = output.toLowerCase() === "true";
+  addCheck(
+    "virtualization-firmware",
+    enabled,
+    enabled
+      ? "enabled"
+      : "disabled in firmware/BIOS; x86_64 AVDs cannot run until virtualization is enabled",
+    false,
+  );
+}
+
+function emulatorAccelSummary(output) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && line !== "accel:" && line !== "accel" && !/^\d+$/.test(line))
+    ?? "emulator acceleration unavailable";
+}
+
 function checkRustTargets() {
   const result = run("rustup", ["target", "list", "--installed"]);
   const installed = new Set((result.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
   for (const target of expectedTargets) {
     addCheck(`rust:${target}`, installed.has(target), installed.has(target) ? "installed" : "missing");
   }
+}
+
+function checkIrohFfiSource() {
+  const source = process.env.IROH_FFI_DIR;
+  const ok = Boolean(source && existsSync(source));
+  addCheck(
+    "IROH_FFI_DIR",
+    ok,
+    ok ? source : "optional for current Maven-linked shell; required before source-built iroh Android binding",
+    false,
+  );
 }
 
 function findAndroidHome() {

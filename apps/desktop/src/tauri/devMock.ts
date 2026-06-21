@@ -151,6 +151,35 @@ let agentInteractionSubagents = [{
   enabled: true,
 }];
 
+let remoteControlEnabled = false;
+let remoteControlTicket: Record<string, unknown> | null = null;
+let remoteControlDevices: Record<string, unknown>[] = [];
+const remoteControlBridgeUrl = "http://127.0.0.1:41478";
+
+function remoteControlStatus() {
+  return {
+    hostEnabled: remoteControlEnabled,
+    state: remoteControlEnabled ? (remoteControlTicket ? "pairing" : "listening") : "disabled",
+    pcName: "Lilia Dev PC",
+    endpoint: remoteControlEnabled
+      ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }
+      : null,
+    activeTicket: remoteControlTicket,
+    trustedDevices: remoteControlDevices,
+    capabilities: {
+      protocolVersion: 1,
+      minProtocolVersion: 1,
+      alpn: "lilia.remote-control.v1",
+      supportsPairing: true,
+      supportsTaskInbox: true,
+      supportsTimelineSubscription: true,
+      supportsChatSend: true,
+      supportsInteractionResponse: true,
+      supportsInterrupt: true,
+    },
+  };
+}
+
 type MockMemory = {
   id: string;
   scope: "user" | "project";
@@ -242,6 +271,54 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       return false as T;
     case "project_get_settings":
       return { cloneParentDir: "C:\\Files\\workspace", codexDefaults: null, githubBinding: null } as T;
+    case "remote_control_status":
+      return clone(remoteControlStatus()) as T;
+    case "remote_control_set_host_enabled":
+      remoteControlEnabled = bool(args, "enabled");
+      return clone(remoteControlStatus()) as T;
+    case "remote_control_set_pc_name":
+      return clone(remoteControlStatus()) as T;
+    case "remote_control_start_pairing":
+      remoteControlEnabled = true;
+      remoteControlTicket = {
+        id: "mock-ticket",
+        pcName: "Lilia Dev PC",
+        pcEndpoint: { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] },
+        protocolVersion: 1,
+        challenge: "mock-challenge",
+        expiresAt: now + 600_000,
+        bridgeUrl: remoteControlBridgeUrl,
+        pairingUri: `lilia-remote://pair?v=1&ticket=mock-ticket&challenge=mock-challenge&endpoint=mock-pc-endpoint&name=Lilia%20Dev%20PC&bridge=${encodeURIComponent(remoteControlBridgeUrl)}`,
+      };
+      return clone(remoteControlTicket) as T;
+    case "remote_control_cancel_pairing":
+      remoteControlTicket = null;
+      return undefined as T;
+    case "remote_control_revoke_device":
+      remoteControlDevices = remoteControlDevices.map((device) =>
+        device.id === text(args, "deviceId")
+          ? { ...device, trusted: false, revokedAt: now }
+          : device
+      );
+      return clone(remoteControlStatus()) as T;
+    case "remote_control_pair_device": {
+      const input = (args.input ?? {}) as Args;
+      const endpoint = (input.androidEndpoint ?? {}) as Args;
+      const device = {
+        id: `mock-device-${Date.now()}`,
+        kind: "android",
+        displayName: text(input, "deviceName") || "Android device",
+        endpointId: text(endpoint, "endpointId") || "mock-android-endpoint",
+        protocolVersion: 1,
+        trusted: true,
+        firstPairedAt: now,
+        lastSeenAt: now,
+        revokedAt: null,
+      };
+      remoteControlDevices = [device, ...remoteControlDevices];
+      remoteControlTicket = null;
+      return clone(device) as T;
+    }
     case "memory_list": {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       return clone(memories.filter((item) => item.scope === "user" || item.projectId === projectId)) as T;
