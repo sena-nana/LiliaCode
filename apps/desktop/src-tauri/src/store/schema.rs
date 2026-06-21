@@ -51,6 +51,9 @@ pub(super) fn reset_development_schema(conn: &Connection) -> Result<(), String> 
         DROP TABLE IF EXISTS automation_workflows;
         DROP TABLE IF EXISTS memory_injection_states;
         DROP TABLE IF EXISTS memories;
+        DROP TABLE IF EXISTS remote_control_pairing_tickets;
+        DROP TABLE IF EXISTS remote_control_trusted_devices;
+        DROP TABLE IF EXISTS remote_control_settings;
 
         PRAGMA foreign_keys = ON;
         "#,
@@ -180,6 +183,40 @@ fn create_current_schema(conn: &Connection) -> Result<(), String> {
           updated_at             INTEGER NOT NULL,
           FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE remote_control_settings (
+          key        TEXT PRIMARY KEY,
+          value      TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE remote_control_trusted_devices (
+          id                TEXT PRIMARY KEY,
+          display_name      TEXT NOT NULL,
+          endpoint_id       TEXT NOT NULL UNIQUE,
+          protocol_version  INTEGER NOT NULL,
+          trusted           INTEGER NOT NULL DEFAULT 1 CHECK (trusted IN (0, 1)),
+          first_paired_at   INTEGER NOT NULL,
+          last_seen_at      INTEGER,
+          revoked_at        INTEGER
+        );
+
+        CREATE INDEX idx_remote_control_trusted_devices_endpoint
+          ON remote_control_trusted_devices(endpoint_id);
+
+        CREATE TABLE remote_control_pairing_tickets (
+          id             TEXT PRIMARY KEY,
+          challenge      TEXT NOT NULL,
+          pc_name        TEXT NOT NULL,
+          endpoint_id    TEXT NOT NULL,
+          pairing_uri    TEXT NOT NULL,
+          expires_at     INTEGER NOT NULL,
+          consumed_at    INTEGER,
+          created_at     INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_remote_control_pairing_tickets_active
+          ON remote_control_pairing_tickets(expires_at, consumed_at);
 
         CREATE TABLE project_architecture_graphs (
           project_id TEXT PRIMARY KEY,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
+import { defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Archive,

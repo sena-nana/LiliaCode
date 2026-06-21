@@ -14,6 +14,7 @@ export * from "./timeline";
 export * from "./suggestions";
 export * from "./automation";
 export * from "./architecture";
+export * from "./remote-control";
 
 export { deriveTimelineDisplay, isAgentTimelineToolWindowKind } from "./timelineDisplay";
 export type { TimelineDisplayInput } from "./timelineDisplay";

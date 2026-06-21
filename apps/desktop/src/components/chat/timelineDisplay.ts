@@ -48,14 +48,11 @@ type DisplayDerivableEvent = Pick<
 export function readTimelinePayloadRecord(
   event: Pick<AgentTimelineEvent, "payload">,
 ): TimelinePayloadRecord {
-  if (typeof event === "object" && event !== null) {
-    const cached = timelinePayloadRecordCache.get(event);
-    if (cached) return cached;
-    const record = readPayloadRecord(event.payload);
-    timelinePayloadRecordCache.set(event, record);
-    return record;
-  }
-  return readPayloadRecord(event.payload);
+  const cached = timelinePayloadRecordCache.get(event);
+  if (cached) return cached;
+  const record = readPayloadRecord(event.payload);
+  timelinePayloadRecordCache.set(event, record);
+  return record;
 }
 
 /**
@@ -67,16 +64,6 @@ export function readTimelineDisplay(
   event: DisplayDerivableEvent,
   context: TimelineDisplayContext = {},
 ): AgentTimelineDisplay {
-  if (typeof event !== "object" || event === null) {
-    return deriveTimelineDisplay({
-      kind: event.kind,
-      status: event.status,
-      title: event.title,
-      summary: event.summary,
-      payload: event.payload,
-      projectCwd: context.projectCwd,
-    });
-  }
   const cacheKey = context.projectCwd ?? "";
   let cachedByContext = timelineDisplayCache.get(event);
   const cached = cachedByContext?.get(cacheKey);

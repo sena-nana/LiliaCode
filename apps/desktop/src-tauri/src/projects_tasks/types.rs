@@ -64,6 +64,7 @@ pub struct SidebarConversationSummaryRow {
     pub project_id: Option<String>,
     pub project_name: Option<String>,
     pub title: String,
+    pub status: String,
     pub created_at: i64,
     pub pinned: bool,
     pub route: String,

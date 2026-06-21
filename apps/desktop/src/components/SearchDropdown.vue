@@ -47,6 +47,7 @@ const {
   offset: 0,
   matchAnchorWidth: true,
 });
+void menuEl;
 const menuPlacementClass = computed(() =>
   resolvedPlacement.value.startsWith("top")
     ? "search-dropdown__menu--top"
