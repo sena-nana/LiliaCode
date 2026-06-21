@@ -14,14 +14,12 @@ class RemoteHttpClient(
 ) {
     suspend fun bridgeStatus(pc: SavedPc): Result<RemoteBridgeStatus> = withContext(Dispatchers.IO) {
         runCatching {
-            val bridgeUrl = pc.bridgeUrl.trim().trimEnd('/')
-            RemotePayloadParser.parseBridgeStatus(getJson("$bridgeUrl/status"))
+            RemotePayloadParser.parseBridgeStatus(getJson("${bridgeUrl(pc)}/status"))
         }
     }
 
     suspend fun pair(ticket: RemotePairingTicket): Result<SavedPc> = withContext(Dispatchers.IO) {
         runCatching {
-            val bridgeUrl = ticket.bridgeUrl.trim().trimEnd('/')
             val body = JSONObject()
                 .put("ticketId", ticket.ticketId)
                 .put("challenge", ticket.challenge)
@@ -34,7 +32,7 @@ class RemoteHttpClient(
                         .put("relayUrl", JSONObject.NULL)
                         .put("directAddresses", JSONArray()),
                 )
-            val response = postJson("$bridgeUrl/pair", body)
+            val response = postJson("${bridgeUrl(ticket)}/pair", body)
             RemoteEnvelopeAdapter.throwIfError(response, "Pairing failed")
             repository.savePairing(ticket)
         }
@@ -122,15 +120,18 @@ class RemoteHttpClient(
     }
 
     private fun dispatch(pc: SavedPc, request: JSONObject): JSONObject {
-        val bridgeUrl = pc.bridgeUrl.trim().trimEnd('/')
         val envelope = RemoteEnvelopeAdapter.requestEnvelope(pc, repository.deviceEndpointId(), request)
-        val response = postJson("$bridgeUrl/dispatch", envelope)
+        val response = postJson("${bridgeUrl(pc)}/dispatch", envelope)
         val payload = RemoteEnvelopeAdapter.payloadOrThrow(response)
         if (shouldMarkActivePcSeen(request, payload)) {
             repository.markActivePcSeen(pc)
         }
         return payload
     }
+
+    private fun bridgeUrl(pc: SavedPc): String = pc.bridgeUrl.trim().trimEnd('/')
+
+    private fun bridgeUrl(ticket: RemotePairingTicket): String = ticket.bridgeUrl.trim().trimEnd('/')
 
     private fun shouldMarkActivePcSeen(request: JSONObject, payload: JSONObject): Boolean {
         if (request.optString("type") != "connection.resume") return true
