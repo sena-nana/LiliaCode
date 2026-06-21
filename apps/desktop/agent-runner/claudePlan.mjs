@@ -1,6 +1,14 @@
-export const PLAN_APPROVAL_QUESTION_ID = "approve-plan";
+import { claudePermissionRuntime } from "@lilia/contracts/permissionModes.mjs";
+import {
+  TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_CLAUDE_PLAN_TEXT_LIMIT,
+  TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+  TIMELINE_DISPLAY_FILE_CHANGE_PATH_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TINY_TEXT_LIMIT,
+} from "@lilia/contracts/timelineContract.mjs";
 
 export {
+  PLAN_APPROVAL_QUESTION_ID,
   buildPlanApprovalSpec,
   buildPlanRevisionDenyMessage,
   isPlanApprovalAccepted,
@@ -14,53 +22,20 @@ import {
   readFirstString,
   readFirstText,
 } from "../../../packages/contracts/src/toolUtils.mjs";
-
-const PLAN_TOOL_NAMES = new Set(["ExitPlanMode", "exit_plan_mode"]);
-const READONLY_DENIED_TOOLS = new Set([
-  "Bash",
-  "Write",
-  "Edit",
-  "MultiEdit",
-  "NotebookEdit",
-]);
-const READONLY_ALLOWED_TOOLS = new Set([
-  "Read",
-  "LS",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "WebSearch",
-  "NotebookRead",
-  "TodoWrite",
-]);
-
-export function isClaudePlanTool(toolName) {
-  return PLAN_TOOL_NAMES.has(String(toolName || ""));
-}
-
-export function isReadonlyDeniedClaudeTool(toolName) {
-  const name = String(toolName || "");
-  if (READONLY_DENIED_TOOLS.has(name)) return true;
-  return !READONLY_ALLOWED_TOOLS.has(name);
-}
+export {
+  isClaudePlanTool,
+  isReadonlyDeniedClaudeTool,
+} from "@lilia/contracts/claudePlanContract.mjs";
 
 export function normalizeClaudePermissionMode(permission) {
-  switch (permission) {
-    case "full":
-    case "free":
-      return "bypassPermissions";
-    case "ask":
-    case "readonly":
-    default:
-      return "default";
-  }
+  return claudePermissionRuntime(permission)?.permissionMode ?? "default";
 }
 
 export function readPlanAllowedPrompts(input) {
   return readArrayRecords(input?.allowedPrompts)
     .map((item) => ({
-      tool: compactLine(item.tool, 80) || "tool",
-      prompt: compactLine(item.prompt, 400),
+      tool: compactLine(item.tool, TIMELINE_DISPLAY_TINY_TEXT_LIMIT) || "tool",
+      prompt: compactLine(item.prompt, TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT),
     }))
     .filter((item) => item.prompt);
 }
@@ -84,20 +59,36 @@ export function readPlanArchitectureImpacts(input) {
 }
 
 export function extractPlanTextFromInput(input) {
-  return readFirstText(input, ["plan", "content", "text", "markdown"], 12000);
+  return readFirstText(
+    input,
+    ["plan", "content", "text", "markdown"],
+    TIMELINE_DISPLAY_CLAUDE_PLAN_TEXT_LIMIT,
+  );
 }
 
 export function extractPlanResult(output) {
   const parsed = parseRecordJson(output) ?? {};
-  const plan = readFirstText(parsed, ["plan", "content", "text", "markdown"], 12000);
+  const plan = readFirstText(
+    parsed,
+    ["plan", "content", "text", "markdown"],
+    TIMELINE_DISPLAY_CLAUDE_PLAN_TEXT_LIMIT,
+  );
   return {
     plan,
-    filePath: readFirstString(parsed, ["filePath", "file_path"], 1200) || undefined,
+    filePath: readFirstString(
+      parsed,
+      ["filePath", "file_path"],
+      TIMELINE_DISPLAY_FILE_CHANGE_PATH_TEXT_LIMIT,
+    ) || undefined,
     isAgent: parsed.isAgent === true,
     hasTaskTool: parsed.hasTaskTool === true,
     planWasEdited: parsed.planWasEdited === true,
     awaitingLeaderApproval: parsed.awaitingLeaderApproval === true,
-    revisionRequest: readFirstString(parsed, ["revisionRequest", "revision_request"], 6000),
+    revisionRequest: readFirstString(
+      parsed,
+      ["revisionRequest", "revision_request"],
+      TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+    ),
   };
 }
 export function buildPlanPayload({
@@ -112,7 +103,11 @@ export function buildPlanPayload({
   const inputPlan = extractPlanTextFromInput(input);
   const revisionRequest =
     result.revisionRequest ||
-    readFirstString(input, ["revisionRequest", "revision_request"], 6000);
+    readFirstString(
+      input,
+      ["revisionRequest", "revision_request"],
+      TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+    );
   const preserveInputPlan = Boolean(revisionRequest) || approved === false;
   const plan = preserveInputPlan
     ? inputPlan || fallbackPlan || result.plan || ""

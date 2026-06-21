@@ -6,9 +6,34 @@ import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS,
+} from "@lilia/contracts/architectureContract.mjs";
+import { ASK_USER_SINGLE_SELECT_MODE } from "@lilia/contracts/askUserContract.mjs";
+import {
+  LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE,
+  LILIA_BATCH_APPLY_WORKFLOW_TYPE,
+  LILIA_COMPACT_WORKFLOW_TYPE,
+  LILIA_CONFIG_DIAGNOSTICS_WORKFLOW_TYPE,
+  LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
+  LILIA_GOAL_WORKFLOW_TYPE,
+  LILIA_REVIEW_WORKFLOW_TYPE,
+  REMOTE_ENVIRONMENT_COMMAND_TYPE,
+  RUNTIME_SETTINGS_COMMAND_TYPE,
+  SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
+  SESSION_FORK_COMMAND_TYPE,
+  SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
+} from "@lilia/contracts";
+import {
+  RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
+  RUNNER_INTERRUPT_TURN_CONTROL_TYPE,
+  RUNNER_SETTINGS_UPDATE_CONTROL_TYPE,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
 import { runAgentTurn } from "../agent-runner/core.mjs";
 import { createInteractionBroker } from "../agent-runner/interactions.mjs";
 import { createProtocolEmitter } from "../agent-runner/protocol.mjs";
+import { createArchitectureChangeHandler } from "../agent-runner/architecture.mjs";
+import { normalizeRuntimePermission } from "../agent-runner/runtimeSettings.mjs";
 import {
   applyClaudeRuntimePermission,
   mapClaudeInitialPermission,
@@ -22,6 +47,8 @@ import {
 } from "../agent-runner/conversationContext.mjs";
 import {
   codexPermissionProfileIdForMode,
+  codexLegacyPermissionRuntimeParams,
+  codexPermissionRuntimeParams,
   mapCodexApprovalPolicy,
   mapCodexSandboxMode,
   maybeHandleCodexApprovalRequest,
@@ -214,7 +241,7 @@ describe("runner core", () => {
       backend: "codex",
       turn: runnerTurn(""),
       workflow: {
-        type: "lilia_review",
+        type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
       },
     }, {
@@ -233,7 +260,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-review",
       workflow: {
-        type: "lilia_review",
+        type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
       },
     });
@@ -245,7 +272,7 @@ describe("runner core", () => {
       backend: "codex",
       turn: runnerTurn(""),
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -265,7 +292,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-fix",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -278,7 +305,7 @@ describe("runner core", () => {
       backend: "codex",
       turn: runnerTurn(""),
       workflow: {
-        type: "lilia_batch_apply",
+        type: LILIA_BATCH_APPLY_WORKFLOW_TYPE,
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -299,7 +326,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-batch",
       workflow: {
-        type: "lilia_batch_apply",
+        type: LILIA_BATCH_APPLY_WORKFLOW_TYPE,
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
       },
@@ -312,7 +339,7 @@ describe("runner core", () => {
       backend: "codex",
       turn: runnerTurn(""),
       workflow: {
-        type: "lilia_goal",
+        type: LILIA_GOAL_WORKFLOW_TYPE,
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -332,7 +359,7 @@ describe("runner core", () => {
       type: "done",
       sessionId: "thread-goal",
       workflow: {
-        type: "lilia_goal",
+        type: LILIA_GOAL_WORKFLOW_TYPE,
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -344,7 +371,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "codex",
       turn: runnerTurn(""),
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, {
       protocol,
       env: {},
@@ -360,7 +387,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "thread-compact",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     });
   });
 
@@ -369,7 +396,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "codex",
       turn: runnerTurn(""),
-      workflow: { type: "lilia_background_terminals_clean" },
+      workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
     }, {
       protocol,
       env: {},
@@ -385,16 +412,16 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "thread-clean",
-      workflow: { type: "lilia_background_terminals_clean" },
+      workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
     });
   });
 
   it("Codex native runtime command 允许空 prompt 进入 Codex 后端", async () => {
     for (const runtimeCommand of [
-      { type: "session_fork" },
-      { type: "session_management", action: "list" },
-      { type: "runtime_settings", action: "diagnose" },
-      { type: "sandbox_diagnostics", includeDetails: true },
+      { type: SESSION_FORK_COMMAND_TYPE },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "list" },
+      { type: RUNTIME_SETTINGS_COMMAND_TYPE, action: "diagnose" },
+      { type: SANDBOX_DIAGNOSTICS_COMMAND_TYPE, includeDetails: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const result = await runAgentTurn({
@@ -462,7 +489,7 @@ describe("runner core", () => {
     const result = await runAgentTurn({
       backend: "claude",
       turn: runnerTurn(""),
-      runtimeCommand: { type: "session_fork" },
+      runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
       }, {
       protocol,
       env: {},
@@ -478,7 +505,7 @@ describe("runner core", () => {
     expect(json()[0]).toMatchObject({
       type: "done",
       sessionId: "claude-fork",
-      runtimeCommand: { type: "session_fork" },
+      runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
     });
   });
 
@@ -593,7 +620,7 @@ describe("interaction broker", () => {
       },
     });
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "consent-1",
       kind: "tool_consent",
       result: {
@@ -613,9 +640,12 @@ describe("interaction broker", () => {
       questions: [{ id: "q1", question: "Go?", options: [] }],
     });
     broker.handleControlLine("not json");
-    broker.handleControlLine(JSON.stringify({ type: "interaction_response", id: "missing" }));
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
+      id: "missing",
+    }));
+    broker.handleControlLine(JSON.stringify({
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "ask_user",
       result: { answers: { q1: { value: "yes" } } },
@@ -652,7 +682,7 @@ describe("interaction broker", () => {
     });
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "plan_approval",
       result: {
@@ -677,12 +707,18 @@ describe("interaction broker", () => {
     broker.handleSettingsUpdate((msg: any) => updates.push(msg));
     const consent = broker.requestUserConsent({ toolName: "Bash", input: { command: "pwd" } });
 
-    broker.handleControlLine(JSON.stringify({ type: "settings_update", permission: "readonly" }));
-    expect(updates).toEqual([{ type: "settings_update", permission: "readonly" }]);
+    broker.handleControlLine(JSON.stringify({
+      type: RUNNER_SETTINGS_UPDATE_CONTROL_TYPE,
+      permission: "readonly",
+    }));
+    expect(updates).toEqual([{
+      type: RUNNER_SETTINGS_UPDATE_CONTROL_TYPE,
+      permission: "readonly",
+    }]);
     expect(broker.pendingCounts().consent).toBe(1);
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "consent-1",
       kind: "tool_consent",
       result: { decision: "allow" },
@@ -700,9 +736,9 @@ describe("interaction broker", () => {
     });
     const unregister = broker.handleInterruptTurn(() => calls.push("interrupt"));
 
-    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    broker.handleControlLine(JSON.stringify({ type: RUNNER_INTERRUPT_TURN_CONTROL_TYPE }));
     unregister();
-    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    broker.handleControlLine(JSON.stringify({ type: RUNNER_INTERRUPT_TURN_CONTROL_TYPE }));
 
     expect(calls).toEqual(["interrupt"]);
   });
@@ -734,7 +770,7 @@ describe("interaction broker", () => {
     }));
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "codex-1",
       kind: "mcp_elicitation",
       result: { action: "decline" },
@@ -906,6 +942,7 @@ describe("Claude helpers", () => {
     } as any);
 
     expect(seenOptions).toMatchObject({ promptSuggestions: true });
+    expect(seenOptions.toolAliases.QueryQuotaUsage).toBe("mcp__lilia__query_quota_usage");
     expect(json()).toContainEqual({
       type: "prompt_suggestion",
       suggestion: "请继续检查 Claude 原生建议展示。",
@@ -1017,7 +1054,7 @@ describe("Claude helpers", () => {
     }));
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "codex-1",
       kind: "mcp_elicitation",
       result: {
@@ -1096,7 +1133,7 @@ describe("Claude helpers", () => {
       }));
 
       broker.handleControlLine(JSON.stringify({
-        type: "interaction_response",
+        type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
         id: "codex-1",
         kind: "mcp_elicitation",
         result: { action },
@@ -1116,7 +1153,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      runtimeCommand: { type: "session_fork" },
+      runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
     }, {
       protocol,
       platform: "win32",
@@ -1223,7 +1260,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "session_fork" },
+      runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
     }, {
       protocol,
       platform: "win32",
@@ -1256,18 +1293,18 @@ describe("Claude helpers", () => {
 
   it("handles Claude session management through SDK session APIs", async () => {
     for (const runtimeCommand of [
-      { type: "session_management", action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
-      { type: "session_management", action: "info", sessionId: "claude-session-1" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "list", limit: 10, cursor: "5", searchTerm: "fix" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "info", sessionId: "claude-session-1" },
       {
-        type: "session_management",
+        type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
         action: "messages",
         sessionId: "claude-session-1",
         limit: 3,
         cursor: "2",
         includeSystemMessages: true,
       },
-      { type: "session_management", action: "tag", sessionId: "claude-session-1", tag: "release" },
-      { type: "session_management", action: "delete", sessionId: "claude-session-1" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "tag", sessionId: "claude-session-1", tag: "release" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "delete", sessionId: "claude-session-1" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -1329,7 +1366,7 @@ describe("Claude helpers", () => {
           status: "success",
           payload: expect.objectContaining({
             backend: "claude",
-            subkind: "session_management",
+            subkind: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
             action: runtimeCommand.action,
             native: true,
           }),
@@ -1348,7 +1385,7 @@ describe("Claude helpers", () => {
     await expect(runClaudeSessionManagementRuntimeCommand({
       cwd: "C:/repo",
       prompt: "",
-      runtimeCommand: { type: "session_management", action: "archive", sessionId: "claude-session-1" },
+      runtimeCommand: { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "archive", sessionId: "claude-session-1" },
     }, { protocol } as any, "C:/repo")).resolves.toBe(true);
 
     expect(json()).toContainEqual(expect.objectContaining({
@@ -1358,7 +1395,7 @@ describe("Claude helpers", () => {
         status: "success",
         payload: expect.objectContaining({
           backend: "claude",
-          subkind: "session_management",
+          subkind: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
           action: "archive",
           native: false,
           result: expect.objectContaining({ unsupported: true }),
@@ -1374,7 +1411,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       runtimeCommand: {
-        type: "session_management",
+        type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
         action: "rename",
         sessionId: "claude-session-1",
         title: "新标题",
@@ -1391,7 +1428,7 @@ describe("Claude helpers", () => {
         status: "error",
         payload: expect.objectContaining({
           backend: "claude",
-          subkind: "session_management",
+          subkind: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
           action: "rename",
           native: false,
           error: "Claude SDK renameSession is not available",
@@ -1409,7 +1446,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, claudeRunnerContext(protocol, {
       createSdkMcpServer: (config: any) => config,
       createClaudeTool: (name: string) => ({ name }),
@@ -1486,7 +1523,7 @@ describe("Claude helpers", () => {
     await expect(runClaude({
       cwd: "C:/repo",
       prompt: "",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, claudeRunnerContext(protocol, {
       createClaudeQuery: () => {
         queryCalled = true;
@@ -1512,7 +1549,7 @@ describe("Claude helpers", () => {
       cwd: "C:/repo",
       prompt: "",
       resumeSessionId: "claude-source",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, claudeRunnerContext(protocol, {
       createSdkMcpServer: (config: any) => config,
       createClaudeTool: (name: string) => ({ name }),
@@ -1564,7 +1601,7 @@ describe("Claude helpers", () => {
     },
     {
       name: "background terminals clean",
-      workflow: { type: "lilia_background_terminals_clean" },
+      workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
       title: "Claude background terminals clean completed",
       payload: { subkind: "background_terminals_clean", cleanedCount: 0 },
     },
@@ -1634,7 +1671,7 @@ describe("Claude helpers", () => {
       model: "claude-sonnet-4-6",
       permission: "ask",
       runtimeCommand: {
-        type: "runtime_settings",
+        type: RUNTIME_SETTINGS_COMMAND_TYPE,
         action: "update",
       },
       runtimeOptions: {
@@ -1789,7 +1826,7 @@ describe("Claude helpers", () => {
     });
 
     await waitUntil(() => seenController !== null);
-    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    broker.handleControlLine(JSON.stringify({ type: RUNNER_INTERRUPT_TURN_CONTROL_TYPE }));
     await run;
 
     expect(seenController?.signal.aborted).toBe(true);
@@ -1810,7 +1847,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-existing",
       runtimeCommand: {
-        type: "runtime_settings",
+        type: RUNTIME_SETTINGS_COMMAND_TYPE,
         action: "diagnose",
       },
       runtimeOptions: {
@@ -1865,7 +1902,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-existing",
       runtimeCommand: {
-        type: "sandbox_diagnostics",
+        type: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
         includeDetails: true,
       },
     }, claudeRunnerContext(protocol, {
@@ -1884,7 +1921,7 @@ describe("Claude helpers", () => {
         title: "Claude sandbox diagnostics unsupported",
         payload: expect.objectContaining({
           backend: "claude",
-          subkind: "sandbox_diagnostics",
+          subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
           includeDetails: true,
           native: false,
           unsupported: true,
@@ -1907,7 +1944,7 @@ describe("Claude helpers", () => {
       prompt: "",
       resumeSessionId: "claude-existing",
       runtimeCommand: {
-        type: "remote_environment",
+        type: REMOTE_ENVIRONMENT_COMMAND_TYPE,
         action: "select",
         environmentId: "env-1",
       },
@@ -1927,7 +1964,7 @@ describe("Claude helpers", () => {
         title: "Claude remote environment unsupported",
         payload: expect.objectContaining({
           backend: "claude",
-          subkind: "remote_environment",
+          subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
           action: "select",
           environmentId: "env-1",
           native: false,
@@ -2038,7 +2075,7 @@ describe("Claude helpers", () => {
       permission: "full",
       planMode: true,
       resumeSessionId: "claude-source",
-      workflow: { type: "lilia_config_diagnostics" },
+      workflow: { type: LILIA_CONFIG_DIAGNOSTICS_WORKFLOW_TYPE },
       extensions: {
         claude: {
           skills: ["reviewer"],
@@ -2106,6 +2143,7 @@ describe("Claude helpers", () => {
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
     });
+    expect(mapClaudeInitialPermission("unknown", false).permissionMode).toBe("default");
   });
 
   it("runtime permission update changes Claude SDK mode and Lilia gate", async () => {
@@ -2133,6 +2171,43 @@ describe("Claude helpers", () => {
     expect(ctx.executionPermission).toBe("free");
     expect(modeCalls).toEqual(["default", "bypassPermissions", "bypassPermissions"]);
     expect(json().filter((line) => line.type === "timeline")).toHaveLength(3);
+    expect(applyClaudeRuntimePermission(ctx, "unknown")).toBe(false);
+    expect(normalizeRuntimePermission("unknown")).toBeNull();
+  });
+
+  it("maps free runtime permission to full architecture permission", async () => {
+    const change = { type: "set_summary", summary: "更新架构摘要" };
+    const requests: any[] = [];
+    const handler = createArchitectureChangeHandler({
+      cmd: {
+        conversationContext: { projectId: "project-1" },
+        permission: "free",
+        taskId: "task-1",
+        turnId: "turn-1",
+      },
+      ctx: {
+        currentTurnId: "turn-1",
+        approvedArchitectureImpacts: [{ changes: [change] }],
+        interactions: {
+          requestArchitectureChange: async (payload: any, options: any) => {
+            requests.push({ payload, options });
+            return { decision: "allow", graph: { version: 2 } };
+          },
+        },
+      },
+      backend: "codex",
+    });
+
+    const result = await handler({ reason: "更新架构", changes: [change] });
+
+    expect(result).toMatchObject({ ok: true, applied: true, version: 2 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].payload).toMatchObject({
+      permission: "full",
+      status: PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS,
+      requiresConfirmation: false,
+    });
+    expect(requests[0].options).toMatchObject({ autoApply: true });
   });
 });
 
@@ -2153,6 +2228,26 @@ describe("Codex app-server mapping", () => {
     expect(mapCodexApprovalPolicy("readonly")).toBe("never");
     expect(mapCodexSandboxMode("readonly")).toBe("read-only");
     expect(codexPermissionProfileIdForMode("readonly")).toBe(":read-only");
+
+    expect(mapCodexApprovalPolicy("unknown")).toBe("on-request");
+    expect(mapCodexSandboxMode("unknown")).toBe("workspace-write");
+    expect(codexPermissionProfileIdForMode("unknown")).toBe(":workspace");
+    expect(codexPermissionRuntimeParams("ask")).toEqual({
+      approvalPolicy: "on-request",
+      permissions: ":workspace",
+      sandboxPolicy: { type: "workspaceWrite" },
+    });
+    expect(codexLegacyPermissionRuntimeParams("readonly")).toEqual({
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+  });
+
+  it("normalizes Codex timeline execution permission through contracts defaults", () => {
+    const { protocol } = captureProtocol();
+
+    expect(createCodexRunContext({ permission: "free" }, protocol).executionPermission).toBe("free");
+    expect(createCodexRunContext({ permission: "unknown" }, protocol).executionPermission).toBe("ask");
   });
 
   it("resolves managed Codex CLI path from Lilia home", () => {
@@ -2827,7 +2922,7 @@ describe("Codex app-server mapping", () => {
     ]);
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "ask_user",
       result: {
@@ -2851,6 +2946,7 @@ describe("Codex app-server mapping", () => {
   it("Codex dynamic AskUser tool also marks elicitation", async () => {
     const calls: any[] = [];
     const elicitationCalls: any[] = [];
+    let requestedAskUserSpec: any = null;
     const handled = await maybeHandleCodexServerRequest(
       {
         respond: (...args: any[]) => calls.push(["respond", ...args]),
@@ -2875,12 +2971,15 @@ describe("Codex app-server mapping", () => {
       },
       {
         interactions: {
-          requestAskUser: async () => ({
-            cancelled: false,
-            answers: {
-              "q-1": { questionId: "q-1", value: "o-2" },
-            },
-          }),
+          requestAskUser: async (spec: any) => {
+            requestedAskUserSpec = spec;
+            return {
+              cancelled: false,
+              answers: {
+                "q-1": { questionId: "q-1", value: "o-2" },
+              },
+            };
+          },
         },
         withCodexElicitation: trackedElicitation(elicitationCalls),
       } as any,
@@ -2891,6 +2990,7 @@ describe("Codex app-server mapping", () => {
       ["increment", "ask_user"],
       ["decrement", "ask_user"],
     ]);
+    expect(requestedAskUserSpec?.questions[0]?.mode).toBe(ASK_USER_SINGLE_SELECT_MODE);
     expect(calls[0][1]).toBe("ask-tool-1");
     expect(calls[0][2]).toMatchObject({ success: true });
     const output = JSON.parse(calls[0][2].contentItems[0].text);
@@ -3251,7 +3351,7 @@ describe("Codex app-server mapping", () => {
     }));
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "codex-1",
       kind: "mcp_elicitation",
       result: {
@@ -3346,7 +3446,7 @@ describe("Codex app-server mapping", () => {
     }));
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "codex-1",
       kind: "permission_approval",
       result: {
@@ -3421,7 +3521,7 @@ describe("Codex app-server mapping", () => {
     ]);
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "consent-1",
       kind: "tool_consent",
       result: {
@@ -4061,7 +4161,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "lilia_review",
+        type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
@@ -4103,7 +4203,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "baseBranch", branch: "main" },
         instructions: "重点看权限边界",
       },
@@ -4173,7 +4273,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "full",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -4204,7 +4304,7 @@ describe("Codex app-server mapping", () => {
         },
       },
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         mode: "suggest",
       },
@@ -4310,7 +4410,7 @@ describe("Codex app-server mapping", () => {
       permission: "ask",
       planMode: false,
       workflow: {
-        type: "lilia_batch_apply",
+        type: LILIA_BATCH_APPLY_WORKFLOW_TYPE,
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -4382,7 +4482,7 @@ describe("Codex app-server mapping", () => {
       prompt: "可以直接修",
       permission: "full",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "commit", sha: "abc123" },
         instructions: "可以直接修",
         mode: "apply",
@@ -4411,7 +4511,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
       },
       protocol,
@@ -4435,7 +4535,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "baseBranch", branch: "main" },
       },
       protocol,
@@ -4479,7 +4579,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       planMode: false,
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4524,7 +4624,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4562,7 +4662,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       planMode: false,
-      workflow: { type: "lilia_background_terminals_clean" },
+      workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4613,7 +4713,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "lilia_background_terminals_clean" },
+      workflow: { type: LILIA_BACKGROUND_TERMINALS_CLEAN_WORKFLOW_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4771,7 +4871,7 @@ describe("Codex app-server mapping", () => {
           },
         },
       },
-      runtimeCommand: { type: "session_fork" },
+      runtimeCommand: { type: SESSION_FORK_COMMAND_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4909,7 +5009,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      workflow: { type: "lilia_config_diagnostics" },
+      workflow: { type: LILIA_CONFIG_DIAGNOSTICS_WORKFLOW_TYPE },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -4942,9 +5042,9 @@ describe("Codex app-server mapping", () => {
 
   it("handles Codex session management list/info/messages/rename without starting a turn", async () => {
     for (const runtimeCommand of [
-      { type: "session_management", action: "list", searchTerm: "fix", limit: 10 },
-      { type: "session_management", action: "messages", sessionId: "thread-target", limit: 5 },
-      { type: "session_management", action: "archive", sessionId: "thread-target", archived: true },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "list", searchTerm: "fix", limit: 10 },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "messages", sessionId: "thread-target", limit: 5 },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "archive", sessionId: "thread-target", archived: true },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -5010,7 +5110,7 @@ describe("Codex app-server mapping", () => {
           status: "success",
           payload: expect.objectContaining({
             backend: "codex",
-            subkind: "session_management",
+            subkind: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
             action: runtimeCommand.action,
             native: true,
           }),
@@ -5025,8 +5125,8 @@ describe("Codex app-server mapping", () => {
 
   it("reports unsupported diagnostic for Codex session tag and delete", async () => {
     for (const runtimeCommand of [
-      { type: "session_management", action: "tag", sessionId: "thread-target", tag: "release" },
-      { type: "session_management", action: "delete", sessionId: "thread-target" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "tag", sessionId: "thread-target", tag: "release" },
+      { type: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE, action: "delete", sessionId: "thread-target" },
     ]) {
       const { protocol, json } = captureProtocol();
       const calls: any[] = [];
@@ -5063,7 +5163,7 @@ describe("Codex app-server mapping", () => {
           status: "success",
           payload: expect.objectContaining({
             backend: "codex",
-            subkind: "session_management",
+            subkind: SESSION_MANAGEMENT_RUNTIME_COMMAND_TYPE,
             action: runtimeCommand.action,
             native: false,
             result: expect.objectContaining({ unsupported: true }),
@@ -5094,7 +5194,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "runtime_settings",
+        type: RUNTIME_SETTINGS_COMMAND_TYPE,
         action: "update",
       },
       runtimeOptions: {
@@ -5180,7 +5280,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "runtime_settings",
+        type: RUNTIME_SETTINGS_COMMAND_TYPE,
         action: "update",
       },
       runtimeOptions: {
@@ -5236,7 +5336,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "remote_environment",
+        type: REMOTE_ENVIRONMENT_COMMAND_TYPE,
         action: "diagnose",
       },
       runtimeOptions: {
@@ -5257,7 +5357,7 @@ describe("Codex app-server mapping", () => {
         title: "Codex remote environment diagnostics",
         payload: expect.objectContaining({
           backend: "codex",
-          subkind: "remote_environment",
+          subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
           action: "diagnose",
           threadId: "thread-1",
           native: true,
@@ -5292,7 +5392,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "remote_environment",
+        type: REMOTE_ENVIRONMENT_COMMAND_TYPE,
         action: "add",
         environmentId: "env-1",
         environment: { name: "Windows VM" },
@@ -5312,7 +5412,7 @@ describe("Codex app-server mapping", () => {
         title: "Codex remote environment added",
         payload: expect.objectContaining({
           backend: "codex",
-          subkind: "remote_environment",
+          subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
           action: "add",
           method: "environment/add",
           threadId: "thread-1",
@@ -5346,7 +5446,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "remote_environment",
+        type: REMOTE_ENVIRONMENT_COMMAND_TYPE,
         action: "select",
         environmentId: "env-1",
       },
@@ -5368,7 +5468,7 @@ describe("Codex app-server mapping", () => {
         title: "Codex remote environment selected",
         payload: expect.objectContaining({
           backend: "codex",
-          subkind: "remote_environment",
+          subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
           action: "select",
           method: "thread/settings/update",
           threadId: "thread-1",
@@ -5408,7 +5508,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "sandbox_diagnostics",
+        type: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
         includeDetails: true,
       },
     });
@@ -5426,7 +5526,7 @@ describe("Codex app-server mapping", () => {
         title: "Codex sandbox diagnostics",
         payload: expect.objectContaining({
           backend: "codex",
-          subkind: "sandbox_diagnostics",
+          subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
           method: "windowsSandbox/readiness",
           threadId: "thread-1",
           includeDetails: true,
@@ -5462,7 +5562,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       runtimeCommand: {
-        type: "sandbox_diagnostics",
+        type: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
       },
     })).rejects.toThrow("sandbox not available");
 
@@ -5475,7 +5575,7 @@ describe("Codex app-server mapping", () => {
         title: "Codex sandbox diagnostics failed",
         payload: expect.objectContaining({
           backend: "codex",
-          subkind: "sandbox_diagnostics",
+          subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
           method: "windowsSandbox/readiness",
           includeDetails: false,
           error: "sandbox not available",
@@ -5553,7 +5653,7 @@ describe("Codex app-server mapping", () => {
       backend: "codex",
       prompt: "",
       permission: "ask",
-      runtimeCommand: { type: "runtime_settings", action: "update" },
+      runtimeCommand: { type: RUNTIME_SETTINGS_COMMAND_TYPE, action: "update" },
     }, { mcpServers: [], warnings: [] }, {
       protocol,
       interactions: { requestAskUser: async () => ({ cancelled: true, answers: {} }) },
@@ -5638,7 +5738,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "lilia_review",
+        type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "commit", sha: "abc123" },
       },
     }, { mcpServers: [], warnings: [] }, {
@@ -5689,7 +5789,7 @@ describe("Codex app-server mapping", () => {
       prompt: "",
       permission: "ask",
       workflow: {
-        type: "lilia_goal",
+        type: LILIA_GOAL_WORKFLOW_TYPE,
         action: "set",
         objective: "完成 Thread Goal 接入",
       },
@@ -5753,7 +5853,7 @@ describe("Codex app-server mapping", () => {
         prompt: "",
         permission: "ask",
         workflow: {
-          type: "lilia_goal",
+          type: LILIA_GOAL_WORKFLOW_TYPE,
           action,
         },
       }, { mcpServers: [], warnings: [] }, {
@@ -6095,7 +6195,7 @@ describe("Codex app-server mapping", () => {
     ]);
 
     broker.handleControlLine(JSON.stringify({
-      type: "interaction_response",
+      type: RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
       id: "ask-1",
       kind: "plan_approval",
       result: {
@@ -6169,7 +6269,7 @@ describe("Codex app-server mapping", () => {
     });
 
     await waitUntil(() => turnStarted);
-    broker.handleControlLine(JSON.stringify({ type: "interrupt_turn" }));
+    broker.handleControlLine(JSON.stringify({ type: RUNNER_INTERRUPT_TURN_CONTROL_TYPE }));
     await run;
 
     expect(calls).toContainEqual({

@@ -1,6 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { Milestone, MilestoneUpdatePatch, ProjectRoadmap, TaskMilestoneLink } from "@lilia/contracts";
+import {
+  MILESTONE_CREATE_COMMAND,
+  MILESTONE_DELETE_COMMAND,
+  MILESTONE_LIST_COMMAND,
+  MILESTONE_REORDER_COMMAND,
+  MILESTONE_SET_TASKS_COMMAND,
+  MILESTONE_UPDATE_COMMAND,
+  type Milestone,
+  type MilestoneUpdatePatch,
+  type ProjectRoadmap,
+  type TaskMilestoneLink,
+} from "@lilia/contracts";
 
 export const MILESTONES = ref<Record<string, Milestone[]>>({});
 export const MILESTONE_LINKS = ref<Record<string, TaskMilestoneLink[]>>({});
@@ -9,7 +20,7 @@ export const PROJECT_ROADMAP_LOADED = ref<Record<string, boolean>>({});
 const roadmapLoads = new Map<string, Promise<void>>();
 
 async function refreshRoadmap(projectId: string): Promise<void> {
-  const snapshot = await invoke<ProjectRoadmap>("milestone_list", { projectId });
+  const snapshot = await invoke<ProjectRoadmap>(MILESTONE_LIST_COMMAND, { projectId });
   MILESTONES.value = {
     ...MILESTONES.value,
     [projectId]: snapshot.milestones,
@@ -50,7 +61,7 @@ export function listProjectMilestoneLinks(projectId: string): TaskMilestoneLink[
 }
 
 export async function createMilestone(projectId: string, title: string): Promise<Milestone> {
-  const milestone = await invoke<Milestone>("milestone_create", {
+  const milestone = await invoke<Milestone>(MILESTONE_CREATE_COMMAND, {
     projectId,
     title,
   });
@@ -71,7 +82,7 @@ export async function updateMilestone(
   patch: MilestoneUpdatePatch,
 ): Promise<void> {
   const { dueDate, ...rest } = patch;
-  await invoke("milestone_update", {
+  await invoke(MILESTONE_UPDATE_COMMAND, {
     id,
     ...rest,
     ...(dueDate === undefined
@@ -84,7 +95,7 @@ export async function updateMilestone(
 }
 
 export async function deleteMilestone(projectId: string, id: string): Promise<void> {
-  await invoke("milestone_delete", { id });
+  await invoke(MILESTONE_DELETE_COMMAND, { id });
   await ensureProjectRoadmapLoaded(projectId, true);
 }
 
@@ -92,7 +103,7 @@ export async function reorderMilestones(
   projectId: string,
   orderedIds: string[],
 ): Promise<void> {
-  await invoke("milestone_reorder", { projectId, orderedIds });
+  await invoke(MILESTONE_REORDER_COMMAND, { projectId, orderedIds });
   await ensureProjectRoadmapLoaded(projectId, true);
 }
 
@@ -101,6 +112,6 @@ export async function setMilestoneTasks(
   milestoneId: string,
   taskIds: string[],
 ): Promise<void> {
-  await invoke("milestone_set_tasks", { milestoneId, taskIds });
+  await invoke(MILESTONE_SET_TASKS_COMMAND, { milestoneId, taskIds });
   await ensureProjectRoadmapLoaded(projectId, true);
 }

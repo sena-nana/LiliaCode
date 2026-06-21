@@ -7,8 +7,16 @@ import type {
   LiliaReviewTarget,
   ProviderRuntimeOptions,
 } from "@lilia/contracts";
-import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
-import type { PendingAgentAction } from "../../composables/usePendingAgentActions";
+import {
+  createLiliaBatchApplyWorkflow,
+  createLiliaCompactWorkflow,
+  createLiliaFixSuggestionWorkflow,
+  createLiliaGoalWorkflow,
+  createLiliaReviewWorkflow,
+  createSessionForkCommand,
+} from "@lilia/contracts";
+import type { LiliaBatchApplyInput } from "@lilia/contracts";
+import type { PendingAgentAction } from "../../composables/pendingAgentActions";
 
 export interface LiliaWorkflowSendAgentMessageInput {
   turn: {
@@ -61,13 +69,11 @@ export function useLiliaWorkflowActions(options: {
     outgoingConversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ) {
-    const workflow: ChatWorkflow = {
-      type: "lilia_review",
-      target,
+    const workflow = createLiliaReviewWorkflow(target, {
+      instructions: content,
       delivery: "inline",
-    };
+    });
     const instructions = content.trim();
-    if (instructions) workflow.instructions = instructions;
     await sendLiliaWorkflow(
       workflow,
       instructions,
@@ -83,13 +89,11 @@ export function useLiliaWorkflowActions(options: {
     outgoingConversationReferences: ChatConversationReference[],
     target: LiliaReviewTarget,
   ) {
-    const workflow: ChatWorkflow = {
-      type: "lilia_fix_suggestion",
-      target,
+    const workflow = createLiliaFixSuggestionWorkflow(target, {
+      instructions: content,
       mode: "suggest",
-    };
+    });
     const instructions = content.trim();
-    if (instructions) workflow.instructions = instructions;
     await sendLiliaWorkflow(
       workflow,
       instructions,
@@ -116,7 +120,7 @@ export function useLiliaWorkflowActions(options: {
   }
 
   async function onStartLiliaCompact() {
-    await sendLiliaWorkflow({ type: "lilia_compact" });
+    await sendLiliaWorkflow(createLiliaCompactWorkflow());
   }
 
   async function onStartSessionFork() {
@@ -125,45 +129,35 @@ export function useLiliaWorkflowActions(options: {
         content: "",
         outgoingAttachments: [],
       },
-      runtimeCommand: { type: "session_fork", excludeTurns: true },
+      runtimeCommand: createSessionForkCommand(),
     });
   }
 
   async function onStartLiliaBatchApply(input: LiliaBatchApplyInput) {
     const sourceSummary = input.sourceSummary.trim();
     if (!sourceSummary) return;
-    await sendLiliaWorkflow({
-      type: "lilia_batch_apply",
-      sourceTurnId: input.sourceTurnId,
-      sourceKind: input.sourceKind,
+    await sendLiliaWorkflow(createLiliaBatchApplyWorkflow({
+      ...input,
       sourceSummary,
-    });
+    }));
   }
 
   async function onSetLiliaGoal(objective: string) {
     const trimmed = objective.trim();
     if (!trimmed) return;
-    await sendLiliaWorkflow({
-      type: "lilia_goal",
-      action: "set",
+    await sendLiliaWorkflow(createLiliaGoalWorkflow("set", {
       objective: trimmed,
       status: "active",
       tokenBudget: null,
-    });
+    }));
   }
 
   async function onRefreshLiliaGoal() {
-    await sendLiliaWorkflow({
-      type: "lilia_goal",
-      action: "refresh",
-    });
+    await sendLiliaWorkflow(createLiliaGoalWorkflow("refresh"));
   }
 
   async function onClearLiliaGoal() {
-    await sendLiliaWorkflow({
-      type: "lilia_goal",
-      action: "clear",
-    });
+    await sendLiliaWorkflow(createLiliaGoalWorkflow("clear"));
   }
 
   return {

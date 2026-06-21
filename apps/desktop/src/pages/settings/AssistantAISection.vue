@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { AlertTriangle, KeyRound, MessageSquarePlus, Plug, Save, Sparkles, Trash2 } from "lucide-vue-next";
-import type {
-  AssistantAIConfig,
-  AssistantAITestResult,
-  SuggestionSettings,
-  SuggestionSource,
+import {
+  DEFAULT_SUGGESTION_SOURCE,
+  SUGGESTION_SOURCE_SETTING_ORDER,
+  suggestionSourceSettingLabel,
+  type AssistantAIConfig,
+  type AssistantAITestResult,
+  type SuggestionSettings,
+  type SuggestionSource,
 } from "@lilia/contracts";
 import {
   getConversationSuggestionSettings,
@@ -22,15 +25,21 @@ const assistantAIForm = ref<AssistantAIConfig>({
   codexAccountSparkEnabled: false,
   hasApiKey: false,
 });
-const suggestionSettings = ref<SuggestionSettings>({ enabled: true, source: "assistant-ai" });
+const suggestionSettings = ref<SuggestionSettings>({
+  enabled: true,
+  source: DEFAULT_SUGGESTION_SOURCE,
+});
 const savingAssistantAI = ref(false);
 const savingSuggestions = ref(false);
 const testingAssistantAI = ref(false);
 const assistantAIResult = ref<AssistantAITestResult | null>(null);
+let disposed = false;
 
 const suggestionSourceOptions: Array<{ value: SuggestionSource; label: string }> = [
-  { value: "assistant-ai", label: "辅助模型" },
-  { value: "provider", label: "当前 Provider" },
+  ...SUGGESTION_SOURCE_SETTING_ORDER.map((value) => ({
+    value,
+    label: suggestionSourceSettingLabel(value),
+  })),
 ];
 
 const assistantAIBannerHint = computed(() => {
@@ -59,48 +68,59 @@ function normalizedAssistantAI(): AssistantAIConfig {
 async function loadAssistantAI() {
   try {
     const config = await getAssistantAIConfig();
+    if (disposed) return;
     assistantAIForm.value = { ...config, apiKey: null };
   }
   catch (err) { console.error("[settings] load assistant ai config failed", err); }
 }
 
 async function loadSuggestionSettings() {
-  try { suggestionSettings.value = await getConversationSuggestionSettings(); }
+  try {
+    const settings = await getConversationSuggestionSettings();
+    if (!disposed) suggestionSettings.value = settings;
+  }
   catch (err) { console.error("[settings] load suggestion settings failed", err); }
 }
 
 async function saveAssistantAI() {
+  if (disposed) return;
   savingAssistantAI.value = true;
   try {
     await setAssistantAIConfig(normalizedAssistantAI());
+    if (disposed) return;
     await loadAssistantAI();
   } catch (err) { console.error("[settings] saveAssistantAI failed", err); }
-  finally { savingAssistantAI.value = false; }
+  finally { if (!disposed) savingAssistantAI.value = false; }
 }
 
 async function clearAssistantAIKey() {
+  if (disposed) return;
   savingAssistantAI.value = true;
   try {
     await setAssistantAIConfig({ ...normalizedAssistantAI(), apiKey: null, clearApiKey: true });
+    if (disposed) return;
     assistantAIForm.value.apiKey = null;
     await loadAssistantAI();
   } catch (err) { console.error("[settings] clearAssistantAIKey failed", err); }
-  finally { savingAssistantAI.value = false; }
+  finally { if (!disposed) savingAssistantAI.value = false; }
 }
 
 async function testAssistantAI() {
+  if (disposed) return;
   testingAssistantAI.value = true;
   assistantAIResult.value = null;
   try {
-    assistantAIResult.value = await testAssistantAIConnection(normalizedAssistantAI());
+    const result = await testAssistantAIConnection(normalizedAssistantAI());
+    if (!disposed) assistantAIResult.value = result;
   } catch (err) {
-    assistantAIResult.value = {
+    if (!disposed) assistantAIResult.value = {
       ok: false, error: String(err), models: null, modelMatched: null,
     };
-  } finally { testingAssistantAI.value = false; }
+  } finally { if (!disposed) testingAssistantAI.value = false; }
 }
 
 async function setSuggestionPatch(patch: Partial<SuggestionSettings>) {
+  if (disposed) return;
   const next: SuggestionSettings = { ...suggestionSettings.value, ...patch };
   suggestionSettings.value = next;
   savingSuggestions.value = true;
@@ -109,12 +129,17 @@ async function setSuggestionPatch(patch: Partial<SuggestionSettings>) {
   } catch (err) {
     console.error("[settings] save suggestion settings failed", err);
   } finally {
-    savingSuggestions.value = false;
+    if (!disposed) savingSuggestions.value = false;
   }
 }
 
 onMounted(() => {
+  disposed = false;
   void Promise.all([loadAssistantAI(), loadSuggestionSettings()]);
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
 });
 </script>
 

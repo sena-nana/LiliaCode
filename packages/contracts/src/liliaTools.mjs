@@ -10,6 +10,25 @@ import {
   shortText,
   stringOrNull,
 } from "./toolUtils.mjs";
+import {
+  architectureChangeCompactLabel,
+  readArchitectureChangeRecords,
+} from "./architectureDisplay.mjs";
+import {
+  ARCHITECTURE_INTERACTION_KIND,
+  ASK_USER_INTERACTION_KIND,
+} from "./agentInteractionContract.mjs";
+import {
+  TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_ASK_USER_HEADER_TEXT_LIMIT,
+  TIMELINE_DISPLAY_COMMAND_INLINE_THRESHOLD,
+  TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+  TIMELINE_DISPLAY_FILE_CHANGE_PATH_TEXT_LIMIT,
+  TIMELINE_DISPLAY_INLINE_TEXT_LIMIT,
+  TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TINY_TEXT_LIMIT,
+} from "./timelineContract.mjs";
 
 export {
   compactLine,
@@ -21,7 +40,7 @@ export {
 };
 
 export function displayField(label, value) {
-  const text = compactLine(value, 1200);
+  const text = compactLine(value, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
   return label && text ? { label, value: text } : null;
 }
 
@@ -43,7 +62,7 @@ export function codeDetail(label, content, language = "") {
   return {
     type: "code",
     label: label || null,
-    content: shortText(text.trim(), 6000),
+    content: shortText(text.trim(), TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT),
     language: language || null,
   };
 }
@@ -53,7 +72,7 @@ export function markdownDetail(content, tone = "default", singleLine = false) {
   if (!text || !text.trim()) return null;
   return {
     type: "markdown",
-    content: shortText(text.trim(), 6000),
+    content: shortText(text.trim(), TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT),
     tone,
     singleLine,
   };
@@ -62,9 +81,13 @@ export function markdownDetail(content, tone = "default", singleLine = false) {
 export function listDetail(items, ordered = false) {
   const normalized = (Array.isArray(items) ? items : [])
     .map((item) => {
-      if (typeof item === "string") return { text: compactLine(item, 1200) };
+      if (typeof item === "string") return { text: compactLine(item, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) };
       if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "summary"], 1200);
+      const text = readFirstString(
+        item,
+        ["text", "content", "title", "summary"],
+        TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+      );
       if (!text) return null;
       const status = String(item.status ?? "").toLowerCase();
       const completed = item.completed === true || item.done === true || status === "completed";
@@ -88,7 +111,11 @@ export function readTodoItems(payload) {
     .map((item) => {
       if (typeof item === "string") return { text: item, completed: false };
       if (!isRecord(item)) return null;
-      const text = readFirstString(item, ["text", "content", "title", "description"], 1200);
+      const text = readFirstString(
+        item,
+        ["text", "content", "title", "description"],
+        TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+      );
       if (!text) return null;
       const status = String(item.status ?? "").toLowerCase();
       return {
@@ -112,8 +139,11 @@ function readAskUserQuestions(payload) {
 }
 
 function askUserQuestionTitle(question, index) {
-  const header = compactLine(pick(question, ["header"]), 40);
-  const text = compactLine(pick(question, ["question", "title", "text"]), 1200);
+  const header = compactLine(pick(question, ["header"]), TIMELINE_DISPLAY_ASK_USER_HEADER_TEXT_LIMIT);
+  const text = compactLine(
+    pick(question, ["question", "title", "text"]),
+    TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+  );
   if (header && text) return `${header} · ${text}`;
   return text || header || `问题 ${index + 1}`;
 }
@@ -134,8 +164,11 @@ function readAskUserResult(payload) {
 
 function findAskUserQuestion(questions, key, fallbackIndex) {
   const matchedIndex = questions.findIndex((question, index) => {
-    const id = compactLine(pick(question, ["id"]), 120);
-    const text = compactLine(pick(question, ["question", "title", "text"]), 1200);
+    const id = compactLine(pick(question, ["id"]), TIMELINE_DISPLAY_SHORT_TEXT_LIMIT);
+    const text = compactLine(
+      pick(question, ["question", "title", "text"]),
+      TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+    );
     return key === id || key === text || key === askUserQuestionTitle(question, index);
   });
   const index = matchedIndex >= 0 ? matchedIndex : fallbackIndex;
@@ -147,9 +180,9 @@ function formatAskUserAnswerValue(answer) {
   if (answerRecord.skipped === true) return "已跳过";
   const value = answerRecord.value !== undefined ? answerRecord.value : answer;
   const valueText = Array.isArray(value)
-    ? value.map((item) => compactLine(item, 1200)).filter(Boolean).join("、")
-    : compactLine(value, 1200);
-  const noteText = compactLine(pick(answerRecord, ["notes"]), 1200);
+    ? value.map((item) => compactLine(item, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT)).filter(Boolean).join("、")
+    : compactLine(value, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
+  const noteText = compactLine(pick(answerRecord, ["notes"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
   if (valueText === "other" && noteText) return noteText;
   return noteText && valueText && !valueText.includes(noteText)
     ? `${valueText}（备注：${noteText}）`
@@ -168,10 +201,10 @@ function askUserAnswerItems(payload) {
       const question = questionEntry?.question ?? {};
       const title = questionEntry
         ? askUserQuestionTitle(question, questionEntry.index)
-        : compactLine(key, 1200) || `问题 ${index + 1}`;
+        : compactLine(key, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || `问题 ${index + 1}`;
       const annotation = readRecord(annotations[key]);
       const valueText = formatAskUserAnswerValue(answer);
-      const noteText = compactLine(pick(annotation, ["notes"]), 1200);
+      const noteText = compactLine(pick(annotation, ["notes"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
       const answerText = noteText && valueText && !valueText.includes(noteText)
         ? `${valueText}（备注：${noteText}）`
         : valueText || noteText;
@@ -183,34 +216,6 @@ function askUserAnswerItems(payload) {
 function askUserCancelled(payload) {
   const result = readAskUserResult(payload);
   return payload.cancelled === true || result.cancelled === true;
-}
-
-function readArchitectureChanges(payload) {
-  const raw = Array.isArray(payload.changes) ? payload.changes : [];
-  return raw.map((change) => isRecord(change) ? change : null).filter(Boolean);
-}
-
-function architectureChangeLabel(change) {
-  const type = compactLine(pick(change, ["type"]), 80);
-  if (type === "set_summary") return "更新项目摘要";
-  if (type === "remove_node") {
-    return `删除节点 ${compactLine(pick(change, ["nodeId"]), 120) || ""}`.trim();
-  }
-  if (type === "remove_edge") {
-    return `删除关系 ${compactLine(pick(change, ["edgeId"]), 120) || ""}`.trim();
-  }
-  const node = readRecord(change.node);
-  if (type === "upsert_node") {
-    return `更新节点 ${compactLine(pick(node, ["label", "id"]), 120) || ""}`.trim();
-  }
-  const edge = readRecord(change.edge);
-  if (type === "upsert_edge") {
-    const label = compactLine(pick(edge, ["label", "id"]), 120);
-    const from = compactLine(pick(edge, ["from"]), 80);
-    const to = compactLine(pick(edge, ["to"]), 80);
-    return `更新关系 ${label || [from, to].filter(Boolean).join(" -> ")}`.trim();
-  }
-  return type || "架构变更";
 }
 
 function architectureChangeStatusLabel(payload, status) {
@@ -255,7 +260,7 @@ const LILIA_TOOL_REGISTRY = {
       bucket: "file",
       unit: "个文件",
       build(payload, status) {
-        const path = compactLine(pick(payload, ["path"]), 1200);
+        const path = compactLine(pick(payload, ["path"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
         return {
           object: path,
           details: [errorOutputDetail(payload, status)],
@@ -341,7 +346,7 @@ const LILIA_TOOL_REGISTRY = {
       bucket: "search",
       unit: "次搜索",
       build(payload, status) {
-        const url = compactLine(pick(payload, ["url"]), 1200);
+        const url = compactLine(pick(payload, ["url"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
         return {
           object: url,
           details: [errorOutputDetail(payload, status)],
@@ -356,10 +361,10 @@ const LILIA_TOOL_REGISTRY = {
       bucket: "subagent",
       unit: "个子代理",
       build(payload) {
-        const agentType = compactLine(pick(payload, ["agentType"]), 200);
-        const description = compactLine(pick(payload, ["description"]), 1200);
-        const prompt = compactLine(pick(payload, ["prompt"]), 6000);
-        const result = compactLine(pick(payload, ["result"]), 6000);
+        const agentType = compactLine(pick(payload, ["agentType"]), TIMELINE_DISPLAY_SHORT_TEXT_LIMIT);
+        const description = compactLine(pick(payload, ["description"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
+        const prompt = compactLine(pick(payload, ["prompt"]), TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
+        const result = compactLine(pick(payload, ["result"]), TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
         return {
           object: agentType,
           details: [
@@ -378,17 +383,17 @@ const LILIA_TOOL_REGISTRY = {
       bucket: "plan",
       unit: "项计划",
       build(payload) {
-        const plan = readFirstText(payload, ["plan"], 6000);
-        const revisionRequest = readFirstText(payload, ["revisionRequest"], 6000);
+        const plan = readFirstText(payload, ["plan"], TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
+        const revisionRequest = readFirstText(payload, ["revisionRequest"], TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
         const preview = revisionRequest
-          ? `修改要求：${compactLine(revisionRequest, 600)}`
-          : compactLine(plan, 600);
+          ? `修改要求：${compactLine(revisionRequest, TIMELINE_DISPLAY_INLINE_TEXT_LIMIT)}`
+          : compactLine(plan, TIMELINE_DISPLAY_INLINE_TEXT_LIMIT);
         const approved = payload.approved;
         const allowedPrompts = (Array.isArray(payload.allowedPrompts) ? payload.allowedPrompts : [])
           .filter(isRecord)
           .map((item) => {
-            const tool = compactLine(pick(item, ["tool"]), 80);
-            const prompt = compactLine(pick(item, ["prompt"]), 400);
+            const tool = compactLine(pick(item, ["tool"]), TIMELINE_DISPLAY_TINY_TEXT_LIMIT);
+            const prompt = compactLine(pick(item, ["prompt"]), TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT);
             return [tool, prompt].filter(Boolean).join("：");
           })
           .filter(Boolean);
@@ -429,11 +434,11 @@ const LILIA_TOOL_REGISTRY = {
       },
     },
   },
-  ask_user: {
+  [ASK_USER_INTERACTION_KIND]: {
     default: {
       action: "提问",
       icon: "circle-help",
-      bucket: "ask_user",
+      bucket: ASK_USER_INTERACTION_KIND,
       unit: "个问题",
       build(payload) {
         const questions = readAskUserQuestions(payload);
@@ -459,15 +464,15 @@ const LILIA_TOOL_REGISTRY = {
       },
     },
   },
-  architecture_change: {
+  [ARCHITECTURE_INTERACTION_KIND]: {
     default: {
       action: "更新架构",
       icon: "git-branch",
       bucket: "architecture",
       unit: "次架构变更",
       build(payload, status) {
-        const changes = readArchitectureChanges(payload);
-        const reason = readFirstText(payload, ["reason"], 1200);
+        const changes = readArchitectureChangeRecords(payload);
+        const reason = readFirstText(payload, ["reason"], TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
         const versionText = [
           payload.beforeVersion !== undefined ? `v${payload.beforeVersion}` : "",
           payload.afterVersion !== undefined && payload.afterVersion !== null
@@ -477,7 +482,7 @@ const LILIA_TOOL_REGISTRY = {
         return {
           object: reason,
           label: architectureChangeStatusLabel(payload, status),
-          preview: reason || changes.map(architectureChangeLabel).slice(0, 2).join("；"),
+          preview: reason || changes.map(architectureChangeCompactLabel).slice(0, 2).join("；"),
           count: Math.max(1, changes.length),
           details: [
             markdownDetail(reason, "default", true),
@@ -486,7 +491,7 @@ const LILIA_TOOL_REGISTRY = {
               displayField("permission", pick(payload, ["permission"])),
               displayField("project", pick(payload, ["projectId"])),
             ]),
-            changes.length ? listDetail(changes.map(architectureChangeLabel), true) : null,
+            changes.length ? listDetail(changes.map(architectureChangeCompactLabel), true) : null,
           ],
         };
       },
@@ -500,7 +505,7 @@ const LILIA_TOOL_REGISTRY = {
       unit: "个工具",
       objectInLabel: true,
       build(payload) {
-        const toolName = compactLine(pick(payload, ["toolName"]), 200);
+        const toolName = compactLine(pick(payload, ["toolName"]), TIMELINE_DISPLAY_SHORT_TEXT_LIMIT);
         return {
           object: toolName,
           details: [
@@ -518,10 +523,24 @@ const LILIA_TOOL_REGISTRY = {
         unit: "个 Hook",
         objectInLabel: true,
         build(payload) {
-          const hookName = compactLine(pick(payload, ["hookName", "toolName", "name"]), 200);
-          const hookEvent = compactLine(pick(payload, ["hookEvent", "event"]), 200);
-          const output = readFirstText(payload, ["output", "stdout", "result", "response"], 6000);
-          const stderr = readFirstText(payload, ["stderr", "error", "message"], 6000);
+          const hookName = compactLine(
+            pick(payload, ["hookName", "toolName", "name"]),
+            TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+          );
+          const hookEvent = compactLine(
+            pick(payload, ["hookEvent", "event"]),
+            TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+          );
+          const output = readFirstText(
+            payload,
+            ["output", "stdout", "result", "response"],
+            TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+          );
+          const stderr = readFirstText(
+            payload,
+            ["stderr", "error", "message"],
+            TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+          );
           return {
             object: hookName || hookEvent,
             details: [
@@ -553,7 +572,7 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title, status }
   if (!rule) return null;
   const safePayload = readRecord(payload);
   const built = rule.build(safePayload, status) ?? {};
-  const object = compactLine(built.object, 1200);
+  const object = compactLine(built.object, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
   const details = Array.isArray(built.details)
     ? built.details.filter((d) => d !== null && d !== undefined)
     : [];
@@ -581,13 +600,17 @@ export function deriveLiliaToolDisplay({ kind, subkind, payload, title, status }
 
 function buildCommandDisplay(payload, status, options = {}) {
   const commandKeys = Array.isArray(options.commandKeys) ? options.commandKeys : ["command"];
-  const command = compactLine(pick(payload, commandKeys), 1200);
-  const output = readFirstText(payload, ["output", "aggregatedOutput", "stdout"], 6000);
-  const stderr = readFirstText(payload, ["stderr", "error"], 6000);
+  const command = compactLine(pick(payload, commandKeys), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
+  const output = readFirstText(
+    payload,
+    ["output", "aggregatedOutput", "stdout"],
+    TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT,
+  );
+  const stderr = readFirstText(payload, ["stderr", "error"], TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
   const combinedOutput = output && stderr && !output.includes(stderr)
     ? `${output}\n${stderr}`.trim()
     : output || stderr;
-  const shouldShowCommand = command.length > 180 ||
+  const shouldShowCommand = command.length > TIMELINE_DISPLAY_COMMAND_INLINE_THRESHOLD ||
     Boolean(output || stderr || options.includeEditedCommands);
   return {
     object: command,
@@ -614,7 +637,7 @@ function buildCommandDisplay(payload, status, options = {}) {
 }
 
 function buildFileChangeDisplay(payload, status) {
-  const path = compactLine(pick(payload, ["path"]), 1200);
+  const path = compactLine(pick(payload, ["path"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
   const changes = readFileChanges(payload);
   const changeItems = changes.length > 1
     ? listDetail(changes.map((change) => `${change.kind} ${change.path}`))
@@ -626,7 +649,7 @@ function buildFileChangeDisplay(payload, status) {
 }
 
 function buildSearchDisplay(payload, status) {
-  const query = compactLine(pick(payload, ["query"]), 1200);
+  const query = compactLine(pick(payload, ["query"]), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT);
   return {
     object: query,
     details: [errorOutputDetail(payload, status)],
@@ -651,7 +674,7 @@ export function errorOutputDetail(payload, status) {
     "output",
     "error",
     "message",
-  ], 6000);
+  ], TIMELINE_DISPLAY_DETAIL_TEXT_LIMIT);
   return codeDetail("ERROR / OUTPUT", output);
 }
 
@@ -671,11 +694,15 @@ export function readFileChanges(payload) {
       const path = readFirstString(
         change,
         ["path", "filePath", "relativePath", "targetPath", "name"],
-        600,
+        TIMELINE_DISPLAY_FILE_CHANGE_PATH_TEXT_LIMIT,
       );
       if (!path) return null;
       return {
-        kind: readFirstString(change, ["kind", "operation", "type", "status"], 80) || "update",
+        kind: readFirstString(
+          change,
+          ["kind", "operation", "type", "status"],
+          TIMELINE_DISPLAY_TINY_TEXT_LIMIT,
+        ) || "update",
         path,
       };
     })

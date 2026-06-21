@@ -64,11 +64,15 @@ export function useProjectTreeExpansion(
   const orphansExpanded = ref(savedTreeExpansion.orphansExpanded ?? true);
   const sidebarDataReady = ref(false);
   let expandedProjectHydrationHandle: number | null = null;
+  let cancelExpandedProjectHydrationPaint: (() => void) | null = null;
   let expandedProjectHydrationStage: ReturnType<typeof beginPerfStage> | null = null;
   let expandedProjectHydrationQueue: string[] = [];
   let expandedProjectHydrationSeq = 0;
   let orphanHydrationHandle: number | null = null;
+  let cancelOrphanHydrationPaint: (() => void) | null = null;
   let orphanHydrationSeq = 0;
+  let initialSidebarDataSeq = 0;
+  let disposed = false;
 
   function isProjectExpanded(projectId: string): boolean {
     if (String(route.params.projectId ?? "") === projectId) return true;
@@ -94,6 +98,7 @@ export function useProjectTreeExpansion(
   }
 
   async function loadProjectTasks(projectId: string, source = "sidebar.project") {
+    if (disposed) return;
     try {
       await measurePerfAsync(
         "sidebar.project-tasks.load",
@@ -101,6 +106,7 @@ export function useProjectTreeExpansion(
         { detail: `${source}:${projectId}` },
       );
     } catch (err) {
+      if (disposed) return;
       reportError(`加载项目对话失败：${String(err)}`);
     }
   }
@@ -112,6 +118,8 @@ export function useProjectTreeExpansion(
 
   function cancelExpandedProjectHydration(stage = "superseded") {
     expandedProjectHydrationSeq += 1;
+    cancelExpandedProjectHydrationPaint?.();
+    cancelExpandedProjectHydrationPaint = null;
     if (expandedProjectHydrationHandle !== null) {
       cancelIdleRun(expandedProjectHydrationHandle);
       expandedProjectHydrationHandle = null;
@@ -122,6 +130,8 @@ export function useProjectTreeExpansion(
 
   function cancelOrphanHydration() {
     orphanHydrationSeq += 1;
+    cancelOrphanHydrationPaint?.();
+    cancelOrphanHydrationPaint = null;
     if (orphanHydrationHandle !== null) {
       cancelIdleRun(orphanHydrationHandle);
       orphanHydrationHandle = null;
@@ -129,19 +139,22 @@ export function useProjectTreeExpansion(
   }
 
   function scheduleOrphanHydration(source: string) {
+    if (disposed) return;
     cancelOrphanHydration();
     if (areOrphansLoaded()) return;
     const seq = orphanHydrationSeq;
-    scheduleAfterPaint(() => {
-      if (seq !== orphanHydrationSeq) return;
+    cancelOrphanHydrationPaint = scheduleAfterPaint(() => {
+      cancelOrphanHydrationPaint = null;
+      if (disposed || seq !== orphanHydrationSeq) return;
       orphanHydrationHandle = runWhenIdle(() => {
         orphanHydrationHandle = null;
-        if (seq !== orphanHydrationSeq) return;
+        if (disposed || seq !== orphanHydrationSeq) return;
         void measurePerfAsync(
           "sidebar.orphans.load",
           () => ensureOrphansLoaded(),
           { detail: source },
         ).catch((err) => {
+          if (disposed || seq !== orphanHydrationSeq) return;
           reportError(`加载收集箱对话失败：${String(err)}`);
         });
       });
@@ -155,19 +168,19 @@ export function useProjectTreeExpansion(
   }
 
   function pumpExpandedProjectHydration(seq: number) {
-    if (seq !== expandedProjectHydrationSeq) return;
+    if (disposed || seq !== expandedProjectHydrationSeq) return;
     if (expandedProjectHydrationQueue.length === 0) {
       finishExpandedProjectHydration("idle");
       return;
     }
     expandedProjectHydrationHandle = runWhenIdle(async () => {
       expandedProjectHydrationHandle = null;
-      if (seq !== expandedProjectHydrationSeq) return;
+      if (disposed || seq !== expandedProjectHydrationSeq) return;
       const nextProjectId = expandedProjectHydrationQueue.shift();
       if (nextProjectId) {
         await loadProjectTasks(nextProjectId, "sidebar.expanded-project");
       }
-      if (seq !== expandedProjectHydrationSeq) return;
+      if (disposed || seq !== expandedProjectHydrationSeq) return;
       if (expandedProjectHydrationQueue.length === 0) {
         finishExpandedProjectHydration("idle");
         return;
@@ -177,6 +190,7 @@ export function useProjectTreeExpansion(
   }
 
   function scheduleExpandedProjectHydration(source: string) {
+    if (disposed) return;
     const expandedProjectIds = listExpandedProjectIds();
     const currentProjectId =
       typeof route.params.projectId === "string" && expandedProjectIds.includes(route.params.projectId)
@@ -193,8 +207,9 @@ export function useProjectTreeExpansion(
     expandedProjectHydrationStage = beginPerfStage("sidebar.expanded-projects.hydrate", {
       detail: `${source}:${deferredIds.length}`,
     });
-    scheduleAfterPaint(() => {
-      if (seq !== expandedProjectHydrationSeq) return;
+    cancelExpandedProjectHydrationPaint = scheduleAfterPaint(() => {
+      cancelExpandedProjectHydrationPaint = null;
+      if (disposed || seq !== expandedProjectHydrationSeq) return;
       pumpExpandedProjectHydration(seq);
     });
   }
@@ -231,11 +246,13 @@ export function useProjectTreeExpansion(
   );
 
   async function loadInitialSidebarData() {
+    const seq = ++initialSidebarDataSeq;
     await measurePerfAsync(
       "sidebar.projects.load",
       () => ensureProjectsLoaded(),
       { detail: "sidebar.initial" },
     );
+    if (disposed || seq !== initialSidebarDataSeq) return;
     sidebarDataReady.value = true;
     scheduleExpandedProjectHydration("sidebar.initial");
     scheduleOrphanHydration("sidebar.initial");
@@ -257,6 +274,7 @@ export function useProjectTreeExpansion(
   );
 
   function toggle(projectId: string) {
+    if (disposed) return;
     expanded[projectId] = !isProjectExpanded(projectId);
     persistProjectTreeExpansion();
     if (isProjectExpanded(projectId)) {
@@ -274,6 +292,7 @@ export function useProjectTreeExpansion(
   );
 
   function toggleAll() {
+    if (disposed) return;
     const target = !allExpanded.value;
     for (const p of projects.value) expanded[p.id] = target;
     persistProjectTreeExpansion();
@@ -281,16 +300,19 @@ export function useProjectTreeExpansion(
   }
 
   function rememberExpanded(projectId: string) {
+    if (disposed) return;
     expanded[projectId] = true;
     persistProjectTreeExpansion();
   }
 
   function forgetProject(projectId: string) {
+    if (disposed) return;
     delete expanded[projectId];
     persistProjectTreeExpansion();
   }
 
   function rememberCurrentExpansion() {
+    if (disposed) return;
     persistProjectTreeExpansion();
   }
 
@@ -299,6 +321,8 @@ export function useProjectTreeExpansion(
   }
 
   onBeforeUnmount(() => {
+    disposed = true;
+    initialSidebarDataSeq += 1;
     cancelExpandedProjectHydration("disposed");
     cancelOrphanHydration();
     window.removeEventListener("beforeunload", rememberCurrentExpansion);
@@ -306,6 +330,7 @@ export function useProjectTreeExpansion(
   });
 
   function toggleOrphans() {
+    if (disposed) return;
     orphansExpanded.value = !orphansExpanded.value;
     persistProjectTreeExpansion();
   }

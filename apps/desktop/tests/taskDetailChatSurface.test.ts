@@ -1,13 +1,16 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { defineComponent, h, ref } from "vue";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatComposerState } from "@lilia/contracts";
 import TaskDetailChatSurface from "../src/pages/taskDetail/TaskDetailChatSurface.vue";
+
+const mockTodoFloatSetup = vi.fn();
 
 const MockTodoFloat = defineComponent({
   name: "MockTodoFloat",
   emits: ["set-lilia-goal"],
   setup(_, { emit }) {
+    mockTodoFloatSetup();
     return () =>
       h("button", {
         type: "button",
@@ -80,6 +83,11 @@ vi.mock("../src/components/chat/ChatComposer.vue", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 const codexComposerState: ChatComposerState = {
@@ -188,5 +196,27 @@ describe("TaskDetailChatSurface", () => {
     await fireEvent.click(view.getByRole("button", { name: "call surface trigger" }));
 
     expect(triggerConversationReference).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels deferred TodoFloat render after unmount", async () => {
+    vi.useFakeTimers();
+    const view = renderSurface();
+
+    view.unmount();
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mockTodoFloatSetup).not.toHaveBeenCalled();
+  });
+
+  it("cancels deferred composer activation after unmount", () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 41));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = renderSurface();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(41);
   });
 });

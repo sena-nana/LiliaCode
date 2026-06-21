@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, type Ref } from "vue";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 type ResizeEdge = "left" | "right";
 
@@ -46,6 +47,7 @@ export function useResizablePane(options: ResizablePaneOptions) {
 
   let startX = 0;
   let startWidth = 0;
+  let resizeUnlisteners: Array<() => void> = [];
 
   function setWidth(nextWidth: number) {
     width.value = clampWidth(nextWidth);
@@ -77,10 +79,13 @@ export function useResizablePane(options: ResizablePaneOptions) {
 
   function onPointerUp(event: PointerEvent) {
     isResizing.value = false;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
+    clearResizeListeners();
     (event.target as Element | null)?.releasePointerCapture?.(event.pointerId);
     persistWidth();
+  }
+
+  function clearResizeListeners() {
+    runUnlistenFns(resizeUnlisteners.splice(0).reverse());
   }
 
   function startResize(event: PointerEvent) {
@@ -90,13 +95,15 @@ export function useResizablePane(options: ResizablePaneOptions) {
     startX = event.clientX;
     startWidth = width.value;
     (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
+    clearResizeListeners();
+    resizeUnlisteners = [
+      addDomEventListener(window, "pointermove", onPointerMove),
+      addDomEventListener(window, "pointerup", onPointerUp),
+    ];
   }
 
   onBeforeUnmount(() => {
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
+    clearResizeListeners();
   });
 
   return {

@@ -3,8 +3,37 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
+use crate::chat_backends_contract::chat_backends_contract;
+use crate::project_architecture_contract::{
+    project_architecture_change_statuses, project_architecture_permissions,
+    project_architecture_rollback_permission,
+};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
+
+fn contains_contract_value(values: &[String], value: &str) -> bool {
+    values.iter().any(|item| item == value)
+}
+
+fn required_change_status(status: &str) -> &'static str {
+    project_architecture_change_statuses()
+        .iter()
+        .find(|value| value.as_str() == status)
+        .map(String::as_str)
+        .unwrap_or_else(|| panic!("architecture-contract.json missing change status {status}"))
+}
+
+fn applied_change_status() -> &'static str {
+    required_change_status("applied")
+}
+
+fn rejected_change_status() -> &'static str {
+    required_change_status("rejected")
+}
+
+fn rolled_back_change_status() -> &'static str {
+    required_change_status("rolled_back")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,7 +163,7 @@ fn empty_graph(project_id: &str) -> ProjectArchitectureGraph {
 }
 
 fn validate_backend(value: &str) -> Result<(), String> {
-    if value == "claude" || value == "codex" {
+    if contains_contract_value(&chat_backends_contract().chat_backends, value) {
         Ok(())
     } else {
         Err(format!("project_architecture: 无效 backend：{value}"))
@@ -142,7 +171,7 @@ fn validate_backend(value: &str) -> Result<(), String> {
 }
 
 fn validate_permission(value: &str) -> Result<(), String> {
-    if value == "ask" || value == "full" || value == "readonly" {
+    if contains_contract_value(project_architecture_permissions(), value) {
         Ok(())
     } else {
         Err(format!("project_architecture: 无效 permission：{value}"))
@@ -150,10 +179,7 @@ fn validate_permission(value: &str) -> Result<(), String> {
 }
 
 fn validate_status(value: &str) -> Result<(), String> {
-    if matches!(
-        value,
-        "proposed" | "pending" | "applied" | "rejected" | "rolled_back"
-    ) {
+    if contains_contract_value(project_architecture_change_statuses(), value) {
         Ok(())
     } else {
         Err(format!("project_architecture: 无效 status：{value}"))
@@ -444,7 +470,7 @@ pub(crate) fn apply_project_architecture_changes_core(
         &input.task_id,
         input.turn_id.as_deref(),
         &input.backend,
-        "applied",
+        applied_change_status(),
         &input.permission,
         &reason,
         &changes,
@@ -485,7 +511,7 @@ pub(crate) fn reject_project_architecture_changes_core(
         &input.task_id,
         input.turn_id.as_deref(),
         &input.backend,
-        "rejected",
+        rejected_change_status(),
         &input.permission,
         &reason,
         &changes,
@@ -639,10 +665,10 @@ pub(crate) fn rollback_project_architecture_core(
                       summary, changes_json, before_graph_json, after_graph_json,
                       created_at, resolved_at
                FROM project_architecture_changes
-               WHERE project_id = ?1 AND status = 'applied' AND before_graph_json IS NOT NULL
+               WHERE project_id = ?1 AND status = ?2 AND before_graph_json IS NOT NULL
                ORDER BY created_at DESC, rowid DESC
                LIMIT 1"#,
-            params![project_id.as_str()],
+            params![project_id.as_str(), applied_change_status()],
             row_to_change_record,
         )
         .optional()
@@ -669,8 +695,8 @@ pub(crate) fn rollback_project_architecture_core(
         &task_id,
         None,
         &backend,
-        "rolled_back",
-        "full",
+        rolled_back_change_status(),
+        project_architecture_rollback_permission(),
         "回滚到上一版本",
         &[],
         Some(&current),
@@ -761,6 +787,36 @@ mod tests {
             changes,
             request_id: Some(Uuid::new_v4().to_string()),
         }
+    }
+
+    #[test]
+    fn validators_accept_contract_values() {
+        let backend_contract = chat_backends_contract();
+        assert_eq!(backend_contract.chat_backends, vec!["claude", "codex"]);
+        assert_eq!(
+            project_architecture_permissions(),
+            &["ask", "full", "readonly"]
+        );
+        assert_eq!(project_architecture_rollback_permission(), "full");
+        assert_eq!(
+            project_architecture_change_statuses(),
+            &["proposed", "pending", "applied", "rejected", "rolled_back"]
+        );
+        assert_eq!(applied_change_status(), "applied");
+        assert_eq!(rejected_change_status(), "rejected");
+        assert_eq!(rolled_back_change_status(), "rolled_back");
+        for backend in &backend_contract.chat_backends {
+            validate_backend(backend).unwrap();
+        }
+        for permission in project_architecture_permissions() {
+            validate_permission(permission).unwrap();
+        }
+        for status in project_architecture_change_statuses() {
+            validate_status(status).unwrap();
+        }
+        assert!(validate_backend("openai").is_err());
+        assert!(validate_permission("free").is_err());
+        assert!(validate_status("queued").is_err());
     }
 
     #[test]
@@ -857,10 +913,10 @@ mod tests {
                           summary, changes_json, before_graph_json, after_graph_json,
                           created_at, resolved_at
                    FROM project_architecture_changes
-                   WHERE project_id = 'p1' AND status = 'applied'
+                   WHERE project_id = 'p1' AND status = ?1
                    ORDER BY created_at DESC, rowid DESC
                    LIMIT 1"#,
-                [],
+                params![applied_change_status()],
                 row_to_change_record,
             )
             .unwrap();
@@ -900,8 +956,8 @@ mod tests {
             assert_eq!(result.event.as_ref().unwrap().backend, backend);
             let history_backend: String = conn
                 .query_row(
-                    "SELECT backend FROM project_architecture_changes WHERE status = 'rolled_back'",
-                    [],
+                    "SELECT backend FROM project_architecture_changes WHERE status = ?1",
+                    params![rolled_back_change_status()],
                     |row| row.get(0),
                 )
                 .unwrap();

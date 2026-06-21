@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { ChartData, ChartOptions, ChartType, TooltipItem } from "chart.js";
 import {
   AlertTriangle,
@@ -9,13 +9,19 @@ import {
   RotateCcw,
   RefreshCw,
 } from "lucide-vue-next";
-import type {
-  ChatBackendKind,
-  CodexAccountQuotaCredits,
-  CodexAccountQuotaStatus,
-  QuotaUsageStats,
-  QuotaUsageStatsBackendFilter,
-  QuotaUsageStatsDays,
+import {
+  type CodexAccountQuotaStatus,
+  connectionModeUsesCodexAccount,
+  codexAccountQuotaCreditsLabel,
+  codexRateLimitResetCreditConsumeOutcomeLabel,
+  DEFAULT_QUOTA_USAGE_STATS_DAYS,
+  QUOTA_USAGE_STATS_BACKEND_FILTERS,
+  QUOTA_USAGE_STATS_DAYS,
+  type QuotaUsageStats,
+  type QuotaUsageStatsBackendFilter,
+  type QuotaUsageStatsDays,
+  quotaUsageStatsBackendFilterLabel,
+  quotaUsageStatsDaysLabel,
 } from "@lilia/contracts";
 import QuotaChartCanvas from "./QuotaChartCanvas.vue";
 import {
@@ -44,14 +50,15 @@ type QuotaBreakdownItem = {
 type NumericChartData = ChartData<ChartType, number[], string>;
 
 const backendOptions: BackendOption[] = [
-  { value: "all", label: "全部" },
-  { value: "codex", label: "Codex" },
-  { value: "claude", label: "Claude" },
+  ...QUOTA_USAGE_STATS_BACKEND_FILTERS.map((value) => ({
+    value,
+    label: quotaUsageStatsBackendFilterLabel(value),
+  })),
 ];
 const daysOptions: DaysOption[] = [
-  { value: 7, label: "7 天" },
-  { value: 30, label: "30 天" },
+  ...QUOTA_USAGE_STATS_DAYS.map((value) => ({ value, label: quotaUsageStatsDaysLabel(value) })),
 ];
+const maxStatsDays = Math.max(...QUOTA_USAGE_STATS_DAYS);
 const chartPalette = {
   input: "var(--accent)",
   output: "var(--ok)",
@@ -70,7 +77,7 @@ const breakdownPalette = [
 ];
 
 const selectedBackend = ref<QuotaUsageStatsBackendFilter>("all");
-const selectedDays = ref<QuotaUsageStatsDays>(7);
+const selectedDays = ref<QuotaUsageStatsDays>(DEFAULT_QUOTA_USAGE_STATS_DAYS);
 const stats = ref<QuotaUsageStats | null>(null);
 const officialQuota = ref<CodexAccountQuotaStatus | null>(null);
 const loading = ref(false);
@@ -81,13 +88,14 @@ const resetCreditError = ref("");
 const error = ref("");
 let requestSeq = 0;
 let quotaRequestSeq = 0;
+let disposed = false;
 
 const totalRecords = computed(() => stats.value?.cost.totalRecordCount ?? 0);
 const hasUsage = computed(() => totalRecords.value > 0);
 const totalTokens = computed(() => stats.value?.totals.totalTokens ?? 0);
 const refreshing = computed(() => loading.value || quotaLoading.value);
 const showOfficialQuota = computed(() =>
-  officialQuota.value?.connectionMode === "codex-account",
+  connectionModeUsesCodexAccount(officialQuota.value?.connectionMode),
 );
 const officialQuotaWindows = computed(() => [
   { key: "fiveHour", window: officialQuota.value?.fiveHour },
@@ -170,7 +178,7 @@ const toolBreakdown = computed(() =>
   ),
 );
 const usageTrendChartLabel = computed(
-  () => `Token 用量趋势（${backendLabel(selectedBackend.value)} · 近 ${selectedDays.value} 天）`,
+  () => `Token 用量趋势（${quotaUsageStatsBackendFilterLabel(selectedBackend.value)} · 近 ${selectedDays.value} 天）`,
 );
 const usageTrendChartData = computed<NumericChartData>(() => {
   const daily = stats.value?.daily ?? [];
@@ -238,7 +246,7 @@ const usageTrendChartOptions = computed<ChartOptions>(() => ({
         display: false,
       },
       ticks: {
-        autoSkip: selectedDays.value === 30,
+        autoSkip: selectedDays.value === maxStatsDays,
         maxRotation: 0,
         color: chartPalette.muted,
       },
@@ -266,7 +274,7 @@ const usageTrendChartOptions = computed<ChartOptions>(() => ({
   },
 }));
 const backendChartData = computed<NumericChartData>(() => ({
-  labels: sortedBackends.value.map((row) => backendLabel(row.backend)),
+  labels: sortedBackends.value.map((row) => quotaUsageStatsBackendFilterLabel(row.backend)),
   datasets: [
     {
       label: "Token",
@@ -392,12 +400,6 @@ const costCoverageText = computed(() => {
   return `${coverage.costRecordCount}/${coverage.totalRecordCount} 条记录含成本`;
 });
 
-function backendLabel(backend: ChatBackendKind | QuotaUsageStatsBackendFilter) {
-  if (backend === "codex") return "Codex";
-  if (backend === "claude") return "Claude";
-  return "全部";
-}
-
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(value);
 }
@@ -480,13 +482,6 @@ function breakdownShareText(context: TooltipItem<ChartType>) {
   return `${Math.round((Number(context.raw ?? 0) / total) * 100)}%`;
 }
 
-function quotaCreditsLabel(credits: CodexAccountQuotaCredits | null | undefined) {
-  if (!credits || !credits.hasCredits) return "暂无 credit 数据";
-  if (credits.unlimited) return "不限";
-  if (credits.balance) return `剩余 ${credits.balance}`;
-  return "可用";
-}
-
 function resetCreditText(count: number) {
   return count > 0 ? `可用 ${formatNumber(count)} 次` : "暂无可用重置次数";
 }
@@ -494,14 +489,6 @@ function resetCreditText(count: number) {
 function accountUsageValue(value: number | null, suffix: string) {
   if (value === null) return "--";
   return suffix === "tokens" ? `${formatCompactNumber(value)} tokens` : `${formatNumber(value)} ${suffix}`;
-}
-
-function resetOutcomeText(outcome: string) {
-  if (outcome === "reset") return "已使用 1 次重置次数，官方额度已刷新";
-  if (outcome === "alreadyRedeemed") return "本次重置请求已处理，官方额度已刷新";
-  if (outcome === "nothingToReset") return "当前没有可重置的额度窗口";
-  if (outcome === "noCredit") return "没有可用的重置次数";
-  return "重置次数请求已完成";
 }
 
 function createIdempotencyKey() {
@@ -517,11 +504,11 @@ async function loadStats() {
       days: selectedDays.value,
       backend: selectedBackend.value,
     });
-    if (seq === requestSeq) stats.value = result;
+    if (!disposed && seq === requestSeq) stats.value = result;
   } catch (err) {
-    if (seq === requestSeq) error.value = String(err);
+    if (!disposed && seq === requestSeq) error.value = String(err);
   } finally {
-    if (seq === requestSeq) loading.value = false;
+    if (!disposed && seq === requestSeq) loading.value = false;
   }
 }
 
@@ -530,18 +517,18 @@ async function loadOfficialQuota() {
   quotaLoading.value = true;
   try {
     const result = await getCodexAccountQuotaStatus();
-    if (seq === quotaRequestSeq) officialQuota.value = result;
+    if (!disposed && seq === quotaRequestSeq) officialQuota.value = result;
   } catch (err) {
-    if (seq === quotaRequestSeq) {
+    if (!disposed && seq === quotaRequestSeq) {
       officialQuota.value = codexQuotaUnavailableStatus(err);
     }
   } finally {
-    if (seq === quotaRequestSeq) quotaLoading.value = false;
+    if (!disposed && seq === quotaRequestSeq) quotaLoading.value = false;
   }
 }
 
 async function consumeResetCredit() {
-  if (!canConsumeResetCredit.value) return;
+  if (disposed || !canConsumeResetCredit.value) return;
   resetCreditLoading.value = true;
   resetCreditMessage.value = "";
   resetCreditError.value = "";
@@ -549,16 +536,18 @@ async function consumeResetCredit() {
     const result = await consumeCodexRateLimitResetCredit({
       idempotencyKey: createIdempotencyKey(),
     });
+    if (disposed) return;
     officialQuota.value = result.status;
-    resetCreditMessage.value = resetOutcomeText(result.outcome);
+    resetCreditMessage.value = codexRateLimitResetCreditConsumeOutcomeLabel(result.outcome);
   } catch (err) {
-    resetCreditError.value = String(err);
+    if (!disposed) resetCreditError.value = String(err);
   } finally {
-    resetCreditLoading.value = false;
+    if (!disposed) resetCreditLoading.value = false;
   }
 }
 
 async function refreshAll() {
+  if (disposed) return;
   resetCreditMessage.value = "";
   resetCreditError.value = "";
   await Promise.all([loadStats(), loadOfficialQuota()]);
@@ -577,7 +566,14 @@ async function selectDays(days: QuotaUsageStatsDays) {
 }
 
 onMounted(() => {
+  disposed = false;
   void refreshAll();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  requestSeq += 1;
+  quotaRequestSeq += 1;
 });
 </script>
 
@@ -684,7 +680,7 @@ onMounted(() => {
           class="quota-official-credit"
         >
           <span>{{ row.label }}</span>
-          <strong>{{ quotaCreditsLabel(row.credits) }}</strong>
+          <strong>{{ codexAccountQuotaCreditsLabel(row.credits) }}</strong>
         </div>
       </div>
       <div v-if="!hasOfficialQuotaWindow" class="quota-official__empty">
@@ -771,7 +767,7 @@ onMounted(() => {
         <Database :size="14" aria-hidden="true" />
         趋势
       </span>
-      <span class="ui-badge ui-badge--muted">{{ backendLabel(selectedBackend) }} · 近 {{ selectedDays }} 天</span>
+      <span class="ui-badge ui-badge--muted">{{ quotaUsageStatsBackendFilterLabel(selectedBackend) }} · 近 {{ selectedDays }} 天</span>
     </h2>
 
     <div v-if="!hasUsage && !loading" class="quota-empty">
@@ -811,7 +807,7 @@ onMounted(() => {
           :key="row.backend"
           class="quota-backend-row"
         >
-          <span>{{ backendLabel(row.backend) }}</span>
+          <span>{{ quotaUsageStatsBackendFilterLabel(row.backend) }}</span>
           <strong>{{ formatCompactNumber(row.totalTokens) }} tokens · {{ backendShareText(row.totalTokens) }}</strong>
         </div>
       </div>
@@ -922,7 +918,7 @@ onMounted(() => {
         class="quota-recent__row"
       >
         <div class="quota-recent__main">
-          <strong>{{ backendLabel(record.backend) }}</strong>
+          <strong>{{ quotaUsageStatsBackendFilterLabel(record.backend) }}</strong>
           <span>{{ formatDateTime(record.createdAt) }}</span>
         </div>
         <span>{{ formatCompactNumber(record.totalTokens) }} tokens</span>

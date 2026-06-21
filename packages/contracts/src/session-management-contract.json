@@ -1,0 +1,29 @@
+{
+  "runtimeCommandType": "session_management",
+  "actions": [
+    "list",
+    "info",
+    "messages",
+    "rename",
+    "tag",
+    "delete",
+    "archive"
+  ],
+  "defaultLimit": 20,
+  "maxLimit": 100,
+  "defaultArchived": false,
+  "requiresSessionId": [
+    "info",
+    "messages",
+    "rename",
+    "tag",
+    "delete",
+    "archive"
+  ],
+  "requiresTitle": [
+    "rename"
+  ],
+  "requiresTagField": [
+    "tag"
+  ]
+}

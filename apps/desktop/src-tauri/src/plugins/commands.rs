@@ -9,25 +9,22 @@ use super::claude_mcp::{
     set_claude_mcp_server_enabled, update_claude_mcp_server,
 };
 use super::claude_plugins::set_claude_plugin_enabled;
-use super::claude_skills::{
-    create_claude_skill, delete_claude_skill, set_claude_skill_enabled,
-};
+use super::claude_skills::{create_claude_skill, delete_claude_skill, set_claude_skill_enabled};
 use super::codex_mcp::{
     codex_config_path, create_codex_mcp_server, delete_codex_mcp_server,
     set_codex_mcp_server_enabled, update_codex_mcp_server,
 };
 use super::hooks::{
     create_hook_source, delete_hook_source, hooks_overview, read_hook_source,
-    set_hook_source_enabled, update_hook_source,
+    set_hook_source_enabled, update_hook_source, FORMAT_CLAUDE_SETTINGS_JSON,
+    FORMAT_CODEX_HOOKS_JSON,
 };
 use super::runtime::overview;
 use super::types::{
     HookDocumentUpdateInput, HookDocumentView, HookSourceSummary, HooksOverview, PluginMcpServer,
     PluginMcpServerInput, PluginSkill, PluginsOverview,
 };
-
-const BACKEND_CLAUDE: &str = "claude";
-const BACKEND_CODEX: &str = "codex";
+use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 enum PluginBackend {
     Claude,
@@ -224,10 +221,7 @@ pub fn plugins_create_hook_source(
 }
 
 #[tauri::command]
-pub fn plugins_delete_hook_source(
-    app: AppHandle,
-    source: HookSourceSummary,
-) -> Result<(), String> {
+pub fn plugins_delete_hook_source(app: AppHandle, source: HookSourceSummary) -> Result<(), String> {
     delete_hook_source(&app, &source)
 }
 
@@ -244,9 +238,8 @@ pub fn plugins_set_hook_source_enabled(
 pub fn plugins_open_hook_config(app: AppHandle, source: HookSourceSummary) -> Result<(), String> {
     let path = PathBuf::from(&source.path);
     let default_contents: &[u8] = match (source.backend.as_str(), source.format.as_str()) {
-        (BACKEND_CLAUDE, "claude_settings_json") | (BACKEND_CODEX, "codex_hooks_json") => {
-            b"{\n  \"hooks\": {}\n}\n"
-        }
+        (BACKEND_CLAUDE, FORMAT_CLAUDE_SETTINGS_JSON)
+        | (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => b"{\n  \"hooks\": {}\n}\n",
         _ => b"",
     };
     ensure_file_and_open(

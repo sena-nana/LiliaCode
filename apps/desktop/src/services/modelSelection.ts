@@ -1,21 +1,32 @@
-import type {
-  ChatAttachment,
-  ChatBackendKind,
-  ChatComposerState,
-  ChatContextUsage,
-  ChatConversationReference,
-  ChatModelOption,
-  ChatRuntimeCommand,
-  ChatWorkflow,
-  ModelSelectionExplanation,
-  ProviderRuntimeOptions,
-  ReasoningEffort,
+import {
+  autoModelForBackendTier,
+  autoRuntimeCommandSignalLabel,
+  autoReasoningEffortForTier,
+  autoTierForRuntimeCommandType,
+  autoTierForWorkflowType,
+  autoContextThresholdsForScale,
+  chatBackendLabel,
+  mergeModelSelectionRuntimeOptions,
+  modelBelongsToBackend,
+  normalizeReasoningEffortForBackend,
+  normalizeReasoningEffort,
+  runtimeOptionsModelForBackend,
+  runtimeOptionsReasoningEffortForBackend,
+  type ChatAttachment,
+  type ChatBackendKind,
+  type ChatComposerState,
+  type ChatContextUsage,
+  type ChatConversationReference,
+  type ChatModelOption,
+  type ChatRuntimeCommand,
+  type ChatWorkflow,
+  type ModelSelectionContextScale,
+  type ModelSelectionExplanation,
+  type ModelTier,
+  type ProviderRuntimeOptions,
+  type ReasoningEffort,
 } from "@lilia/contracts";
 
-export const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
-
-type ContextScale = "small" | "medium" | "large";
-type ModelTier = "light" | "normal" | "deep";
 type SelectionSource = ModelSelectionExplanation["source"];
 
 export interface ModelSelectionInput {
@@ -37,114 +48,59 @@ export interface ModelSelectionResult {
   explanation: ModelSelectionExplanation;
 }
 
-const AUTO_MODELS: Record<ChatBackendKind, Record<ModelTier, string>> = {
-  codex: {
-    light: "gpt-5.4-mini",
-    normal: "gpt-5.4",
-    deep: "gpt-5.5",
-  },
-  claude: {
-    light: "claude-haiku-4-5",
-    normal: "claude-sonnet-4-6",
-    deep: "claude-opus-4-7",
-  },
-};
-
-const AUTO_EFFORTS: Record<ModelTier, ReasoningEffort> = {
-  light: "low",
-  normal: "medium",
-  deep: "high",
-};
-
-const LIGHT_WORKFLOWS = new Set([
-  "lilia_compact",
-  "lilia_background_terminals_clean",
-  "lilia_config_diagnostics",
-  "lilia_memory_mode",
-  "lilia_memory_reset",
-]);
-
-const DEEP_WORKFLOWS = new Set([
-  "lilia_review",
-  "lilia_fix_suggestion",
-  "lilia_batch_apply",
-]);
-
-function normalizeEffort(value: unknown): ReasoningEffort | null {
-  return typeof value === "string" && REASONING_EFFORTS.includes(value as ReasoningEffort)
-    ? value as ReasoningEffort
-    : null;
-}
-
 function normalizeEffortForBackend(
   backend: ChatBackendKind,
   value: ReasoningEffort | null,
   signals: string[],
 ): ReasoningEffort | null {
   if (!value) return null;
-  if (backend === "codex" && value === "max") {
-    signals.push("Codex 不支持 max，已降级为 xhigh");
-    return "xhigh";
+  const normalized = normalizeReasoningEffortForBackend(backend, value);
+  if (normalized && normalized !== value) {
+    signals.push(`${chatBackendLabel(backend)} 不支持 ${value}，已降级为 ${normalized}`);
   }
-  return value;
-}
-
-function runtimeProviderModel(
-  backend: ChatBackendKind,
-  runtimeOptions: ProviderRuntimeOptions | null | undefined,
-): string | null {
-  const commonModel = runtimeOptions?.common?.model?.trim();
-  if (commonModel) return commonModel;
-  if (backend === "codex") {
-    const codexModel = runtimeOptions?.provider?.codex?.model?.trim();
-    if (codexModel) return codexModel;
-  }
-  return null;
-}
-
-function runtimeProviderEffort(
-  backend: ChatBackendKind,
-  runtimeOptions: ProviderRuntimeOptions | null | undefined,
-): ReasoningEffort | null {
-  const provider = runtimeOptions?.provider;
-  const providerEffort = backend === "codex"
-    ? normalizeEffort(provider?.codex?.reasoningEffort)
-    : normalizeEffort(provider?.claude?.reasoningEffort);
-  return providerEffort ?? normalizeEffort(runtimeOptions?.common?.reasoningEffort);
+  return normalized;
 }
 
 function workflowType(workflow: ChatWorkflow | null | undefined): string | null {
   return typeof workflow?.type === "string" ? workflow.type : null;
 }
 
-function contextScale(input: ModelSelectionInput, signals: string[]): ContextScale {
+function contextScale(input: ModelSelectionInput, signals: string[]): ModelSelectionContextScale {
   const promptLength = input.prompt.trim().length;
   const attachmentCount = input.attachments?.length ?? 0;
   const referenceCount = input.conversationReferences?.length ?? 0;
   const usagePercent = input.contextUsage?.backend === input.backend ? input.contextUsage.usedPercent : null;
+  const largeThresholds = autoContextThresholdsForScale("large");
+  const mediumThresholds = autoContextThresholdsForScale("medium");
   const hasLargeDirectory = (input.attachments ?? []).some((attachment) => {
     const directory = attachment.directory;
     return Boolean(directory && (
       directory.truncated ||
-      directory.fileCount >= 200 ||
-      directory.totalSize >= 20 * 1024 * 1024
+      (
+        typeof largeThresholds.directoryFileCount === "number" &&
+        directory.fileCount >= largeThresholds.directoryFileCount
+      ) ||
+      (
+        typeof largeThresholds.directoryTotalSize === "number" &&
+        directory.totalSize >= largeThresholds.directoryTotalSize
+      )
     ));
   });
   if (
-    (typeof usagePercent === "number" && usagePercent >= 70) ||
-    promptLength >= 8000 ||
-    attachmentCount >= 6 ||
+    (typeof usagePercent === "number" && usagePercent >= largeThresholds.contextUsagePercent) ||
+    promptLength >= largeThresholds.promptLength ||
+    attachmentCount >= largeThresholds.attachmentCount ||
     hasLargeDirectory ||
-    referenceCount >= 3
+    referenceCount >= largeThresholds.conversationReferenceCount
   ) {
     signals.push("上下文规模 large");
     return "large";
   }
   if (
-    (typeof usagePercent === "number" && usagePercent >= 35) ||
-    promptLength >= 2000 ||
-    attachmentCount >= 2 ||
-    referenceCount >= 1
+    (typeof usagePercent === "number" && usagePercent >= mediumThresholds.contextUsagePercent) ||
+    promptLength >= mediumThresholds.promptLength ||
+    attachmentCount >= mediumThresholds.attachmentCount ||
+    referenceCount >= mediumThresholds.conversationReferenceCount
   ) {
     signals.push("上下文规模 medium");
     return "medium";
@@ -159,25 +115,17 @@ function selectAutoTier(input: ModelSelectionInput, signals: string[]): ModelTie
     signals.push("计划模式");
     return "deep";
   }
-  if (type && DEEP_WORKFLOWS.has(type)) {
-    signals.push(`工作流 ${type}`);
-    return "deep";
+  const workflowTier = autoTierForWorkflowType(type);
+  if (workflowTier) {
+    signals.push(
+      workflowTier === "light" ? `轻量工作流 ${type}` : `工作流 ${type}`,
+    );
+    return workflowTier;
   }
-  if (type && LIGHT_WORKFLOWS.has(type)) {
-    signals.push(`轻量工作流 ${type}`);
-    return "light";
-  }
-  if (input.runtimeCommand?.type === "runtime_settings") {
-    signals.push("运行时诊断/设置");
-    return "light";
-  }
-  if (input.runtimeCommand?.type === "remote_environment") {
-    signals.push("远程环境管理");
-    return "light";
-  }
-  if (input.runtimeCommand?.type === "session_management") {
-    signals.push("会话管理");
-    return "light";
+  const runtimeCommandTier = autoTierForRuntimeCommandType(input.runtimeCommand?.type);
+  if (runtimeCommandTier) {
+    signals.push(autoRuntimeCommandSignalLabel(input.runtimeCommand?.type) ?? "运行时命令");
+    return runtimeCommandTier;
   }
   const scale = contextScale(input, signals);
   if (scale === "large") return "deep";
@@ -195,7 +143,7 @@ function pickAvailableModel(
   modelOptions: ChatModelOption[],
   signals: string[],
 ): string {
-  const desired = AUTO_MODELS[backend][tier];
+  const desired = autoModelForBackendTier(backend, tier);
   if (modelExists(modelOptions, desired)) return desired;
   const fallback = modelOptions.find((option) => option.backend === backend)?.id ?? desired;
   if (fallback !== desired) signals.push(`模型 ${desired} 不可用，已使用 ${fallback}`);
@@ -209,9 +157,7 @@ function validateModel(
   fallbackTier: ModelTier,
   signals: string[],
 ): string {
-  if (modelExists(modelOptions, model)) return model;
-  if (backend === "claude" && model.startsWith("claude-")) return model;
-  if (backend === "codex" && (model.startsWith("gpt-") || model.startsWith("o"))) return model;
+  if (modelBelongsToBackend(backend, model)) return model;
   signals.push(`模型 ${model} 不属于当前后端，已回退自动档位`);
   return pickAvailableModel(backend, fallbackTier, modelOptions, signals);
 }
@@ -232,59 +178,17 @@ function selectionSummary(
   return `${prefix} ${model}${effortText}${signalText}`;
 }
 
-function mergeRuntimeOptions(
-  backend: ChatBackendKind,
-  runtimeOptions: ProviderRuntimeOptions | null | undefined,
-  model: string,
-  effort: ReasoningEffort | null,
-  explanation: ModelSelectionExplanation,
-): ProviderRuntimeOptions {
-  const next: ProviderRuntimeOptions = {
-    ...(runtimeOptions ?? {}),
-    common: {
-      ...(runtimeOptions?.common ?? {}),
-      model,
-      reasoningEffort: effort ?? undefined,
-      modelSelection: explanation,
-    },
-    provider: {
-      ...(runtimeOptions?.provider ?? {}),
-    },
-  };
-  if (backend === "codex") {
-    const codexEffort = effort === "max" ? "xhigh" : effort;
-    next.provider = {
-      ...next.provider,
-      codex: {
-        ...(runtimeOptions?.provider?.codex ?? {}),
-        model,
-        reasoningEffort: codexEffort ?? undefined,
-      },
-    };
-  } else {
-    next.provider = {
-      ...next.provider,
-      claude: {
-        ...(runtimeOptions?.provider?.claude ?? {}),
-        reasoningEffort: effort ?? undefined,
-        thinking: runtimeOptions?.provider?.claude?.thinking ?? (effort ? { type: "adaptive" } : undefined),
-      },
-    };
-  }
-  return next;
-}
-
 export function selectModelForTurn(input: ModelSelectionInput): ModelSelectionResult {
   const signals: string[] = [];
   const backend = input.backend;
   const tier = selectAutoTier(input, signals);
   const autoModel = pickAvailableModel(backend, tier, input.modelOptions, signals);
-  const autoEffort = AUTO_EFFORTS[tier];
-  const runtimeModel = runtimeProviderModel(backend, input.runtimeOptions);
-  const runtimeEffort = runtimeProviderEffort(backend, input.runtimeOptions);
+  const autoEffort = autoReasoningEffortForTier(tier);
+  const runtimeModel = runtimeOptionsModelForBackend(backend, input.runtimeOptions);
+  const runtimeEffort = runtimeOptionsReasoningEffortForBackend(backend, input.runtimeOptions);
   const manualMode = input.composer.modelSelectionMode === "manual";
   const manualModel = manualMode && input.composer.model ? input.composer.model : null;
-  const manualEffort = manualMode ? normalizeEffort(input.composer.reasoningEffort) : null;
+  const manualEffort = manualMode ? normalizeReasoningEffort(input.composer.reasoningEffort) : null;
   const source: SelectionSource =
     runtimeModel || runtimeEffort ? "runtimeOptions" : manualModel || manualEffort ? "manual" : "auto";
   const selectedModel = validateModel(
@@ -318,7 +222,13 @@ export function selectModelForTurn(input: ModelSelectionInput): ModelSelectionRe
   };
   return {
     composer,
-    runtimeOptions: mergeRuntimeOptions(backend, input.runtimeOptions, selectedModel, selectedEffort, explanation),
+    runtimeOptions: mergeModelSelectionRuntimeOptions(
+      backend,
+      input.runtimeOptions,
+      selectedModel,
+      selectedEffort,
+      explanation,
+    ),
     explanation,
   };
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 const props = defineProps<{
   modelValue: string;
@@ -12,17 +12,28 @@ const emit = defineEmits<{
 }>();
 
 const commandInput = ref<HTMLTextAreaElement | null>(null);
+let focusSeq = 0;
+let disposed = false;
 
 watch(
   () => props.editing,
   (editing) => {
-    if (!editing) return;
+    focusSeq += 1;
+    if (!editing || disposed) return;
+    const seq = focusSeq;
     void nextTick(() => {
-      commandInput.value?.focus();
-      commandInput.value?.select();
+      if (disposed || seq !== focusSeq || !props.editing) return;
+      const input = commandInput.value;
+      input?.focus();
+      input?.select();
     });
   },
 );
+
+onBeforeUnmount(() => {
+  disposed = true;
+  focusSeq += 1;
+});
 
 function updateCommand(event: Event) {
   emit("update:modelValue", (event.target as HTMLTextAreaElement).value);

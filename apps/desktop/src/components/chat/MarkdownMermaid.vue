@@ -29,6 +29,8 @@ const errorText = ref("");
 const activatedByUser = ref(false);
 let renderId = 0;
 let renderIdleHandle: number | null = null;
+let cancelPaintRender: (() => void) | null = null;
+let disposed = false;
 
 const instanceId = `m${++mermaidInstanceSeed}`;
 const MAX_MERMAID_SOURCE_LENGTH = 20_000;
@@ -77,19 +79,22 @@ function configureMermaid(mermaid: MermaidApi) {
 }
 
 function cancelScheduledRender() {
+  cancelPaintRender?.();
+  cancelPaintRender = null;
   if (renderIdleHandle === null) return;
   cancelIdleRun(renderIdleHandle);
   renderIdleHandle = null;
 }
 
 function resetDiagramState() {
+  if (disposed) return;
   state.value = "idle";
   errorText.value = "";
   if (container.value) container.value.innerHTML = "";
 }
 
 function requestDiagramActivation() {
-  if (activatedByUser.value) return;
+  if (disposed || activatedByUser.value) return;
   const stage = beginPerfStage("markdown.mermaid.activate", {
     detail: `${props.source.length} chars`,
   });
@@ -98,6 +103,7 @@ function requestDiagramActivation() {
 }
 
 function scheduleRenderDiagram() {
+  if (disposed) return;
   const currentRenderId = renderId + 1;
   renderId = currentRenderId;
   cancelScheduledRender();
@@ -106,7 +112,8 @@ function scheduleRenderDiagram() {
     void renderDiagram(currentRenderId);
     return;
   }
-  scheduleAfterPaint(() => {
+  cancelPaintRender = scheduleAfterPaint(() => {
+    cancelPaintRender = null;
     if (currentRenderId !== renderId) return;
     renderIdleHandle = runWhenIdle(() => {
       renderIdleHandle = null;
@@ -117,6 +124,7 @@ function scheduleRenderDiagram() {
 }
 
 async function renderDiagram(currentRenderId: number) {
+  if (disposed || currentRenderId !== renderId) return;
   const element = container.value;
   if (!element) return;
 
@@ -138,10 +146,11 @@ async function renderDiagram(currentRenderId: number) {
 
   state.value = "rendering";
   await nextTick();
+  if (disposed || currentRenderId !== renderId || !container.value) return;
 
   try {
     const mermaid = await getMermaid();
-    if (currentRenderId !== renderId || !container.value) return;
+    if (disposed || currentRenderId !== renderId || !container.value) return;
     configureMermaid(mermaid);
     const id = `markdown-mermaid-${instanceId}-${props.blockKey}-${currentRenderId}`.replace(
       /[^A-Za-z0-9_-]/g,
@@ -152,12 +161,12 @@ async function renderDiagram(currentRenderId: number) {
       async () => await mermaid.render(id, source),
       { detail: `${source.length} chars` },
     );
-    if (currentRenderId !== renderId || !container.value) return;
+    if (disposed || currentRenderId !== renderId || !container.value) return;
     container.value.innerHTML = svg;
     bindFunctions?.(container.value);
     state.value = "ready";
   } catch (error) {
-    if (currentRenderId !== renderId || !container.value) return;
+    if (disposed || currentRenderId !== renderId || !container.value) return;
     container.value.innerHTML = "";
     state.value = "error";
     errorText.value = error instanceof Error
@@ -192,6 +201,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  disposed = true;
   cancelScheduledRender();
   renderId += 1;
 });

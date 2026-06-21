@@ -4,10 +4,11 @@
  * （composer 在底，向上更自然）。
  */
 
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
 import { ChevronDown } from "lucide-vue-next";
 import { SB_MENU_POP_TRANSITION_MS } from "../composables/menuMotion";
 import { useAnchoredMenuMotion } from "../composables/useAnchoredMenuMotion";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 interface Option {
   value: T;
@@ -27,6 +28,8 @@ const props = defineProps<{
 const emit = defineEmits<{ "update:modelValue": [value: T] }>();
 
 const open = ref(false);
+let listenerSeq = 0;
+let documentUnlisteners: Array<() => void> = [];
 const placement = computed(() => props.placement === "bottom" ? "bottom" : "top");
 const {
   triggerEl,
@@ -58,6 +61,18 @@ function pick(opt: Option) {
   open.value = false;
 }
 
+function elementRef(el: Element | ComponentPublicInstance | null): HTMLElement | null {
+  return el instanceof HTMLElement ? el : null;
+}
+
+function setTriggerEl(el: Element | ComponentPublicInstance | null) {
+  triggerEl.value = elementRef(el);
+}
+
+function setMenuEl(el: Element | ComponentPublicInstance | null) {
+  menuEl.value = elementRef(el);
+}
+
 function onDocPointer(e: PointerEvent) {
   if (!containsTarget(e.target)) open.value = false;
 }
@@ -69,28 +84,40 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+function clearDocumentListeners() {
+  runUnlistenFns(documentUnlisteners.splice(0).reverse());
+}
+
+function installDocumentListeners() {
+  clearDocumentListeners();
+  documentUnlisteners = [
+    addDomEventListener(document, "pointerdown", onDocPointer, true),
+    addDomEventListener(document, "keydown", onKey),
+  ];
+}
+
 watch(open, async (v) => {
+  const seq = ++listenerSeq;
+  clearDocumentListeners();
   if (v) {
     await updateOrigin();
-    document.addEventListener("pointerdown", onDocPointer, true);
-    document.addEventListener("keydown", onKey);
+    if (seq !== listenerSeq || !open.value) return;
+    installDocumentListeners();
   } else {
     clearAnchor();
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onKey);
   }
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onKey);
+  listenerSeq += 1;
+  clearDocumentListeners();
 });
 </script>
 
 <template>
   <div class="dd">
     <button
-      ref="triggerEl"
+      :ref="setTriggerEl"
       type="button"
       class="chat-chip"
       :class="{ 'is-open': open, 'is-disabled': disabled }"
@@ -110,7 +137,7 @@ onBeforeUnmount(() => {
       <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
         <div
           v-if="open"
-          ref="menuEl"
+          :ref="setMenuEl"
           class="dd__menu"
           :class="placementClass"
           role="listbox"

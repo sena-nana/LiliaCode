@@ -1,0 +1,21 @@
+{
+  "agentTimelineListCommand": "agent_timeline_list",
+  "agentTimelineClearTaskCommand": "agent_timeline_clear_task",
+  "chatSendMessageCommand": "chat_send_message",
+  "chatInterruptTurnCommand": "chat_interrupt_turn",
+  "chatDescribeAttachmentsCommand": "chat_describe_attachments",
+  "chatSearchContextAttachmentsCommand": "chat_search_context_attachments",
+  "chatSearchSlashCommandsCommand": "chat_search_slash_commands",
+  "chatReadClipboardFilePathsCommand": "chat_read_clipboard_file_paths",
+  "chatSaveClipboardImageCommand": "chat_save_clipboard_image",
+  "chatSaveClipboardTextCommand": "chat_save_clipboard_text",
+  "chatGetComposerStateCommand": "chat_get_composer_state",
+  "chatListModelsCommand": "chat_list_models",
+  "chatGetRuntimeSnapshotCommand": "chat_get_runtime_snapshot",
+  "chatSetComposerStateCommand": "chat_set_composer_state",
+  "chatAckRestoredRollbackCommand": "chat_ack_restored_rollback",
+  "chatRespondAgentInteractionCommand": "chat_respond_agent_interaction",
+  "chatRespondTitleUpdateCommand": "chat_respond_title_update",
+  "liliaIabOpenCommand": "lilia_iab_open",
+  "liliaIabSubmitCommand": "lilia_iab_submit"
+}

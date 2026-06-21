@@ -1,4 +1,64 @@
 import type { CodexComposerSettings } from "./provider";
+import {
+  GITHUB_CLONE_REPO_COMMAND,
+  GITHUB_GET_BINDING_STATUS_COMMAND,
+  GITHUB_LIST_REPOS_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  GIT_CLONE_REPO_COMMAND,
+} from "./githubCommandsContract.mjs";
+import {
+  PROJECT_CREATE_COMMAND,
+  PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_GET_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_LIST_COMMAND,
+  PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  PROJECT_TOGGLE_PIN_COMMAND,
+} from "./projectCommandsContract.mjs";
+import {
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+} from "./systemCommandsContract.mjs";
+import { TASK_STATUSES, isTaskStatus, type TaskStatus } from "./task";
+import {
+  PROJECT_DASHBOARD_ACTIVE_STATUSES,
+  PROJECT_DASHBOARD_BLOCKED_STATUSES,
+  PROJECT_DASHBOARD_STATUS_ORDER,
+  PROJECT_ROADMAP_STATUS_ORDER,
+} from "./taskStatusContract.mjs";
+
+export {
+  GITHUB_CLONE_REPO_COMMAND,
+  GITHUB_GET_BINDING_STATUS_COMMAND,
+  GITHUB_LIST_REPOS_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  GIT_CLONE_REPO_COMMAND,
+  PROJECT_CREATE_COMMAND,
+  PROJECT_DASHBOARD_ACTIVE_STATUSES,
+  PROJECT_DASHBOARD_BLOCKED_STATUSES,
+  PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_GET_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_LIST_COMMAND,
+  PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_DASHBOARD_STATUS_ORDER,
+  PROJECT_ROADMAP_STATUS_ORDER,
+  PROJECT_SET_SETTINGS_COMMAND,
+  PROJECT_TOGGLE_PIN_COMMAND,
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+};
 
 export interface Project {
   id: string;
@@ -8,13 +68,45 @@ export interface Project {
   pinned: boolean;
 }
 
-export interface ProjectTaskStatusCounts {
-  draft: number;
-  waiting: number;
-  running: number;
-  blocked: number;
-  done: number;
-  cancelled: number;
+export type ProjectTaskStatusCounts = Record<TaskStatus, number>;
+
+export function createEmptyProjectTaskStatusCounts(): ProjectTaskStatusCounts {
+  return Object.fromEntries(
+    TASK_STATUSES.map((status) => [status, 0]),
+  ) as ProjectTaskStatusCounts;
+}
+
+export function incrementProjectTaskStatusCount(
+  counts: ProjectTaskStatusCounts,
+  status: unknown,
+): boolean {
+  if (!isTaskStatus(status)) return false;
+  counts[status] += 1;
+  return true;
+}
+
+export function countProjectTaskStatuses(
+  tasks: readonly { status: unknown }[],
+): ProjectTaskStatusCounts {
+  const counts = createEmptyProjectTaskStatusCounts();
+  for (const task of tasks) incrementProjectTaskStatusCount(counts, task.status);
+  return counts;
+}
+
+export function sumProjectTaskStatuses(
+  counts: ProjectTaskStatusCounts,
+  statuses: readonly TaskStatus[],
+): number {
+  return statuses.reduce((total, status) => total + counts[status], 0);
+}
+
+export function deriveProjectDashboardCounts(
+  counts: ProjectTaskStatusCounts,
+): Pick<ProjectDashboardSummary, "activeCount" | "blockedCount"> {
+  return {
+    activeCount: sumProjectTaskStatuses(counts, PROJECT_DASHBOARD_ACTIVE_STATUSES),
+    blockedCount: sumProjectTaskStatuses(counts, PROJECT_DASHBOARD_BLOCKED_STATUSES),
+  };
 }
 
 export interface ProjectDashboardSummary {

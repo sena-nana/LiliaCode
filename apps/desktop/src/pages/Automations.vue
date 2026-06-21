@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, ref } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   beginPerfStage,
   installPerfObservers,
@@ -17,14 +17,26 @@ const AutomationWorkspacePage = defineAsyncComponent({
 
 const workspaceReady = ref(false);
 let deferredMountSeq = 0;
+let cancelWorkspacePaint: (() => void) | null = null;
+let cancelRoutePaint: (() => void) | null = null;
+
+function cancelWorkspaceMountSchedule() {
+  cancelWorkspacePaint?.();
+  cancelWorkspacePaint = null;
+  cancelRoutePaint?.();
+  cancelRoutePaint = null;
+}
 
 function scheduleWorkspaceMount() {
+  cancelWorkspaceMountSchedule();
   const seq = ++deferredMountSeq;
   const stage = beginPerfStage("automations.route.mount");
-  scheduleAfterPaint(() => {
+  cancelRoutePaint = scheduleAfterPaint(() => {
+    cancelRoutePaint = null;
     stage.end("paint");
   });
-  scheduleAfterPaint(() => {
+  cancelWorkspacePaint = scheduleAfterPaint(() => {
+    cancelWorkspacePaint = null;
     if (seq !== deferredMountSeq) return;
     workspaceReady.value = true;
   });
@@ -33,6 +45,11 @@ function scheduleWorkspaceMount() {
 onMounted(() => {
   installPerfObservers();
   scheduleWorkspaceMount();
+});
+
+onBeforeUnmount(() => {
+  deferredMountSeq += 1;
+  cancelWorkspaceMountSchedule();
 });
 </script>
 

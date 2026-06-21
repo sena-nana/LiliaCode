@@ -1,9 +1,12 @@
-import type { CodexAccountQuotaStatus } from "@lilia/contracts";
+import {
+  clampPercent,
+  codexAccountQuotaPercentLabel,
+  codexAccountQuotaWindowRemainingLabel,
+  type ConnectionMode,
+  type CodexAccountQuotaStatus,
+} from "@lilia/contracts";
 
-export function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, value));
-}
+export { clampPercent };
 
 export function quotaPercentTone(value: number): "normal" | "warn" | "error" {
   const percent = clampPercent(value);
@@ -13,9 +16,7 @@ export function quotaPercentTone(value: number): "normal" | "warn" | "error" {
 }
 
 export function formatPercent(value: number): string {
-  return `${new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: value >= 10 ? 0 : 1,
-  }).format(clampPercent(value))}%`;
+  return codexAccountQuotaPercentLabel(value);
 }
 
 export function formatCompactNumber(value: number): string {
@@ -40,13 +41,12 @@ export function formatUnixSeconds(value: number | null | undefined): string {
 }
 
 export function quotaWindowLabel(window: { usedPercent: number } | null | undefined): string {
-  if (!window) return "暂无数据";
-  return `剩余 ${formatPercent(100 - window.usedPercent)}`;
+  return codexAccountQuotaWindowRemainingLabel(window);
 }
 
 export function codexQuotaUnavailableStatus(
   error: unknown,
-  connectionMode = "codex-account",
+  connectionMode: ConnectionMode = "codex-account",
 ): CodexAccountQuotaStatus {
   return {
     available: false,

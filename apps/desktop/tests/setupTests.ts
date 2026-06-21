@@ -102,7 +102,7 @@ beforeEach(async () => {
     TASKS,
     installTasksChangedListener,
   } = tasksModule;
-  installTasksChangedListener();
+  installTasksChangedListener({ force: true });
   PROJECTS.value = mockProjectsForStore();
   TASKS.value = mockTasksByProjectForStore();
   ORPHAN_LIST.value = mockOrphansForStore();

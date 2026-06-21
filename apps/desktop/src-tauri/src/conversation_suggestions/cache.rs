@@ -31,10 +31,7 @@ pub(super) fn normalize_settings(settings: Option<SuggestionSettings>) -> Sugges
 pub(super) fn cache_scope_key(project_id: Option<&str>, source: &SuggestionSource) -> String {
     format!(
         "{}:{}",
-        match source {
-            SuggestionSource::Provider => "provider",
-            SuggestionSource::AssistantAi => "assistant-ai",
-        },
+        source.as_contract_value(),
         project_id.unwrap_or("__recent__")
     )
 }
@@ -106,7 +103,7 @@ pub(super) fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> 
     format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}",
         scope.project_id.as_deref().unwrap_or("__recent__"),
-        source_label(&model.source),
+        model.source.as_contract_value(),
         model.backend.as_deref().unwrap_or("assistant-ai"),
         model.model,
         scope.latest_updated_at,
@@ -119,11 +116,4 @@ pub(super) fn build_cache_key(scope: &SuggestionScope, model: &ModelRequest) -> 
         github_fingerprint,
         local_git_fingerprint
     )
-}
-
-fn source_label(source: &SuggestionSource) -> &'static str {
-    match source {
-        SuggestionSource::Provider => "provider",
-        SuggestionSource::AssistantAi => "assistant-ai",
-    }
 }

@@ -1,10 +1,14 @@
 import { nextTick } from "vue";
-import type { ChatAttachment, Project, SuggestionItem } from "@lilia/contracts";
+import {
+  DEFAULT_SUGGESTION_LOADING_TEXT,
+  conversationSuggestionLoadingText,
+  type ChatAttachment,
+  type Project,
+  type SuggestionItem,
+  type SuggestionStatus,
+} from "@lilia/contracts";
 import type { Router } from "vue-router";
-import type { ConversationSuggestionSources } from "../../services/chat";
 import { measurePerfAsync } from "../../utils/perf";
-
-export type SuggestionsStatus = "idle" | "loading" | "empty" | "error";
 
 let suggestionDepsLoad: Promise<{
   getConversationSuggestions: typeof import("../../services/chat").getConversationSuggestions;
@@ -64,7 +68,7 @@ export async function loadTaskDetailSuggestions(options: {
   seq: number;
   isCurrentSeq: (seq: number) => boolean;
   setSuggestions: (items: SuggestionItem[]) => void;
-  setStatus: (status: SuggestionsStatus) => void;
+  setStatus: (status: SuggestionStatus) => void;
   setLoadingText: (text: string) => void;
 }) {
   const {
@@ -81,14 +85,14 @@ export async function loadTaskDetailSuggestions(options: {
   if (!shouldLoad) {
     setSuggestions([]);
     setStatus("idle");
-    setLoadingText("正在寻找灵感");
+    setLoadingText(DEFAULT_SUGGESTION_LOADING_TEXT);
     return;
   }
   setStatus("loading");
-  setLoadingText("正在寻找灵感");
+  setLoadingText(DEFAULT_SUGGESTION_LOADING_TEXT);
   try {
     const { getConversationSuggestions, getConversationSuggestionSources } = await loadSuggestionDeps(detail);
-    const loadingText = suggestionLoadingText(
+    const loadingText = conversationSuggestionLoadingText(
       await getConversationSuggestionSources(projectId, forceRefresh),
     );
     if (!isCurrentSeq(seq)) return;
@@ -115,51 +119,28 @@ export async function moveTaskDetailDraftToProject(options: {
   projectId: string;
   attachments: ChatAttachment[];
   router: Router;
+  isSourceCurrent: () => boolean;
+  isTargetCurrent: (taskId: string) => boolean;
   getDraftSnapshot: () => { content: string };
   restoreDraft: (content: string, attachments: ChatAttachment[]) => void;
 }) {
-  const { detail, projectId, attachments, router, getDraftSnapshot, restoreDraft } = options;
+  const {
+    detail,
+    projectId,
+    attachments,
+    router,
+    isSourceCurrent,
+    isTargetCurrent,
+    getDraftSnapshot,
+    restoreDraft,
+  } = options;
   const { createDraftTask } = await loadDraftProjectPickerDeps(detail);
+  if (!isSourceCurrent()) return;
   const draft = createDraftTask(projectId);
   const snapshot = getDraftSnapshot();
   const nextAttachments = [...attachments];
   await router.push(`/projects/${projectId}/tasks/${draft.id}`);
   await nextTick();
+  if (!isTargetCurrent(draft.id)) return;
   restoreDraft(snapshot.content, nextAttachments);
-}
-
-function suggestionLoadingText(probe: ConversationSuggestionSources): string {
-  const sources = new Set(probe.sources);
-  if (sources.has("claude")) return "正在读取 Claude 建议";
-  const labels: string[] = [];
-  if (sources.has("task")) labels.push("历史任务");
-  if (sources.has("github")) labels.push("GitHub 活动");
-  if (sources.has("local-git")) {
-    labels.push(localGitLoadingLabel(probe.localGit));
-  }
-  if (labels.length === 0) return "正在寻找灵感";
-  return `正在检查${joinSuggestionSourceLabels(labels)}`;
-}
-
-function localGitLoadingLabel(localGit: ConversationSuggestionSources["localGit"]): string {
-  if (localGit?.hasRecentCommits && localGit.hasChangedFiles) {
-    return "本地提交和未提交变更";
-  }
-  if (localGit?.hasRecentCommits) return "本地提交";
-  if (localGit?.hasChangedFiles) return "未提交变更";
-  return "本地 Git 上下文";
-}
-
-function joinSuggestionSourceLabels(labels: string[]): string {
-  if (labels.length <= 1) return labelAfterVerb(labels[0] ?? "");
-  if (labels.length === 2) return `${labels[0]}和${labelAfterConjunction(labels[1])}`;
-  return `${labels.slice(0, -1).join("、")}和${labelAfterConjunction(labels[labels.length - 1])}`;
-}
-
-function labelAfterVerb(label: string): string {
-  return /^[A-Za-z]/.test(label) ? ` ${label}` : label;
-}
-
-function labelAfterConjunction(label: string): string {
-  return /^[A-Za-z]/.test(label) ? ` ${label}` : label;
 }

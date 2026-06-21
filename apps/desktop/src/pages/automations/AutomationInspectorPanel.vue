@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { CircleHelp, Play } from "lucide-vue-next";
+import {
+  DEFAULT_AUTOMATION_HUMAN_PROMPT,
+  AUTOMATION_WAITING_USER_STATUS,
+  automationRunStatusTone,
+  normalizeAutomationRunStatus,
+  taskStatusLabel,
+} from "@lilia/contracts";
 import type {
   AutomationRunNodeState,
   AutomationRunSummary,
@@ -44,7 +51,7 @@ const emit = defineEmits<{
 const selectedRunHumanPrompt = computed(() => {
   const output = props.selectedRunNodeState?.output;
   const prompt = output && typeof output.prompt === "string" ? output.prompt.trim() : "";
-  return prompt || "确认后继续执行自动化。";
+  return prompt || DEFAULT_AUTOMATION_HUMAN_PROMPT;
 });
 
 function formatDuration(state: AutomationRunNodeState | null): string {
@@ -67,10 +74,7 @@ function runContextMeta(run: AutomationRunSummary): string {
 }
 
 function runStatusClass(status: string) {
-  if (status === "succeeded") return "ui-badge--ok";
-  if (status === "failed") return "ui-badge--err";
-  if (status === "running" || status === "waiting_user") return "ui-badge--accent";
-  return "ui-badge--muted";
+  return `ui-badge--${automationRunStatusTone(normalizeAutomationRunStatus(status))}`;
 }
 
 function formatTime(value: number | null): string {
@@ -113,7 +117,7 @@ function formatTime(value: number | null): string {
             :class="{ 'is-active': scope.taskStatuses.includes(status) }"
             @click="emit('toggle-scope-list', 'taskStatuses', status)"
           >
-            {{ status }}
+            {{ taskStatusLabel(status) }}
           </button>
         </div>
       </div>
@@ -205,7 +209,7 @@ function formatTime(value: number | null): string {
       </div>
       <div v-if="selectedRunNodeState" class="automations-page__replay">
         <section
-          v-if="selectedRunNodeState.status === 'waiting_user'"
+          v-if="selectedRunNodeState.status === AUTOMATION_WAITING_USER_STATUS"
           class="composer-inline composer-inline--ask automations-page__human-ask"
           role="region"
           aria-label="自动化等待确认"

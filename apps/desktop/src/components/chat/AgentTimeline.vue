@@ -4,15 +4,15 @@ import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 import ChatBubble from "./ChatBubble.vue";
-import type { LiliaBatchApplyInput } from "./liliaBatchApply";
+import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { processGroupEntries, type TimelineGroupEntry } from "./timelineEntries";
 import {
-  isTimelineInterruptEvent,
   isTimelineExpanded,
-  isTimelineFinalReply,
+  isTimelineMessageEvent,
+  isTimelineProcessAnchor,
   pruneTimelineExpandedIds,
   toggleTimelineExpandedId,
 } from "./timelineDisplay";
@@ -86,6 +86,10 @@ const { railLineStyle, timelineRef } = useTimelineRailMask([
 ]);
 void timelineRef;
 
+const processAnchorEventIds = computed(() =>
+  visibleEvents.value.filter(isTimelineProcessAnchor).map((event) => event.id),
+);
+
 watch(
   () => visibleEvents.value.map((event) => event.id).join("|"),
   () => {
@@ -104,11 +108,9 @@ watch(
 );
 
 watch(
-  () => visibleEvents.value.filter(isProcessAnchor).map((e) => e.id).join("|"),
+  () => processAnchorEventIds.value.join("|"),
   () => {
-    const valid = new Set(
-      visibleEvents.value.filter(isProcessAnchor).map((e) => e.id),
-    );
+    const valid = new Set(processAnchorEventIds.value);
     expandedProcessGroupIds.value = new Set(
       [...expandedProcessGroupIds.value].filter((id) => valid.has(id)),
     );
@@ -140,7 +142,7 @@ function expanded(event: AgentTimelineEvent): boolean {
 }
 
 function toggleEvent(event: AgentTimelineEvent) {
-  if (isTimelineMessage(event)) return;
+  if (isTimelineMessageEvent(event)) return;
   const nextExpanded = !expanded(event);
   toggledIds.value = toggleTimelineExpandedId(toggledIds.value, event.id);
   emit("eventToggled", { event, expanded: nextExpanded });
@@ -171,14 +173,6 @@ function toggleGroup(entry: TimelineGroupEntry) {
   if (next.has(entry.id)) next.delete(entry.id);
   else next.add(entry.id);
   expandedGroupIds.value = next;
-}
-
-function isTimelineMessage(event: AgentTimelineEvent): boolean {
-  return event.kind === "message";
-}
-
-function isProcessAnchor(event: AgentTimelineEvent): boolean {
-  return isTimelineFinalReply(event) || isTimelineInterruptEvent(event);
 }
 
 const pendingActions = computed(() => props.pendingActions ?? []);
@@ -231,8 +225,7 @@ function pendingState(event: AgentTimelineEvent) {
           :process-entries-for="processGroupEntries"
           :preview-text="previewText"
           :project-cwd="projectCwd"
-          :pending-actions="pendingActions"
-          :show-expired-pending-actions="showExpiredPendingActions"
+          :pending-state="pendingState"
           :can-retry-event="canRetryEvent"
           :can-start-lilia-batch-apply="canStartLiliaBatchApply"
           :can-start-session-fork="canStartSessionFork"

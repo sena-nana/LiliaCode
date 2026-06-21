@@ -1,4 +1,5 @@
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
+import { claudePermissionRuntime } from "@lilia/contracts/permissionModes.mjs";
 import {
   buildPlanApprovalSpec,
   buildPlanRevisionDenyMessage,
@@ -15,10 +16,11 @@ import { isRecord, stringOrNull } from "../utils.mjs";
 import { rememberClaudeTool } from "./state.mjs";
 
 export function mapClaudeExecutionPermission(permission) {
-  const permissionMode = normalizeClaudePermissionMode(permission);
+  const runtime = claudePermissionRuntime(permission);
+  const permissionMode = runtime?.permissionMode ?? normalizeClaudePermissionMode(permission);
   return {
     permissionMode,
-    ...(permission === "full" || permission === "free" ? { allowDangerouslySkipPermissions: true } : {}),
+    ...(runtime?.allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
   };
 }
 

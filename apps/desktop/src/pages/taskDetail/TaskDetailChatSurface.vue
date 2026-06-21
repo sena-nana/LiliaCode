@@ -14,8 +14,10 @@ import type {
   LiliaReviewTarget,
   Project,
   SuggestionItem,
+  SuggestionStatus,
 } from "@lilia/contracts";
-import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
+import type { LiliaBatchApplyInput } from "@lilia/contracts";
+import { TITLE_UPDATE_ACTION_KIND } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "../../components/chat/imageViewer";
 import {
   cancelIdleRun,
@@ -29,7 +31,7 @@ import { useChatSidebar } from "../../composables/useChatSidebar";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 import type {
   ToolConsentDecision,
   ToolConsentRequest,
@@ -128,7 +130,7 @@ const props = defineProps<{
   toolConsent: ToolConsentRequest | null;
   viewingImage: ChatImageViewerSource | null;
   suggestions: SuggestionItem[];
-  suggestionsStatus: "idle" | "loading" | "empty" | "error";
+  suggestionsStatus: SuggestionStatus;
   suggestionsLoadingText: string;
   suggestionsVisible: boolean;
   showDraftProjectPicker?: boolean;
@@ -197,7 +199,36 @@ const composerActivated = ref(false);
 const chatSidebar = useChatSidebar();
 const sidebarHostActivated = ref(!props.isPopup && chatSidebar.state.open);
 let todoFloatIdleHandle: number | null = null;
+let cancelTodoFloatPaint: (() => void) | null = null;
+let cancelComposerActivationPaint: (() => void) | null = null;
+let todoFloatRenderSeq = 0;
 let composerActivationSeq = 0;
+let disposed = false;
+
+function cancelTodoFloatRenderSchedule() {
+  todoFloatRenderSeq += 1;
+  cancelTodoFloatPaint?.();
+  cancelTodoFloatPaint = null;
+  if (todoFloatIdleHandle !== null) {
+    cancelIdleRun(todoFloatIdleHandle);
+    todoFloatIdleHandle = null;
+  }
+}
+
+function cancelComposerActivationSchedule() {
+  composerActivationSeq += 1;
+  cancelComposerActivationPaint?.();
+  cancelComposerActivationPaint = null;
+}
+
+function canRenderTodoFloat(seq: number) {
+  return seq === todoFloatRenderSeq &&
+    !disposed &&
+    !shouldRenderTodoFloat.value &&
+    !!props.taskId &&
+    props.shouldRenderChat &&
+    composerActivated.value;
+}
 
 function scheduleTodoFloatRender() {
   if (
@@ -206,18 +237,20 @@ function scheduleTodoFloatRender() {
     !props.shouldRenderChat ||
     !composerActivated.value
   ) return;
-  scheduleAfterPaint(() => {
-    if (
-      shouldRenderTodoFloat.value ||
-      !props.taskId ||
-      !props.shouldRenderChat ||
-      !composerActivated.value
-    ) return;
+  cancelTodoFloatRenderSchedule();
+  const seq = ++todoFloatRenderSeq;
+  cancelTodoFloatPaint = scheduleAfterPaint(() => {
+    cancelTodoFloatPaint = null;
+    if (!canRenderTodoFloat(seq)) return;
     todoFloatIdleHandle = runWhenIdle(() => {
-      scheduleAfterPaint(() => {
+      todoFloatIdleHandle = null;
+      if (!canRenderTodoFloat(seq)) return;
+      cancelTodoFloatPaint = scheduleAfterPaint(() => {
+        cancelTodoFloatPaint = null;
+        if (!canRenderTodoFloat(seq)) return;
         todoFloatIdleHandle = runWhenIdle(() => {
           todoFloatIdleHandle = null;
-          if (!props.shouldRenderChat || !composerActivated.value) return;
+          if (!canRenderTodoFloat(seq)) return;
           shouldRenderTodoFloat.value = true;
         });
       });
@@ -233,32 +266,53 @@ function shouldPrioritizeComposerActivation() {
 
 function scheduleComposerActivation() {
   if (composerActivated.value || !props.shouldRenderChat) return;
+  cancelComposerActivationSchedule();
   const seq = ++composerActivationSeq;
   const activate = () => {
-    if (seq !== composerActivationSeq || composerActivated.value || !props.shouldRenderChat) return;
+    if (
+      seq !== composerActivationSeq ||
+      disposed ||
+      composerActivated.value ||
+      !props.shouldRenderChat
+    ) return;
     measurePerfSync("task-detail.composer.activate", () => {
       composerActivated.value = true;
     }, { detail: props.taskId });
   };
-  scheduleAfterPaint(() => {
-    if (seq !== composerActivationSeq || composerActivated.value || !props.shouldRenderChat) return;
+  const cancelPaint = scheduleAfterPaint(() => {
+    if (cancelComposerActivationPaint === cancelPaint) {
+      cancelComposerActivationPaint = null;
+    }
+    if (
+      seq !== composerActivationSeq ||
+      disposed ||
+      composerActivated.value ||
+      !props.shouldRenderChat
+    ) return;
     if (shouldPrioritizeComposerActivation()) {
       activate();
       return;
     }
-    scheduleAfterPaint(activate);
+    const cancelSecondPaint = scheduleAfterPaint(() => {
+      if (cancelComposerActivationPaint === cancelSecondPaint) {
+        cancelComposerActivationPaint = null;
+      }
+      activate();
+    });
+    cancelComposerActivationPaint = cancelSecondPaint;
   });
+  cancelComposerActivationPaint = cancelPaint;
 }
 
 onMounted(() => {
+  disposed = false;
   scheduleComposerActivation();
 });
 
 onBeforeUnmount(() => {
-  if (todoFloatIdleHandle !== null) {
-    cancelIdleRun(todoFloatIdleHandle);
-    todoFloatIdleHandle = null;
-  }
+  disposed = true;
+  cancelComposerActivationSchedule();
+  cancelTodoFloatRenderSchedule();
 });
 
 watch(
@@ -274,7 +328,8 @@ watch(
   () => props.shouldRenderChat,
   (shouldRenderChat) => {
     if (!shouldRenderChat) {
-      composerActivationSeq += 1;
+      cancelComposerActivationSchedule();
+      cancelTodoFloatRenderSchedule();
       return;
     }
     scheduleComposerActivation();
@@ -403,7 +458,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   :task-id="taskId"
                   :show-goal="true"
                   :goal="currentLiliaGoal"
-                  :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== 'title_update')"
+                  :goal-disabled="isTurnRunning || pendingAgentActions.some((action) => action.kind !== TITLE_UPDATE_ACTION_KIND)"
                   @insert-guide="emit('insert-guide', $event)"
                   @set-lilia-goal="emit('set-lilia-goal', $event)"
                   @refresh-lilia-goal="emit('refresh-lilia-goal')"

@@ -58,13 +58,7 @@ pub(crate) struct ChatConversationReference {
 
 impl ChatConversationReference {
     pub(crate) fn timeline_payload(&self) -> JsonValue {
-        serde_json::json!({
-            "taskId": self.task_id,
-            "title": self.title,
-            "route": self.route,
-            "projectId": self.project_id,
-            "projectName": self.project_name,
-        })
+        serde_json::to_value(self).expect("ChatConversationReference must serialize")
     }
 }
 
@@ -77,6 +71,34 @@ pub(crate) fn conversation_references_payload(
             .map(ChatConversationReference::timeline_payload)
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn conversation_reference_payload_uses_struct_serialization() {
+        let reference = ChatConversationReference {
+            task_id: "task-1".to_string(),
+            title: "Title".to_string(),
+            route: "/task/task-1".to_string(),
+            project_id: Some("project-1".to_string()),
+            project_name: None,
+        };
+
+        assert_eq!(
+            reference.timeline_payload(),
+            json!({
+                "taskId": "task-1",
+                "title": "Title",
+                "route": "/task/task-1",
+                "projectId": "project-1",
+                "projectName": null,
+            })
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

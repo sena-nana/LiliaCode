@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_PLAN_TOOL_NAMES,
+  CLAUDE_READONLY_ALLOWED_TOOLS,
+  CLAUDE_READONLY_DENIED_TOOLS,
+} from "@lilia/contracts/claudePlanContract.mjs";
+import {
   PLAN_APPROVAL_QUESTION_ID,
   buildPlanRevisionDenyMessage,
   buildPlanApprovalSpec,
   buildPlanPayload,
   extractPlanResult,
+  isClaudePlanTool,
   isPlanApprovalAccepted,
   isReadonlyDeniedClaudeTool,
   normalizeClaudePermissionMode,
@@ -81,6 +87,12 @@ describe("claudePlan helpers", () => {
     expect(normalizeClaudePermissionMode("free")).toBe("bypassPermissions");
     expect(normalizeClaudePermissionMode("ask")).toBe("default");
     expect(normalizeClaudePermissionMode("readonly")).toBe("default");
+    expect(CLAUDE_PLAN_TOOL_NAMES).toEqual(["ExitPlanMode", "exit_plan_mode"]);
+    expect(CLAUDE_READONLY_DENIED_TOOLS).toContain("Write");
+    expect(CLAUDE_READONLY_ALLOWED_TOOLS).toContain("Read");
+    expect(isClaudePlanTool("ExitPlanMode")).toBe(true);
+    expect(isClaudePlanTool("exit_plan_mode")).toBe(true);
+    expect(isClaudePlanTool("Write")).toBe(false);
     expect(isReadonlyDeniedClaudeTool("Write")).toBe(true);
     expect(isReadonlyDeniedClaudeTool("UnknownTool")).toBe(true);
     expect(isReadonlyDeniedClaudeTool("Read")).toBe(false);

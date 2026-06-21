@@ -2,22 +2,37 @@ import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
-import type { Task } from "@lilia/contracts";
+import {
+  CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME,
+  CHAT_DONE_EVENT_NAME,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_TURN_STARTED_EVENT_NAME,
+  POPUP_OPEN_TASK_COMMAND,
+  PROJECT_CREATE_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  TASK_LIST_COMMAND,
+  TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
+  type Task,
+} from "@lilia/contracts";
 import SecondaryPanel from "../src/layouts/SecondaryPanel.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { vContextMenu } from "../src/directives/contextMenu";
 import { createLiliaRouter } from "../src/router";
+import { resetSidebarConversationsCache } from "../src/data/sidebarConversations";
 import { ORPHAN_LIST, ORPHANS_LOADED, PROJECT_TASKS_LOADED, TASKS } from "../src/data/tasks";
 import {
   emitMockTimelineEvent,
   emitTauriEvent,
   mockInvoke,
   replaceMockTimelineEvents,
+  resetTauriMockData,
   setMockActiveBackend,
   setMockCodexAppServerStatus,
   setMockChatRunning,
+  setMockTasks,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
 import {
@@ -165,6 +180,22 @@ function seedSecondaryPanelOverflowConversations() {
   };
 }
 
+function seedManyMockTasks(count: number) {
+  setMockTasks(Array.from({ length: count }, (_, index) => ({
+    id: `t-many-${index + 1}`,
+    projectId: "lilia",
+    sessionId: `session-many-${index + 1}`,
+    title: `批量对话 ${index + 1}`,
+    titleSource: "manual",
+    status: "done",
+    createdAt: 10_000 + index,
+    parentId: null,
+    dependsOn: [],
+    sortOrder: index,
+    pinned: false,
+  })));
+}
+
 async function dragFromTo(source: HTMLElement, target: HTMLElement, targetY: number) {
   await fireEvent.pointerDown(source, {
     button: 0,
@@ -189,6 +220,21 @@ describe("SecondaryPanel project tree expansion", () => {
     localStorage.clear();
     useSidebarDisplayMode().setSidebarDisplayMode("grouped");
     resetConversationActivity();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("卸载时取消侧栏 mount idle 打点", async () => {
+    const cancelIdleCallback = vi.fn();
+    vi.stubGlobal("requestIdleCallback", vi.fn(() => 64));
+    vi.stubGlobal("cancelIdleCallback", cancelIdleCallback);
+    const view = await renderSecondaryPanel();
+
+    view.unmount();
+
+    expect(cancelIdleCallback).toHaveBeenCalledWith(64);
   });
 
   it("左下角连接徽章显示全局 active provider", async () => {
@@ -261,33 +307,51 @@ describe("SecondaryPanel project tree expansion", () => {
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(
-          ([cmd, args]) => cmd === "task_list" && args?.projectId === "lilia",
+          ([cmd, args]) => cmd === TASK_LIST_COMMAND && args?.projectId === "lilia",
         ),
       ).toBe(true);
     });
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(
-          ([cmd, args]) => cmd === "task_list" && args?.projectId === "tools",
+          ([cmd, args]) => cmd === TASK_LIST_COMMAND && args?.projectId === "tools",
         ),
       ).toBe(true);
     });
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(
-          ([cmd, args]) => cmd === "task_list" && (args?.projectId ?? null) === null,
+          ([cmd, args]) => cmd === TASK_LIST_COMMAND && (args?.projectId ?? null) === null,
         ),
       ).toBe(true);
     });
 
     const taskListCalls = mockInvoke.mock.calls
-      .filter(([cmd]) => cmd === "task_list")
+      .filter(([cmd]) => cmd === TASK_LIST_COMMAND)
       .map(([, args]) => args?.projectId ?? null);
     expect(taskListCalls.indexOf("lilia")).toBeGreaterThan(-1);
     expect(taskListCalls.indexOf("tools")).toBeGreaterThan(-1);
     expect(taskListCalls.indexOf(null)).toBeGreaterThan(-1);
     expect(taskListCalls.indexOf("lilia")).toBeLessThan(taskListCalls.indexOf("tools"));
     expect(taskListCalls.indexOf("lilia")).toBeLessThan(taskListCalls.indexOf(null));
+  });
+
+  it("统一模式卸载时取消延期 activity hydrate 的 paint 调度", async () => {
+    try {
+      seedManyMockTasks(30);
+      useSidebarDisplayMode().setSidebarDisplayMode("unified");
+      const cancelAnimationFrame = vi.fn();
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 71));
+      vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+      const view = await renderSecondaryPanel();
+      view.unmount();
+
+      expect(cancelAnimationFrame).toHaveBeenCalledWith(71);
+    } finally {
+      resetTauriMockData();
+      resetSidebarConversationsCache();
+    }
   });
 
 
@@ -354,7 +418,7 @@ describe("SecondaryPanel project chat navigation", () => {
     });
     await fireEvent.click(createButton);
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("project_create", {
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_CREATE_COMMAND, {
         name: "临时分类",
         cwd: null,
       }, undefined);
@@ -417,8 +481,8 @@ describe("SecondaryPanel project chat navigation", () => {
     await waitFor(() => {
       expect(pushSpy).toHaveBeenCalledWith("/projects/lilia/tasks/t-002");
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list_sidebar_conversations")).toBe(true);
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND)).toBe(true);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_LIST_COMMAND)).toBe(false);
     expect(view.queryByPlaceholderText("搜索会话…")).not.toBeInTheDocument();
     expect(view.getByRole("button", { name: "搜索会话" })).toBeInTheDocument();
   });
@@ -449,7 +513,7 @@ describe("SecondaryPanel project chat navigation", () => {
       new MouseEvent("auxclick", { bubbles: true, button: 1 }),
     );
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_TASK_COMMAND, {
       projectId: null,
       taskId: "o-001",
     }, undefined);
@@ -464,9 +528,9 @@ describe("SecondaryPanel project chat navigation", () => {
     expect(view.queryByText("收集箱")).not.toBeInTheDocument();
     expect(view.queryByRole("button", { name: "添加项目" })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list_sidebar_conversations")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND)).toBe(true);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_list")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_LIST_COMMAND)).toBe(false);
 
     const projectRow = await view.findByText("打通 tsconfig paths 搜索");
     const projectConversation = projectRow.closest(".sb-tree__row--unified");
@@ -489,7 +553,7 @@ describe("SecondaryPanel project chat navigation", () => {
       new MouseEvent("auxclick", { bubbles: true, button: 1 }),
     );
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_TASK_COMMAND, {
       projectId: "tools",
       taskId: "t-003",
     }, undefined);
@@ -500,14 +564,14 @@ describe("SecondaryPanel project chat navigation", () => {
     const view = await renderSecondaryPanel();
     const row = getConversationRow(view, "整理窗口快捷键");
 
-    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-003", queuedCount: 0 });
     await waitFor(() => {
       expect(within(row).getByLabelText("对话中")).toHaveClass(
         "sb-tree__activity--running",
       );
     });
 
-    emitTauriEvent("chat:agent-interaction-request", {
+    emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
       taskId: "t-003",
       turnId: "turn-1",
       backend: "codex",
@@ -525,7 +589,7 @@ describe("SecondaryPanel project chat navigation", () => {
       );
     });
 
-    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
       expect(within(row).getByLabelText("对话完成")).toHaveClass(
         "sb-tree__activity--completed",
@@ -540,7 +604,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const row = getConversationRow(view, "整理窗口快捷键");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_get_runtime_snapshot"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_GET_RUNTIME_SNAPSHOT_COMMAND))
         .toBe(true);
       expect(within(row).getByLabelText("对话中")).toHaveClass(
         "sb-tree__activity--running",
@@ -698,7 +762,7 @@ describe("SecondaryPanel project chat navigation", () => {
       );
     });
 
-    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
       expect(within(row).getByLabelText("对话完成")).toHaveClass(
         "sb-tree__activity--completed",
@@ -712,7 +776,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const view = await renderSecondaryPanel();
     const row = getConversationRow(view, "整理窗口快捷键");
 
-    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-003", queuedCount: 0 });
     emitMockTimelineEvent("t-003", {
       id: "tl-error-activity",
       kind: "error",
@@ -728,7 +792,7 @@ describe("SecondaryPanel project chat navigation", () => {
       );
     });
 
-    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
       expect(within(row).getByLabelText("发生错误")).toBeInTheDocument();
       expect(within(row).queryByLabelText("对话完成")).toBeNull();
@@ -740,7 +804,7 @@ describe("SecondaryPanel project chat navigation", () => {
     const view = await renderSecondaryPanel();
     const row = getConversationRow(view, "整理窗口快捷键");
 
-    emitTauriEvent("chat:done", { taskId: "t-003", sessionId: null, subtype: null });
+    emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-003", sessionId: null, subtype: null });
     await waitFor(() => {
       expect(within(row).getByLabelText("对话完成")).toBeInTheDocument();
     });
@@ -752,7 +816,7 @@ describe("SecondaryPanel project chat navigation", () => {
       expect(within(row).queryByLabelText("对话完成")).toBeNull();
     });
 
-    emitTauriEvent("chat:turn-started", { taskId: "t-003", queuedCount: 0 });
+    emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-003", queuedCount: 0 });
     await waitFor(() => {
       expect(within(row).queryByLabelText("对话中")).toBeNull();
     });
@@ -768,7 +832,7 @@ describe("SecondaryPanel project chat navigation", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.path).toBe("/projects/lilia/tasks/t-002");
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_interrupt_turn"))
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_INTERRUPT_TURN_COMMAND))
       .toBe(false);
   });
 });
@@ -812,7 +876,7 @@ describe("SecondaryPanel project tree drag", () => {
     });
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("project_reorder", {
+      expect(mockInvoke).toHaveBeenCalledWith(PROJECT_REORDER_COMMAND, {
         orderedIds: ["tools", "lilia"],
       }, undefined);
     });

@@ -1,8 +1,16 @@
-import type {
-  AgentTimelineEvent,
-  AgentTimelinePayload,
-  AskUserResult,
-  AskUserSpec,
+import {
+  agentTimelinePayloadRecord,
+  ASK_USER_CANCEL_ANSWER_VALUE,
+  ASK_USER_INTERACTION_KIND,
+  ASK_USER_MULTI_SELECT_MODE,
+  ASK_USER_SINGLE_SELECT_MODE,
+  createPlanApprovalAskUserSpec,
+  PLAN_APPROVAL_REVISION_REQUEST_ANSWER_VALUE,
+  TOOL_CONSENT_INTERACTION_KIND,
+  type AgentTimelineEvent,
+  type AgentTimelinePayload,
+  type AskUserResult,
+  type AskUserSpec,
 } from "@lilia/contracts";
 import { askUserForTask } from "./useAskUser";
 import { emitDebugTimelineEvent } from "./useDebugTimelineEvents";
@@ -76,9 +84,7 @@ function patchPayload(
   event: AgentTimelineEvent,
   patch: Record<string, AgentTimelinePayload>,
 ): AgentTimelinePayload {
-  const payload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
-    ? event.payload as Record<string, AgentTimelinePayload>
-    : {};
+  const payload = agentTimelinePayloadRecord(event) ?? {};
   return { ...payload, ...patch };
 }
 
@@ -109,7 +115,7 @@ function debugAskEvent(
     id: ids.eventId,
     taskId,
     turnId: ids.turnId,
-    kind: "ask_user",
+    kind: ASK_USER_INTERACTION_KIND,
     title,
     summary,
     status: "requires_action",
@@ -203,23 +209,11 @@ export function useDebugTimelineInteractions(taskId: string) {
 
   function emitPlan() {
     const ids = nextDebugIds(taskId, "plan");
-    const questionId = "approve-plan";
-    const spec: AskUserSpec = {
+    const spec = createPlanApprovalAskUserSpec({
       title: "确认 Debug 计划",
       source: "Debug",
-      intent: "plan_approval",
-      dismissable: true,
-      questions: [
-        {
-          id: questionId,
-          header: "计划确认",
-          question: "",
-          mode: "confirm",
-          confirmLabel: "按计划执行",
-          cancelLabel: "先不执行",
-        },
-      ],
-    };
+    });
+    const questionId = spec.questions[0]?.id ?? "";
     const event = createDebugEvent({
       id: ids.eventId,
       taskId,
@@ -243,8 +237,8 @@ export function useDebugTimelineInteractions(taskId: string) {
     void askUserForTask(taskId, spec, ids.turnId, ids.requestId).then((result) => {
       const answer = readAnswer(result, questionId);
       const notes = answer?.notes?.trim();
-      const revisionRequest = answer?.value === "revision_request" && notes ? notes : "";
-      const cancelled = !revisionRequest && (result.cancelled || answer?.value === "no");
+      const revisionRequest = answer?.value === PLAN_APPROVAL_REVISION_REQUEST_ANSWER_VALUE && notes ? notes : "";
+      const cancelled = !revisionRequest && (result.cancelled || answer?.value === ASK_USER_CANCEL_ANSWER_VALUE);
       updateEvent(event, {
         status: cancelled ? "cancelled" : "success",
         summary: revisionRequest || (cancelled ? "Debug 计划已取消" : "Debug 计划已同意"),
@@ -265,11 +259,11 @@ export function useDebugTimelineInteractions(taskId: string) {
         id: questionId,
         header: "Debug",
         question: "要注入哪类临时事件？",
-        mode: "single" as const,
+        mode: ASK_USER_SINGLE_SELECT_MODE,
         options: [
           { id: "plan", label: "计划" },
           { id: "todo", label: "待办" },
-          { id: "ask_user", label: "提问" },
+          { id: ASK_USER_INTERACTION_KIND, label: "提问" },
         ],
       },
     ];
@@ -292,7 +286,7 @@ export function useDebugTimelineInteractions(taskId: string) {
         id: "debug-multi",
         header: "多选",
         question: "这轮调试要覆盖哪些流程？",
-        mode: "multi",
+        mode: ASK_USER_MULTI_SELECT_MODE,
         minSelections: 2,
         maxSelections: 3,
         allowOther: true,
@@ -323,7 +317,7 @@ export function useDebugTimelineInteractions(taskId: string) {
         id: "debug-preview",
         header: "示例",
         question: "选择一种响应模板。",
-        mode: "single",
+        mode: ASK_USER_SINGLE_SELECT_MODE,
         allowOther: true,
         options: [
           {
@@ -368,7 +362,7 @@ export function useDebugTimelineInteractions(taskId: string) {
         id: "debug-flow-target",
         header: "目标",
         question: "这次要先验证哪个入口？",
-        mode: "single",
+        mode: ASK_USER_SINGLE_SELECT_MODE,
         options: [
           { id: "sidebar", label: "侧栏", description: "验证动态注册和切换。" },
           { id: "timeline", label: "时间线", description: "验证卡片和 pending action。" },
@@ -378,7 +372,7 @@ export function useDebugTimelineInteractions(taskId: string) {
         id: "debug-flow-checks",
         header: "检查项",
         question: "需要一起检查哪些状态？",
-        mode: "multi",
+        mode: ASK_USER_MULTI_SELECT_MODE,
         minSelections: 1,
         options: [
           { id: "success", label: "完成态" },
@@ -430,7 +424,7 @@ export function useDebugTimelineInteractions(taskId: string) {
       order: ids.order,
       payload: {
         subkind: "write",
-        interaction: "tool_consent",
+        interaction: TOOL_CONSENT_INTERACTION_KIND,
         requestId: ids.requestId,
         toolName: request.toolName,
         path: "apps/desktop/src/debug-fixture.ts",

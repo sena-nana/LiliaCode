@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::contract;
+
 pub(super) const SETTINGS_KEY: &str = "conversation-suggestions.settings";
 pub(super) const CACHE_KEY: &str = "conversation-suggestions.cache";
 pub(super) const CLAUDE_NATIVE_CACHE_KEY: &str = "conversation-suggestions.claude-native";
@@ -17,11 +19,20 @@ pub(super) const GITHUB_ACTIVITY_LIMIT: usize = 6;
 pub(super) const LOCAL_GIT_COMMIT_LIMIT: usize = 3;
 pub(super) const LOCAL_GIT_FILE_LIMIT: usize = 12;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SuggestionSource {
     Provider,
     AssistantAi,
+}
+
+impl SuggestionSource {
+    pub(crate) fn as_contract_value(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::AssistantAi => "assistant-ai",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +46,7 @@ impl Default for SuggestionSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            source: SuggestionSource::AssistantAi,
+            source: contract::default_suggestion_source(),
         }
     }
 }
@@ -164,4 +175,30 @@ pub(super) struct ModelRequest {
 
 pub(super) fn now_millis() -> i64 {
     crate::util::now_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_use_contract_default_source() {
+        assert_eq!(
+            contract::suggestion_sources(),
+            [SuggestionSource::Provider, SuggestionSource::AssistantAi]
+        );
+        assert!(contract::suggestion_sources().contains(&contract::default_suggestion_source()));
+        assert_eq!(
+            SuggestionSource::AssistantAi.as_contract_value(),
+            "assistant-ai"
+        );
+        assert_eq!(
+            SuggestionSettings::default().source,
+            contract::default_suggestion_source()
+        );
+        assert_eq!(
+            SuggestionSettings::default().source,
+            SuggestionSource::AssistantAi
+        );
+    }
 }

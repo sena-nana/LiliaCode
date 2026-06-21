@@ -7,10 +7,9 @@ use crate::store::LiliaStore;
 use crate::util::now_millis;
 
 use super::agent_sync::apply_agent_event_impl;
+use super::contract;
 use super::repository::{attachments_json, emit_todo_changed, next_order, select_by_task};
-use super::types::{
-    normalize_guide_status, normalize_priority, AgentTodoItem, TaskTodo, GUIDE_STATUS_PENDING,
-};
+use super::types::{normalize_guide_status, normalize_priority, AgentTodoItem, TaskTodo};
 
 #[tauri::command]
 pub fn todo_list(task_id: String, store: State<'_, LiliaStore>) -> Result<Vec<TaskTodo>, String> {
@@ -45,7 +44,7 @@ pub fn todo_create<R: Runtime>(
         order,
         source: "lilia".to_string(),
         priority: normalize_priority(priority.as_deref()),
-        guide_status: Some(GUIDE_STATUS_PENDING.to_string()),
+        guide_status: Some(contract::pending_guide_status().to_string()),
         attachments: attachment_values,
         created_at: now,
         updated_at: now,

@@ -1,0 +1,29 @@
+export const PROVIDER_COMMANDS_CONTRACT: {
+  chatCheckEnvCommand: "chat_check_env";
+  providerGetConfigCommand: "provider_get_config";
+  providerSetConfigCommand: "provider_set_config";
+  providerGetActiveBackendCommand: "provider_get_active_backend";
+  providerSetActiveBackendCommand: "provider_set_active_backend";
+  providerCodexAppServerCheckUpdateCommand: "provider_codex_app_server_check_update";
+  providerCodexAppServerInstallUpdateCommand: "provider_codex_app_server_install_update";
+  routerGetModeCommand: "router_get_mode";
+  routerSetModeCommand: "router_set_mode";
+  assistantAiGetConfigCommand: "assistant_ai_get_config";
+  assistantAiSetConfigCommand: "assistant_ai_set_config";
+  assistantAiTestConnectionCommand: "assistant_ai_test_connection";
+  assistantAiOptimizePromptCommand: "assistant_ai_optimize_prompt";
+};
+
+export const CHAT_CHECK_ENV_COMMAND: "chat_check_env";
+export const PROVIDER_GET_CONFIG_COMMAND: "provider_get_config";
+export const PROVIDER_SET_CONFIG_COMMAND: "provider_set_config";
+export const PROVIDER_GET_ACTIVE_BACKEND_COMMAND: "provider_get_active_backend";
+export const PROVIDER_SET_ACTIVE_BACKEND_COMMAND: "provider_set_active_backend";
+export const PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND: "provider_codex_app_server_check_update";
+export const PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND: "provider_codex_app_server_install_update";
+export const ROUTER_GET_MODE_COMMAND: "router_get_mode";
+export const ROUTER_SET_MODE_COMMAND: "router_set_mode";
+export const ASSISTANT_AI_GET_CONFIG_COMMAND: "assistant_ai_get_config";
+export const ASSISTANT_AI_SET_CONFIG_COMMAND: "assistant_ai_set_config";
+export const ASSISTANT_AI_TEST_CONNECTION_COMMAND: "assistant_ai_test_connection";
+export const ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND: "assistant_ai_optimize_prompt";

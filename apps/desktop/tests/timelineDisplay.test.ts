@@ -9,6 +9,8 @@ import {
   readTimelinePayloadRecord,
   timelineEventLabel,
   timelineInlinePreview,
+  timelineKindClass,
+  timelineStatusClass,
 } from "../src/components/chat/timelineDisplay";
 
 function codeContent(
@@ -109,6 +111,13 @@ afterEach(() => {
 });
 
 describe("timeline display derivation", () => {
+  it("统一生成 timeline 状态和 kind 样式类", () => {
+    expect(timelineStatusClass("requires_action")).toBe("is-status-requires-action");
+    expect(timelineKindClass("agent-timeline__item--", "mcp/tool.result")).toBe(
+      "agent-timeline__item--mcp-tool-result",
+    );
+  });
+
   it("识别所有会触发高优先级引导的工具窗口 kind", () => {
     for (const kind of [
       "tool",

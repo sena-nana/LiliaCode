@@ -1,19 +1,167 @@
 import { vi } from "vitest";
-
-const CODEX_MODEL_OPTIONS = [
-  { id: "gpt-5.5", label: "GPT-5.5" },
-  { id: "gpt-5.4", label: "GPT-5.4" },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-] as const;
-const CLAUDE_MODEL_OPTIONS = [
-  { id: "claude-opus-4-7", label: "Opus 4.7" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
-] as const;
-const MILESTONE_STATUSES = ["upcoming", "in-progress", "done", "abandoned"] as const;
-type MockMilestoneStatus = (typeof MILESTONE_STATUSES)[number];
-const TASK_STATUSES = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
-type MockTaskStatus = (typeof TASK_STATUSES)[number];
+import {
+  AUTOMATION_CHANGED_EVENT_NAME,
+  AUTOMATION_DELETE_WORKFLOW_COMMAND,
+  AUTOMATION_GET_RUN_COMMAND,
+  AUTOMATION_LIST_RUNS_COMMAND,
+  AUTOMATION_LIST_WORKFLOWS_COMMAND,
+  AUTOMATION_PUBLISH_COMMAND,
+  AUTOMATION_RESUME_RUN_COMMAND,
+  AUTOMATION_RUN_ONCE_COMMAND,
+  AUTOMATION_RUN_FINISHED_EVENT_NAME,
+  AUTOMATION_RUN_STARTED_EVENT_NAME,
+  AUTOMATION_RUN_UPDATED_EVENT_NAME,
+  AUTOMATION_SAVE_DRAFT_COMMAND,
+  AUTOMATION_SET_ENABLED_COMMAND,
+  AGENT_TIMELINE_BATCH_EVENT_NAME,
+  AGENT_TIMELINE_CLEAR_TASK_COMMAND,
+  AGENT_TIMELINE_LIST_COMMAND,
+  AGENT_TIMELINE_EVENT_NAME,
+  CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
+  CHAT_CHECK_ENV_COMMAND,
+  CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
+  CHAT_DONE_EVENT_NAME,
+  CHAT_GET_COMPOSER_STATE_COMMAND,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_LIST_MODELS_COMMAND,
+  CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  CHAT_RESPOND_TITLE_UPDATE_COMMAND,
+  CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND,
+  CHAT_SAVE_CLIPBOARD_TEXT_COMMAND,
+  CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
+  CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
+  CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_SET_COMPOSER_STATE_COMMAND,
+  CHAT_TURN_STARTED_EVENT_NAME,
+  CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND,
+  AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND,
+  AGENT_INTERACTION_GET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND,
+  AGENT_INTERACTION_SET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND,
+  ASSISTANT_AI_GET_CONFIG_COMMAND,
+  ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
+  ASSISTANT_AI_SET_CONFIG_COMMAND,
+  ASSISTANT_AI_TEST_CONNECTION_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
+  CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  GIT_CLONE_REPO_COMMAND,
+  GITHUB_CLONE_REPO_COMMAND,
+  GITHUB_GET_BINDING_STATUS_COMMAND,
+  GITHUB_LIST_REPOS_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  LILIA_IAB_OPEN_COMMAND,
+  LILIA_IAB_SUBMIT_COMMAND,
+  MILESTONE_CREATE_COMMAND,
+  MILESTONE_DELETE_COMMAND,
+  MILESTONE_LIST_COMMAND,
+  MILESTONE_REORDER_COMMAND,
+  MILESTONE_SET_TASKS_COMMAND,
+  MILESTONE_UPDATE_COMMAND,
+  PROJECT_ARCHITECTURE_APPLY_COMMAND,
+  PROJECT_CREATE_COMMAND,
+  PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_GET_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_LIST_COMMAND,
+  PROJECT_REMOVE_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  PROJECT_TOGGLE_PIN_COMMAND,
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_HOOKS_OVERVIEW_COMMAND,
+  PLUGINS_OPEN_HOOK_CONFIG_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_OVERVIEW_COMMAND,
+  PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_UPDATE_MCP_SERVER_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_GET_CONFIG_COMMAND,
+  PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_SET_CONFIG_COMMAND,
+  POPUP_FOCUS_MAIN_COMMAND,
+  POPUP_GET_WINDOW_SETTINGS_COMMAND,
+  POPUP_OPEN_CHILD_QUESTION_COMMAND,
+  POPUP_OPEN_NEW_CHAT_COMMAND,
+  POPUP_OPEN_TASK_COMMAND,
+  POPUP_REMEMBER_LAST_PROJECT_COMMAND,
+  POPUP_SET_WINDOW_SETTINGS_COMMAND,
+  QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
+  QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+  QUOTA_USAGE_GET_STATS_COMMAND,
+  ROUTER_GET_MODE_COMMAND,
+  ROUTER_SET_MODE_COMMAND,
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+  TASK_ARCHIVE_COMMAND,
+  TASK_ARCHIVE_PROJECT_COMMAND,
+  TASK_CREATE_COMMAND,
+  TASK_GET_COMMAND,
+  TASK_LIST_COMMAND,
+  TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
+  TASK_PROMOTE_COMMAND,
+  TASK_REORDER_COMMAND,
+  TASK_REPARENT_COMMAND,
+  TASK_TOGGLE_PIN_COMMAND,
+  TASK_UPDATE_COMMAND,
+  TODO_APPLY_AGENT_EVENT_COMMAND,
+  MAIN_NAVIGATE_EVENT_NAME,
+  TODO_CREATE_COMMAND,
+  TODO_DELETE_COMMAND,
+  TODO_LIST_COMMAND,
+  TODO_UPDATE_COMMAND,
+  countProjectTaskStatuses,
+  createAutomationChangedEvent,
+  createAutomationRunEvent,
+  createChatDoneEvent,
+  createChatTurnStartedEvent,
+  createAppNavigateEvent,
+  createTodoChangedEvent,
+  createTasksChangedEvent,
+  deriveProjectDashboardCounts,
+  DEFAULT_AUTOMATION_HUMAN_PROMPT,
+  DEFAULT_MODEL_BY_BACKEND,
+  DEFAULT_ROUTER_MODE_BY_BACKEND,
+  DIRECT_DEFAULT_URLS,
+  isMilestoneStatus,
+  MODEL_OPTIONS_BY_BACKEND,
+  normalizeRouterModeForBackend as normalizeContractRouterModeForBackend,
+  normalizeAutomationScope,
+  normalizeAgentInteractionSettings,
+  routerModeUsesCodexAccount,
+  TODO_CHANGED_EVENT_NAME,
+  TASKS_CHANGED_EVENT_NAME,
+  type AutomationScopeFilter,
+  type AgentInteractionSettings,
+  type BackendEnvStatus,
+  type ConnectionMode,
+  type MilestoneStatus,
+  type ProjectTaskStatusCounts,
+  type RouterMode,
+} from "@lilia/contracts";
+import {
+  TAURI_PLUGIN_DIALOG_OPEN_COMMAND,
+  TAURI_PLUGIN_EVENT_LISTEN_COMMAND,
+} from "../src/tauri/pluginCommands";
 
 interface ProjectRow {
   id: string;
@@ -36,7 +184,7 @@ interface ProjectDashboardSummaryRow {
   pinned: boolean;
   taskCount: number;
   sessionCount: number;
-  statusCounts: Record<MockTaskStatus, number>;
+  statusCounts: ProjectTaskStatusCounts;
   blockedCount: number;
   activeCount: number;
   recentActivityAt: number | null;
@@ -66,7 +214,7 @@ interface MilestoneRow {
   projectId: string;
   title: string;
   description: string;
-  status: MockMilestoneStatus;
+  status: MilestoneStatus;
   dueDate: number | null;
   order: number;
   createdAt: number;
@@ -153,13 +301,7 @@ interface AutomationEdgeRow {
   targetHandle?: string | null;
 }
 
-interface AutomationScopeRow {
-  projectIds: string[];
-  includeInbox: boolean;
-  taskStatuses: string[];
-  backends: Array<"claude" | "codex">;
-  eventKinds: string[];
-}
+type AutomationScopeRow = AutomationScopeFilter;
 
 interface AutomationWorkflowRow {
   id: string;
@@ -382,13 +524,7 @@ let automationRunSeq = 0;
 let pendingCliProjectOpen: CliProjectOpenPayload | null = null;
 
 function defaultAutomationScope(): AutomationScopeRow {
-  return {
-    projectIds: [],
-    includeInbox: true,
-    taskStatuses: [],
-    backends: [],
-    eventKinds: [],
-  };
+  return normalizeAutomationScope(null);
 }
 
 function cloneAutomationWorkflow(row: AutomationWorkflowRow): AutomationWorkflowRow {
@@ -467,7 +603,7 @@ let liliaIabSeq = 0;
 let nextLiliaIabDelivery: "runner" | "message" = "message";
 let activeBackend: "claude" | "codex" = "claude";
 type MockProviderBackend = "claude" | "codex";
-type MockRouterMode = "api" | "codex-account";
+type MockRouterMode = RouterMode;
 type MockProviderConfig = {
   backend: MockProviderBackend;
   baseUrl: string | null;
@@ -478,8 +614,8 @@ let providerConfigs: Record<MockProviderBackend, MockProviderConfig> = {
   codex: { backend: "codex", baseUrl: null, hasApiKey: false },
 };
 let routerModes: Record<MockProviderBackend, MockRouterMode> = {
-  claude: "api",
-  codex: "codex-account",
+  claude: DEFAULT_ROUTER_MODE_BY_BACKEND.claude,
+  codex: DEFAULT_ROUTER_MODE_BY_BACKEND.codex,
 };
 let nodeAvailable = true;
 
@@ -962,54 +1098,8 @@ function updateMcpServersForBackend(
   else codexMcpServers = updater(codexMcpServers);
 }
 
-function defaultAgentInteractionSettings() {
-  return {
-    nonInterruptMode: false,
-    debug: false,
-    permissionMode: "ask" as "ask" | "readonly" | "full" | "free",
-    codexProfile: {
-      profile: "default",
-      model: null,
-      reasoningEffort: null,
-      runtimeWorkspaceRoots: [] as string[],
-      responsesApiClientMetadata: null as Record<string, unknown> | null,
-      additionalContext: null as string | null,
-      persistExtendedHistory: null as boolean | null,
-      initialTurnsPage: null as Record<string, unknown> | null,
-      excludeTurns: [] as string[],
-    },
-    subagentMode: {
-      enabled: false,
-      codex: {
-        enabled: true,
-      },
-      claude: {
-        enabled: true,
-        forwardSubagentText: true,
-        agentProgressSummaries: true,
-      },
-    },
-    autoTurnDecision: {
-      enabled: true,
-      allowModelTier: true,
-      allowReasoningEffort: true,
-      allowPlanMode: true,
-      allowGoalMode: true,
-      allowSessionFork: true,
-    },
-  };
-}
-
-function normalizeMockJsonObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? { ...(value as Record<string, unknown>) }
-    : null;
-}
-
-function normalizeMockStringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? Array.from(new Set(value.map(String).map((item) => item.trim()).filter(Boolean)))
-    : [];
+function defaultAgentInteractionSettings(): AgentInteractionSettings {
+  return normalizeAgentInteractionSettings(null);
 }
 
 let agentInteractionSettings = defaultAgentInteractionSettings();
@@ -1065,6 +1155,7 @@ let popupWindowSettings: { shortcut: string | null } = { shortcut: null };
 let nextPopupSettingsError: string | null = null;
 let popupLastProjectId: string | null = null;
 let eventHandlers: Record<string, Array<(event: { payload: unknown }) => void>> = {};
+let listenFailureByEvent: Record<string, string> = {};
 let webviewDragDropHandlers: Array<(event: { payload: unknown }) => void> = [];
 let projectPinUpdater: ((projectId: string, pinned: boolean) => void) | null = null;
 let windowScaleFactor = 1;
@@ -1084,15 +1175,7 @@ function createProjectDashboardSummaries(): ProjectDashboardSummaryRow[] {
   return projects
     .map((project) => {
       const projectTasks = tasks.filter((task) => task.projectId === project.id && task.archived !== true);
-      const statusCounts = Object.fromEntries(TASK_STATUSES.map((status) => [status, 0])) as Record<
-        MockTaskStatus,
-        number
-      >;
-      for (const task of projectTasks) {
-        if (TASK_STATUSES.includes(task.status as MockTaskStatus)) {
-          statusCounts[task.status as MockTaskStatus] += 1;
-        }
-      }
+      const statusCounts = countProjectTaskStatuses(projectTasks);
       const latestTaskAt = projectTasks.reduce<number | null>(
         (latest, task) => latest === null ? task.createdAt : Math.max(latest, task.createdAt),
         null,
@@ -1113,6 +1196,7 @@ function createProjectDashboardSummaries(): ProjectDashboardSummaryRow[] {
       const usage = project.id === "lilia"
         ? { totalTokens: 4200, knownCostUsd: 0.15, costRecordCount: 1, usageRecordCount: 2 }
         : { totalTokens: 0, knownCostUsd: null, costRecordCount: 0, usageRecordCount: 0 };
+      const dashboardCounts = deriveProjectDashboardCounts(statusCounts);
       return {
         id: project.id,
         name: project.name,
@@ -1121,8 +1205,7 @@ function createProjectDashboardSummaries(): ProjectDashboardSummaryRow[] {
         taskCount: projectTasks.length,
         sessionCount: new Set(projectTasks.map((task) => task.sessionId)).size,
         statusCounts,
-        blockedCount: statusCounts.blocked,
-        activeCount: statusCounts.waiting + statusCounts.running,
+        ...dashboardCounts,
         recentActivityAt,
         ...usage,
       };
@@ -1275,10 +1358,11 @@ function createMockQuotaUsageStats(input: Record<string, unknown> = {}) {
 }
 
 function createMockCodexAccountQuotaStatus() {
-  if (routerModes.codex !== "codex-account") {
+  if (!routerModeUsesCodexAccount(routerModes.codex)) {
+    const codexStatus = mockBackendEnvStatus("codex");
     return {
       available: false,
-      connectionMode: routerModes.codex,
+      connectionMode: codexStatus.connectionMode,
       limitId: null,
       limitName: null,
       planType: null,
@@ -1433,7 +1517,7 @@ function setMockGuideStatus(
       return { ...todo, guideStatus, updatedAt: now };
     });
     if (changed) {
-      emitTauriEvent("todo-changed", { taskId });
+      emitTauriEvent(TODO_CHANGED_EVENT_NAME, createTodoChangedEvent(taskId));
       return;
     }
   }
@@ -1487,7 +1571,7 @@ function refreshSessionCounts() {
 }
 
 function defaultModelForBackend(backend: "claude" | "codex") {
-  return backend === "codex" ? CODEX_MODEL_OPTIONS[0].id : "claude-sonnet-4-6";
+  return DEFAULT_MODEL_BY_BACKEND[backend];
 }
 
 function normalizeBackend(value: unknown): "claude" | "codex" {
@@ -1495,17 +1579,30 @@ function normalizeBackend(value: unknown): "claude" | "codex" {
 }
 
 function directDefaultUrl(backend: MockProviderBackend) {
-  return backend === "codex" ? "https://api.openai.com/v1" : "https://api.anthropic.com";
+  return DIRECT_DEFAULT_URLS[backend];
+}
+
+function mockApiConnectionMode(hasKey: boolean, hasUrl: boolean): ConnectionMode {
+  if (hasUrl) return "custom";
+  return hasKey ? "api" : "unconfigured";
+}
+
+function normalizeMockRouterMode(
+  backend: MockProviderBackend,
+  mode: "api" | "codex-account" | "direct" | "cc-switch",
+): MockRouterMode {
+  const normalized = mode === "direct" || mode === "cc-switch" ? "api" : mode;
+  return normalizeContractRouterModeForBackend(backend, normalized);
 }
 
 function cloneProviderConfig(backend: MockProviderBackend) {
   return { ...providerConfigs[backend], apiKey: null };
 }
 
-function mockBackendEnvStatus(backend: MockProviderBackend) {
+function mockBackendEnvStatus(backend: MockProviderBackend): BackendEnvStatus {
   const mode = routerModes[backend];
   const config = providerConfigs[backend];
-  if (mode === "codex-account" && backend === "codex") {
+  if (routerModeUsesCodexAccount(mode) && backend === "codex") {
     return {
       backend,
       hasApiKey: false,
@@ -1518,16 +1615,13 @@ function mockBackendEnvStatus(backend: MockProviderBackend) {
   return {
     backend,
     hasApiKey: hasKey,
-    connectionMode: hasKey || hasUrl ? (hasUrl ? "custom" : "api") : "unconfigured",
+    connectionMode: mockApiConnectionMode(hasKey, hasUrl),
     effectiveUrl: hasUrl ? config.baseUrl : hasKey ? directDefaultUrl(backend) : null,
   };
 }
 
 function modelBelongsToBackend(model: string, backend: "claude" | "codex") {
-  if (backend === "codex") {
-    return CODEX_MODEL_OPTIONS.some((option) => option.id === model);
-  }
-  return model.startsWith("claude-");
+  return MODEL_OPTIONS_BY_BACKEND[backend].some((option) => option.id === model);
 }
 
 function normalizeComposer(input: unknown, taskId: string) {
@@ -1673,8 +1767,8 @@ export function resetTauriMockData() {
     codex: { backend: "codex", baseUrl: null, hasApiKey: false },
   };
   routerModes = {
-    claude: "api",
-    codex: "codex-account",
+    claude: DEFAULT_ROUTER_MODE_BY_BACKEND.claude,
+    codex: DEFAULT_ROUTER_MODE_BY_BACKEND.codex,
   };
   nodeAvailable = true;
   codexAppServerStatus = {
@@ -1747,6 +1841,7 @@ export function resetTauriMockData() {
   nextPopupSettingsError = null;
   popupLastProjectId = null;
   eventHandlers = {};
+  listenFailureByEvent = {};
   webviewDragDropHandlers = [];
   windowScaleFactor = 1;
   agentTimelineDelayMs = 0;
@@ -1795,7 +1890,7 @@ export function finishMockAutomationRun(runId: string) {
     output: { ...(node.output ?? {}), completedByEvent: true },
     finishedAt: node.finishedAt ?? now,
   }));
-  emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
+  emitTauriEvent(AUTOMATION_RUN_FINISHED_EVENT_NAME, createAutomationRunEvent(cloneAutomationRun(run)));
 }
 
 export function clearMockAutomations() {
@@ -1845,6 +1940,10 @@ export function seedMockAutomationRun() {
 
 export function mockListenerCount(event: string): number {
   return eventHandlers[event]?.length ?? 0;
+}
+
+export function failNextMockListen(event: string, message: string) {
+  listenFailureByEvent[event] = message;
 }
 
 export function setMockChatRunning(taskId: string, running: boolean) {
@@ -2029,12 +2128,12 @@ export function setMockWindowScaleFactor(scaleFactor: number) {
 export function completeMockAgentTurn(taskId: string) {
   const rollback = chatInterruptRollbacks[taskId] ?? null;
   delete chatInterruptRollbacks[taskId];
-  emitTauriEvent("chat:done", {
+  emitTauriEvent(CHAT_DONE_EVENT_NAME, createChatDoneEvent({
     taskId,
     sessionId: `mock-${taskId}`,
     subtype: null,
     rollback,
-  });
+  }));
   const [next, ...rest] = chatQueued[taskId] ?? [];
   if (next) {
     chatQueued[taskId] = rest;
@@ -2056,10 +2155,7 @@ export function completeMockAgentTurn(taskId: string) {
       });
     }
     queueMicrotask(() => {
-      emitTauriEvent("chat:turn-started", {
-        taskId,
-        queuedCount: rest.length,
-      });
+      emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, createChatTurnStartedEvent(taskId, rest.length));
     });
   } else {
     chatRunning[taskId] = false;
@@ -2100,8 +2196,37 @@ export function emitMockTimelineEvent(
     ...(timelineEvents[taskId] ?? []).filter((item) => item.id !== event.id),
     event,
   ];
-  emitTauriEvent("agent:timeline", event);
+  emitTauriEvent(AGENT_TIMELINE_EVENT_NAME, event);
   return event;
+}
+
+export function emitMockTimelineBatchEvent(
+  taskId: string,
+  patches: Partial<AgentTimelineEvent>[],
+) {
+  const events = patches.map((patch, index): AgentTimelineEvent => ({
+    id: patch.id ?? `tl-batch-${Date.now()}-${index}`,
+    taskId: patch.taskId ?? taskId,
+    turnId: patch.turnId ?? "turn-live",
+    backend: patch.backend ?? "claude",
+    kind: patch.kind ?? "command",
+    status: patch.status ?? "running",
+    title: patch.title ?? "实时命令",
+    summary: patch.summary ?? "正在运行命令",
+    payload: patch.payload ?? { command: "yarn test" },
+    createdAt: patch.createdAt ?? Date.now(),
+    updatedAt: patch.updatedAt ?? Date.now(),
+    turnSeq: patch.turnSeq ?? 0,
+    intraTurnOrder: patch.intraTurnOrder ?? (timelineEvents[taskId]?.length ?? 0) + index,
+  }));
+  timelineEvents[taskId] = [
+    ...(timelineEvents[taskId] ?? []).filter((item) =>
+      !events.some((event) => event.id === item.id)
+    ),
+    ...events,
+  ];
+  emitTauriEvent(AGENT_TIMELINE_BATCH_EVENT_NAME, { taskId, events });
+  return events;
 }
 
 export function replaceMockTimelineEvents(
@@ -2200,9 +2325,7 @@ export function setMockRouterMode(
   backend: "claude" | "codex",
   mode: "api" | "codex-account" | "direct" | "cc-switch",
 ) {
-  routerModes[backend] = backend === "codex" && mode === "codex-account"
-    ? "codex-account"
-    : "api";
+  routerModes[backend] = normalizeMockRouterMode(backend, mode);
 }
 
 export function setMockProviderConfig(
@@ -2298,6 +2421,11 @@ export const mockListen = vi.fn(async (
   event: string,
   handler: (event: { payload: unknown }) => void,
 ) => {
+  const failure = listenFailureByEvent[event];
+  if (failure) {
+    delete listenFailureByEvent[event];
+    throw new Error(failure);
+  }
   eventHandlers[event] = [...(eventHandlers[event] ?? []), handler];
   return async () => {
     eventHandlers[event] = (eventHandlers[event] ?? []).filter((h) => h !== handler);
@@ -2306,34 +2434,34 @@ export const mockListen = vi.fn(async (
 
 export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
   switch (cmd) {
-    case "plugin:dialog|open":
+    case TAURI_PLUGIN_DIALOG_OPEN_COMMAND:
       return mockPickedFolderPath;
 
-    case "project_list":
+    case PROJECT_LIST_COMMAND:
       refreshSessionCounts();
       return projects
         .map(cloneProject)
         .sort((a, b) => a.sortOrder - b.sortOrder);
 
-    case "project_dashboard_list":
+    case PROJECT_DASHBOARD_LIST_COMMAND:
       return createProjectDashboardSummaries();
 
-    case "project_get": {
+    case PROJECT_GET_COMMAND: {
       const id = String(args.id);
       refreshSessionCounts();
       return projects.find((project) => project.id === id) ?? null;
     }
 
-    case "cli_project_open_consume_pending": {
+    case CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND: {
       const payload = pendingCliProjectOpen;
       pendingCliProjectOpen = null;
       return payload ? { ...payload } : null;
     }
 
-    case "project_get_settings":
+    case PROJECT_GET_SETTINGS_COMMAND:
       return { ...projectSettings };
 
-    case "project_set_settings": {
+    case PROJECT_SET_SETTINGS_COMMAND: {
       const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
         ? args.settings as Record<string, unknown>
         : {};
@@ -2351,23 +2479,23 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "git_clone_repo": {
+    case GIT_CLONE_REPO_COMMAND: {
       const url = String(args.url ?? "").trim().replace(/\.git$/i, "").replace(/\/+$/, "");
       const parentDir = String(args.parentDir ?? "").replace(/[\\/]+$/, "");
       const base = url.split(/[/:]/).pop() || "repo";
       return `${parentDir}\\${base}`;
     }
 
-    case "github_get_binding_status":
+    case GITHUB_GET_BINDING_STATUS_COMMAND:
       return {
         ...githubBindingStatus,
         binding: githubBindingStatus.binding ? { ...githubBindingStatus.binding } : null,
       };
 
-    case "github_start_device_flow":
+    case GITHUB_START_DEVICE_FLOW_COMMAND:
       return { ...githubDeviceFlowStart };
 
-    case "github_poll_device_flow": {
+    case GITHUB_POLL_DEVICE_FLOW_COMMAND: {
       const next = githubDeviceFlowPollQueue.shift() ?? {
         status: "pending",
         intervalSeconds: githubDeviceFlowStart.intervalSeconds,
@@ -2402,7 +2530,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return result;
     }
 
-    case "github_unbind":
+    case GITHUB_UNBIND_COMMAND:
       githubBindingStatus = {
         ...githubBindingStatus,
         state: "unbound",
@@ -2411,7 +2539,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       projectSettings = { ...projectSettings, githubBinding: null };
       return undefined;
 
-    case "github_list_repos": {
+    case GITHUB_LIST_REPOS_COMMAND: {
       if (githubReposError) {
         throw new Error(githubReposError);
       }
@@ -2423,7 +2551,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "github_clone_repo": {
+    case GITHUB_CLONE_REPO_COMMAND: {
       const repo = String(args.repo ?? "").trim().replace(/\/+$/, "");
       const parentDir = String(args.parentDir ?? "").replace(/[\\/]+$/, "");
       const cleaned = repo.replace(/\.git$/i, "");
@@ -2431,12 +2559,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return `${parentDir}\\${base}`;
     }
 
-    case "system_open_path":
-    case "system_open_url":
-    case "system_open_in_vscode":
+    case SYSTEM_OPEN_PATH_COMMAND:
+    case SYSTEM_OPEN_URL_COMMAND:
+    case SYSTEM_OPEN_IN_VSCODE_COMMAND:
       return undefined;
 
-    case "project_create": {
+    case PROJECT_CREATE_COMMAND: {
       const name = String(args.name || "未命名项目");
       const cwd = typeof args.cwd === "string" ? args.cwd : null;
       const project: ProjectRow = {
@@ -2451,7 +2579,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return cloneProject(project);
     }
 
-    case "project_remove": {
+    case PROJECT_REMOVE_COMMAND: {
       const id = String(args.id);
       const before = projects.length;
       projects = projects.filter((project) => project.id !== id);
@@ -2471,7 +2599,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return projects.length !== before;
     }
 
-    case "project_reorder": {
+    case PROJECT_REORDER_COMMAND: {
       const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
       projects = projects.map((project) => {
         const index = orderedIds.indexOf(project.id);
@@ -2480,11 +2608,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "milestone_list": {
+    case MILESTONE_LIST_COMMAND: {
       return getProjectRoadmap(String(args.projectId));
     }
 
-    case "milestone_create": {
+    case MILESTONE_CREATE_COMMAND: {
       const projectId = String(args.projectId);
       const title = String(args.title ?? "").trim();
       if (!title) throw new Error("milestone_create: 标题不能为空");
@@ -2505,7 +2633,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return cloneMilestone(row);
     }
 
-    case "milestone_update": {
+    case MILESTONE_UPDATE_COMMAND: {
       const id = String(args.id);
       const title = typeof args.title === "string" ? args.title.trim() : null;
       const description = typeof args.description === "string" ? args.description.trim() : null;
@@ -2516,18 +2644,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           ? null
           : undefined;
       if (title !== null && !title) throw new Error("milestone_update: 标题不能为空");
-      if (status !== null && !MILESTONE_STATUSES.includes(status as MockMilestoneStatus)) {
+      if (status !== null && !isMilestoneStatus(status)) {
         throw new Error(`milestone_update: 无效状态：${status}`);
       }
       let changed = false;
       milestones = milestones.map((milestone) => {
         if (milestone.id !== id) return milestone;
         changed = true;
+        const nextStatus = status ?? milestone.status;
         return {
           ...milestone,
           title: title ?? milestone.title,
           description: description ?? milestone.description,
-          status: (status ?? milestone.status) as MockMilestoneStatus,
+          status: nextStatus,
           dueDate: dueDate === undefined ? milestone.dueDate : dueDate,
         };
       });
@@ -2535,7 +2664,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "milestone_delete": {
+    case MILESTONE_DELETE_COMMAND: {
       const id = String(args.id);
       const before = milestones.length;
       milestones = milestones.filter((milestone) => milestone.id !== id);
@@ -2543,7 +2672,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return milestones.length !== before;
     }
 
-    case "milestone_reorder": {
+    case MILESTONE_REORDER_COMMAND: {
       const projectId = String(args.projectId);
       const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
       milestones = milestones.map((milestone) => {
@@ -2554,7 +2683,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "milestone_set_tasks": {
+    case MILESTONE_SET_TASKS_COMMAND: {
       const milestoneId = String(args.milestoneId);
       const taskIds = Array.isArray(args.taskIds) ? Array.from(new Set(args.taskIds.map(String))) : [];
       const milestone = milestones.find((item) => item.id === milestoneId);
@@ -2572,10 +2701,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return taskIds.map((taskId) => ({ taskId, milestoneId }));
     }
 
-    case "popup_get_window_settings":
+    case POPUP_GET_WINDOW_SETTINGS_COMMAND:
       return { ...popupWindowSettings };
 
-    case "popup_set_window_settings": {
+    case POPUP_SET_WINDOW_SETTINGS_COMMAND: {
       if (nextPopupSettingsError) {
         const message = nextPopupSettingsError;
         nextPopupSettingsError = null;
@@ -2591,7 +2720,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "popup_remember_last_project": {
+    case POPUP_REMEMBER_LAST_PROJECT_COMMAND: {
       const projectId = String(args.projectId ?? "");
       if (projects.some((project) => project.id === projectId)) {
         popupLastProjectId = projectId;
@@ -2599,29 +2728,29 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "popup_open_new_chat": {
+    case POPUP_OPEN_NEW_CHAT_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       if (projectId) popupLastProjectId = projectId;
       return undefined;
     }
 
-    case "popup_open_task": {
+    case POPUP_OPEN_TASK_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       if (projectId) popupLastProjectId = projectId;
       return undefined;
     }
 
-    case "popup_open_child_question": {
+    case POPUP_OPEN_CHILD_QUESTION_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       if (projectId) popupLastProjectId = projectId;
       return undefined;
     }
 
-    case "popup_focus_main":
-      emitTauriEvent("lilia:main:navigate", { route: String(args.route ?? "/") });
+    case POPUP_FOCUS_MAIN_COMMAND:
+      emitTauriEvent(MAIN_NAVIGATE_EVENT_NAME, createAppNavigateEvent(String(args.route ?? "/")));
       return undefined;
 
-    case "task_list": {
+    case TASK_LIST_COMMAND: {
       const projectId = args.projectId as string | null | undefined;
       return tasks
         .filter((task) => !task.archived && task.projectId === (projectId ?? null))
@@ -2631,7 +2760,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         );
     }
 
-    case "task_list_sidebar_conversations":
+    case TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND:
       return tasks
         .filter((task) => !task.archived)
         .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt)
@@ -2647,13 +2776,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           route: task.projectId ? `/projects/${task.projectId}/tasks/${task.id}` : `/chats/${task.id}`,
         }));
 
-    case "task_get": {
+    case TASK_GET_COMMAND: {
       const id = String(args.id);
       const row = tasks.find((task) => !task.archived && task.id === id);
       return row ? cloneTask(row) : null;
     }
 
-    case "task_update": {
+    case TASK_UPDATE_COMMAND: {
       const id = String(args.id);
       const title = typeof args.title === "string" ? args.title : null;
       const status = typeof args.status === "string" ? args.status : null;
@@ -2670,11 +2799,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           status: status ?? task.status,
         };
       });
-      if (changed) emitTauriEvent("tasks:changed", { projectId: changedProjectId });
+      if (changed) {
+        emitTauriEvent(TASKS_CHANGED_EVENT_NAME, createTasksChangedEvent(changedProjectId));
+      }
       return undefined;
     }
 
-    case "task_toggle_pin": {
+    case TASK_TOGGLE_PIN_COMMAND: {
       const id = String(args.id);
       let pinned = false;
       tasks = tasks.map((task) => {
@@ -2685,7 +2816,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return pinned;
     }
 
-    case "task_create": {
+    case TASK_CREATE_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       const title = String(args.title ?? "新对话");
       const status = String(args.status ?? "draft");
@@ -2706,11 +2837,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
       tasks = [row, ...tasks];
       refreshSessionCounts();
-      emitTauriEvent("tasks:changed", { projectId });
+      emitTauriEvent(TASKS_CHANGED_EVENT_NAME, createTasksChangedEvent(projectId));
       return cloneTask(row);
     }
 
-    case "task_promote": {
+    case TASK_PROMOTE_COMMAND: {
       const id = String(args.id);
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       const title = String(args.title ?? "新对话");
@@ -2731,11 +2862,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
       tasks = [row, ...tasks.filter((task) => task.id !== id)];
       refreshSessionCounts();
-      emitTauriEvent("tasks:changed", { projectId });
+      emitTauriEvent(TASKS_CHANGED_EVENT_NAME, createTasksChangedEvent(projectId));
       return cloneTask(row);
     }
 
-    case "task_reorder": {
+    case TASK_REORDER_COMMAND: {
       const projectId = args.projectId as string | null | undefined;
       const targetProjectId = projectId ?? null;
       const orderedIds = Array.isArray(args.orderedIds) ? args.orderedIds.map(String) : [];
@@ -2747,7 +2878,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "task_reparent": {
+    case TASK_REPARENT_COMMAND: {
       const taskId = String(args.taskId);
       const newProjectId = args.newProjectId === null || args.newProjectId === undefined
         ? null
@@ -2760,7 +2891,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "task_archive": {
+    case TASK_ARCHIVE_COMMAND: {
       const id = String(args.id);
       const before = tasks.length;
       tasks = tasks.filter((task) => task.id !== id);
@@ -2768,7 +2899,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return tasks.length !== before;
     }
 
-    case "task_archive_project": {
+    case TASK_ARCHIVE_PROJECT_COMMAND: {
       const projectId = String(args.projectId);
       const count = tasks.filter((task) => task.projectId === projectId).length;
       tasks = tasks.filter((task) => task.projectId !== projectId);
@@ -2776,10 +2907,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return count;
     }
 
-    case "automation_list_workflows":
+    case AUTOMATION_LIST_WORKFLOWS_COMMAND:
       return automations.map(cloneAutomationWorkflow);
 
-    case "automation_save_draft": {
+    case AUTOMATION_SAVE_DRAFT_COMMAND: {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
@@ -2788,16 +2919,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const scopeInput = input.scope && typeof input.scope === "object" && !Array.isArray(input.scope)
         ? input.scope as Partial<AutomationScopeRow>
         : {};
-      const nextScope: AutomationScopeRow = {
-        ...defaultAutomationScope(),
-        projectIds: Array.isArray(scopeInput.projectIds) ? scopeInput.projectIds.map(String) : [],
-        includeInbox: scopeInput.includeInbox !== false,
-        taskStatuses: Array.isArray(scopeInput.taskStatuses) ? scopeInput.taskStatuses.map(String) : [],
-        backends: Array.isArray(scopeInput.backends)
-          ? scopeInput.backends.filter((item): item is "claude" | "codex" => item === "claude" || item === "codex")
-          : [],
-        eventKinds: Array.isArray(scopeInput.eventKinds) ? scopeInput.eventKinds.map(String) : [],
-      };
+      const nextScope = normalizeAutomationScope(scopeInput);
       const nodes = Array.isArray(input.nodes)
         ? input.nodes.map((node, index) => {
           const row = node && typeof node === "object" && !Array.isArray(node)
@@ -2847,11 +2969,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         updatedAt: now,
       };
       automations = [workflow, ...automations.filter((item) => item.id !== id)];
-      emitTauriEvent("automation:changed", { workflowId: id });
+      emitTauriEvent(AUTOMATION_CHANGED_EVENT_NAME, createAutomationChangedEvent(id));
       return cloneAutomationWorkflow(workflow);
     }
 
-    case "automation_publish": {
+    case AUTOMATION_PUBLISH_COMMAND: {
       const id = String(args.id);
       const workflow = automations.find((item) => item.id === id);
       if (!workflow) throw new Error("自动化不存在");
@@ -2859,7 +2981,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const versionId = `${id}-v${automationVersionSeq + 1}`;
       workflow.publishedVersionId = versionId;
       workflow.updatedAt = Date.now();
-      emitTauriEvent("automation:changed", { workflowId: id });
+      emitTauriEvent(AUTOMATION_CHANGED_EVENT_NAME, createAutomationChangedEvent(id));
       return {
         id: versionId,
         workflowId: id,
@@ -2869,7 +2991,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "automation_delete_workflow": {
+    case AUTOMATION_DELETE_WORKFLOW_COMMAND: {
       const id = String(args.id);
       const before = automations.length;
       automations = automations.filter((item) => item.id !== id);
@@ -2879,21 +3001,21 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         .map((run) => run.id);
       automationRuns = automationRuns.filter((run) => run.workflowId !== id);
       for (const runId of deletedRunIds) delete automationRunNodes[runId];
-      emitTauriEvent("automation:changed", { workflowId: id });
+      emitTauriEvent(AUTOMATION_CHANGED_EVENT_NAME, createAutomationChangedEvent(id));
       return undefined;
     }
 
-    case "automation_set_enabled": {
+    case AUTOMATION_SET_ENABLED_COMMAND: {
       const id = String(args.id);
       const enabled = args.enabled === true;
       automations = automations.map((workflow) =>
         workflow.id === id ? { ...workflow, enabled, updatedAt: Date.now() } : workflow
       );
-      emitTauriEvent("automation:changed", { workflowId: id });
+      emitTauriEvent(AUTOMATION_CHANGED_EVENT_NAME, createAutomationChangedEvent(id));
       return undefined;
     }
 
-    case "automation_run_once": {
+    case AUTOMATION_RUN_ONCE_COMMAND: {
       const id = String(args.id);
       const workflow = automations.find((item) => item.id === id);
       if (!workflow?.publishedVersionId) throw new Error("运行前需要先发布");
@@ -2934,7 +3056,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
             : "succeeded",
         input: { trigger: run.trigger },
         output: node.id === waitingNode?.id
-          ? { waitingUser: true, prompt: String(node.config.prompt ?? "确认后继续执行自动化。") }
+          ? { waitingUser: true, prompt: String(node.config.prompt ?? DEFAULT_AUTOMATION_HUMAN_PROMPT) }
           : node.id === waitingAgent?.id
             ? { waitingAgent: true, taskId: "t-002", turnId: `turn-${run.id}` }
           : { ok: true },
@@ -2942,12 +3064,15 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         startedAt: now,
         finishedAt: node.id === waitingNode?.id || node.id === waitingAgent?.id ? null : now,
       }));
-      emitTauriEvent("automation:run-started", { run: cloneAutomationRun(run) });
-      emitTauriEvent(waitingNode || waitingAgent ? "automation:run-updated" : "automation:run-finished", { run: cloneAutomationRun(run) });
+      emitTauriEvent(AUTOMATION_RUN_STARTED_EVENT_NAME, createAutomationRunEvent(cloneAutomationRun(run)));
+      emitTauriEvent(
+        waitingNode || waitingAgent ? AUTOMATION_RUN_UPDATED_EVENT_NAME : AUTOMATION_RUN_FINISHED_EVENT_NAME,
+        createAutomationRunEvent(cloneAutomationRun(run)),
+      );
       return cloneAutomationRun(run);
     }
 
-    case "automation_resume_run": {
+    case AUTOMATION_RESUME_RUN_COMMAND: {
       const runId = String(args.runId);
       const run = automationRuns.find((item) => item.id === runId);
       if (!run) throw new Error("运行不存在");
@@ -2964,18 +3089,18 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           }
           : node,
       );
-      emitTauriEvent("automation:run-finished", { run: cloneAutomationRun(run) });
+      emitTauriEvent(AUTOMATION_RUN_FINISHED_EVENT_NAME, createAutomationRunEvent(cloneAutomationRun(run)));
       return cloneAutomationRun(run);
     }
 
-    case "automation_list_runs": {
+    case AUTOMATION_LIST_RUNS_COMMAND: {
       const workflowId = typeof args.workflowId === "string" ? args.workflowId : null;
       return automationRuns
         .filter((run) => !workflowId || run.workflowId === workflowId)
         .map(cloneAutomationRunSummary);
     }
 
-    case "automation_get_run": {
+    case AUTOMATION_GET_RUN_COMMAND: {
       const runId = String(args.runId);
       const run = automationRuns.find((item) => item.id === runId);
       if (!run) return null;
@@ -2985,7 +3110,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_check_env":
+    case CHAT_CHECK_ENV_COMMAND:
       return {
         nodeAvailable,
         codexCliAvailable: codexAppServerStatus.failureKind !== "missingCli",
@@ -3002,14 +3127,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
       };
 
-    case "provider_codex_app_server_check_update":
+    case PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND:
       return {
         ...codexAppServerStatus,
         issues: [...codexAppServerStatus.issues],
         releaseNotes: [...codexAppServerStatus.releaseNotes],
       };
 
-    case "provider_codex_app_server_install_update":
+    case PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND:
       codexAppServerStatus = {
         ...codexAppServerStatus,
         managed: true,
@@ -3024,19 +3149,19 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         releaseNotes: [...codexAppServerStatus.releaseNotes],
       };
 
-    case "provider_get_active_backend":
+    case PROVIDER_GET_ACTIVE_BACKEND_COMMAND:
       return activeBackend;
 
-    case "provider_set_active_backend":
+    case PROVIDER_SET_ACTIVE_BACKEND_COMMAND:
       activeBackend = normalizeBackend(args.backend);
       return undefined;
 
-    case "provider_get_config": {
+    case PROVIDER_GET_CONFIG_COMMAND: {
       const backend = normalizeBackend(args.backend);
       return cloneProviderConfig(backend);
     }
 
-    case "provider_set_config": {
+    case PROVIDER_SET_CONFIG_COMMAND: {
       const input = args.config && typeof args.config === "object" && !Array.isArray(args.config)
         ? args.config as Record<string, unknown>
         : {};
@@ -3056,10 +3181,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "assistant_ai_get_config":
+    case ASSISTANT_AI_GET_CONFIG_COMMAND:
       return { ...assistantAIConfig, apiKey: null };
 
-    case "assistant_ai_set_config": {
+    case ASSISTANT_AI_SET_CONFIG_COMMAND: {
       const config = args.config && typeof args.config === "object" && !Array.isArray(args.config)
         ? args.config as Record<string, unknown>
         : {};
@@ -3076,25 +3201,25 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "assistant_ai_test_connection":
+    case ASSISTANT_AI_TEST_CONNECTION_COMMAND:
       return { ok: false, error: "baseUrl / apiKey / model 必须全部填写", models: null, modelMatched: null };
 
-    case "assistant_ai_optimize_prompt": {
+    case ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND: {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
       return `优化后：${typeof input.prompt === "string" ? input.prompt : ""}`;
     }
 
-    case "conversation_suggestions_get_settings":
+    case CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND:
       return { ...conversationSuggestionSettings };
 
-    case "conversation_suggestions_get_sources":
+    case CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND:
       if (!conversationSuggestionSettings.enabled) return { sources: [], localGit: null };
       if (conversationSuggestionSourcesOverride) return conversationSuggestionSourcesOverride;
       return { sources: ["task"], localGit: null };
 
-    case "conversation_suggestions_set_settings": {
+    case CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND: {
       const settings = args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)
         ? args.settings as Record<string, unknown>
         : {};
@@ -3105,7 +3230,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "conversation_suggestions_get":
+    case CONVERSATION_SUGGESTIONS_GET_COMMAND:
       if (!conversationSuggestionSettings.enabled) return [];
       if (conversationSuggestionsDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, conversationSuggestionsDelayMs));
@@ -3149,7 +3274,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
       ];
 
-    case "history_import_search": {
+    case HISTORY_IMPORT_SEARCH_COMMAND: {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
@@ -3187,7 +3312,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "history_import_runtime_states": {
+    case HISTORY_IMPORT_RUNTIME_STATES_COMMAND: {
       return Object.entries(codexTaskSessions).flatMap(([taskId, threadId]) => {
         const task = tasks.find((row) => row.id === taskId && !row.archived);
         if (!task) return [];
@@ -3206,27 +3331,30 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       });
     }
 
-    case "history_import_clean_background_terminals": {
+    case HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND: {
       const itemId = String(args.itemId ?? "").trim();
       if (!itemId) throw new Error("Codex threadId 不能为空");
       cleanedCodexThreads.push(itemId);
       return undefined;
     }
 
-    case "router_get_mode": {
+    case ROUTER_GET_MODE_COMMAND: {
       const backend = normalizeBackend(args.backend);
       return routerModes[backend];
     }
 
-    case "router_set_mode": {
+    case ROUTER_SET_MODE_COMMAND: {
       const backend = normalizeBackend(args.backend);
-      routerModes[backend] = backend === "codex" && args.mode === "codex-account"
-        ? "codex-account"
+      const mode = args.mode === "codex-account" ||
+        args.mode === "direct" ||
+        args.mode === "cc-switch"
+        ? args.mode
         : "api";
+      routerModes[backend] = normalizeMockRouterMode(backend, mode);
       return undefined;
     }
 
-    case "agent_timeline_list": {
+    case AGENT_TIMELINE_LIST_COMMAND: {
       if (agentTimelineDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, agentTimelineDelayMs));
       }
@@ -3234,24 +3362,24 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return timelineEvents[taskId] ?? [];
     }
 
-    case "agent_timeline_clear_task": {
+    case AGENT_TIMELINE_CLEAR_TASK_COMMAND: {
       const taskId = String(args.taskId);
       const count = timelineEvents[taskId]?.length ?? 0;
       timelineEvents[taskId] = [];
       return count;
     }
 
-    case "quota_usage_get_stats":
+    case QUOTA_USAGE_GET_STATS_COMMAND:
       return quotaUsageStatsOverride ?? createMockQuotaUsageStats(
         args.input && typeof args.input === "object" && !Array.isArray(args.input)
           ? args.input as Record<string, unknown>
           : {},
       );
 
-    case "quota_usage_get_codex_account_status":
+    case QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND:
       return codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
 
-    case "quota_usage_consume_codex_rate_limit_reset_credit": {
+    case QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND: {
       const status = codexAccountQuotaStatusOverride ?? createMockCodexAccountQuotaStatus();
       return {
         outcome: "reset",
@@ -3262,7 +3390,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_get_composer_state": {
+    case CHAT_GET_COMPOSER_STATE_COMMAND: {
       const taskId = String(args.taskId);
       if (composerStateHandler) return composerStateHandler(taskId);
       return {
@@ -3275,7 +3403,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_get_runtime_snapshot": {
+    case CHAT_GET_RUNTIME_SNAPSHOT_COMMAND: {
       const taskId = String(args.taskId);
       if (runtimeSnapshotDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, runtimeSnapshotDelayMs));
@@ -3302,7 +3430,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "plugins_overview":
+    case PLUGINS_OVERVIEW_COMMAND:
       return {
         skills: [
           {
@@ -3342,13 +3470,13 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         warnings: [],
       };
 
-    case "plugins_hooks_overview":
+    case PLUGINS_HOOKS_OVERVIEW_COMMAND:
       return {
         sources: hookSourcesOverview(),
         warnings: [],
       };
 
-    case "plugins_read_hook_source": {
+    case PLUGINS_READ_HOOK_SOURCE_COMMAND: {
       const source = args.source as { id?: string };
       const document = source?.id ? hookDocuments[String(source.id)] : undefined;
       if (!document) throw new Error("unknown hook source");
@@ -3356,7 +3484,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return cloneHookDocument(document);
     }
 
-    case "plugins_update_hook_source": {
+    case PLUGINS_UPDATE_HOOK_SOURCE_COMMAND: {
       const source = args.source as { id?: string };
       const input = args.input as {
         handlers?: Array<{
@@ -3405,7 +3533,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return cloneHookDocument(document);
     }
 
-    case "plugins_create_hook_source": {
+    case PLUGINS_CREATE_HOOK_SOURCE_COMMAND: {
       const backend = String(args.backend);
       const scope = String(args.scope);
       const document = editableHookSourceFor(backend, scope);
@@ -3417,7 +3545,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return structuredClone(document.source);
     }
 
-    case "plugins_delete_hook_source": {
+    case PLUGINS_DELETE_HOOK_SOURCE_COMMAND: {
       const source = args.source as { id?: string };
       const document = source?.id ? hookDocuments[String(source.id)] : undefined;
       if (!document) throw new Error("unknown hook source");
@@ -3431,7 +3559,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "plugins_set_hook_source_enabled": {
+    case PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND: {
       const source = args.source as { id?: string };
       const enabled = args.enabled === true;
       const document = source?.id ? hookDocuments[String(source.id)] : undefined;
@@ -3441,7 +3569,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return structuredClone(document.source);
     }
 
-    case "plugins_set_package_enabled": {
+    case PLUGINS_SET_PACKAGE_ENABLED_COMMAND: {
       if (args.backend !== "claude") throw new Error("unsupported package backend");
       const name = String(args.name);
       const enabled = args.enabled === true;
@@ -3451,7 +3579,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "plugins_create_mcp_server": {
+    case PLUGINS_CREATE_MCP_SERVER_COMMAND: {
       const backend = String(args.backend);
       const input = args.input as {
         name?: string;
@@ -3473,7 +3601,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return { ...server, args: [...server.args], envKeys: [...server.envKeys] };
     }
 
-    case "plugins_update_mcp_server": {
+    case PLUGINS_UPDATE_MCP_SERVER_COMMAND: {
       const backend = String(args.backend);
       const name = String(args.name);
       const input = args.input as {
@@ -3509,7 +3637,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return { ...updated, args: [...updated.args], envKeys: [...updated.envKeys] };
     }
 
-    case "plugins_delete_mcp_server": {
+    case PLUGINS_DELETE_MCP_SERVER_COMMAND: {
       const backend = String(args.backend);
       const name = String(args.name);
       updateMcpServersForBackend(backend, (servers) =>
@@ -3518,7 +3646,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "plugins_set_mcp_server_enabled": {
+    case PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND: {
       const backend = String(args.backend);
       const name = String(args.name);
       const enabled = args.enabled === true;
@@ -3532,111 +3660,27 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "plugins_open_mcp_config":
-    case "plugins_open_hook_config":
+    case PLUGINS_OPEN_MCP_CONFIG_COMMAND:
+    case PLUGINS_OPEN_HOOK_CONFIG_COMMAND:
       return undefined;
 
-    case "chat_set_composer_state":
+    case CHAT_SET_COMPOSER_STATE_COMMAND:
       return undefined;
 
-    case "agent_interaction_get_settings":
+    case AGENT_INTERACTION_GET_SETTINGS_COMMAND:
       return { ...agentInteractionSettings };
 
-    case "agent_interaction_list_subagents":
+    case AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND:
       return customSubagents.map((item) => ({ ...item }));
 
-    case "agent_interaction_set_settings": {
-      const settings = args.settings as {
-        nonInterruptMode?: unknown;
-        debug?: unknown;
-        permissionMode?: unknown;
-        codexProfile?: {
-          profile?: unknown;
-          model?: unknown;
-          reasoningEffort?: unknown;
-          runtimeWorkspaceRoots?: unknown;
-          permissions?: { profile?: unknown };
-          responsesApiClientMetadata?: unknown;
-          additionalContext?: unknown;
-          persistExtendedHistory?: unknown;
-          initialTurnsPage?: unknown;
-          excludeTurns?: unknown;
-        };
-        subagentMode?: {
-          enabled?: unknown;
-          codex?: { enabled?: unknown };
-          claude?: {
-            enabled?: unknown;
-            forwardSubagentText?: unknown;
-            agentProgressSummaries?: unknown;
-          };
-        };
-        autoTurnDecision?: {
-          enabled?: unknown;
-          allowModelTier?: unknown;
-          allowReasoningEffort?: unknown;
-          allowPlanMode?: unknown;
-          allowGoalMode?: unknown;
-          allowSessionFork?: unknown;
-        };
-      } | undefined;
-      const codexProfile = settings?.codexProfile;
-      const subagentMode = settings?.subagentMode;
-      const claudeSubagentMode = subagentMode?.claude;
-      const autoTurnDecision = settings?.autoTurnDecision;
-      agentInteractionSettings = {
-        nonInterruptMode: settings?.nonInterruptMode === true,
-        debug: settings?.debug === true,
-        permissionMode: settings?.permissionMode === "readonly" ||
-          settings?.permissionMode === "full" ||
-          settings?.permissionMode === "free"
-          ? settings.permissionMode
-          : "ask",
-        codexProfile: {
-          profile: typeof codexProfile?.profile === "string" ? codexProfile.profile : "default",
-          model: typeof codexProfile?.model === "string" && codexProfile.model.trim()
-            ? codexProfile.model.trim()
-            : null,
-          reasoningEffort: typeof codexProfile?.reasoningEffort === "string"
-            ? codexProfile.reasoningEffort
-            : null,
-          runtimeWorkspaceRoots: Array.isArray(codexProfile?.runtimeWorkspaceRoots)
-            ? codexProfile.runtimeWorkspaceRoots.map(String)
-            : [],
-          responsesApiClientMetadata: normalizeMockJsonObject(codexProfile?.responsesApiClientMetadata),
-          additionalContext: typeof codexProfile?.additionalContext === "string" && codexProfile.additionalContext.trim()
-            ? codexProfile.additionalContext.trim()
-            : null,
-          persistExtendedHistory: typeof codexProfile?.persistExtendedHistory === "boolean"
-            ? codexProfile.persistExtendedHistory
-            : null,
-          initialTurnsPage: normalizeMockJsonObject(codexProfile?.initialTurnsPage),
-          excludeTurns: normalizeMockStringList(codexProfile?.excludeTurns),
-        },
-        subagentMode: {
-          enabled: subagentMode?.enabled === true,
-          codex: {
-            enabled: subagentMode?.codex?.enabled !== false,
-          },
-          claude: {
-            enabled: claudeSubagentMode?.enabled !== false,
-            forwardSubagentText: claudeSubagentMode?.forwardSubagentText !== false,
-            agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
-          },
-        },
-        autoTurnDecision: {
-          enabled: autoTurnDecision?.enabled !== false,
-          allowModelTier: autoTurnDecision?.allowModelTier !== false,
-          allowReasoningEffort: autoTurnDecision?.allowReasoningEffort !== false,
-          allowPlanMode: autoTurnDecision?.allowPlanMode !== false,
-          allowGoalMode: autoTurnDecision?.allowGoalMode !== false,
-          allowSessionFork: autoTurnDecision?.allowSessionFork !== false,
-        },
-      };
+    case AGENT_INTERACTION_SET_SETTINGS_COMMAND: {
+      agentInteractionSettings = normalizeAgentInteractionSettings(
+        args.settings as Partial<AgentInteractionSettings> | null | undefined,
+      );
       return undefined;
     }
 
-    case "agent_interaction_upsert_subagent": {
+    case AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND: {
       const input = args.input as {
         id?: unknown;
         name?: unknown;
@@ -3660,26 +3704,23 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return saved;
     }
 
-    case "agent_interaction_delete_subagent":
+    case AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND:
       customSubagents = customSubagents.filter((item) => item.id !== String(args.id || ""));
       return undefined;
 
-    case "chat_list_models": {
-      const backend = String(args.backend || "claude");
-      if (backend === "codex") {
-        return CODEX_MODEL_OPTIONS.map((option) => ({ ...option, backend }));
-      }
-      return CLAUDE_MODEL_OPTIONS.map((option) => ({ ...option, backend }));
+    case CHAT_LIST_MODELS_COMMAND: {
+      const backend = normalizeBackend(args.backend);
+      return MODEL_OPTIONS_BY_BACKEND[backend].map((option) => ({ ...option, backend }));
     }
 
-    case "chat_respond_agent_interaction":
+    case CHAT_RESPOND_AGENT_INTERACTION_COMMAND:
       if (nextAgentInteractionResponseError) {
         const message = nextAgentInteractionResponseError;
         nextAgentInteractionResponseError = null;
         throw new Error(message);
       }
       return undefined;
-    case "project_architecture_apply": {
+    case PROJECT_ARCHITECTURE_APPLY_COMMAND: {
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
         : {};
@@ -3710,10 +3751,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         },
       };
     }
-    case "chat_ack_restored_rollback":
+    case CHAT_ACK_RESTORED_ROLLBACK_COMMAND:
       return undefined;
 
-    case "chat_respond_title_update": {
+    case CHAT_RESPOND_TITLE_UPDATE_COMMAND: {
       const taskId = String(args.taskId);
       const requestId = String(args.requestId);
       const decision = args.decision === "accept" ? "accept" : "decline";
@@ -3735,7 +3776,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           changedProjectId = task.projectId;
           return { ...task, title: proposedTitle, titleSource: "manual" };
         });
-        emitTauriEvent("tasks:changed", { projectId: changedProjectId });
+        emitTauriEvent(TASKS_CHANGED_EVENT_NAME, createTasksChangedEvent(changedProjectId));
       }
       emitMockTimelineEvent(taskId, {
         ...event,
@@ -3750,7 +3791,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       return undefined;
     }
 
-    case "chat_describe_attachments": {
+    case CHAT_DESCRIBE_ATTACHMENTS_COMMAND: {
       const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
       return paths.map((path, index) => {
         const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
@@ -3780,10 +3821,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       });
     }
 
-    case "chat_read_clipboard_file_paths":
+    case CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND:
       return [...clipboardFilePaths];
 
-    case "chat_save_clipboard_image": {
+    case CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND: {
       clipboardImageSeq += 1;
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
@@ -3809,7 +3850,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_save_clipboard_text": {
+    case CHAT_SAVE_CLIPBOARD_TEXT_COMMAND: {
       clipboardTextSeq += 1;
       const input = args.input && typeof args.input === "object" && !Array.isArray(args.input)
         ? args.input as Record<string, unknown>
@@ -3828,7 +3869,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_search_context_attachments": {
+    case CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND: {
       const projectCwd = String(args.projectCwd ?? "D:\\PROJECT\\workspace\\Lilia");
       const query = String(args.query ?? "").toLowerCase().replace(/\\/g, "/");
       const limit = typeof args.limit === "number" ? args.limit : 12;
@@ -3906,7 +3947,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         });
     }
 
-    case "chat_search_slash_commands": {
+    case CHAT_SEARCH_SLASH_COMMANDS_COMMAND: {
       const query = String(args.query ?? "").trim().toLowerCase();
       const limit = typeof args.limit === "number" ? args.limit : 12;
       return mockSlashCommands
@@ -3923,12 +3964,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         }));
     }
 
-    case "todo_list": {
+    case TODO_LIST_COMMAND: {
       const taskId = String(args.taskId);
       return listMockTodos(taskId);
     }
 
-    case "todo_create": {
+    case TODO_CREATE_COMMAND: {
       const taskId = String(args.taskId);
       const text = String(args.text ?? "").trim();
       const now = Date.now();
@@ -3950,11 +3991,11 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         updatedAt: now,
       };
       todosByTaskId[taskId] = [...(todosByTaskId[taskId] ?? []), todo];
-      emitTauriEvent("todo-changed", { taskId });
+      emitTauriEvent(TODO_CHANGED_EVENT_NAME, createTodoChangedEvent(taskId));
       return cloneTodo(todo);
     }
 
-    case "todo_update": {
+    case TODO_UPDATE_COMMAND: {
       const id = String(args.id);
       const now = Date.now();
       for (const taskId of Object.keys(todosByTaskId)) {
@@ -3980,14 +4021,14 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           };
         });
         if (changed) {
-          emitTauriEvent("todo-changed", { taskId });
+          emitTauriEvent(TODO_CHANGED_EVENT_NAME, createTodoChangedEvent(taskId));
           break;
         }
       }
       return undefined;
     }
 
-    case "todo_delete": {
+    case TODO_DELETE_COMMAND: {
       const id = String(args.id);
       for (const taskId of Object.keys(todosByTaskId)) {
         const before = todosByTaskId[taskId].length;
@@ -3995,22 +4036,22 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           todo.id !== id || todo.source !== "lilia"
         );
         if (todosByTaskId[taskId].length !== before) {
-          emitTauriEvent("todo-changed", { taskId });
+          emitTauriEvent(TODO_CHANGED_EVENT_NAME, createTodoChangedEvent(taskId));
           break;
         }
       }
       return undefined;
     }
 
-    case "todo_apply_agent_event": {
+    case TODO_APPLY_AGENT_EVENT_COMMAND: {
       const taskId = String(args.taskId);
       const todos = Array.isArray(args.todos) ? args.todos : [];
       const updated = applyMockAgentTodos(taskId, todos);
-      emitTauriEvent("todo-changed", { taskId });
+      emitTauriEvent(TODO_CHANGED_EVENT_NAME, createTodoChangedEvent(taskId));
       return updated;
     }
 
-    case "chat_send_message": {
+    case CHAT_SEND_MESSAGE_COMMAND: {
       if (nextChatSendError) {
         const message = nextChatSendError;
         nextChatSendError = null;
@@ -4067,12 +4108,12 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
           intraTurnOrder: 0,
         });
         queueMicrotask(() => {
-          emitTauriEvent("chat:done", {
+          emitTauriEvent(CHAT_DONE_EVENT_NAME, createChatDoneEvent({
             taskId,
             sessionId: null,
             subtype: "slash_command",
             rollback: null,
-          });
+          }));
         });
         return {
           message,
@@ -4144,10 +4185,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       setMockGuideStatus(args.guideId, "sent");
       chatRunning[taskId] = true;
       queueMicrotask(() => {
-        emitTauriEvent("chat:turn-started", {
-          taskId,
-          queuedCount: 0,
-        });
+        emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, createChatTurnStartedEvent(taskId, 0));
       });
       return {
         message,
@@ -4157,10 +4195,10 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "lilia_iab_open":
+    case LILIA_IAB_OPEN_COMMAND:
       return undefined;
 
-    case "lilia_iab_submit": {
+    case LILIA_IAB_SUBMIT_COMMAND: {
       const snapshot = createMockLiliaIabSnapshot(args);
       const delivery = nextLiliaIabDelivery;
       nextLiliaIabDelivery = "message";
@@ -4171,7 +4209,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "chat_interrupt_turn": {
+    case CHAT_INTERRUPT_TURN_COMMAND: {
       const taskId = String(args.taskId);
       const turnId = currentChatTurnId(taskId);
       const message = "用户打断了当前 Agent 运行";
@@ -4231,7 +4269,7 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       };
     }
 
-    case "plugin:event|listen": {
+    case TAURI_PLUGIN_EVENT_LISTEN_COMMAND: {
       const event = String(args.event);
       const handlerId = Number(args.handler);
       return handlerId || 1;

@@ -1,0 +1,60 @@
+{
+  "hookBackends": [
+    "claude",
+    "codex"
+  ],
+  "hookScopes": [
+    "managed",
+    "user",
+    "project",
+    "local",
+    "plugin",
+    "system"
+  ],
+  "hookSourceFormats": [
+    "claude_settings_json",
+    "codex_hooks_json",
+    "codex_config_toml",
+    "managed_settings",
+    "requirements_toml",
+    "plugin_manifest"
+  ],
+  "hookTrustStates": [
+    "unknown",
+    "required",
+    "managed",
+    "n_a"
+  ],
+  "hookScopeLabels": {
+    "managed": "Managed",
+    "user": "全局",
+    "project": "项目",
+    "local": "本地",
+    "plugin": "Plugin",
+    "system": "System"
+  },
+  "hookSourceFormatLabels": {
+    "claude_settings_json": "settings.json",
+    "codex_hooks_json": "hooks.json",
+    "codex_config_toml": "config.toml [hooks]",
+    "managed_settings": "managed settings",
+    "requirements_toml": "requirements.toml",
+    "plugin_manifest": "plugin.json"
+  },
+  "hookTrustStateLabels": {
+    "unknown": "未知",
+    "required": "需要 review/trust",
+    "managed": "Managed",
+    "n_a": "不适用"
+  },
+  "hookSourceStateLabels": {
+    "missing": "未创建",
+    "empty": "空来源",
+    "handlerCount": "{count} 条 Handler"
+  },
+  "hookSourceEditLabels": {
+    "readonly": "只读",
+    "writable": "可写",
+    "creatable": "可创建"
+  }
+}

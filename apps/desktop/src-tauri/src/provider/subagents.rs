@@ -1,6 +1,6 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -67,8 +67,8 @@ fn save_custom_subagents_to_path(
         fs::create_dir_all(parent)
             .map_err(|e| format!("创建目录 {} 失败：{e}", parent.display()))?;
     }
-    let mut text =
-        serde_json::to_string_pretty(subagents).map_err(|e| format!("序列化 subagents 失败：{e}"))?;
+    let mut text = serde_json::to_string_pretty(subagents)
+        .map_err(|e| format!("序列化 subagents 失败：{e}"))?;
     text.push('\n');
     fs::write(path, text).map_err(|e| format!("写入 {} 失败：{e}", path.display()))
 }
@@ -152,9 +152,7 @@ fn compile_codex_subagent_instructions(subagents: &[CustomSubagentDefinition]) -
     Some(lines.join("\n"))
 }
 
-fn compile_claude_managed_subagents(
-    subagents: &[CustomSubagentDefinition],
-) -> Option<JsonValue> {
+fn compile_claude_managed_subagents(subagents: &[CustomSubagentDefinition]) -> Option<JsonValue> {
     if subagents.is_empty() {
         return None;
     }
@@ -234,11 +232,15 @@ pub(crate) fn delete_custom_subagent(id: &str) -> Result<(), String> {
 }
 
 pub(crate) fn codex_subagent_instructions() -> Result<Option<String>, String> {
-    Ok(compile_codex_subagent_instructions(&enabled_custom_subagents()?))
+    Ok(compile_codex_subagent_instructions(
+        &enabled_custom_subagents()?,
+    ))
 }
 
 pub(crate) fn claude_managed_subagents() -> Result<Option<JsonValue>, String> {
-    Ok(compile_claude_managed_subagents(&enabled_custom_subagents()?))
+    Ok(compile_claude_managed_subagents(
+        &enabled_custom_subagents()?
+    ))
 }
 
 #[cfg(test)]

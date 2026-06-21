@@ -1,0 +1,87 @@
+{
+  "askUserModes": [
+    "confirm",
+    "single",
+    "multi"
+  ],
+  "defaultAskUserMode": "confirm",
+  "defaultAskUserModeWithOptions": "single",
+  "singleSelectAskUserMode": "single",
+  "multiSelectAskUserMode": "multi",
+  "maxAskUserToolQuestions": 4,
+  "minAskUserToolOptions": 2,
+  "maxAskUserToolOptions": 4,
+  "maxCodexRequestUserInputOptions": 10,
+  "maxAskUserHeaderText": 12,
+  "maxAskUserQuestionText": 1200,
+  "askUserToolNames": [
+    "AskUserQuestion",
+    "ask_user_question",
+    "mcp__lilia__ask_user_question"
+  ],
+  "askUserQuestionInputSchema": {
+    "type": "object",
+    "properties": {
+      "questions": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string"
+            },
+            "header": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "preview": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "multiSelect": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "question",
+            "header",
+            "options"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "questions"
+    ],
+    "additionalProperties": false
+  },
+  "askUserIntents": [
+    "plan_approval"
+  ],
+  "planApprovalIntent": "plan_approval",
+  "confirmAskUserAnswerValue": "yes",
+  "cancelAskUserAnswerValue": "no",
+  "planApprovalRevisionRequestAnswerValue": "revision_request"
+}

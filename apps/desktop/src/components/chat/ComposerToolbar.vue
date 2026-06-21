@@ -12,6 +12,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-vue-next";
+import { clampPercent } from "@lilia/contracts";
 import type {
   ChatAttachment,
   ChatComposerState,
@@ -26,6 +27,7 @@ import {
   SB_MENU_POP_TRANSITION_MS,
 } from "../../composables/menuMotion";
 import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
+import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync } from "../../utils/perf";
 
 const ComposerModelPicker = defineAsyncComponent({
@@ -69,6 +71,7 @@ const emit = defineEmits<{
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 const actionMenuOpen = ref(false);
+let actionMenuDocumentUnlisteners: Array<() => void> = [];
 const actionMenuPlacement = ref<"top" | "bottom">("top");
 const {
   triggerEl: actionTriggerEl,
@@ -94,11 +97,6 @@ type ModeChip = {
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
-}
-
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, value));
 }
 
 function contextUsageTone(usage: ChatContextUsage | null | undefined): string {
@@ -223,23 +221,32 @@ function onKey(e: KeyboardEvent) {
   e.stopPropagation();
 }
 
+function clearActionMenuDocumentListeners() {
+  runUnlistenFns(actionMenuDocumentUnlisteners.splice(0).reverse());
+}
+
+function installActionMenuDocumentListeners() {
+  clearActionMenuDocumentListeners();
+  actionMenuDocumentUnlisteners = [
+    addDomEventListener(document, "pointerdown", onDocPointer, true),
+    addDomEventListener(document, "keydown", onKey),
+  ];
+}
+
 watch(actionMenuOpen, (open) => {
+  clearActionMenuDocumentListeners();
   if (open) {
     void updateActionMenuOrigin();
-    document.addEventListener("pointerdown", onDocPointer, true);
-    document.addEventListener("keydown", onKey);
+    installActionMenuDocumentListeners();
   } else {
     clearActionMenuAnchor();
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onKey);
   }
 });
 
 onBeforeUnmount(() => {
   actionTriggerEl.value = null;
   actionMenuEl.value = null;
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onKey);
+  clearActionMenuDocumentListeners();
 });
 
 </script>

@@ -3,25 +3,52 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 pub mod agent_events;
 mod agent_extensions;
+mod agent_interaction_contract;
 pub mod agent_timeline;
+mod agent_timeline_contract;
+mod app_events_contract;
 mod automation;
 mod chat;
+mod chat_backends_contract;
 mod claude_history;
 mod cli_project;
 mod codex_history;
+mod contract_manifest;
 mod conversation_suggestions;
 mod github;
+#[cfg(test)]
+mod github_command_contract;
 mod history_import;
+#[cfg(test)]
+mod history_import_contract;
 mod lilia_iab;
 mod memory;
+#[cfg(test)]
+mod memory_command_contract;
+#[cfg(test)]
+mod milestone_command_contract;
 mod plugins;
+#[cfg(test)]
+mod plugins_command_contract;
 mod popup_windows;
+mod project_architecture_contract;
+#[cfg(test)]
+mod project_contract;
 mod project_shell;
 mod projects_tasks;
 mod provider;
 mod quota_usage;
+mod quota_usage_contract;
+mod runner_protocol_contract;
 mod settings_store;
 mod store;
+#[cfg(test)]
+mod system_popup_command_contract;
+#[cfg(test)]
+mod task_command_contract;
+mod task_contract;
+#[cfg(test)]
+mod todo_command_contract;
 mod todos;
 mod tray;
 mod util;
@@ -35,11 +62,6 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
-pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
-    ("gpt-5.5", "GPT-5.5"),
-    ("gpt-5.4", "GPT-5.4"),
-    ("gpt-5.4-mini", "GPT-5.4 Mini"),
-];
 pub(crate) const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 136, 0);
 
 #[tauri::command]

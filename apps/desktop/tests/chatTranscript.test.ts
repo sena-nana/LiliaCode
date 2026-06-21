@@ -170,6 +170,36 @@ function timelineEvent(
 }
 
 describe("ChatTranscript empty state", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("卸载时取消 timeline activation paint 调度", () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 47));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const view = render(ChatTranscript, {
+      props: {
+        timelineEvents: [
+          timelineEvent({
+            id: "user-activation",
+            kind: "message",
+            payload: { role: "user", content: "开始" },
+          }),
+        ],
+        emptyHeadline: "今天想做什么？",
+        isThinking: false,
+      },
+      slots: {
+        controls: "<div data-testid=\"composer\">composer</div>",
+      },
+    });
+
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(47);
+  });
+
   it("renders empty headline with empty actions slot in the same empty container", () => {
     const view = render(ChatTranscript, {
       props: {

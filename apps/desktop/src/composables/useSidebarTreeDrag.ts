@@ -7,6 +7,7 @@ import {
   reparentTask,
   type OrphanConversation,
 } from "../services/tasksStore";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 export type TreeDragKind = "project" | "task";
 export type TreeDropPosition = "before" | "after" | "inside";
@@ -134,6 +135,9 @@ export function useSidebarTreeDrag(
   const treeDrag = ref<TreeDragSource | null>(null);
   const treeDropTarget = ref<TreeDropTarget | null>(null);
   const suppressTreeClick = ref(false);
+  let treeDragUnlisteners: Array<() => void> = [];
+  let treeDragSeq = 0;
+  let disposed = false;
 
   function resolveTreeDropTarget(event: PointerEvent): TreeDropTarget | null {
     const source = treeDrag.value;
@@ -272,10 +276,12 @@ export function useSidebarTreeDrag(
     }
   }
 
-  async function applyTreeDrop() {
-    const source = treeDrag.value;
-    const target = treeDropTarget.value;
-    if (!source || !target || !target.valid) return;
+  async function applyTreeDrop(
+    source = treeDrag.value,
+    target = treeDropTarget.value,
+    seq = treeDragSeq,
+  ) {
+    if (disposed || seq !== treeDragSeq || !source || !target || !target.valid) return;
     try {
       if (source.kind === "project") {
         await applyProjectDrop(source, target);
@@ -283,11 +289,13 @@ export function useSidebarTreeDrag(
         await applyTaskDrop(source, target);
       }
     } catch (err) {
+      if (disposed || seq !== treeDragSeq) return;
       reportError(`调整项目树失败：${String(err)}`);
     }
   }
 
   function onTreePointerDown(event: PointerEvent) {
+    if (disposed) return;
     if (event.button !== 0) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -296,13 +304,18 @@ export function useSidebarTreeDrag(
     if (!row) return;
     const source = sourceFromTreeRow(row, event);
     if (!source) return;
+    treeDragSeq += 1;
     treeDrag.value = source;
     treeDropTarget.value = null;
-    window.addEventListener("pointermove", onTreePointerMove);
-    window.addEventListener("pointerup", onTreePointerUp, { once: true });
+    clearTreeDragListeners();
+    treeDragUnlisteners = [
+      addDomEventListener(window, "pointermove", onTreePointerMove),
+      addDomEventListener(window, "pointerup", onTreePointerUp, { once: true }),
+    ];
   }
 
   function onTreePointerMove(event: PointerEvent) {
+    if (disposed) return;
     const source = treeDrag.value;
     if (!source || source.pointerId !== event.pointerId) return;
     const moved = Math.hypot(event.clientX - source.startX, event.clientY - source.startY);
@@ -316,8 +329,10 @@ export function useSidebarTreeDrag(
   }
 
   async function onTreePointerUp(event: PointerEvent) {
+    if (disposed) return;
+    const seq = treeDragSeq;
     const source = treeDrag.value;
-    window.removeEventListener("pointermove", onTreePointerMove);
+    clearTreeDragListeners();
     if (!source || source.pointerId !== event.pointerId) {
       treeDrag.value = null;
       treeDropTarget.value = null;
@@ -326,22 +341,29 @@ export function useSidebarTreeDrag(
     if (source.active) {
       event.preventDefault();
       treeDropTarget.value = resolveTreeDropTarget(event);
-      await applyTreeDrop();
+      await applyTreeDrop(source, treeDropTarget.value, seq);
+      if (disposed || seq !== treeDragSeq) return;
     }
     treeDrag.value = null;
     treeDropTarget.value = null;
   }
 
   function onTreeClickCapture(event: MouseEvent) {
+    if (disposed) return;
     if (!suppressTreeClick.value) return;
     suppressTreeClick.value = false;
     event.preventDefault();
     event.stopPropagation();
   }
 
+  function clearTreeDragListeners() {
+    runUnlistenFns(treeDragUnlisteners.splice(0).reverse());
+  }
+
   onBeforeUnmount(() => {
-    window.removeEventListener("pointermove", onTreePointerMove);
-    window.removeEventListener("pointerup", onTreePointerUp);
+    disposed = true;
+    treeDragSeq += 1;
+    clearTreeDragListeners();
   });
 
   return {

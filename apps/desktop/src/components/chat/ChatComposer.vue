@@ -25,19 +25,27 @@ import {
   Paperclip,
   Square,
 } from "lucide-vue-next";
-import type {
-  AskUserResult,
-  ChatAttachment,
-  ChatComposerState,
-  ChatConversationReference,
-  ChatContextSearchResult,
-  ChatContextUsage,
-  ChatModelOption,
-  ChatSlashCommandWorkflow,
-  LiliaReviewTarget,
-  PermissionMode,
+import {
+  ASK_USER_MULTI_SELECT_MODE,
+  ASK_USER_SINGLE_SELECT_MODE,
+  chatAttachmentMetaLabel,
+  DEFAULT_ASK_USER_MODE,
+  isLargeChatAttachmentDirectory,
+  type AskUserResult,
+  type ChatAttachment,
+  type ChatComposerState,
+  type ChatConversationReference,
+  type ChatContextSearchResult,
+  type ChatContextUsage,
+  type ChatModelOption,
+  type ChatSlashCommandWorkflow,
+  type LiliaReviewTarget,
+  type PermissionMode,
 } from "@lilia/contracts";
-import type { PendingAsk } from "../../composables/useAskUser";
+import {
+  pendingAskInteractionKey,
+  type PendingAsk,
+} from "../../composables/useAskUser";
 import type { SearchResult } from "../../services/sessionSearch";
 import type {
   ToolConsentDecision,
@@ -234,13 +242,35 @@ const COMPOSER_INPUT_MAX_HEIGHT =
   COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_INPUT_MAX_ROWS + COMPOSER_INPUT_VERTICAL_PADDING;
 const COMPOSER_INPUT_TRANSITION_MS = 160;
 const COMPOSER_ACTION_BLOCK_MS = 320;
-const LARGE_DIRECTORY_FILE_COUNT = 200;
-const LARGE_DIRECTORY_TOTAL_SIZE = 20 * 1024 * 1024;
 const DIRECT_PASTE_TEXT_THRESHOLD = 2000;
 const EMPTY_CONVERSATION_RESULTS: SearchResult[] = [];
 const EMPTY_CONTEXT_RESULTS: ChatContextSearchResult[] = [];
 const EMPTY_SLASH_RESULTS: ComposerSlashCommandItem[] = [];
 const EMPTY_SLASH_TARGETS: ComposerSlashTargetItem[] = [];
+const NOOP_COMPOSER_PASTE_HANDLER: ComposerPasteHandler = { onPaste: () => {} };
+
+function composerSubmitLabels(input: {
+  hasToolConsent: boolean;
+  hasAsk: boolean;
+  askIsPlanApproval: boolean;
+  canInterrupt: boolean;
+  sending: boolean;
+}): { title: string; ariaLabel: string } {
+  if (input.hasToolConsent) {
+    return { title: "发送拒绝备注（Enter）", ariaLabel: "发送拒绝备注" };
+  }
+  if (input.hasAsk) {
+    return input.askIsPlanApproval
+      ? { title: "发送计划修改要求（Enter）", ariaLabel: "发送计划修改要求" }
+      : { title: "发送取消原因（Enter）", ariaLabel: "发送取消原因" };
+  }
+  if (input.canInterrupt) {
+    return { title: "打断 Agent", ariaLabel: "打断 Agent" };
+  }
+  return input.sending
+    ? { title: "加入调度队列（Enter）", ariaLabel: "加入调度队列" }
+    : { title: "发送（Enter）", ariaLabel: "发送" };
+}
 
 type ValueRef<T> = { value: T };
 type ConversationSearchController = {
@@ -287,6 +317,7 @@ type SlashCommandsController = {
   noteInputChanged: () => void;
 };
 type SpecialInputControllerKind = "conversation" | "context" | "slash";
+type ComposerPasteHandler = { onPaste: (event: ClipboardEvent) => void };
 
 function composerPerfDetail(state: ChatComposerState) {
   return `${state.taskId}:${state.backend}`;
@@ -299,10 +330,13 @@ let resizeFrameId: number | null = null;
 let overflowTimerId: number | null = null;
 let actionBlockTimerId: number | null = null;
 let warmToolbarHandle: number | null = null;
+let cancelToolbarPaint: (() => void) | null = null;
 let composerDisposed = false;
 let composerChromeRequested = false;
 let specialInputRefreshScheduled = false;
 let specialInputRefreshSeq = 0;
+let pendingTextareaFocusSeq = 0;
+let cancelSpecialInputRefreshPaint: (() => void) | null = null;
 const composerToolbarComponent: ShallowRef<Component | null> = shallowRef(null);
 const composerPendingEntryActionsComponent: ShallowRef<Component | null> = shallowRef(null);
 const promptOptimizing = ref(false);
@@ -321,8 +355,9 @@ const specialInputControllerIntentSeq: Record<SpecialInputControllerKind, number
 const conversationSearchController = shallowRef<ConversationSearchController | null>(null);
 const contextSearchController = shallowRef<ContextSearchController | null>(null);
 const slashCommandsController = shallowRef<SlashCommandsController | null>(null);
-let composerPasteLoad: Promise<{ onPaste: (event: ClipboardEvent) => void }> | null = null;
-let composerPasteHandler: { onPaste: (event: ClipboardEvent) => void } | null = null;
+let composerPasteLoad: Promise<ComposerPasteHandler> | null = null;
+let composerPasteHandler: ComposerPasteHandler | null = null;
+let composerPasteSeq = 0;
 
 let clearComposerContextState = () => {};
 
@@ -384,6 +419,7 @@ const {
   isEditingToolCommand,
   modifyPlanApproval,
   multiPicks,
+  pendingEntryActionsMode,
   pendingEntryActionsKey,
   pendingText,
   pendingKey,
@@ -423,7 +459,7 @@ const richInput = measurePerfSync(
     attachments: attachmentsForView,
     appendAttachmentsToEndKey,
     hasPending,
-    isLargeDirectory,
+    isLargeDirectory: isLargeChatAttachmentDirectory,
     removeAttachment: (attachmentId) => emit("remove-attachment", attachmentId),
   }),
   { detail: composerPerfDetail(props.state) },
@@ -608,12 +644,15 @@ clearComposerContextState = () => {
 };
 
 async function ensureComposerPasteLoaded() {
+  if (composerDisposed) return NOOP_COMPOSER_PASTE_HANDLER;
   if (composerPasteHandler) return composerPasteHandler;
   if (!composerPasteLoad) {
+    const seq = ++composerPasteSeq;
     composerPasteLoad = measurePerfAsync(
       "chat-composer.paste.handler.load",
       async () => {
         const module = await loadComposerPasteModule();
+        if (composerDisposed || seq !== composerPasteSeq) return NOOP_COMPOSER_PASTE_HANDLER;
         const handler = module.useComposerPaste({
           richInput,
           clearContextSearch: clearComposerContextState,
@@ -706,7 +745,10 @@ function scheduleSpecialInputControllerRefresh() {
   specialInputRefreshSeq += 1;
   if (specialInputRefreshScheduled) return;
   specialInputRefreshScheduled = true;
-  scheduleAfterPaint(() => {
+  const cancelPaint = scheduleAfterPaint(() => {
+    if (cancelSpecialInputRefreshPaint === cancelPaint) {
+      cancelSpecialInputRefreshPaint = null;
+    }
     specialInputRefreshScheduled = false;
     if (composerDisposed || hasPending.value) return;
     const refreshSeq = specialInputRefreshSeq;
@@ -719,6 +761,14 @@ function scheduleSpecialInputControllerRefresh() {
       scheduleSpecialInputControllerRefresh();
     }
   });
+  cancelSpecialInputRefreshPaint = cancelPaint;
+}
+
+function cancelSpecialInputControllerRefresh() {
+  specialInputRefreshSeq += 1;
+  specialInputRefreshScheduled = false;
+  cancelSpecialInputRefreshPaint?.();
+  cancelSpecialInputRefreshPaint = null;
 }
 
 const canSend = computed(() => {
@@ -760,9 +810,12 @@ async function ensureComposerPendingEntryActionsLoaded() {
 }
 
 function cancelToolbarWarmup() {
-  if (warmToolbarHandle === null) return;
-  cancelIdleRun(warmToolbarHandle);
-  warmToolbarHandle = null;
+  cancelToolbarPaint?.();
+  cancelToolbarPaint = null;
+  if (warmToolbarHandle !== null) {
+    cancelIdleRun(warmToolbarHandle);
+    warmToolbarHandle = null;
+  }
 }
 
 function requestComposerToolbar() {
@@ -778,11 +831,21 @@ function requestComposerChrome() {
 }
 
 function scheduleToolbarWarmup() {
-  if (composerDisposed || hasPending.value || composerToolbarComponent.value || warmToolbarHandle !== null) return;
-  scheduleAfterPaint(() => {
+  if (
+    composerDisposed ||
+    hasPending.value ||
+    composerToolbarComponent.value ||
+    warmToolbarHandle !== null ||
+    cancelToolbarPaint !== null
+  ) return;
+  cancelToolbarPaint = scheduleAfterPaint(() => {
+    cancelToolbarPaint = null;
     if (composerDisposed || hasPending.value || composerToolbarComponent.value || warmToolbarHandle !== null) return;
     warmToolbarHandle = runWhenIdle(() => {
-      scheduleAfterPaint(() => {
+      warmToolbarHandle = null;
+      if (composerDisposed || hasPending.value || composerToolbarComponent.value) return;
+      cancelToolbarPaint = scheduleAfterPaint(() => {
+        cancelToolbarPaint = null;
         if (composerDisposed || hasPending.value || composerToolbarComponent.value) return;
         warmToolbarHandle = runWhenIdle(() => {
           warmToolbarHandle = null;
@@ -796,7 +859,7 @@ function scheduleToolbarWarmup() {
 const interactionPhaseKey = computed(() => {
   if (activeAsk.value) {
     const questionId = askQuestion.value?.id ?? "unknown";
-    return `ask:${activeAsk.value.id}:${questionId}`;
+    return `${pendingAskInteractionKey(activeAsk.value)}:${questionId}`;
   }
   if (activeToolConsent.value) return `tool:${activeToolConsent.value.requestId}`;
   return "input";
@@ -839,25 +902,15 @@ watch(
   { immediate: true },
 );
 
-const sendTitle = computed(() => {
-  if (activeToolConsent.value) return "发送拒绝备注（Enter）";
-  if (activeAsk.value) {
-    if (askIsPlanApproval.value) return "发送计划修改要求（Enter）";
-    return "发送取消原因（Enter）";
-  }
-  if (canInterrupt.value) return "打断 Agent";
-  return props.sending ? "加入调度队列（Enter）" : "发送（Enter）";
-});
-
-const sendAriaLabel = computed(() => {
-  if (activeToolConsent.value) return "发送拒绝备注";
-  if (activeAsk.value) {
-    if (askIsPlanApproval.value) return "发送计划修改要求";
-    return "发送取消原因";
-  }
-  if (canInterrupt.value) return "打断 Agent";
-  return props.sending ? "加入调度队列" : "发送";
-});
+const submitLabels = computed(() => composerSubmitLabels({
+  hasToolConsent: !!activeToolConsent.value,
+  hasAsk: !!activeAsk.value,
+  askIsPlanApproval: askIsPlanApproval.value,
+  canInterrupt: canInterrupt.value,
+  sending: props.sending === true,
+}));
+const sendTitle = computed(() => submitLabels.value.title);
+const sendAriaLabel = computed(() => submitLabels.value.ariaLabel);
 
 const permissionOptions = [
   { value: "ask" as PermissionMode, label: "询问", hint: "敏感操作前询问" },
@@ -924,6 +977,7 @@ function onRichPaste(event: ClipboardEvent) {
     return;
   }
   void ensureComposerPasteLoaded().then((paste) => {
+    if (composerDisposed) return;
     paste.onPaste(event);
   }).catch((error) => {
     console.error("[chat] load paste handler failed", error);
@@ -940,47 +994,6 @@ function contextAttachmentIcon(attachment: ChatAttachment) {
   if (attachment.kind === "directory") return Folder;
   if (attachment.kind === "file") return FileText;
   return Paperclip;
-}
-
-function formatBytes(size: number | null | undefined): string {
-  if (typeof size !== "number" || !Number.isFinite(size)) return "大小未知";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${Math.round(size / (1024 * 1024))} MB`;
-}
-
-function isLargeDirectory(attachment: ChatAttachment): boolean {
-  const directory = attachment.directory;
-  if (!directory) return false;
-  return directory.fileCount >= LARGE_DIRECTORY_FILE_COUNT ||
-    directory.totalSize >= LARGE_DIRECTORY_TOTAL_SIZE ||
-    directory.truncated;
-}
-
-function directorySummary(attachment: ChatAttachment): string | null {
-  const directory = attachment.directory;
-  if (!directory) return null;
-  const parts = [
-    `${directory.fileCount} 个文件`,
-    `${directory.directoryCount} 个目录`,
-    formatBytes(directory.totalSize),
-  ];
-  if (directory.truncated) parts.push("未完全统计");
-  if (directory.unreadableCount > 0) parts.push(`${directory.unreadableCount} 处不可读`);
-  return parts.join(" · ");
-}
-
-function attachmentMetaLabel(attachment: ChatAttachment): string {
-  if (attachment.exists === false) return "路径不存在";
-  if (attachment.kind === "directory") {
-    const summary = directorySummary(attachment);
-    return isLargeDirectory(attachment)
-      ? `目录较大${summary ? ` · ${summary}` : ""}`
-      : summary ?? "目录";
-  }
-  if (isImageAttachment(attachment)) return "图片";
-  if (attachment.kind === "file") return formatBytes(attachment.size);
-  return "未知路径";
 }
 
 function patch(next: Partial<ChatComposerState>) {
@@ -1002,9 +1015,11 @@ function fillSuggestionPrompt(prompt: string) {
 }
 
 function blockActionsBriefly() {
+  if (composerDisposed) return;
   actionsBlocked.value = true;
   if (actionBlockTimerId !== null) window.clearTimeout(actionBlockTimerId);
   actionBlockTimerId = window.setTimeout(() => {
+    if (composerDisposed) return;
     actionsBlocked.value = false;
     actionBlockTimerId = null;
   }, COMPOSER_ACTION_BLOCK_MS);
@@ -1124,9 +1139,12 @@ function triggerConversationReference() {
     const prefix = start > 0 && !/\s/.test(inputValue.value[start - 1] ?? "") ? " #" : "#";
     inputValue.value = `${inputValue.value.slice(0, start)}${prefix}${inputValue.value.slice(end)}`;
     const nextOffset = start + prefix.length;
+    const seq = ++pendingTextareaFocusSeq;
     void nextTick(() => {
-      textarea.value?.focus();
-      textarea.value?.setSelectionRange(nextOffset, nextOffset);
+      if (composerDisposed || seq !== pendingTextareaFocusSeq || !hasPending.value) return;
+      const input = textarea.value;
+      input?.focus();
+      input?.setSelectionRange(nextOffset, nextOffset);
       queueResize();
     });
     return;
@@ -1175,9 +1193,11 @@ function onRichKeydown(e: KeyboardEvent) {
 }
 
 function queueResize() {
+  if (composerDisposed) return;
   if (resizeFrameId !== null) return;
   resizeFrameId = window.requestAnimationFrame(() => {
     resizeFrameId = null;
+    if (composerDisposed) return;
     resize();
   });
 }
@@ -1192,6 +1212,7 @@ function measureInputScrollHeight(el: HTMLTextAreaElement): number {
 }
 
 function resize() {
+  if (composerDisposed) return;
   const el = textarea.value;
   if (!el) return;
   const currentHeight =
@@ -1217,7 +1238,7 @@ function resize() {
   el.scrollTop = 0;
   if (scrollHeight > COMPOSER_INPUT_MAX_HEIGHT) {
     overflowTimerId = window.setTimeout(() => {
-      if (textarea.value !== el) return;
+      if (composerDisposed || textarea.value !== el) return;
       el.style.overflowY = "auto";
       el.scrollTop = scrollHeight;
       overflowTimerId = null;
@@ -1239,7 +1260,7 @@ function onInlineKeydown(e: KeyboardEvent) {
     submitAsk();
     return;
   }
-  if (q.mode === "confirm") return;
+  if (q.mode === DEFAULT_ASK_USER_MODE) return;
   const list = askOptionsWithId.value;
   const allIds = list.map((o) => o.id);
   if (allIds.length === 0) return;
@@ -1251,10 +1272,10 @@ function onInlineKeydown(e: KeyboardEvent) {
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     highlightOption(allIds[(i - 1 + allIds.length) % allIds.length]);
-  } else if (e.key === " " && q.mode === "single") {
+  } else if (e.key === " " && q.mode === ASK_USER_SINGLE_SELECT_MODE) {
     e.preventDefault();
     selectSingleOption(cur);
-  } else if (e.key === " " && q.mode === "multi") {
+  } else if (e.key === " " && q.mode === ASK_USER_MULTI_SELECT_MODE) {
     e.preventDefault();
     toggleMulti(cur);
   }
@@ -1318,9 +1339,12 @@ watch(
       inputValue.value = `${inputValue.value.slice(0, start)}${text}${inputValue.value.slice(end)}`;
       const nextOffset = start + text.length;
       richInput.inputSelection.value = nextOffset;
+      const seq = ++pendingTextareaFocusSeq;
       void nextTick(() => {
-        textarea.value?.focus();
-        textarea.value?.setSelectionRange(nextOffset, nextOffset);
+        if (composerDisposed || seq !== pendingTextareaFocusSeq || !hasPending.value) return;
+        const input = textarea.value;
+        input?.focus();
+        input?.setSelectionRange(nextOffset, nextOffset);
         queueResize();
       });
       return;
@@ -1335,6 +1359,9 @@ watch(
 onBeforeUnmount(() => {
   composerDisposed = true;
   composerChromeRequested = false;
+  pendingTextareaFocusSeq += 1;
+  composerPasteSeq += 1;
+  cancelSpecialInputControllerRefresh();
   cancelToolbarWarmup();
   conversationSearchScope?.stop();
   contextSearchScope?.stop();
@@ -1436,8 +1463,8 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         :error="contextSearch.error.value"
         :missing-path="contextSearch.missingPath.value"
         :show-missing-path="contextSearch.showMissingPath.value"
-        :is-large-directory="isLargeDirectory"
-        :attachment-meta-label="attachmentMetaLabel"
+        :is-large-directory="isLargeChatAttachmentDirectory"
+        :attachment-meta-label="chatAttachmentMetaLabel"
         :context-inline-path="contextInlinePath"
         :context-attachment-icon="contextAttachmentIcon"
         @activate="contextSearch.activateResult"
@@ -1507,16 +1534,14 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
           :is="composerPendingEntryActionsComponent"
           v-if="hasPendingComposerUi && composerPendingEntryActionsComponent"
           :key="pendingEntryActionsKey"
-          :ask-uses-input-actions="askUsesInputActions"
+          :mode="pendingEntryActionsMode"
           :ask-question-skippable="askQuestion?.skippable !== false"
           :ask-total="askTotal"
           :can-go-prev="canGoPrev"
           :can-ask-submit="canAskSubmit"
           :ask-is-last="askIsLast"
-          :ask-is-plan-approval="askIsPlanApproval"
           :auto-decision-text="autoDecisionText"
           :has-pending-input-text="hasPendingInputText"
-          :has-tool-consent="!!activeToolConsent"
           :tool-submitting="toolSubmitting"
           :is-editing-tool-command="isEditingToolCommand"
           :tool-danger="toolDanger"
@@ -1544,7 +1569,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
           </div>
 
           <button
-            v-if="askUsesInputActions && askQuestion?.skippable !== false && askTotal > 1"
+            v-if="pendingEntryActionsMode === 'ask-input' && askQuestion?.skippable !== false && askTotal > 1"
             type="button"
             class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
             :disabled="actionsBlocked"
@@ -1553,7 +1578,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             跳过
           </button>
 
-          <div v-if="askUsesInputActions" class="chat-composer__pending-actions">
+          <div v-if="pendingEntryActionsMode === 'ask-input'" class="chat-composer__pending-actions">
             <button
               v-if="canGoPrev"
               type="button"
@@ -1573,7 +1598,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             </button>
           </div>
 
-          <div v-else-if="askIsPlanApproval" class="chat-composer__pending-actions">
+          <div v-else-if="pendingEntryActionsMode === 'ask-plan'" class="chat-composer__pending-actions">
             <button
               type="button"
               class="ui-button ui-button--ghost composer-inline__btn"
@@ -1592,7 +1617,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
             </button>
           </div>
 
-          <div v-else-if="activeToolConsent" class="chat-composer__pending-actions">
+          <div v-else-if="pendingEntryActionsMode === 'tool'" class="chat-composer__pending-actions">
             <button
               type="button"
               class="ui-button ui-button--ghost composer-inline__btn"
@@ -1621,7 +1646,7 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
           </div>
 
           <button
-            v-if="!askUsesInputActions && !askIsPlanApproval && !activeToolConsent"
+            v-if="pendingEntryActionsMode === 'ask-confirm' || pendingEntryActionsMode === 'none'"
             type="button"
             class="chat-composer__send"
             :class="{ 'chat-composer__send--interrupt': canInterrupt }"

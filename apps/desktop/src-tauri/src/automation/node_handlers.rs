@@ -3,19 +3,27 @@ use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
-use crate::agent_timeline::AgentTimelineEventInput;
+use crate::agent_timeline::{default_timeline_status, AgentTimelineEventInput};
+use crate::automation::contract;
 use crate::automation::signals::{emit_task_changed_signal, emit_todo_signal};
 use crate::automation::types::{AutomationNode, AutomationRun};
 use crate::chat::runner::spawn_agent_turn;
 use crate::chat::state::{
-    new_chat_message_id, normalize_composer_for_backend, queue_pending_turn_for_app,
-    should_persist_user_message, ChatStore,
+    default_backend, default_model_for_backend, new_chat_message_id, normalize_backend,
+    normalize_composer_for_backend, queue_pending_turn_for_app, should_persist_user_message,
+    ChatStore,
 };
 use crate::chat::timeline_sink::{persist_and_emit_input, persist_and_emit_message_timeline_event};
 use crate::chat::types::{ChatComposerState, ChatMessage, ChatSendResult, ChatWorkflow};
+use crate::provider::normalize_permission_mode;
 use crate::store::LiliaStore;
+use crate::task_contract;
+use crate::todos::contract as todo_contract;
 use crate::util::now_millis;
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+
+fn default_automation_tool_action() -> &'static str {
+    contract::default_tool_action()
+}
 
 pub(crate) fn execute_node<R: Runtime>(
     app: &AppHandle<R>,
@@ -36,15 +44,15 @@ pub(crate) fn execute_node<R: Runtime>(
 }
 
 fn execute_human_node(node: &AutomationNode, input: &JsonValue) -> Result<JsonValue, String> {
+    let prompt = node
+        .config
+        .get("prompt")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| contract::default_human_prompt().to_string());
     Ok(serde_json::json!({
         "waitingUser": true,
-        "prompt": render_template(
-            node.config
-                .get("prompt")
-                .and_then(|value| value.as_str())
-                .unwrap_or("确认后继续执行自动化。"),
-            input,
-        ),
+        "prompt": render_template(&prompt, input),
     }))
 }
 
@@ -53,17 +61,19 @@ fn execute_logic_node(node: &AutomationNode, input: &JsonValue) -> Result<JsonVa
         .config
         .get("logic")
         .and_then(|value| value.as_str())
-        .unwrap_or("condition");
-    match logic {
+        .map(str::to_string)
+        .unwrap_or_else(|| contract::default_logic_kind().to_string());
+    match logic.as_str() {
         "stop" => Ok(serde_json::json!({ "stopped": true })),
         "condition" => {
             let path = node
                 .config
                 .get("path")
                 .and_then(|value| value.as_str())
-                .unwrap_or("trigger.kind");
+                .map(str::to_string)
+                .unwrap_or_else(|| contract::default_logic_path().to_string());
             let expected = node.config.get("equals").and_then(|value| value.as_str());
-            let actual = json_path(input, path);
+            let actual = json_path(input, &path);
             let passed = match expected {
                 Some(expected) => actual
                     .map(|value| json_value_to_string(value) == expected)
@@ -80,8 +90,9 @@ fn execute_logic_node(node: &AutomationNode, input: &JsonValue) -> Result<JsonVa
                 .config
                 .get("path")
                 .and_then(|value| value.as_str())
-                .unwrap_or("trigger.kind");
-            let value = json_path(input, path).cloned().unwrap_or(JsonValue::Null);
+                .map(str::to_string)
+                .unwrap_or_else(|| contract::default_logic_path().to_string());
+            let value = json_path(input, &path).cloned().unwrap_or(JsonValue::Null);
             let selected_handle = json_value_to_port(&value);
             Ok(serde_json::json!({
                 "value": value,
@@ -104,8 +115,9 @@ fn execute_tool_node<R: Runtime>(
         .config
         .get("action")
         .and_then(|value| value.as_str())
-        .unwrap_or("record_timeline");
-    match action {
+        .map(str::to_string)
+        .unwrap_or_else(|| default_automation_tool_action().to_string());
+    match action.as_str() {
         "create_task" => create_task_from_tool(app, conn, run, node, input),
         "update_task_status" => update_task_status_from_tool(app, conn, run, node, input),
         "add_todo" => add_todo_from_tool(app, conn, run, node, input),
@@ -133,7 +145,7 @@ fn create_task_from_tool<R: Runtime>(
     let project_id = optional_rendered_string(node.config.get("projectId"), input)
         .or_else(|| run.trigger.project_id.clone());
     let status = optional_rendered_string(node.config.get("status"), input)
-        .unwrap_or_else(|| "waiting".to_string());
+        .unwrap_or_else(|| contract::waiting_task_status().to_string());
     let now = now_millis();
     let sort_order: i64 = conn
         .query_row(
@@ -150,15 +162,15 @@ fn create_task_from_tool<R: Runtime>(
     )
     .map_err(|e| format!("automation create_task: insert 失败：{e}"))?;
     let _ = app.emit(
-        "tasks:changed",
-        serde_json::json!({ "projectId": project_id.clone() }),
+        task_contract::tasks_changed_event_name(),
+        task_contract::tasks_changed_event_payload(project_id.as_deref()),
     );
     emit_task_changed_signal(
         app,
         project_id.clone(),
         Some(id.clone()),
         Some(status.clone()),
-        "task_created",
+        contract::task_created_event_kind(),
         Some(run.id.clone()),
     );
     Ok(serde_json::json!({ "taskId": id, "projectId": project_id, "status": status }))
@@ -178,7 +190,7 @@ fn update_task_status_from_tool<R: Runtime>(
         node.config
             .get("status")
             .and_then(|value| value.as_str())
-            .unwrap_or("waiting"),
+            .unwrap_or_else(|| contract::waiting_task_status()),
         input,
     );
     conn.execute(
@@ -196,15 +208,15 @@ fn update_task_status_from_tool<R: Runtime>(
         .map_err(|e| format!("automation update_task_status: 查询项目失败：{e}"))?
         .flatten();
     let _ = app.emit(
-        "tasks:changed",
-        serde_json::json!({ "projectId": project_id.clone() }),
+        task_contract::tasks_changed_event_name(),
+        task_contract::tasks_changed_event_payload(project_id.as_deref()),
     );
     emit_task_changed_signal(
         app,
         project_id.clone(),
         Some(task_id.clone()),
         Some(status.clone()),
-        "task_status_changed",
+        contract::task_status_changed_event_kind(),
         Some(run.id.clone()),
     );
     Ok(serde_json::json!({ "taskId": task_id, "projectId": project_id, "status": status }))
@@ -229,10 +241,19 @@ fn add_todo_from_tool<R: Runtime>(
     );
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
-    insert_task_todo_row(conn, &id, &task_id, &text, "agent", "normal", None, now)?;
+    insert_task_todo_row(
+        conn,
+        &id,
+        &task_id,
+        &text,
+        "agent",
+        todo_contract::default_priority(),
+        None,
+        now,
+    )?;
     let _ = app.emit(
-        "todo-changed",
-        serde_json::json!({ "taskId": task_id.clone() }),
+        todo_contract::changed_event_name(),
+        todo_contract::changed_event_payload(&task_id),
     );
     emit_todo_signal(app, task_id.clone(), Some(run.id.clone()));
     Ok(serde_json::json!({ "todoId": id, "taskId": task_id }))
@@ -256,12 +277,13 @@ fn send_guide_from_tool<R: Runtime>(
             .unwrap_or("自动化引导"),
         input,
     );
-    let priority = normalize_task_priority(
-        node.config
-            .get("priority")
-            .and_then(|value| value.as_str())
-            .unwrap_or("normal"),
-    );
+    let priority_value = node
+        .config
+        .get("priority")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| todo_contract::default_priority().to_string());
+    let priority = normalize_task_priority(&priority_value);
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
     insert_task_todo_row(
@@ -270,20 +292,20 @@ fn send_guide_from_tool<R: Runtime>(
         &task_id,
         &text,
         "lilia",
-        priority,
-        Some("pending"),
+        &priority,
+        Some(todo_contract::pending_guide_status()),
         now,
     )?;
     let _ = app.emit(
-        "todo-changed",
-        serde_json::json!({ "taskId": task_id.clone() }),
+        todo_contract::changed_event_name(),
+        todo_contract::changed_event_payload(&task_id),
     );
     emit_todo_signal(app, task_id.clone(), Some(run.id.clone()));
     Ok(serde_json::json!({
         "guideId": id,
         "taskId": task_id,
         "priority": priority,
-        "guideStatus": "pending",
+        "guideStatus": todo_contract::pending_guide_status(),
     }))
 }
 
@@ -314,12 +336,15 @@ pub(crate) fn insert_task_todo_row(
     Ok(())
 }
 
-fn normalize_task_priority(value: &str) -> &'static str {
-    match value {
-        "high" => "high",
-        "low" => "low",
-        _ => "normal",
+pub(crate) fn normalize_task_priority(value: &str) -> String {
+    let normalized = value.trim().to_ascii_lowercase();
+    if todo_contract::priorities()
+        .iter()
+        .any(|priority| priority == &normalized)
+    {
+        return normalized;
     }
+    todo_contract::default_priority().to_string()
 }
 
 fn record_timeline_from_tool<R: Runtime>(
@@ -356,11 +381,10 @@ pub(crate) fn timeline_input_from_tool(
     let summary =
         optional_rendered_string(node.config.get("summary"), input).or(Some(title.clone()));
     let status = optional_rendered_string(node.config.get("status"), input)
-        .unwrap_or_else(|| "info".to_string());
+        .unwrap_or_else(|| default_timeline_status().to_string());
     let backend = optional_rendered_string(node.config.get("backend"), input)
-        .or_else(|| run.trigger.backend.clone())
-        .filter(|value| value == BACKEND_CODEX || value == BACKEND_CLAUDE)
-        .unwrap_or_else(|| BACKEND_CLAUDE.to_string());
+        .or_else(|| run.trigger.backend.clone());
+    let backend = normalize_optional_backend(backend);
     let now = now_millis();
     Ok(AgentTimelineEventInput {
         id: Some(format!("automation:{}:{}", run.id, node.id)),
@@ -402,35 +426,33 @@ fn execute_agent_node<R: Runtime>(
             .ok_or_else(|| "Agent 节点需要 taskId".to_string())?
     };
     let content = render_template(
-        node.config
+        &node
+            .config
             .get("prompt")
             .and_then(|value| value.as_str())
-            .unwrap_or("请根据当前上下文继续推进。"),
+            .map(str::to_string)
+            .unwrap_or_else(|| contract::default_agent_prompt().to_string()),
         input,
     );
     let backend = node
         .config
         .get("backend")
         .and_then(|value| value.as_str())
-        .filter(|value| *value == BACKEND_CODEX || *value == BACKEND_CLAUDE)
-        .unwrap_or(BACKEND_CLAUDE)
-        .to_string();
+        .map(ToString::to_string);
+    let backend = normalize_optional_backend(backend);
     let model = node
         .config
         .get("model")
         .and_then(|value| value.as_str())
-        .unwrap_or(if backend == BACKEND_CODEX {
-            "gpt-5.5"
-        } else {
-            "claude-sonnet-4-6"
-        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_model_for_backend(&backend))
         .to_string();
-    let permission = node
-        .config
-        .get("permission")
-        .and_then(|value| value.as_str())
-        .unwrap_or("ask")
-        .to_string();
+    let permission = normalize_permission_mode(
+        node.config
+            .get("permission")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
     let project_cwd = node
         .config
         .get("projectCwd")
@@ -495,20 +517,28 @@ fn create_agent_target_task<R: Runtime>(
     conn.execute(
         r#"INSERT INTO tasks
            (id, project_id, session_id, title, title_source, status, created_at, parent_id, archived, sort_order, pinned)
-           VALUES (?1, ?2, ?3, ?4, 'auto', 'running', ?5, NULL, 0, ?6, 0)"#,
-        params![id, project_id, id, title, now, sort_order],
+           VALUES (?1, ?2, ?3, ?4, 'auto', ?5, ?6, NULL, 0, ?7, 0)"#,
+        params![
+            id,
+            project_id,
+            id,
+            title,
+            contract::running_task_status(),
+            now,
+            sort_order
+        ],
     )
     .map_err(|e| format!("automation agent create_task: insert 失败：{e}"))?;
     let _ = app.emit(
-        "tasks:changed",
-        serde_json::json!({ "projectId": project_id.clone() }),
+        task_contract::tasks_changed_event_name(),
+        task_contract::tasks_changed_event_payload(project_id.as_deref()),
     );
     emit_task_changed_signal(
         app,
         project_id,
         Some(id.clone()),
-        Some("running".to_string()),
-        "task_created",
+        Some(contract::running_task_status().to_string()),
+        contract::task_created_event_kind(),
         Some(run.id.clone()),
     );
     Ok(id)
@@ -622,6 +652,14 @@ fn optional_rendered_string(value: Option<&JsonValue>, input: &JsonValue) -> Opt
         .filter(|value| !value.trim().is_empty())
 }
 
+fn normalize_optional_backend(value: Option<String>) -> String {
+    value
+        .as_deref()
+        .map(normalize_backend)
+        .unwrap_or_else(default_backend)
+        .to_string()
+}
+
 pub(crate) fn render_template(template: &str, input: &JsonValue) -> String {
     let mut out = String::new();
     let mut rest = template;
@@ -681,5 +719,37 @@ fn json_value_truthy(value: &JsonValue) -> bool {
         JsonValue::Array(value) => !value.is_empty(),
         JsonValue::Object(value) => !value.is_empty(),
         JsonValue::Null => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_backend_defaults_from_contract_manifest() {
+        assert_eq!(normalize_optional_backend(None), default_backend());
+        assert_eq!(
+            normalize_optional_backend(Some("unknown".to_string())),
+            default_backend()
+        );
+        assert_eq!(
+            normalize_optional_backend(Some("codex".to_string())),
+            "codex"
+        );
+    }
+
+    #[test]
+    fn automation_tool_defaults_come_from_contract_manifests() {
+        assert_eq!(contract::waiting_task_status(), "waiting");
+        assert_eq!(contract::running_task_status(), "running");
+        assert_eq!(default_timeline_status(), "info");
+        assert_eq!(todo_contract::default_priority(), "normal");
+        assert_eq!(todo_contract::pending_guide_status(), "pending");
+        assert_eq!(normalize_task_priority(" HIGH "), "high");
+        assert_eq!(
+            normalize_task_priority("urgent"),
+            todo_contract::default_priority()
+        );
     }
 }

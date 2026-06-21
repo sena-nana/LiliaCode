@@ -12,4 +12,4 @@ pub use milestone_commands::*;
 pub use ordering::*;
 pub use project_commands::*;
 pub use task_commands::*;
-pub use types::{SidebarConversationSummaryRow, TaskRow};
+pub use types::TaskRow;

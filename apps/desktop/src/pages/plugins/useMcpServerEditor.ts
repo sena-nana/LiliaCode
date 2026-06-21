@@ -23,10 +23,12 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
   backend,
   label,
   refresh,
+  isDisposed,
 }: {
   backend: PluginBackendKind;
   label: string;
   refresh: () => Promise<void>;
+  isDisposed?: () => boolean;
 }) {
   const showMcpEditor = ref(false);
   const editingMcp = ref<TServer | null>(null);
@@ -36,6 +38,7 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
   const mcpEnvRows = ref<EnvDraftRow[]>([]);
   const mcpSaving = ref(false);
   const mcpError = ref<string | null>(null);
+  const disposed = () => isDisposed?.() === true;
 
   const mcpEditorTitle = computed(() =>
     editingMcp.value ? `编辑 ${label}：${editingMcp.value.name}` : `新增 ${label}`,
@@ -53,20 +56,24 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
   }
 
   function openCreateMcp() {
+    if (disposed()) return;
     resetMcpEditor(null);
     showMcpEditor.value = true;
   }
 
   function openEditMcp(server: TServer) {
+    if (disposed()) return;
     resetMcpEditor(server);
     showMcpEditor.value = true;
   }
 
   function addMcpEnvRow() {
+    if (disposed()) return;
     mcpEnvRows.value.push({ key: "", value: "", originalKey: null });
   }
 
   function removeMcpEnvRow(index: number) {
+    if (disposed()) return;
     mcpEnvRows.value.splice(index, 1);
     if (mcpEnvRows.value.length === 0) {
       mcpEnvRows.value.push({ key: "", value: "", originalKey: null });
@@ -91,7 +98,7 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
   }
 
   async function saveMcpServer() {
-    if (mcpSaving.value) return;
+    if (disposed() || mcpSaving.value) return;
     mcpError.value = null;
     mcpSaving.value = true;
     try {
@@ -111,12 +118,13 @@ export function useMcpServerEditor<TServer extends EditableMcpServer>({
       } else {
         await createMcpServer(backend, input);
       }
+      if (disposed()) return;
       showMcpEditor.value = false;
       await refresh();
     } catch (err) {
-      mcpError.value = String(err);
+      if (!disposed()) mcpError.value = String(err);
     } finally {
-      mcpSaving.value = false;
+      if (!disposed()) mcpSaving.value = false;
     }
   }
 

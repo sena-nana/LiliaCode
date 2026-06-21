@@ -21,8 +21,13 @@ use serde_json::Value as JsonValue;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::agent_timeline_contract;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
+
+pub(crate) fn default_timeline_status() -> &'static str {
+    agent_timeline_contract::default_timeline_status()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

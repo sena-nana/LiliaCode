@@ -32,9 +32,63 @@ import {
   createClaudeCanUseTool,
   createClaudeHooks,
 } from "./permissions.mjs";
+import {
+  REMOTE_ENVIRONMENT_COMMAND_TYPE,
+  SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
+  SESSION_FORK_COMMAND_TYPE,
+  normalizeRemoteEnvironmentCommand,
+  normalizeRuntimeSettingsCommand,
+  normalizeSandboxDiagnosticsCommand,
+  normalizeSessionForkCommand,
+} from "@lilia/contracts/runtimeCommandContract.mjs";
+import {
+  isLiliaMemoryResetWorkflow,
+  isLiliaBackgroundTerminalsCleanWorkflow,
+  isLiliaCompactWorkflow,
+  isLiliaQueryWorkflowType,
+  normalizeLiliaBatchApplyWorkflow,
+  normalizeLiliaGoalWorkflow,
+  normalizeLiliaConfigDiagnosticsWorkflow,
+  normalizeLiliaFixSuggestionWorkflow,
+  normalizeLiliaMemoryModeWorkflow,
+  normalizeLiliaReviewWorkflow,
+} from "@lilia/contracts/liliaWorkflowContract.mjs";
+import {
+  ASK_USER_CLAUDE_TOOL_NAME,
+  ASK_USER_MCP_TOOL_NAME,
+  ASK_USER_TOOL_NAME,
+} from "@lilia/contracts/askUserContract.mjs";
+import {
+  ARCHITECTURE_CLAUDE_TOOL_NAME,
+  ARCHITECTURE_MCP_TOOL_NAME,
+  ARCHITECTURE_TOOL_NAME,
+} from "@lilia/contracts/architectureContract.mjs";
+import {
+  CONVERSATION_CONTEXT_CLAUDE_TOOL_NAME,
+  CONVERSATION_CONTEXT_MCP_TOOL_NAME,
+  CONVERSATION_CONTEXT_TOOL_NAME,
+} from "@lilia/contracts/conversationContextContract.mjs";
+import {
+  QUOTA_USAGE_CLAUDE_TOOL_NAME,
+  QUOTA_USAGE_MCP_TOOL_NAME,
+  QUOTA_USAGE_TOOL_NAME,
+} from "@lilia/contracts/quotaContract.mjs";
+import {
+  RUNNER_DONE_EVENT_TYPE,
+  RUNNER_PROMPT_SUGGESTION_EVENT_TYPE,
+  RUNNER_TOOL_USE_EVENT_TYPE,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
+import { normalizeReasoningEffortForBackend } from "@lilia/contracts/provider.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { runClaudeSessionManagementRuntimeCommand } from "../sessionManagement.mjs";
-import { handleExperimentalProviderOptions } from "../providerOptions.mjs";
+import {
+  handleExperimentalProviderOptions,
+  readProviderRuntimeOptions,
+} from "../providerOptions.mjs";
+import {
+  readRunnerRuntimeCommand,
+  readRunnerWorkflow,
+} from "../runnerCommand.mjs";
 import {
   closeClaudeReasoningBlock,
   closeClaudeTextFragment,
@@ -107,14 +161,14 @@ export function createLiliaAskUserServer({
 }) {
   const tools = [
     createTool(
-      "ask_user_question",
+      ASK_USER_CLAUDE_TOOL_NAME,
       "Ask the human user one or more multiple-choice questions through Lilia.",
       askUserQuestionInputSchema,
       createClaudeAskUserHandler(requestAskUser),
       { alwaysLoad: true },
     ),
     createTool(
-      "query_quota_usage",
+      QUOTA_USAGE_CLAUDE_TOOL_NAME,
       "Query Lilia quota usage summaries through the Lilia internal quota plugin.",
       queryQuotaUsageInputSchema,
       createQuotaUsageHandler(requestQuotaUsage),
@@ -123,7 +177,7 @@ export function createLiliaAskUserServer({
   ];
   if (conversationContextEnabled(conversationContext)) {
     tools.push(createTool(
-      "query_conversation_context",
+      CONVERSATION_CONTEXT_CLAUDE_TOOL_NAME,
       buildConversationContextToolDescription(),
       queryConversationContextInputSchema,
       createConversationContextHandler(conversationContext),
@@ -132,7 +186,7 @@ export function createLiliaAskUserServer({
   }
   if (architectureContextEnabled(conversationContext) && architectureHandler) {
     tools.push(createTool(
-      "update_project_architecture",
+      ARCHITECTURE_CLAUDE_TOOL_NAME,
       "Update Lilia's project-level architecture graph with structured changes.",
       updateProjectArchitectureInputSchema,
       architectureHandler,
@@ -148,12 +202,12 @@ export function createLiliaAskUserServer({
 }
 
 function readLiliaWorkflow(cmd) {
-  return isRecord(cmd?.workflow) ? cmd.workflow : null;
+  return readRunnerWorkflow(cmd);
 }
 
 async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "session_fork") return false;
+  const command = normalizeSessionForkCommand(readRunnerRuntimeCommand(cmd));
+  if (!command) return false;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -162,7 +216,7 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
     summary: "正在分叉 Claude session",
     payload: {
       backend: "claude",
-      subkind: "session_fork",
+      subkind: SESSION_FORK_COMMAND_TYPE,
       sourceSessionId: sourceSessionId || null,
     },
     sourceId: `claude:session-fork:start:${sourceSessionId || "missing"}`,
@@ -180,13 +234,13 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
       summary: "已分叉 Claude session",
       payload: {
         backend: "claude",
-        subkind: "session_fork",
+        subkind: SESSION_FORK_COMMAND_TYPE,
         sourceSessionId,
         sessionId,
       },
       sourceId: `claude:session-fork:completed:${sourceSessionId}:${sessionId}`,
     });
-    context.protocol.emit({ type: "done", sessionId, subtype: "success" });
+    context.protocol.emit({ type: RUNNER_DONE_EVENT_TYPE, sessionId, subtype: "success" });
   } catch (err) {
     context.protocol.emitTimeline({
       kind: "diagnostic",
@@ -195,7 +249,7 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
       summary: err?.message || String(err),
       payload: {
         backend: "claude",
-        subkind: "session_fork",
+        subkind: SESSION_FORK_COMMAND_TYPE,
         sourceSessionId: sourceSessionId || null,
         error: err?.message || String(err),
       },
@@ -207,7 +261,10 @@ async function runClaudeSessionForkRuntimeCommand(cmd, context, cwd) {
 }
 
 async function runClaudeAutoSessionFork(cmd, context, cwd) {
-  if (cmd?.autoSessionFork !== true || cmd?.runtimeCommand?.type === "session_fork") return;
+  if (
+    cmd?.autoSessionFork !== true ||
+    normalizeSessionForkCommand(readRunnerRuntimeCommand(cmd))
+  ) return;
   const sourceSessionId = typeof cmd.resumeSessionId === "string" ? cmd.resumeSessionId.trim() : "";
   context.protocol.emitTimeline({
     kind: "diagnostic",
@@ -216,7 +273,7 @@ async function runClaudeAutoSessionFork(cmd, context, cwd) {
     summary: "正在分叉 Claude session",
     payload: {
       backend: "claude",
-      subkind: "session_fork",
+      subkind: SESSION_FORK_COMMAND_TYPE,
       sourceSessionId: sourceSessionId || null,
       autoTurnDecision: true,
     },
@@ -236,7 +293,7 @@ async function runClaudeAutoSessionFork(cmd, context, cwd) {
       summary: "已分叉 Claude session，本轮将在分叉 session 中继续",
       payload: {
         backend: "claude",
-        subkind: "session_fork",
+        subkind: SESSION_FORK_COMMAND_TYPE,
         sourceSessionId,
         sessionId,
         autoTurnDecision: true,
@@ -251,7 +308,7 @@ async function runClaudeAutoSessionFork(cmd, context, cwd) {
       summary: err?.message || String(err),
       payload: {
         backend: "claude",
-        subkind: "session_fork",
+        subkind: SESSION_FORK_COMMAND_TYPE,
         sourceSessionId: sourceSessionId || null,
         autoTurnDecision: true,
         error: err?.message || String(err),
@@ -262,21 +319,6 @@ async function runClaudeAutoSessionFork(cmd, context, cwd) {
   }
 }
 
-function normalizeLiliaReviewTarget(target) {
-  if (!isRecord(target)) return null;
-  const type = stringOrNull(target.type);
-  if (type === "uncommittedChanges") return { type };
-  if (type === "baseBranch") {
-    const branch = stringOrNull(target.branch)?.trim();
-    return branch ? { type, branch } : null;
-  }
-  if (type === "commit") {
-    const sha = stringOrNull(target.sha)?.trim();
-    return sha ? { type, sha } : null;
-  }
-  return null;
-}
-
 function liliaReviewTargetText(target) {
   if (target.type === "uncommittedChanges") return "当前工作区未提交改动";
   if (target.type === "baseBranch") return `当前工作区相对分支 ${target.branch} 的差异`;
@@ -284,45 +326,15 @@ function liliaReviewTargetText(target) {
 }
 
 function readLiliaReviewWorkflow(cmd) {
-  const workflow = readLiliaWorkflow(cmd);
-  if (workflow?.type !== "lilia_review") return null;
-  const target = normalizeLiliaReviewTarget(workflow.target);
-  if (!target) throw new Error("Lilia review workflow missing a valid target");
-  return {
-    target,
-    instructions: stringOrNull(workflow.instructions)?.trim() || "",
-  };
+  return normalizeLiliaReviewWorkflow(readLiliaWorkflow(cmd));
 }
 
 function readLiliaFixSuggestionWorkflow(cmd) {
-  const workflow = readLiliaWorkflow(cmd);
-  if (workflow?.type !== "lilia_fix_suggestion") return null;
-  const target = normalizeLiliaReviewTarget(workflow.target);
-  if (!target) throw new Error("Lilia fix suggestion workflow missing a valid target");
-  return {
-    target,
-    instructions: stringOrNull(workflow.instructions)?.trim() || "",
-    mode: workflow.mode === "apply" ? "apply" : "suggest",
-  };
+  return normalizeLiliaFixSuggestionWorkflow(readLiliaWorkflow(cmd));
 }
 
 function readLiliaBatchApplyWorkflow(cmd) {
-  const workflow = readLiliaWorkflow(cmd);
-  if (workflow?.type !== "lilia_batch_apply") return null;
-  const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
-  const sourceKind = stringOrNull(workflow.sourceKind);
-  const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
-  if (!sourceTurnId) throw new Error("Lilia batch apply workflow missing sourceTurnId");
-  if (sourceKind !== "review" && sourceKind !== "fix_suggestion") {
-    throw new Error("Lilia batch apply workflow missing a valid sourceKind");
-  }
-  if (!sourceSummary) throw new Error("Lilia batch apply workflow missing sourceSummary");
-  return {
-    sourceTurnId,
-    sourceKind,
-    sourceSummary,
-    instructions: stringOrNull(workflow.instructions)?.trim() || "",
-  };
+  return normalizeLiliaBatchApplyWorkflow(readLiliaWorkflow(cmd));
 }
 
 function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
@@ -376,18 +388,6 @@ function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
   return null;
 }
 
-const LILIA_GOAL_ACTIONS = new Set(["set", "refresh", "clear"]);
-const LILIA_GOAL_STATUSES = new Set([
-  "active",
-  "paused",
-  "blocked",
-  "usageLimited",
-  "budgetLimited",
-  "complete",
-]);
-const LILIA_MEMORY_MODES = new Set(["enabled", "disabled"]);
-const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
-const REMOTE_ENVIRONMENT_ACTIONS = new Set(["diagnose", "add", "select"]);
 const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
   "allowedTools",
   "disallowedTools",
@@ -413,20 +413,8 @@ const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
   "tools",
   "settings",
 ]);
-const CLAUDE_QUERY_LILIA_WORKFLOWS = new Set([
-  "lilia_review",
-  "lilia_fix_suggestion",
-  "lilia_batch_apply",
-  "lilia_compact",
-]);
-
-function normalizeLiliaGoalStatus(status) {
-  const value = stringOrNull(status);
-  return LILIA_GOAL_STATUSES.has(value) ? value : "active";
-}
-
 function emitClaudeWorkflowDone(context, sessionId = null) {
-  context.protocol.emit({ type: "done", sessionId, subtype: "success" });
+  context.protocol.emit({ type: RUNNER_DONE_EVENT_TYPE, sessionId, subtype: "success" });
 }
 
 function claudeUsageTokenCount(usage) {
@@ -508,11 +496,8 @@ function readPlainObject(value) {
   return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
 }
 
-const CLAUDE_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
-
 function readClaudeReasoningEffort(value) {
-  const effort = readStringOption(value);
-  return CLAUDE_REASONING_EFFORTS.has(effort) ? effort : null;
+  return normalizeReasoningEffortForBackend("claude", readStringOption(value));
 }
 
 function readClaudeThinkingConfig(value) {
@@ -544,17 +529,13 @@ function readClaudeToolsOption(value) {
 }
 
 function readClaudeRuntimeSettingsCommand(command, runtimeOptions = {}) {
-  if (command?.type !== "runtime_settings") return null;
-  const action = stringOrNull(command.action);
-  if (!RUNTIME_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia runtime settings command missing a valid action");
-  }
-  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
-  const common = isRecord(runtimeOptions.common) ? runtimeOptions.common : {};
-  const claude = isRecord(provider.claude)
-    ? provider.claude
-    : {};
-  const ignoredProviderKeys = isRecord(provider.codex) ? Object.keys(provider.codex) : [];
+  const normalizedCommand = normalizeRuntimeSettingsCommand(command);
+  if (!normalizedCommand) return null;
+  const {
+    common,
+    settings: claude,
+    ignoredProviderKeys,
+  } = readProviderRuntimeOptions(runtimeOptions, "claude");
   const unsupportedKeys = Object.keys(claude)
     .filter((key) => !CLAUDE_PROVIDER_SETTING_KEYS.has(key));
   const supported = {};
@@ -608,11 +589,11 @@ function readClaudeRuntimeSettingsCommand(command, runtimeOptions = {}) {
   if (typeof claude.abortAfterMs === "number" && Number.isFinite(claude.abortAfterMs) && claude.abortAfterMs > 0) {
     options.abortAfterMs = Math.trunc(claude.abortAfterMs);
   }
-  if (action === "update" && Object.keys(supported).length === 0 && Object.keys(options).length === 0) {
+  if (normalizedCommand.action === "update" && Object.keys(supported).length === 0 && Object.keys(options).length === 0) {
     throw new Error("Lilia provider settings update requires at least one valid setting");
   }
   return {
-    action,
+    action: normalizedCommand.action,
     supported,
     options,
     settingsKeys: [...Object.keys(supported), ...Object.keys(options)],
@@ -624,22 +605,18 @@ function readClaudeRuntimeSettingsCommand(command, runtimeOptions = {}) {
 async function runClaudeLocalLiliaWorkflow(cmd, context) {
   const workflow = readLiliaWorkflow(cmd);
   if (!workflow) return false;
-  if (CLAUDE_QUERY_LILIA_WORKFLOWS.has(workflow.type)) return false;
-  if (workflow.type === "lilia_goal") {
-    const action = stringOrNull(workflow.action);
-    if (!LILIA_GOAL_ACTIONS.has(action)) {
-      throw new Error("Lilia goal workflow missing a valid action");
-    }
-    const objective = stringOrNull(workflow.objective)?.trim() || "";
-    if (action === "set" && !objective) throw new Error("Lilia goal workflow missing objective");
+  if (isLiliaQueryWorkflowType(workflow.type)) return false;
+  const goalWorkflow = normalizeLiliaGoalWorkflow(workflow);
+  if (goalWorkflow) {
+    const { action, objective, status, tokenBudget } = goalWorkflow;
     const cleared = action === "clear";
     const goal = cleared
       ? null
       : {
         threadId: stringOrNull(cmd.resumeSessionId) || "claude-local",
         objective: objective || "Lilia Goal",
-        status: normalizeLiliaGoalStatus(workflow.status),
-        tokenBudget: typeof workflow.tokenBudget === "number" ? workflow.tokenBudget : null,
+        status,
+        tokenBudget,
         tokensUsed: 0,
         timeUsedSeconds: 0,
         createdAt: Date.now(),
@@ -663,11 +640,9 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
     return true;
   }
-  if (workflow.type === "lilia_memory_mode") {
-    const mode = stringOrNull(workflow.mode);
-    if (!LILIA_MEMORY_MODES.has(mode)) {
-      throw new Error("Lilia memory mode workflow missing a valid mode");
-    }
+  const memoryModeWorkflow = normalizeLiliaMemoryModeWorkflow(workflow);
+  if (memoryModeWorkflow) {
+    const { mode } = memoryModeWorkflow;
     emitClaudeLocalWorkflowTimeline(context, workflow, {
       subkind: "memory_mode",
       title: "Claude memory mode recorded",
@@ -680,7 +655,7 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     });
     return true;
   }
-  if (workflow.type === "lilia_memory_reset") {
+  if (isLiliaMemoryResetWorkflow(workflow)) {
     emitClaudeLocalWorkflowTimeline(context, workflow, {
       subkind: "memory_reset",
       title: "Claude memory reset recorded",
@@ -692,7 +667,7 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     });
     return true;
   }
-  if (workflow.type === "lilia_background_terminals_clean") {
+  if (isLiliaBackgroundTerminalsCleanWorkflow(workflow)) {
     emitClaudeLocalWorkflowTimeline(context, workflow, {
       subkind: "background_terminals_clean",
       title: "Claude background terminals clean completed",
@@ -704,13 +679,14 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
     });
     return true;
   }
-  if (workflow.type === "lilia_config_diagnostics") {
+  const configDiagnosticsWorkflow = normalizeLiliaConfigDiagnosticsWorkflow(workflow);
+  if (configDiagnosticsWorkflow) {
     emitClaudeLocalWorkflowTimeline(context, workflow, {
       subkind: "config_diagnostics",
       title: "Claude config diagnostics",
       summary: "Lilia+Claude runtime diagnostics collected",
       payload: {
-        includeLayers: workflow.includeLayers !== false,
+        includeLayers: configDiagnosticsWorkflow.includeLayers,
         ...claudeConfigDiagnosticsPayload(cmd),
       },
     });
@@ -720,11 +696,11 @@ async function runClaudeLocalLiliaWorkflow(cmd, context) {
 }
 
 function readClaudeCompactWorkflow(cmd) {
-  return readLiliaWorkflow(cmd)?.type === "lilia_compact";
+  return isLiliaCompactWorkflow(readLiliaWorkflow(cmd));
 }
 
 function applyClaudeRuntimeSettingsCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  const command = readRunnerRuntimeCommand(cmd);
   const settings = readClaudeRuntimeSettingsCommand(
     command,
     isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
@@ -766,7 +742,7 @@ function emitClaudeProviderSettingsTimeline(context, settings, status = "info") 
 }
 
 function runClaudeProviderSettingsRuntimeCommand(cmd, context) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
+  const command = readRunnerRuntimeCommand(cmd);
   const settings = readClaudeRuntimeSettingsCommand(
     command,
     isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {},
@@ -778,8 +754,10 @@ function runClaudeProviderSettingsRuntimeCommand(cmd, context) {
 }
 
 function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "sandbox_diagnostics") return false;
+  const command = normalizeSandboxDiagnosticsCommand(
+    readRunnerRuntimeCommand(cmd),
+  );
+  if (!command) return false;
   context.protocol.emitTimeline({
     kind: "diagnostic",
     status: "info",
@@ -787,7 +765,7 @@ function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
     summary: "Claude SDK has no equivalent sandbox readiness endpoint.",
     payload: {
       backend: "claude",
-      subkind: "sandbox_diagnostics",
+      subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
       includeDetails: command.includeDetails === true,
       native: false,
       unsupported: true,
@@ -800,13 +778,11 @@ function runClaudeSandboxDiagnosticsRuntimeCommand(cmd, context) {
 }
 
 function runClaudeRemoteEnvironmentRuntimeCommand(cmd, context) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "remote_environment") return false;
-  const action = stringOrNull(command.action);
-  if (!REMOTE_ENVIRONMENT_ACTIONS.has(action)) {
-    throw new Error("Lilia remote environment command missing a valid action");
-  }
-  const environmentId = stringOrNull(command.environmentId)?.trim() || null;
+  const command = normalizeRemoteEnvironmentCommand(
+    readRunnerRuntimeCommand(cmd),
+  );
+  if (!command) return false;
+  const environmentId = command.environmentId || null;
   context.protocol.emitTimeline({
     kind: "diagnostic",
     status: "info",
@@ -814,14 +790,14 @@ function runClaudeRemoteEnvironmentRuntimeCommand(cmd, context) {
     summary: "Claude SDK has no equivalent remote environment endpoint.",
     payload: {
       backend: "claude",
-      subkind: "remote_environment",
-      action,
+      subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
+      action: command.action,
       environmentId,
       native: false,
       unsupported: true,
       reason: "Claude SDK has no equivalent Lilia-controllable remote environment endpoint.",
     },
-    sourceId: `claude:remote-environment:${action}:${Date.now()}`,
+    sourceId: `claude:remote-environment:${command.action}:${Date.now()}`,
   });
   emitClaudeWorkflowDone(context, stringOrNull(cmd.resumeSessionId));
   return true;
@@ -898,8 +874,7 @@ function emitClaudeCompactTimeline(context, status, sourceSessionId, err = null)
 }
 
 function readClaudeAdditionalContext(runtimeOptions = {}) {
-  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
-  const claude = isRecord(provider.claude) ? provider.claude : {};
+  const claude = readProviderRuntimeOptions(runtimeOptions, "claude").settings;
   return readStringOption(claude.additionalContext);
 }
 
@@ -1026,9 +1001,10 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
       ...runtimeExtensions.mcpServers,
     },
     toolAliases: {
-      AskUserQuestion: "mcp__lilia__ask_user_question",
-      QueryConversationContext: "mcp__lilia__query_conversation_context",
-      UpdateProjectArchitecture: "mcp__lilia__update_project_architecture",
+      [ASK_USER_TOOL_NAME]: ASK_USER_MCP_TOOL_NAME,
+      [QUOTA_USAGE_TOOL_NAME]: QUOTA_USAGE_MCP_TOOL_NAME,
+      [CONVERSATION_CONTEXT_TOOL_NAME]: CONVERSATION_CONTEXT_MCP_TOOL_NAME,
+      [ARCHITECTURE_TOOL_NAME]: ARCHITECTURE_MCP_TOOL_NAME,
     },
     toolConfig: {
       askUserQuestion: { previewFormat: "markdown" },
@@ -1082,7 +1058,11 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
                   }
                 }
                 if (b && b.type === "tool_use") {
-                  context.protocol.emit({ type: "tool_use", name: b.name, input: b.input });
+                  context.protocol.emit({
+                    type: RUNNER_TOOL_USE_EVENT_TYPE,
+                    name: b.name,
+                    input: b.input,
+                  });
                   emitClaudeToolTimeline(b, msg, ctx);
                 }
               }
@@ -1124,7 +1104,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
             });
             if (overrides.suppressDone !== true) {
               context.protocol.emit({
-                type: "done",
+                type: RUNNER_DONE_EVENT_TYPE,
                 sessionId: msg.session_id || lastSessionId,
                 subtype: interrupted ? "interrupted" : msg.subtype,
               });
@@ -1134,7 +1114,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
           case "prompt_suggestion": {
             if (typeof msg.suggestion === "string" && msg.suggestion.trim()) {
               context.protocol.emit({
-                type: "prompt_suggestion",
+                type: RUNNER_PROMPT_SUGGESTION_EVENT_TYPE,
                 suggestion: msg.suggestion,
                 uuid: msg.uuid,
               });
@@ -1199,7 +1179,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
       sourceId: `${lastSessionId}:turn:done`,
     });
     if (overrides.suppressDone !== true) {
-      context.protocol.emit({ type: "done", sessionId: lastSessionId, subtype });
+      context.protocol.emit({ type: RUNNER_DONE_EVENT_TYPE, sessionId: lastSessionId, subtype });
     }
   }
   return {

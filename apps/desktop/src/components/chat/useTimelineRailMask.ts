@@ -11,6 +11,8 @@ export function useTimelineRailMask(measureSources: WatchSource<unknown>[]) {
   const railGaps = ref<RailGap[]>([]);
   let railResizeObserver: ResizeObserver | null = null;
   let railMeasureRaf = 0;
+  let railMeasureSeq = 0;
+  let disposed = false;
 
   const railLineStyle = computed<Record<string, string>>(() => {
     const style: Record<string, string> = {};
@@ -28,6 +30,7 @@ export function useTimelineRailMask(measureSources: WatchSource<unknown>[]) {
   );
 
   onMounted(() => {
+    disposed = false;
     if (typeof ResizeObserver !== "undefined" && timelineRef.value) {
       railResizeObserver = new ResizeObserver(() => scheduleRailMeasure());
       railResizeObserver.observe(timelineRef.value);
@@ -36,20 +39,26 @@ export function useTimelineRailMask(measureSources: WatchSource<unknown>[]) {
   });
 
   onBeforeUnmount(() => {
+    disposed = true;
+    railMeasureSeq += 1;
     railResizeObserver?.disconnect();
     if (railMeasureRaf) cancelAnimationFrame(railMeasureRaf);
+    railMeasureRaf = 0;
   });
 
   function scheduleRailMeasure() {
+    if (disposed) return;
     if (railMeasureRaf) cancelAnimationFrame(railMeasureRaf);
+    const seq = ++railMeasureSeq;
     railMeasureRaf = requestAnimationFrame(() => {
       railMeasureRaf = 0;
-      void measureRailGaps();
+      void measureRailGaps(seq);
     });
   }
 
-  async function measureRailGaps() {
+  async function measureRailGaps(seq: number) {
     await nextTick();
+    if (disposed || seq !== railMeasureSeq) return;
     const timeline = timelineRef.value;
     if (!timeline) {
       railGaps.value = [];

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
@@ -37,6 +37,7 @@ const emit = defineEmits<{
 }>();
 
 const confirming = ref(false);
+let disposed = false;
 
 const activityLabel: Record<ConversationActivity, string> = {
   running: "对话中",
@@ -46,21 +47,25 @@ const activityLabel: Record<ConversationActivity, string> = {
 };
 
 async function archiveCurrentTask() {
+  if (disposed) return;
   try {
     const archived = await (props.archive ?? archiveTask)(props.task.id);
+    if (disposed) return;
     confirming.value = false;
     if (archived) emit("archived", props.task.id);
   } catch (err) {
+    if (disposed) return;
     confirming.value = false;
     emit("error", `归档对话失败：${String(err)}`);
   }
 }
 
 async function toggleCurrentTaskPin() {
+  if (disposed) return;
   try {
     await toggleTaskPin(props.task.id);
   } catch (err) {
-    emit("error", `切换对话置顶失败：${String(err)}`);
+    if (!disposed) emit("error", `切换对话置顶失败：${String(err)}`);
   }
 }
 
@@ -91,18 +96,20 @@ function preloadConversationDetail() {
 }
 
 async function openInPopup() {
+  if (disposed) return;
   try {
     await openPopupTask(props.task.id, props.projectId);
   } catch (err) {
-    emit("error", `打开弹出窗口对话失败：${String(err)}`);
+    if (!disposed) emit("error", `打开弹出窗口对话失败：${String(err)}`);
   }
 }
 
 async function askInPopup() {
+  if (disposed) return;
   try {
     await openPopupChildQuestion(props.task.id, props.projectId);
   } catch (err) {
-    emit("error", `创建弹出窗口子对话失败：${String(err)}`);
+    if (!disposed) emit("error", `创建弹出窗口子对话失败：${String(err)}`);
   }
 }
 
@@ -153,6 +160,10 @@ function onClick() {
   if (props.to) return;
   emit("open", props.task.id);
 }
+
+onBeforeUnmount(() => {
+  disposed = true;
+});
 </script>
 
 <template>

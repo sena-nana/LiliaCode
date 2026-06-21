@@ -1,7 +1,19 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AskUserSpec } from "@lilia/contracts";
+import {
+  CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME,
+  CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
+  CHAT_DONE_EVENT_NAME,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_TURN_STARTED_EVENT_NAME,
+  LILIA_BATCH_APPLY_WORKFLOW_TYPE,
+  LILIA_COMPACT_WORKFLOW_TYPE,
+  LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
+  LILIA_REVIEW_WORKFLOW_TYPE,
+  type AskUserSpec,
+} from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { installAgentInteractionBridge } from "../src/composables/useAgentInteractionBridge";
 import { resolveAskUserById, useAskUser } from "../src/composables/useAskUser";
@@ -99,6 +111,14 @@ async function flushSlashCommands() {
   await Promise.resolve();
 }
 
+async function flushPendingInteractionRender() {
+  if (typeof vi.dynamicImportSettled === "function") {
+    await vi.dynamicImportSettled();
+  }
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 async function enableNonInterruptMode() {
   await setAgentInteractionSettings({ nonInterruptMode: true });
   mockInvoke.mockClear();
@@ -125,7 +145,7 @@ async function renderCodexTaskDetail(taskId = "t-002", options: { clearMockCalls
 }
 
 function latestChatSendArgs() {
-  const calls = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+  const calls = mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
   return calls.at(-1)?.[1] as Record<string, unknown> | undefined;
 }
 
@@ -139,7 +159,7 @@ async function expectLatestChatSend(partial: Record<string, unknown>) {
 }
 
 function finishCodexWorkflow(sessionId: string) {
-  emitTauriEvent("chat:done", { taskId: "t-002", sessionId, subtype: null });
+  emitTauriEvent(CHAT_DONE_EVENT_NAME, { taskId: "t-002", sessionId, subtype: null });
   mockInvoke.mockClear();
 }
 
@@ -148,7 +168,7 @@ function emitAskUserRequest(
   spec: AskUserSpec = askUserSpec,
   turnId = "turn-ask",
 ) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId,
     backend: "claude",
@@ -165,7 +185,7 @@ function emitUnifiedAskUserRequest(
   backend = "codex",
   turnId = "turn-unified-ask",
 ) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId,
     backend,
@@ -198,7 +218,7 @@ function emitAskUserTimelineEvent(
 }
 
 function emitPlanApprovalRequest(taskId: string) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId: "turn-plan",
     backend: "claude",
@@ -224,7 +244,7 @@ function emitPlanApprovalRequest(taskId: string) {
 }
 
 function emitToolConsentRequest(taskId: string) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId: "turn-tool",
     backend: "claude",
@@ -267,7 +287,7 @@ function persistedToolConsentEvent() {
 }
 
 function emitUnifiedToolConsentRequest(taskId: string) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId: "turn-unified-tool",
     backend: "codex",
@@ -287,7 +307,7 @@ function emitUnifiedToolConsentRequest(taskId: string) {
 }
 
 function emitBashToolConsentRequest(taskId: string) {
-  emitTauriEvent("chat:agent-interaction-request", {
+  emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
     taskId,
     turnId: "turn-bash",
     backend: "claude",
@@ -308,7 +328,7 @@ function emitBashToolConsentRequest(taskId: string) {
 
 async function expectAskUserResponse(taskId: string) {
   await waitFor(() => {
-    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
       taskId,
       requestId: `ask-${taskId}`,
       kind: "ask_user",
@@ -324,7 +344,7 @@ async function expectAskUserResponse(taskId: string) {
 
 async function expectUnifiedAskUserResponse(taskId: string, kind: "ask_user" | "plan_approval" = "ask_user") {
   await waitFor(() => {
-    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
       taskId,
       requestId: `unified-${taskId}`,
       kind,
@@ -366,6 +386,7 @@ describe("chat AskUser prompt", () => {
     const view = await renderTaskDetail();
 
     emitAskUserRequest("t-002");
+    await flushPendingInteractionRender();
 
     const prompt = await view.findByRole("region", { name: "Claude 想确认一下" });
     expect(prompt).toHaveClass("composer-inline");
@@ -391,6 +412,7 @@ describe("chat AskUser prompt", () => {
       title: "Codex 想确认一下",
       source: "Codex",
     });
+    await flushPendingInteractionRender();
 
     const prompt = await view.findByRole("region", { name: "Codex 想确认一下" });
     expect(prompt).toHaveClass("composer-inline");
@@ -408,6 +430,7 @@ describe("chat AskUser prompt", () => {
 
     emitAskUserRequest("t-002");
     emitAskUserTimelineEvent("t-002");
+    await flushPendingInteractionRender();
 
     await waitFor(() => {
       expect(view.container.querySelector(".chat-composer .composer-inline--ask")).toBeNull();
@@ -419,15 +442,15 @@ describe("chat AskUser prompt", () => {
     });
     expect(prompt).toHaveClass("timeline-pending-action");
     expect(view.getByRole("region", { name: "Claude 想确认一下" })).toBe(prompt);
-    await fireEvent.click(view.getByRole("button", { name: "更多输入操作" }));
-    expect(view.getByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
+    await fireEvent.click(await view.findByRole("button", { name: "更多输入操作" }));
+    expect(await view.findByRole("menuitem", { name: "添加附件" })).toBeInTheDocument();
 
-    emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
+    emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-002", queuedCount: 0 });
     await setComposerText(view, "补充上下文");
     await fireEvent.click(view.getByRole("button", { name: "加入调度队列" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_send_message", expect.objectContaining({
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_SEND_MESSAGE_COMMAND, expect.objectContaining({
         taskId: "t-002",
         content: expect.stringContaining("补充上下文"),
       }), undefined);
@@ -444,6 +467,7 @@ describe("chat AskUser prompt", () => {
     const view = await renderTaskDetail();
 
     emitPlanApprovalRequest("t-002");
+    await flushPendingInteractionRender();
 
     const prompt = await view.findByRole("region", { name: "确认 Claude 计划" });
     expect(prompt).toHaveClass("composer-inline", "composer-inline--plan");
@@ -456,7 +480,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "ask-t-002",
         kind: "plan_approval",
@@ -472,7 +496,7 @@ describe("chat AskUser prompt", () => {
         },
       }, undefined);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
     expect(view.queryByText("请把测试计划拆细")).toBeNull();
   });
 
@@ -481,6 +505,7 @@ describe("chat AskUser prompt", () => {
     const view = await renderTaskDetail();
 
     emitToolConsentRequest("t-002");
+    await flushPendingInteractionRender();
 
     await view.findByRole("alert");
     const composer = view.container.querySelector(".chat-composer");
@@ -495,7 +520,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "tool-t-002",
         kind: "tool_consent",
@@ -507,13 +532,14 @@ describe("chat AskUser prompt", () => {
         },
       }, undefined);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
   });
 
   it("统一 Codex 工具确认显示在 composer 内部，并用统一命令回写", async () => {
     const view = await renderTaskDetail();
 
     emitUnifiedToolConsentRequest("t-002");
+    await flushPendingInteractionRender();
 
     await view.findByRole("alert");
     expect(view.container.querySelector(".chat-composer .composer-inline--tool"))
@@ -524,7 +550,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "unified-tool-t-002",
         kind: "tool_consent",
@@ -536,7 +562,7 @@ describe("chat AskUser prompt", () => {
         },
       }, undefined);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
   });
 
   it("重进任务页后会从持久化 timeline 恢复 ask_user 卡片", async () => {
@@ -587,7 +613,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "tool-t-002",
         kind: "tool_consent",
@@ -613,7 +639,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", expect.objectContaining({
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, expect.objectContaining({
         taskId: "t-002",
         requestId: "tool-t-002",
         kind: "tool_consent",
@@ -667,7 +693,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(promptView.getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "mcp-t-002",
         kind: "mcp_elicitation",
@@ -722,7 +748,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(within(prompt).getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "permission-t-002",
         kind: "permission_approval",
@@ -767,7 +793,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(true);
     });
   });
 
@@ -775,6 +801,7 @@ describe("chat AskUser prompt", () => {
     const view = await renderTaskDetail();
 
     emitUnifiedToolConsentRequest("t-002");
+    await flushPendingInteractionRender();
 
     const prompt = await view.findByRole("alert");
     const promptView = within(prompt);
@@ -785,7 +812,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "unified-tool-t-002",
         kind: "tool_consent",
@@ -815,7 +842,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "重点看权限边界",
       workflow: {
-        type: "lilia_review",
+        type: LILIA_REVIEW_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         instructions: "重点看权限边界",
         delivery: "inline",
@@ -836,7 +863,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "优先给最小修复",
       workflow: {
-        type: "lilia_fix_suggestion",
+        type: LILIA_FIX_SUGGESTION_WORKFLOW_TYPE,
         target: { type: "uncommittedChanges" },
         instructions: "优先给最小修复",
         mode: "suggest",
@@ -876,7 +903,7 @@ describe("chat AskUser prompt", () => {
     await expectLatestChatSend({
       content: "",
       workflow: {
-        type: "lilia_batch_apply",
+        type: LILIA_BATCH_APPLY_WORKFLOW_TYPE,
         sourceTurnId: "turn-source",
         sourceKind: "fix_suggestion",
         sourceSummary: "建议修复权限边界",
@@ -890,7 +917,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(await view.findByRole("button", { name: /压缩上下文/ }));
     await expectLatestChatSend({
       content: "",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     });
   });
 
@@ -899,6 +926,7 @@ describe("chat AskUser prompt", () => {
     const view = await renderTaskDetail();
 
     emitBashToolConsentRequest("t-002");
+    await flushPendingInteractionRender();
 
     const prompt = await view.findByRole("alert");
     const promptView = within(prompt);
@@ -910,7 +938,7 @@ describe("chat AskUser prompt", () => {
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "t-002",
         requestId: "bash-tool-t-002",
         kind: "tool_consent",
@@ -929,7 +957,7 @@ describe("chat AskUser prompt", () => {
   it("后端真实消息到达后不残留同内容 queued 乐观消息", async () => {
     const view = await renderTaskDetail();
     setMockChatRunning("t-002", true);
-    emitTauriEvent("chat:turn-started", { taskId: "t-002", queuedCount: 0 });
+    emitTauriEvent(CHAT_TURN_STARTED_EVENT_NAME, { taskId: "t-002", queuedCount: 0 });
 
     const sentContent = [
       "[Lilia 引导]",
@@ -995,7 +1023,7 @@ describe("chat AskUser prompt", () => {
         expect(view.getByText("恢复的草稿内容")).toBeInTheDocument();
       });
       const ackCalls = mockInvoke.mock.calls.filter(
-        ([cmd]) => cmd === "chat_ack_restored_rollback"
+        ([cmd]) => cmd === CHAT_ACK_RESTORED_ROLLBACK_COMMAND
       );
       expect(ackCalls.length).toBeGreaterThanOrEqual(1);
     });
@@ -1041,7 +1069,7 @@ describe("chat AskUser prompt", () => {
         expect(view.getByRole("textbox")).toBeInTheDocument();
       });
       const ackCalls = mockInvoke.mock.calls.filter(
-        ([cmd]) => cmd === "chat_ack_restored_rollback"
+        ([cmd]) => cmd === CHAT_ACK_RESTORED_ROLLBACK_COMMAND
       );
       expect(ackCalls.length).toBe(0);
     });

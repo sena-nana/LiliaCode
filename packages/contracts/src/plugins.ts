@@ -1,6 +1,96 @@
-export type PluginScope = "user" | "project";
+import {
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_CREATE_SKILL_COMMAND,
+  PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
+  PLUGINS_HOOKS_OVERVIEW_COMMAND,
+  PLUGINS_OPEN_HOOK_CONFIG_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_OVERVIEW_COMMAND,
+  PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_UPDATE_MCP_SERVER_COMMAND,
+  PLUGIN_BACKENDS,
+  PLUGIN_BACKEND_LABELS,
+  PLUGIN_ENABLED_LABELS,
+  PLUGIN_MCP_TRANSPORTS,
+  PLUGIN_MCP_TRANSPORT_LABELS,
+  PLUGIN_SCOPES,
+  PLUGIN_TOGGLE_ACTION_LABELS,
+} from "./pluginsContract.mjs";
 
-export type PluginBackendKind = "claude" | "codex";
+export type PluginScope = typeof PLUGIN_SCOPES[number];
+
+export type PluginBackendKind = typeof PLUGIN_BACKENDS[number];
+
+export type PluginMcpTransport = "stdio" | "http" | "oauth" | "unknown" | (string & {});
+
+export {
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_CREATE_MCP_SERVER_COMMAND,
+  PLUGINS_CREATE_SKILL_COMMAND,
+  PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
+  PLUGINS_HOOKS_OVERVIEW_COMMAND,
+  PLUGINS_OPEN_HOOK_CONFIG_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_OVERVIEW_COMMAND,
+  PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_UPDATE_MCP_SERVER_COMMAND,
+  PLUGIN_BACKENDS,
+  PLUGIN_BACKEND_LABELS,
+  PLUGIN_ENABLED_LABELS,
+  PLUGIN_MCP_TRANSPORTS,
+  PLUGIN_MCP_TRANSPORT_LABELS,
+  PLUGIN_SCOPES,
+  PLUGIN_TOGGLE_ACTION_LABELS,
+};
+
+const PLUGIN_SCOPE_SET = new Set<string>(PLUGIN_SCOPES);
+const PLUGIN_BACKEND_SET = new Set<string>(PLUGIN_BACKENDS);
+const PLUGIN_MCP_TRANSPORT_SET = new Set<string>(PLUGIN_MCP_TRANSPORTS);
+
+export function isPluginScope(value: unknown): value is PluginScope {
+  return typeof value === "string" && PLUGIN_SCOPE_SET.has(value);
+}
+
+export function isPluginBackendKind(value: unknown): value is PluginBackendKind {
+  return typeof value === "string" && PLUGIN_BACKEND_SET.has(value);
+}
+
+export function pluginEnabledLabel(enabled: boolean): string {
+  return enabled ? PLUGIN_ENABLED_LABELS.enabled : PLUGIN_ENABLED_LABELS.disabled;
+}
+
+export function pluginToggleActionLabel(enabled: boolean): string {
+  return enabled ? PLUGIN_TOGGLE_ACTION_LABELS.disable : PLUGIN_TOGGLE_ACTION_LABELS.enable;
+}
+
+export function pluginBackendLabel(backend: PluginBackendKind): string {
+  return PLUGIN_BACKEND_LABELS[backend];
+}
+
+export function pluginMcpBackendLabel(backend: PluginBackendKind): string {
+  return `${pluginBackendLabel(backend)} MCP`;
+}
+
+export function pluginMcpTransportLabel(transport: PluginMcpTransport | null | undefined): string {
+  return typeof transport === "string" && PLUGIN_MCP_TRANSPORT_SET.has(transport)
+    ? PLUGIN_MCP_TRANSPORT_LABELS[transport as keyof typeof PLUGIN_MCP_TRANSPORT_LABELS]
+    : PLUGIN_MCP_TRANSPORT_LABELS.unknown;
+}
 
 export interface PluginSkill {
   backend: PluginBackendKind;
@@ -30,7 +120,7 @@ export interface PluginMcpServer {
   envKeys: string[];
   enabled: boolean;
   editable: boolean;
-  transport?: "stdio" | "http" | "oauth" | "unknown" | string;
+  transport?: PluginMcpTransport;
 }
 
 export interface PluginMcpServerInput {

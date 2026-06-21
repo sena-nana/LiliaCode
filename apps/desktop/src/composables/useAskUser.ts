@@ -1,9 +1,14 @@
 import { computed, reactive, type ComputedRef } from "vue";
 import type { AskUserResult, AskUserSpec } from "@lilia/contracts";
+import { askUserSpecKey, isPlanApprovalAskUserSpec } from "@lilia/contracts";
 import {
   clearConversationRequiresAction,
   markConversationRequiresAction,
 } from "./useConversationActivity";
+import {
+  shouldClearPendingInteraction,
+  type ClearPendingInteractionsOptions,
+} from "./pendingInteractionClearOptions";
 
 export interface PendingAsk {
   id: number;
@@ -12,6 +17,10 @@ export interface PendingAsk {
   taskId: string | null;
   turnId: string | null;
   resolve: (result: AskUserResult) => void;
+}
+
+export function pendingAskInteractionKey(ask: PendingAsk): string {
+  return `ask:${ask.requestId ?? ask.id}`;
 }
 
 interface AskUserState {
@@ -33,19 +42,30 @@ function readTaskId(source: TaskIdSource): string {
   return typeof source === "function" ? source() : source;
 }
 
-export interface ClearPendingForTaskOptions {
-  turnId?: string | null;
-  keepRequestIds?: Set<string>;
-}
-
 function pumpNext() {
   if (state.current) return;
   const next = state.queue.shift();
   if (next) state.current = next;
 }
 
-function sameAskSpec(left: AskUserSpec, right: AskUserSpec): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function findHydratedAsk(
+  taskId: string,
+  spec: AskUserSpec,
+  turnId: string | null,
+  requestId: string | null,
+): PendingAsk | null {
+  if (requestId) {
+    return state.pending.find((ask) =>
+      ask.taskId === taskId &&
+      ask.requestId === requestId
+    ) ?? null;
+  }
+  return state.pending.find((ask) =>
+    ask.taskId === taskId &&
+    ask.turnId === turnId &&
+    !ask.requestId &&
+    askUserSpecKey(ask.spec) === askUserSpecKey(spec)
+  ) ?? null;
 }
 
 export function askUserForTask(
@@ -105,13 +125,10 @@ export function hydrateAskUserForTask(
   requestId: string | null = null,
   resolve: (result: AskUserResult) => void = () => {},
 ) {
-  const existing = state.pending.find((ask) =>
-    ask.taskId === taskId &&
-    ask.turnId === turnId &&
-    ask.requestId === requestId &&
-    sameAskSpec(ask.spec, spec)
-  );
+  const existing = findHydratedAsk(taskId, spec, turnId, requestId);
   if (existing) {
+    existing.spec = spec;
+    existing.turnId = turnId;
     existing.resolve = resolve;
     if (taskId && requestId) markConversationRequiresAction(taskId, requestId);
     return existing;
@@ -131,37 +148,26 @@ export function hydrateAskUserForTask(
   return ask;
 }
 
-function shouldClearAsk(
-  ask: PendingAsk,
-  taskId: string,
-  options: ClearPendingForTaskOptions = {},
-): boolean {
-  if (ask.taskId !== taskId) return false;
-  if (options.turnId !== undefined && ask.turnId !== options.turnId) return false;
-  if (ask.requestId && options.keepRequestIds?.has(ask.requestId)) return false;
-  return true;
-}
-
 export function clearAskUsersForTask(
   taskId: string,
-  options: ClearPendingForTaskOptions = {},
+  options: ClearPendingInteractionsOptions = {},
 ) {
   const removedRequestIds = new Set<string>();
-  if (state.current && shouldClearAsk(state.current, taskId, options)) {
+  if (state.current && shouldClearPendingInteraction(state.current, taskId, options)) {
     if (state.current.requestId) removedRequestIds.add(state.current.requestId);
     state.current = null;
   }
 
   for (let index = state.queue.length - 1; index >= 0; index -= 1) {
     const ask = state.queue[index];
-    if (!ask || !shouldClearAsk(ask, taskId, options)) continue;
+    if (!ask || !shouldClearPendingInteraction(ask, taskId, options)) continue;
     if (ask.requestId) removedRequestIds.add(ask.requestId);
     state.queue.splice(index, 1);
   }
 
   for (let index = state.pending.length - 1; index >= 0; index -= 1) {
     const ask = state.pending[index];
-    if (!ask || !shouldClearAsk(ask, taskId, options)) continue;
+    if (!ask || !shouldClearPendingInteraction(ask, taskId, options)) continue;
     if (ask.requestId) removedRequestIds.add(ask.requestId);
     state.pending.splice(index, 1);
   }
@@ -191,6 +197,16 @@ export function usePendingAsksForTask(
     const currentTaskId = readTaskId(taskId);
     return state.pending.filter((ask) => ask.taskId == null || ask.taskId === currentTaskId);
   });
+}
+
+export function isPlanApprovalAsk(ask: Pick<PendingAsk, "spec">): boolean {
+  return isPlanApprovalAskUserSpec(ask.spec);
+}
+
+export function findPlanApprovalAsk(
+  asks: readonly PendingAsk[],
+): PendingAsk | null {
+  return asks.find(isPlanApprovalAsk) ?? null;
 }
 
 export function useAskUser() {

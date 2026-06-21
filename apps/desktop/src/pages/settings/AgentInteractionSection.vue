@@ -8,6 +8,11 @@ import {
 } from "lucide-vue-next";
 import type { AgentInteractionSettings, PermissionMode } from "@lilia/contracts";
 import {
+  AUTO_TURN_DECISION_PERMISSION_OPTIONS,
+  PERMISSION_MODE_DISPLAY,
+  PERMISSION_MODE_DISPLAY_ORDER,
+} from "@lilia/contracts";
+import {
   useAgentInteractionSettings,
 } from "../../composables/useAgentInteractionSettings";
 import {
@@ -34,28 +39,23 @@ const subagentCardExpanded = ref(false);
 const subagentCatalogReady = ref(false);
 const subagentDetailsId = "agent-subagent-mode-details";
 let subagentCatalogIdleHandle: number | null = null;
+let cancelSubagentCatalogPaint: (() => void) | null = null;
 let subagentCatalogMountSeq = 0;
+let disposed = false;
 
-const permissionModeOptions: Array<{ value: PermissionMode; label: string; description: string }> = [
-  { value: "ask", label: "询问", description: "敏感操作前等待用户确认。" },
-  { value: "readonly", label: "只读", description: "允许读取与分析，禁止写入和执行变更。" },
-  { value: "full", label: "完全访问", description: "使用完全访问权限，不逐条请求操作确认。" },
-  { value: "free", label: "自由实现", description: "完全访问，并在 8 秒后按建议项处理交互。" },
-];
+const permissionModeOptions: Array<{ value: PermissionMode; label: string; description: string }> =
+  PERMISSION_MODE_DISPLAY_ORDER.map((value) => ({
+    value,
+    label: PERMISSION_MODE_DISPLAY[value].label,
+    description: PERMISSION_MODE_DISPLAY[value].description,
+  }));
 
-type AutoTurnDecisionPermissionKey = Exclude<keyof AgentInteractionSettings["autoTurnDecision"], "enabled">;
+type SubagentModePatch = Partial<Omit<AgentInteractionSettings["subagentMode"], "codex" | "claude">> & {
+  codex?: Partial<AgentInteractionSettings["subagentMode"]["codex"]>;
+  claude?: Partial<AgentInteractionSettings["subagentMode"]["claude"]>;
+};
 
-const autoTurnDecisionPermissionOptions: Array<{
-  key: AutoTurnDecisionPermissionKey;
-  label: string;
-  ariaLabel: string;
-}> = [
-  { key: "allowModelTier", label: "模型层级", ariaLabel: "辅助模型操作模型层级" },
-  { key: "allowReasoningEffort", label: "思考强度", ariaLabel: "辅助模型操作思考强度" },
-  { key: "allowPlanMode", label: "计划模式", ariaLabel: "辅助模型操作计划模式" },
-  { key: "allowGoalMode", label: "Goal 模式", ariaLabel: "辅助模型操作 Goal 模式" },
-  { key: "allowSessionFork", label: "会话分叉", ariaLabel: "辅助模型操作会话分叉" },
-];
+const autoTurnDecisionPermissionOptions = AUTO_TURN_DECISION_PERMISSION_OPTIONS;
 
 function activePermissionDescription(): string {
   return permissionModeOptions.find((option) => option.value === agentInteraction.value.permissionMode)
@@ -66,6 +66,7 @@ async function loadAgentInteraction() {
   try {
     await agentInteractionStore.load();
   } catch (err) {
+    if (disposed) return;
     agentInteractionError.value = `读取 Agent 交互设置失败：${String(err)}`;
   }
 }
@@ -83,7 +84,7 @@ async function setPermissionMode(permissionMode: PermissionMode) {
 }
 
 function nextSubagentMode(
-  patch: Partial<AgentInteractionSettings["subagentMode"]>,
+  patch: SubagentModePatch,
 ): AgentInteractionSettings["subagentMode"] {
   const current = agentInteraction.value.subagentMode;
   return {
@@ -144,14 +145,15 @@ async function setAutoTurnDecisionField(
 }
 
 async function setAgentInteraction(patch: Partial<AgentInteractionSettings>) {
+  if (disposed) return;
   savingAgentInteraction.value = true;
   agentInteractionError.value = null;
   try {
     await agentInteractionStore.update(patch);
   } catch (err) {
-    agentInteractionError.value = `保存 Agent 交互设置失败：${String(err)}`;
+    if (!disposed) agentInteractionError.value = `保存 Agent 交互设置失败：${String(err)}`;
   } finally {
-    savingAgentInteraction.value = false;
+    if (!disposed) savingAgentInteraction.value = false;
   }
 }
 
@@ -162,9 +164,12 @@ function toggleSubagentCard() {
 
 function scheduleSubagentCatalogMount() {
   if (subagentCatalogReady.value) return;
+  cancelSubagentCatalogPaint?.();
+  cancelSubagentCatalogPaint = null;
   const seq = ++subagentCatalogMountSeq;
   const stage = beginPerfStage("settings.agent.subagents.mount");
-  scheduleAfterPaint(() => {
+  cancelSubagentCatalogPaint = scheduleAfterPaint(() => {
+    cancelSubagentCatalogPaint = null;
     if (seq !== subagentCatalogMountSeq || subagentCatalogReady.value) {
       stage.end("cancelled");
       return;
@@ -190,12 +195,16 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   void loadAgentInteraction();
   scheduleSubagentCatalogMount();
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   subagentCatalogMountSeq += 1;
+  cancelSubagentCatalogPaint?.();
+  cancelSubagentCatalogPaint = null;
   if (subagentCatalogIdleHandle === null) return;
   cancelIdleRun(subagentCatalogIdleHandle);
   subagentCatalogIdleHandle = null;

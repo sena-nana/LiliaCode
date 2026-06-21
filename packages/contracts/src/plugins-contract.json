@@ -1,0 +1,53 @@
+{
+  "pluginScopes": [
+    "user",
+    "project"
+  ],
+  "pluginBackends": [
+    "claude",
+    "codex"
+  ],
+  "pluginMcpTransports": [
+    "stdio",
+    "http",
+    "oauth",
+    "unknown"
+  ],
+  "pluginEnabledLabels": {
+    "enabled": "已启用",
+    "disabled": "已停用"
+  },
+  "pluginToggleActionLabels": {
+    "enable": "启用",
+    "disable": "停用"
+  },
+  "pluginBackendLabels": {
+    "claude": "Claude",
+    "codex": "Codex"
+  },
+  "pluginMcpTransportLabels": {
+    "stdio": "stdio",
+    "http": "HTTP",
+    "oauth": "OAuth",
+    "unknown": "未知"
+  },
+  "commands": {
+    "overview": "plugins_overview",
+    "hooksOverview": "plugins_hooks_overview",
+    "createSkill": "plugins_create_skill",
+    "deleteSkill": "plugins_delete_skill",
+    "setSkillEnabled": "plugins_set_skill_enabled",
+    "setPackageEnabled": "plugins_set_package_enabled",
+    "createMcpServer": "plugins_create_mcp_server",
+    "updateMcpServer": "plugins_update_mcp_server",
+    "deleteMcpServer": "plugins_delete_mcp_server",
+    "setMcpServerEnabled": "plugins_set_mcp_server_enabled",
+    "openMcpConfig": "plugins_open_mcp_config",
+    "readHookSource": "plugins_read_hook_source",
+    "updateHookSource": "plugins_update_hook_source",
+    "createHookSource": "plugins_create_hook_source",
+    "deleteHookSource": "plugins_delete_hook_source",
+    "setHookSourceEnabled": "plugins_set_hook_source_enabled",
+    "openHookConfig": "plugins_open_hook_config"
+  }
+}

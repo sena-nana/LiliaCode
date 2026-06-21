@@ -1,8 +1,15 @@
 import { computed, reactive, type ComputedRef } from "vue";
 import type {
+  AgentInteractionResponse,
   ChatBackendKind,
+  ProjectArchitectureInteractionEnvelope,
   ProjectArchitectureInteractionPayload,
   ProjectArchitectureInteractionResult,
+} from "@lilia/contracts";
+import {
+  ARCHITECTURE_INTERACTION_KIND,
+  projectArchitectureApplyInputFromInteraction,
+  projectArchitectureRejectInputFromInteraction,
 } from "@lilia/contracts";
 import {
   applyProjectArchitecture,
@@ -13,9 +20,13 @@ import {
   clearConversationRequiresAction,
   markConversationRequiresAction,
 } from "./useConversationActivity";
+import {
+  shouldClearPendingInteraction,
+  type ClearPendingInteractionsOptions,
+} from "./pendingInteractionClearOptions";
 
 export interface PendingArchitectureChange {
-  kind: "architecture_change";
+  kind: typeof ARCHITECTURE_INTERACTION_KIND;
   taskId: string;
   turnId: string | null;
   backend: ChatBackendKind;
@@ -23,13 +34,7 @@ export interface PendingArchitectureChange {
   payload: ProjectArchitectureInteractionPayload;
 }
 
-type ArchitectureInteractionRequest = {
-  taskId: string;
-  turnId: string | null;
-  backend: ChatBackendKind;
-  requestId: string;
-  payload: ProjectArchitectureInteractionPayload;
-};
+type ArchitectureInteractionRequest = ProjectArchitectureInteractionEnvelope;
 
 const state = reactive<{ pending: PendingArchitectureChange[] }>({
   pending: [],
@@ -72,7 +77,7 @@ export function hydrateProjectArchitectureInteraction(req: {
 
 function pendingArchitectureChangeFromRequest(req: ArchitectureInteractionRequest): PendingArchitectureChange {
   return {
-    kind: "architecture_change",
+    kind: ARCHITECTURE_INTERACTION_KIND,
     taskId: req.taskId,
     turnId: req.turnId,
     backend: req.backend,
@@ -104,9 +109,9 @@ async function autoApplyProjectArchitectureInteraction(req: ArchitectureInteract
     await respondAgentInteraction({
       taskId: request.taskId,
       requestId: request.requestId,
-      kind: "architecture_change",
+      kind: ARCHITECTURE_INTERACTION_KIND,
       result,
-    });
+    } satisfies AgentInteractionResponse);
   } catch (err) {
     console.error("[project-architecture] auto response failed", err);
   }
@@ -120,16 +125,7 @@ export async function respondProjectArchitectureChange(
   if (decision === "allow") {
     result = await applyArchitectureChange(request);
   } else {
-    const event = await rejectProjectArchitecture({
-      projectId: request.payload.projectId,
-      taskId: request.payload.taskId || request.taskId,
-      turnId: request.payload.turnId ?? request.turnId,
-      backend: request.payload.backend || request.backend,
-      permission: request.payload.permission,
-      reason: request.payload.reason,
-      changes: request.payload.changes,
-      requestId: request.requestId,
-    });
+    const event = await rejectProjectArchitecture(projectArchitectureRejectInputFromInteraction(request));
     result = {
       decision: "deny",
       event,
@@ -140,22 +136,16 @@ export async function respondProjectArchitectureChange(
   await respondAgentInteraction({
     taskId: request.taskId,
     requestId: request.requestId,
-    kind: "architecture_change",
+    kind: ARCHITECTURE_INTERACTION_KIND,
     result,
-  });
+  } satisfies AgentInteractionResponse);
   clearProjectArchitectureInteraction(request.taskId, request.requestId);
 }
 
 async function applyArchitectureChange(
   request: PendingArchitectureChange,
 ): Promise<ProjectArchitectureInteractionResult> {
-  const applied = await applyProjectArchitecture({
-    ...request.payload,
-    requestId: request.requestId,
-    taskId: request.payload.taskId || request.taskId,
-    turnId: request.payload.turnId ?? request.turnId,
-    backend: request.payload.backend || request.backend,
-  });
+  const applied = await applyProjectArchitecture(projectArchitectureApplyInputFromInteraction(request));
   return {
     decision: "allow",
     graph: applied.graph,
@@ -174,13 +164,11 @@ export function clearProjectArchitectureInteraction(taskId: string, requestId: s
 
 export function clearProjectArchitectureInteractionsForTask(
   taskId: string,
-  options: { turnId?: string | null; keepRequestIds?: Set<string> } = {},
+  options: ClearPendingInteractionsOptions = {},
 ) {
   for (let index = state.pending.length - 1; index >= 0; index -= 1) {
     const item = state.pending[index];
-    if (!item || item.taskId !== taskId) continue;
-    if (options.turnId !== undefined && item.turnId !== options.turnId) continue;
-    if (options.keepRequestIds?.has(item.requestId)) continue;
+    if (!item || !shouldClearPendingInteraction(item, taskId, options)) continue;
     clearConversationRequiresAction(taskId, item.requestId);
     state.pending.splice(index, 1);
   }

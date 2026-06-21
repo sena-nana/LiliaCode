@@ -30,6 +30,7 @@ import {
   ensureSidebarConversationsLoaded,
   listSidebarConversations,
 } from "../services/sidebarConversations";
+import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
 import {
   cancelIdleRun,
   installPerfObservers,
@@ -63,7 +64,9 @@ const opacityPanelOpen = ref(false);
 let geometryUnlisteners: Array<() => void> = [];
 let activityHydrationTimer: number | null = null;
 let deferredActivityHydrationTimer: number | null = null;
+let cancelDeferredActivityHydrationPaint: (() => void) | null = null;
 let activityHydrationSeq = 0;
+let disposed = false;
 
 const conversations = computed<UnifiedSidebarConversation[]>(() => {
   return listSidebarConversations().map((item) =>
@@ -163,10 +166,12 @@ async function persistCurrentGeometry() {
 }
 
 async function restoreStoredGeometry() {
+  if (disposed) return;
   const geometry = readStoredGeometry();
   if (!geometry) return;
   try {
     await appWindow.setSize(new PhysicalSize(geometry.width, geometry.height));
+    if (disposed) return;
     await appWindow.setPosition(new PhysicalPosition(geometry.x, geometry.y));
   } catch {
     /* ignore */
@@ -175,26 +180,33 @@ async function restoreStoredGeometry() {
 
 async function bindGeometryPersistence() {
   try {
-    const [unlistenResize, unlistenMove] = await Promise.all([
-      appWindow.onResized(() => {
+    const unlisteners = await installUnlistenFns([
+      () => appWindow.onResized(() => {
         void persistCurrentGeometry();
       }),
-      appWindow.onMoved(() => {
+      () => appWindow.onMoved(() => {
         void persistCurrentGeometry();
       }),
     ]);
-    geometryUnlisteners = [unlistenResize, unlistenMove];
+    if (disposed) {
+      runUnlistenFns(unlisteners.reverse());
+      return;
+    }
+    geometryUnlisteners = unlisteners;
   } catch {
+    if (disposed) return;
     geometryUnlisteners = [];
   }
 }
 
 async function initializeGeometryPersistence() {
   await restoreStoredGeometry();
+  if (disposed) return;
   await bindGeometryPersistence();
 }
 
 async function loadConversations() {
+  if (disposed) return;
   loaded.value = false;
   error.value = null;
   try {
@@ -204,23 +216,27 @@ async function loadConversations() {
       { detail: "popup-status" },
     );
   } catch (err) {
+    if (disposed) return;
     error.value = `加载会话状态失败：${String(err)}`;
   } finally {
+    if (disposed) return;
     loaded.value = true;
   }
 }
 
 async function toggleAlwaysOnTop() {
+  if (disposed) return;
   alwaysOnTop.value = !alwaysOnTop.value;
   await applyAlwaysOnTop(alwaysOnTop.value);
 }
 
 async function applyAlwaysOnTop(value: boolean) {
+  if (disposed) return;
   persistBoolean(ALWAYS_ON_TOP_STORAGE_KEY, value);
   try {
     await appWindow.setAlwaysOnTop(value);
   } catch (err) {
-    error.value = `设置窗口置顶失败：${String(err)}`;
+    if (!disposed) error.value = `设置窗口置顶失败：${String(err)}`;
   }
 }
 
@@ -234,10 +250,11 @@ function toggleOpacityPanel() {
 }
 
 async function newChat() {
+  if (disposed) return;
   try {
     await openPopupNewChat();
   } catch (err) {
-    error.value = `创建弹出窗口对话失败：${String(err)}`;
+    if (!disposed) error.value = `创建弹出窗口对话失败：${String(err)}`;
   }
 }
 
@@ -246,10 +263,11 @@ async function closeWindow() {
 }
 
 async function openConversation(item: UnifiedSidebarConversation) {
+  if (disposed) return;
   try {
     await openPopupTask(item.taskId, item.projectId);
   } catch (err) {
-    error.value = `打开弹出窗口对话失败：${String(err)}`;
+    if (!disposed) error.value = `打开弹出窗口对话失败：${String(err)}`;
   }
 }
 
@@ -262,6 +280,8 @@ function dismissError() {
 }
 
 function cancelConversationActivityHydration() {
+  cancelDeferredActivityHydrationPaint?.();
+  cancelDeferredActivityHydrationPaint = null;
   if (activityHydrationTimer !== null) {
     cancelIdleRun(activityHydrationTimer);
     activityHydrationTimer = null;
@@ -301,7 +321,8 @@ watch(
     }
     if (plan.deferredTaskIds.length === 0) return;
     const seq = activityHydrationSeq;
-    scheduleAfterPaint(() => {
+    cancelDeferredActivityHydrationPaint = scheduleAfterPaint(() => {
+      cancelDeferredActivityHydrationPaint = null;
       if (seq !== activityHydrationSeq) return;
       deferredActivityHydrationTimer = runWhenIdle(() => {
         deferredActivityHydrationTimer = null;
@@ -321,6 +342,7 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   installPerfObservers();
   document.body.classList.add(TRANSPARENT_BODY_CLASS);
   void initializeGeometryPersistence();
@@ -329,8 +351,9 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  disposed = true;
   cancelConversationActivityHydration();
-  for (const unlisten of geometryUnlisteners) unlisten();
+  runUnlistenFns(geometryUnlisteners.splice(0).reverse());
   geometryUnlisteners = [];
   document.body.classList.remove(TRANSPARENT_BODY_CLASS);
 });

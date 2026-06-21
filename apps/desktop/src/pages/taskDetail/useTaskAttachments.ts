@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { onScopeDispose, ref, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -61,6 +61,7 @@ export function useTaskAttachments(options: {
   const droppedAttachmentAppendKey = ref(0);
   const fileDropActive = ref(false);
   const appWindow = getCurrentWindow();
+  let disposed = false;
 
   function canAcceptFileDropAt(point: DropPoint | null): boolean {
     if (!options.hasContext()) return false;
@@ -71,9 +72,11 @@ export function useTaskAttachments(options: {
   }
 
   async function normalizeDropPoint(point: DropPoint | null): Promise<DropPoint | null> {
+    if (disposed) return null;
     if (!point) return null;
     try {
       const scaleFactor = await appWindow.scaleFactor();
+      if (disposed) return null;
       if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) return point;
       return {
         x: point.x / scaleFactor,
@@ -85,6 +88,7 @@ export function useTaskAttachments(options: {
   }
 
   async function addAttachmentsFromPaths(paths: string[], appendToEnd = false) {
+    if (disposed) return;
     const uniquePaths = paths.filter((path, index) =>
       paths.indexOf(path) === index &&
       !attachments.value.some((attachment) => attachment.path === path)
@@ -92,6 +96,7 @@ export function useTaskAttachments(options: {
     if (uniquePaths.length === 0) return;
     try {
       const described = await describeAttachments(uniquePaths);
+      if (disposed) return;
       const existing = new Set(attachments.value.map((attachment) => attachment.path));
       const nextAttachments = described.filter((attachment) => !existing.has(attachment.path));
       if (appendToEnd && nextAttachments.length > 0) {
@@ -107,26 +112,33 @@ export function useTaskAttachments(options: {
   }
 
   function addContextAttachment(attachment: ChatAttachment) {
+    if (disposed) return;
     if (attachment.exists === false) return;
     if (attachments.value.some((item) => item.path === attachment.path)) return;
     attachments.value = [...attachments.value, attachment];
   }
 
   async function onPickAttachments() {
+    if (disposed) return;
     try {
       const paths = await pickAttachmentFiles();
+      if (disposed) return;
       await addAttachmentsFromPaths(paths);
     } catch (err) {
+      if (disposed) return;
       console.error("[chat] pickAttachmentFiles failed", err);
     }
   }
 
   function removeAttachment(attachmentId: string) {
+    if (disposed) return;
     attachments.value = attachments.value.filter((attachment) => attachment.id !== attachmentId);
   }
 
   async function installDragDropListener(): Promise<UnlistenFn> {
-    return await getCurrentWebview().onDragDropEvent(async (event) => {
+    if (disposed) return () => {};
+    const unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+      if (disposed) return;
       const drop = readDropPayload(event.payload);
       if (!drop) return;
       if (drop.type === "leave") {
@@ -134,6 +146,7 @@ export function useTaskAttachments(options: {
         return;
       }
       const point = await normalizeDropPoint(drop.position);
+      if (disposed) return;
       const canAccept = canAcceptFileDropAt(point);
       fileDropActive.value = (drop.type === "enter" || drop.type === "over") && canAccept;
       if (drop.type !== "drop") return;
@@ -141,13 +154,23 @@ export function useTaskAttachments(options: {
       if (!canAccept || drop.paths.length === 0) return;
       await addAttachmentsFromPaths(drop.paths, true);
     });
+    if (disposed) {
+      unlisten();
+      return () => {};
+    }
+    return unlisten;
   }
 
   function resetAttachments() {
+    if (disposed) return;
     attachments.value = [];
     fileDropActive.value = false;
     viewingImage.value = null;
   }
+
+  onScopeDispose(() => {
+    disposed = true;
+  });
 
   return {
     attachments,

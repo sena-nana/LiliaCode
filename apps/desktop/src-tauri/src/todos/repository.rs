@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 
+use super::contract;
 use super::types::{normalize_guide_status, TaskTodo};
 
 fn parse_attachments_json(value: String) -> Vec<JsonValue> {
@@ -67,12 +68,10 @@ pub(super) fn emit_todo_changed<R: Runtime>(
     task_id: &str,
 ) -> Result<(), String> {
     app.emit(
-        "todo-changed",
-        serde_json::json!({
-            "taskId": task_id,
-        }),
+        contract::changed_event_name(),
+        contract::changed_event_payload(task_id),
     )
-    .map_err(|err| format!("todo-changed emit failed: {err}"))?;
+    .map_err(|err| format!("{} emit failed: {err}", contract::changed_event_name()))?;
     crate::automation::emit_todo_signal(app, task_id.to_string(), None);
     Ok(())
 }

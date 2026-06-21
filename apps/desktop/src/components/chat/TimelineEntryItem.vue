@@ -1,28 +1,31 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from "vue";
 import { ChevronDown, ChevronRight, RotateCcw } from "lucide-vue-next";
-import type { AgentTimelineEvent, AgentTimelineEventStatus } from "@lilia/contracts";
+import type { AgentTimelineEvent } from "@lilia/contracts";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 import TimelineNodeIcon from "./TimelineNodeIcon.vue";
-import type { LiliaBatchApplyInput } from "./liliaBatchApply";
+import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
 import type { TimelineEntry, TimelineEventEntry, TimelineGroupEntry } from "./timelineEntries";
 import {
   hasTimelinePendingActionState,
-  timelinePendingActionState,
+  type TimelinePendingActionStateReader,
 } from "./timelinePendingActions";
 import {
   isTimelineErrorReply,
   isTimelineFinalReply,
   isTimelineFinalReplyStreaming,
+  isTimelineMessageEvent,
   readTimelineDisplay,
   timelineCanExpand,
   timelineDisplayIcon,
   timelineEventLabel,
   timelineGroupLabel,
+  timelineKindClass,
+  timelineStatusClass,
   type TimelineDisplayContext,
 } from "./timelineDisplay";
 import { measurePerfAsync } from "../../utils/perf";
@@ -61,8 +64,7 @@ const props = defineProps<{
   processEntriesFor: (entry: TimelineEventEntry) => TimelineEntry[];
   previewText: (event: AgentTimelineEvent) => string;
   projectCwd?: string | null;
-  pendingActions?: PendingAgentAction[];
-  showExpiredPendingActions?: boolean;
+  pendingState: TimelinePendingActionStateReader;
   canRetryEvent?: (event: AgentTimelineEvent) => boolean;
   canStartLiliaBatchApply?: boolean;
   canStartSessionFork?: boolean;
@@ -80,15 +82,10 @@ const emit = defineEmits<{
 }>();
 
 const displayContext = computed<TimelineDisplayContext>(() => ({ projectCwd: props.projectCwd }));
-const pendingActions = computed(() => props.pendingActions ?? []);
-
-function isTimelineMessage(event: AgentTimelineEvent): boolean {
-  return event.kind === "message";
-}
 
 function canToggle(event: AgentTimelineEvent): boolean {
   return timelineCanExpand(event, displayContext.value) ||
-    hasTimelinePendingActionState(pendingState(event));
+    hasTimelinePendingActionState(props.pendingState(event));
 }
 
 function canRetry(event: AgentTimelineEvent): boolean {
@@ -96,7 +93,7 @@ function canRetry(event: AgentTimelineEvent): boolean {
 }
 
 function isCompact(event: AgentTimelineEvent): boolean {
-  return !isTimelineMessage(event) && !props.expanded(event);
+  return !isTimelineMessageEvent(event) && !props.expanded(event);
 }
 
 function hasProcessEvents(entry: TimelineEventEntry): boolean {
@@ -138,28 +135,12 @@ function labelText(event: AgentTimelineEvent): string {
   return timelineEventLabel(event, displayContext.value);
 }
 
-function statusClass(status: AgentTimelineEventStatus): string {
-  return `is-status-${status.replace(/_/g, "-")}`;
-}
-
-function kindClass(prefix: string, kind: string): string {
-  return `${prefix}${kind.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-}
-
 function pendingAction(event: AgentTimelineEvent): PendingAgentAction | null {
-  return pendingState(event).action;
+  return props.pendingState(event).action;
 }
 
 function expiredPendingAction(event: AgentTimelineEvent): boolean {
-  return pendingState(event).expired;
-}
-
-function pendingState(event: AgentTimelineEvent) {
-  return timelinePendingActionState(
-    event,
-    pendingActions.value,
-    props.showExpiredPendingActions,
-  );
+  return props.pendingState(event).expired;
 }
 
 function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
@@ -173,8 +154,8 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
     class="agent-timeline__item agent-timeline__item--group"
     :data-scroll-anchor-ids="groupScrollAnchorIds(entry)"
     :class="[
-      kindClass('agent-timeline__item--', entry.representative.kind),
-      statusClass(entry.aggregatedStatus),
+      timelineKindClass('agent-timeline__item--', entry.representative.kind),
+      timelineStatusClass(entry.aggregatedStatus),
       {
         'is-compact': !groupExpanded(entry),
         'is-process-child': entry.isProcessChild,
@@ -221,7 +202,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
             :key="event.id"
             class="agent-timeline__group-item"
             :data-scroll-anchor-id="event.id"
-            :class="[kindClass('agent-timeline__group-item--', event.kind), statusClass(event.status)]"
+            :class="[timelineKindClass('agent-timeline__group-item--', event.kind), timelineStatusClass(event.status)]"
           >
             <TimelinePlanCard
               v-if="event.kind === 'plan'"
@@ -303,8 +284,8 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
     class="agent-timeline__item"
     :data-scroll-anchor-id="entry.event.id"
     :class="[
-      kindClass('agent-timeline__item--', entry.event.kind),
-      statusClass(entry.event.status),
+      timelineKindClass('agent-timeline__item--', entry.event.kind),
+      timelineStatusClass(entry.event.status),
       {
         'is-final-reply': isTimelineFinalReply(entry.event),
         'is-compact': isCompact(entry.event),
@@ -421,8 +402,7 @@ function groupScrollAnchorIds(entry: TimelineGroupEntry): string {
                 :process-entries-for="processEntriesFor"
                 :preview-text="previewText"
                 :project-cwd="projectCwd"
-                :pending-actions="pendingActions"
-                :show-expired-pending-actions="showExpiredPendingActions"
+                :pending-state="pendingState"
                 :can-retry-event="canRetryEvent"
                 :can-start-lilia-batch-apply="canStartLiliaBatchApply"
                 :can-start-session-fork="canStartSessionFork"

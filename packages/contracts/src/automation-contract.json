@@ -1,0 +1,104 @@
+{
+  "automationTriggerKinds": [
+    "manual",
+    "task_changed",
+    "timeline_event",
+    "todo_changed",
+    "interaction_request"
+  ],
+  "defaultAutomationTriggerKind": "manual",
+  "automationScopeEventKinds": [
+    "task_created",
+    "task_status_changed",
+    "task_updated",
+    "timeline_event",
+    "todo_changed",
+    "interaction_request"
+  ],
+  "automationScopeTaskStatuses": [
+    "waiting",
+    "running",
+    "blocked",
+    "done"
+  ],
+  "automationTriggerKindLabels": {
+    "manual": "手动触发",
+    "task_changed": "任务变化",
+    "timeline_event": "时间线事件",
+    "todo_changed": "Todo 变化",
+    "interaction_request": "Agent 交互请求"
+  },
+  "automationLogicKinds": [
+    "condition",
+    "switch",
+    "stop"
+  ],
+  "defaultAutomationLogicKind": "condition",
+  "defaultAutomationLogicPath": "trigger.kind",
+  "automationLogicKindLabels": {
+    "condition": "条件",
+    "switch": "Switch",
+    "stop": "停止运行"
+  },
+  "defaultAutomationAgentPrompt": "请根据当前上下文继续推进。",
+  "defaultAutomationHumanPrompt": "确认后继续执行自动化。",
+  "automationRunStatuses": [
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "skipped",
+    "waiting_user"
+  ],
+  "automationChangedEventName": "automation:changed",
+  "automationRunStartedEventName": "automation:run-started",
+  "automationRunUpdatedEventName": "automation:run-updated",
+  "automationRunFinishedEventName": "automation:run-finished",
+  "automationListWorkflowsCommand": "automation_list_workflows",
+  "automationSaveDraftCommand": "automation_save_draft",
+  "automationPublishCommand": "automation_publish",
+  "automationDeleteWorkflowCommand": "automation_delete_workflow",
+  "automationSetEnabledCommand": "automation_set_enabled",
+  "automationRunOnceCommand": "automation_run_once",
+  "automationResumeRunCommand": "automation_resume_run",
+  "automationListRunsCommand": "automation_list_runs",
+  "automationGetRunCommand": "automation_get_run",
+  "defaultAutomationRunStatus": "pending",
+  "automationWaitingUserStatus": "waiting_user",
+  "automationRunStatusTones": {
+    "pending": "muted",
+    "running": "accent",
+    "succeeded": "ok",
+    "failed": "err",
+    "skipped": "muted",
+    "waiting_user": "accent"
+  },
+  "automationToolActions": [
+    "record_timeline",
+    "create_task",
+    "update_task_status",
+    "add_todo",
+    "send_guide"
+  ],
+  "defaultAutomationToolAction": "record_timeline",
+  "automationToolActionLabels": {
+    "record_timeline": "记录运行",
+    "create_task": "创建任务",
+    "update_task_status": "更新任务状态",
+    "add_todo": "添加 Todo",
+    "send_guide": "发送引导"
+  },
+  "automationToolActionFields": {
+    "record_timeline": ["taskId", "title", "summary", "status", "backend"],
+    "create_task": ["projectId", "title", "status"],
+    "update_task_status": ["taskId", "status"],
+    "add_todo": ["taskId", "text"],
+    "send_guide": ["taskId", "text", "priority"]
+  },
+  "automationToolPriorities": [
+    "low",
+    "normal",
+    "high"
+  ],
+  "defaultAutomationToolPriority": "normal"
+}

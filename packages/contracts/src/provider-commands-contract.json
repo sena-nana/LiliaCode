@@ -1,0 +1,15 @@
+{
+  "chatCheckEnvCommand": "chat_check_env",
+  "providerGetConfigCommand": "provider_get_config",
+  "providerSetConfigCommand": "provider_set_config",
+  "providerGetActiveBackendCommand": "provider_get_active_backend",
+  "providerSetActiveBackendCommand": "provider_set_active_backend",
+  "providerCodexAppServerCheckUpdateCommand": "provider_codex_app_server_check_update",
+  "providerCodexAppServerInstallUpdateCommand": "provider_codex_app_server_install_update",
+  "routerGetModeCommand": "router_get_mode",
+  "routerSetModeCommand": "router_set_mode",
+  "assistantAiGetConfigCommand": "assistant_ai_get_config",
+  "assistantAiSetConfigCommand": "assistant_ai_set_config",
+  "assistantAiTestConnectionCommand": "assistant_ai_test_connection",
+  "assistantAiOptimizePromptCommand": "assistant_ai_optimize_prompt"
+}

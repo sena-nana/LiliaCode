@@ -1,8 +1,11 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
-import type {
-  ChatSlashCommandSearchResult,
-  ChatSlashCommandWorkflow,
-  LiliaReviewTarget,
+import {
+  CHAT_WORKFLOW_SLASH_COMMANDS,
+  createChatSlashCommandWorkflow,
+  type ChatWorkflowSlashKind,
+  type ChatSlashCommandSearchResult,
+  type ChatSlashCommandWorkflow,
+  type LiliaReviewTarget,
 } from "@lilia/contracts";
 import { measurePerfAsync } from "../../utils/perf";
 import { textPart, type MentionRange } from "./composerParts";
@@ -12,7 +15,7 @@ import type { useComposerRichInput } from "./useComposerRichInput";
 const SLASH_COMMAND_LIMIT = 12;
 
 type ComposerRichInput = ReturnType<typeof useComposerRichInput>;
-export type ComposerWorkflowSlashKind = "review" | "fix_suggestion";
+export type ComposerWorkflowSlashKind = ChatWorkflowSlashKind;
 type SlashCommandDeps = {
   searchSlashCommands: typeof import("../../services/chat").searchSlashCommands;
 };
@@ -45,34 +48,12 @@ export interface ComposerSlashTargetItem {
   hint: string;
 }
 
-const WORKFLOW_COMMANDS: ComposerSlashCommandItem[] = [
-  {
-    kind: "workflow",
-    workflowKind: "review",
-    matchedBy: "name",
-    command: {
-      id: "workflow:lilia_review",
-      name: "review",
-      title: "代码审查",
-      description: "对指定代码范围做审查。",
-      source: "native",
-      parameters: [],
-    },
-  },
-  {
-    kind: "workflow",
-    workflowKind: "fix_suggestion",
-    matchedBy: "name",
-    command: {
-      id: "workflow:lilia_fix_suggestion",
-      name: "fix",
-      title: "修复建议",
-      description: "生成修复建议。",
-      source: "native",
-      parameters: [],
-    },
-  },
-];
+const WORKFLOW_COMMANDS: ComposerSlashCommandItem[] = CHAT_WORKFLOW_SLASH_COMMANDS.map((item) => ({
+  kind: "workflow",
+  workflowKind: item.kind,
+  matchedBy: "name",
+  command: item.command,
+}));
 
 const TARGET_ITEMS: ComposerSlashTargetItem[] = [
   { id: "uncommitted", label: "未提交改动", hint: "当前工作区未提交改动" },
@@ -210,12 +191,11 @@ export function useComposerSlashCommands(options: {
     options.richInput.replaceRange(range.start, range.end, [textPart("")]);
     suppressedKey.value = null;
     clear();
-    options.executeCommand({
-      type: "slash_command",
+    options.executeCommand(createChatSlashCommandWorkflow({
       commandId: result.command.id,
       source: result.command.source,
       arguments: {},
-    });
+    }));
   }
 
   function targetFromItem(item: ComposerSlashTargetItem): LiliaReviewTarget | null {

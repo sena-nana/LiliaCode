@@ -2,6 +2,17 @@ import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { normalizeClaudeTool } from "@lilia/contracts/claudeTools.mjs";
 import {
+  HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT,
+  HISTORY_IMPORT_DEFAULT_SYNC_LIMIT,
+  HISTORY_IMPORT_ERROR_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_MAX_SEARCH_LIMIT,
+  HISTORY_IMPORT_MAX_SYNC_LIMIT,
+  HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT,
+  HISTORY_IMPORT_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_TITLE_TEXT_LIMIT,
+} from "@lilia/contracts/historyImportContract.mjs";
+import {
   isRecord,
   normalizeTimelineStatus,
   oneLineSummary,
@@ -9,19 +20,15 @@ import {
   stringOrNull,
 } from "../utils.mjs";
 
-const DEFAULT_LIMIT = 20;
-const DEFAULT_SYNC_LIMIT = 120;
-const PREVIEW_MESSAGE_LIMIT = 5;
-
 function defaultClaudeProjectsDir() {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   return home ? join(home, ".claude", "projects") : "";
 }
 
-function limitValue(value, fallback = DEFAULT_LIMIT) {
+function limitValue(value, fallback = HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
-  return Math.max(1, Math.min(50, Math.trunc(number)));
+  return Math.max(1, Math.min(HISTORY_IMPORT_MAX_SEARCH_LIMIT, Math.trunc(number)));
 }
 
 function parseCursor(value) {
@@ -174,14 +181,14 @@ function normalizeSession(file, entries) {
   const title = titled || preview || "Claude session";
   return {
     id: sessionId,
-    title: shortText(title, 160) || "Claude session",
+    title: shortText(title, HISTORY_IMPORT_TITLE_TEXT_LIMIT) || "Claude session",
     status: null,
     model,
     sourceKind: "claude",
     createdAt: firstTime,
     updatedAt: lastTime,
     archived: false,
-    preview: preview ? shortText(preview, 240) : null,
+    preview: preview ? shortText(preview, HISTORY_IMPORT_PREVIEW_TEXT_LIMIT) : null,
     cwd,
     project: file.project,
     path: file.path,
@@ -257,7 +264,7 @@ function messageEvent(sessionId, entry, index) {
     kind: "message",
     status: "success",
     title: role === "assistant" ? "Assistant" : "User",
-    summary: shortText(text, 1200) || "",
+    summary: shortText(text, HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT) || "",
     payload: historyPayload(sessionId, base.turnId, itemId, { role, content: text }),
     sourceId: `claude-history:${sessionId}:${base.turnId}:${itemId}`,
     turnIdOverride: base.turnId,
@@ -275,7 +282,7 @@ function thinkingEvent(sessionId, entry, part, index, partIndex) {
     kind: "reasoning",
     status: "success",
     title: "思考中",
-    summary: shortText(text, 1200) || "",
+    summary: shortText(text, HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT) || "",
     payload: historyPayload(sessionId, base.turnId, itemId, { text }),
     sourceId: `claude-history:${sessionId}:${base.turnId}:${itemId}`,
     turnIdOverride: base.turnId,
@@ -317,7 +324,7 @@ function toolResultEvent(sessionId, entry, part, index, partIndex) {
     kind: isError ? "error" : "tool",
     status: isError ? "error" : "success",
     title: "Tool result",
-    summary: isError ? shortText(text, 400) || "" : "",
+    summary: isError ? shortText(text, HISTORY_IMPORT_ERROR_SUMMARY_TEXT_LIMIT) || "" : "",
     payload: historyPayload(sessionId, base.turnId, itemId, {
       toolUseId: stringOrNull(part.tool_use_id),
       output: text,
@@ -411,7 +418,7 @@ export function claudeHistoryTimelineInputs(taskId, sessionId, entries) {
   }));
 }
 
-function previewMessages(entries, limit = PREVIEW_MESSAGE_LIMIT) {
+function previewMessages(entries, limit = HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT) {
   const messages = [];
   for (const [index, entry] of entries.entries()) {
     const role = entry?.message?.role;
@@ -421,7 +428,7 @@ function previewMessages(entries, limit = PREVIEW_MESSAGE_LIMIT) {
     messages.push({
       id: stringOrNull(entry.uuid) || `${role}:${index}`,
       role,
-      summary: shortText(text, 1200) || null,
+      summary: shortText(text, HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT) || null,
     });
   }
   return messages.slice(-limit);
@@ -465,14 +472,17 @@ export async function previewClaudeSession(sessionId, { projectsDir = defaultCla
 }
 
 export async function syncClaudeSessionHistoryForTask(
-  { taskId, sessionId, limit = DEFAULT_SYNC_LIMIT, cursor = null },
+  { taskId, sessionId, limit = HISTORY_IMPORT_DEFAULT_SYNC_LIMIT, cursor = null },
   { projectsDir = defaultClaudeProjectsDir() } = {},
 ) {
   const session = await findSession(sessionId, projectsDir);
   if (!session) throw new Error(`未找到 Claude session：${sessionId}`);
   const entries = await readJsonl(session.path);
   const offset = parseCursor(cursor);
-  const pageLimit = Math.max(1, Math.min(500, Number(limit) || DEFAULT_SYNC_LIMIT));
+  const pageLimit = Math.max(1, Math.min(
+    HISTORY_IMPORT_MAX_SYNC_LIMIT,
+    Number(limit) || HISTORY_IMPORT_DEFAULT_SYNC_LIMIT,
+  ));
   const page = entries.slice(offset, offset + pageLimit);
   const events = claudeHistoryTimelineInputs(taskId, session.id, page);
   const nextOffset = offset + page.length;

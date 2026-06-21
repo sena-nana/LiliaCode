@@ -1,13 +1,12 @@
-export const TIMELINE_RESERVED_KEYS = new Set([
-  "taskId",
-  "task_id",
-  "turnId",
-  "turn_id",
-  "order",
-  "thinking",
-  "redacted_thinking",
-  "signature",
-]);
+import {
+  TIMELINE_DISPLAY_INLINE_TEXT_LIMIT,
+  TIMELINE_DISPLAY_ONE_LINE_TEXT_LIMIT,
+  TIMELINE_PAYLOAD_MAX_DEPTH,
+  TIMELINE_PAYLOAD_RESERVED_KEYS,
+  normalizeTimelineStatus as normalizeContractTimelineStatus,
+} from "@lilia/contracts/timelineContract.mjs";
+
+export const TIMELINE_RESERVED_KEYS = new Set(TIMELINE_PAYLOAD_RESERVED_KEYS);
 
 export function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -19,13 +18,13 @@ export function stringOrNull(value) {
   return null;
 }
 
-export function shortText(value, max = 600) {
+export function shortText(value, max = TIMELINE_DISPLAY_INLINE_TEXT_LIMIT) {
   const text = stringOrNull(value);
   if (!text) return null;
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-export function oneLineSummary(value, max = 400) {
+export function oneLineSummary(value, max = TIMELINE_DISPLAY_ONE_LINE_TEXT_LIMIT) {
   const text = stringOrNull(value);
   if (!text) return "";
   return shortText(text.replace(/\s+/g, " ").trim(), max) || "";
@@ -36,16 +35,7 @@ export function fullTextOrNull(value) {
 }
 
 export function normalizeTimelineStatus(status) {
-  switch (status) {
-    case "failed":
-      return "error";
-    case "completed":
-      return "success";
-    case "in_progress":
-      return "running";
-    default:
-      return status || "info";
-  }
+  return normalizeContractTimelineStatus(status);
 }
 
 export function toJsonSafe(value, seen = new WeakSet()) {
@@ -102,7 +92,7 @@ export function sanitizeTimelinePayload(value, seen = new WeakSet(), depth = 0) 
       stack: value.stack,
     };
   }
-  if (depth > 5) return "[Truncated]";
+  if (depth > TIMELINE_PAYLOAD_MAX_DEPTH) return "[Truncated]";
   if (seen.has(value)) return "[Circular]";
 
   seen.add(value);

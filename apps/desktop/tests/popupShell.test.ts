@@ -2,7 +2,13 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { nextTick } from "vue";
 import { createMemoryHistory } from "vue-router";
 import { defineComponent } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  POPUP_FOCUS_MAIN_COMMAND,
+  POPUP_OPEN_NEW_CHAT_COMMAND,
+  POPUP_OPEN_TASK_COMMAND,
+  TASK_GET_COMMAND,
+} from "@lilia/contracts";
 import {
   createLiliaRouter,
   shouldUsePopupHashHistory,
@@ -15,6 +21,10 @@ import {
   setMockTaskArchived,
 } from "./tauriMock";
 import { ORPHAN_LIST, TASKS } from "../src/data/tasks";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 async function renderPopup(initialRoute = "/popup/projects/lilia/tasks/t-001") {
   const router = createLiliaRouter(createMemoryHistory());
@@ -41,7 +51,7 @@ async function expectReturnToMainRoute(initialRoute: string, mainRoute: string) 
   await fireEvent.click(view.getByRole("button", { name: "回到主窗口" }));
 
   await waitFor(() => {
-    expect(mockInvoke).toHaveBeenCalledWith("popup_focus_main", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_FOCUS_MAIN_COMMAND, {
       route: mainRoute,
     }, undefined);
     expect(mockCurrentWindow.close).toHaveBeenCalledTimes(1);
@@ -126,7 +136,7 @@ describe("Popup shell", () => {
       name: /接入 Claude Code 会话发现/,
     }));
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_TASK_COMMAND, {
       projectId: "lilia",
       taskId: "t-001",
     }, undefined);
@@ -173,7 +183,7 @@ describe("Popup shell", () => {
     expect(localStorage.getItem("lilia.conversationStatus.opacity")).toBe("0.40");
 
     await fireEvent.click(view.getByRole("button", { name: "新对话" }));
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_NEW_CHAT_COMMAND, {
       projectId: null,
       initialDraftContent: null,
     }, undefined);
@@ -226,7 +236,7 @@ describe("Popup shell", () => {
     const view = await renderPopup("/popup/projects/lilia/tasks/t-001");
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("task_get", { id: "t-001" }, undefined);
+      expect(mockInvoke).toHaveBeenCalledWith(TASK_GET_COMMAND, { id: "t-001" }, undefined);
       expect(view.getByText("要在 Lilia 中构建什么？")).toBeInTheDocument();
     });
   });
@@ -238,8 +248,10 @@ describe("Popup shell", () => {
 
       const view = await renderPopup("/popup/projects/lilia/tasks/t-002");
 
-      expect(view.container.querySelector(".chat-page--pending")).toBeInTheDocument();
-      expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(view.container.querySelector(".chat-page--pending")).toBeInTheDocument();
+        expect(view.queryByText("要在 Lilia 中构建什么？")).not.toBeInTheDocument();
+      });
 
       await vi.advanceTimersByTimeAsync(700);
       await nextTick();
@@ -270,7 +282,7 @@ describe("Popup shell", () => {
     await fireEvent.click(view.getByRole("button", { name: "回到主窗口" }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("popup_focus_main", {
+      expect(mockInvoke).toHaveBeenCalledWith(POPUP_FOCUS_MAIN_COMMAND, {
         route: "/projects/lilia/tasks/t-001",
       }, undefined);
       expect(mockCurrentWindow.close).toHaveBeenCalledTimes(1);
