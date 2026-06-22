@@ -8,7 +8,11 @@ import type {
 import ChatBubble from "./ChatBubble.vue";
 import type { LiliaBatchApplyInput } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
-import { processGroupEntries, type TimelineGroupEntry } from "./timelineEntries";
+import {
+  processGroupEntries,
+  type TimelineEntry,
+  type TimelineGroupEntry,
+} from "./timelineEntries";
 import {
   isTimelineExpanded,
   isTimelineMessageEvent,
@@ -31,6 +35,9 @@ const TimelineEntryItem = defineAsyncComponent({
     async () => (await import("./TimelineEntryItem.vue")).default,
   ),
 });
+
+const TIMELINE_RENDER_WINDOW_SIZE = 160;
+const TIMELINE_RENDER_WINDOW_STEP = 160;
 
 const props = defineProps<{
   events: AgentTimelineEvent[];
@@ -56,6 +63,7 @@ const emit = defineEmits<{
 const toggledIds = ref<Set<string>>(new Set());
 const expandedGroupIds = ref<Set<string>>(new Set());
 const expandedProcessGroupIds = ref<Set<string>>(new Set());
+const renderedEntryCount = ref(TIMELINE_RENDER_WINDOW_SIZE);
 
 const {
   displayContext,
@@ -77,8 +85,18 @@ const {
   projectCwd: computed(() => props.projectCwd),
 });
 
+const renderedEntries = computed(() => {
+  const entries = orderedEntries.value;
+  if (entries.length <= renderedEntryCount.value) return entries;
+  return entries.slice(entries.length - renderedEntryCount.value);
+});
+
+const hiddenOlderEntryCount = computed(() =>
+  Math.max(0, orderedEntries.value.length - renderedEntries.value.length),
+);
+
 const { railLineStyle, timelineRef } = useTimelineRailMask([
-  orderedEntries,
+  renderedEntries,
   showThinkingIndicator,
   toggledIds,
   expandedGroupIds,
@@ -87,18 +105,18 @@ const { railLineStyle, timelineRef } = useTimelineRailMask([
 void timelineRef;
 
 const processAnchorEventIds = computed(() =>
-  visibleEvents.value.filter(isTimelineProcessAnchor).map((event) => event.id),
+  renderedEntries.value.flatMap((entry) => processAnchorIdsForEntry(entry)),
 );
 
 watch(
-  () => visibleEvents.value.map((event) => event.id).join("|"),
+  () => timelinePruneKey(visibleEvents.value),
   () => {
     toggledIds.value = pruneTimelineExpandedIds(toggledIds.value, visibleEvents.value);
   },
 );
 
 watch(
-  orderedEntries,
+  renderedEntries,
   (entries) => {
     const valid = timelineGroupEntryIds(entries);
     expandedGroupIds.value = new Set(
@@ -108,7 +126,7 @@ watch(
 );
 
 watch(
-  () => processAnchorEventIds.value.join("|"),
+  () => processAnchorEventIds.value,
   () => {
     const valid = new Set(processAnchorEventIds.value);
     expandedProcessGroupIds.value = new Set(
@@ -118,7 +136,7 @@ watch(
 );
 
 watch(
-  () => [...turnState.value.interrupted].join("|"),
+  () => turnState.value.interrupted,
   () => {
     const turnIds = turnState.value.interrupted;
     if (turnIds.size === 0) return;
@@ -133,6 +151,19 @@ watch(
     expandedProcessGroupIds.value = new Set(
       [...expandedProcessGroupIds.value].filter((id) => !interruptedEventIds.has(id)),
     );
+  },
+);
+
+watch(
+  () => orderedEntries.value.length,
+  (count, previousCount) => {
+    if (count <= TIMELINE_RENDER_WINDOW_SIZE) {
+      renderedEntryCount.value = TIMELINE_RENDER_WINDOW_SIZE;
+      return;
+    }
+    if (previousCount !== undefined && renderedEntryCount.value >= previousCount) {
+      renderedEntryCount.value = count;
+    }
   },
 );
 
@@ -175,6 +206,13 @@ function toggleGroup(entry: TimelineGroupEntry) {
   expandedGroupIds.value = next;
 }
 
+function revealOlderEntries() {
+  renderedEntryCount.value = Math.min(
+    orderedEntries.value.length,
+    renderedEntryCount.value + TIMELINE_RENDER_WINDOW_STEP,
+  );
+}
+
 const pendingActions = computed(() => props.pendingActions ?? []);
 
 function pendingState(event: AgentTimelineEvent) {
@@ -183,6 +221,29 @@ function pendingState(event: AgentTimelineEvent) {
     pendingActions.value,
     props.showExpiredPendingActions,
   );
+}
+
+function timelinePruneKey(events: AgentTimelineEvent[]): string {
+  const first = events[0];
+  const last = events[events.length - 1];
+  return [
+    events.length,
+    first?.id ?? "",
+    last?.id ?? "",
+    last?.updatedAt ?? "",
+  ].join(":");
+}
+
+function processAnchorIdsForEntry(entry: TimelineEntry): string[] {
+  if (entry.type === "group") {
+    return entry.events.filter(isTimelineProcessAnchor).map((event) => event.id);
+  }
+  const ids: string[] = [];
+  if (isTimelineProcessAnchor(entry.event)) ids.push(entry.event.id);
+  for (const event of entry.processEvents ?? []) {
+    if (isTimelineProcessAnchor(event)) ids.push(event.id);
+  }
+  return ids;
 }
 
 </script>
@@ -198,7 +259,16 @@ function pendingState(event: AgentTimelineEvent) {
       <span class="agent-timeline__rail-line" :style="railLineStyle" />
     </div>
     <ol class="agent-timeline__list">
-      <template v-for="entry in orderedEntries" :key="entry.id">
+      <li v-if="hiddenOlderEntryCount > 0" class="agent-timeline__window-row">
+        <button
+          type="button"
+          class="agent-timeline__window-button"
+          @click="revealOlderEntries"
+        >
+          显示更早 {{ hiddenOlderEntryCount }} 项
+        </button>
+      </li>
+      <template v-for="entry in renderedEntries" :key="entry.id">
         <li
           v-if="entry.type === 'event' && isTimelineUserMessage(entry.event)"
           class="agent-timeline__message-row"

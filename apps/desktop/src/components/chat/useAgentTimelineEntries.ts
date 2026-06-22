@@ -64,21 +64,7 @@ export function useAgentTimelineEntries(options: UseAgentTimelineEntriesOptions)
   );
 
   const chronologicalEntries = computed<TimelineEventEntry[]>(() =>
-    visibleEvents.value
-      .map((event): TimelineEventEntry => ({
-        type: "event",
-        id: `event:${event.id}`,
-        createdAt: event.createdAt,
-        turnSeq: event.turnSeq,
-        intraTurnOrder: event.intraTurnOrder,
-        event,
-      }))
-      .sort((a, b) =>
-        a.turnSeq - b.turnSeq ||
-        a.intraTurnOrder - b.intraTurnOrder ||
-        a.createdAt - b.createdAt ||
-        a.id.localeCompare(b.id)
-      ),
+    timelineEventEntries(visibleEvents.value),
   );
 
   const orderedEntries = computed<TimelineEntry[]>(() => {
@@ -170,11 +156,18 @@ export function useAgentTimelineEntries(options: UseAgentTimelineEntriesOptions)
 
   onBeforeUnmount(stopThinkingTimer);
 
+  const thinkingContext = computed(() => {
+    const events = chronologicalEntries.value.map((entry) => entry.event);
+    return {
+      previousAt: timelineLatestEventTimeMs(events),
+      subagent: timelineRunningSubagentLabel(events),
+    };
+  });
+
   const thinkingIndicatorLabel = computed(() => {
-    const previousAt = timelineLatestEventTimeMs(chronologicalEntries.value.map((entry) => entry.event));
-    const parts = [timelineThinkingDurationLabel(previousAt, nowMs.value)];
-    const subagent = timelineRunningSubagentLabel(chronologicalEntries.value.map((entry) => entry.event));
-    if (subagent) parts.push(subagent);
+    const context = thinkingContext.value;
+    const parts = [timelineThinkingDurationLabel(context.previousAt, nowMs.value)];
+    if (context.subagent) parts.push(context.subagent);
     return parts.join("，");
   });
 
@@ -229,4 +222,31 @@ function timelineGroupEntryIds(entries: TimelineEntry[]): Set<string> {
 
 function hasRunningEvent(events: AgentTimelineEvent[]): boolean {
   return events.some((event) => isAgentTimelineRunningStatus(event.status));
+}
+
+function timelineEventEntries(events: AgentTimelineEvent[]): TimelineEventEntry[] {
+  const entries = events.map((event): TimelineEventEntry => ({
+    type: "event",
+    id: `event:${event.id}`,
+    createdAt: event.createdAt,
+    turnSeq: event.turnSeq,
+    intraTurnOrder: event.intraTurnOrder,
+    event,
+  }));
+  if (!entriesAreChronological(entries)) entries.sort(compareTimelineEntries);
+  return entries;
+}
+
+function entriesAreChronological(entries: TimelineEventEntry[]): boolean {
+  for (let i = 1; i < entries.length; i += 1) {
+    if (compareTimelineEntries(entries[i - 1], entries[i]) > 0) return false;
+  }
+  return true;
+}
+
+function compareTimelineEntries(a: TimelineEventEntry, b: TimelineEventEntry): number {
+  return a.turnSeq - b.turnSeq ||
+    a.intraTurnOrder - b.intraTurnOrder ||
+    a.createdAt - b.createdAt ||
+    a.id.localeCompare(b.id);
 }

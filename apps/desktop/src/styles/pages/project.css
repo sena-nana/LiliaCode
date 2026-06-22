@@ -261,6 +261,20 @@
   padding: 8px 12px;
 }
 
+.sessions-view__more {
+  justify-content: center;
+  width: 100%;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sessions-view__more:hover {
+  color: var(--text);
+}
+
 .sessions-view__title {
   font-size: 13px;
 }
