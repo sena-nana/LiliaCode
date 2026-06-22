@@ -6,6 +6,7 @@ import {
   POPUP_OPEN_CHILD_QUESTION_COMMAND,
   POPUP_OPEN_NEW_CHAT_COMMAND,
   POPUP_OPEN_TASK_COMMAND,
+  PROJECT_RENAME_COMMAND,
   type Task,
 } from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
@@ -180,6 +181,22 @@ describe("ProjectTreeItem", () => {
       projectId: "lilia",
       initialDraftContent: null,
     }, undefined);
+  });
+
+  it("项目菜单可进入重命名并提交新名称", async () => {
+    const view = await renderProjectTreeItem("/projects/tools");
+
+    await fireEvent.click(view.getByLabelText("更多"));
+    await fireEvent.click(await view.findByRole("menuitem", { name: "重命名项目" }));
+    const input = await view.findByRole("textbox");
+    await fireEvent.update(input, "  Lilia Next  ");
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockInvoke).toHaveBeenCalledWith(PROJECT_RENAME_COMMAND, {
+      id: "lilia",
+      nextName: "Lilia Next",
+    }, undefined);
+    expect(view.queryByRole("textbox")).toBeNull();
   });
 
   it("中键点击项目行会在弹出窗口中创建对话", async () => {

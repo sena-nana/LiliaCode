@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { ref } from "vue";
+import { useFocusOnActivation } from "../../composables/useFocusOnActivation";
 
 const props = defineProps<{
   modelValue: string;
@@ -12,28 +13,7 @@ const emit = defineEmits<{
 }>();
 
 const commandInput = ref<HTMLTextAreaElement | null>(null);
-let focusSeq = 0;
-let disposed = false;
-
-watch(
-  () => props.editing,
-  (editing) => {
-    focusSeq += 1;
-    if (!editing || disposed) return;
-    const seq = focusSeq;
-    void nextTick(() => {
-      if (disposed || seq !== focusSeq || !props.editing) return;
-      const input = commandInput.value;
-      input?.focus();
-      input?.select();
-    });
-  },
-);
-
-onBeforeUnmount(() => {
-  disposed = true;
-  focusSeq += 1;
-});
+useFocusOnActivation(commandInput, () => props.editing, true);
 
 function updateCommand(event: Event) {
   emit("update:modelValue", (event.target as HTMLTextAreaElement).value);
