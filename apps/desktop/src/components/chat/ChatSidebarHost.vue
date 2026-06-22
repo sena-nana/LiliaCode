@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch, type Component } from "vue";
+import { computed, markRaw, ref, shallowRef, watch, type Component } from "vue";
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -9,6 +9,7 @@ import {
   type ChatSidebarContext,
 } from "../../composables/useChatSidebar";
 import { useResizablePane } from "../../composables/useResizablePane";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { measurePerfAsync } from "../../utils/perf";
 
 const props = defineProps<ChatSidebarContext>();
@@ -35,13 +36,12 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
 const panelComponentCache = new Map<string, Component>();
 const activePanelComponent = shallowRef<Component | null>(null);
 const activePanelLoading = ref(false);
-let disposed = false;
-let loadSeq = 0;
+const panelLoadEpoch = withComponentEpoch();
 
 watch(
   () => [sidebarState.open, activePanel.value?.id ?? ""] as const,
   async ([open, panelId]) => {
-    const seq = ++loadSeq;
+    const seq = panelLoadEpoch.nextEpoch();
     if (!open || !panelId) {
       activePanelComponent.value = null;
       activePanelLoading.value = false;
@@ -55,7 +55,7 @@ watch(
     }
     const cached = panelComponentCache.get(panel.id);
     if (cached) {
-      if (disposed || seq !== loadSeq) return;
+      if (!panelLoadEpoch.assertAlive(seq)) return;
       activePanelComponent.value = cached;
       activePanelLoading.value = false;
       return;
@@ -67,28 +67,23 @@ watch(
         () => panel.loader(),
         { detail: panel.id },
       ));
-      if (disposed || seq !== loadSeq || !sidebarState.open || activePanel.value?.id !== panel.id) return;
+      if (!panelLoadEpoch.assertAlive(seq) || !sidebarState.open || activePanel.value?.id !== panel.id) return;
       panelComponentCache.set(panel.id, component);
       activePanelComponent.value = component;
     } catch (err) {
-      if (disposed || seq !== loadSeq) return;
+      if (!panelLoadEpoch.assertAlive(seq)) return;
       console.error("[chat-sidebar] load panel failed", panel.id, err);
       if (sidebarState.open && activePanel.value?.id === panel.id) {
         activePanelComponent.value = null;
       }
     } finally {
-      if (!disposed && seq === loadSeq && sidebarState.open && activePanel.value?.id === panel.id) {
+      if (panelLoadEpoch.assertAlive(seq) && sidebarState.open && activePanel.value?.id === panel.id) {
         activePanelLoading.value = false;
       }
     }
   },
   { immediate: true },
 );
-
-onBeforeUnmount(() => {
-  disposed = true;
-  loadSeq += 1;
-});
 
 </script>
 

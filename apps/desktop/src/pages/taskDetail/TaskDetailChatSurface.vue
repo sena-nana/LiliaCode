@@ -29,6 +29,7 @@ import {
 } from "../../utils/perf";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useChatSidebar } from "../../composables/useChatSidebar";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import type {
   PendingAgentAction,
   PendingAgentActionResolution,
@@ -223,12 +224,11 @@ const sidebarHostActivated = ref(!props.isPopup && chatSidebar.state.open);
 let todoFloatIdleHandle: number | null = null;
 let cancelTodoFloatPaint: (() => void) | null = null;
 let cancelComposerActivationPaint: (() => void) | null = null;
-let todoFloatRenderSeq = 0;
-let composerActivationSeq = 0;
-let disposed = false;
+const todoFloatRenderEpoch = withComponentEpoch();
+const composerActivationEpoch = withComponentEpoch();
 
 function cancelTodoFloatRenderSchedule() {
-  todoFloatRenderSeq += 1;
+  todoFloatRenderEpoch.invalidate();
   cancelTodoFloatPaint?.();
   cancelTodoFloatPaint = null;
   if (todoFloatIdleHandle !== null) {
@@ -238,14 +238,13 @@ function cancelTodoFloatRenderSchedule() {
 }
 
 function cancelComposerActivationSchedule() {
-  composerActivationSeq += 1;
+  composerActivationEpoch.invalidate();
   cancelComposerActivationPaint?.();
   cancelComposerActivationPaint = null;
 }
 
-function canRenderTodoFloat(seq: number) {
-  return seq === todoFloatRenderSeq &&
-    !disposed &&
+function canRenderTodoFloat(epoch: number) {
+  return todoFloatRenderEpoch.assertAlive(epoch) &&
     !shouldRenderTodoFloat.value &&
     !!props.taskId &&
     props.shouldRenderChat &&
@@ -260,19 +259,19 @@ function scheduleTodoFloatRender() {
     !composerActivated.value
   ) return;
   cancelTodoFloatRenderSchedule();
-  const seq = ++todoFloatRenderSeq;
+  const epoch = todoFloatRenderEpoch.nextEpoch();
   cancelTodoFloatPaint = scheduleAfterPaint(() => {
     cancelTodoFloatPaint = null;
-    if (!canRenderTodoFloat(seq)) return;
+    if (!canRenderTodoFloat(epoch)) return;
     todoFloatIdleHandle = runWhenIdle(() => {
       todoFloatIdleHandle = null;
-      if (!canRenderTodoFloat(seq)) return;
+      if (!canRenderTodoFloat(epoch)) return;
       cancelTodoFloatPaint = scheduleAfterPaint(() => {
         cancelTodoFloatPaint = null;
-        if (!canRenderTodoFloat(seq)) return;
+        if (!canRenderTodoFloat(epoch)) return;
         todoFloatIdleHandle = runWhenIdle(() => {
           todoFloatIdleHandle = null;
-          if (!canRenderTodoFloat(seq)) return;
+          if (!canRenderTodoFloat(epoch)) return;
           shouldRenderTodoFloat.value = true;
         });
       });
@@ -289,11 +288,10 @@ function shouldPrioritizeComposerActivation() {
 function scheduleComposerActivation() {
   if (composerActivated.value || !props.shouldRenderChat) return;
   cancelComposerActivationSchedule();
-  const seq = ++composerActivationSeq;
+  const epoch = composerActivationEpoch.nextEpoch();
   const activate = () => {
     if (
-      seq !== composerActivationSeq ||
-      disposed ||
+      !composerActivationEpoch.assertAlive(epoch) ||
       composerActivated.value ||
       !props.shouldRenderChat
     ) return;
@@ -306,8 +304,7 @@ function scheduleComposerActivation() {
       cancelComposerActivationPaint = null;
     }
     if (
-      seq !== composerActivationSeq ||
-      disposed ||
+      !composerActivationEpoch.assertAlive(epoch) ||
       composerActivated.value ||
       !props.shouldRenderChat
     ) return;
@@ -327,12 +324,10 @@ function scheduleComposerActivation() {
 }
 
 onMounted(() => {
-  disposed = false;
   scheduleComposerActivation();
 });
 
 onBeforeUnmount(() => {
-  disposed = true;
   cancelComposerActivationSchedule();
   cancelTodoFloatRenderSchedule();
 });

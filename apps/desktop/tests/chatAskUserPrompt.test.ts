@@ -89,11 +89,15 @@ function placeEditableCaret(element: HTMLElement, offset: number) {
   selection?.addRange(range);
 }
 
+function getComposerTextbox(view: ReturnType<typeof render>): HTMLElement {
+  const element = view.container.querySelector(".chat-composer [role='textbox']");
+  expect(element).toBeInstanceOf(HTMLElement);
+  return element as HTMLElement;
+}
+
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
   const input = await waitFor(() => {
-    const element = view.container.querySelector(".chat-composer [role='textbox']");
-    expect(element).toBeInstanceOf(HTMLElement);
-    return element as HTMLElement;
+    return getComposerTextbox(view);
   });
   if (input instanceof HTMLTextAreaElement) {
     await fireEvent.update(input, text);
@@ -138,7 +142,7 @@ async function renderCodexTaskDetail(taskId = "t-002", options: { clearMockCalls
   }));
   const view = await renderTaskDetail(taskId);
   await waitFor(() => {
-    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(getComposerTextbox(view)).toBeInTheDocument();
   });
   if (clearMockCalls) mockInvoke.mockClear();
   return view;
@@ -1096,7 +1100,7 @@ describe("chat AskUser prompt", () => {
         expect(view.getByText("旧对话")).toBeInTheDocument();
       });
       expect(view.container).not.toHaveTextContent("[对话引用:");
-      expect(view.getByRole("textbox")).toHaveTextContent("继续 追问");
+      expect(getComposerTextbox(view)).toHaveTextContent("继续 追问");
     });
 
     it("无 rollback 的冷启动不清除预期 composer 内容", async () => {
@@ -1108,7 +1112,7 @@ describe("chat AskUser prompt", () => {
 
       const view = await renderCodexTaskDetail("t-002", { clearMockCalls: false });
       await waitFor(() => {
-        expect(view.getByRole("textbox")).toBeInTheDocument();
+        expect(getComposerTextbox(view)).toBeInTheDocument();
       });
       const ackCalls = mockInvoke.mock.calls.filter(
         ([cmd]) => cmd === CHAT_ACK_RESTORED_ROLLBACK_COMMAND

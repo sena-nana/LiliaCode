@@ -11,6 +11,7 @@ import { useRoute, useRouter } from "vue-router";
 import { isChatBackendKind, type ChatAttachment, type Project, type SuggestionItem, type SuggestionStatus } from "@lilia/contracts";
 import { useChatSidebar } from "../../composables/useChatSidebar";
 import { useSidebarDisplayMode } from "../../composables/useSidebarDisplayMode";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { useTaskAttachments } from "./useTaskAttachments";
 import { useTaskComposerController } from "./useTaskComposerController";
 import {
@@ -77,13 +78,14 @@ let cancelDeferredHydrationPaint: (() => void) | null = null;
 let cancelDragDropListenerInstallPaint: (() => void) | null = null;
 let cancelRuntimeListenerInstallPaint: (() => void) | null = null;
 let cancelContextUsageListenerInstallPaint: (() => void) | null = null;
+const taskDetailLifecycle = withComponentEpoch();
 
 function taskDetailPerfDetail() {
   return `${props.projectId ?? "orphan"}:${props.taskId}`;
 }
 
 function isCurrentTaskDetailRoute(projectId: string | undefined, taskId: string) {
-  return !taskDetailDisposed && props.projectId === projectId && props.taskId === taskId;
+  return taskDetailLifecycle.assertAlive() && props.projectId === projectId && props.taskId === taskId;
 }
 
 const conversation = measurePerfSync(
@@ -279,7 +281,7 @@ async function moveCurrentDraftToProject(projectId: string) {
     isTargetCurrent: (taskId) => isCurrentTaskDetailRoute(projectId, taskId),
     getDraftSnapshot: () => chatSurfaceRef.value?.getComposerDraftSnapshot() ?? { content: "" },
     restoreDraft: (content, nextAttachments) => {
-      if (taskDetailDisposed) return;
+      if (!taskDetailLifecycle.assertAlive()) return;
       sharedAttachments.value = nextAttachments;
       if (content.trim()) {
         composerController.onInsertDraftText(content);
@@ -318,19 +320,19 @@ function scheduleDeferredTaskDetailHydration() {
   const seq = ++deferredHydrationSeq;
   const cancelPaint = scheduleAfterPaint(() => {
     if (cancelDeferredHydrationPaint === cancelPaint) cancelDeferredHydrationPaint = null;
-    if (taskDetailDisposed || seq !== deferredHydrationSeq) return;
+    if (!taskDetailLifecycle.assertAlive() || seq !== deferredHydrationSeq) return;
     suggestionsReady.value = true;
     sidebarPanelsReady.value = true;
     deferredSettingsHydrationHandle = runWhenIdle(() => {
       deferredSettingsHydrationHandle = null;
-      if (taskDetailDisposed || seq !== deferredHydrationSeq) return;
+      if (!taskDetailLifecycle.assertAlive() || seq !== deferredHydrationSeq) return;
       void conversation.hydrateMainTaskRecord();
       void measurePerfAsync(
         "task-detail.agent-settings.load",
         () => composerController.loadAgentInteractionSettings(),
         { detail: taskDetailPerfDetail() },
       ).then(() => {
-        if (taskDetailDisposed || seq !== deferredHydrationSeq) return;
+        if (!taskDetailLifecycle.assertAlive() || seq !== deferredHydrationSeq) return;
         agentInteractionSettingsReady.value = true;
       }).catch((err) => {
         console.error("[task-detail] deferred agent settings hydration failed", err);
@@ -353,7 +355,6 @@ const unlisteners: UnlistenFn[] = [];
 let unregisterDebugPanel: (() => void) | null = null;
 let unregisterArchitecturePanel: (() => void) | null = null;
 let unregisterIabPanel: (() => void) | null = null;
-let taskDetailDisposed = false;
 let runtimeListenerInstallSeq = 0;
 let contextUsageListenerInstallSeq = 0;
 let dragDropListenerInstallSeq = 0;
@@ -400,7 +401,7 @@ function syncDebugPanelRegistration() {
   if (unregisterDebugPanel) return;
   void loadTaskDetailSidebarPanelsModule()
     .then((module) => {
-      if (taskDetailDisposed || seq !== debugPanelRegistrationSeq || unregisterDebugPanel) return;
+      if (!taskDetailLifecycle.assertAlive() || seq !== debugPanelRegistrationSeq || unregisterDebugPanel) return;
       if (!shouldRegisterDebugPanel()) return;
       unregisterDebugPanel = module.registerTaskDetailDebugSidebarPanel();
     })
@@ -419,7 +420,7 @@ function syncArchitecturePanelRegistration() {
   if (unregisterArchitecturePanel) return;
   void loadTaskDetailSidebarPanelsModule()
     .then((module) => {
-      if (taskDetailDisposed || seq !== architecturePanelRegistrationSeq || unregisterArchitecturePanel) {
+      if (!taskDetailLifecycle.assertAlive() || seq !== architecturePanelRegistrationSeq || unregisterArchitecturePanel) {
         return;
       }
       if (!shouldRegisterArchitecturePanel()) return;
@@ -440,7 +441,7 @@ function syncIabPanelRegistration() {
   if (unregisterIabPanel) return;
   void loadTaskDetailSidebarPanelsModule()
     .then((module) => {
-      if (taskDetailDisposed || seq !== iabPanelRegistrationSeq || unregisterIabPanel) return;
+      if (!taskDetailLifecycle.assertAlive() || seq !== iabPanelRegistrationSeq || unregisterIabPanel) return;
       if (!shouldRegisterIabPanel()) return;
       unregisterIabPanel = module.registerTaskDetailIabSidebarPanel();
     })
@@ -457,17 +458,17 @@ function scheduleDeferredDragDropListenerInstall() {
     if (cancelDragDropListenerInstallPaint === cancelPaint) {
       cancelDragDropListenerInstallPaint = null;
     }
-    if (taskDetailDisposed || seq !== dragDropListenerInstallSeq || dragDropListenerInstalled) return;
+    if (!taskDetailLifecycle.assertAlive() || seq !== dragDropListenerInstallSeq || dragDropListenerInstalled) return;
     dragDropListenerInstallHandle = runWhenIdle(() => {
       dragDropListenerInstallHandle = null;
-      if (taskDetailDisposed || seq !== dragDropListenerInstallSeq || dragDropListenerInstalled) {
+      if (!taskDetailLifecycle.assertAlive() || seq !== dragDropListenerInstallSeq || dragDropListenerInstalled) {
         return;
       }
       void measurePerfAsync(
         "task-detail.dragdrop.install",
         async () => {
           const unlisten = await attachmentController.installDragDropListener();
-          if (taskDetailDisposed || seq !== dragDropListenerInstallSeq) {
+          if (!taskDetailLifecycle.assertAlive() || seq !== dragDropListenerInstallSeq) {
             await unlisten();
             return;
           }
@@ -488,14 +489,14 @@ function installRuntimeListenersInBackground() {
     if (cancelRuntimeListenerInstallPaint === cancelPaint) {
       cancelRuntimeListenerInstallPaint = null;
     }
-    if (taskDetailDisposed || seq !== runtimeListenerInstallSeq) return;
+    if (!taskDetailLifecycle.assertAlive() || seq !== runtimeListenerInstallSeq) return;
     void measurePerfAsync(
       "task-detail.runtime-listeners.install",
       () => composerController.installRuntimeListeners(),
       { detail: `${props.projectId ?? "orphan"}:${props.taskId}` },
     )
       .then(async (listeners) => {
-        if (taskDetailDisposed || seq !== runtimeListenerInstallSeq) {
+        if (!taskDetailLifecycle.assertAlive() || seq !== runtimeListenerInstallSeq) {
           for (const unlisten of listeners) {
             try {
               await unlisten();
@@ -522,17 +523,17 @@ function installContextUsageListenerInBackground() {
     if (cancelContextUsageListenerInstallPaint === cancelPaint) {
       cancelContextUsageListenerInstallPaint = null;
     }
-    if (taskDetailDisposed || seq !== contextUsageListenerInstallSeq) return;
+    if (!taskDetailLifecycle.assertAlive() || seq !== contextUsageListenerInstallSeq) return;
     contextUsageListenerInstallHandle = runWhenIdle(async () => {
       contextUsageListenerInstallHandle = null;
-      if (taskDetailDisposed || seq !== contextUsageListenerInstallSeq) return;
+      if (!taskDetailLifecycle.assertAlive() || seq !== contextUsageListenerInstallSeq) return;
       try {
         const unlisten = await measurePerfAsync(
           "task-detail.context-usage-listener.install",
           () => composerController.installContextUsageListener(),
           { detail: `${props.projectId ?? "orphan"}:${props.taskId}` },
         );
-        if (taskDetailDisposed || seq !== contextUsageListenerInstallSeq) {
+        if (!taskDetailLifecycle.assertAlive() || seq !== contextUsageListenerInstallSeq) {
           await unlisten();
           return;
         }
@@ -565,7 +566,6 @@ function cancelContextUsageListenerInstallSchedule() {
 }
 
 onMounted(async () => {
-  taskDetailDisposed = false;
   installRuntimeListenersInBackground();
   installContextUsageListenerInBackground();
   scheduleDeferredDragDropListenerInstall();
@@ -575,13 +575,12 @@ onMounted(async () => {
     scheduleDeferredTaskDetailHydration();
   } else {
     await hydrateCriticalTaskDetailState();
-    if (taskDetailDisposed) return;
+    if (!taskDetailLifecycle.assertAlive()) return;
     scheduleDeferredTaskDetailHydration();
   }
 });
 
 onUnmounted(async () => {
-  taskDetailDisposed = true;
   runtimeListenerInstallSeq += 1;
   contextUsageListenerInstallSeq += 1;
   dragDropListenerInstallSeq += 1;
@@ -671,7 +670,7 @@ watch(
       }
       await hydrateCriticalTaskDetailState();
       if (
-        taskDetailDisposed ||
+        !taskDetailLifecycle.assertAlive() ||
         routeHydrationSeq !== deferredHydrationSeq ||
         routeProjectId !== props.projectId ||
         routeTaskId !== props.taskId
@@ -810,7 +809,7 @@ watch(
     if (!key) return;
     pendingSurfaceFocus.value = true;
     await nextTick();
-    if (taskDetailDisposed || key !== focusConversationKey.value) return;
+    if (!taskDetailLifecycle.assertAlive() || key !== focusConversationKey.value) return;
     if (!chatSurfaceRef.value) return;
     pendingSurfaceFocus.value = false;
     chatSurfaceRef.value.focusComposer();

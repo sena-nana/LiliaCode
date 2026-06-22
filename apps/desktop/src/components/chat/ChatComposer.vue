@@ -47,6 +47,7 @@ import {
   pendingAskInteractionKey,
   type PendingAsk,
 } from "../../composables/useAskUser";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import type { SearchResult } from "../../services/sessionSearch";
 import type {
   ToolConsentDecision,
@@ -339,11 +340,11 @@ let overflowTimerId: number | null = null;
 let actionBlockTimerId: number | null = null;
 let warmToolbarHandle: number | null = null;
 let cancelToolbarPaint: (() => void) | null = null;
-let composerDisposed = false;
+const composerLifecycle = withComponentEpoch();
+const pendingTextareaFocusEpoch = withComponentEpoch();
 let composerChromeRequested = false;
 let specialInputRefreshScheduled = false;
 let specialInputRefreshSeq = 0;
-let pendingTextareaFocusSeq = 0;
 let cancelSpecialInputRefreshPaint: (() => void) | null = null;
 const composerToolbarComponent: ShallowRef<Component | null> = shallowRef(null);
 const composerPendingEntryActionsComponent: ShallowRef<Component | null> = shallowRef(null);
@@ -365,7 +366,6 @@ const contextSearchController = shallowRef<ContextSearchController | null>(null)
 const slashCommandsController = shallowRef<SlashCommandsController | null>(null);
 let composerPasteLoad: Promise<ComposerPasteHandler> | null = null;
 let composerPasteHandler: ComposerPasteHandler | null = null;
-let composerPasteSeq = 0;
 
 let clearComposerContextState = () => {};
 
@@ -489,7 +489,7 @@ async function ensureConversationSearchLoaded() {
           scope.stop();
           throw new Error("failed to initialize conversation search");
         }
-        if (composerDisposed) {
+        if (!composerLifecycle.assertAlive()) {
           scope.stop();
           return controller;
         }
@@ -525,7 +525,7 @@ async function ensureContextSearchLoaded() {
           scope.stop();
           throw new Error("failed to initialize context search");
         }
-        if (composerDisposed) {
+        if (!composerLifecycle.assertAlive()) {
           scope.stop();
           return controller;
         }
@@ -569,7 +569,7 @@ async function ensureSlashCommandsLoaded() {
           scope.stop();
           throw new Error("failed to initialize slash commands");
         }
-        if (composerDisposed) {
+        if (!composerLifecycle.assertAlive()) {
           scope.stop();
           return controller;
         }
@@ -652,15 +652,14 @@ clearComposerContextState = () => {
 };
 
 async function ensureComposerPasteLoaded() {
-  if (composerDisposed) return NOOP_COMPOSER_PASTE_HANDLER;
+  if (!composerLifecycle.assertAlive()) return NOOP_COMPOSER_PASTE_HANDLER;
   if (composerPasteHandler) return composerPasteHandler;
   if (!composerPasteLoad) {
-    const seq = ++composerPasteSeq;
     composerPasteLoad = measurePerfAsync(
       "chat-composer.paste.handler.load",
       async () => {
         const module = await loadComposerPasteModule();
-        if (composerDisposed || seq !== composerPasteSeq) return NOOP_COMPOSER_PASTE_HANDLER;
+        if (!composerLifecycle.assertAlive()) return NOOP_COMPOSER_PASTE_HANDLER;
         const handler = module.useComposerPaste({
           richInput,
           clearContextSearch: clearComposerContextState,
@@ -705,7 +704,7 @@ function scheduleSpecialInputControllerLoad(
   load: () => Promise<unknown>,
 ) {
   const seq = ++specialInputControllerIntentSeq[kind];
-  if (composerDisposed || hasPending.value || seq !== specialInputControllerIntentSeq[kind]) return;
+  if (!composerLifecycle.assertAlive() || hasPending.value || seq !== specialInputControllerIntentSeq[kind]) return;
   if (!shouldLoad(text, cursor)) return;
   void load();
 }
@@ -758,7 +757,7 @@ function scheduleSpecialInputControllerRefresh() {
       cancelSpecialInputRefreshPaint = null;
     }
     specialInputRefreshScheduled = false;
-    if (composerDisposed || hasPending.value) return;
+    if (!composerLifecycle.assertAlive() || hasPending.value) return;
     const refreshSeq = specialInputRefreshSeq;
     measurePerfSync(
       "chat-composer.special-input.refresh",
@@ -806,14 +805,14 @@ const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
 async function ensureComposerToolbarLoaded() {
   if (composerToolbarComponent.value) return composerToolbarComponent.value;
   const component = await loadComposerToolbar();
-  if (!composerDisposed) composerToolbarComponent.value = component;
+  if (composerLifecycle.assertAlive()) composerToolbarComponent.value = component;
   return component;
 }
 
 async function ensureComposerPendingEntryActionsLoaded() {
   if (composerPendingEntryActionsComponent.value) return composerPendingEntryActionsComponent.value;
   const component = await loadComposerPendingEntryActions();
-  if (!composerDisposed) composerPendingEntryActionsComponent.value = component;
+  if (composerLifecycle.assertAlive()) composerPendingEntryActionsComponent.value = component;
   return component;
 }
 
@@ -827,7 +826,7 @@ function cancelToolbarWarmup() {
 }
 
 function requestComposerToolbar() {
-  if (composerDisposed || hasPending.value || composerToolbarComponent.value) return;
+  if (!composerLifecycle.assertAlive() || hasPending.value || composerToolbarComponent.value) return;
   void ensureComposerToolbarLoaded().catch(() => {
     // toolbar 按需加载失败时保留 fallback 发送按钮兜底。
   });
@@ -840,7 +839,7 @@ function requestComposerChrome() {
 
 function scheduleToolbarWarmup() {
   if (
-    composerDisposed ||
+    !composerLifecycle.assertAlive() ||
     hasPending.value ||
     composerToolbarComponent.value ||
     warmToolbarHandle !== null ||
@@ -848,13 +847,13 @@ function scheduleToolbarWarmup() {
   ) return;
   cancelToolbarPaint = scheduleAfterPaint(() => {
     cancelToolbarPaint = null;
-    if (composerDisposed || hasPending.value || composerToolbarComponent.value || warmToolbarHandle !== null) return;
+    if (!composerLifecycle.assertAlive() || hasPending.value || composerToolbarComponent.value || warmToolbarHandle !== null) return;
     warmToolbarHandle = runWhenIdle(() => {
       warmToolbarHandle = null;
-      if (composerDisposed || hasPending.value || composerToolbarComponent.value) return;
+      if (!composerLifecycle.assertAlive() || hasPending.value || composerToolbarComponent.value) return;
       cancelToolbarPaint = scheduleAfterPaint(() => {
         cancelToolbarPaint = null;
-        if (composerDisposed || hasPending.value || composerToolbarComponent.value) return;
+        if (!composerLifecycle.assertAlive() || hasPending.value || composerToolbarComponent.value) return;
         warmToolbarHandle = runWhenIdle(() => {
           warmToolbarHandle = null;
           requestComposerToolbar();
@@ -874,7 +873,6 @@ const interactionPhaseKey = computed(() => {
 });
 
 onMounted(() => {
-  composerDisposed = false;
   if (hasPendingComposerUi.value) {
     void ensureComposerPendingEntryActionsLoaded();
   }
@@ -986,7 +984,7 @@ function onRichPaste(event: ClipboardEvent) {
     return;
   }
   void ensureComposerPasteLoaded().then((paste) => {
-    if (composerDisposed) return;
+    if (!composerLifecycle.assertAlive()) return;
     paste.onPaste(event);
   }).catch((error) => {
     console.error("[chat] load paste handler failed", error);
@@ -1024,11 +1022,11 @@ function fillSuggestionPrompt(prompt: string) {
 }
 
 function blockActionsBriefly() {
-  if (composerDisposed) return;
+  if (!composerLifecycle.assertAlive()) return;
   actionsBlocked.value = true;
   if (actionBlockTimerId !== null) window.clearTimeout(actionBlockTimerId);
   actionBlockTimerId = window.setTimeout(() => {
-    if (composerDisposed) return;
+    if (!composerLifecycle.assertAlive()) return;
     actionsBlocked.value = false;
     actionBlockTimerId = null;
   }, COMPOSER_ACTION_BLOCK_MS);
@@ -1148,9 +1146,9 @@ function triggerConversationReference() {
     const prefix = start > 0 && !/\s/.test(inputValue.value[start - 1] ?? "") ? " #" : "#";
     inputValue.value = `${inputValue.value.slice(0, start)}${prefix}${inputValue.value.slice(end)}`;
     const nextOffset = start + prefix.length;
-    const seq = ++pendingTextareaFocusSeq;
+    const epoch = pendingTextareaFocusEpoch.nextEpoch();
     void nextTick(() => {
-      if (composerDisposed || seq !== pendingTextareaFocusSeq || !hasPending.value) return;
+      if (!pendingTextareaFocusEpoch.assertAlive(epoch) || !hasPending.value) return;
       const input = textarea.value;
       input?.focus();
       input?.setSelectionRange(nextOffset, nextOffset);
@@ -1202,11 +1200,11 @@ function onRichKeydown(e: KeyboardEvent) {
 }
 
 function queueResize() {
-  if (composerDisposed) return;
+  if (!composerLifecycle.assertAlive()) return;
   if (resizeFrameId !== null) return;
   resizeFrameId = window.requestAnimationFrame(() => {
     resizeFrameId = null;
-    if (composerDisposed) return;
+    if (!composerLifecycle.assertAlive()) return;
     resize();
   });
 }
@@ -1221,7 +1219,7 @@ function measureInputScrollHeight(el: HTMLTextAreaElement): number {
 }
 
 function resize() {
-  if (composerDisposed) return;
+  if (!composerLifecycle.assertAlive()) return;
   const el = textarea.value;
   if (!el) return;
   const currentHeight =
@@ -1247,7 +1245,7 @@ function resize() {
   el.scrollTop = 0;
   if (scrollHeight > COMPOSER_INPUT_MAX_HEIGHT) {
     overflowTimerId = window.setTimeout(() => {
-      if (composerDisposed || textarea.value !== el) return;
+      if (!composerLifecycle.assertAlive() || textarea.value !== el) return;
       el.style.overflowY = "auto";
       el.scrollTop = scrollHeight;
       overflowTimerId = null;
@@ -1348,9 +1346,9 @@ watch(
       inputValue.value = `${inputValue.value.slice(0, start)}${text}${inputValue.value.slice(end)}`;
       const nextOffset = start + text.length;
       richInput.inputSelection.value = nextOffset;
-      const seq = ++pendingTextareaFocusSeq;
+      const epoch = pendingTextareaFocusEpoch.nextEpoch();
       void nextTick(() => {
-        if (composerDisposed || seq !== pendingTextareaFocusSeq || !hasPending.value) return;
+        if (!pendingTextareaFocusEpoch.assertAlive(epoch) || !hasPending.value) return;
         const input = textarea.value;
         input?.focus();
         input?.setSelectionRange(nextOffset, nextOffset);
@@ -1366,10 +1364,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  composerDisposed = true;
   composerChromeRequested = false;
-  pendingTextareaFocusSeq += 1;
-  composerPasteSeq += 1;
   cancelSpecialInputControllerRefresh();
   cancelToolbarWarmup();
   conversationSearchScope?.stop();

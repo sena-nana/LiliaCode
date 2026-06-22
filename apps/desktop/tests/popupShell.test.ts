@@ -85,9 +85,10 @@ function encodeDraftQueryText(text: string): string {
 }
 
 function expectComposerFocused(view: ReturnType<typeof render>) {
-  const input = view.getByRole("textbox");
+  const input = view.container.querySelector(".chat-composer [role='textbox']");
+  expect(input).toBeInstanceOf(HTMLElement);
   expect(document.activeElement).toBe(input);
-  return input;
+  return input as HTMLElement;
 }
 
 describe("Popup shell", () => {
