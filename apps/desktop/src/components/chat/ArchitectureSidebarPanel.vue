@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   projectArchitectureChangeText,
   type ProjectArchitectureChangeRecord,
@@ -11,6 +11,7 @@ import {
   rollbackProjectArchitecture,
 } from "../../services/chat";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import MarkdownMermaid from "./MarkdownMermaid.vue";
 
 const props = defineProps<{
@@ -25,8 +26,7 @@ const changes = ref<ProjectArchitectureChangeRecord[]>([]);
 const loading = ref(false);
 const error = ref("");
 const rollingBack = ref(false);
-let disposed = false;
-let loadSeq = 0;
+const panelEpoch = withComponentEpoch();
 
 const hasGraphContent = computed(() =>
   Boolean(graph.value && (graph.value.nodes.length > 0 || graph.value.edges.length > 0 || graph.value.summary)),
@@ -41,8 +41,8 @@ const changeTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 async function loadArchitecture() {
-  if (disposed) return;
-  const seq = ++loadSeq;
+  if (!panelEpoch.assertAlive()) return;
+  const seq = panelEpoch.nextEpoch();
   if (!props.projectId) {
     graph.value = null;
     changes.value = [];
@@ -58,33 +58,33 @@ async function loadArchitecture() {
       getProjectArchitecture(projectId),
       listProjectArchitectureChanges(projectId, 20),
     ]);
-    if (disposed || seq !== loadSeq) return;
+    if (!panelEpoch.assertAlive(seq)) return;
     graph.value = nextGraph;
     changes.value = nextChanges;
   } catch (err) {
-    if (disposed || seq !== loadSeq) return;
+    if (!panelEpoch.assertAlive(seq)) return;
     error.value = String(err);
   } finally {
-    if (disposed || seq !== loadSeq) return;
+    if (!panelEpoch.assertAlive(seq)) return;
     loading.value = false;
   }
 }
 
 async function rollbackPreviousVersion() {
-  if (disposed || !props.projectId || rollingBack.value) return;
+  if (!panelEpoch.assertAlive() || !props.projectId || rollingBack.value) return;
   rollingBack.value = true;
   error.value = "";
   const projectId = props.projectId;
   const taskId = props.taskId;
   try {
     await rollbackProjectArchitecture(projectId, taskId, activeBackend.value);
-    if (disposed || projectId !== props.projectId || taskId !== props.taskId) return;
+    if (!panelEpoch.assertAlive() || projectId !== props.projectId || taskId !== props.taskId) return;
     await loadArchitecture();
   } catch (err) {
-    if (disposed) return;
+    if (!panelEpoch.assertAlive()) return;
     error.value = String(err);
   } finally {
-    if (disposed) return;
+    if (!panelEpoch.assertAlive()) return;
     rollingBack.value = false;
   }
 }
@@ -134,10 +134,6 @@ function eventTimeLabel(event: ProjectArchitectureChangeRecord): string {
 
 onMounted(loadArchitecture);
 watch(() => props.projectId, loadArchitecture);
-onBeforeUnmount(() => {
-  disposed = true;
-  loadSeq += 1;
-});
 </script>
 
 <template>

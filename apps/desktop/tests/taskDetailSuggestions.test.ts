@@ -20,6 +20,12 @@ import {
   setMockConversationSuggestionsDelay,
 } from "./tauriMock";
 
+function getComposerTextbox(view: ReturnType<typeof render>): HTMLElement {
+  const element = view.container.querySelector(".chat-composer [role='textbox']");
+  expect(element).toBeInstanceOf(HTMLElement);
+  return element as HTMLElement;
+}
+
 async function renderProjectDraftTaskDetail(taskId: string) {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(`/projects/lilia/tasks/${taskId}`);
@@ -36,7 +42,7 @@ async function renderProjectDraftTaskDetail(taskId: string) {
   });
   await vi.dynamicImportSettled();
   await waitFor(() => {
-    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(getComposerTextbox(view)).toBeInTheDocument();
   }, { timeout: 3000 });
   return view;
 }
@@ -56,7 +62,7 @@ async function renderOrphanDraftTaskDetail(taskId: string) {
   });
   await vi.dynamicImportSettled();
   await waitFor(() => {
-    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(getComposerTextbox(view)).toBeInTheDocument();
   }, { timeout: 3000 });
   return view;
 }
@@ -77,13 +83,13 @@ async function renderRouterView(initialRoute: string) {
   });
   await vi.dynamicImportSettled();
   await waitFor(() => {
-    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(getComposerTextbox(view)).toBeInTheDocument();
   }, { timeout: 3000 });
   return { ...view, router };
 }
 
 function expectComposerFocused(view: ReturnType<typeof render>) {
-  const input = view.getByRole("textbox");
+  const input = getComposerTextbox(view);
   expect(document.activeElement).toBe(input);
 }
 
@@ -149,7 +155,7 @@ describe("TaskDetail conversation suggestions", () => {
 
     await fireEvent.click(view.getByText("跟进 GitHub 建议来源"));
 
-    expect(view.getByRole("textbox")).toHaveTextContent("请继续跟进 PR #12 的建议来源展示。");
+    expect(getComposerTextbox(view)).toHaveTextContent("请继续跟进 PR #12 的建议来源展示。");
   });
 
   it("点击来点灵感会强制刷新新对话建议并显示来源加载文案", async () => {
@@ -196,7 +202,7 @@ describe("TaskDetail conversation suggestions", () => {
       expect(view.getByRole("button", { name: "来点灵感？" })).toBeInTheDocument();
     });
 
-    const input = view.getByRole("textbox");
+    const input = getComposerTextbox(view);
     await fireEvent.input(input, { target: { textContent: "继续写草稿" } });
 
     expect(input).toHaveTextContent("继续写草稿");
@@ -247,7 +253,7 @@ describe("TaskDetail conversation suggestions", () => {
         );
       });
 
-      const input = view.getByRole("textbox");
+      const input = getComposerTextbox(view);
       await fireEvent.input(input, { target: { textContent: "先自己输入" } });
 
       expect(input).toHaveTextContent("先自己输入");
@@ -297,7 +303,7 @@ describe("TaskDetail conversation suggestions", () => {
     const draft = createDraftOrphan();
     const view = await renderRouterView(`/chats/${draft.id}`);
 
-    const input = await view.findByRole("textbox");
+    const input = await waitFor(() => getComposerTextbox(view));
     await fireEvent.input(input, { target: { textContent: "把这个想法放进项目" } });
     const projectPicker = await view.findByLabelText("选择项目");
     await fireEvent.change(projectPicker, {
@@ -310,7 +316,7 @@ describe("TaskDetail conversation suggestions", () => {
       );
     });
     await waitFor(() => {
-      expect(view.getByRole("textbox")).toHaveTextContent("把这个想法放进项目");
+      expect(getComposerTextbox(view)).toHaveTextContent("把这个想法放进项目");
     });
   });
 });

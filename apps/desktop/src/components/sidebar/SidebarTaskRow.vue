@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
@@ -7,6 +7,7 @@ import type { ConversationActivity } from "../../composables/useConversationActi
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
+import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import { scheduleTaskDetailPreload } from "../../router";
 import { archiveTask, removeArchivedTaskFromLists, toggleTaskPin } from "../../services/tasksStore";
 import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";
@@ -44,7 +45,8 @@ const confirming = ref(false);
 const taskDepthStyle = computed(() => ({
   "--task-tree-depth": String(Math.min(Math.max(props.depth ?? 0, 0), 6)),
 }));
-let disposed = false;
+const rowLifecycle = withComponentEpoch();
+const worktreeBindingEpoch = withComponentEpoch();
 const merging = ref(false);
 const hasWorktree = ref(false);
 
@@ -56,10 +58,11 @@ const activityLabel: Record<ConversationActivity, string> = {
 };
 
 async function archiveCurrentTask() {
-  if (disposed) return;
+  if (!rowLifecycle.assertAlive()) return;
   try {
     if (hasWorktree.value && await shouldCleanupWorktreeOnArchive()) {
       const result = await cleanupArchiveWorktree(props.task.id);
+      if (!rowLifecycle.assertAlive()) return;
       confirming.value = false;
       if (result.archived) {
         removeArchivedTaskFromLists(props.task.id);
@@ -68,11 +71,11 @@ async function archiveCurrentTask() {
       return;
     }
     const archived = await (props.archive ?? archiveTask)(props.task.id);
-    if (disposed) return;
+    if (!rowLifecycle.assertAlive()) return;
     confirming.value = false;
     if (archived) emit("archived", props.task.id);
   } catch (err) {
-    if (disposed) return;
+    if (!rowLifecycle.assertAlive()) return;
     confirming.value = false;
     emit("error", `归档对话失败：${String(err)}`);
   }
@@ -88,40 +91,48 @@ async function shouldCleanupWorktreeOnArchive(): Promise<boolean> {
 }
 
 async function refreshWorktreeBinding() {
+  const seq = worktreeBindingEpoch.nextEpoch();
+  const taskId = props.task.id;
   if (!props.projectId) {
     hasWorktree.value = false;
     return;
   }
   try {
-    hasWorktree.value = Boolean(await getTaskWorktree(props.task.id));
+    const nextHasWorktree = Boolean(await getTaskWorktree(taskId));
+    if (!worktreeBindingEpoch.assertAlive(seq) || taskId !== props.task.id) return;
+    hasWorktree.value = nextHasWorktree;
   } catch {
+    if (!worktreeBindingEpoch.assertAlive(seq) || taskId !== props.task.id) return;
     hasWorktree.value = false;
   }
 }
 
 async function mergeDeleteArchiveCurrentTask() {
-  if (merging.value) return;
+  if (!rowLifecycle.assertAlive() || merging.value) return;
   merging.value = true;
   try {
     const result = await mergeDeleteArchiveWorktree(props.task.id);
+    if (!rowLifecycle.assertAlive()) return;
     if (result.archived) {
       removeArchivedTaskFromLists(props.task.id);
       emit("archived", props.task.id);
     }
   } catch (err) {
+    if (!rowLifecycle.assertAlive()) return;
     emit("error", `合并并删除工作树失败：${String(err)}`);
   } finally {
+    if (!rowLifecycle.assertAlive()) return;
     confirming.value = false;
     merging.value = false;
   }
 }
 
 async function toggleCurrentTaskPin() {
-  if (disposed) return;
+  if (!rowLifecycle.assertAlive()) return;
   try {
     await toggleTaskPin(props.task.id);
   } catch (err) {
-    if (!disposed) emit("error", `切换对话置顶失败：${String(err)}`);
+    if (rowLifecycle.assertAlive()) emit("error", `切换对话置顶失败：${String(err)}`);
   }
 }
 
@@ -152,20 +163,20 @@ function preloadConversationDetail() {
 }
 
 async function openInPopup() {
-  if (disposed) return;
+  if (!rowLifecycle.assertAlive()) return;
   try {
     await openPopupTask(props.task.id, props.projectId);
   } catch (err) {
-    if (!disposed) emit("error", `打开弹出窗口对话失败：${String(err)}`);
+    if (rowLifecycle.assertAlive()) emit("error", `打开弹出窗口对话失败：${String(err)}`);
   }
 }
 
 async function askInPopup() {
-  if (disposed) return;
+  if (!rowLifecycle.assertAlive()) return;
   try {
     await openPopupChildQuestion(props.task.id, props.projectId);
   } catch (err) {
-    if (!disposed) emit("error", `创建弹出窗口子对话失败：${String(err)}`);
+    if (rowLifecycle.assertAlive()) emit("error", `创建弹出窗口子对话失败：${String(err)}`);
   }
 }
 
@@ -230,10 +241,6 @@ function onClick() {
 
 onMounted(refreshWorktreeBinding);
 watch(() => props.task.id, refreshWorktreeBinding);
-
-onBeforeUnmount(() => {
-  disposed = true;
-});
 </script>
 
 <template>
