@@ -113,7 +113,7 @@ class RemotePayloadParserTest {
                     "status": "blocked",
                     "createdAt": 1710000000000
                   },
-                  "runtime": { "phase": "waiting_user" }
+                  "runtime": { "phase": "waiting_user", "processSessionId": "jsonl-process-1" }
                 }
                 """.trimIndent(),
             ),
@@ -158,6 +158,7 @@ class RemotePayloadParserTest {
 
         assertEquals("blocked", detail.task.status)
         assertEquals("waiting_user", detail.runtimePhase)
+        assertEquals("jsonl-process-1", detail.processSessionId)
         assertEquals("Assistant", detail.timeline[0].title)
         assertEquals("Ready", detail.timeline[0].summary)
         assertNotNull(detail.pendingInteraction)
@@ -218,6 +219,7 @@ class RemotePayloadParserTest {
         assertEquals("Untitled task", detail.task.title)
         assertEquals("waiting", detail.task.status)
         assertEquals("waiting", detail.runtimePhase)
+        assertEquals(null, detail.processSessionId)
     }
 
     @Test

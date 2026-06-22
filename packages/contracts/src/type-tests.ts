@@ -456,6 +456,7 @@ export type ChatRuntimeSnapshotContextUsageTypeTest = Assert<
       phase: "running";
       backend: "codex";
       turnId: "turn-1";
+      processSessionId: "jsonl-process-1";
       queuedCount: 0;
       pendingRollback: false;
       pendingResetCleanup: false;

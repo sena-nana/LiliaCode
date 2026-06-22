@@ -488,6 +488,8 @@ pub(crate) struct ChatRuntimeSnapshot {
     pub(crate) phase: String,
     pub(crate) backend: Option<String>,
     pub(crate) turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) process_session_id: Option<String>,
     pub(crate) queued_count: usize,
     pub(crate) pending_rollback: bool,
     pub(crate) pending_reset_cleanup: bool,

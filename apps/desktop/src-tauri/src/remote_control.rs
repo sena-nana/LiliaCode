@@ -660,6 +660,16 @@ fn dispatch_request(
                 .and_then(JsonValue::as_str)
                 .map(ToString::to_string);
             let chat_store = app.state::<chat::state::ChatStore>();
+            if let Some(command) = runtime_command.clone() {
+                if is_process_session_control_command(&command) {
+                    chat::commands::chat_send_process_session_command(task_id, command, chat_store)
+                        .map_err(RemoteDispatchError::unavailable)?;
+                    return Ok(json!({
+                        "type": "chat.send",
+                        "result": { "accepted": true },
+                    }));
+                }
+            }
             let result = chat::commands::chat_send_message(
                 app.clone(),
                 task_id,
@@ -729,6 +739,13 @@ fn dispatch_request(
             "不支持的远控请求：{request_type}"
         ))),
     }
+}
+
+fn is_process_session_control_command(command: &chat::types::ChatRuntimeCommand) -> bool {
+    matches!(
+        command,
+        chat::types::ChatRuntimeCommand::ProcessSession { action, .. } if action != "spawn"
+    )
 }
 
 pub(crate) fn record_pending_interaction(
@@ -1731,6 +1748,31 @@ mod tests {
         ensure_host_accepts_request(&conn, "connection.capabilities.read").unwrap();
         enable_host(&conn);
         ensure_host_accepts_request(&conn, "tasks.list").unwrap();
+    }
+
+    #[test]
+    fn remote_process_session_controls_reuse_chat_send_runtime_command() {
+        let write_stdin: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "write_stdin",
+            "stdin": "q"
+        }))
+        .unwrap();
+        let kill: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "kill"
+        }))
+        .unwrap();
+        let spawn: chat::types::ChatRuntimeCommand = serde_json::from_value(json!({
+            "type": "process_session",
+            "action": "spawn",
+            "command": "npm test"
+        }))
+        .unwrap();
+
+        assert!(is_process_session_control_command(&write_stdin));
+        assert!(is_process_session_control_command(&kill));
+        assert!(!is_process_session_control_command(&spawn));
     }
 
     #[test]
