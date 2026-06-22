@@ -14,11 +14,10 @@ use super::types::{
     HookDocumentUpdateInput, HookDocumentView, HookHandlerUpdateInput, HookHandlerView,
     HookSourceSummary, HookTrustState, HooksOverview,
 };
+use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
-const BACKEND_CLAUDE: &str = "claude";
-const BACKEND_CODEX: &str = "codex";
-const FORMAT_CLAUDE_SETTINGS_JSON: &str = "claude_settings_json";
-const FORMAT_CODEX_HOOKS_JSON: &str = "codex_hooks_json";
+pub(super) const FORMAT_CLAUDE_SETTINGS_JSON: &str = "claude_settings_json";
+pub(super) const FORMAT_CODEX_HOOKS_JSON: &str = "codex_hooks_json";
 const FORMAT_CODEX_CONFIG_TOML: &str = "codex_config_toml";
 const FORMAT_MANAGED_SETTINGS: &str = "managed_settings";
 const FORMAT_REQUIREMENTS_TOML: &str = "requirements_toml";
@@ -61,18 +60,26 @@ pub fn read_hook_source<R: Runtime>(
     source: &HookSourceSummary,
 ) -> Result<HookDocumentView, String> {
     match (source.backend.as_str(), source.format.as_str()) {
-        (BACKEND_CLAUDE, FORMAT_CLAUDE_SETTINGS_JSON) => {
-            read_json_source(source.clone(), JsonRootKind::HooksField, ProviderFlavor::Claude)
-        }
-        (BACKEND_CLAUDE, FORMAT_MANAGED_SETTINGS) => {
-            read_json_source(source.clone(), JsonRootKind::HooksField, ProviderFlavor::Claude)
-        }
-        (BACKEND_CLAUDE, FORMAT_PLUGIN_MANIFEST) => {
-            read_json_source(source.clone(), JsonRootKind::HooksField, ProviderFlavor::Claude)
-        }
-        (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => {
-            read_json_source(source.clone(), JsonRootKind::HooksField, ProviderFlavor::Codex)
-        }
+        (BACKEND_CLAUDE, FORMAT_CLAUDE_SETTINGS_JSON) => read_json_source(
+            source.clone(),
+            JsonRootKind::HooksField,
+            ProviderFlavor::Claude,
+        ),
+        (BACKEND_CLAUDE, FORMAT_MANAGED_SETTINGS) => read_json_source(
+            source.clone(),
+            JsonRootKind::HooksField,
+            ProviderFlavor::Claude,
+        ),
+        (BACKEND_CLAUDE, FORMAT_PLUGIN_MANIFEST) => read_json_source(
+            source.clone(),
+            JsonRootKind::HooksField,
+            ProviderFlavor::Claude,
+        ),
+        (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => read_json_source(
+            source.clone(),
+            JsonRootKind::HooksField,
+            ProviderFlavor::Codex,
+        ),
         (BACKEND_CODEX, FORMAT_CODEX_CONFIG_TOML) => read_codex_toml_source(source.clone()),
         (BACKEND_CODEX, FORMAT_REQUIREMENTS_TOML) => read_codex_requirements_source(source.clone()),
         _ => Err(format!(
@@ -111,12 +118,18 @@ pub fn update_hook_source<R: Runtime>(
         return Err("当前 hooks source 为只读，不能保存".to_string());
     }
     match (source.backend.as_str(), source.format.as_str()) {
-        (BACKEND_CLAUDE, FORMAT_CLAUDE_SETTINGS_JSON) => {
-            update_json_source(source, input, JsonRootKind::HooksField, ProviderFlavor::Claude)
-        }
-        (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => {
-            update_json_source(source, input, JsonRootKind::HooksField, ProviderFlavor::Codex)
-        }
+        (BACKEND_CLAUDE, FORMAT_CLAUDE_SETTINGS_JSON) => update_json_source(
+            source,
+            input,
+            JsonRootKind::HooksField,
+            ProviderFlavor::Claude,
+        ),
+        (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => update_json_source(
+            source,
+            input,
+            JsonRootKind::HooksField,
+            ProviderFlavor::Codex,
+        ),
         _ => Err("当前 hooks source 不支持结构化保存".to_string()),
     }?;
     read_hook_source(app, source)
@@ -137,8 +150,7 @@ pub fn delete_hook_source<R: Runtime>(
         (BACKEND_CODEX, FORMAT_CODEX_HOOKS_JSON) => {
             let path = PathBuf::from(&source.path);
             if path.exists() {
-                fs::remove_file(&path)
-                    .map_err(|e| format!("删除 {} 失败：{e}", path.display()))?;
+                fs::remove_file(&path).map_err(|e| format!("删除 {} 失败：{e}", path.display()))?;
             }
             Ok(())
         }
@@ -152,7 +164,12 @@ pub fn set_hook_source_enabled<R: Runtime>(
     enabled: bool,
 ) -> Result<HookSourceSummary, String> {
     if enabled {
-        create_hook_source(app, &source.backend, &source.scope, project_cwd_from_source(source).as_deref())
+        create_hook_source(
+            app,
+            &source.backend,
+            &source.scope,
+            project_cwd_from_source(source).as_deref(),
+        )
     } else {
         delete_hook_source(app, source)?;
         Ok(read_hook_source(app, source)?.source)
@@ -185,11 +202,23 @@ fn project_cwd_from_source(source: &HookSourceSummary) -> Option<String> {
     }
     let path = Path::new(&source.path);
     let parent = path.parent()?;
-    if parent.file_name()?.to_string_lossy().eq_ignore_ascii_case(CLAUDE_DIR) {
-        return parent.parent().map(|value| value.to_string_lossy().to_string());
+    if parent
+        .file_name()?
+        .to_string_lossy()
+        .eq_ignore_ascii_case(CLAUDE_DIR)
+    {
+        return parent
+            .parent()
+            .map(|value| value.to_string_lossy().to_string());
     }
-    if parent.file_name()?.to_string_lossy().eq_ignore_ascii_case(".codex") {
-        return parent.parent().map(|value| value.to_string_lossy().to_string());
+    if parent
+        .file_name()?
+        .to_string_lossy()
+        .eq_ignore_ascii_case(".codex")
+    {
+        return parent
+            .parent()
+            .map(|value| value.to_string_lossy().to_string());
     }
     None
 }
@@ -216,7 +245,9 @@ fn editable_source_template<R: Runtime>(
             scope,
             FORMAT_CLAUDE_SETTINGS_JSON,
             "Claude User Hooks",
-            claude_user_settings_path(app)?.to_string_lossy().to_string(),
+            claude_user_settings_path(app)?
+                .to_string_lossy()
+                .to_string(),
             false,
             true,
             Vec::new(),
@@ -229,7 +260,9 @@ fn editable_source_template<R: Runtime>(
             scope,
             FORMAT_CLAUDE_SETTINGS_JSON,
             "Claude Project Hooks",
-            claude_project_settings_path(project_cwd)?.to_string_lossy().to_string(),
+            claude_project_settings_path(project_cwd)?
+                .to_string_lossy()
+                .to_string(),
             false,
             true,
             Vec::new(),
@@ -242,7 +275,9 @@ fn editable_source_template<R: Runtime>(
             scope,
             FORMAT_CLAUDE_SETTINGS_JSON,
             "Claude Local Hooks",
-            claude_local_settings_path(project_cwd)?.to_string_lossy().to_string(),
+            claude_local_settings_path(project_cwd)?
+                .to_string_lossy()
+                .to_string(),
             false,
             true,
             Vec::new(),
@@ -268,7 +303,9 @@ fn editable_source_template<R: Runtime>(
             scope,
             FORMAT_CODEX_HOOKS_JSON,
             "Codex Project Hooks",
-            codex_project_hooks_path(project_cwd)?.to_string_lossy().to_string(),
+            codex_project_hooks_path(project_cwd)?
+                .to_string_lossy()
+                .to_string(),
             false,
             true,
             Vec::new(),
@@ -371,7 +408,9 @@ fn claude_hook_sources<R: Runtime>(
             HookTrustState::Managed,
             Some("Claude managed settings".to_string()),
         );
-        if let Ok(document) = read_json_source(source, JsonRootKind::HooksField, ProviderFlavor::Claude) {
+        if let Ok(document) =
+            read_json_source(source, JsonRootKind::HooksField, ProviderFlavor::Claude)
+        {
             warnings.extend(document.warnings.clone());
             if document.source.exists {
                 sources.push(document.source);
@@ -545,7 +584,8 @@ fn annotate_codex_mixed_source_warnings(sources: &mut [HookSourceSummary]) {
             continue;
         }
         for source in sources.iter_mut().filter(|source| {
-            source.backend == BACKEND_CODEX && source.scope == scope
+            source.backend == BACKEND_CODEX
+                && source.scope == scope
                 && (source.format == FORMAT_CODEX_HOOKS_JSON
                     || source.format == FORMAT_CODEX_CONFIG_TOML)
         }) {
@@ -698,7 +738,9 @@ fn read_codex_toml_source(mut source: HookSourceSummary) -> Result<HookDocumentV
     })
 }
 
-fn read_codex_requirements_source(mut source: HookSourceSummary) -> Result<HookDocumentView, String> {
+fn read_codex_requirements_source(
+    mut source: HookSourceSummary,
+) -> Result<HookDocumentView, String> {
     let path = PathBuf::from(&source.path);
     let (doc, raw_text, warnings) = read_toml_document(&path)?;
     let hooks_item = doc
@@ -707,9 +749,8 @@ fn read_codex_requirements_source(mut source: HookSourceSummary) -> Result<HookD
         .cloned()
         .unwrap_or(Item::None);
     let parse = parse_toml_hook_item(&hooks_item, ProviderFlavor::Codex);
-    let mut limitations = vec![
-        "当前来源来自 requirements.toml，仅用于展示约束与托管 hooks。".to_string(),
-    ];
+    let mut limitations =
+        vec!["当前来源来自 requirements.toml，仅用于展示约束与托管 hooks。".to_string()];
     if let Some(doc) = doc.as_ref() {
         if doc
             .as_table()
@@ -755,13 +796,20 @@ fn readonly_limitations_for_source(source: &HookSourceSummary) -> Vec<String> {
     }
 }
 
-fn read_json_value(path: &Path) -> Result<(Option<JsonValue>, Option<String>, Vec<String>), String> {
+fn read_json_value(
+    path: &Path,
+) -> Result<(Option<JsonValue>, Option<String>, Vec<String>), String> {
     if !path.exists() {
         return Ok((None, None, Vec::new()));
     }
-    let text = fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
     if text.trim().is_empty() {
-        return Ok((Some(JsonValue::Object(JsonMap::new())), Some(text), Vec::new()));
+        return Ok((
+            Some(JsonValue::Object(JsonMap::new())),
+            Some(text),
+            Vec::new(),
+        ));
     }
     match serde_json::from_str::<JsonValue>(&text) {
         Ok(value) => Ok((Some(value), Some(text), Vec::new())),
@@ -773,17 +821,24 @@ fn read_json_value(path: &Path) -> Result<(Option<JsonValue>, Option<String>, Ve
     }
 }
 
-fn read_toml_document(path: &Path) -> Result<(Option<DocumentMut>, Option<String>, Vec<String>), String> {
+fn read_toml_document(
+    path: &Path,
+) -> Result<(Option<DocumentMut>, Option<String>, Vec<String>), String> {
     if !path.exists() {
         return Ok((None, None, Vec::new()));
     }
-    let text = fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
     if text.trim().is_empty() {
         return Ok((Some(DocumentMut::new()), Some(text), Vec::new()));
     }
     match text.parse::<DocumentMut>() {
         Ok(value) => Ok((Some(value), Some(text), Vec::new())),
-        Err(err) => Ok((Some(DocumentMut::new()), Some(text), vec![format!("{} 不是合法 TOML：{err}", path.display())])),
+        Err(err) => Ok((
+            Some(DocumentMut::new()),
+            Some(text),
+            vec![format!("{} 不是合法 TOML：{err}", path.display())],
+        )),
     }
 }
 
@@ -845,8 +900,10 @@ fn build_hook_object_from_handlers(
     handlers: &[HookHandlerUpdateInput],
     flavor: ProviderFlavor,
 ) -> Result<JsonValue, String> {
-    let mut events: BTreeMap<String, Vec<(Option<String>, Option<String>, JsonMap<String, JsonValue>)>> =
-        BTreeMap::new();
+    let mut events: BTreeMap<
+        String,
+        Vec<(Option<String>, Option<String>, JsonMap<String, JsonValue>)>,
+    > = BTreeMap::new();
     for handler in handlers {
         let event = handler.event.trim();
         if event.is_empty() {
@@ -858,15 +915,24 @@ fn build_hook_object_from_handlers(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
-        let group_advanced = parse_json_map(handler.group_advanced_json.as_deref(), "groupAdvancedJson")?;
+        let group_advanced =
+            parse_json_map(handler.group_advanced_json.as_deref(), "groupAdvancedJson")?;
         let advanced = parse_json_map(handler.advanced_json.as_deref(), "advancedJson")?;
         let mut handler_object = JsonMap::new();
         handler_object.insert(
             "type".to_string(),
             JsonValue::String(handler.handler_type.trim().to_string()),
         );
-        if let Some(command) = handler.command.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-            handler_object.insert("command".to_string(), JsonValue::String(command.to_string()));
+        if let Some(command) = handler
+            .command
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            handler_object.insert(
+                "command".to_string(),
+                JsonValue::String(command.to_string()),
+            );
         }
         if let Some(command_windows) = handler
             .command_windows
@@ -896,7 +962,10 @@ fn build_hook_object_from_handlers(
         merge_json_maps(&mut handler_object, advanced);
         let group_marker = matcher.clone();
         let event_groups = events.entry(event.to_string()).or_default();
-        if let Some(index) = event_groups.iter().position(|(existing_matcher, _, _)| *existing_matcher == group_marker) {
+        if let Some(index) = event_groups
+            .iter()
+            .position(|(existing_matcher, _, _)| *existing_matcher == group_marker)
+        {
             if let Some(group) = event_groups.get_mut(index) {
                 let entry = group
                     .2
@@ -922,7 +991,9 @@ fn build_hook_object_from_handlers(
     for (event, groups) in events {
         let mut event_groups = Vec::new();
         for (matcher, group_advanced_json, mut group) in groups {
-            let hooks = group.remove("__hooks").unwrap_or_else(|| JsonValue::Array(Vec::new()));
+            let hooks = group
+                .remove("__hooks")
+                .unwrap_or_else(|| JsonValue::Array(Vec::new()));
             let mut group_object = group;
             if let Some(matcher) = matcher {
                 group_object.insert("matcher".to_string(), JsonValue::String(matcher));
@@ -959,7 +1030,10 @@ fn merge_json_maps(target: &mut JsonMap<String, JsonValue>, source: JsonMap<Stri
     }
 }
 
-fn parse_hook_handlers_from_hook_object(value: &JsonValue, flavor: ProviderFlavor) -> HookParseResult {
+fn parse_hook_handlers_from_hook_object(
+    value: &JsonValue,
+    flavor: ProviderFlavor,
+) -> HookParseResult {
     let Some(object) = value.as_object() else {
         return HookParseResult {
             handlers: Vec::new(),
@@ -1010,16 +1084,19 @@ fn parse_hook_handlers_from_hook_object(value: &JsonValue, flavor: ProviderFlavo
                     .or_else(|| handler_obj.get("command_windows"))
                     .and_then(JsonValue::as_str)
                     .map(|value| value.to_string());
-                let timeout_seconds = handler_obj
-                    .get("timeout")
-                    .and_then(|value| value.as_u64().or_else(|| value.as_i64().and_then(|num| u64::try_from(num).ok())));
+                let timeout_seconds = handler_obj.get("timeout").and_then(|value| {
+                    value
+                        .as_u64()
+                        .or_else(|| value.as_i64().and_then(|num| u64::try_from(num).ok()))
+                });
                 let supported = match flavor {
                     ProviderFlavor::Codex => handler_type == "command",
                     ProviderFlavor::Claude => true,
                 };
                 let executable = match flavor {
                     ProviderFlavor::Codex => {
-                        supported && handler_obj.get("async").and_then(JsonValue::as_bool) != Some(true)
+                        supported
+                            && handler_obj.get("async").and_then(JsonValue::as_bool) != Some(true)
                     }
                     ProviderFlavor::Claude => true,
                 };
@@ -1030,7 +1107,8 @@ fn parse_hook_handlers_from_hook_object(value: &JsonValue, flavor: ProviderFlavo
                 if flavor == ProviderFlavor::Codex
                     && handler_obj.get("async").and_then(JsonValue::as_bool) == Some(true)
                 {
-                    row_warnings.push("Codex 当前会跳过 async = true 的 command hook。".to_string());
+                    row_warnings
+                        .push("Codex 当前会跳过 async = true 的 command hook。".to_string());
                 }
                 handlers.push(HookHandlerView {
                     id: format!("{event}:{group_index}:{handler_index}"),
@@ -1052,7 +1130,14 @@ fn parse_hook_handlers_from_hook_object(value: &JsonValue, flavor: ProviderFlavo
                     group_advanced_json: group_advanced.clone(),
                     advanced_json: advanced_json_string(
                         handler_obj,
-                        &["type", "command", "commandWindows", "command_windows", "timeout", "statusMessage"],
+                        &[
+                            "type",
+                            "command",
+                            "commandWindows",
+                            "command_windows",
+                            "timeout",
+                            "statusMessage",
+                        ],
                     ),
                     warnings: row_warnings,
                 });
@@ -1082,28 +1167,38 @@ fn parse_toml_hook_item(value: &Item, flavor: ProviderFlavor) -> HookParseResult
             continue;
         };
         for (group_index, group) in groups.iter().enumerate() {
-            let matcher = group.get("matcher").and_then(Item::as_str).map(|value| value.to_string());
+            let matcher = group
+                .get("matcher")
+                .and_then(Item::as_str)
+                .map(|value| value.to_string());
             let Some(group_handlers) = group.get("hooks").and_then(Item::as_array_of_tables) else {
                 warnings.push(format!("hooks.{event}[{group_index}].hooks 不是数组表"));
                 continue;
             };
             let group_advanced_json = toml_table_advanced_json(group, &["matcher", "hooks"]);
             for (handler_index, handler) in group_handlers.iter().enumerate() {
-                let handler_type = handler.get("type").and_then(Item::as_str).unwrap_or("command");
+                let handler_type = handler
+                    .get("type")
+                    .and_then(Item::as_str)
+                    .unwrap_or("command");
                 let async_enabled = handler.get("async").and_then(Item::as_bool) == Some(true);
                 let mut row_warnings = Vec::new();
                 if flavor == ProviderFlavor::Codex && handler_type != "command" {
                     row_warnings.push("Codex 当前仅执行 type = command 的 handler。".to_string());
                 }
                 if flavor == ProviderFlavor::Codex && async_enabled {
-                    row_warnings.push("Codex 当前会跳过 async = true 的 command hook。".to_string());
+                    row_warnings
+                        .push("Codex 当前会跳过 async = true 的 command hook。".to_string());
                 }
                 handlers.push(HookHandlerView {
                     id: format!("{event}:{group_index}:{handler_index}"),
                     event: event.to_string(),
                     matcher: matcher.clone(),
                     r#type: handler_type.to_string(),
-                    command: handler.get("command").and_then(Item::as_str).map(|value| value.to_string()),
+                    command: handler
+                        .get("command")
+                        .and_then(Item::as_str)
+                        .map(|value| value.to_string()),
                     command_windows: handler
                         .get("command_windows")
                         .or_else(|| handler.get("commandWindows"))
@@ -1119,7 +1214,8 @@ fn parse_toml_hook_item(value: &Item, flavor: ProviderFlavor) -> HookParseResult
                         .and_then(Item::as_str)
                         .map(|value| value.to_string()),
                     supported: flavor != ProviderFlavor::Codex || handler_type == "command",
-                    executable: flavor != ProviderFlavor::Codex || (handler_type == "command" && !async_enabled),
+                    executable: flavor != ProviderFlavor::Codex
+                        || (handler_type == "command" && !async_enabled),
                     group_advanced_json: group_advanced_json.clone(),
                     advanced_json: toml_table_advanced_json(
                         handler,
@@ -1141,7 +1237,10 @@ fn parse_toml_hook_item(value: &Item, flavor: ProviderFlavor) -> HookParseResult
     HookParseResult { handlers, warnings }
 }
 
-fn advanced_json_string(object: &JsonMap<String, JsonValue>, ignored_keys: &[&str]) -> Option<String> {
+fn advanced_json_string(
+    object: &JsonMap<String, JsonValue>,
+    ignored_keys: &[&str],
+) -> Option<String> {
     let mut filtered = JsonMap::new();
     for (key, value) in object {
         if ignored_keys.iter().any(|ignored| ignored == key) {
@@ -1156,7 +1255,10 @@ fn advanced_json_string(object: &JsonMap<String, JsonValue>, ignored_keys: &[&st
     }
 }
 
-fn toml_table_advanced_json(table: &dyn toml_edit::TableLike, ignored_keys: &[&str]) -> Option<String> {
+fn toml_table_advanced_json(
+    table: &dyn toml_edit::TableLike,
+    ignored_keys: &[&str],
+) -> Option<String> {
     let mut filtered = JsonMap::new();
     for (key, value) in table.iter() {
         if ignored_keys.iter().any(|ignored| *ignored == key) {
@@ -1186,15 +1288,18 @@ fn toml_item_to_json(item: &Item) -> Option<JsonValue> {
         }
     }
     if let Some(array) = item.as_array() {
-        let values = array.iter().filter_map(|value| {
-            if let Some(text) = value.as_str() {
-                Some(JsonValue::String(text.to_string()))
-            } else if let Some(integer) = value.as_integer() {
-                Some(JsonValue::Number(integer.into()))
-            } else {
-                value.as_bool().map(JsonValue::Bool)
-            }
-        }).collect::<Vec<_>>();
+        let values = array
+            .iter()
+            .filter_map(|value| {
+                if let Some(text) = value.as_str() {
+                    Some(JsonValue::String(text.to_string()))
+                } else if let Some(integer) = value.as_integer() {
+                    Some(JsonValue::Number(integer.into()))
+                } else {
+                    value.as_bool().map(JsonValue::Bool)
+                }
+            })
+            .collect::<Vec<_>>();
         return Some(JsonValue::Array(values));
     }
     if let Some(table) = item.as_table_like() {
@@ -1274,14 +1379,18 @@ fn claude_project_settings_path(project_cwd: Option<&str>) -> Result<PathBuf, St
     let cwd = project_cwd
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "项目 hooks 需要 projectCwd".to_string())?;
-    Ok(PathBuf::from(cwd).join(CLAUDE_DIR).join(CLAUDE_SETTINGS_FILE))
+    Ok(PathBuf::from(cwd)
+        .join(CLAUDE_DIR)
+        .join(CLAUDE_SETTINGS_FILE))
 }
 
 fn claude_local_settings_path(project_cwd: Option<&str>) -> Result<PathBuf, String> {
     let cwd = project_cwd
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "本地 hooks 需要 projectCwd".to_string())?;
-    Ok(PathBuf::from(cwd).join(CLAUDE_DIR).join(CLAUDE_LOCAL_SETTINGS_FILE))
+    Ok(PathBuf::from(cwd)
+        .join(CLAUDE_DIR)
+        .join(CLAUDE_LOCAL_SETTINGS_FILE))
 }
 
 fn claude_managed_settings_paths() -> Vec<PathBuf> {
@@ -1343,7 +1452,9 @@ fn codex_project_requirements_path(project_cwd: Option<&str>) -> Result<PathBuf,
     let cwd = project_cwd
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "项目 hooks 需要 projectCwd".to_string())?;
-    Ok(PathBuf::from(cwd).join(".codex").join(CODEX_REQUIREMENTS_FILE))
+    Ok(PathBuf::from(cwd)
+        .join(".codex")
+        .join(CODEX_REQUIREMENTS_FILE))
 }
 
 #[cfg(test)]
@@ -1398,7 +1509,10 @@ mod tests {
             .and_then(JsonValue::as_array)
             .unwrap();
         assert_eq!(groups.len(), 1);
-        let handlers = groups[0].get("hooks").and_then(JsonValue::as_array).unwrap();
+        let handlers = groups[0]
+            .get("hooks")
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert_eq!(handlers.len(), 2);
     }
 }

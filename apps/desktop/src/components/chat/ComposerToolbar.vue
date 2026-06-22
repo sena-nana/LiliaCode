@@ -9,11 +9,13 @@ import {
   Plus,
   MessageSquareQuote,
   Goal,
+  GitBranch,
   ShieldCheck,
   Square,
   WandSparkles,
   X,
 } from "lucide-vue-next";
+import { clampPercent } from "@lilia/contracts";
 import type {
   ChatAttachment,
   ChatBranchAnchor,
@@ -29,6 +31,7 @@ import {
   SB_MENU_POP_TRANSITION_MS,
 } from "../../composables/menuMotion";
 import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
+import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync } from "../../utils/perf";
 
 const ComposerModelPicker = defineAsyncComponent({
@@ -41,6 +44,10 @@ const ComposerModelPicker = defineAsyncComponent({
 
 const props = defineProps<{
   state: ChatComposerState;
+  worktreeValue: string;
+  worktreeOptions: Array<{ value: string; label: string; hint?: string }>;
+  worktreeBusy: boolean;
+  worktreeError?: string | null;
   modelOptions: ChatModelOption[];
   autoModelPreview: ModelSelectionExplanation;
   permissionOptions: Array<{ value: PermissionMode; label: string; hint: string }>;
@@ -62,6 +69,7 @@ const emit = defineEmits<{
   pickAttachments: [];
   referenceConversation: [];
   setPermission: [permission: PermissionMode];
+  selectWorktree: [value: string];
   updateComposer: [patch: Partial<ChatComposerState>];
   togglePlanMode: [];
   toggleGoalMode: [];
@@ -74,6 +82,7 @@ const emit = defineEmits<{
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 const actionMenuOpen = ref(false);
+let actionMenuDocumentUnlisteners: Array<() => void> = [];
 const actionMenuPlacement = ref<"top" | "bottom">("top");
 const {
   triggerEl: actionTriggerEl,
@@ -99,11 +108,6 @@ type ModeChip = {
 
 function supportsBuiltinAgentActions(backend: ChatComposerState["backend"]) {
   return backend === "codex" || backend === "claude";
-}
-
-function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(100, Math.max(0, value));
 }
 
 function contextUsageTone(usage: ChatContextUsage | null | undefined): string {
@@ -212,6 +216,10 @@ const activeModeChips = computed<ModeChip[]>(() => {
   return chips;
 });
 
+const worktreeTitle = computed(() =>
+  props.worktreeError || props.worktreeOptions.find((option) => option.value === props.worktreeValue)?.hint || "工作树",
+);
+
 function toggleActionMenu(event: MouseEvent) {
   captureActionMenuAnchor(event);
   actionMenuOpen.value = !actionMenuOpen.value;
@@ -239,23 +247,32 @@ function onKey(e: KeyboardEvent) {
   e.stopPropagation();
 }
 
+function clearActionMenuDocumentListeners() {
+  runUnlistenFns(actionMenuDocumentUnlisteners.splice(0).reverse());
+}
+
+function installActionMenuDocumentListeners() {
+  clearActionMenuDocumentListeners();
+  actionMenuDocumentUnlisteners = [
+    addDomEventListener(document, "pointerdown", onDocPointer, true),
+    addDomEventListener(document, "keydown", onKey),
+  ];
+}
+
 watch(actionMenuOpen, (open) => {
+  clearActionMenuDocumentListeners();
   if (open) {
     void updateActionMenuOrigin();
-    document.addEventListener("pointerdown", onDocPointer, true);
-    document.addEventListener("keydown", onKey);
+    installActionMenuDocumentListeners();
   } else {
     clearActionMenuAnchor();
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onKey);
   }
 });
 
 onBeforeUnmount(() => {
   actionTriggerEl.value = null;
   actionMenuEl.value = null;
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onKey);
+  clearActionMenuDocumentListeners();
 });
 
 </script>
@@ -375,6 +392,17 @@ onBeforeUnmount(() => {
           :options="permissionOptions"
           :icon="ShieldCheck"
           @update:model-value="emit('setPermission', $event)"
+        />
+        <Dropdown
+          class="chat-composer__worktree-dropdown"
+          :class="{ 'is-error': worktreeError }"
+          :model-value="worktreeValue"
+          :options="worktreeOptions"
+          :icon="GitBranch"
+          :disabled="worktreeBusy"
+          :placeholder="worktreeBusy ? '工作树...' : '当前环境'"
+          :title="worktreeTitle"
+          @update:model-value="emit('selectWorktree', $event)"
         />
         <ComposerModelPicker
           :state="state"

@@ -108,7 +108,14 @@ async function flushAsyncPreviewComponents() {
 describe("ConversationImport", () => {
   beforeEach(() => {
     routerMock.push.mockClear();
-    vi.mocked(attachHistoryImport).mockClear();
+    vi.mocked(attachHistoryImport).mockReset();
+    vi.mocked(attachHistoryImport).mockImplementation(async (input) => ({
+      taskId: input.provider === "claude" ? "task-claude-imported" : "task-imported",
+      projectId: null,
+      itemId: input.itemId,
+      task: null,
+      eventCount: 0,
+    }));
     vi.mocked(cleanHistoryImportBackgroundTerminals).mockClear();
     vi.mocked(listHistoryImportRuntimeStates).mockResolvedValue([]);
     vi.mocked(previewHistoryImport).mockReset();
@@ -173,6 +180,43 @@ describe("ConversationImport", () => {
       itemId: "thread-1",
       detail: "full",
     });
+  });
+
+  it("卸载后导入完成不会继续跳转", async () => {
+    const thread = historyImportItem();
+    let resolveImport: (value: Awaited<ReturnType<typeof attachHistoryImport>>) => void;
+    vi.mocked(searchHistoryImports).mockResolvedValue({
+      items: [thread],
+      nextCursor: null,
+    });
+    vi.mocked(previewHistoryImport).mockResolvedValue({
+      item: thread,
+      eventCount: 1,
+      messages: [],
+      hasFullPreview: false,
+      events: [],
+    });
+    vi.mocked(attachHistoryImport).mockReturnValue(new Promise((resolve) => {
+      resolveImport = resolve;
+    }));
+
+    const view = render(ConversationImport);
+    await waitFor(() => {
+      expect(view.getByRole("button", { name: "导入到收集箱" })).toBeEnabled();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "导入到收集箱" }));
+    view.unmount();
+    resolveImport!({
+      taskId: "task-imported-after-unmount",
+      projectId: null,
+      itemId: thread.id,
+      task: null,
+      eventCount: 0,
+    });
+    await Promise.resolve();
+
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("先显示 Lilia 管理会话，再合并后台 Codex 历史", async () => {

@@ -1,6 +1,14 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AskUserSpec, ChatAttachment, ChatComposerState } from "@lilia/contracts";
+import {
+  ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
+  CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
+  CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND,
+  CHAT_SAVE_CLIPBOARD_TEXT_COMMAND,
+  type AskUserSpec,
+  type ChatAttachment,
+  type ChatComposerState,
+} from "@lilia/contracts";
 import type { PendingAsk } from "../src/composables/useAskUser";
 import type { ToolConsentRequest } from "../src/services/chat";
 import ChatComposer from "../src/components/chat/ChatComposer.vue";
@@ -21,9 +29,13 @@ const codexState: ChatComposerState = {
   model: "gpt-5.5",
 };
 
-function pendingAsk(spec: AskUserSpec): PendingAsk {
+function pendingAsk(
+  spec: AskUserSpec,
+  overrides: Partial<Pick<PendingAsk, "id" | "requestId">> = {},
+): PendingAsk {
   return {
-    id: 1,
+    id: overrides.id ?? 1,
+    requestId: overrides.requestId ?? null,
     spec,
     taskId: "task-1",
     turnId: "turn-1",
@@ -237,9 +249,34 @@ afterEach(() => {
     delete (textareaProto as { scrollHeight?: number }).scrollHeight;
   }
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("ChatComposer", () => {
+  it("卸载时取消特殊输入刷新 paint 调度", async () => {
+    const frameIds: number[] = [];
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => {
+      const nextId = 80 + frameIds.length;
+      frameIds.push(nextId);
+      return nextId;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+      },
+    });
+
+    await setComposerText(view, "@read");
+    const lastFrameId = frameIds.at(-1);
+    view.unmount();
+
+    expect(lastFrameId).toBeDefined();
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(lastFrameId);
+  });
+
   it("Agent 运行且空输入时发送按钮切为打断", async () => {
     const view = renderRunningComposer();
 
@@ -314,7 +351,7 @@ describe("ChatComposer", () => {
       expect(composerText(input)).toBe("优化后：修一下输入框按钮");
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith("assistant_ai_optimize_prompt", {
+    expect(mockInvoke).toHaveBeenCalledWith(ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND, {
       input: {
         prompt: "修一下输入框按钮",
         attachments: [],
@@ -557,9 +594,9 @@ describe("ChatComposer", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(composerText(input)).toBe("前粗体文本  后");
     expect(input.querySelector("span, strong")).toBeNull();
-    expect(mockInvoke).not.toHaveBeenCalledWith("chat_read_clipboard_file_paths", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_image", expect.anything());
-    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND, expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(CHAT_SAVE_CLIPBOARD_TEXT_COMMAND, expect.anything());
   });
 
   it("未达到阈值的长文本粘贴仍直接插入输入框", async () => {
@@ -578,7 +615,7 @@ describe("ChatComposer", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(composerText(input)).toBe(`前${text}  后`);
-    expect(mockInvoke).not.toHaveBeenCalledWith("chat_save_clipboard_text", expect.anything());
+    expect(mockInvoke).not.toHaveBeenCalledWith(CHAT_SAVE_CLIPBOARD_TEXT_COMMAND, expect.anything());
     expect(view.emitted("add-context-attachment")).toBeUndefined();
   });
 
@@ -598,7 +635,7 @@ describe("ChatComposer", () => {
     await flushPasteTasks();
 
     expect(event.defaultPrevented).toBe(true);
-    expect(mockInvoke).toHaveBeenCalledWith("chat_save_clipboard_text", {
+    expect(mockInvoke).toHaveBeenCalledWith(CHAT_SAVE_CLIPBOARD_TEXT_COMMAND, {
       input: { text },
     }, undefined);
     await waitFor(() => {
@@ -673,7 +710,7 @@ describe("ChatComposer", () => {
     await flushPasteTasks();
 
     expect(event.defaultPrevented).toBe(true);
-    expect(mockInvoke).toHaveBeenCalledWith("chat_save_clipboard_image", {
+    expect(mockInvoke).toHaveBeenCalledWith(CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND, {
       input: expect.objectContaining({
         mime: "image/png",
         bytesBase64: expect.any(String),
@@ -1615,6 +1652,28 @@ describe("ChatComposer", () => {
         },
       },
     });
+  });
+
+  it("同一 AskUser requestId 重新 hydrate 时不重新屏蔽关键动作", async () => {
+    const view = render(ChatComposer, {
+      props: {
+        state: baseState,
+        attachments: [],
+        pendingAsk: pendingAsk(singleAskWithOtherSpec, { id: 1, requestId: "ask-1" }),
+      },
+    });
+
+    await fireEvent.click(await view.findByRole("radio", { name: "A" }));
+    await vi.advanceTimersByTimeAsync(320);
+    expect(view.getByRole("button", { name: "完成" })).not.toBeDisabled();
+
+    await view.rerender({
+      state: baseState,
+      attachments: [],
+      pendingAsk: pendingAsk(singleAskWithOtherSpec, { id: 2, requestId: "ask-1" }),
+    });
+
+    expect(view.getByRole("button", { name: "完成" })).not.toBeDisabled();
   });
 
   it("状态切到工具授权后短暂屏蔽关键动作", async () => {

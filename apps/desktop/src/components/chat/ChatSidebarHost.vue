@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, markRaw, ref, shallowRef, watch, type Component } from "vue";
+import { computed, markRaw, onBeforeUnmount, ref, shallowRef, watch, type Component } from "vue";
 import {
   CHAT_SIDEBAR_DEFAULT_WIDTH,
   CHAT_SIDEBAR_MAX_WIDTH,
@@ -35,10 +35,13 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
 const panelComponentCache = new Map<string, Component>();
 const activePanelComponent = shallowRef<Component | null>(null);
 const activePanelLoading = ref(false);
+let disposed = false;
+let loadSeq = 0;
 
 watch(
   () => [sidebarState.open, activePanel.value?.id ?? ""] as const,
   async ([open, panelId]) => {
+    const seq = ++loadSeq;
     if (!open || !panelId) {
       activePanelComponent.value = null;
       activePanelLoading.value = false;
@@ -52,6 +55,7 @@ watch(
     }
     const cached = panelComponentCache.get(panel.id);
     if (cached) {
+      if (disposed || seq !== loadSeq) return;
       activePanelComponent.value = cached;
       activePanelLoading.value = false;
       return;
@@ -63,23 +67,28 @@ watch(
         () => panel.loader(),
         { detail: panel.id },
       ));
+      if (disposed || seq !== loadSeq || !sidebarState.open || activePanel.value?.id !== panel.id) return;
       panelComponentCache.set(panel.id, component);
-      if (activePanel.value?.id === panel.id) {
-        activePanelComponent.value = component;
-      }
+      activePanelComponent.value = component;
     } catch (err) {
+      if (disposed || seq !== loadSeq) return;
       console.error("[chat-sidebar] load panel failed", panel.id, err);
-      if (activePanel.value?.id === panel.id) {
+      if (sidebarState.open && activePanel.value?.id === panel.id) {
         activePanelComponent.value = null;
       }
     } finally {
-      if (activePanel.value?.id === panel.id) {
+      if (!disposed && seq === loadSeq && sidebarState.open && activePanel.value?.id === panel.id) {
         activePanelLoading.value = false;
       }
     }
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  disposed = true;
+  loadSeq += 1;
+});
 
 </script>
 

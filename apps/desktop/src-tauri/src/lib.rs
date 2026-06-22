@@ -3,29 +3,58 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 pub mod agent_events;
 mod agent_extensions;
+mod agent_interaction_contract;
 pub mod agent_timeline;
+mod agent_timeline_contract;
+mod app_events_contract;
 mod automation;
 mod chat;
+mod chat_backends_contract;
 mod claude_history;
 mod cli_project;
 mod codex_history;
+mod contract_manifest;
 mod conversation_suggestions;
 mod github;
+#[cfg(test)]
+mod github_command_contract;
 mod history_import;
+#[cfg(test)]
+mod history_import_contract;
 mod lilia_iab;
 mod memory;
+#[cfg(test)]
+mod memory_command_contract;
+#[cfg(test)]
+mod milestone_command_contract;
 mod plugins;
+#[cfg(test)]
+mod plugins_command_contract;
 mod popup_windows;
+mod project_architecture_contract;
+#[cfg(test)]
+mod project_contract;
 mod project_shell;
 mod projects_tasks;
 mod provider;
 mod quota_usage;
+mod quota_usage_contract;
+mod remote_control;
+mod runner_protocol_contract;
 mod settings_store;
 mod store;
+#[cfg(test)]
+mod system_popup_command_contract;
+#[cfg(test)]
+mod task_command_contract;
+mod task_contract;
+#[cfg(test)]
+mod todo_command_contract;
 mod todos;
 mod tray;
 mod util;
 mod window_state;
+mod worktrees;
 
 pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -35,11 +64,6 @@ pub(crate) const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 pub(crate) const BACKEND_CLAUDE: &str = "claude";
 pub(crate) const BACKEND_CODEX: &str = "codex";
-pub(crate) const CODEX_MODEL_OPTIONS: [(&str, &str); 3] = [
-    ("gpt-5.5", "GPT-5.5"),
-    ("gpt-5.4", "GPT-5.4"),
-    ("gpt-5.4-mini", "GPT-5.4 Mini"),
-];
 pub(crate) const MIN_CODEX_APP_SERVER_VERSION: (u32, u32, u32) = (0, 136, 0);
 
 #[tauri::command]
@@ -151,6 +175,7 @@ pub fn run() {
             match store::LiliaStore::new(&home) {
                 Ok(s) => {
                     app.manage(s);
+                    remote_control::restore_http_bridge_if_enabled(app.handle());
                     restore_runtime_sessions_on_startup(app.handle());
                     cli_project::handle_initial_args(app.handle());
                 }
@@ -255,6 +280,13 @@ pub fn run() {
             project_shell::system_open_path,
             project_shell::system_open_url,
             project_shell::system_open_in_vscode,
+            worktrees::worktree_list,
+            worktrees::worktree_create_for_task,
+            worktrees::worktree_attach_task,
+            worktrees::worktree_get_for_task,
+            worktrees::worktree_clear_task,
+            worktrees::worktree_cleanup_archive,
+            worktrees::worktree_merge_delete_archive,
             plugins::plugins_overview,
             plugins::plugins_hooks_overview,
             plugins::plugins_create_skill,
@@ -314,6 +346,14 @@ pub fn run() {
             quota_usage::quota_usage_get_stats,
             quota_usage::quota_usage_get_codex_account_status,
             quota_usage::quota_usage_consume_codex_rate_limit_reset_credit,
+            remote_control::remote_control_status,
+            remote_control::remote_control_set_host_enabled,
+            remote_control::remote_control_set_pc_name,
+            remote_control::remote_control_start_pairing,
+            remote_control::remote_control_cancel_pairing,
+            remote_control::remote_control_pair_device,
+            remote_control::remote_control_revoke_device,
+            remote_control::remote_control_dispatch_request,
             automation::commands::automation_list_workflows,
             automation::commands::automation_save_draft,
             automation::commands::automation_publish,

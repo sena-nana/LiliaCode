@@ -1,9 +1,9 @@
 import { computed, readonly, ref } from "vue";
-import type {
-  AgentInteractionSettings,
-  CustomSubagentDefinition,
-  CustomSubagentUpsertInput,
-  PermissionMode,
+import {
+  normalizeAgentInteractionSettings as normalizeAgentInteractionSettingsContract,
+  type AgentInteractionSettings,
+  type CustomSubagentDefinition,
+  type CustomSubagentUpsertInput,
 } from "@lilia/contracts";
 import {
   deleteCustomSubagent,
@@ -13,136 +13,15 @@ import {
   upsertCustomSubagent,
 } from "../services/chat";
 
-const DEFAULT_AGENT_INTERACTION_SETTINGS: AgentInteractionSettings = {
-  nonInterruptMode: false,
-  debug: false,
-  permissionMode: "ask",
-  codexProfile: {
-    profile: "default",
-    model: null,
-    reasoningEffort: null,
-    runtimeWorkspaceRoots: [],
-    responsesApiClientMetadata: null,
-    additionalContext: null,
-    persistExtendedHistory: null,
-    initialTurnsPage: null,
-    excludeTurns: [],
-  },
-  subagentMode: {
-    enabled: false,
-    codex: {
-      enabled: true,
-    },
-    claude: {
-      enabled: true,
-      forwardSubagentText: true,
-      agentProgressSummaries: true,
-    },
-  },
-  autoTurnDecision: {
-    enabled: true,
-    allowModelTier: true,
-    allowReasoningEffort: true,
-    allowPlanMode: true,
-    allowGoalMode: true,
-    allowSessionFork: true,
-  },
-};
+export {
+  normalizeAgentInteractionSettings,
+  normalizePermissionMode,
+} from "@lilia/contracts";
 
-const settings = ref<AgentInteractionSettings>({
-  ...DEFAULT_AGENT_INTERACTION_SETTINGS,
-});
+const settings = ref<AgentInteractionSettings>(normalizeAgentInteractionSettingsContract(null));
 const subagents = ref<CustomSubagentDefinition[]>([]);
 
 let loadPromise: Promise<AgentInteractionSettings> | null = null;
-
-export function uniqueTrimmedStrings(value: unknown): string[] {
-  return Array.isArray(value)
-    ? Array.from(new Set(
-        value
-          .filter((item): item is string => typeof item === "string")
-          .map((item) => item.trim())
-          .filter(Boolean),
-      ))
-    : [];
-}
-
-export function normalizeAgentInteractionSettings(
-  input: Partial<AgentInteractionSettings> | null | undefined,
-): AgentInteractionSettings {
-  const codexProfile = input?.codexProfile;
-  const subagentMode = input?.subagentMode;
-  const claudeSubagentMode = subagentMode?.claude;
-  return {
-    nonInterruptMode: input?.nonInterruptMode === true,
-    debug: input?.debug === true,
-    permissionMode: normalizePermissionMode(input?.permissionMode),
-    codexProfile: {
-      profile: normalizeProfile(codexProfile?.profile),
-      model: normalizeNullableText(codexProfile?.model),
-      reasoningEffort: normalizeReasoningEffort(codexProfile?.reasoningEffort),
-      runtimeWorkspaceRoots: uniqueTrimmedStrings(codexProfile?.runtimeWorkspaceRoots),
-      responsesApiClientMetadata: normalizeJsonObject(codexProfile?.responsesApiClientMetadata),
-      additionalContext: normalizeNullableText(codexProfile?.additionalContext),
-      persistExtendedHistory: normalizeNullableBoolean(codexProfile?.persistExtendedHistory),
-      initialTurnsPage: normalizeJsonObject(codexProfile?.initialTurnsPage),
-      excludeTurns: uniqueTrimmedStrings(codexProfile?.excludeTurns),
-    },
-    subagentMode: {
-      enabled: subagentMode?.enabled === true,
-      codex: {
-        enabled: subagentMode?.codex?.enabled !== false,
-      },
-      claude: {
-        enabled: claudeSubagentMode?.enabled !== false,
-        forwardSubagentText: claudeSubagentMode?.forwardSubagentText !== false,
-        agentProgressSummaries: claudeSubagentMode?.agentProgressSummaries !== false,
-      },
-    },
-    autoTurnDecision: normalizeAutoTurnDecisionSettings(input?.autoTurnDecision),
-  };
-}
-
-function normalizeAutoTurnDecisionSettings(
-  input: Partial<AgentInteractionSettings["autoTurnDecision"]> | null | undefined,
-): AgentInteractionSettings["autoTurnDecision"] {
-  return {
-    enabled: input?.enabled !== false,
-    allowModelTier: input?.allowModelTier !== false,
-    allowReasoningEffort: input?.allowReasoningEffort !== false,
-    allowPlanMode: input?.allowPlanMode !== false,
-    allowGoalMode: input?.allowGoalMode !== false,
-    allowSessionFork: input?.allowSessionFork !== false,
-  };
-}
-
-function normalizeJsonObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? { ...(value as Record<string, unknown>) }
-    : null;
-}
-
-function normalizeNullableBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
-}
-
-function normalizeNullableText(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function normalizeReasoningEffort(value: unknown): AgentInteractionSettings["codexProfile"]["reasoningEffort"] {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh"
-    ? value
-    : null;
-}
-
-function normalizeProfile(value: unknown): AgentInteractionSettings["codexProfile"]["profile"] {
-  return value === "fast" || value === "balanced" || value === "deep" ? value : "default";
-}
-
-export function normalizePermissionMode(value: unknown): PermissionMode {
-  return value === "full" || value === "readonly" || value === "free" ? value : "ask";
-}
 
 function sameJsonValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -160,7 +39,7 @@ export async function loadAgentInteractionSettings(): Promise<AgentInteractionSe
   if (!loadPromise) {
     loadPromise = getAgentInteractionSettings()
       .then((next) => {
-        settings.value = normalizeAgentInteractionSettings(next);
+        settings.value = normalizeAgentInteractionSettingsContract(next);
         return settings.value;
       })
       .finally(() => {
@@ -197,7 +76,7 @@ export async function updateAgentInteractionSettings(
   patch: Partial<AgentInteractionSettings>,
 ): Promise<AgentInteractionSettings> {
   const previous = settings.value;
-  const next = normalizeAgentInteractionSettings({ ...previous, ...patch });
+  const next = normalizeAgentInteractionSettingsContract({ ...previous, ...patch });
   if (
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&

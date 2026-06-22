@@ -70,12 +70,15 @@ impl<R: Runtime> AgentExtension for TodoMirrorExtension<R> {
         apply_todo_event_items(&conn, &ctx.task_id, items)?;
         self.app
             .emit(
-                "todo-changed",
-                serde_json::json!({
-                    "taskId": ctx.task_id,
-                }),
+                todos::contract::changed_event_name(),
+                todos::contract::changed_event_payload(&ctx.task_id),
             )
-            .map_err(|err| format!("todo-changed emit failed: {err}"))?;
+            .map_err(|err| {
+                format!(
+                    "{} emit failed: {err}",
+                    todos::contract::changed_event_name()
+                )
+            })?;
 
         Ok(AgentEventEffect::default())
     }

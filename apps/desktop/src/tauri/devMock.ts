@@ -1,3 +1,156 @@
+import {
+  CHAT_BACKENDS,
+  AGENT_TIMELINE_LIST_COMMAND,
+  CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
+  CHAT_CHECK_ENV_COMMAND,
+  CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
+  CHAT_GET_COMPOSER_STATE_COMMAND,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  CHAT_RESPOND_TITLE_UPDATE_COMMAND,
+  CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
+  CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
+  CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_SET_COMPOSER_STATE_COMMAND,
+  DEFAULT_MODEL_BY_BACKEND,
+  DEFAULT_MEMORY_SETTINGS,
+  ASSISTANT_AI_GET_CONFIG_COMMAND,
+  ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
+  ASSISTANT_AI_SET_CONFIG_COMMAND,
+  ASSISTANT_AI_TEST_CONNECTION_COMMAND,
+  AUTOMATION_DELETE_WORKFLOW_COMMAND,
+  AUTOMATION_LIST_RUNS_COMMAND,
+  AUTOMATION_LIST_WORKFLOWS_COMMAND,
+  AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND,
+  AGENT_INTERACTION_GET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND,
+  AGENT_INTERACTION_SET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
+  CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  GIT_CLONE_REPO_COMMAND,
+  GITHUB_CLONE_REPO_COMMAND,
+  GITHUB_GET_BINDING_STATUS_COMMAND,
+  GITHUB_LIST_REPOS_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  MILESTONE_CREATE_COMMAND,
+  MILESTONE_DELETE_COMMAND,
+  MILESTONE_LIST_COMMAND,
+  MILESTONE_REORDER_COMMAND,
+  MILESTONE_SET_TASKS_COMMAND,
+  MILESTONE_UPDATE_COMMAND,
+  MEMORY_DELETE_COMMAND,
+  MEMORY_GET_INJECTION_STATE_COMMAND,
+  MEMORY_GET_SETTINGS_COMMAND,
+  MEMORY_LIST_COMMAND,
+  MEMORY_RESET_TASK_COOLDOWN_COMMAND,
+  MEMORY_SET_ENABLED_COMMAND,
+  MEMORY_SET_SETTINGS_COMMAND,
+  MEMORY_SET_TASK_ENABLED_COMMAND,
+  MEMORY_UPSERT_COMMAND,
+  PROJECT_ARCHITECTURE_APPLY_COMMAND,
+  PROJECT_ARCHITECTURE_GET_COMMAND,
+  PROJECT_ARCHITECTURE_LIST_CHANGES_COMMAND,
+  PROJECT_ARCHITECTURE_REJECT_COMMAND,
+  PROJECT_ARCHITECTURE_ROLLBACK_COMMAND,
+  PROJECT_CREATE_COMMAND,
+  PROJECT_DASHBOARD_LIST_COMMAND,
+  PROJECT_GET_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_LIST_COMMAND,
+  PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  PROJECT_TOGGLE_PIN_COMMAND,
+  PLUGINS_CREATE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_HOOK_SOURCE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
+  PLUGINS_HOOKS_OVERVIEW_COMMAND,
+  PLUGINS_OPEN_HOOK_CONFIG_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_OVERVIEW_COMMAND,
+  PLUGINS_READ_HOOK_SOURCE_COMMAND,
+  PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
+  PLUGINS_UPDATE_HOOK_SOURCE_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_GET_CONFIG_COMMAND,
+  PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_SET_CONFIG_COMMAND,
+  POPUP_FOCUS_MAIN_COMMAND,
+  POPUP_GET_WINDOW_SETTINGS_COMMAND,
+  POPUP_OPEN_CHILD_QUESTION_COMMAND,
+  POPUP_OPEN_NEW_CHAT_COMMAND,
+  POPUP_OPEN_TASK_COMMAND,
+  POPUP_REMEMBER_LAST_PROJECT_COMMAND,
+  POPUP_SET_WINDOW_SETTINGS_COMMAND,
+  QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
+  QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+  QUOTA_USAGE_GET_STATS_COMMAND,
+  REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
+  REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
+  REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
+  REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
+  REMOTE_CONTROL_SET_PC_NAME_COMMAND,
+  REMOTE_CONTROL_START_PAIRING_COMMAND,
+  REMOTE_CONTROL_STATUS_COMMAND,
+  ROUTER_GET_MODE_COMMAND,
+  ROUTER_SET_MODE_COMMAND,
+  LILIA_IAB_OPEN_COMMAND,
+  LILIA_IAB_SUBMIT_COMMAND,
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+  TASK_ARCHIVE_COMMAND,
+  TASK_ARCHIVE_PROJECT_COMMAND,
+  TASK_GET_COMMAND,
+  TASK_LIST_COMMAND,
+  TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
+  TASK_PROMOTE_COMMAND,
+  TASK_REORDER_COMMAND,
+  TASK_REPARENT_COMMAND,
+  TASK_TOGGLE_PIN_COMMAND,
+  TODO_LIST_COMMAND,
+  WORKTREE_ATTACH_TASK_COMMAND,
+  WORKTREE_CLEANUP_ARCHIVE_COMMAND,
+  WORKTREE_CLEAR_TASK_COMMAND,
+  WORKTREE_CREATE_FOR_TASK_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
+  WORKTREE_LIST_COMMAND,
+  WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
+  countProjectTaskStatuses,
+  createChatBackendRecord,
+  deriveProjectDashboardCounts,
+  defaultRouterModeForBackend,
+  createMemoryUpsertInput,
+  normalizeAgentInteractionSettings,
+  normalizeMemorySettings,
+  normalizePermissionMode,
+  routerModeUsesCodexAccount,
+  type AgentInteractionSettings,
+  type BackendEnvStatus,
+  type ChatBackendKind,
+  type Memory,
+  type MemorySettings,
+  type RouterMode,
+} from "@lilia/contracts";
+import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "./pluginCommands";
+
 type Args = Record<string, unknown>;
 type UnlistenFn = () => void;
 
@@ -53,20 +206,25 @@ const tasks = [
   },
 ];
 
+let taskWorktrees: Record<string, any> = {};
+
+const defaultWorktreeSettings = {
+  defaultMode: "current",
+  parentDir: null,
+  autoInstructions: [
+    "This task is running inside a dedicated git worktree managed by Lilia.",
+    "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+  ].join("\n"),
+  cleanupOnArchive: true,
+};
+
 const statusKeys = ["draft", "waiting", "running", "blocked", "done", "cancelled"] as const;
 
 function projectDashboardRows() {
   return projects.map((project) => {
     const projectTasks = tasks.filter((task) => task.projectId === project.id);
-    const statusCounts = Object.fromEntries(statusKeys.map((status) => [status, 0])) as Record<
-      (typeof statusKeys)[number],
-      number
-    >;
-    for (const task of projectTasks) {
-      if (statusKeys.includes(task.status as (typeof statusKeys)[number])) {
-        statusCounts[task.status as (typeof statusKeys)[number]] += 1;
-      }
-    }
+    const statusCounts = countProjectTaskStatuses(projectTasks);
+    const dashboardCounts = deriveProjectDashboardCounts(statusCounts);
     const usage = project.id === "lilia"
       ? { totalTokens: 12_400, knownCostUsd: 0.084, costRecordCount: 1, usageRecordCount: 2 }
       : { totalTokens: 0, knownCostUsd: null, costRecordCount: 0, usageRecordCount: 0 };
@@ -78,8 +236,7 @@ function projectDashboardRows() {
       taskCount: projectTasks.length,
       sessionCount: new Set(projectTasks.map((task) => task.sessionId)).size,
       statusCounts,
-      blockedCount: statusCounts.blocked,
-      activeCount: statusCounts.waiting + statusCounts.running,
+      ...dashboardCounts,
       recentActivityAt: projectTasks.reduce<number | null>(
         (latest, task) => latest === null ? task.createdAt : Math.max(latest, task.createdAt),
         null,
@@ -89,58 +246,57 @@ function projectDashboardRows() {
   });
 }
 
-const emptyLists = new Set([
-  "agent_timeline_list",
-  "automation_list_runs",
-  "automation_list_workflows",
-  "chat_describe_attachments",
-  "chat_read_clipboard_file_paths",
-  "chat_search_context_attachments",
-  "conversation_suggestions_get",
-  "history_import_runtime_states",
-  "history_import_search",
-  "project_architecture_list_changes",
-  "todo_list",
+const emptyLists = new Set<string>([
+  AGENT_TIMELINE_LIST_COMMAND,
+  AUTOMATION_LIST_RUNS_COMMAND,
+  AUTOMATION_LIST_WORKFLOWS_COMMAND,
+  CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
+  CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
+  CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_COMMAND,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  PROJECT_ARCHITECTURE_LIST_CHANGES_COMMAND,
+  TODO_LIST_COMMAND,
 ]);
 
-const noops = new Set([
-  "agent_interaction_set_settings",
-  "assistant_ai_set_config",
-  "automation_delete_workflow",
-  "chat_ack_restored_rollback",
-  "chat_respond_agent_interaction",
-  "chat_respond_title_update",
-  "chat_set_composer_state",
-  "conversation_suggestions_set_settings",
-  "github_unbind",
-  "history_import_clean_background_terminals",
-  "lilia_iab_open",
-  "milestone_delete",
-  "milestone_reorder",
-  "milestone_set_tasks",
-  "milestone_update",
-  "plugins_delete_mcp_server",
-  "plugins_delete_skill",
-  "plugins_open_mcp_config",
-  "plugins_set_mcp_server_enabled",
-  "plugins_set_package_enabled",
-  "plugins_set_skill_enabled",
-  "popup_focus_main",
-  "popup_open_child_question",
-  "popup_open_new_chat",
-  "popup_open_task",
-  "popup_remember_last_project",
-  "popup_set_window_settings",
-  "project_reorder",
-  "project_set_settings",
-  "provider_set_active_backend",
-  "provider_set_config",
-  "router_set_mode",
-  "system_open_in_vscode",
-  "system_open_path",
-  "system_open_url",
-  "task_reorder",
-  "task_reparent",
+const noops = new Set<string>([
+  ASSISTANT_AI_SET_CONFIG_COMMAND,
+  AUTOMATION_DELETE_WORKFLOW_COMMAND,
+  CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  CHAT_RESPOND_TITLE_UPDATE_COMMAND,
+  CHAT_SET_COMPOSER_STATE_COMMAND,
+  CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  LILIA_IAB_OPEN_COMMAND,
+  MILESTONE_DELETE_COMMAND,
+  MILESTONE_REORDER_COMMAND,
+  MILESTONE_SET_TASKS_COMMAND,
+  MILESTONE_UPDATE_COMMAND,
+  PLUGINS_DELETE_MCP_SERVER_COMMAND,
+  PLUGINS_DELETE_SKILL_COMMAND,
+  PLUGINS_OPEN_MCP_CONFIG_COMMAND,
+  PLUGINS_SET_MCP_SERVER_ENABLED_COMMAND,
+  PLUGINS_SET_PACKAGE_ENABLED_COMMAND,
+  PLUGINS_SET_SKILL_ENABLED_COMMAND,
+  POPUP_FOCUS_MAIN_COMMAND,
+  POPUP_OPEN_CHILD_QUESTION_COMMAND,
+  POPUP_OPEN_NEW_CHAT_COMMAND,
+  POPUP_OPEN_TASK_COMMAND,
+  POPUP_REMEMBER_LAST_PROJECT_COMMAND,
+  POPUP_SET_WINDOW_SETTINGS_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_SET_CONFIG_COMMAND,
+  ROUTER_SET_MODE_COMMAND,
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
+  TASK_REORDER_COMMAND,
+  TASK_REPARENT_COMMAND,
 ]);
 
 let agentInteractionSubagents = [{
@@ -151,20 +307,37 @@ let agentInteractionSubagents = [{
   enabled: true,
 }];
 
-type MockMemory = {
-  id: string;
-  scope: "user" | "project";
-  projectId: string | null;
-  title: string;
-  body: string;
-  tags: string[];
-  enabled: boolean;
-  sourceTaskId: string | null;
-  createdAt: number;
-  updatedAt: number;
-};
+let agentInteractionSettings = normalizeAgentInteractionSettings(null);
+let remoteControlEnabled = false;
+let remoteControlTicket: Record<string, unknown> | null = null;
+let remoteControlDevices: Record<string, unknown>[] = [];
+const remoteControlBridgeUrl = "http://127.0.0.1:41478";
 
-let memories: MockMemory[] = [
+function remoteControlStatus() {
+  return {
+    hostEnabled: remoteControlEnabled,
+    state: remoteControlEnabled ? (remoteControlTicket ? "pairing" : "listening") : "disabled",
+    pcName: "Lilia Dev PC",
+    endpoint: remoteControlEnabled
+      ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }
+      : null,
+    activeTicket: remoteControlTicket,
+    trustedDevices: remoteControlDevices,
+    capabilities: {
+      protocolVersion: 1,
+      minProtocolVersion: 1,
+      alpn: "lilia.remote-control.v1",
+      supportsPairing: true,
+      supportsTaskInbox: true,
+      supportsTimelineSubscription: true,
+      supportsChatSend: true,
+      supportsInteractionResponse: true,
+      supportsInterrupt: true,
+    },
+  };
+}
+
+let memories: Memory[] = [
   {
     id: "memory-user-1",
     scope: "user",
@@ -191,14 +364,38 @@ let memories: MockMemory[] = [
   },
 ];
 
-let memorySettings = {
-  enabled: true,
-  baselineInjectionEnabled: true,
-  cooldownTurns: 5,
-};
+let memorySettings: MemorySettings = { ...DEFAULT_MEMORY_SETTINGS };
+
+const providerBackends = CHAT_BACKENDS as readonly ChatBackendKind[];
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function defaultDevRouterModes(): Record<ChatBackendKind, RouterMode> {
+  return createChatBackendRecord(defaultRouterModeForBackend);
+}
+
+function defaultDevBackendEnvStatus(backend: ChatBackendKind): BackendEnvStatus {
+  const routerMode = defaultRouterModeForBackend(backend);
+  if (routerModeUsesCodexAccount(routerMode)) {
+    return {
+      backend,
+      hasApiKey: false,
+      connectionMode: "codex-account",
+      effectiveUrl: null,
+    };
+  }
+  return {
+    backend,
+    hasApiKey: false,
+    connectionMode: "unconfigured",
+    effectiveUrl: null,
+  };
+}
+
+function defaultDevBackendEnvStatuses(): Record<ChatBackendKind, BackendEnvStatus> {
+  return createChatBackendRecord(defaultDevBackendEnvStatus);
 }
 
 function text(args: Args, key: string): string {
@@ -225,42 +422,103 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
   if (noops.has(cmd)) return undefined as T;
 
   switch (cmd) {
-    case "plugin:dialog|open":
+    case TAURI_PLUGIN_DIALOG_OPEN_COMMAND:
       return null as T;
-    case "project_list":
+    case PROJECT_LIST_COMMAND:
       return clone(projects) as T;
-    case "project_dashboard_list":
+    case PROJECT_DASHBOARD_LIST_COMMAND:
       return clone(projectDashboardRows()) as T;
-    case "project_get":
+    case PROJECT_GET_COMMAND:
       return clone(projects.find((project) => project.id === text(args, "id")) ?? null) as T;
-    case "project_create":
+    case PROJECT_CREATE_COMMAND:
       return clone({ ...projects[0], id: `project-${Date.now()}`, name: text(args, "name") || "未命名项目", pinned: false }) as T;
-    case "project_rename":
-    case "project_remove":
+    case PROJECT_RENAME_COMMAND:
+    case PROJECT_REMOVE_COMMAND:
       return true as T;
-    case "project_toggle_pin":
+    case PROJECT_TOGGLE_PIN_COMMAND:
       return false as T;
-    case "project_get_settings":
-      return { cloneParentDir: "C:\\Files\\workspace", codexDefaults: null, githubBinding: null } as T;
-    case "memory_list": {
+    case PROJECT_GET_SETTINGS_COMMAND:
+      return {
+        cloneParentDir: "C:\\Files\\workspace",
+        codexDefaults: null,
+        githubBinding: null,
+        worktree: defaultWorktreeSettings,
+      } as T;
+    case REMOTE_CONTROL_STATUS_COMMAND:
+      return clone(remoteControlStatus()) as T;
+    case REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND:
+      remoteControlEnabled = bool(args, "enabled");
+      return clone(remoteControlStatus()) as T;
+    case REMOTE_CONTROL_SET_PC_NAME_COMMAND:
+      return clone(remoteControlStatus()) as T;
+    case REMOTE_CONTROL_START_PAIRING_COMMAND:
+      remoteControlEnabled = true;
+      remoteControlTicket = {
+        id: "mock-ticket",
+        pcName: "Lilia Dev PC",
+        pcEndpoint: { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] },
+        protocolVersion: 1,
+        challenge: "mock-challenge",
+        expiresAt: now + 600_000,
+        bridgeUrl: remoteControlBridgeUrl,
+        pairingUri: `lilia-remote://pair?v=1&ticket=mock-ticket&challenge=mock-challenge&endpoint=mock-pc-endpoint&name=Lilia%20Dev%20PC&bridge=${encodeURIComponent(remoteControlBridgeUrl)}`,
+      };
+      return clone(remoteControlTicket) as T;
+    case REMOTE_CONTROL_CANCEL_PAIRING_COMMAND:
+      remoteControlTicket = null;
+      return undefined as T;
+    case REMOTE_CONTROL_REVOKE_DEVICE_COMMAND:
+      remoteControlDevices = remoteControlDevices.map((device) =>
+        device.id === text(args, "deviceId")
+          ? { ...device, trusted: false, revokedAt: now }
+          : device
+      );
+      return clone(remoteControlStatus()) as T;
+    case REMOTE_CONTROL_PAIR_DEVICE_COMMAND: {
+      const input = (args.input ?? {}) as Args;
+      const endpoint = (input.androidEndpoint ?? {}) as Args;
+      const device = {
+        id: `mock-device-${Date.now()}`,
+        kind: "android",
+        displayName: text(input, "deviceName") || "Android device",
+        endpointId: text(endpoint, "endpointId") || "mock-android-endpoint",
+        protocolVersion: 1,
+        trusted: true,
+        firstPairedAt: now,
+        lastSeenAt: now,
+        revokedAt: null,
+      };
+      remoteControlDevices = [device, ...remoteControlDevices];
+      remoteControlTicket = null;
+      return clone(device) as T;
+    }
+    case MEMORY_LIST_COMMAND: {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       return clone(memories.filter((item) => item.scope === "user" || item.projectId === projectId)) as T;
     }
-    case "memory_upsert": {
+    case MEMORY_UPSERT_COMMAND: {
       const input = (args.input ?? {}) as Args;
-      const scope = text(input, "scope") === "user" ? "user" : "project";
-      const projectId = scope === "project" ? text(input, "projectId") || "lilia" : null;
-      const id = text(input, "id") || `memory-${Date.now()}`;
-      const existing = memories.find((item) => item.id === id);
-      const saved: MockMemory = {
-        id,
-        scope,
-        projectId,
+      const normalized = createMemoryUpsertInput({
+        id: typeof input.id === "string" ? input.id : null,
+        scope: input.scope,
+        projectId: text(input, "projectId") || "lilia",
         title: text(input, "title") || "新记忆",
-        body: text(input, "body") || "",
-        tags: Array.isArray(input.tags) ? input.tags.filter((item): item is string => typeof item === "string") : [],
-        enabled: input.enabled !== false,
+        body: text(input, "body"),
+        tags: Array.isArray(input.tags) ? input.tags : [],
+        enabled: typeof input.enabled === "boolean" ? input.enabled : true,
         sourceTaskId: typeof input.sourceTaskId === "string" ? input.sourceTaskId : null,
+      });
+      const id = normalized.id || `memory-${Date.now()}`;
+      const existing = memories.find((item) => item.id === id);
+      const saved: Memory = {
+        id,
+        scope: normalized.scope,
+        projectId: normalized.projectId ?? null,
+        title: normalized.title,
+        body: normalized.body,
+        tags: normalized.tags ?? [],
+        enabled: normalized.enabled !== false,
+        sourceTaskId: normalized.sourceTaskId ?? null,
         createdAt: existing?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
       };
@@ -269,50 +527,40 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         : [saved, ...memories];
       return clone(saved) as T;
     }
-    case "memory_set_enabled": {
+    case MEMORY_SET_ENABLED_COMMAND: {
       const id = text(args, "id");
       memories = memories.map((item) =>
         item.id === id ? { ...item, enabled: bool(args, "enabled"), updatedAt: Date.now() } : item
       );
       return clone(memories.find((item) => item.id === id) ?? memories[0]) as T;
     }
-    case "memory_delete": {
+    case MEMORY_DELETE_COMMAND: {
       const id = text(args, "id");
       const before = memories.length;
       memories = memories.filter((item) => item.id !== id);
       return (memories.length !== before) as T;
     }
-    case "memory_get_settings":
+    case MEMORY_GET_SETTINGS_COMMAND:
       return clone(memorySettings) as T;
-    case "memory_set_settings": {
+    case MEMORY_SET_SETTINGS_COMMAND: {
       const input = (args.settings ?? {}) as Args;
-      const cooldownTurns =
-        typeof input.cooldownTurns === "number" && Number.isFinite(input.cooldownTurns) && input.cooldownTurns > 0
-          ? Math.trunc(input.cooldownTurns)
-          : memorySettings.cooldownTurns;
-      memorySettings = {
-        enabled: typeof input.enabled === "boolean" ? input.enabled : memorySettings.enabled,
-        baselineInjectionEnabled: typeof input.baselineInjectionEnabled === "boolean"
-          ? input.baselineInjectionEnabled
-          : memorySettings.baselineInjectionEnabled,
-        cooldownTurns,
-      };
+      memorySettings = normalizeMemorySettings(input, memorySettings);
       return undefined as T;
     }
-    case "memory_get_injection_state":
-    case "memory_set_task_enabled":
-    case "memory_reset_task_cooldown":
+    case MEMORY_GET_INJECTION_STATE_COMMAND:
+    case MEMORY_SET_TASK_ENABLED_COMMAND:
+    case MEMORY_RESET_TASK_COOLDOWN_COMMAND:
       return {
         taskId: text(args, "taskId"),
         enabled: args.enabled !== false,
         lastInjectedTurnSeq: null,
         updatedAt: Date.now(),
       } as T;
-    case "task_list": {
+    case TASK_LIST_COMMAND: {
       const projectId = args.projectId ?? null;
       return clone(tasks.filter((task) => task.projectId === projectId)) as T;
     }
-    case "task_list_sidebar_conversations":
+    case TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND:
       return clone(
         tasks
           .filter((task) => task.archived !== true)
@@ -329,9 +577,9 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
             route: task.projectId ? `/projects/${task.projectId}/tasks/${task.id}` : `/chats/${task.id}`,
           })),
       ) as T;
-    case "task_get":
+    case TASK_GET_COMMAND:
       return clone(tasks.find((task) => task.id === text(args, "id")) ?? null) as T;
-    case "task_promote":
+    case TASK_PROMOTE_COMMAND:
       return clone({
         ...tasks[0],
         id: text(args, "id") || `task-${Date.now()}`,
@@ -339,14 +587,88 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         title: text(args, "title") || "新对话",
         createdAt: Date.now(),
       }) as T;
-    case "task_toggle_pin":
-    case "task_archive":
+    case TASK_TOGGLE_PIN_COMMAND:
+    case TASK_ARCHIVE_COMMAND:
       return true as T;
-    case "task_archive_project":
+    case TASK_ARCHIVE_PROJECT_COMMAND:
       return 0 as T;
-    case "milestone_list":
+    case WORKTREE_LIST_COMMAND:
+      return [
+        {
+          path: text(args, "baseRepoPath") || "C:\\Files\\workspace\\Lilia",
+          head: null,
+          branch: "main",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: true,
+          isTaskBound: false,
+        },
+        {
+          path: "C:\\Files\\workspace\\Lilia-task-worktree",
+          head: null,
+          branch: "lilia/mock-task",
+          bare: false,
+          detached: false,
+          prunable: false,
+          locked: false,
+          isMain: false,
+          isTaskBound: false,
+        },
+      ] as T;
+    case WORKTREE_GET_FOR_TASK_COMMAND:
+      return clone(taskWorktrees[text(args, "taskId")] ?? null) as T;
+    case WORKTREE_CLEAR_TASK_COMMAND:
+      delete taskWorktrees[text(args, "taskId")];
+      return undefined as T;
+    case WORKTREE_CREATE_FOR_TASK_COMMAND: {
+      const input = (args.input ?? {}) as Args;
+      const taskId = text(input, "taskId");
+      const saved = {
+        taskId,
+        projectId: text(input, "projectId") || null,
+        baseRepoPath: text(input, "baseRepoPath"),
+        worktreePath: `${text(input, "baseRepoPath") || "C:\\Files\\workspace\\Lilia"}-task-worktree`,
+        branchName: `lilia/${taskId || "mock-task"}`,
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return clone(saved) as T;
+    }
+    case WORKTREE_ATTACH_TASK_COMMAND: {
+      const input = (args.input ?? {}) as Args;
+      const taskId = text(input, "taskId");
+      const saved = {
+        taskId,
+        projectId: text(input, "projectId") || null,
+        baseRepoPath: text(input, "baseRepoPath"),
+        worktreePath: text(input, "worktreePath"),
+        branchName: "lilia/mock-task",
+        baseBranch: "main",
+        status: "active",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      taskWorktrees[taskId] = saved;
+      return clone(saved) as T;
+    }
+    case WORKTREE_CLEANUP_ARCHIVE_COMMAND: {
+      const taskId = text(args, "taskId");
+      delete taskWorktrees[taskId];
+      return { merged: false, removed: true, archived: true, message: "mock cleaned" } as T;
+    }
+    case WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND: {
+      const taskId = text(args, "taskId");
+      delete taskWorktrees[taskId];
+      return { merged: true, removed: true, archived: true, message: "mock merged" } as T;
+    }
+    case MILESTONE_LIST_COMMAND:
       return { milestones: [], links: [] } as T;
-    case "milestone_create":
+    case MILESTONE_CREATE_COMMAND:
       return {
         id: `milestone-${Date.now()}`,
         projectId: text(args, "projectId"),
@@ -357,7 +679,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         order: 0,
         createdAt: Date.now(),
       } as T;
-    case "chat_check_env":
+    case CHAT_CHECK_ENV_COMMAND:
       return {
         nodeAvailable: true,
         codexCliAvailable: true,
@@ -374,14 +696,11 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
           releaseNotes: [],
           updateError: null,
         },
-        routerModes: { claude: "api", codex: "codex-account" },
-        backends: {
-          claude: { backend: "claude", hasApiKey: false, connectionMode: "api", effectiveUrl: null },
-          codex: { backend: "codex", hasApiKey: true, connectionMode: "codex-account", effectiveUrl: null },
-        },
+        routerModes: defaultDevRouterModes(),
+        backends: defaultDevBackendEnvStatuses(),
       } as T;
-    case "provider_codex_app_server_check_update":
-    case "provider_codex_app_server_install_update":
+    case PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND:
+    case PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND:
       return {
         version: "dev-mock",
         installPath: null,
@@ -395,13 +714,17 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         releaseNotes: [],
         updateError: null,
       } as T;
-    case "provider_get_active_backend":
+    case PROVIDER_GET_ACTIVE_BACKEND_COMMAND:
       return "codex" as T;
-    case "provider_get_config":
+    case PROVIDER_GET_CONFIG_COMMAND:
       return { backend: text(args, "backend") || "codex", baseUrl: null, apiKey: null, hasApiKey: false } as T;
-    case "router_get_mode":
-      return (text(args, "backend") === "codex" ? "codex-account" : "api") as T;
-    case "assistant_ai_get_config":
+    case ROUTER_GET_MODE_COMMAND:
+      return defaultRouterModeForBackend(
+        providerBackends.includes(text(args, "backend") as ChatBackendKind)
+          ? text(args, "backend") as ChatBackendKind
+          : "codex",
+      ) as T;
+    case ASSISTANT_AI_GET_CONFIG_COMMAND:
       return {
         baseUrl: null,
         apiKey: null,
@@ -409,59 +732,41 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         codexAccountSparkEnabled: false,
         hasApiKey: false,
       } as T;
-    case "assistant_ai_test_connection":
+    case ASSISTANT_AI_TEST_CONNECTION_COMMAND:
       return { ok: true, error: null, models: ["mock-assistant"], modelMatched: true } as T;
-    case "assistant_ai_optimize_prompt":
+    case ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND:
       return [
         "请基于当前上下文处理以下任务：",
         text((args.input ?? {}) as Args, "prompt"),
         "",
         "要求：先做简单定位，明确本次修改范围，保留现有数据契约，不自动扩大任务。",
       ].join("\n") as T;
-    case "conversation_suggestions_get_settings":
+    case CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND:
       return { enabled: false, maxItems: 5 } as T;
-    case "conversation_suggestions_get_sources":
+    case CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND:
       return { sources: [], localGit: null } as T;
-    case "chat_get_composer_state":
-      return { taskId: text(args, "taskId"), backend: "codex", model: "gpt-5.4", planMode: false, goalMode: false, permission: "ask" } as T;
-    case "chat_get_runtime_snapshot":
-      return { taskId: text(args, "taskId"), phase: "idle", backend: null, turnId: null, queuedCount: 0, pendingRollback: false, pendingResetCleanup: false, rollback: null } as T;
-    case "agent_interaction_get_settings":
+    case CHAT_GET_COMPOSER_STATE_COMMAND:
       return {
-        nonInterruptMode: false,
-        debug: false,
-        codexProfile: {
-          profile: "default",
-          model: null,
-          reasoningEffort: null,
-          runtimeWorkspaceRoots: [],
-          responsesApiClientMetadata: null,
-          additionalContext: null,
-          persistExtendedHistory: null,
-          initialTurnsPage: null,
-          excludeTurns: [],
-        },
-        subagentMode: {
-          enabled: false,
-          codex: { enabled: true },
-          claude: {
-            enabled: true,
-            forwardSubagentText: true,
-            agentProgressSummaries: true,
-          },
-        },
-        autoTurnDecision: {
-          enabled: true,
-          allowModelTier: true,
-          allowReasoningEffort: true,
-          allowPlanMode: true,
-          allowGoalMode: true,
-          allowSessionFork: true,
-        },
+        taskId: text(args, "taskId"),
+        backend: "codex",
+        model: DEFAULT_MODEL_BY_BACKEND.codex,
+        planMode: false,
+        goalMode: false,
+        permission: normalizePermissionMode(null),
       } as T;
-    case "agent_interaction_list_subagents":
+    case CHAT_GET_RUNTIME_SNAPSHOT_COMMAND:
+      return { taskId: text(args, "taskId"), phase: "idle", backend: null, turnId: null, queuedCount: 0, pendingRollback: false, pendingResetCleanup: false, rollback: null } as T;
+    case AGENT_INTERACTION_GET_SETTINGS_COMMAND:
+      return clone(agentInteractionSettings) as T;
+    case AGENT_INTERACTION_SET_SETTINGS_COMMAND:
+      agentInteractionSettings = normalizeAgentInteractionSettings(
+        (args.settings ?? null) as Partial<AgentInteractionSettings> | null,
+        agentInteractionSettings,
+      );
+      return undefined as T;
+    case AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND:
       return agentInteractionSubagents.map((item) => ({ ...item })) as T;
-    case "agent_interaction_upsert_subagent": {
+    case AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND: {
       const input = (args.input ?? {}) as Args;
       const saved = {
         id: text(input, "id") || `agent-${agentInteractionSubagents.length + 1}`,
@@ -475,27 +780,27 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
       else agentInteractionSubagents = agentInteractionSubagents.map((item, itemIndex) => itemIndex === index ? saved : item);
       return saved as T;
     }
-    case "agent_interaction_delete_subagent":
+    case AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND:
       agentInteractionSubagents = agentInteractionSubagents.filter((item) => item.id !== text(args, "id"));
       return undefined as T;
-    case "chat_search_slash_commands":
+    case CHAT_SEARCH_SLASH_COMMANDS_COMMAND:
       return [{ command: { id: "native:help", name: "help", title: "显示可用斜杠命令", description: "开发期 mock 命令。", source: "native", parameters: [] }, matchedBy: "name" }] as T;
-    case "chat_send_message":
+    case CHAT_SEND_MESSAGE_COMMAND:
       return { userEvent: null } as T;
-    case "chat_interrupt_turn":
+    case CHAT_INTERRUPT_TURN_COMMAND:
       return { interrupted: false, reason: "dev-mock-idle" } as T;
-    case "project_architecture_get":
+    case PROJECT_ARCHITECTURE_GET_COMMAND:
       return architecture(text(args, "projectId")) as T;
-    case "project_architecture_apply":
-    case "project_architecture_reject": {
+    case PROJECT_ARCHITECTURE_APPLY_COMMAND:
+    case PROJECT_ARCHITECTURE_REJECT_COMMAND: {
       const input = (args.input ?? {}) as Args;
       return { graph: architecture(text(input, "projectId")), event: null } as T;
     }
-    case "project_architecture_rollback":
+    case PROJECT_ARCHITECTURE_ROLLBACK_COMMAND:
       return { graph: architecture(text(args, "projectId")), event: null } as T;
-    case "plugins_overview":
+    case PLUGINS_OVERVIEW_COMMAND:
       return { skills: [], packages: [], mcpServers: [], configPaths: { claude: null, codex: null }, warnings: [] } as T;
-    case "plugins_hooks_overview":
+    case PLUGINS_HOOKS_OVERVIEW_COMMAND:
       return {
         sources: [
           {
@@ -535,7 +840,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         ],
         warnings: [],
       } as T;
-    case "plugins_read_hook_source":
+    case PLUGINS_READ_HOOK_SOURCE_COMMAND:
       return {
         source: args.source,
         handlers: [],
@@ -544,7 +849,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         warnings: [],
         limitations: [],
       } as T;
-    case "plugins_update_hook_source":
+    case PLUGINS_UPDATE_HOOK_SOURCE_COMMAND:
       return {
         source: args.source,
         handlers: (args.input as Args)?.handlers ?? [],
@@ -553,7 +858,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         warnings: [],
         limitations: [],
       } as T;
-    case "plugins_create_hook_source":
+    case PLUGINS_CREATE_HOOK_SOURCE_COMMAND:
       return {
         id: `${text(args, "backend")}-${text(args, "scope")}`,
         backend: text(args, "backend"),
@@ -573,28 +878,28 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         trustState: text(args, "backend") === "codex" ? "required" : "unknown",
         description: null,
       } as T;
-    case "plugins_delete_hook_source":
-    case "plugins_set_hook_source_enabled":
-    case "plugins_open_hook_config":
+    case PLUGINS_DELETE_HOOK_SOURCE_COMMAND:
+    case PLUGINS_SET_HOOK_SOURCE_ENABLED_COMMAND:
+    case PLUGINS_OPEN_HOOK_CONFIG_COMMAND:
       return undefined as T;
-    case "popup_get_window_settings":
+    case POPUP_GET_WINDOW_SETTINGS_COMMAND:
       return { shortcut: null } as T;
-    case "lilia_iab_submit":
+    case LILIA_IAB_SUBMIT_COMMAND:
       return { submitted: false, reason: "dev-mock" } as T;
-    case "github_get_binding_status":
+    case GITHUB_GET_BINDING_STATUS_COMMAND:
       return { state: "unbound", clientIdConfigured: false, clientIdSource: "none", binding: null } as T;
-    case "github_list_repos":
+    case GITHUB_LIST_REPOS_COMMAND:
       return { items: [], nextPage: null } as T;
-    case "github_start_device_flow":
+    case GITHUB_START_DEVICE_FLOW_COMMAND:
       return { deviceCode: "mock-device", userCode: "MOCK-DEV", verificationUri: "https://github.com/login/device", expiresAt: Date.now() + 600_000, intervalSeconds: 5 } as T;
-    case "github_poll_device_flow":
+    case GITHUB_POLL_DEVICE_FLOW_COMMAND:
       return { status: "pending", intervalSeconds: 5, bindingStatus: null, error: null } as T;
-    case "git_clone_repo":
-    case "github_clone_repo":
+    case GIT_CLONE_REPO_COMMAND:
+    case GITHUB_CLONE_REPO_COMMAND:
       return "C:\\Files\\workspace\\mock-clone" as T;
-    case "quota_usage_get_stats":
+    case QUOTA_USAGE_GET_STATS_COMMAND:
       return { today: null, weekly: null, monthly: null, updatedAt: Date.now() } as T;
-    case "quota_usage_get_codex_account_status":
+    case QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND:
       return {
         available: false,
         connectionMode: "codex-account",
@@ -614,7 +919,7 @@ export async function invoke<T>(cmd: string, args: Args = {}): Promise<T> {
         fetchedAt: Date.now(),
         error: "dev-mock",
       } as T;
-    case "quota_usage_consume_codex_rate_limit_reset_credit":
+    case QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND:
       return {
         outcome: "noCredit",
         status: {

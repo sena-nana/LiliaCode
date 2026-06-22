@@ -8,6 +8,7 @@ use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use uuid::Uuid;
 
+use crate::agent_events::runner_lilia_iab_result_control_type;
 use crate::chat::attachments::describe::describe_attachment_path;
 use crate::chat::runner::write_runner_stdin_for_task;
 use crate::chat::state::{now_millis, ChatStore, RunningTurn};
@@ -315,7 +316,7 @@ fn build_snapshot<R: Runtime>(
 
 fn lilia_iab_result_payload(snapshot: &LiliaIabSnapshot) -> JsonValue {
     serde_json::json!({
-        "type": "lilia_iab_result",
+        "type": runner_lilia_iab_result_control_type(),
         "snapshot": snapshot,
     })
 }
@@ -429,7 +430,7 @@ mod tests {
 
         let payload = lilia_iab_result_payload(&snapshot);
 
-        assert_eq!(payload["type"], "lilia_iab_result");
+        assert_eq!(payload["type"], runner_lilia_iab_result_control_type());
         assert_eq!(payload["snapshot"]["url"], "https://example.com/");
         assert_eq!(payload["snapshot"]["note"], "note");
     }

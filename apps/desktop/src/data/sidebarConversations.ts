@@ -2,6 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { shallowRef } from "vue";
 import type { SidebarConversationSummary } from "@lilia/contracts";
+import {
+  TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND,
+  TASKS_CHANGED_EVENT_NAME,
+} from "@lilia/contracts";
 import { measurePerfAsync } from "../utils/perf";
 
 export const SIDEBAR_CONVERSATIONS = shallowRef<SidebarConversationSummary[]>([]);
@@ -10,13 +14,14 @@ const SIDEBAR_CONVERSATIONS_BY_KEY = shallowRef<Map<string, SidebarConversationS
 const loaded = shallowRef(false);
 let loadPromise: Promise<SidebarConversationSummary[]> | null = null;
 let listenerInstalled = false;
+let listenerInstallPromise: Promise<void> | null = null;
 let revision = 0;
 
 async function refreshSidebarConversations(): Promise<SidebarConversationSummary[]> {
   const rows = await measurePerfAsync(
     "sidebar.unified.fetch",
-    () => invoke<SidebarConversationSummary[]>("task_list_sidebar_conversations"),
-    { detail: "task_list_sidebar_conversations" },
+    () => invoke<SidebarConversationSummary[]>(TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND),
+    { detail: TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND },
   );
   SIDEBAR_CONVERSATIONS.value = rows;
   SIDEBAR_CONVERSATIONS_BY_KEY.value = new Map(
@@ -32,22 +37,36 @@ function sidebarConversationKey(projectId: string | null, taskId: string): strin
 }
 
 function installSidebarConversationListener() {
-  if (listenerInstalled) return;
-  listenerInstalled = true;
-  void listen("tasks:changed", () => {
+  if (listenerInstalled || listenerInstallPromise) return;
+  listenerInstallPromise = listen(TASKS_CHANGED_EVENT_NAME, () => {
     if (!loaded.value) return;
     void refreshSidebarConversations().catch((err) => {
       console.error("[sidebar-conversations] refresh failed", err);
     });
-  }).catch((err) => {
-    console.error("[sidebar-conversations] listen tasks:changed failed", err);
-  });
+  })
+    .then(() => {
+      listenerInstalled = true;
+    })
+    .catch((err) => {
+      console.error(`[sidebar-conversations] listen ${TASKS_CHANGED_EVENT_NAME} failed`, err);
+    })
+    .finally(() => {
+      listenerInstallPromise = null;
+    });
 }
 
 installSidebarConversationListener();
 
 export function areSidebarConversationsLoaded(): boolean {
   return loaded.value;
+}
+
+export function resetSidebarConversationsCache() {
+  SIDEBAR_CONVERSATIONS.value = [];
+  SIDEBAR_CONVERSATIONS_BY_KEY.value = new Map();
+  loaded.value = false;
+  loadPromise = null;
+  revision += 1;
 }
 
 export function listSidebarConversations(): SidebarConversationSummary[] {
@@ -67,6 +86,7 @@ export function getSidebarConversationRevision(): number {
 }
 
 export function ensureSidebarConversationsLoaded(force = false): Promise<SidebarConversationSummary[]> {
+  installSidebarConversationListener();
   if (!force && loaded.value) return Promise.resolve(SIDEBAR_CONVERSATIONS.value);
   if (!force && loadPromise) return loadPromise;
   loadPromise = refreshSidebarConversations().finally(() => {

@@ -1,0 +1,83 @@
+{
+  "permissionModes": [
+    "full",
+    "ask",
+    "readonly",
+    "free"
+  ],
+  "defaultPermissionMode": "ask",
+  "display": {
+    "ask": {
+      "label": "询问",
+      "description": "敏感操作前等待用户确认。"
+    },
+    "readonly": {
+      "label": "只读",
+      "description": "允许读取与分析，禁止写入和执行变更。"
+    },
+    "full": {
+      "label": "完全访问",
+      "description": "使用完全访问权限，不逐条请求操作确认。"
+    },
+    "free": {
+      "label": "自由实现",
+      "description": "完全访问，并在 8 秒后按建议项处理交互。"
+    }
+  },
+  "displayOrder": [
+    "ask",
+    "readonly",
+    "full",
+    "free"
+  ],
+  "runtimeMappings": {
+    "claude": {
+      "full": {
+        "permissionMode": "bypassPermissions",
+        "allowDangerouslySkipPermissions": true
+      },
+      "ask": {
+        "permissionMode": "default",
+        "allowDangerouslySkipPermissions": false
+      },
+      "readonly": {
+        "permissionMode": "default",
+        "allowDangerouslySkipPermissions": false
+      },
+      "free": {
+        "permissionMode": "bypassPermissions",
+        "allowDangerouslySkipPermissions": true
+      }
+    },
+    "codex": {
+      "full": {
+        "sandboxMode": "danger-full-access",
+        "sandboxPolicy": "dangerFullAccess",
+        "approvalPolicy": "never",
+        "permissionProfile": "dangerFullAccess",
+        "permissionProfileId": ":danger-no-sandbox"
+      },
+      "ask": {
+        "sandboxMode": "workspace-write",
+        "sandboxPolicy": "workspaceWrite",
+        "approvalPolicy": "on-request",
+        "permissionProfile": "workspaceWrite",
+        "permissionProfileId": ":workspace"
+      },
+      "readonly": {
+        "sandboxMode": "read-only",
+        "sandboxPolicy": "readOnly",
+        "approvalPolicy": "never",
+        "permissionProfile": "readOnly",
+        "permissionProfileId": ":read-only"
+      },
+      "free": {
+        "sandboxMode": "danger-full-access",
+        "sandboxPolicy": "dangerFullAccess",
+        "approvalPolicy": "never",
+        "permissionProfile": "dangerFullAccess",
+        "permissionProfileId": ":danger-no-sandbox"
+      }
+    }
+  }
+}

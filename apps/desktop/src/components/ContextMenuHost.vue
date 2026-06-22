@@ -3,7 +3,7 @@
  * 全局右键菜单宿主：监听 useContextMenu 的状态，Teleport 到 body。
  * 渲染前测一次尺寸，clamp 在视口内避免穿底/穿右。
  */
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   finalizeClosedContextMenu,
   isContextMenuItemPending,
@@ -24,6 +24,8 @@ const menuEl = ref<HTMLElement | null>(null);
 const rendered = ref(false);
 const pos = ref(createAnchoredMenuPosition(0, 0));
 const origin = ref({ x: 0, y: 0 });
+let geometrySeq = 0;
+let disposed = false;
 
 function displayLabel(item: ContextMenuItem) {
   return isContextMenuItemPending(item) ? item.confirmLabel : item.label;
@@ -34,6 +36,8 @@ function isDanger(item: ContextMenuItem) {
 }
 
 async function updateGeometry() {
+  const seq = ++geometrySeq;
+  const openSeq = state.openSeq;
   const initialPos = createAnchoredMenuPosition(
     state.x,
     state.y,
@@ -43,6 +47,7 @@ async function updateGeometry() {
   pos.value = initialPos;
   origin.value = resolveMenuTransformOrigin(initialPos);
   await nextTick();
+  if (disposed || seq !== geometrySeq || !state.open || state.openSeq !== openSeq) return;
   const el = menuEl.value;
   if (!el) return;
   const clampedPos = clampAnchoredMenuPosition(initialPos, el.offsetWidth, el.offsetHeight);
@@ -57,6 +62,7 @@ function onAfterLeave() {
 watch(
   () => [state.openSeq, state.open] as const,
   ([, open]) => {
+    geometrySeq += 1;
     if (!open) {
       rendered.value = false;
       return;
@@ -66,6 +72,11 @@ watch(
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  disposed = true;
+  geometrySeq += 1;
+});
 </script>
 
 <template>

@@ -1,5 +1,33 @@
 import type { AgentTimelineEvent } from "./timeline";
 import type { Task } from "./task";
+import {
+  CODEX_HISTORY_DEFAULT_TURN_LIMIT,
+  CODEX_HISTORY_PREVIEW_TURN_LIMIT,
+  historyImportProviderDisplay as historyImportProviderDisplayImpl,
+  historyImportProviderUiLabels as historyImportProviderUiLabelsImpl,
+  HISTORY_IMPORT_ATTACH_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT,
+  HISTORY_IMPORT_DEFAULT_SYNC_LIMIT,
+  HISTORY_IMPORT_ERROR_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_INLINE_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_MAX_SEARCH_LIMIT,
+  HISTORY_IMPORT_MAX_SESSION_MANAGEMENT_LIMIT,
+  HISTORY_IMPORT_MAX_SYNC_LIMIT,
+  HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_PREVIEW_COMMAND,
+  HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT,
+  HISTORY_IMPORT_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_PROVIDER_DISPLAY,
+  HISTORY_IMPORT_PROVIDERS,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  HISTORY_IMPORT_TITLE_TEXT_LIMIT,
+  isHistoryImportProvider as isHistoryImportProviderImpl,
+  type HistoryImportProvider as ContractHistoryImportProvider,
+  type HistoryImportProviderDisplay as ContractHistoryImportProviderDisplay,
+  type HistoryImportProviderUiLabels as ContractHistoryImportProviderUiLabels,
+} from "./historyImportContract.mjs";
 
 /**
  * Lilia desktop application protocol for importing provider history.
@@ -7,7 +35,44 @@ import type { Task } from "./task";
  * history_import_* Tauri facade directly and provider-specific shapes stay
  * behind that facade.
  */
-export type HistoryImportProvider = "codex" | "claude";
+export type HistoryImportProvider = ContractHistoryImportProvider;
+export type HistoryImportProviderDisplay = ContractHistoryImportProviderDisplay;
+export type HistoryImportProviderUiLabels = ContractHistoryImportProviderUiLabels;
+
+export {
+  CODEX_HISTORY_DEFAULT_TURN_LIMIT,
+  CODEX_HISTORY_PREVIEW_TURN_LIMIT,
+  HISTORY_IMPORT_ATTACH_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  HISTORY_IMPORT_DEFAULT_SEARCH_LIMIT,
+  HISTORY_IMPORT_DEFAULT_SYNC_LIMIT,
+  HISTORY_IMPORT_ERROR_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_INLINE_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_MAX_SEARCH_LIMIT,
+  HISTORY_IMPORT_MAX_SESSION_MANAGEMENT_LIMIT,
+  HISTORY_IMPORT_MAX_SYNC_LIMIT,
+  HISTORY_IMPORT_MESSAGE_SUMMARY_TEXT_LIMIT,
+  HISTORY_IMPORT_PREVIEW_COMMAND,
+  HISTORY_IMPORT_PREVIEW_MESSAGE_LIMIT,
+  HISTORY_IMPORT_PREVIEW_TEXT_LIMIT,
+  HISTORY_IMPORT_PROVIDER_DISPLAY,
+  HISTORY_IMPORT_PROVIDERS,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  HISTORY_IMPORT_TITLE_TEXT_LIMIT,
+};
+
+export const isHistoryImportProvider = isHistoryImportProviderImpl as (
+  value: unknown,
+) => value is HistoryImportProvider;
+
+export const historyImportProviderDisplay = historyImportProviderDisplayImpl as (
+  provider: HistoryImportProvider,
+) => HistoryImportProviderDisplay;
+
+export const historyImportProviderUiLabels = historyImportProviderUiLabelsImpl as (
+  provider: HistoryImportProvider,
+) => HistoryImportProviderUiLabels;
 
 export interface HistoryImportSearchInput {
   provider: HistoryImportProvider;

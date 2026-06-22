@@ -1,3 +1,20 @@
+import {
+  DEFAULT_PERMISSION_MODE,
+  normalizeRuntimePermissionMode,
+} from "@lilia/contracts/permissionModes.mjs";
+import {
+  TIMELINE_DISPLAY_PATH_PREVIEW_TEXT_LIMIT,
+  TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TODO_ITEM_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TODO_STEP_TEXT_LIMIT,
+} from "@lilia/contracts/timelineContract.mjs";
+import {
+  RUNNER_DONE_EVENT_TYPE,
+  RUNNER_ERROR_EVENT_TYPE,
+  RUNNER_TODO_LIST_EVENT_TYPE,
+  RUNNER_TOOL_USE_EVENT_TYPE,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
 import { isPlanApprovalAccepted, readPlanRevisionRequest } from "../planApproval.mjs";
 import { createTextPacer } from "../protocol.mjs";
 import {
@@ -64,9 +81,11 @@ export function summarizeCodexTodoList(items) {
   if (!Array.isArray(items)) return "";
   return items
     .map((todo) => {
-      if (!isRecord(todo)) return shortText(todo, 120);
+      if (!isRecord(todo)) return shortText(todo, TIMELINE_DISPLAY_TODO_ITEM_TEXT_LIMIT);
       const prefix = todo.completed ? "[x]" : "[ ]";
-      return `${prefix} ${shortText(todo.text || todo.step, 160) || ""}`.trim();
+      return `${prefix} ${
+        shortText(todo.text || todo.step, TIMELINE_DISPLAY_TODO_STEP_TEXT_LIMIT) || ""
+      }`.trim();
     })
     .filter(Boolean)
     .join("\n");
@@ -76,8 +95,8 @@ export function summarizeCodexFileChanges(changes) {
   if (!Array.isArray(changes)) return "";
   return changes
     .map((change) => {
-      if (!isRecord(change)) return shortText(change, 160);
-      const path = shortText(change.path, 240) || "(unknown path)";
+      if (!isRecord(change)) return shortText(change, TIMELINE_DISPLAY_TODO_STEP_TEXT_LIMIT);
+      const path = shortText(change.path, TIMELINE_DISPLAY_PATH_PREVIEW_TEXT_LIMIT) || "(unknown path)";
       return `${change.kind || "update"} ${path}`;
     })
     .filter(Boolean)
@@ -99,13 +118,13 @@ export function codexTimelineTitle(kind, item, eventType) {
     case "reasoning":
       return "Reasoning";
     case "command":
-      return shortText(item.modifiedCommand || item.command, 200) || "Command";
+      return shortText(item.modifiedCommand || item.command, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT) || "Command";
     case "file_change":
       return "File change";
     case "mcp":
       return [item.server, item.tool].filter(Boolean).join(" / ") || "MCP tool";
     case "search":
-      return shortText(item.query, 200) || "Web search";
+      return shortText(item.query, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT) || "Web search";
     case "todo_list":
       return eventType === "item.completed" ? "Plan completed" : "Plan";
     case "plan":
@@ -120,23 +139,29 @@ export function codexTimelineTitle(kind, item, eventType) {
 export function codexTimelineSummary(kind, item) {
   switch (kind) {
     case "message":
-      return shortText(pickCodexMessageText(item), 1200) || "";
+      return shortText(pickCodexMessageText(item), TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "";
     case "reasoning":
-      return shortText(item.text || item.summary?.join?.("\n"), 1200) || "";
+      return shortText(
+        item.text || item.summary?.join?.("\n"),
+        TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+      ) || "";
     case "command":
-      return shortText(item.modifiedCommand || item.command, 1200) || "";
+      return shortText(
+        item.modifiedCommand || item.command,
+        TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT,
+      ) || "";
     case "file_change":
       return summarizeCodexFileChanges(item.changes);
     case "mcp":
       return [item.server, item.tool].filter(Boolean).join(" / ");
     case "search":
-      return shortText(item.query, 1200) || "";
+      return shortText(item.query, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "";
     case "todo_list":
       return summarizeCodexTodoList(item.items);
     case "plan":
-      return shortText(item.text, 1200) || "";
+      return shortText(item.text, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "";
     case "error":
-      return shortText(item.message, 1200) || "";
+      return shortText(item.message, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "";
     default:
       return "";
   }
@@ -316,7 +341,7 @@ export function emitCodexItemTimeline(eventType, item, ctx = null) {
     sourceId: item?.id,
   });
   if (kind === "todo_list" && Array.isArray(item?.items)) {
-    ctx.protocol.emit({ type: "todo_list", items: item.items });
+    ctx.protocol.emit({ type: RUNNER_TODO_LIST_EVENT_TYPE, items: item.items });
   }
 }
 
@@ -341,7 +366,7 @@ function emitCodexGoalTimeline(eventType, params, ctx) {
     title: cleared ? "Lilia Goal cleared" : "Lilia Goal updated",
     summary: cleared
       ? "Codex thread goal 已清除"
-      : shortText(goal?.objective, 1200) || "Codex thread goal",
+      : shortText(goal?.objective, TIMELINE_DISPLAY_SUMMARY_TEXT_LIMIT) || "Codex thread goal",
     payload: {
       backend: "codex",
       eventType,
@@ -497,7 +522,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
     if (type === "item.started" && kind !== "plan") {
       const name = String(kind || "tool");
       const { type: _ignore, ...rest } = item || {};
-      ctx.protocol.emit({ type: "tool_use", name, input: rest });
+      ctx.protocol.emit({ type: RUNNER_TOOL_USE_EVENT_TYPE, name, input: rest });
     }
     return;
   }
@@ -508,7 +533,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
     emitCodexTurnTimeline(type, ev, ctx);
     if (ctx.activeTurnKind === "plan") return;
     ctx.protocol.emit({
-      type: "done",
+      type: RUNNER_DONE_EVENT_TYPE,
       sessionId: ctx.lastThreadId,
       subtype: "success",
     });
@@ -521,7 +546,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
     ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
     ctx.protocol.emit({
-      type: "done",
+      type: RUNNER_DONE_EVENT_TYPE,
       sessionId: ctx.lastThreadId,
       subtype: "interrupted",
     });
@@ -534,7 +559,7 @@ export function mapCodexEventToNdjson(ev, ctx) {
     ctx.turnFailedSeen = true;
     ctx.pacer.finishImmediate();
     emitCodexTurnTimeline(type, ev, ctx);
-    ctx.protocol.emit({ type: "error", message: msg });
+    ctx.protocol.emit({ type: RUNNER_ERROR_EVENT_TYPE, message: msg });
   }
 }
 
@@ -646,7 +671,7 @@ export function createCodexRunContext(cmd, protocol, sessionId = null) {
     planCancelled: false,
     pendingPlanPayload: null,
     latestPlanPayload: null,
-    executionPermission: cmd.permission === "full" || cmd.permission === "readonly" || cmd.permission === "free" ? cmd.permission : "ask",
+    executionPermission: normalizeRuntimePermissionMode(cmd.permission, DEFAULT_PERMISSION_MODE),
     assistantSuccessEmitted: false,
     workflowSource: null,
     pacer: null,
@@ -751,5 +776,9 @@ export function finalizeCodexRunContext(ctx) {
       sessionId: ctx.lastThreadId,
     },
   });
-  ctx.protocol.emit({ type: "done", sessionId: ctx.lastThreadId, subtype: "success" });
+  ctx.protocol.emit({
+    type: RUNNER_DONE_EVENT_TYPE,
+    sessionId: ctx.lastThreadId,
+    subtype: "success",
+  });
 }

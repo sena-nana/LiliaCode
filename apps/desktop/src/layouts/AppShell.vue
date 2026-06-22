@@ -94,6 +94,7 @@ const sidebarReturnTo = computed(() =>
     ? previousSidebarReplacementRoute.value
     : "/",
 );
+let cancelRoutePaintMeasure: (() => void) | null = null;
 
 const removeBeforeEach = router.beforeEach((to, from) => {
   if (
@@ -113,13 +114,22 @@ installPerfObservers();
 watch(
   () => route.fullPath,
   (path) => {
+    cancelRoutePaintMeasure?.();
     const stage = beginPerfStage("route.paint", { detail: path });
-    scheduleAfterPaint(() => stage.end("paint"));
+    const cancelPaint = scheduleAfterPaint(() => {
+      if (cancelRoutePaintMeasure === cancelPaint) {
+        cancelRoutePaintMeasure = null;
+      }
+      stage.end("paint");
+    });
+    cancelRoutePaintMeasure = cancelPaint;
   },
   { immediate: true },
 );
 
 onBeforeUnmount(() => {
+  cancelRoutePaintMeasure?.();
+  cancelRoutePaintMeasure = null;
   removeBeforeEach();
 });
 </script>

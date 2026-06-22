@@ -1,0 +1,14 @@
+export const TASK_COMMANDS_CONTRACT: Record<string, unknown>;
+export const TASK_LIST_COMMAND: "task_list";
+export const TASK_LIST_SIDEBAR_CONVERSATIONS_COMMAND: "task_list_sidebar_conversations";
+export const TASK_GET_COMMAND: "task_get";
+export const TASK_CREATE_COMMAND: "task_create";
+export const TASK_UPDATE_COMMAND: "task_update";
+export const TASK_DELETE_COMMAND: "task_delete";
+export const TASK_PROMOTE_COMMAND: "task_promote";
+export const TASK_ARCHIVE_PROJECT_COMMAND: "task_archive_project";
+export const TASK_ARCHIVE_COMMAND: "task_archive";
+export const TASK_TOGGLE_PIN_COMMAND: "task_toggle_pin";
+export const TASK_REORDER_COMMAND: "task_reorder";
+export const TASK_REPARENT_COMMAND: "task_reparent";
+export const TASK_UPDATE_DEPENDENCIES_COMMAND: "task_update_dependencies";

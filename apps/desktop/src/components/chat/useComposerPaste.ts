@@ -1,4 +1,5 @@
 import type { ChatAttachment } from "@lilia/contracts";
+import { onScopeDispose } from "vue";
 import { measurePerfAsync } from "../../utils/perf";
 import { textPart } from "./composerParts";
 import { pasteHasFileItems, pastedImageFiles, pastedPlainText } from "./composerPasteEvent";
@@ -72,7 +73,10 @@ export function useComposerPaste(options: {
   addContextAttachment: (attachment: ChatAttachment) => void;
   hasPending: () => boolean;
 }) {
+  let disposed = false;
+
   async function attachmentsFromPastedFilePaths(paths: string[]): Promise<ChatAttachment[]> {
+    if (disposed) return [];
     const uniquePaths = paths.filter((path, index) =>
       path.trim().length > 0 &&
       paths.indexOf(path) === index &&
@@ -80,6 +84,7 @@ export function useComposerPaste(options: {
     );
     if (uniquePaths.length === 0) return [];
     const deps = await loadComposerPasteDeps();
+    if (disposed) return [];
     return measurePerfAsync(
       "chat-composer.paste.describe",
       () => deps.describeAttachments(uniquePaths),
@@ -87,8 +92,10 @@ export function useComposerPaste(options: {
   }
 
   async function insertPastedAttachments(attachments: ChatAttachment[], offset: number) {
+    if (disposed) return;
     let nextOffset = offset;
     for (const attachment of attachments) {
+      if (disposed) return;
       if (options.richInput.insertAttachmentReference(attachment, nextOffset)) {
         options.addContextAttachment(attachment);
         nextOffset = options.richInput.inputSelection.value;
@@ -97,34 +104,45 @@ export function useComposerPaste(options: {
   }
 
   async function handleRichPaste(imageFiles: File[], offset: number) {
+    if (disposed) return;
     try {
       const deps = await loadComposerPasteDeps();
+      if (disposed) return;
       const paths = await measurePerfAsync(
         "chat-composer.paste.clipboard-paths",
         () => deps.readClipboardFilePaths(),
       );
+      if (disposed) return;
       const pathAttachments = await attachmentsFromPastedFilePaths(paths);
+      if (disposed) return;
       const imageAttachments = pathAttachments.length > 0 ? [] : await savePastedImages(deps, imageFiles);
+      if (disposed) return;
       await insertPastedAttachments([...pathAttachments, ...imageAttachments], offset);
     } catch (err) {
+      if (disposed) return;
       console.error("[chat] paste context failed", err);
     }
   }
 
   async function handleLongTextPaste(text: string, offset: number) {
+    if (disposed) return;
     try {
       const deps = await loadComposerPasteDeps();
+      if (disposed) return;
       const attachment = await measurePerfAsync(
         "chat-composer.paste.long-text.save",
         () => deps.saveClipboardText({ text }),
       );
+      if (disposed) return;
       await insertPastedAttachments([attachment], offset);
     } catch (err) {
+      if (disposed) return;
       console.error("[chat] paste context failed", err);
     }
   }
 
   function onPaste(event: ClipboardEvent) {
+    if (disposed) return;
     if (options.hasPending()) return;
     const hasFiles = pasteHasFileItems(event);
     const plainText = pastedPlainText(event);
@@ -152,6 +170,10 @@ export function useComposerPaste(options: {
     const imageFiles = pastedImageFiles(event);
     void handleRichPaste(imageFiles, offset);
   }
+
+  onScopeDispose(() => {
+    disposed = true;
+  });
 
   return {
     onPaste,

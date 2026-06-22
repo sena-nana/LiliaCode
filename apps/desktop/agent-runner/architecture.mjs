@@ -1,11 +1,20 @@
 import { z } from "zod/v4";
+import {
+  ARCHITECTURE_TOOL_NAME,
+  ARCHITECTURE_TOOL_NAMES as LILIA_ARCHITECTURE_TOOL_NAMES,
+  PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS,
+  PROJECT_ARCHITECTURE_DEFAULT_EDGE_TYPE,
+  PROJECT_ARCHITECTURE_DEFAULT_INTERACTION_STATUS,
+  PROJECT_ARCHITECTURE_DEFAULT_NODE_TYPE,
+  PROJECT_ARCHITECTURE_READONLY_INTERACTION_STATUS,
+  UPDATE_PROJECT_ARCHITECTURE_INPUT_SCHEMA,
+  isLiliaArchitectureTool,
+  projectArchitecturePermissionFromRuntimePermission,
+} from "@lilia/contracts/architectureContract.mjs";
+import { ARCHITECTURE_INTERACTION_KIND } from "@lilia/contracts/agentInteractionContract.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "./utils.mjs";
 
-export const LILIA_ARCHITECTURE_TOOL_NAMES = new Set([
-  "UpdateProjectArchitecture",
-  "update_project_architecture",
-  "mcp__lilia__update_project_architecture",
-]);
+export { LILIA_ARCHITECTURE_TOOL_NAMES, isLiliaArchitectureTool };
 
 const architectureChangeSchema = z.discriminatedUnion("type", [
   z.object({
@@ -13,7 +22,7 @@ const architectureChangeSchema = z.discriminatedUnion("type", [
     node: z.object({
       id: z.string().min(1),
       label: z.string().default(""),
-      type: z.string().default("module"),
+      type: z.string().default(PROJECT_ARCHITECTURE_DEFAULT_NODE_TYPE),
       summary: z.string().default(""),
       paths: z.array(z.string()).default([]),
       tags: z.array(z.string()).default([]),
@@ -29,7 +38,7 @@ const architectureChangeSchema = z.discriminatedUnion("type", [
       id: z.string().min(1),
       from: z.string().min(1),
       to: z.string().min(1),
-      type: z.string().default("depends_on"),
+      type: z.string().default(PROJECT_ARCHITECTURE_DEFAULT_EDGE_TYPE),
       label: z.string().default(""),
       summary: z.string().default(""),
     }),
@@ -50,94 +59,13 @@ export const updateProjectArchitectureInputSchema = z.object({
 });
 
 export const codexUpdateProjectArchitectureDynamicTool = {
-  name: "UpdateProjectArchitecture",
+  name: ARCHITECTURE_TOOL_NAME,
   description: [
     "Update Lilia's project-level architecture graph with structured node/edge changes.",
     "Use it only when the conversation changes or clarifies architecture knowledge.",
   ].join(" "),
-  inputSchema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      reason: { type: "string" },
-      changes: {
-        type: "array",
-        minItems: 1,
-        items: {
-          oneOf: [
-            {
-              type: "object",
-              required: ["type", "node"],
-              properties: {
-                type: { const: "upsert_node" },
-                node: {
-                  type: "object",
-                  required: ["id", "label", "type", "summary", "paths", "tags"],
-                  properties: {
-                    id: { type: "string" },
-                    label: { type: "string" },
-                    type: { type: "string" },
-                    summary: { type: "string" },
-                    paths: { type: "array", items: { type: "string" } },
-                    tags: { type: "array", items: { type: "string" } },
-                  },
-                },
-              },
-            },
-            {
-              type: "object",
-              required: ["type", "nodeId"],
-              properties: {
-                type: { const: "remove_node" },
-                nodeId: { type: "string" },
-              },
-            },
-            {
-              type: "object",
-              required: ["type", "edge"],
-              properties: {
-                type: { const: "upsert_edge" },
-                edge: {
-                  type: "object",
-                  required: ["id", "from", "to", "type", "label", "summary"],
-                  properties: {
-                    id: { type: "string" },
-                    from: { type: "string" },
-                    to: { type: "string" },
-                    type: { type: "string" },
-                    label: { type: "string" },
-                    summary: { type: "string" },
-                  },
-                },
-              },
-            },
-            {
-              type: "object",
-              required: ["type", "edgeId"],
-              properties: {
-                type: { const: "remove_edge" },
-                edgeId: { type: "string" },
-              },
-            },
-            {
-              type: "object",
-              required: ["type", "summary"],
-              properties: {
-                type: { const: "set_summary" },
-                summary: { type: "string" },
-              },
-            },
-          ],
-        },
-      },
-    },
-    required: ["changes"],
-  },
+  inputSchema: UPDATE_PROJECT_ARCHITECTURE_INPUT_SCHEMA,
 };
-
-export function isLiliaArchitectureTool(toolName) {
-  return LILIA_ARCHITECTURE_TOOL_NAMES.has(String(toolName || ""));
-}
 
 export function architectureContextEnabled(conversationContext) {
   return Boolean(stringOrNull(conversationContext?.projectId));
@@ -166,16 +94,14 @@ export function createArchitectureChangeHandler({
         message: "当前对话不属于项目，无法更新项目架构图。",
       };
     }
-    const permission = cmd?.permission === "full" || cmd?.permission === "readonly" || cmd?.permission === "free"
-      ? cmd.permission
-      : "ask";
-    const allowedByPlan = (permission === "full" || permission === "free") &&
+    const permission = projectArchitecturePermissionFromRuntimePermission(cmd?.permission);
+    const allowedByPlan = permission === "full" &&
       changesAllowedByPlan(normalized.changes, ctx?.approvedArchitectureImpacts);
     const status = permission === "readonly"
-      ? "proposed"
+      ? PROJECT_ARCHITECTURE_READONLY_INTERACTION_STATUS
       : allowedByPlan
-        ? "applied"
-        : "pending";
+        ? PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS
+        : PROJECT_ARCHITECTURE_DEFAULT_INTERACTION_STATUS;
     const payload = {
       projectId,
       taskId: stringOrNull(cmd?.taskId) || "",
@@ -185,7 +111,7 @@ export function createArchitectureChangeHandler({
       reason: normalized.reason,
       changes: normalized.changes,
       status,
-      requiresConfirmation: status === "pending",
+      requiresConfirmation: status === PROJECT_ARCHITECTURE_DEFAULT_INTERACTION_STATUS,
     };
 
     if (permission === "readonly") {
@@ -194,7 +120,7 @@ export function createArchitectureChangeHandler({
         ok: true,
         applied: false,
         requiresConfirmation: false,
-        status: "proposed",
+        status: PROJECT_ARCHITECTURE_READONLY_INTERACTION_STATUS,
         message: "架构图变更已作为只读提议记录在时间线中。",
       };
     }
@@ -221,13 +147,13 @@ export function createArchitectureChangeHandler({
 
 export function emitArchitectureTimeline(ctx, id, payload, status, result = null) {
   ctx?.protocol?.emitTimeline?.({
-    kind: "architecture_change",
+    kind: ARCHITECTURE_INTERACTION_KIND,
     status,
     title: "项目架构图",
     summary: architectureSummary(payload),
     payload: {
       ...payload,
-      interaction: "architecture_change",
+      interaction: ARCHITECTURE_INTERACTION_KIND,
       requestId: id,
       ...(result ? { result } : {}),
     },

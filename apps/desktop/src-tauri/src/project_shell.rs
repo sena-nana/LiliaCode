@@ -21,6 +21,34 @@ pub(crate) struct GitHubBindingMetadata {
     pub(crate) client_id_source: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorktreeSettings {
+    pub(crate) default_mode: String,
+    pub(crate) parent_dir: Option<String>,
+    pub(crate) auto_instructions: String,
+    pub(crate) cleanup_on_archive: bool,
+}
+
+impl Default for WorktreeSettings {
+    fn default() -> Self {
+        Self {
+            default_mode: "current".to_string(),
+            parent_dir: None,
+            auto_instructions: default_worktree_auto_instructions(),
+            cleanup_on_archive: true,
+        }
+    }
+}
+
+fn default_worktree_auto_instructions() -> String {
+    [
+        "This task is running inside a dedicated git worktree managed by Lilia.",
+        "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+    ]
+    .join("\n")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectSettings {
@@ -29,6 +57,8 @@ pub(crate) struct ProjectSettings {
     pub(crate) codex_defaults: Option<CodexProfileSettings>,
     #[serde(default)]
     pub(crate) github_binding: Option<GitHubBindingMetadata>,
+    #[serde(default)]
+    pub(crate) worktree: WorktreeSettings,
 }
 
 // ---------- Project / Git ----------

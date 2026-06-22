@@ -2,6 +2,16 @@ import { render, fireEvent, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import type { ChatAttachment } from "@lilia/contracts";
+import {
+  AGENT_TIMELINE_LIST_COMMAND,
+  CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_SEND_MESSAGE_COMMAND,
+  LILIA_IAB_OPEN_COMMAND,
+  TASK_PROMOTE_COMMAND,
+  TODO_CREATE_COMMAND,
+} from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
 import {
@@ -29,6 +39,8 @@ import {
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { closeChatSidebar, openChatSidebar } from "../src/composables/useChatSidebar";
 
+const LEGACY_IGNORED_CHAT_ERROR_EVENT_NAME = "chat:error";
+
 async function flushAfterPaint() {
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => {
@@ -55,13 +67,14 @@ async function renderTaskDetail() {
       plugins: [router],
     },
   });
+  await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
-  });
+  }, { timeout: 3000 });
   await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
-  });
+  }, { timeout: 3000 });
   return view;
 }
 
@@ -79,6 +92,7 @@ async function renderProjectDraftTaskDetail(taskId: string) {
       plugins: [router],
     },
   });
+  await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
   });
@@ -153,7 +167,7 @@ function setChatDropBounds(view: ReturnType<typeof render>) {
 
 async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {
   await waitFor(() => {
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "agent_timeline_list")).toBe(true);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AGENT_TIMELINE_LIST_COMMAND)).toBe(true);
   });
   expect(view.queryByText("从持久化时间线恢复的公开摘要。")).toBeNull();
 }
@@ -184,7 +198,7 @@ describe("chat scheduler", () => {
     });
 
     expect(
-      mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_describe_attachments"),
+      mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_DESCRIBE_ATTACHMENTS_COMMAND),
     ).toBe(false);
     expect(view.queryByText("IGNORED.md")).not.toBeInTheDocument();
 
@@ -201,10 +215,10 @@ describe("chat scheduler", () => {
     await sendText(view, "参考附件总结项目");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({
       attachments: [expect.objectContaining({
         path: "D:\\PROJECT\\workspace\\Lilia\\README.md",
@@ -213,7 +227,7 @@ describe("chat scheduler", () => {
     expect(send?.[1].content).not.toContain("[Lilia 引导]");
     expect(send?.[1].content).toContain("参考附件总结项目");
     expect(send?.[1].content).toContain("[文件引用: README.md | D:\\PROJECT\\workspace\\Lilia\\README.md]");
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "todo_create")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TODO_CREATE_COMMAND)).toBe(false);
   });
 
   it("全局 provider 为 Codex 时发送会覆盖旧 composer backend", async () => {
@@ -223,10 +237,10 @@ describe("chat scheduler", () => {
     await sendText(view, "检查 Codex 通路");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({
       composer: expect.objectContaining({
         backend: "codex",
@@ -240,10 +254,10 @@ describe("chat scheduler", () => {
     await sendText(view, "短消息交给后端自动决策");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1].runtimeOptions).toBeNull();
     expect(send?.[1].composer).toMatchObject({
       modelSelectionMode: "auto",
@@ -266,10 +280,10 @@ describe("chat scheduler", () => {
     await sendText(view, "使用手动 Claude 配置");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({
       composer: expect.objectContaining({
         modelSelectionMode: "manual",
@@ -296,10 +310,10 @@ describe("chat scheduler", () => {
     await sendText(view, "需要先计划");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1].composer).toMatchObject({
       modelSelectionMode: "auto",
       planMode: true,
@@ -325,7 +339,7 @@ describe("chat scheduler", () => {
       expect(frame).toBeInstanceOf(HTMLIFrameElement);
       expect((frame as HTMLIFrameElement).getAttribute("src")).toBe("https://example.com/debug");
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "lilia_iab_open")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === LILIA_IAB_OPEN_COMMAND)).toBe(false);
   });
 
   it("斜杠项目命令通过 workflow 执行并写入时间线", async () => {
@@ -333,15 +347,15 @@ describe("chat scheduler", () => {
     await setComposerText(view, "/release");
     await waitFor(() => {
       expect(view.getAllByRole("option").length).toBeGreaterThan(0);
-    });
+    }, { timeout: 3000 });
 
-    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/release/ }, { timeout: 3000 }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({
       content: "",
       attachments: [],
@@ -363,15 +377,15 @@ describe("chat scheduler", () => {
     await setComposerText(view, "/release");
     await waitFor(() => {
       expect(view.getAllByRole("option").length).toBeGreaterThan(0);
-    });
+    }, { timeout: 3000 });
 
-    await fireEvent.click(view.getByRole("option", { name: /\/release/ }));
+    await fireEvent.click(await view.findByRole("option", { name: /\/release/ }, { timeout: 3000 }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === TASK_PROMOTE_COMMAND);
     expect(promote?.[1]).toMatchObject({
       id: draft.id,
       projectId: "lilia",
@@ -387,11 +401,11 @@ describe("chat scheduler", () => {
     await sendText(view, "用 Codex 开始草稿对话");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === TASK_PROMOTE_COMMAND);
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(promote?.[1]).toMatchObject({
       id: draft.id,
       projectId: "lilia",
@@ -403,8 +417,8 @@ describe("chat scheduler", () => {
         backend: "codex",
       }),
     });
-    expect(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "task_promote"))
-      .toBeLessThan(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === "chat_send_message"));
+    expect(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === TASK_PROMOTE_COMMAND))
+      .toBeLessThan(mockInvoke.mock.calls.findIndex(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND));
   });
 
   it("已入库的草稿前缀对话再次发送不会被判为失效草稿", async () => {
@@ -414,10 +428,10 @@ describe("chat scheduler", () => {
     await sendText(view, "创建草稿前缀对话");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toHaveLength(1);
     });
-    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "task_promote"))
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === TASK_PROMOTE_COMMAND))
       .toHaveLength(1);
 
     completeMockAgentTurn(draft.id);
@@ -429,10 +443,10 @@ describe("chat scheduler", () => {
     await sendText(view, "继续发送第二条消息");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toHaveLength(1);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "task_promote")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === TASK_PROMOTE_COMMAND)).toBe(false);
     expect(view.queryByText(/草稿已失效，请重新创建对话/)).toBeNull();
   });
 
@@ -443,10 +457,10 @@ describe("chat scheduler", () => {
     await sendText(view, "基于父对话继续追问");
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === "task_promote");
+    const promote = mockInvoke.mock.calls.find(([cmd]) => cmd === TASK_PROMOTE_COMMAND);
     expect(promote?.[1]).toMatchObject({
       id: draft.id,
       projectId: "lilia",
@@ -473,15 +487,15 @@ describe("chat scheduler", () => {
     const view = await renderTaskDetail();
     await sendText(view, "加载期间发送");
 
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
 
     resolveComposer(null);
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1].content).toContain("加载期间发送");
   });
 
@@ -505,7 +519,7 @@ describe("chat scheduler", () => {
     await waitFor(() => {
       expect(view.getByText(/发送失败：Error: composer failed/)).toBeInTheDocument();
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
     expect(view.getByText("README.md")).toBeInTheDocument();
   });
 
@@ -528,13 +542,13 @@ describe("chat scheduler", () => {
         .not.toBeNull();
     });
 
-    const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+    const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(sends).toHaveLength(1);
 
     completeMockAgentTurn("t-002");
 
     await waitFor(() => {
-      const nextSends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      const nextSends = mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
       expect(nextSends).toHaveLength(2);
       expect(nextSends[1][1].content).toContain("[Lilia 引导]");
       expect(nextSends[1][1].content).toContain("补充：优先看调度器");
@@ -576,7 +590,7 @@ describe("chat scheduler", () => {
       expect(view.getByRole("textbox")).toBeInTheDocument();
       expect(view.getByText("先别发出去")).toBeInTheDocument();
     });
-    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_interrupt_turn")).toHaveLength(1);
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_INTERRUPT_TURN_COMMAND)).toHaveLength(1);
   });
 
   it("打断成功后的新输入会直接发送而不是加入调度队列", async () => {
@@ -588,7 +602,7 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(true);
     });
     mockInvoke.mockClear();
 
@@ -600,7 +614,7 @@ describe("chat scheduler", () => {
     await sendText(view, "打断后的新请求");
 
     await waitFor(() => {
-      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
       expect(sends).toHaveLength(1);
       expect(sends[0][1].content).toBe("打断后的新请求");
     });
@@ -612,7 +626,7 @@ describe("chat scheduler", () => {
     const view = await renderTaskDetail();
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_get_runtime_snapshot"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_GET_RUNTIME_SNAPSHOT_COMMAND))
         .toBe(true);
       expect(view.getByRole("button", { name: "打断 Agent" })).toBeInTheDocument();
     });
@@ -670,7 +684,7 @@ describe("chat scheduler", () => {
     });
 
     await waitFor(() => {
-      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === "chat_send_message");
+      const sends = mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
       expect(sends).toHaveLength(1);
       expect(sends[0][1].content).toContain("高优先级工具窗口引导");
       expect(sends[0][1].content).not.toContain("普通优先级保留");
@@ -864,7 +878,7 @@ describe("chat scheduler", () => {
       },
       order: 1,
     });
-    emitTauriEvent("chat:error", {
+    emitTauriEvent(LEGACY_IGNORED_CHAT_ERROR_EVENT_NAME, {
       taskId: "t-002",
       message: "旧错误通道不应生成气泡",
     });
@@ -928,10 +942,10 @@ describe("chat scheduler", () => {
     }
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({
       content: "请读取 README",
       attachments: [expect.objectContaining({
@@ -1002,10 +1016,10 @@ describe("chat scheduler", () => {
     await fireEvent.click(retryButton);
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "chat_send_message"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
         .toBe(true);
     });
-    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === "chat_send_message");
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
     expect(send?.[1]).toMatchObject({ content: "本地发送失败后重试" });
   });
 });

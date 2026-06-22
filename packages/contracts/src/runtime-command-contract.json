@@ -1,0 +1,47 @@
+{
+  "runtimeSettings": {
+    "type": "runtime_settings",
+    "actions": [
+      "diagnose",
+      "update"
+    ]
+  },
+  "remoteEnvironment": {
+    "type": "remote_environment",
+    "actions": [
+      "diagnose",
+      "add",
+      "select"
+    ],
+    "requiresEnvironment": [
+      "add"
+    ],
+    "requiresEnvironmentId": [
+      "select"
+    ]
+  },
+  "sandboxDiagnostics": {
+    "type": "sandbox_diagnostics"
+  },
+  "sessionFork": {
+    "type": "session_fork",
+    "defaultExcludeTurns": true,
+    "modes": [
+      "continue",
+      "fork"
+    ],
+    "defaultMode": "fork"
+  },
+  "processSession": {
+    "type": "process_session",
+    "actions": [
+      "spawn",
+      "write_stdin",
+      "kill",
+      "resize_pty"
+    ],
+    "requiresCommand": [
+      "spawn"
+    ]
+  }
+}

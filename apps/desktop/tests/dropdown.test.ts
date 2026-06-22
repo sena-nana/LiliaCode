@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
 import { defineComponent, ref } from "vue";
 import Dropdown from "../src/components/Dropdown.vue";
@@ -8,6 +8,10 @@ const options = [
   { value: "readonly", label: "只读", hint: "禁止写操作" },
   { value: "workspace-write", label: "工作区写入", hint: "允许编辑工作区" },
 ] as const;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function renderDropdown() {
   return render(defineComponent({
@@ -81,6 +85,20 @@ describe("Dropdown", () => {
     await waitFor(() => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
+  });
+
+  it("快速关闭时不会在异步定位后补装 document listener", async () => {
+    const addListenerSpy = vi.spyOn(document, "addEventListener");
+    renderDropdown();
+    const trigger = screen.getByRole("button", { name: /只读/i });
+
+    await fireEvent.click(trigger);
+    await fireEvent.click(trigger);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(addListenerSpy).not.toHaveBeenCalledWith("pointerdown", expect.any(Function), true);
+    expect(addListenerSpy).not.toHaveBeenCalledWith("keydown", expect.any(Function));
   });
 
   it("会从触发点击位置展开", async () => {

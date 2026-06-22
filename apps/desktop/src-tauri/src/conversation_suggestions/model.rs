@@ -4,13 +4,14 @@ use reqwest::blocking::Client;
 use serde_json::{json, Value as JsonValue};
 use tauri::AppHandle;
 
+use crate::chat::state::default_model_for_backend;
 use crate::provider::{
-    assistant_ai_secret, backend_api_key_env, codex_account_spark_enabled,
+    assistant_ai_secret, backend_api_key_env, backend_direct_url, codex_account_spark_enabled,
     is_codex_account_spark_request, load_active_backend, load_assistant_ai_config,
     request_codex_account_spark, resolve_connection_for, AssistantAIConfig, BackendConnectionPlan,
     ConnectionMode, CODEX_SPARK_BASE_URL, CODEX_SPARK_MODEL,
 };
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX, CODEX_MODEL_OPTIONS};
+use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
 
 use super::types::{ModelRequest, SuggestionSettings, SuggestionSource};
 
@@ -79,11 +80,7 @@ fn provider_model_request(app: &AppHandle) -> Option<ModelRequest> {
     let api_key = provider_api_key(&backend, plan.api_key.as_deref())?;
     Some(ModelRequest {
         source: SuggestionSource::Provider,
-        model: if backend == BACKEND_CODEX {
-            CODEX_MODEL_OPTIONS[0].0.to_string()
-        } else {
-            "claude-sonnet-4-6".to_string()
-        },
+        model: default_model_for_backend(&backend).to_string(),
         backend: Some(backend),
         base_url,
         api_key,
@@ -104,13 +101,10 @@ fn provider_api_key(backend: &str, plan_api_key: Option<&str>) -> Option<String>
 }
 
 fn effective_base_url(backend: &str, plan: &BackendConnectionPlan) -> Option<String> {
-    let base = plan.base_url.clone().or_else(|| {
-        if backend == BACKEND_CODEX {
-            Some("https://api.openai.com/v1".to_string())
-        } else {
-            Some("https://api.anthropic.com".to_string())
-        }
-    })?;
+    let base = plan
+        .base_url
+        .clone()
+        .or_else(|| Some(backend_direct_url(backend).to_string()))?;
     let trimmed = base.trim().trim_end_matches('/').to_string();
     (!trimmed.is_empty()).then_some(trimmed)
 }

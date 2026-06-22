@@ -1,9 +1,27 @@
 import { computed, nextTick, ref, watch } from "vue";
 import type { ComputedRef } from "vue";
-import type { AskUserResult } from "@lilia/contracts";
+import {
+  DEFAULT_ASK_USER_MODE,
+  TOOL_CONSENT_INTERACTION_KIND,
+  type AskUserResult,
+} from "@lilia/contracts";
+import {
+  pendingAgentActionAutoDecisionKey,
+  pendingAgentActionAutoDecisionLabel,
+  pendingAgentActionAutoResolution,
+  pendingAgentActionResolutionSubmittingTarget,
+  pendingAskAgentAction,
+  toolConsentAgentAction,
+  type PendingAgentAction,
+  type PendingAgentActionAutoResolutionInput,
+  type PendingAgentActionSubmittingTarget,
+} from "../../composables/pendingAgentActions";
 import { useAskUserInteraction } from "../../composables/useAskUserInteraction";
 import { useEditableToolCommand } from "../../composables/useEditableToolCommand";
-import type { PendingAsk } from "../../composables/useAskUser";
+import {
+  pendingAskInteractionKey,
+  type PendingAsk,
+} from "../../composables/useAskUser";
 import { useToolConsentPresentation } from "../../composables/useToolConsentPresentation";
 import type {
   ToolConsentDecision,
@@ -29,6 +47,79 @@ export interface UseComposerPendingInteractionOptions {
   toolConsent: ComputedRef<ToolConsentRequest | null | undefined>;
 }
 
+export function composerPendingInteractionKey(
+  pendingAsk: PendingAsk | null | undefined,
+  toolConsent: ToolConsentRequest | null | undefined,
+): string {
+  if (pendingAsk) return pendingAskInteractionKey(pendingAsk);
+  if (toolConsent) return `tool:${toolConsent.requestId}`;
+  return "none";
+}
+
+export type ComposerPendingEntryActionsMode =
+  | "ask-input"
+  | "ask-plan"
+  | "ask-confirm"
+  | "tool"
+  | "none";
+
+type ComposerPendingEntryActionsModeInput = {
+  askUsesInputActions: boolean;
+  askIsPlanApproval: boolean;
+  hasAsk: boolean;
+  hasToolConsent: boolean;
+};
+
+export function composerPendingEntryActionsMode(
+  input: ComposerPendingEntryActionsModeInput,
+): ComposerPendingEntryActionsMode {
+  if (input.askUsesInputActions) return "ask-input";
+  if (input.askIsPlanApproval) return "ask-plan";
+  if (input.hasAsk) return "ask-confirm";
+  if (input.hasToolConsent) return "tool";
+  return "none";
+}
+
+export type ComposerPendingAutoResolution =
+  | {
+      target: "ask_user";
+      submittingTarget: PendingAgentActionSubmittingTarget;
+      result: AskUserResult;
+    }
+  | {
+      target: "tool_consent";
+      submittingTarget: PendingAgentActionSubmittingTarget;
+      decision: ToolConsentDecision;
+      message?: string;
+      updatedInput?: ToolConsentUpdatedInput;
+    };
+
+export function composerPendingAutoResolution(
+  action: PendingAgentAction | null,
+  input: PendingAgentActionAutoResolutionInput,
+): ComposerPendingAutoResolution | null {
+  if (!action) return null;
+  const resolution = pendingAgentActionAutoResolution(action, input);
+  if (!resolution) return null;
+  if ("result" in resolution) {
+    return {
+      target: "ask_user",
+      submittingTarget: pendingAgentActionResolutionSubmittingTarget(resolution),
+      result: resolution.result,
+    };
+  }
+  if (resolution.kind === TOOL_CONSENT_INTERACTION_KIND) {
+    return {
+      target: "tool_consent",
+      submittingTarget: pendingAgentActionResolutionSubmittingTarget(resolution),
+      decision: resolution.decision,
+      message: resolution.message,
+      updatedInput: resolution.updatedInput,
+    };
+  }
+  return null;
+}
+
 export function useComposerPendingInteraction(options: UseComposerPendingInteractionOptions) {
   const pendingText = ref("");
   const toolExpanded = ref(false);
@@ -38,12 +129,15 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
   const activeToolConsent = computed(() =>
     activeAsk.value ? null : options.toolConsent.value ?? null,
   );
-  const hasPending = computed(() => !!activeAsk.value || !!activeToolConsent.value);
-  const pendingKey = computed(() => {
-    if (activeAsk.value) return `ask:${activeAsk.value.id}`;
-    if (activeToolConsent.value) return `tool:${activeToolConsent.value.requestId}`;
-    return "none";
+  const activePendingAction = computed(() => {
+    if (activeAsk.value) return pendingAskAgentAction(activeAsk.value);
+    if (activeToolConsent.value) return toolConsentAgentAction(activeToolConsent.value);
+    return null;
   });
+  const hasPending = computed(() => !!activeAsk.value || !!activeToolConsent.value);
+  const pendingKey = computed(() =>
+    composerPendingInteractionKey(activeAsk.value, activeToolConsent.value),
+  );
 
   const inputValue = computed({
     get: () => pendingText.value,
@@ -88,17 +182,19 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     !!(activeAsk.value && askQuestion.value) || !!activeToolConsent.value,
   );
   const askUsesInputActions = computed(() =>
-    !!activeAsk.value && askQuestion.value?.mode !== "confirm",
+    !!activeAsk.value && askQuestion.value?.mode !== DEFAULT_ASK_USER_MODE,
   );
   const pendingInputText = computed(() => pendingText.value.trim());
   const hasPendingInputText = computed(() => pendingInputText.value.length > 0);
-  const pendingEntryActionsKey = computed(() => {
-    if (askUsesInputActions.value) return "ask-input";
-    if (askIsPlanApproval.value) return "ask-plan";
-    if (activeAsk.value) return "ask-confirm";
-    if (activeToolConsent.value) return "tool";
-    return "none";
-  });
+  const pendingEntryActionsMode = computed(() =>
+    composerPendingEntryActionsMode({
+      askUsesInputActions: askUsesInputActions.value,
+      askIsPlanApproval: askIsPlanApproval.value,
+      hasAsk: !!activeAsk.value,
+      hasToolConsent: !!activeToolConsent.value,
+    }),
+  );
+  const pendingEntryActionsKey = computed(() => pendingEntryActionsMode.value);
 
   const {
     toolDanger,
@@ -130,7 +226,7 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     if (activeAsk.value) {
       const q = askQuestion.value;
       if (askIsPlanApproval.value) return "输入修改要求，Enter 退回计划";
-      if (q?.mode === "confirm") return "输入取消原因，Enter 返回给 Agent";
+      if (q?.mode === DEFAULT_ASK_USER_MODE) return "输入取消原因，Enter 返回给 Agent";
       return "补充其他回答";
     }
     return "可向 agent 询问任何事，输入 @ 使用插件或提及文件";
@@ -164,100 +260,101 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     if (decision === "deny") pendingText.value = "";
   }
 
-  function submitAsk() {
+  function runManualAction(action: () => void) {
     cancelAutoDecision();
-    submitAskBase();
+    action();
+  }
+
+  function runManualActionWith<T>(action: (value: T) => void, value: T) {
+    cancelAutoDecision();
+    action(value);
+  }
+
+  function submitAsk() {
+    runManualAction(submitAskBase);
   }
 
   function submitAskFreeform(value?: string) {
-    cancelAutoDecision();
-    submitAskFreeformBase(value);
+    runManualAction(() => submitAskFreeformBase(value));
   }
 
   function confirmAskNo() {
-    cancelAutoDecision();
-    confirmAskNoBase();
+    runManualAction(confirmAskNoBase);
   }
 
   function skipAsk() {
-    cancelAutoDecision();
-    skipAskBase();
+    runManualAction(skipAskBase);
   }
 
   function backAsk() {
-    cancelAutoDecision();
-    backAskBase();
+    runManualAction(backAskBase);
   }
 
   function cancelAsk() {
-    cancelAutoDecision();
-    cancelAskBase();
+    runManualAction(cancelAskBase);
   }
 
   function selectSingleOption(id: string) {
-    cancelAutoDecision();
-    selectSingleOptionBase(id);
+    runManualActionWith(selectSingleOptionBase, id);
   }
 
   function toggleMulti(id: string) {
-    cancelAutoDecision();
-    toggleMultiBase(id);
+    runManualActionWith(toggleMultiBase, id);
   }
 
   function beginCommandEdit() {
-    cancelAutoDecision();
-    beginCommandEditBase();
+    runManualAction(beginCommandEditBase);
   }
 
   function cancelCommandEdit() {
-    cancelAutoDecision();
-    cancelCommandEditBase();
+    runManualAction(cancelCommandEditBase);
   }
 
   function autoDecisionKeyForCurrentState(): string {
-    if (activeAsk.value) {
-      const result = recommendedAskUserResult(activeAsk.value.spec);
-      if (!result) return "";
-      return `ask:${activeAsk.value.id}:${askQuestion.value?.id ?? ""}`;
-    }
-    const tool = activeToolConsent.value;
-    if (
-      tool &&
-      !toolDanger.value &&
-      !toolSubmitting.value &&
-      !isEditingToolCommand.value &&
-      !toolCommandIsEmpty.value
-    ) {
-      return `tool:${tool.requestId}`;
-    }
-    return "";
+    const action = activePendingAction.value;
+    if (!action) return "";
+    return pendingAgentActionAutoDecisionKey(action, {
+      askHasRecommendedResult: !!recommendedAskUserResult(activeAsk.value?.spec),
+      askQuestionId: askQuestion.value?.id,
+      editingToolCommand: isEditingToolCommand.value,
+      toolDanger: toolDanger.value,
+      toolSubmitting: !!toolSubmitting.value,
+      toolCommandIsEmpty: toolCommandIsEmpty.value,
+    });
   }
 
   const autoDecisionKey = computed(autoDecisionKeyForCurrentState);
 
   function autoDecisionLabelForCurrentState(): string {
-    if (activeAsk.value) return askIsPlanApproval.value ? "同意计划" : "选择推荐项";
-    if (activeToolConsent.value) return "同意工具调用";
-    return "";
+    return activePendingAction.value
+      ? pendingAgentActionAutoDecisionLabel(activePendingAction.value)
+      : "";
   }
 
   function runAutoDecision() {
-    const ask = activeAsk.value;
-    if (ask) {
-      const result = recommendedAskUserResult(ask.spec);
-      if (result) options.resolveAsk(result);
+    const action = activePendingAction.value;
+    const askResult = activeAsk.value
+      ? recommendedAskUserResult(activeAsk.value.spec)
+      : null;
+    const resolution = composerPendingAutoResolution(action, {
+      askHasRecommendedResult: !!askResult,
+      askQuestionId: askQuestion.value?.id,
+      askResult,
+      editingToolCommand: isEditingToolCommand.value,
+      toolCommandIsEmpty: toolCommandIsEmpty.value,
+      toolDanger: toolDanger.value,
+      toolSubmitting: !!toolSubmitting.value,
+      toolUpdatedInput: updatedCommandInput.value,
+    });
+    if (!resolution) return;
+    if (resolution.target === "ask_user") {
+      options.resolveAsk(resolution.result);
       return;
     }
-    const tool = activeToolConsent.value;
-    if (
-      tool &&
-      !toolDanger.value &&
-      !toolSubmitting.value &&
-      !isEditingToolCommand.value &&
-      !toolCommandIsEmpty.value
-    ) {
-      decideToolConsent("allow", undefined, "auto");
+    if (resolution.submittingTarget === "tool") {
+      toolSubmitting.value = resolution.decision;
     }
+    options.resolveToolConsent(resolution.decision, resolution.message, resolution.updatedInput);
   }
 
   const {
@@ -325,6 +422,7 @@ export function useComposerPendingInteraction(options: UseComposerPendingInterac
     isEditingToolCommand,
     modifyPlanApproval,
     multiPicks,
+    pendingEntryActionsMode,
     pendingEntryActionsKey,
     pendingInputText,
     pendingKey,

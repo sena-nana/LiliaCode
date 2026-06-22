@@ -51,7 +51,9 @@ export function useTitleBarCrumbs() {
   const taskId = computed(() => paramAsString(route.params.taskId));
   const fallbackStores = shallowRef<FallbackStores | null>(null);
   let fallbackIdleHandle: number | null = null;
+  let cancelFallbackPaint: (() => void) | null = null;
   let fallbackSeq = 0;
+  let disposed = false;
 
   const summary = computed(() => findConversationSummary(projectId.value, taskId.value));
 
@@ -59,6 +61,8 @@ export function useTitleBarCrumbs() {
     () => [route.path, projectId.value, taskId.value, summary.value?.taskId] as const,
     ([path, projectIdValue, taskIdValue, summaryTaskId]) => {
       fallbackSeq += 1;
+      cancelFallbackPaint?.();
+      cancelFallbackPaint = null;
       if (fallbackIdleHandle !== null) {
         cancelIdleRun(fallbackIdleHandle);
         fallbackIdleHandle = null;
@@ -81,7 +85,8 @@ export function useTitleBarCrumbs() {
       }
 
       const seq = fallbackSeq;
-      scheduleAfterPaint(() => {
+      cancelFallbackPaint = scheduleAfterPaint(() => {
+        cancelFallbackPaint = null;
         if (seq !== fallbackSeq || findConversationSummary(projectIdValue, taskIdValue)) return;
         fallbackIdleHandle = runWhenIdle(() => {
           fallbackIdleHandle = null;
@@ -93,7 +98,13 @@ export function useTitleBarCrumbs() {
                 import("../services/tasksStore"),
                 projectIdValue ? import("../services/projectsStore") : Promise.resolve(null),
               ]);
-              if (seq !== fallbackSeq || findConversationSummary(projectIdValue, taskIdValue)) return;
+              if (
+                disposed ||
+                seq !== fallbackSeq ||
+                findConversationSummary(projectIdValue, taskIdValue)
+              ) {
+                return;
+              }
               fallbackStores.value = {
                 getOrphanConversation,
                 getProject: projectsStore?.getProject,
@@ -111,7 +122,10 @@ export function useTitleBarCrumbs() {
   );
 
   onBeforeUnmount(() => {
+    disposed = true;
     fallbackSeq += 1;
+    cancelFallbackPaint?.();
+    cancelFallbackPaint = null;
     if (fallbackIdleHandle !== null) {
       cancelIdleRun(fallbackIdleHandle);
       fallbackIdleHandle = null;

@@ -1,14 +1,21 @@
 import { reactive } from "vue";
-import type { ChatRuntimePhase } from "@lilia/contracts";
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import {
+  agentTimelineActionDescriptor,
+  agentTimelineActionRequestIds,
+  agentTimelineEventRequestId,
+  timelineEventScopedKey,
+  type AgentTimelineEvent,
+  type ChatRuntimePhase,
+} from "@lilia/contracts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   getRuntimeSnapshot,
   listAgentTimeline,
-  onAgentTimeline,
+  onAgentTimelineEvents,
   onDone,
   onTurnStarted,
 } from "../services/chat";
+import { installUnlistenFns, runUnlistenFns } from "../utils/eventListeners";
 import { measurePerfAsync } from "../utils/perf";
 
 export type ConversationActivity = "running" | "requires_action" | "completed" | "error";
@@ -31,6 +38,7 @@ const HYDRATION_CONCURRENCY = 3;
 let installed = false;
 let unlistenAll: UnlistenFn[] = [];
 let hydrationSeq = 0;
+let activityGeneration = 0;
 
 function ensureState(taskId: string): ConversationActivityState {
   const existing = states[taskId];
@@ -113,6 +121,7 @@ export function clearConversationActivityNotice(taskId: string) {
 }
 
 export function resetConversationActivity() {
+  activityGeneration += 1;
   for (const taskId of Object.keys(states)) {
     delete states[taskId];
   }
@@ -157,46 +166,18 @@ function isDraftConversationId(taskId: string): boolean {
   return taskId.startsWith("t-draft-") || taskId.startsWith("o-draft-");
 }
 
-function readTimelinePayloadString(event: AgentTimelineEvent, key: string): string | null {
-  const payload = event.payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const value = (payload as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : null;
-}
-
-function timelineRequiresActionRequestId(event: AgentTimelineEvent): string | null {
-  if (event.status !== "requires_action") return null;
-  if (event.kind === "title_update" || event.kind === "plan" || event.kind === "ask_user") {
-    return readTimelinePayloadString(event, "requestId") ?? `timeline:${event.id}`;
-  }
-  const interaction = readTimelinePayloadString(event, "interaction");
-  if (
-    interaction === "tool_consent" ||
-    interaction === "mcp_elicitation" ||
-    interaction === "permission_approval"
-  ) {
-    return readTimelinePayloadString(event, "requestId") ?? `timeline:${event.id}`;
-  }
-  return null;
-}
-
 function timelineRequestId(event: AgentTimelineEvent): string {
-  return readTimelinePayloadString(event, "requestId") ??
-    timelineRequestIdsByEventId.get(event.id) ??
-    `timeline:${event.id}`;
+  return agentTimelineEventRequestId(event, timelineRequestIdsByEventId.get(timelineEventScopedKey(event)));
+}
+
+function clearTimelineRequestActivity(event: AgentTimelineEvent): void {
+  const requestId = timelineRequestId(event);
+  timelineRequestIdsByEventId.delete(timelineEventScopedKey(event));
+  clearConversationRequiresAction(event.taskId, requestId);
 }
 
 function timelineHasError(events: AgentTimelineEvent[]): boolean {
   return events.some((event) => event.kind === "error" || event.status === "error");
-}
-
-function timelineRequiresActionRequestIds(events: AgentTimelineEvent[]): string[] {
-  const requestIds = new Set<string>();
-  for (const event of events) {
-    const requestId = timelineRequiresActionRequestId(event);
-    if (requestId) requestIds.add(requestId);
-  }
-  return [...requestIds];
 }
 
 export interface HydrateConversationActivityOptions {
@@ -243,7 +224,7 @@ function nextQueuedHydrationTaskId(): string | null {
   return nextTaskId;
 }
 
-async function hydrateSingleConversationActivity(taskId: string) {
+async function hydrateSingleConversationActivity(taskId: string, generation: number) {
   try {
     const [snapshot, timeline] = await Promise.all([
       measurePerfAsync(
@@ -257,6 +238,7 @@ async function hydrateSingleConversationActivity(taskId: string) {
         { detail: taskId },
       ),
     ]);
+    if (generation !== activityGeneration) return;
     hydratedTaskIds.add(taskId);
     if (states[taskId]) return;
     const runtimeActivity = runtimePhaseToConversationActivity(snapshot.phase);
@@ -272,7 +254,7 @@ async function hydrateSingleConversationActivity(taskId: string) {
       markConversationError(taskId);
       return;
     }
-    for (const requestId of timelineRequiresActionRequestIds(timeline)) {
+    for (const requestId of agentTimelineActionRequestIds(timeline)) {
       markConversationRequiresAction(taskId, requestId);
     }
   } catch (err) {
@@ -290,7 +272,8 @@ function pumpConversationActivityHydrationQueue() {
       continue;
     }
     activeHydrationTaskIds.add(taskId);
-    void hydrateSingleConversationActivity(taskId).finally(() => {
+    const generation = activityGeneration;
+    void hydrateSingleConversationActivity(taskId, generation).finally(() => {
       activeHydrationTaskIds.delete(taskId);
       resolveHydrationWaiters();
       pumpConversationActivityHydrationQueue();
@@ -333,28 +316,39 @@ function applyTimelineActivity(event: AgentTimelineEvent) {
     markConversationError(event.taskId);
     return;
   }
-  const requiresActionRequestId = timelineRequiresActionRequestId(event);
-  if (requiresActionRequestId) {
-    timelineRequestIdsByEventId.set(event.id, requiresActionRequestId);
-    markConversationRequiresAction(event.taskId, requiresActionRequestId);
+  const action = agentTimelineActionDescriptor(event);
+  if (action) {
+    const memoryKey = timelineEventScopedKey(event);
+    const previousRequestId = timelineRequestIdsByEventId.get(memoryKey);
+    if (previousRequestId && previousRequestId !== action.requestId) {
+      clearConversationRequiresAction(event.taskId, previousRequestId);
+    }
+    timelineRequestIdsByEventId.set(memoryKey, action.requestId);
+    markConversationRequiresAction(event.taskId, action.requestId);
     return;
   }
+  clearTimelineRequestActivity(event);
   if (event.status === "requires_action") return;
-  const requestId = timelineRequestId(event);
-  timelineRequestIdsByEventId.delete(event.id);
-  clearConversationRequiresAction(event.taskId, requestId);
 }
 
 export async function installConversationActivityBridge(): Promise<() => void> {
   if (installed) return () => {};
   installed = true;
-  unlistenAll = await Promise.all([
-    onTurnStarted((event) => markConversationRunning(event.taskId)),
-    onDone((event) => markConversationCompleted(event.taskId)),
-    onAgentTimeline(applyTimelineActivity),
-  ]);
+  try {
+    unlistenAll = await installUnlistenFns([
+      () => onTurnStarted((event) => markConversationRunning(event.taskId)),
+      () => onDone((event) => markConversationCompleted(event.taskId)),
+      () => onAgentTimelineEvents((events) => {
+        for (const event of events) applyTimelineActivity(event);
+      }),
+    ]);
+  } catch (err) {
+    unlistenAll = [];
+    installed = false;
+    throw err;
+  }
   return () => {
-    for (const unlisten of unlistenAll) unlisten();
+    runUnlistenFns(unlistenAll.splice(0).reverse());
     unlistenAll = [];
     installed = false;
   };

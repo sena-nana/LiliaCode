@@ -13,6 +13,8 @@ const props = defineProps<{
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const chart = shallowRef<Chart | null>(null);
 let themeObserver: MutationObserver | null = null;
+let renderSeq = 0;
+let disposed = false;
 
 function resolveCssColor(value: string) {
   const match = value.match(/^var\((--[\w-]+)(?:,\s*([^)]+))?\)$/);
@@ -35,7 +37,8 @@ function destroyChart() {
   chart.value = null;
 }
 
-function renderChart() {
+function renderChart(seq = renderSeq) {
+  if (disposed || seq !== renderSeq) return;
   const canvas = canvasRef.value;
   if (!canvas) return;
   destroyChart();
@@ -53,7 +56,8 @@ function renderChart() {
 }
 
 function scheduleRender() {
-  void nextTick(renderChart);
+  const seq = ++renderSeq;
+  void nextTick(() => renderChart(seq));
 }
 
 watch(
@@ -63,6 +67,7 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   renderChart();
   if (typeof MutationObserver !== "undefined") {
     themeObserver = new MutationObserver(scheduleRender);
@@ -74,6 +79,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  renderSeq += 1;
   themeObserver?.disconnect();
   destroyChart();
 });

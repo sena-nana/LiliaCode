@@ -103,14 +103,37 @@ export function measurePerfSync<T>(
   }
 }
 
-export function scheduleAfterPaint(callback: () => void) {
+export function scheduleAfterPaint(callback: () => void): () => void {
+  let active = true;
+  let frameHandle: number | null = null;
+  let timeoutHandle: ReturnType<typeof globalThis.setTimeout> | null = null;
+  const runCallback = () => {
+    timeoutHandle = null;
+    if (active) callback();
+  };
+  const scheduleTimeout = () => {
+    if (!active) return;
+    timeoutHandle = globalThis.setTimeout(runCallback, 0);
+  };
   if (typeof requestAnimationFrame === "function") {
-    requestAnimationFrame(() => {
-      globalThis.setTimeout(callback, 0);
+    frameHandle = requestAnimationFrame(() => {
+      frameHandle = null;
+      scheduleTimeout();
     });
-    return;
+  } else {
+    scheduleTimeout();
   }
-  globalThis.setTimeout(callback, 0);
+  return () => {
+    active = false;
+    if (frameHandle !== null && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(frameHandle);
+      frameHandle = null;
+    }
+    if (timeoutHandle !== null) {
+      globalThis.clearTimeout(timeoutHandle);
+      timeoutHandle = null;
+    }
+  }
 }
 
 type IdleWindow = typeof globalThis & {

@@ -4,7 +4,16 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
-import type { Project } from "@lilia/contracts";
+import {
+  PROJECT_CREATE_COMMAND,
+  PROJECT_GET_COMMAND,
+  PROJECT_LIST_COMMAND,
+  PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
+  PROJECT_REORDER_COMMAND,
+  PROJECT_TOGGLE_PIN_COMMAND,
+  type Project,
+} from "@lilia/contracts";
 
 interface ProjectRow {
   id: string;
@@ -29,7 +38,7 @@ export function registerProjectRemovalHandler(
 }
 
 async function refresh(): Promise<void> {
-  const rows = await invoke<ProjectRow[]>("project_list");
+  const rows = await invoke<ProjectRow[]>(PROJECT_LIST_COMMAND);
   PROJECTS.value = rows.map(projectRowToProject);
   projectsLoaded.value = true;
 }
@@ -81,7 +90,7 @@ export function getProject(id: string): Project | undefined {
 export async function ensureProjectLoaded(id: string): Promise<Project | null> {
   const existing = getProject(id);
   if (existing) return existing;
-  const row = await invoke<ProjectRow | null>("project_get", { id });
+  const row = await invoke<ProjectRow | null>(PROJECT_GET_COMMAND, { id });
   if (!row) return null;
   return upsertProject(projectRowToProject(row));
 }
@@ -95,7 +104,7 @@ export async function createProject(input: {
   cwd: string | null;
 }): Promise<Project> {
   const trimmedName = input.name.trim();
-  const row = await invoke<ProjectRow>("project_create", {
+  const row = await invoke<ProjectRow>(PROJECT_CREATE_COMMAND, {
     name: trimmedName || "未命名项目",
     cwd: input.cwd && input.cwd.trim() ? input.cwd.trim() : null,
   });
@@ -104,7 +113,7 @@ export async function createProject(input: {
 
 /** 更新项目名称；trim 后为空时不改动。返回是否真正更新。 */
 export async function renameProject(id: string, nextName: string): Promise<boolean> {
-  const updated = await invoke<boolean>("project_rename", { id, nextName });
+  const updated = await invoke<boolean>(PROJECT_RENAME_COMMAND, { id, nextName });
   if (updated) await refresh();
   return updated;
 }
@@ -114,7 +123,7 @@ export async function renameProject(id: string, nextName: string): Promise<boole
  * 不动磁盘上的 cwd 目录。
  */
 export async function removeProject(id: string): Promise<boolean> {
-  const removed = await invoke<boolean>("project_remove", { id });
+  const removed = await invoke<boolean>(PROJECT_REMOVE_COMMAND, { id });
   if (removed) {
     await refresh();
     await onProjectRemoved?.(id);
@@ -132,14 +141,14 @@ export function deriveProjectName(absPath: string): string {
 
 /** 切换项目置顶状态。 */
 export async function toggleProjectPin(id: string): Promise<boolean> {
-  const pinned = await invoke<boolean>("project_toggle_pin", { id });
+  const pinned = await invoke<boolean>(PROJECT_TOGGLE_PIN_COMMAND, { id });
   await refresh();
   return pinned;
 }
 
 /** 项目列表拖拽排序后调用。`orderedIds` 按显示顺序传入。 */
 export async function reorderProjects(orderedIds: string[]): Promise<void> {
-  await invoke("project_reorder", { orderedIds });
+  await invoke(PROJECT_REORDER_COMMAND, { orderedIds });
   // 本地缓存只重排参与本次拖动的项目；其它 pinned 分组保持原位。
   const byId = new Map(PROJECTS.value.map((p) => [p.id, p]));
   const reordered = orderedIds

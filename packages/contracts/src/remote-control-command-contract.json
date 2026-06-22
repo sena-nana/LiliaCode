@@ -1,0 +1,12 @@
+{
+  "commands": {
+    "status": "remote_control_status",
+    "setHostEnabled": "remote_control_set_host_enabled",
+    "setPcName": "remote_control_set_pc_name",
+    "startPairing": "remote_control_start_pairing",
+    "cancelPairing": "remote_control_cancel_pairing",
+    "revokeDevice": "remote_control_revoke_device",
+    "pairDevice": "remote_control_pair_device",
+    "dispatchRequest": "remote_control_dispatch_request"
+  }
+}

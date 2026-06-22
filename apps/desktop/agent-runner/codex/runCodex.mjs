@@ -26,15 +26,22 @@ import {
   emitRuntimeExtensionWarnings,
   readCodexRuntimeExtensions,
 } from "../runtimeExtensions.mjs";
-import { handleExperimentalProviderOptions } from "../providerOptions.mjs";
+import {
+  readRunnerRuntimeCommand,
+  readRunnerWorkflow,
+} from "../runnerCommand.mjs";
+import {
+  ensureProviderRuntimeOptions,
+  handleExperimentalProviderOptions,
+  readProviderRuntimeOptions,
+  withProviderRuntimeOptions,
+} from "../providerOptions.mjs";
 import { normalizeRuntimePermission } from "../runtimeSettings.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "../utils.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
 import {
-  codexPermissionProfileIdForMode,
-  mapCodexApprovalPolicy,
-  mapCodexSandboxMode,
-  mapCodexSandboxPolicy,
+  codexLegacyPermissionRuntimeParams,
+  codexPermissionRuntimeParams,
   maybeHandleCodexApprovalRequest,
 } from "./permissions.mjs";
 import {
@@ -49,6 +56,35 @@ import {
 } from "./timeline.mjs";
 import { buildPlanApprovalSpec } from "../planApproval.mjs";
 import { runCodexSessionManagementRuntimeCommand } from "../sessionManagement.mjs";
+import {
+  ASK_USER_INTERACTION_KIND,
+  MCP_ELICITATION_INTERACTION_KIND,
+  PERMISSION_APPROVAL_INTERACTION_KIND,
+  PLAN_APPROVAL_INTERACTION_KIND,
+} from "@lilia/contracts/agentInteractionContract.mjs";
+import { RUNNER_DONE_EVENT_TYPE } from "@lilia/contracts/runnerProtocolContract.mjs";
+import { normalizeCodexProfileSettings } from "@lilia/contracts/provider.mjs";
+import {
+  REMOTE_ENVIRONMENT_ACTIONS,
+  REMOTE_ENVIRONMENT_COMMAND_TYPE,
+  SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
+  normalizeProcessSessionCommand,
+  normalizeRemoteEnvironmentCommand,
+  normalizeRuntimeSettingsCommand,
+  normalizeSandboxDiagnosticsCommand,
+  normalizeSessionForkCommand,
+} from "@lilia/contracts/runtimeCommandContract.mjs";
+import {
+  isLiliaMemoryResetWorkflow,
+  isLiliaBackgroundTerminalsCleanWorkflow,
+  isLiliaCompactWorkflow,
+  normalizeLiliaBatchApplyWorkflow,
+  normalizeLiliaGoalWorkflow,
+  normalizeLiliaConfigDiagnosticsWorkflow,
+  normalizeLiliaFixSuggestionWorkflow,
+  normalizeLiliaMemoryModeWorkflow,
+  normalizeLiliaReviewWorkflow,
+} from "@lilia/contracts/liliaWorkflowContract.mjs";
 
 export async function initializeCodexAppServer(server) {
   await server.request("initialize", {
@@ -72,25 +108,13 @@ function codexModelFromResult(result, fallback = null) {
   return stringOrNull(result.model) || stringOrNull(result.thread?.model) || fallback;
 }
 
-function stringArray(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const item of value) {
-    const text = stringOrNull(item)?.trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-  }
-  return out;
-}
-
-function jsonObjectOrNull(value) {
-  return isRecord(value) && Object.keys(value).length > 0 ? { ...value } : null;
-}
-
 function jsonArrayOrNull(value) {
   return Array.isArray(value) && value.length > 0 ? value.slice() : null;
+}
+
+function numberOrNull(value) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function booleanOrNull(value) {
@@ -98,29 +122,20 @@ function booleanOrNull(value) {
 }
 
 function normalizeCodexSettings(cmd) {
-  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
-  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
-  const input = isRecord(provider.codex) ? provider.codex : {};
-  return {
-    profile: stringOrNull(input.profile) || "default",
+  const input = readProviderRuntimeOptions(cmd?.runtimeOptions, "codex").settings;
+  const normalized = normalizeCodexProfileSettings({
+    ...input,
     model: stringOrNull(input.model) || stringOrNull(cmd.model) || null,
-    reasoningEffort: stringOrNull(input.reasoningEffort),
-    runtimeWorkspaceRoots: stringArray(input.runtimeWorkspaceRoots),
-    responsesApiClientMetadata: jsonObjectOrNull(input.responsesApiClientMetadata),
+  });
+  return {
+    ...normalized,
     environments: jsonArrayOrNull(input.environments),
     experimentalRawEvents: booleanOrNull(input.experimentalRawEvents),
-    additionalContext: stringOrNull(input.additionalContext)?.trim() || null,
-    persistExtendedHistory: booleanOrNull(input.persistExtendedHistory),
-    initialTurnsPage: jsonObjectOrNull(input.initialTurnsPage),
-    excludeTurns: stringArray(input.excludeTurns),
   };
 }
 
 function ensureCodexRuntimeOptions(cmd) {
-  if (!isRecord(cmd.runtimeOptions)) cmd.runtimeOptions = {};
-  if (!isRecord(cmd.runtimeOptions.provider)) cmd.runtimeOptions.provider = {};
-  if (!isRecord(cmd.runtimeOptions.provider.codex)) cmd.runtimeOptions.provider.codex = {};
-  return cmd.runtimeOptions.provider.codex;
+  return ensureProviderRuntimeOptions(cmd, "codex");
 }
 
 function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = false } = {}) {
@@ -133,8 +148,7 @@ function assignCodexSettingsParams(params, settings, cmd, { includeSandbox = fal
     params.runtimeWorkspaceRoots = settings.runtimeWorkspaceRoots;
   }
   if (includeSandbox) {
-    params.permissions = codexPermissionProfileIdForMode(cmd.permission);
-    params.sandboxPolicy = mapCodexSandboxPolicy(cmd.permission);
+    Object.assign(params, codexPermissionRuntimeParams(cmd.permission));
   }
 }
 
@@ -176,7 +190,6 @@ function buildCodexThreadSettingsParams(threadId, cmd) {
   const settings = normalizeCodexSettings(cmd);
   const params = {
     threadId,
-    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   assignCodexAdvancedThreadParams(params, settings);
@@ -308,11 +321,10 @@ export async function startCodexAppServerSession(server, cmd, cwdFn = process.cw
   const common = {
     model: settings.model || model || undefined,
     cwd: cwd || cwdFn(),
-    approvalPolicy: mapCodexApprovalPolicy(permission),
+    ...codexLegacyPermissionRuntimeParams(permission),
   };
   assignCodexSettingsParams(common, settings, cmd);
   assignCodexAdvancedThreadParams(common, settings);
-  common.sandbox = mapCodexSandboxMode(permission);
   const dynamicTools = [codexAskUserDynamicTool, codexQueryQuotaUsageDynamicTool];
   if (conversationContextEnabled(cmd.conversationContext)) {
     dynamicTools.push(codexQueryConversationContextDynamicTool);
@@ -372,72 +384,25 @@ function codexTurnIdFromStartResult(result) {
 }
 
 function readCodexWorkflow(cmd) {
-  return isRecord(cmd?.workflow) ? cmd.workflow : null;
+  return readRunnerWorkflow(cmd);
 }
-
-function normalizeCodexReviewTarget(target) {
-  if (!isRecord(target)) return null;
-  const type = stringOrNull(target.type);
-  if (type === "uncommittedChanges") return { type };
-  if (type === "baseBranch") {
-    const branch = stringOrNull(target.branch)?.trim();
-    return branch ? { type, branch } : null;
-  }
-  if (type === "commit") {
-    const sha = stringOrNull(target.sha)?.trim();
-    return sha ? { type, sha, title: null } : null;
-  }
-  return null;
-}
-
-const CODEX_GOAL_ACTIONS = new Set(["set", "refresh", "clear"]);
-const CODEX_GOAL_STATUSES = new Set([
-  "active",
-  "paused",
-  "blocked",
-  "usageLimited",
-  "budgetLimited",
-  "complete",
-]);
-const CODEX_MEMORY_MODES = new Set(["enabled", "disabled"]);
 
 function readCodexReviewWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_review") return null;
-  const target = normalizeCodexReviewTarget(workflow.target);
-  if (!target) throw new Error("Lilia review workflow missing a valid target");
-  const instructions = stringOrNull(workflow.instructions)?.trim() || "";
-  const delivery = workflow.delivery === "detached" ? "detached" : "inline";
-  return { target, instructions, delivery };
+  const workflow = normalizeLiliaReviewWorkflow(readCodexWorkflow(cmd));
+  return workflow ? { ...workflow, target: codexReviewTargetForAppServer(workflow.target) } : null;
 }
 
 function readCodexFixSuggestionWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_fix_suggestion") return null;
-  const target = normalizeCodexReviewTarget(workflow.target);
-  if (!target) throw new Error("Lilia fix suggestion workflow missing a valid target");
-  const mode = workflow.mode === "apply" ? "apply" : "suggest";
-  const instructions = stringOrNull(workflow.instructions)?.trim() || "";
-  return { target, instructions, mode };
+  const workflow = normalizeLiliaFixSuggestionWorkflow(readCodexWorkflow(cmd));
+  return workflow ? { ...workflow, target: codexReviewTargetForAppServer(workflow.target) } : null;
 }
 
 function readCodexBatchApplyWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_batch_apply") return null;
-  const sourceTurnId = stringOrNull(workflow.sourceTurnId)?.trim();
-  const sourceKind = stringOrNull(workflow.sourceKind);
-  const sourceSummary = stringOrNull(workflow.sourceSummary)?.trim();
-  if (!sourceTurnId) throw new Error("Lilia batch apply workflow missing sourceTurnId");
-  if (sourceKind !== "review" && sourceKind !== "fix_suggestion") {
-    throw new Error("Lilia batch apply workflow missing a valid sourceKind");
-  }
-  if (!sourceSummary) throw new Error("Lilia batch apply workflow missing sourceSummary");
-  return {
-    sourceTurnId,
-    sourceKind,
-    sourceSummary,
-    instructions: stringOrNull(workflow.instructions)?.trim() || "",
-  };
+  return normalizeLiliaBatchApplyWorkflow(readCodexWorkflow(cmd));
+}
+
+function codexReviewTargetForAppServer(target) {
+  return target?.type === "commit" ? { ...target, title: null } : target;
 }
 
 function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
@@ -448,212 +413,108 @@ function codexFixSuggestionEffectiveTurnCmd(cmd, workflow) {
   };
 }
 
-function normalizeCodexGoalStatus(status) {
-  const value = stringOrNull(status);
-  return CODEX_GOAL_STATUSES.has(value) ? value : null;
-}
-
-function numberOrNull(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function readCodexGoalWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_goal") return null;
-  const action = stringOrNull(workflow.action);
-  if (!CODEX_GOAL_ACTIONS.has(action)) {
-    throw new Error("Lilia goal workflow missing a valid action");
-  }
-  const objective = stringOrNull(workflow.objective)?.trim() || "";
-  if (action === "set" && !objective) {
-    throw new Error("Lilia goal workflow missing objective");
-  }
-  const tokenBudget = numberOrNull(workflow.tokenBudget);
-  return {
-    action,
-    objective,
-    status: normalizeCodexGoalStatus(workflow.status) || "active",
-    tokenBudget,
-  };
+  return normalizeLiliaGoalWorkflow(readCodexWorkflow(cmd));
 }
 
 function readCodexCompactWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "lilia_compact";
+  return isLiliaCompactWorkflow(readCodexWorkflow(cmd));
 }
 
 function readCodexBackgroundTerminalsCleanWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "lilia_background_terminals_clean";
+  return isLiliaBackgroundTerminalsCleanWorkflow(readCodexWorkflow(cmd));
 }
 
 function readCodexMemoryModeWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_memory_mode") return null;
-  const mode = stringOrNull(workflow.mode);
-  if (!CODEX_MEMORY_MODES.has(mode)) {
-    throw new Error("Lilia memory mode workflow missing a valid mode");
-  }
-  return { mode };
+  return normalizeLiliaMemoryModeWorkflow(readCodexWorkflow(cmd));
 }
 
 function readCodexMemoryResetWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  return workflow?.type === "lilia_memory_reset";
+  return isLiliaMemoryResetWorkflow(readCodexWorkflow(cmd));
 }
 
 function readCodexThreadForkRuntimeCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "session_fork") return null;
-  const sourceTurnId = stringOrNull(command.sourceTurnId)?.trim() || null;
+  const command = normalizeSessionForkCommand(readRunnerRuntimeCommand(cmd));
+  if (!command) return null;
   return {
-    excludeTurns: command.excludeTurns !== false,
-    sourceTurnId,
-    mode: command.mode === "continue" ? "continue" : "fork",
-    continueAfterFork: Boolean(sourceTurnId && stringOrNull(cmd?.prompt)?.trim()),
+    ...command,
+    sourceTurnId: command.sourceTurnId || null,
+    continueAfterFork: Boolean(command.sourceTurnId && stringOrNull(cmd?.prompt)?.trim()),
   };
 }
 
 function readCodexConfigDiagnosticsWorkflow(cmd) {
-  const workflow = readCodexWorkflow(cmd);
-  if (workflow?.type !== "lilia_config_diagnostics") return null;
-  return {
-    includeLayers: workflow.includeLayers !== false,
-  };
+  return normalizeLiliaConfigDiagnosticsWorkflow(readCodexWorkflow(cmd));
 }
-
-const RUNTIME_SETTINGS_ACTIONS = new Set(["diagnose", "update"]);
-const REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS = ["diagnose", "add", "select"];
-const REMOTE_ENVIRONMENT_ACTIONS = new Set(REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS);
-const PROCESS_SESSION_ACTIONS = new Set(["spawn", "write_stdin", "kill", "resize_pty"]);
 
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 function readCodexRuntimeSettingsCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "runtime_settings") return null;
-  const action = stringOrNull(command.action);
-  if (!RUNTIME_SETTINGS_ACTIONS.has(action)) {
-    throw new Error("Lilia runtime settings command missing a valid action");
-  }
-  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
-  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
-  const common = isRecord(runtimeOptions.common) ? runtimeOptions.common : {};
-  const codex = isRecord(provider.codex)
-    ? provider.codex
-    : {};
-  const ignoredProviderKeys = isRecord(provider.claude) ? Object.keys(provider.claude) : [];
+  const normalizedCommand = normalizeRuntimeSettingsCommand(
+    readRunnerRuntimeCommand(cmd),
+  );
+  if (!normalizedCommand) return null;
+  const {
+    common,
+    settings: codex,
+    ignoredProviderKeys,
+  } = readProviderRuntimeOptions(cmd?.runtimeOptions, "codex");
+  const normalizedCodex = normalizeCodexProfileSettings(codex);
   const updates = {};
   const model = stringOrNull(common.model)?.trim();
   const permission = normalizeRuntimePermission(common.permission);
-  const profile = stringOrNull(codex.profile)?.trim();
-  const reasoningEffort = stringOrNull(codex.reasoningEffort)?.trim();
-  const runtimeWorkspaceRoots = stringArray(codex.runtimeWorkspaceRoots);
   const environments = jsonArrayOrNull(codex.environments);
-  const responsesApiClientMetadata = jsonObjectOrNull(codex.responsesApiClientMetadata);
 
   if (model) updates.model = model;
   if (permission) updates.permission = permission;
-  if (profile) updates.profile = profile;
-  if (reasoningEffort) updates.reasoningEffort = reasoningEffort;
-  if (runtimeWorkspaceRoots.length > 0) updates.runtimeWorkspaceRoots = runtimeWorkspaceRoots;
+  if (hasOwn(codex, "profile")) updates.profile = normalizedCodex.profile;
+  if (hasOwn(codex, "reasoningEffort") && normalizedCodex.reasoningEffort) {
+    updates.reasoningEffort = normalizedCodex.reasoningEffort;
+  }
+  if (hasOwn(codex, "runtimeWorkspaceRoots") && normalizedCodex.runtimeWorkspaceRoots.length > 0) {
+    updates.runtimeWorkspaceRoots = normalizedCodex.runtimeWorkspaceRoots;
+  }
   if (hasOwn(codex, "persistExtendedHistory")) {
-    updates.persistExtendedHistory = codex.persistExtendedHistory === true;
+    updates.persistExtendedHistory = normalizedCodex.persistExtendedHistory === true;
   }
   if (environments) updates.environments = environments;
   if (hasOwn(codex, "experimentalRawEvents")) {
     updates.experimentalRawEvents = codex.experimentalRawEvents === true;
   }
-  if (responsesApiClientMetadata) {
-    updates.responsesApiClientMetadata = responsesApiClientMetadata;
+  if (hasOwn(codex, "responsesApiClientMetadata") && normalizedCodex.responsesApiClientMetadata) {
+    updates.responsesApiClientMetadata = normalizedCodex.responsesApiClientMetadata;
   }
-  if (action === "update" && Object.keys(updates).length === 0) {
+  if (normalizedCommand.action === "update" && Object.keys(updates).length === 0) {
     throw new Error("Lilia provider settings update requires at least one supported setting");
   }
   return {
-    action,
+    action: normalizedCommand.action,
     updates,
     ignoredProviderKeys,
   };
 }
 
 function readCodexRemoteEnvironmentCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "remote_environment") return null;
-  const action = stringOrNull(command.action);
-  if (!REMOTE_ENVIRONMENT_ACTIONS.has(action)) {
-    throw new Error("Lilia remote environment command missing a valid action");
-  }
-  const environmentId = stringOrNull(command.environmentId)?.trim() || "";
-  const environment = jsonObjectOrNull(command.environment);
-  if (action === "add" && !environment) {
-    throw new Error("Lilia remote environment add requires environment");
-  }
-  if (action === "select" && !environmentId) {
-    throw new Error("Lilia remote environment select requires environmentId");
-  }
-  if (action === "add" && environmentId && !environment.id) {
-    environment.id = environmentId;
-  }
-  return {
-    action,
-    environmentId,
-    environment,
-  };
+  return normalizeRemoteEnvironmentCommand(readRunnerRuntimeCommand(cmd));
 }
 
 function readCodexSandboxDiagnosticsCommand(cmd) {
-  const command = isRecord(cmd?.runtimeCommand) ? cmd.runtimeCommand : null;
-  if (command?.type !== "sandbox_diagnostics") return null;
-  return {
-    includeDetails: command.includeDetails === true,
-  };
+  return normalizeSandboxDiagnosticsCommand(readRunnerRuntimeCommand(cmd));
 }
 
 function readCodexProcessSessionCommand(value) {
-  const command = isRecord(value?.runtimeCommand) ? value.runtimeCommand : isRecord(value) ? value : null;
-  if (command?.type !== "process_session") return null;
-  const action = stringOrNull(command.action);
-  if (!PROCESS_SESSION_ACTIONS.has(action)) {
-    throw new Error("Lilia process session command missing a valid action");
-  }
-  const processId = stringOrNull(command.processId)?.trim() || "";
-  const shellCommand = stringOrNull(command.command)?.trim() || "";
-  if (action === "spawn" && !shellCommand) {
-    throw new Error("Lilia process session spawn requires command");
-  }
-  const rows = numberOrNull(command.rows);
-  const cols = numberOrNull(command.cols);
-  return {
-    action,
-    processId,
-    command: shellCommand,
-    cwd: stringOrNull(command.cwd)?.trim() || "",
-    stdin: stringOrNull(command.stdin) || "",
-    rows: rows && rows > 0 ? Math.trunc(rows) : null,
-    cols: cols && cols > 0 ? Math.trunc(cols) : null,
-    env: jsonObjectOrNull(command.env),
-    tty: command.tty === true,
-    permissionProfile: stringOrNull(command.permissionProfile)?.trim() || "",
-  };
+  return normalizeProcessSessionCommand(
+    isRecord(value?.runtimeCommand) ? value.runtimeCommand : value,
+  );
 }
 
 function codexSettingsCmdFromRuntimeCommand(cmd, command) {
   const codexSettings = {
     ...normalizeCodexSettings(cmd),
   };
-  const next = {
-    ...cmd,
-    runtimeOptions: {
-      ...(isRecord(cmd.runtimeOptions) ? cmd.runtimeOptions : {}),
-      provider: {
-        ...(isRecord(cmd.runtimeOptions?.provider) ? cmd.runtimeOptions.provider : {}),
-        codex: codexSettings,
-      },
-    },
-  };
+  const next = withProviderRuntimeOptions(cmd, "codex", codexSettings);
   if (command.updates.model) {
     next.model = command.updates.model;
     codexSettings.model = command.updates.model;
@@ -714,7 +575,7 @@ function emitCodexWorkflowTimeline(ctx, config, threadId, status, error = null) 
 
 function emitCodexWorkflowDone(ctx, threadId) {
   ctx.protocol.emit({
-    type: "done",
+    type: RUNNER_DONE_EVENT_TYPE,
     sessionId: threadId,
     subtype: "success",
   });
@@ -929,9 +790,7 @@ export function buildCodexCollaborationMode(kind, model, preset = null, reasonin
 }
 
 function readCodexSubagentInstructions(cmd) {
-  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
-  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
-  const codex = isRecord(provider.codex) ? provider.codex : {};
+  const codex = readProviderRuntimeOptions(cmd?.runtimeOptions, "codex").settings;
   return stringOrNull(codex.subagentInstructions)?.trim() || null;
 }
 
@@ -948,7 +807,6 @@ export async function startCodexAppServerTurn(
     threadId,
     input: [{ type: "text", text: prompt }],
     cwd: cmd.cwd || cwdFn(),
-    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
   assignCodexTurnParams(params, settings);
@@ -1075,7 +933,7 @@ async function runCodexTurnLoop(
       if (!emitCodexPlanApprovalRequired(ctx)) {
         throw new Error("Codex plan mode completed without a readable plan");
       }
-      const result = await runCodexUiInteraction(ctx, "plan_approval", () =>
+      const result = await runCodexUiInteraction(ctx, PLAN_APPROVAL_INTERACTION_KIND, () =>
         ctx.interactions.requestAskUser(buildPlanApprovalSpec("codex"), {
           backend: "codex",
           emitTimelineEvent: false,
@@ -1095,7 +953,7 @@ async function runCodexTurnLoop(
         shouldStartTurn = true;
       } else if (ctx.planCancelled) {
         ctx.protocol.emit({
-          type: "done",
+          type: RUNNER_DONE_EVENT_TYPE,
           sessionId: ctx.lastThreadId,
           subtype: "cancelled",
         });
@@ -1477,7 +1335,6 @@ function buildCodexThreadForkParams(threadId, cmd, command, cwdFn) {
   const params = {
     threadId,
     cwd: cmd.cwd || cwdFn(),
-    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
     excludeTurns: command.excludeTurns,
   };
   if (command.sourceTurnId) params.turnId = command.sourceTurnId;
@@ -1546,7 +1403,8 @@ async function runCodexPromptSessionFork(server, threadId, cmd, ctx, cwdFn = pro
 }
 
 function shouldRunCodexAutoSessionFork(cmd) {
-  return cmd?.autoSessionFork === true && cmd?.runtimeCommand?.type !== "session_fork";
+  return cmd?.autoSessionFork === true &&
+    !normalizeSessionForkCommand(readRunnerRuntimeCommand(cmd));
 }
 
 async function runCodexAutoSessionFork(server, threadId, cmd, ctx, cwdFn = process.cwd) {
@@ -1558,7 +1416,6 @@ async function runCodexAutoSessionFork(server, threadId, cmd, ctx, cwdFn = proce
   const params = {
     threadId,
     cwd: cmd.cwd || cwdFn(),
-    approvalPolicy: mapCodexApprovalPolicy(cmd.permission),
     excludeTurns: true,
   };
   assignCodexSettingsParams(params, settings, cmd, { includeSandbox: true });
@@ -1734,7 +1591,7 @@ function emitCodexRemoteEnvironmentTimeline(ctx, input) {
     summary: errorMessage || input.summary,
     payload: {
       backend: "codex",
-      subkind: "remote_environment",
+      subkind: REMOTE_ENVIRONMENT_COMMAND_TYPE,
       action: input.command.action,
       threadId: input.threadId,
       ...(input.method ? { method: input.method } : {}),
@@ -2012,7 +1869,7 @@ async function runCodexRemoteEnvironmentCommand(server, threadId, cmd, ctx) {
       command,
       environments,
       extraPayload: {
-        supportedActions: REMOTE_ENVIRONMENT_SUPPORTED_ACTIONS,
+        supportedActions: REMOTE_ENVIRONMENT_ACTIONS,
       },
       sourceId: `codex:remote-environment:diagnose:${threadId}`,
     });
@@ -2098,7 +1955,7 @@ async function runCodexSandboxDiagnosticsCommand(server, threadId, cmd, ctx) {
       summary: "已读取 Codex Windows sandbox readiness",
       payload: {
         backend: "codex",
-        subkind: "sandbox_diagnostics",
+        subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
         method: "windowsSandbox/readiness",
         threadId,
         includeDetails: command.includeDetails,
@@ -2114,7 +1971,7 @@ async function runCodexSandboxDiagnosticsCommand(server, threadId, cmd, ctx) {
       summary: err?.message || String(err),
       payload: {
         backend: "codex",
-        subkind: "sandbox_diagnostics",
+        subkind: SANDBOX_DIAGNOSTICS_COMMAND_TYPE,
         method: "windowsSandbox/readiness",
         threadId,
         includeDetails: command.includeDetails,
@@ -2241,7 +2098,7 @@ function codexPermissionApprovalResponse(result) {
 
 async function requestCodexRuntimeInteraction(ctx, kind, payload) {
   if (!ctx?.interactions?.requestCodexInteraction) {
-    return kind === "mcp_elicitation"
+    return kind === MCP_ELICITATION_INTERACTION_KIND
       ? { action: "cancel", content: null, _meta: null }
       : { action: "cancel", permissions: {}, scope: "turn", strictAutoReview: true };
   }
@@ -2351,7 +2208,7 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
     let output = null;
     if (isLiliaAskUserTool(toolName)) {
       const requestAskUser = (spec, options) =>
-        runCodexUiInteraction(ctx, "ask_user", () =>
+        runCodexUiInteraction(ctx, ASK_USER_INTERACTION_KIND, () =>
           ctx.interactions.requestAskUser(spec, options));
       output = await createCodexAskUserHandler(requestAskUser)(input);
     } else if (isLiliaConversationContextTool(toolName)) {
@@ -2380,7 +2237,7 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
       server.respond(msg.id, { answers: {} });
       return true;
     }
-    const result = await runCodexUiInteraction(ctx, "ask_user", () =>
+    const result = await runCodexUiInteraction(ctx, ASK_USER_INTERACTION_KIND, () =>
       ctx.interactions.requestAskUser(spec, { backend: "codex" }));
     server.respond(msg.id, askUserResultToCodexRequestUserInputResponse(result, spec));
     return true;
@@ -2391,7 +2248,7 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
       server.respond(msg.id, { action: "cancel", content: null, _meta: null });
       return true;
     }
-    const result = await requestCodexRuntimeInteraction(ctx, "mcp_elicitation", payload);
+    const result = await requestCodexRuntimeInteraction(ctx, MCP_ELICITATION_INTERACTION_KIND, payload);
     server.respond(
       msg.id,
       codexMcpElicitationResponse(result),
@@ -2408,7 +2265,7 @@ export async function maybeHandleCodexServerRequest(server, msg, ctx = null) {
       });
       return true;
     }
-    const result = await requestCodexRuntimeInteraction(ctx, "permission_approval", payload);
+    const result = await requestCodexRuntimeInteraction(ctx, PERMISSION_APPROVAL_INTERACTION_KIND, payload);
     server.respond(
       msg.id,
       codexPermissionApprovalResponse(result),

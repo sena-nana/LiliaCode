@@ -2,6 +2,12 @@ import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { defineComponent } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  AGENT_TIMELINE_LIST_COMMAND,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
+} from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { useSidebarDisplayMode } from "../src/composables/useSidebarDisplayMode";
 import { createLiliaRouter } from "../src/router";
@@ -93,17 +99,17 @@ describe("TaskDetail conversation suggestions", () => {
     const view = await renderProjectDraftTaskDetail(draft.id);
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "conversation_suggestions_get_sources"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND))
         .toBe(true);
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "conversation_suggestions_get"))
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CONVERSATION_SUGGESTIONS_GET_COMMAND))
         .toBe(true);
       expect(view.getByRole("button", { name: "补齐建议缓存测试" })).toBeInTheDocument();
     });
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "agent_timeline_list" && args?.taskId === draft.id
+      cmd === AGENT_TIMELINE_LIST_COMMAND && args?.taskId === draft.id
     )).toBe(false);
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "chat_get_runtime_snapshot" && args?.taskId === draft.id
+      cmd === CHAT_GET_RUNTIME_SNAPSHOT_COMMAND && args?.taskId === draft.id
     )).toBe(false);
     const suggestions = view.getByLabelText("新对话建议");
     expect(suggestions.closest(".chat-empty")).not.toBeNull();
@@ -169,12 +175,12 @@ describe("TaskDetail conversation suggestions", () => {
 
     await waitFor(() => {
       expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-        cmd === "conversation_suggestions_get_sources" &&
+        cmd === CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND &&
         args?.projectId === "lilia" &&
         args?.forceRefresh === true
       )).toBe(true);
       expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-        cmd === "conversation_suggestions_get" &&
+        cmd === CONVERSATION_SUGGESTIONS_GET_COMMAND &&
         args?.projectId === "lilia" &&
         args?.forceRefresh === true
       )).toBe(true);
@@ -270,7 +276,7 @@ describe("TaskDetail conversation suggestions", () => {
       expect(view.getByText("今天想做什么？")).toBeInTheDocument();
     });
 
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "conversation_suggestions_get"))
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CONVERSATION_SUGGESTIONS_GET_COMMAND))
       .toBe(false);
     expect(view.queryByLabelText("新对话建议")).toBeNull();
     expect(view.queryByRole("button", { name: "补齐建议缓存测试" })).toBeNull();

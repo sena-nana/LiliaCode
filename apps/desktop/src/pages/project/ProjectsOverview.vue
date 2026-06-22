@@ -1,45 +1,43 @@
 <script setup lang="ts">
 import "../../styles/pages/project.css";
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { Pin } from "lucide-vue-next";
-import type {
-  ProjectDashboardSummary,
-  ProjectTaskStatusCounts,
+import {
+  PROJECT_DASHBOARD_STATUS_ORDER,
+  taskStatusLabel,
+  type ProjectDashboardSummary,
+  type TaskStatus,
 } from "@lilia/contracts";
 import {
   ensureProjectDashboardLoaded,
   listProjectDashboardSummaries,
 } from "../../services/projectsStore";
 
-type StatusKey = keyof ProjectTaskStatusCounts;
-
-const statusOrder: Array<{ key: StatusKey; label: string }> = [
-  { key: "blocked", label: "阻塞" },
-  { key: "running", label: "运行" },
-  { key: "waiting", label: "等待" },
-  { key: "draft", label: "草稿" },
-  { key: "done", label: "完成" },
-  { key: "cancelled", label: "取消" },
-];
+const statusOrder = PROJECT_DASHBOARD_STATUS_ORDER.map((key) => ({
+  key,
+  label: taskStatusLabel(key),
+}));
 
 const loading = ref(false);
 const errorMessage = ref("");
 const summaries = computed<ProjectDashboardSummary[]>(() => listProjectDashboardSummaries());
+let disposed = false;
 
 async function loadDashboard(force = false) {
+  if (disposed) return;
   loading.value = true;
   errorMessage.value = "";
   try {
     await ensureProjectDashboardLoaded(force);
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   } finally {
-    loading.value = false;
+    if (!disposed) loading.value = false;
   }
 }
 
-function statusCount(summary: ProjectDashboardSummary, key: StatusKey): number {
+function statusCount(summary: ProjectDashboardSummary, key: TaskStatus): number {
   return summary.statusCounts[key] ?? 0;
 }
 
@@ -88,7 +86,12 @@ function costCoverage(summary: ProjectDashboardSummary): string {
 }
 
 onMounted(() => {
+  disposed = false;
   void loadDashboard(true);
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
 });
 </script>
 

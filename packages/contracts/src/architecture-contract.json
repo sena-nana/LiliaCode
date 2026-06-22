@@ -1,0 +1,196 @@
+{
+  "projectArchitecturePermissions": [
+    "ask",
+    "full",
+    "readonly"
+  ],
+  "projectArchitectureDefaultPermission": "ask",
+  "projectArchitectureRollbackPermission": "full",
+  "projectArchitectureRuntimePermissionMap": {
+    "full": "full",
+    "free": "full",
+    "readonly": "readonly"
+  },
+  "projectArchitectureChangeStatuses": [
+    "proposed",
+    "pending",
+    "applied",
+    "rejected",
+    "rolled_back"
+  ],
+  "projectArchitectureDefaultChangeStatus": "pending",
+  "projectArchitectureDefaultInteractionStatus": "pending",
+  "projectArchitectureReadonlyInteractionStatus": "proposed",
+  "projectArchitectureAppliedInteractionStatus": "applied",
+  "projectArchitectureDefaultNodeType": "module",
+  "projectArchitectureDefaultEdgeType": "depends_on",
+  "commands": {
+    "get": "project_architecture_get",
+    "listChanges": "project_architecture_list_changes",
+    "apply": "project_architecture_apply",
+    "reject": "project_architecture_reject",
+    "rollback": "project_architecture_rollback"
+  },
+  "architectureToolNames": [
+    "UpdateProjectArchitecture",
+    "update_project_architecture",
+    "mcp__lilia__update_project_architecture"
+  ],
+  "updateProjectArchitectureInputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "reason": {
+        "type": "string"
+      },
+      "changes": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "node"
+              ],
+              "properties": {
+                "type": {
+                  "const": "upsert_node"
+                },
+                "node": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "label",
+                    "type",
+                    "summary",
+                    "paths",
+                    "tags"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "paths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "nodeId"
+              ],
+              "properties": {
+                "type": {
+                  "const": "remove_node"
+                },
+                "nodeId": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "edge"
+              ],
+              "properties": {
+                "type": {
+                  "const": "upsert_edge"
+                },
+                "edge": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "from",
+                    "to",
+                    "type",
+                    "label",
+                    "summary"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "from": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "edgeId"
+              ],
+              "properties": {
+                "type": {
+                  "const": "remove_edge"
+                },
+                "edgeId": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "summary"
+              ],
+              "properties": {
+                "type": {
+                  "const": "set_summary"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "required": [
+      "changes"
+    ]
+  }
+}

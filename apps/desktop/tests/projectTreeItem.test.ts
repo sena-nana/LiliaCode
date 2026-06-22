@@ -1,8 +1,13 @@
 import { render, fireEvent, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
-import type { Task } from "@lilia/contracts";
+import {
+  POPUP_OPEN_CHILD_QUESTION_COMMAND,
+  POPUP_OPEN_NEW_CHAT_COMMAND,
+  POPUP_OPEN_TASK_COMMAND,
+  type Task,
+} from "@lilia/contracts";
 import ProjectTreeItem from "../src/components/sidebar/ProjectTreeItem.vue";
 import ContextMenuHost from "../src/components/ContextMenuHost.vue";
 import { installContextMenu } from "../src/composables/useContextMenuInstall";
@@ -130,6 +135,10 @@ function getConversationRow(view: ReturnType<typeof render>, title: string): HTM
 }
 
 describe("ProjectTreeItem", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("项目行主体点击会展开折叠，项目名称不再直接导航", async () => {
     const view = await renderProjectTreeItem("/projects/tools");
     const projectRow = view.getByText("Lilia").closest(".sb-tree__row--project");
@@ -167,7 +176,7 @@ describe("ProjectTreeItem", () => {
       name: "在弹出窗口中创建对话",
     }));
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_NEW_CHAT_COMMAND, {
       projectId: "lilia",
       initialDraftContent: null,
     }, undefined);
@@ -182,7 +191,7 @@ describe("ProjectTreeItem", () => {
       new MouseEvent("auxclick", { bubbles: true, button: 1 }),
     );
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_new_chat", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_NEW_CHAT_COMMAND, {
       projectId: "lilia",
       initialDraftContent: null,
     }, undefined);
@@ -198,7 +207,7 @@ describe("ProjectTreeItem", () => {
       new MouseEvent("auxclick", { bubbles: true, button: 1 }),
     );
 
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_TASK_COMMAND, {
       projectId: "lilia",
       taskId: "t-001",
     }, undefined);
@@ -218,14 +227,14 @@ describe("ProjectTreeItem", () => {
     expect(await view.findByRole("menuitem", { name: "归档" })).toBeInTheDocument();
 
     await fireEvent.click(view.getByRole("menuitem", { name: "在弹出窗口继续" }));
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_task", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_TASK_COMMAND, {
       projectId: "lilia",
       taskId: "t-001",
     }, undefined);
 
     await fireEvent.contextMenu(row!, { clientX: 10, clientY: 10 });
     await fireEvent.click(await view.findByRole("menuitem", { name: "在弹出窗口询问" }));
-    expect(mockInvoke).toHaveBeenCalledWith("popup_open_child_question", {
+    expect(mockInvoke).toHaveBeenCalledWith(POPUP_OPEN_CHILD_QUESTION_COMMAND, {
       projectId: "lilia",
       parentTaskId: "t-001",
     }, undefined);
@@ -265,5 +274,16 @@ describe("ProjectTreeItem", () => {
     expect(within(parentRow).getByText("1 子任务")).toHaveClass("sb-tree__meta");
     expect(within(childRow).getByText(/子任务.*1 依赖/)).toHaveClass("sb-tree__meta");
     expect(childRow).toHaveStyle("--task-tree-depth: 1");
+  });
+
+  it("卸载时取消项目对话列表延迟 reveal 的 paint 调度", async () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 29));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = await renderProjectTreeItem();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(29);
   });
 });

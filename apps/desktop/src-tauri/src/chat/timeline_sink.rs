@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::agent_events::{AgentEventEffect, AgentRuntimeEvent, AgentTurnContext};
 use crate::agent_timeline;
 use crate::agent_timeline::AgentTimelineEventInput;
+use crate::chat::contract;
 use crate::chat::types::{conversation_references_payload, ChatMessage};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
@@ -108,7 +109,7 @@ pub(crate) fn persist_and_emit_input<R: Runtime>(
         Ok(saved)
     }) {
         Ok(saved) => {
-            let _ = app_handle.emit("agent:timeline", &saved);
+            let _ = app_handle.emit(contract::agent_timeline_event_name(), &saved);
             crate::automation::emit_timeline_signal(app_handle, &saved);
         }
         Err(err) => {

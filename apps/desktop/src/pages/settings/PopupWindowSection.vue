@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { AlertTriangle, Keyboard, Save, Trash2 } from "lucide-vue-next";
 import type { PopupWindowSettings } from "@lilia/contracts";
 import {
@@ -11,15 +11,16 @@ const popupWindowSettings = ref<PopupWindowSettings>({ shortcut: null });
 const savingPopupWindow = ref(false);
 const popupWindowError = ref<string | null>(null);
 const popupWindowDirty = ref(false);
+let disposed = false;
 
 async function loadPopupWindowSettings() {
   try {
     const settings = await getPopupWindowSettings();
-    if (!popupWindowDirty.value) {
+    if (!disposed && !popupWindowDirty.value) {
       popupWindowSettings.value = settings;
     }
   } catch (err) {
-    popupWindowError.value = `读取弹出窗口设置失败：${String(err)}`;
+    if (!disposed) popupWindowError.value = `读取弹出窗口设置失败：${String(err)}`;
   }
 }
 
@@ -72,19 +73,27 @@ function clearPopupShortcut() {
 }
 
 async function savePopupWindowSettings() {
+  if (disposed) return;
   savingPopupWindow.value = true;
   popupWindowError.value = null;
   try {
     await setPopupWindowSettings(popupWindowSettings.value);
-    popupWindowDirty.value = false;
+    if (!disposed) popupWindowDirty.value = false;
   } catch (err) {
-    popupWindowError.value = `保存弹出窗口设置失败：${String(err)}`;
+    if (!disposed) popupWindowError.value = `保存弹出窗口设置失败：${String(err)}`;
   } finally {
-    savingPopupWindow.value = false;
+    if (!disposed) savingPopupWindow.value = false;
   }
 }
 
-onMounted(loadPopupWindowSettings);
+onMounted(() => {
+  disposed = false;
+  void loadPopupWindowSettings();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+});
 </script>
 
 <template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   AlertTriangle,
   Download,
@@ -11,10 +11,24 @@ import {
   Trash2,
   UserRound,
 } from "lucide-vue-next";
-import type {
-  ChatBackendKind,
-  ProviderConfig,
-  RouterMode,
+import {
+  API_KEY_ENV_BY_BACKEND,
+  CHAT_BACKENDS,
+  DEFAULT_ROUTER_MODE_BY_BACKEND,
+  DIRECT_DEFAULT_URLS,
+  apiDescriptionForBackend,
+  chatBackendLabel,
+  connectionDiagnostic,
+  createChatBackendRecord,
+  defaultRouterModeForBackend,
+  normalizeRouterModeForBackend,
+  routerModeLabel,
+  routerModeUsesApiConfig,
+  routerModesForBackend,
+  runtimeDiagnostic,
+  type ChatBackendKind,
+  type ProviderConfig,
+  type RouterMode,
 } from "@lilia/contracts";
 import { useConnectionStatus } from "../../composables/useConnectionStatus";
 import {
@@ -23,11 +37,7 @@ import {
   setProviderConfig,
   setRouterMode,
 } from "../../services/chat";
-import {
-  DIRECT_DEFAULT_URLS,
-  connectionDiagnostic,
-  runtimeDiagnostic,
-} from "./providerDiagnostics";
+import RemoteControlSection from "./RemoteControlSection.vue";
 
 const {
   report,
@@ -43,26 +53,36 @@ const {
   codexAppServerUpdateError,
 } = useConnectionStatus();
 
-const backendOptions: { value: ChatBackendKind; label: string }[] = [
-  { value: "claude", label: "Claude" },
-  { value: "codex", label: "Codex" },
+const backendOptions: { value: ChatBackendKind; label: string }[] = CHAT_BACKENDS.map((backend) => ({
+  value: backend,
+  label: chatBackendLabel(backend),
+}));
+const codexRouterModes = [
+  DEFAULT_ROUTER_MODE_BY_BACKEND.codex,
+  ...routerModesForBackend("codex").filter((mode) => mode !== DEFAULT_ROUTER_MODE_BY_BACKEND.codex),
 ];
-const codexModeOptions: { value: RouterMode; label: string }[] = [
-  { value: "codex-account", label: "官方账号" },
-  { value: "api", label: "API" },
-];
+const codexModeOptions: { value: RouterMode; label: string }[] = codexRouterModes.map((mode) => ({
+  value: mode,
+  label: routerModeLabel(mode),
+}));
+
+function emptyProviderConfig(backend: ChatBackendKind): ProviderConfig {
+  return { backend, baseUrl: null, apiKey: null, hasApiKey: false };
+}
+
+function providerConfigMapFromBackends(): Record<ChatBackendKind, ProviderConfig> {
+  return createChatBackendRecord(emptyProviderConfig);
+}
+
+function routerModeMapFromBackends(): Record<ChatBackendKind, RouterMode> {
+  return createChatBackendRecord(defaultRouterModeForBackend);
+}
 
 const switchingBackend = ref<ChatBackendKind | null>(null);
 const savingProvider = ref(false);
 const savingRouter = ref(false);
-const providerForms = ref<Record<ChatBackendKind, ProviderConfig>>({
-  claude: { backend: "claude", baseUrl: null, apiKey: null, hasApiKey: false },
-  codex: { backend: "codex", baseUrl: null, apiKey: null, hasApiKey: false },
-});
-const routerModes = ref<Record<ChatBackendKind, RouterMode>>({
-  claude: "api",
-  codex: "codex-account",
-});
+const providerForms = ref<Record<ChatBackendKind, ProviderConfig>>(providerConfigMapFromBackends());
+const routerModes = ref<Record<ChatBackendKind, RouterMode>>(routerModeMapFromBackends());
 
 const selectedBackend = computed(() => activeBackend.value);
 const selectedStatus = computed(() => statusFor(selectedBackend.value));
@@ -85,17 +105,9 @@ const selectedDiagnostic = computed(() => {
   return selectedConnection.value;
 });
 const apiDefaultUrl = computed(() => DIRECT_DEFAULT_URLS[selectedBackend.value]);
-const apiKeyEnv = computed(() =>
-  selectedBackend.value === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY",
-);
-const apiDescription = computed(() =>
-  selectedBackend.value === "codex"
-    ? "Base URL 留空时使用 OpenAI API；也可填写本地代理或 OpenAI 兼容端点。"
-    : "Base URL 留空时使用 Anthropic API；也可填写本地代理或 Anthropic 兼容端点。",
-);
-const showApiConfig = computed(() =>
-  selectedBackend.value === "claude" || selectedRouterMode.value === "api",
-);
+const apiKeyEnv = computed(() => API_KEY_ENV_BY_BACKEND[selectedBackend.value]);
+const apiDescription = computed(() => apiDescriptionForBackend(selectedBackend.value));
+const showApiConfig = computed(() => routerModeUsesApiConfig(selectedRouterMode.value));
 const codexAppServerStatus = computed(() => report.value?.codexAppServer ?? null);
 const showCodexUpdateAction = computed(() =>
   selectedBackend.value === "codex" &&
@@ -117,10 +129,12 @@ const codexInstallPathText = computed(() =>
     ? `路径：${codexAppServerStatus.value.installPath}`
     : "将安装到 Lilia 管理目录",
 );
+let disposed = false;
 
 async function loadProvider(backend: ChatBackendKind) {
   try {
     const config = await getProviderConfig(backend);
+    if (disposed) return;
     providerForms.value = {
       ...providerForms.value,
       [backend]: { ...config, apiKey: null },
@@ -133,9 +147,10 @@ async function loadProvider(backend: ChatBackendKind) {
 async function loadRouter(backend: ChatBackendKind) {
   try {
     const mode = await getRouterMode(backend);
+    if (disposed) return;
     routerModes.value = {
       ...routerModes.value,
-      [backend]: backend === "codex" && mode === "codex-account" ? "codex-account" : "api",
+      [backend]: normalizeRouterModeForBackend(backend, mode),
     };
   } catch (err) {
     console.error("[settings] load router mode failed", err);
@@ -143,12 +158,10 @@ async function loadRouter(backend: ChatBackendKind) {
 }
 
 async function loadAllConfig() {
-  await Promise.all([
-    loadProvider("claude"),
-    loadProvider("codex"),
-    loadRouter("claude"),
-    loadRouter("codex"),
-  ]);
+  await Promise.all(CHAT_BACKENDS.flatMap((backend) => [
+    loadProvider(backend),
+    loadRouter(backend),
+  ]));
 }
 
 function normalizedProviderConfig(clearApiKey = false): ProviderConfig {
@@ -163,87 +176,114 @@ function normalizedProviderConfig(clearApiKey = false): ProviderConfig {
 }
 
 async function saveProvider() {
+  if (disposed) return;
   const backend = selectedBackend.value;
   savingProvider.value = true;
   try {
     await setProviderConfig(normalizedProviderConfig(false));
+    if (disposed) return;
     await loadProvider(backend);
+    if (disposed) return;
     await refresh();
   } catch (err) {
     console.error("[settings] save provider config failed", err);
   } finally {
-    savingProvider.value = false;
+    if (!disposed) savingProvider.value = false;
   }
 }
 
 async function clearProviderKey() {
+  if (disposed) return;
   const backend = selectedBackend.value;
   savingProvider.value = true;
   try {
     await setProviderConfig({ ...normalizedProviderConfig(true), apiKey: null, clearApiKey: true });
+    if (disposed) return;
     providerForms.value[backend].apiKey = null;
     await loadProvider(backend);
+    if (disposed) return;
     await refresh();
   } catch (err) {
     console.error("[settings] clear provider key failed", err);
   } finally {
-    savingProvider.value = false;
+    if (!disposed) savingProvider.value = false;
   }
 }
 
 async function selectRouterMode(mode: RouterMode) {
+  if (disposed) return;
   const backend = selectedBackend.value;
-  if (backend !== "codex" || savingRouter.value || routerModes.value[backend] === mode) return;
+  if (
+    savingRouter.value ||
+    routerModes.value[backend] === mode ||
+    normalizeRouterModeForBackend(backend, mode) !== mode
+  ) {
+    return;
+  }
   const previous = routerModes.value[backend];
   routerModes.value = { ...routerModes.value, [backend]: mode };
   savingRouter.value = true;
   try {
     await setRouterMode(backend, mode);
+    if (disposed) return;
     await refresh();
   } catch (err) {
-    routerModes.value = { ...routerModes.value, [backend]: previous };
+    if (!disposed) routerModes.value = { ...routerModes.value, [backend]: previous };
     console.error("[settings] set router mode failed", err);
   } finally {
-    savingRouter.value = false;
+    if (!disposed) savingRouter.value = false;
   }
 }
 
 async function ensureClaudeApiMode() {
-  if (routerModes.value.claude === "api") return;
-  routerModes.value = { ...routerModes.value, claude: "api" };
+  if (disposed) return;
+  const defaultMode = defaultRouterModeForBackend("claude");
+  if (routerModes.value.claude === defaultMode) return;
+  routerModes.value = { ...routerModes.value, claude: defaultMode };
   try {
-    await setRouterMode("claude", "api");
+    await setRouterMode("claude", defaultMode);
   } catch (err) {
     console.error("[settings] set Claude API mode failed", err);
   }
 }
 
 async function probe() {
+  if (disposed) return;
   await refresh();
+  if (disposed) return;
   await checkCodexAppServerUpdate();
 }
 
 async function installCodexUpdate() {
+  if (disposed) return;
   await installCodexAppServerUpdate();
 }
 
 async function selectBackend(backend: ChatBackendKind) {
-  if (switchingBackend.value) return;
+  if (disposed || switchingBackend.value) return;
   switchingBackend.value = backend;
   try {
     await setActiveBackend(backend);
+    if (disposed) return;
     await Promise.all([loadProvider(backend), loadRouter(backend), refresh()]);
   } catch (err) {
     console.error("[settings] setActiveBackend failed", err);
   } finally {
-    switchingBackend.value = null;
+    if (!disposed) switchingBackend.value = null;
   }
 }
 
 onMounted(async () => {
+  disposed = false;
   await Promise.all([loadAllConfig(), refresh()]);
+  if (disposed) return;
   await checkCodexAppServerUpdate();
+  if (disposed) return;
   await ensureClaudeApiMode();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
 });
 </script>
 
@@ -440,4 +480,5 @@ onMounted(async () => {
       </div>
     </div>
   </div>
+  <RemoteControlSection />
 </template>

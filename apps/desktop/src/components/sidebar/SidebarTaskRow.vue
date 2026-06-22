@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
-import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
+import { AlertTriangle, Archive, Check, CircleHelp, ExternalLink, GitMerge, Loader2, MessageSquarePlus, Pin } from "lucide-vue-next";
 import type { Task } from "@lilia/contracts";
 import type { ConversationActivity } from "../../composables/useConversationActivity";
 import { clearConversationActivityNotice } from "../../composables/useConversationActivity";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { TreeDragKind } from "../../composables/useSidebarTreeDrag";
 import { scheduleTaskDetailPreload } from "../../router";
-import { archiveTask, toggleTaskPin } from "../../services/tasksStore";
+import { archiveTask, removeArchivedTaskFromLists, toggleTaskPin } from "../../services/tasksStore";
 import { openPopupChildQuestion, openPopupTask } from "../../services/popupWindows";
+import { getProjectSettings } from "../../services/projects";
+import { cleanupArchiveWorktree, getTaskWorktree, mergeDeleteArchiveWorktree } from "../../services/worktrees";
 
 type SidebarTask = Pick<Task, "id" | "title" | "pinned">;
 
@@ -42,6 +44,9 @@ const confirming = ref(false);
 const taskDepthStyle = computed(() => ({
   "--task-tree-depth": String(Math.min(Math.max(props.depth ?? 0, 0), 6)),
 }));
+let disposed = false;
+const merging = ref(false);
+const hasWorktree = ref(false);
 
 const activityLabel: Record<ConversationActivity, string> = {
   running: "对话中",
@@ -51,21 +56,72 @@ const activityLabel: Record<ConversationActivity, string> = {
 };
 
 async function archiveCurrentTask() {
+  if (disposed) return;
   try {
+    if (hasWorktree.value && await shouldCleanupWorktreeOnArchive()) {
+      const result = await cleanupArchiveWorktree(props.task.id);
+      confirming.value = false;
+      if (result.archived) {
+        removeArchivedTaskFromLists(props.task.id);
+        emit("archived", props.task.id);
+      }
+      return;
+    }
     const archived = await (props.archive ?? archiveTask)(props.task.id);
+    if (disposed) return;
     confirming.value = false;
     if (archived) emit("archived", props.task.id);
   } catch (err) {
+    if (disposed) return;
     confirming.value = false;
     emit("error", `归档对话失败：${String(err)}`);
   }
 }
 
+async function shouldCleanupWorktreeOnArchive(): Promise<boolean> {
+  try {
+    const settings = await getProjectSettings();
+    return settings.worktree?.cleanupOnArchive !== false;
+  } catch {
+    return true;
+  }
+}
+
+async function refreshWorktreeBinding() {
+  if (!props.projectId) {
+    hasWorktree.value = false;
+    return;
+  }
+  try {
+    hasWorktree.value = Boolean(await getTaskWorktree(props.task.id));
+  } catch {
+    hasWorktree.value = false;
+  }
+}
+
+async function mergeDeleteArchiveCurrentTask() {
+  if (merging.value) return;
+  merging.value = true;
+  try {
+    const result = await mergeDeleteArchiveWorktree(props.task.id);
+    if (result.archived) {
+      removeArchivedTaskFromLists(props.task.id);
+      emit("archived", props.task.id);
+    }
+  } catch (err) {
+    emit("error", `合并并删除工作树失败：${String(err)}`);
+  } finally {
+    confirming.value = false;
+    merging.value = false;
+  }
+}
+
 async function toggleCurrentTaskPin() {
+  if (disposed) return;
   try {
     await toggleTaskPin(props.task.id);
   } catch (err) {
-    emit("error", `切换对话置顶失败：${String(err)}`);
+    if (!disposed) emit("error", `切换对话置顶失败：${String(err)}`);
   }
 }
 
@@ -96,18 +152,20 @@ function preloadConversationDetail() {
 }
 
 async function openInPopup() {
+  if (disposed) return;
   try {
     await openPopupTask(props.task.id, props.projectId);
   } catch (err) {
-    emit("error", `打开弹出窗口对话失败：${String(err)}`);
+    if (!disposed) emit("error", `打开弹出窗口对话失败：${String(err)}`);
   }
 }
 
 async function askInPopup() {
+  if (disposed) return;
   try {
     await openPopupChildQuestion(props.task.id, props.projectId);
   } catch (err) {
-    emit("error", `创建弹出窗口子对话失败：${String(err)}`);
+    if (!disposed) emit("error", `创建弹出窗口子对话失败：${String(err)}`);
   }
 }
 
@@ -119,7 +177,7 @@ function onAuxClick(e: MouseEvent) {
 }
 
 function buildMenu(): ContextMenuItem[] {
-  return [
+  const items: ContextMenuItem[] = [
     {
       id: "continue-popup-task",
       label: "在弹出窗口继续",
@@ -147,6 +205,17 @@ function buildMenu(): ContextMenuItem[] {
       onSelect: () => archiveCurrentTask(),
     },
   ];
+  if (hasWorktree.value) {
+    items.splice(items.length - 1, 0, {
+      id: "merge-delete-worktree",
+      label: "合并并删除",
+      icon: GitMerge,
+      danger: true,
+      confirmLabel: "确认合并并删除？",
+      onSelect: () => mergeDeleteArchiveCurrentTask(),
+    });
+  }
+  return items;
 }
 
 function onClick() {
@@ -158,6 +227,13 @@ function onClick() {
   if (props.to) return;
   emit("open", props.task.id);
 }
+
+onMounted(refreshWorktreeBinding);
+watch(() => props.task.id, refreshWorktreeBinding);
+
+onBeforeUnmount(() => {
+  disposed = true;
+});
 </script>
 
 <template>
@@ -221,6 +297,19 @@ function onClick() {
       />
     </span>
     <div v-if="!readonly" class="sb-tree__hover-tools" @click.stop>
+      <button
+        v-if="hasWorktree"
+        type="button"
+        class="sb-icon-btn"
+        :class="{ 'is-confirming': merging }"
+        :title="merging ? '正在合并并删除' : '合并并删除工作树'"
+        :aria-label="merging ? '正在合并并删除' : '合并并删除工作树'"
+        :disabled="merging"
+        @click="mergeDeleteArchiveCurrentTask"
+      >
+        <Loader2 v-if="merging" :size="13" class="sb-tree__activity-icon--spin" aria-hidden="true" />
+        <GitMerge v-else :size="13" aria-hidden="true" />
+      </button>
       <button
         type="button"
         class="sb-icon-btn"

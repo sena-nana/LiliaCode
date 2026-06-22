@@ -6,6 +6,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::agent_timeline::AgentTimelineEventInput;
+use crate::chat::contract;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::chat::types::{
     ChatSlashCommand, ChatSlashCommandSearchResult, ChatSlashCommandSource, DoneEvent,
@@ -294,7 +295,7 @@ pub(crate) fn persist_and_emit_slash_command_result<R: Runtime>(
 
 pub(crate) fn emit_slash_command_done<R: Runtime>(app: &AppHandle<R>, task_id: String) {
     let _ = app.emit(
-        "chat:done",
+        contract::done_event_name(),
         DoneEvent {
             task_id,
             session_id: None,

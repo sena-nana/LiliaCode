@@ -5,14 +5,16 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::store::LiliaStore;
+use crate::task_contract;
 use crate::util::now_millis;
 
 use super::types::{MilestoneRow, ProjectRoadmapRow, TaskMilestoneLinkRow};
 
-const MILESTONE_STATUSES: [&str; 4] = ["upcoming", "in-progress", "done", "abandoned"];
-
 fn validate_status(status: &str) -> Result<(), String> {
-    if MILESTONE_STATUSES.contains(&status) {
+    if task_contract::milestone_statuses()
+        .iter()
+        .any(|value| value == status)
+    {
         Ok(())
     } else {
         Err(format!("milestone_update: 无效状态：{status}"))
@@ -269,11 +271,19 @@ pub fn milestone_create(
         .map_err(|e| format!("milestone_create: sort_order 失败：{e}"))?;
     let id = Uuid::new_v4().to_string();
     let now = now_millis();
+    let status = task_contract::default_milestone_status();
     conn.execute(
         r#"INSERT INTO milestones
            (id, project_id, title, description, status, due_date, sort_order, created_at)
-           VALUES (?1, ?2, ?3, '', 'upcoming', NULL, ?4, ?5)"#,
-        params![id.as_str(), project_id.as_str(), trimmed, sort_order, now],
+           VALUES (?1, ?2, ?3, '', ?4, NULL, ?5, ?6)"#,
+        params![
+            id.as_str(),
+            project_id.as_str(),
+            trimmed,
+            status,
+            sort_order,
+            now
+        ],
     )
     .map_err(|e| format!("milestone_create: insert 失败：{e}"))?;
 
@@ -282,7 +292,7 @@ pub fn milestone_create(
         project_id,
         title: trimmed.to_string(),
         description: String::new(),
-        status: "upcoming".to_string(),
+        status: status.to_string(),
         due_date: None,
         order: sort_order,
         created_at: now,
@@ -414,7 +424,17 @@ mod tests {
 
     #[test]
     fn validate_status_accepts_contract_values() {
-        for status in MILESTONE_STATUSES {
+        let statuses: Vec<&str> = task_contract::milestone_statuses()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec!["upcoming", "in-progress", "done", "abandoned"]
+        );
+        assert_eq!(task_contract::default_milestone_status(), "upcoming");
+        validate_status(task_contract::default_milestone_status()).unwrap();
+        for status in task_contract::milestone_statuses() {
             validate_status(status).unwrap();
         }
         assert!(validate_status("running").is_err());

@@ -13,8 +13,10 @@ import {
   PanelRightOpen,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toggleChatSidebar, useChatSidebar } from "../composables/useChatSidebar";
 import { useTitleBarCrumbs } from "../composables/useTitleBarCrumbs";
+import { runUnlistenFns } from "../utils/eventListeners";
 
 defineProps<{
   leftSidebarCollapsed?: boolean;
@@ -56,25 +58,52 @@ const leafKey = computed(() => {
 
 const isMaximized = ref(false);
 const appWindow = getCurrentWindow();
-let unlisten: (() => void) | null = null;
+let resizeUnlisten: UnlistenFn | null = null;
+let disposed = false;
+let syncSeq = 0;
 
 async function syncMaximized() {
+  const seq = ++syncSeq;
+  let nextIsMaximized = false;
   try {
-    isMaximized.value = await appWindow.isMaximized();
+    nextIsMaximized = await appWindow.isMaximized();
   } catch {
-    isMaximized.value = false;
+    nextIsMaximized = false;
+  }
+  if (!disposed && seq === syncSeq) {
+    isMaximized.value = nextIsMaximized;
+  }
+}
+
+async function installResizeListener() {
+  try {
+    const unlisten = await appWindow.onResized(() => {
+      void syncMaximized();
+    });
+    if (disposed) {
+      runUnlistenFns([unlisten]);
+      return;
+    }
+    resizeUnlisten = unlisten;
+  } catch (err) {
+    console.error("[titlebar] install resize listener failed", err);
   }
 }
 
 onMounted(async () => {
+  disposed = false;
   await syncMaximized();
-  unlisten = await appWindow.onResized(() => {
-    void syncMaximized();
-  });
+  if (disposed) return;
+  await installResizeListener();
 });
 
 onUnmounted(() => {
-  unlisten?.();
+  disposed = true;
+  syncSeq += 1;
+  if (resizeUnlisten) {
+    runUnlistenFns([resizeUnlisten]);
+    resizeUnlisten = null;
+  }
 });
 
 async function onMinimize() {

@@ -1,0 +1,82 @@
+{
+  "queryWorkflowTypes": [
+    "lilia_review",
+    "lilia_fix_suggestion",
+    "lilia_batch_apply",
+    "lilia_compact"
+  ],
+  "review": {
+    "type": "lilia_review",
+    "targetTypes": [
+      "uncommittedChanges",
+      "baseBranch",
+      "commit"
+    ],
+    "deliveries": [
+      "inline",
+      "detached"
+    ],
+    "defaultDelivery": "inline"
+  },
+  "fixSuggestion": {
+    "type": "lilia_fix_suggestion",
+    "modes": [
+      "suggest",
+      "apply"
+    ],
+    "defaultMode": "suggest"
+  },
+  "batchApply": {
+    "type": "lilia_batch_apply",
+    "sourceKinds": [
+      "review",
+      "fix_suggestion"
+    ]
+  },
+  "goal": {
+    "type": "lilia_goal",
+    "actions": [
+      "set",
+      "refresh",
+      "clear"
+    ],
+    "statuses": [
+      "active",
+      "paused",
+      "blocked",
+      "usageLimited",
+      "budgetLimited",
+      "complete"
+    ],
+    "defaultStatus": "active",
+    "requiresObjective": [
+      "set"
+    ]
+  },
+  "memoryMode": {
+    "type": "lilia_memory_mode",
+    "modes": [
+      "enabled",
+      "disabled"
+    ]
+  },
+  "memoryReset": {
+    "type": "lilia_memory_reset"
+  },
+  "compact": {
+    "type": "lilia_compact"
+  },
+  "backgroundTerminalsClean": {
+    "type": "lilia_background_terminals_clean"
+  },
+  "configDiagnostics": {
+    "type": "lilia_config_diagnostics",
+    "defaultIncludeLayers": true
+  },
+  "automation": {
+    "type": "automation"
+  },
+  "slashCommand": {
+    "type": "slash_command"
+  }
+}

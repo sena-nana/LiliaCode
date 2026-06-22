@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+use super::agent_interaction_defaults_contract;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentInteractionSettings {
     #[serde(default)]
@@ -20,41 +22,43 @@ pub(crate) struct AgentInteractionSettings {
     pub(crate) auto_turn_decision: AutoTurnDecisionSettings,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for AgentInteractionSettings {
+    fn default() -> Self {
+        agent_interaction_defaults_contract::agent_interaction_settings()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SubagentBackendSettings {
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_codex_subagent_enabled")]
     pub(crate) enabled: bool,
 }
 
 impl Default for SubagentBackendSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        agent_interaction_defaults_contract::subagent_backend_settings()
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClaudeSubagentModeSettings {
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_claude_subagent_enabled")]
     pub(crate) enabled: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_claude_forward_subagent_text")]
     pub(crate) forward_subagent_text: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_claude_agent_progress_summaries")]
     pub(crate) agent_progress_summaries: bool,
 }
 
 impl Default for ClaudeSubagentModeSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            forward_subagent_text: true,
-            agent_progress_summaries: true,
-        }
+        agent_interaction_defaults_contract::claude_subagent_mode_settings()
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SubagentModeSettings {
     #[serde(default)]
@@ -63,6 +67,28 @@ pub(crate) struct SubagentModeSettings {
     pub(crate) codex: SubagentBackendSettings,
     #[serde(default)]
     pub(crate) claude: ClaudeSubagentModeSettings,
+}
+
+impl Default for SubagentModeSettings {
+    fn default() -> Self {
+        agent_interaction_defaults_contract::subagent_mode_settings()
+    }
+}
+
+fn default_codex_subagent_enabled() -> bool {
+    agent_interaction_defaults_contract::codex_subagent_enabled()
+}
+
+fn default_claude_subagent_enabled() -> bool {
+    agent_interaction_defaults_contract::claude_subagent_enabled()
+}
+
+fn default_claude_forward_subagent_text() -> bool {
+    agent_interaction_defaults_contract::claude_forward_subagent_text()
+}
+
+fn default_claude_agent_progress_summaries() -> bool {
+    agent_interaction_defaults_contract::claude_agent_progress_summaries()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,46 +103,55 @@ pub(crate) struct CustomSubagentDefinition {
     pub(crate) enabled: bool,
 }
 
-fn default_codex_profile_name() -> String {
-    "default".to_string()
-}
-
-fn default_enabled_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AutoTurnDecisionSettings {
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_enabled")]
     pub(crate) enabled: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_allow_model_tier")]
     pub(crate) allow_model_tier: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_allow_reasoning_effort")]
     pub(crate) allow_reasoning_effort: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_allow_plan_mode")]
     pub(crate) allow_plan_mode: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_allow_goal_mode")]
     pub(crate) allow_goal_mode: bool,
-    #[serde(default = "default_enabled_true")]
+    #[serde(default = "default_auto_turn_decision_allow_session_fork")]
     pub(crate) allow_session_fork: bool,
 }
 
 impl Default for AutoTurnDecisionSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            allow_model_tier: true,
-            allow_reasoning_effort: true,
-            allow_plan_mode: true,
-            allow_goal_mode: true,
-            allow_session_fork: true,
-        }
+        agent_interaction_defaults_contract::auto_turn_decision_settings()
     }
 }
 
+fn default_auto_turn_decision_enabled() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_enabled()
+}
+
+fn default_auto_turn_decision_allow_model_tier() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_allow_model_tier()
+}
+
+fn default_auto_turn_decision_allow_reasoning_effort() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_allow_reasoning_effort()
+}
+
+fn default_auto_turn_decision_allow_plan_mode() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_allow_plan_mode()
+}
+
+fn default_auto_turn_decision_allow_goal_mode() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_allow_goal_mode()
+}
+
+fn default_auto_turn_decision_allow_session_fork() -> bool {
+    agent_interaction_defaults_contract::auto_turn_decision_allow_session_fork()
+}
+
 fn default_permission_mode() -> String {
-    "ask".to_string()
+    agent_interaction_defaults_contract::permission_mode()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,18 +179,12 @@ pub(crate) struct CodexProfileSettings {
 
 impl Default for CodexProfileSettings {
     fn default() -> Self {
-        Self {
-            profile: "default".to_string(),
-            model: None,
-            reasoning_effort: None,
-            runtime_workspace_roots: Vec::new(),
-            responses_api_client_metadata: None,
-            additional_context: None,
-            persist_extended_history: None,
-            initial_turns_page: None,
-            exclude_turns: Vec::new(),
-        }
+        agent_interaction_defaults_contract::codex_profile_settings()
     }
+}
+
+fn default_codex_profile_name() -> String {
+    agent_interaction_defaults_contract::codex_profile_name()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -198,7 +227,7 @@ pub(crate) struct AssistantAITestResult {
 pub(crate) struct BackendEnvStatus {
     pub(crate) backend: String,
     pub(crate) has_api_key: bool,
-    pub(crate) connection_mode: String,
+    pub(crate) connection_mode: ConnectionMode,
     pub(crate) effective_url: Option<String>,
 }
 
@@ -228,21 +257,25 @@ pub(crate) struct EnvStatusReport {
     pub(crate) backends: HashMap<String, BackendEnvStatus>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum ConnectionMode {
+    #[serde(rename = "api")]
     Api,
+    #[serde(rename = "custom")]
     CustomBaseUrl,
+    #[serde(rename = "codex-account")]
     CodexAccount,
+    #[serde(rename = "unconfigured")]
     Unconfigured,
 }
 
 impl ConnectionMode {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub(crate) fn as_contract_value(self) -> &'static str {
         match self {
-            ConnectionMode::Api => "api",
-            ConnectionMode::CustomBaseUrl => "custom",
-            ConnectionMode::CodexAccount => "codex-account",
-            ConnectionMode::Unconfigured => "unconfigured",
+            Self::Api => "api",
+            Self::CustomBaseUrl => "custom",
+            Self::CodexAccount => "codex-account",
+            Self::Unconfigured => "unconfigured",
         }
     }
 }
@@ -258,4 +291,92 @@ pub(crate) struct BackendConnectionPlan {
 pub(crate) struct CodexAppServerProbeStatus {
     pub(crate) public: CodexAppServerStatus,
     pub(crate) path: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn agent_interaction_defaults_load_from_contracts_manifest() {
+        let settings = AgentInteractionSettings::default();
+
+        assert!(!settings.non_interrupt_mode);
+        assert!(!settings.debug);
+        assert_eq!(settings.permission_mode, "ask");
+        assert_eq!(settings.codex_profile.profile, "default");
+        assert!(settings.codex_profile.model.is_none());
+        assert!(settings.codex_profile.runtime_workspace_roots.is_empty());
+        assert!(!settings.subagent_mode.enabled);
+        assert!(settings.subagent_mode.codex.enabled);
+        assert!(settings.subagent_mode.claude.enabled);
+        assert!(settings.subagent_mode.claude.forward_subagent_text);
+        assert!(settings.subagent_mode.claude.agent_progress_summaries);
+        assert!(settings.auto_turn_decision.enabled);
+        assert!(settings.auto_turn_decision.allow_model_tier);
+        assert!(settings.auto_turn_decision.allow_reasoning_effort);
+        assert!(settings.auto_turn_decision.allow_plan_mode);
+        assert!(settings.auto_turn_decision.allow_goal_mode);
+        assert!(settings.auto_turn_decision.allow_session_fork);
+    }
+
+    #[test]
+    fn missing_agent_interaction_fields_deserialize_from_contracts_defaults() {
+        let settings: AgentInteractionSettings = serde_json::from_value(json!({})).unwrap();
+
+        assert_eq!(settings.permission_mode, default_permission_mode());
+        assert_eq!(settings.codex_profile, CodexProfileSettings::default());
+        assert_eq!(
+            settings.subagent_mode.enabled,
+            SubagentModeSettings::default().enabled
+        );
+        assert_eq!(
+            settings.subagent_mode.codex.enabled,
+            SubagentModeSettings::default().codex.enabled
+        );
+        assert_eq!(
+            settings.auto_turn_decision.allow_session_fork,
+            AutoTurnDecisionSettings::default().allow_session_fork
+        );
+    }
+
+    #[test]
+    fn missing_nested_agent_interaction_fields_deserialize_from_contracts_defaults() {
+        let settings: AgentInteractionSettings = serde_json::from_value(json!({
+            "codexProfile": {},
+            "subagentMode": {
+                "codex": {},
+                "claude": {}
+            },
+            "autoTurnDecision": {}
+        }))
+        .unwrap();
+
+        assert_eq!(settings.codex_profile, CodexProfileSettings::default());
+        assert_eq!(settings.subagent_mode.codex.enabled, true);
+        assert_eq!(settings.subagent_mode.claude.enabled, true);
+        assert_eq!(settings.subagent_mode.claude.forward_subagent_text, true);
+        assert_eq!(
+            settings.auto_turn_decision,
+            AutoTurnDecisionSettings::default()
+        );
+    }
+
+    #[test]
+    fn backend_env_status_serializes_connection_mode_contract_value() {
+        let mode: ConnectionMode = serde_json::from_value(json!("codex-account")).unwrap();
+        assert_eq!(mode, ConnectionMode::CodexAccount);
+        assert_eq!(mode.as_contract_value(), "codex-account");
+
+        let value = serde_json::to_value(BackendEnvStatus {
+            backend: "codex".to_string(),
+            has_api_key: false,
+            connection_mode: ConnectionMode::CodexAccount,
+            effective_url: None,
+        })
+        .unwrap();
+
+        assert_eq!(value["connectionMode"], json!("codex-account"));
+    }
 }

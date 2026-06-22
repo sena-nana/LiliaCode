@@ -6,6 +6,78 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { normalizeAgentInteractionRequest } from "@lilia/contracts";
+import {
+  AGENT_TIMELINE_BATCH_EVENT_NAME,
+  AGENT_TIMELINE_EVENT_NAME,
+  CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME,
+  AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND,
+  AGENT_INTERACTION_GET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND,
+  AGENT_INTERACTION_SET_SETTINGS_COMMAND,
+  AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND,
+  AGENT_TIMELINE_LIST_COMMAND,
+  ASSISTANT_AI_GET_CONFIG_COMMAND,
+  ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND,
+  ASSISTANT_AI_SET_CONFIG_COMMAND,
+  ASSISTANT_AI_TEST_CONNECTION_COMMAND,
+  CHAT_CHECK_ENV_COMMAND,
+  CHAT_CONTEXT_USAGE_EVENT_NAME,
+  CHAT_DONE_EVENT_NAME,
+  CHAT_ACK_RESTORED_ROLLBACK_COMMAND,
+  CHAT_DESCRIBE_ATTACHMENTS_COMMAND,
+  CHAT_GET_COMPOSER_STATE_COMMAND,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CHAT_INTERRUPT_TURN_COMMAND,
+  CHAT_LIST_MODELS_COMMAND,
+  CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  CHAT_RESPOND_TITLE_UPDATE_COMMAND,
+  CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND,
+  CHAT_SAVE_CLIPBOARD_TEXT_COMMAND,
+  CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
+  CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
+  CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_SEND_PROCESS_SESSION_COMMAND,
+  CHAT_SET_COMPOSER_STATE_COMMAND,
+  CHAT_TURN_STARTED_EVENT_NAME,
+  CONVERSATION_SUGGESTIONS_GET_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND,
+  CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND,
+  CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND,
+  HISTORY_IMPORT_ATTACH_COMMAND,
+  HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND,
+  HISTORY_IMPORT_PREVIEW_COMMAND,
+  HISTORY_IMPORT_RUNTIME_STATES_COMMAND,
+  HISTORY_IMPORT_SEARCH_COMMAND,
+  LILIA_IAB_SUBMIT_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND,
+  PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  PROVIDER_GET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_GET_CONFIG_COMMAND,
+  PROVIDER_SET_ACTIVE_BACKEND_COMMAND,
+  PROVIDER_SET_CONFIG_COMMAND,
+  PROJECT_ARCHITECTURE_APPLY_COMMAND,
+  PROJECT_ARCHITECTURE_GET_COMMAND,
+  PROJECT_ARCHITECTURE_LIST_CHANGES_COMMAND,
+  PROJECT_ARCHITECTURE_REJECT_COMMAND,
+  PROJECT_ARCHITECTURE_ROLLBACK_COMMAND,
+  QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
+  QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+  QUOTA_USAGE_GET_STATS_COMMAND,
+  REMOTE_CONTROL_CANCEL_PAIRING_COMMAND,
+  REMOTE_CONTROL_DISPATCH_REQUEST_COMMAND,
+  REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
+  REMOTE_CONTROL_REVOKE_DEVICE_COMMAND,
+  REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND,
+  REMOTE_CONTROL_SET_PC_NAME_COMMAND,
+  REMOTE_CONTROL_START_PAIRING_COMMAND,
+  REMOTE_CONTROL_STATUS_COMMAND,
+  ROUTER_GET_MODE_COMMAND,
+  ROUTER_SET_MODE_COMMAND,
+} from "@lilia/contracts";
+import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../tauri/pluginCommands";
+import { installCombinedUnlisten } from "../utils/eventListeners";
 import type {
   AgentInteractionSettings,
   AgentInteractionKind,
@@ -53,6 +125,10 @@ import type {
   LiliaIabSnapshot,
   LiliaIabSubmitResult,
   ChatRollbackResult,
+  ChatDoneEvent,
+  ChatTurnStartedEvent,
+  ConversationSuggestionSources,
+  ConversationSuggestionSourceKind,
   ProjectArchitectureApplyInput,
   ProjectArchitectureApplyResult,
   ProjectArchitectureChangeEvent,
@@ -68,6 +144,12 @@ import type {
   CustomSubagentUpsertInput,
   QuotaUsageStats,
   QuotaUsageStatsInput,
+  RemoteControlStatus,
+  RemotePairDeviceInput,
+  RemotePairingTicket,
+  RemotePeerSummary,
+  RemoteRequestEnvelope,
+  RemoteResponseEnvelope,
 } from "@lilia/contracts";
 
 export type {
@@ -113,6 +195,8 @@ export type {
   LiliaIabSnapshot,
   LiliaIabSubmitResult,
   ChatRollbackResult,
+  ConversationSuggestionSources,
+  ConversationSuggestionSourceKind,
   ProjectArchitectureApplyInput,
   ProjectArchitectureApplyResult,
   ProjectArchitectureChangeEvent,
@@ -123,52 +207,43 @@ export type {
   CodexAccountQuotaStatus,
   QuotaUsageStats,
   QuotaUsageStatsInput,
+  RemoteControlStatus,
+  RemotePairDeviceInput,
+  RemotePairingTicket,
+  RemotePeerSummary,
+  RemoteRequestEnvelope,
+  RemoteResponseEnvelope,
 };
 
-export type ConversationSuggestionSourceKind = "task" | "github" | "local-git" | "claude";
-
-export interface ConversationSuggestionSources {
-  sources: ConversationSuggestionSourceKind[];
-  localGit?: {
-    hasRecentCommits: boolean;
-    hasChangedFiles: boolean;
-  } | null;
-}
-
-export interface TurnStartedEvent { taskId: string; queuedCount: number; }
-export interface DoneEvent {
-  taskId: string;
-  sessionId: string | null;
-  subtype: string | null;
-  rollback?: ChatRollbackResult | null;
-}
+export type TurnStartedEvent = ChatTurnStartedEvent;
+export type DoneEvent = ChatDoneEvent;
 
 export function listAgentTimeline(taskId: string): Promise<AgentTimelineEvent[]> {
-  return invoke<AgentTimelineEvent[]>("agent_timeline_list", { taskId });
+  return invoke<AgentTimelineEvent[]>(AGENT_TIMELINE_LIST_COMMAND, { taskId });
 }
 
 export function searchHistoryImports(
   input: HistoryImportSearchInput,
 ): Promise<HistoryImportSearchResult> {
-  return invoke<HistoryImportSearchResult>("history_import_search", { input });
+  return invoke<HistoryImportSearchResult>(HISTORY_IMPORT_SEARCH_COMMAND, { input });
 }
 
 export function previewHistoryImport(input: HistoryImportPreviewInput): Promise<HistoryImportPreview> {
-  return invoke<HistoryImportPreview>("history_import_preview", { input });
+  return invoke<HistoryImportPreview>(HISTORY_IMPORT_PREVIEW_COMMAND, { input });
 }
 
 export function attachHistoryImport(
   input: HistoryImportAttachInput,
 ): Promise<HistoryImportAttachResult> {
-  return invoke<HistoryImportAttachResult>("history_import_attach", { input });
+  return invoke<HistoryImportAttachResult>(HISTORY_IMPORT_ATTACH_COMMAND, { input });
 }
 
 export function listHistoryImportRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
-  return invoke<HistoryImportRuntimeState[]>("history_import_runtime_states");
+  return invoke<HistoryImportRuntimeState[]>(HISTORY_IMPORT_RUNTIME_STATES_COMMAND);
 }
 
 export function cleanHistoryImportBackgroundTerminals(itemId: string): Promise<void> {
-  return invoke<void>("history_import_clean_background_terminals", { itemId });
+  return invoke<void>(HISTORY_IMPORT_CLEAN_BACKGROUND_TERMINALS_COMMAND, { itemId });
 }
 
 /**
@@ -192,7 +267,7 @@ export interface SendMessageInput {
 }
 
 export function sendMessage(input: SendMessageInput): Promise<ChatSendResult> {
-  return invoke<ChatSendResult>("chat_send_message", {
+  return invoke<ChatSendResult>(CHAT_SEND_MESSAGE_COMMAND, {
     taskId: input.taskId,
     content: input.turn.content,
     composer: input.turn.composer,
@@ -207,18 +282,18 @@ export function sendMessage(input: SendMessageInput): Promise<ChatSendResult> {
 }
 
 export function interruptTurn(taskId: string): Promise<ChatInterruptResult> {
-  return invoke<ChatInterruptResult>("chat_interrupt_turn", { taskId });
+  return invoke<ChatInterruptResult>(CHAT_INTERRUPT_TURN_COMMAND, { taskId });
 }
 
 export function sendProcessSessionCommand(
   taskId: string,
   command: ChatRuntimeCommand,
 ): Promise<void> {
-  return invoke<void>("chat_send_process_session_command", { taskId, command });
+  return invoke<void>(CHAT_SEND_PROCESS_SESSION_COMMAND, { taskId, command });
 }
 
 export function describeAttachments(paths: string[]): Promise<ChatAttachment[]> {
-  return invoke<ChatAttachment[]>("chat_describe_attachments", { paths });
+  return invoke<ChatAttachment[]>(CHAT_DESCRIBE_ATTACHMENTS_COMMAND, { paths });
 }
 
 export function searchContextAttachments(
@@ -226,7 +301,7 @@ export function searchContextAttachments(
   query: string,
   limit = 12,
 ): Promise<ChatContextSearchResult[]> {
-  return invoke<ChatContextSearchResult[]>("chat_search_context_attachments", {
+  return invoke<ChatContextSearchResult[]>(CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND, {
     projectCwd,
     query,
     limit,
@@ -238,7 +313,7 @@ export function searchSlashCommands(
   query: string,
   limit = 12,
 ): Promise<ChatSlashCommandSearchResult[]> {
-  return invoke<ChatSlashCommandSearchResult[]>("chat_search_slash_commands", {
+  return invoke<ChatSlashCommandSearchResult[]>(CHAT_SEARCH_SLASH_COMMANDS_COMMAND, {
     projectCwd,
     query,
     limit,
@@ -246,7 +321,7 @@ export function searchSlashCommands(
 }
 
 export function readClipboardFilePaths(): Promise<string[]> {
-  return invoke<string[]>("chat_read_clipboard_file_paths");
+  return invoke<string[]>(CHAT_READ_CLIPBOARD_FILE_PATHS_COMMAND);
 }
 
 export function saveClipboardImage(input: {
@@ -254,22 +329,22 @@ export function saveClipboardImage(input: {
   bytesBase64: string;
   name?: string | null;
 }): Promise<ChatAttachment> {
-  return invoke<ChatAttachment>("chat_save_clipboard_image", { input });
+  return invoke<ChatAttachment>(CHAT_SAVE_CLIPBOARD_IMAGE_COMMAND, { input });
 }
 
 export function saveClipboardText(input: { text: string }): Promise<ChatAttachment> {
-  return invoke<ChatAttachment>("chat_save_clipboard_text", { input });
+  return invoke<ChatAttachment>(CHAT_SAVE_CLIPBOARD_TEXT_COMMAND, { input });
 }
 
 export function submitLiliaIab(
   taskId: string,
   note?: string | null,
 ): Promise<LiliaIabSubmitResult> {
-  return invoke<LiliaIabSubmitResult>("lilia_iab_submit", { taskId, note: note ?? null });
+  return invoke<LiliaIabSubmitResult>(LILIA_IAB_SUBMIT_COMMAND, { taskId, note: note ?? null });
 }
 
 export async function pickAttachmentFiles(): Promise<string[]> {
-  const picked = await invoke<string | string[] | null>("plugin:dialog|open", {
+  const picked = await invoke<string | string[] | null>(TAURI_PLUGIN_DIALOG_OPEN_COMMAND, {
     options: {
       directory: false,
       multiple: true,
@@ -281,103 +356,103 @@ export async function pickAttachmentFiles(): Promise<string[]> {
 }
 
 export function getComposerState(taskId: string): Promise<ChatComposerState> {
-  return invoke<ChatComposerState>("chat_get_composer_state", { taskId });
+  return invoke<ChatComposerState>(CHAT_GET_COMPOSER_STATE_COMMAND, { taskId });
 }
 
 export function listModels(backend: ChatBackendKind): Promise<ChatModelOption[]> {
-  return invoke<ChatModelOption[]>("chat_list_models", { backend });
+  return invoke<ChatModelOption[]>(CHAT_LIST_MODELS_COMMAND, { backend });
 }
 
 export function getRuntimeSnapshot(taskId: string): Promise<ChatRuntimeSnapshot> {
-  return invoke<ChatRuntimeSnapshot>("chat_get_runtime_snapshot", { taskId });
+  return invoke<ChatRuntimeSnapshot>(CHAT_GET_RUNTIME_SNAPSHOT_COMMAND, { taskId });
 }
 
 export function setComposerState(state: ChatComposerState): Promise<void> {
-  return invoke<void>("chat_set_composer_state", { state });
+  return invoke<void>(CHAT_SET_COMPOSER_STATE_COMMAND, { state });
 }
 
 export function getAgentInteractionSettings(): Promise<AgentInteractionSettings> {
-  return invoke<AgentInteractionSettings>("agent_interaction_get_settings");
+  return invoke<AgentInteractionSettings>(AGENT_INTERACTION_GET_SETTINGS_COMMAND);
 }
 
 export function setAgentInteractionSettings(
   settings: Partial<AgentInteractionSettings>,
 ): Promise<void> {
-  return invoke<void>("agent_interaction_set_settings", { settings });
+  return invoke<void>(AGENT_INTERACTION_SET_SETTINGS_COMMAND, { settings });
 }
 
 export function listCustomSubagents(): Promise<CustomSubagentDefinition[]> {
-  return invoke<CustomSubagentDefinition[]>("agent_interaction_list_subagents");
+  return invoke<CustomSubagentDefinition[]>(AGENT_INTERACTION_LIST_SUBAGENTS_COMMAND);
 }
 
 export function upsertCustomSubagent(
   input: CustomSubagentUpsertInput,
 ): Promise<CustomSubagentDefinition> {
-  return invoke<CustomSubagentDefinition>("agent_interaction_upsert_subagent", { input });
+  return invoke<CustomSubagentDefinition>(AGENT_INTERACTION_UPSERT_SUBAGENT_COMMAND, { input });
 }
 
 export function deleteCustomSubagent(id: string): Promise<void> {
-  return invoke<void>("agent_interaction_delete_subagent", { id });
+  return invoke<void>(AGENT_INTERACTION_DELETE_SUBAGENT_COMMAND, { id });
 }
 
 export function ackRestoredRollback(taskId: string): Promise<void> {
-  return invoke<void>("chat_ack_restored_rollback", { taskId });
+  return invoke<void>(CHAT_ACK_RESTORED_ROLLBACK_COMMAND, { taskId });
 }
 
 /** 健康检查：node、本机内置 Codex app-server，以及两个 backend 当前的连接模式。 */
 export function checkEnv(options: { forceRefresh?: boolean } = {}): Promise<EnvStatusReport> {
-  return invoke<EnvStatusReport>("chat_check_env", {
+  return invoke<EnvStatusReport>(CHAT_CHECK_ENV_COMMAND, {
     forceRefresh: options.forceRefresh ?? false,
   });
 }
 
 export function getProviderConfig(backend: ChatBackendKind): Promise<ProviderConfig> {
-  return invoke<ProviderConfig>("provider_get_config", { backend });
+  return invoke<ProviderConfig>(PROVIDER_GET_CONFIG_COMMAND, { backend });
 }
 
 export function setProviderConfig(config: ProviderConfig): Promise<void> {
-  return invoke<void>("provider_set_config", { config });
+  return invoke<void>(PROVIDER_SET_CONFIG_COMMAND, { config });
 }
 
 export function getActiveBackend(): Promise<ChatBackendKind> {
-  return invoke<ChatBackendKind>("provider_get_active_backend");
+  return invoke<ChatBackendKind>(PROVIDER_GET_ACTIVE_BACKEND_COMMAND);
 }
 
 export function setActiveBackend(backend: ChatBackendKind): Promise<void> {
-  return invoke<void>("provider_set_active_backend", { backend });
+  return invoke<void>(PROVIDER_SET_ACTIVE_BACKEND_COMMAND, { backend });
 }
 
 export function checkCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
-  return invoke<CodexAppServerStatus>("provider_codex_app_server_check_update");
+  return invoke<CodexAppServerStatus>(PROVIDER_CODEX_APP_SERVER_CHECK_UPDATE_COMMAND);
 }
 
 export function installCodexAppServerUpdate(): Promise<CodexAppServerStatus> {
-  return invoke<CodexAppServerStatus>("provider_codex_app_server_install_update");
+  return invoke<CodexAppServerStatus>(PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND);
 }
 
 export function getRouterMode(backend: ChatBackendKind): Promise<RouterMode> {
-  return invoke<RouterMode>("router_get_mode", { backend });
+  return invoke<RouterMode>(ROUTER_GET_MODE_COMMAND, { backend });
 }
 
 export function setRouterMode(backend: ChatBackendKind, mode: RouterMode): Promise<void> {
-  return invoke<void>("router_set_mode", { backend, mode });
+  return invoke<void>(ROUTER_SET_MODE_COMMAND, { backend, mode });
 }
 
 // ---- 辅助模型（Assistant AI） ----
 // 与 Provider 平级、独立配置，不参与 Agent 主循环；供 Memory 助手等周边模块消费。
 
 export function getAssistantAIConfig(): Promise<AssistantAIConfig> {
-  return invoke<AssistantAIConfig>("assistant_ai_get_config");
+  return invoke<AssistantAIConfig>(ASSISTANT_AI_GET_CONFIG_COMMAND);
 }
 
 export function setAssistantAIConfig(config: AssistantAIConfig): Promise<void> {
-  return invoke<void>("assistant_ai_set_config", { config });
+  return invoke<void>(ASSISTANT_AI_SET_CONFIG_COMMAND, { config });
 }
 
 export function testAssistantAIConnection(
   config: AssistantAIConfig,
 ): Promise<AssistantAITestResult> {
-  return invoke<AssistantAITestResult>("assistant_ai_test_connection", { config });
+  return invoke<AssistantAITestResult>(ASSISTANT_AI_TEST_CONNECTION_COMMAND, { config });
 }
 
 export interface PromptOptimizeInput {
@@ -387,14 +462,14 @@ export interface PromptOptimizeInput {
 }
 
 export function optimizePrompt(input: PromptOptimizeInput): Promise<string> {
-  return invoke<string>("assistant_ai_optimize_prompt", { input });
+  return invoke<string>(ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND, { input });
 }
 
 export function getConversationSuggestions(
   projectId?: string | null,
   forceRefresh = false,
 ): Promise<SuggestionItem[]> {
-  return invoke<SuggestionItem[]>("conversation_suggestions_get", {
+  return invoke<SuggestionItem[]>(CONVERSATION_SUGGESTIONS_GET_COMMAND, {
     projectId: projectId ?? null,
     forceRefresh,
   });
@@ -404,50 +479,84 @@ export function getConversationSuggestionSources(
   projectId?: string | null,
   forceRefresh = false,
 ): Promise<ConversationSuggestionSources> {
-  return invoke<ConversationSuggestionSources>("conversation_suggestions_get_sources", {
+  return invoke<ConversationSuggestionSources>(CONVERSATION_SUGGESTIONS_GET_SOURCES_COMMAND, {
     projectId: projectId ?? null,
     forceRefresh,
   });
 }
 
 export function getConversationSuggestionSettings(): Promise<SuggestionSettings> {
-  return invoke<SuggestionSettings>("conversation_suggestions_get_settings");
+  return invoke<SuggestionSettings>(CONVERSATION_SUGGESTIONS_GET_SETTINGS_COMMAND);
 }
 
 export function setConversationSuggestionSettings(
   settings: SuggestionSettings,
 ): Promise<void> {
-  return invoke<void>("conversation_suggestions_set_settings", { settings });
+  return invoke<void>(CONVERSATION_SUGGESTIONS_SET_SETTINGS_COMMAND, { settings });
 }
 
 export function getQuotaUsageStats(
   input: QuotaUsageStatsInput = {},
 ): Promise<QuotaUsageStats> {
-  return invoke<QuotaUsageStats>("quota_usage_get_stats", { input });
+  return invoke<QuotaUsageStats>(QUOTA_USAGE_GET_STATS_COMMAND, { input });
 }
 
 export function getCodexAccountQuotaStatus(): Promise<CodexAccountQuotaStatus> {
-  return invoke<CodexAccountQuotaStatus>("quota_usage_get_codex_account_status");
+  return invoke<CodexAccountQuotaStatus>(QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND);
 }
 
 export function consumeCodexRateLimitResetCredit(
   input: CodexRateLimitResetCreditConsumeInput,
 ): Promise<CodexRateLimitResetCreditConsumeResult> {
   return invoke<CodexRateLimitResetCreditConsumeResult>(
-    "quota_usage_consume_codex_rate_limit_reset_credit",
+    QUOTA_USAGE_CONSUME_CODEX_RATE_LIMIT_RESET_CREDIT_COMMAND,
     { input },
   );
 }
 
+export function getRemoteControlStatus(): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>(REMOTE_CONTROL_STATUS_COMMAND);
+}
+
+export function setRemoteControlHostEnabled(enabled: boolean): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>(REMOTE_CONTROL_SET_HOST_ENABLED_COMMAND, { enabled });
+}
+
+export function setRemoteControlPcName(name: string): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>(REMOTE_CONTROL_SET_PC_NAME_COMMAND, { name });
+}
+
+export function startRemoteControlPairing(): Promise<RemotePairingTicket> {
+  return invoke<RemotePairingTicket>(REMOTE_CONTROL_START_PAIRING_COMMAND);
+}
+
+export function cancelRemoteControlPairing(): Promise<void> {
+  return invoke<void>(REMOTE_CONTROL_CANCEL_PAIRING_COMMAND);
+}
+
+export function pairRemoteControlDevice(input: RemotePairDeviceInput): Promise<RemotePeerSummary> {
+  return invoke<RemotePeerSummary>(REMOTE_CONTROL_PAIR_DEVICE_COMMAND, { input });
+}
+
+export function revokeRemoteControlDevice(deviceId: string): Promise<RemoteControlStatus> {
+  return invoke<RemoteControlStatus>(REMOTE_CONTROL_REVOKE_DEVICE_COMMAND, { deviceId });
+}
+
+export function dispatchRemoteControlRequest(
+  envelope: RemoteRequestEnvelope,
+): Promise<RemoteResponseEnvelope> {
+  return invoke<RemoteResponseEnvelope>(REMOTE_CONTROL_DISPATCH_REQUEST_COMMAND, { envelope });
+}
+
 export function getProjectArchitecture(projectId: string): Promise<ProjectArchitectureGraph> {
-  return invoke<ProjectArchitectureGraph>("project_architecture_get", { projectId });
+  return invoke<ProjectArchitectureGraph>(PROJECT_ARCHITECTURE_GET_COMMAND, { projectId });
 }
 
 export function listProjectArchitectureChanges(
   projectId: string,
   limit = 20,
 ): Promise<ProjectArchitectureChangeRecord[]> {
-  return invoke<ProjectArchitectureChangeRecord[]>("project_architecture_list_changes", {
+  return invoke<ProjectArchitectureChangeRecord[]>(PROJECT_ARCHITECTURE_LIST_CHANGES_COMMAND, {
     projectId,
     limit,
   });
@@ -456,13 +565,13 @@ export function listProjectArchitectureChanges(
 export function applyProjectArchitecture(
   input: ProjectArchitectureApplyInput,
 ): Promise<ProjectArchitectureApplyResult> {
-  return invoke<ProjectArchitectureApplyResult>("project_architecture_apply", { input });
+  return invoke<ProjectArchitectureApplyResult>(PROJECT_ARCHITECTURE_APPLY_COMMAND, { input });
 }
 
 export function rejectProjectArchitecture(
   input: ProjectArchitectureRejectInput,
 ): Promise<ProjectArchitectureChangeEvent> {
-  return invoke<ProjectArchitectureChangeEvent>("project_architecture_reject", { input });
+  return invoke<ProjectArchitectureChangeEvent>(PROJECT_ARCHITECTURE_REJECT_COMMAND, { input });
 }
 
 export function rollbackProjectArchitecture(
@@ -470,7 +579,7 @@ export function rollbackProjectArchitecture(
   taskId: string,
   backend: ChatBackendKind,
 ): Promise<ProjectArchitectureRollbackResult> {
-  return invoke<ProjectArchitectureRollbackResult>("project_architecture_rollback", {
+  return invoke<ProjectArchitectureRollbackResult>(PROJECT_ARCHITECTURE_ROLLBACK_COMMAND, {
     projectId,
     taskId,
     backend,
@@ -481,75 +590,51 @@ export function rollbackProjectArchitecture(
 // UI 只订阅 turn 状态和 agent timeline；文本、工具、错误都归入 timeline 事件。
 
 export function onTurnStarted(handler: (e: TurnStartedEvent) => void): Promise<UnlistenFn> {
-  return listen<TurnStartedEvent>("chat:turn-started", (event) => handler(event.payload));
+  return listen<TurnStartedEvent>(CHAT_TURN_STARTED_EVENT_NAME, (event) => handler(event.payload));
 }
 
 export function onDone(handler: (e: DoneEvent) => void): Promise<UnlistenFn> {
-  return listen<DoneEvent>("chat:done", (event) => handler(event.payload));
+  return listen<DoneEvent>(CHAT_DONE_EVENT_NAME, (event) => handler(event.payload));
 }
 
 export function onContextUsage(handler: (e: ChatContextUsage) => void): Promise<UnlistenFn> {
-  return listen<ChatContextUsage>("chat:context-usage", (event) => handler(event.payload));
+  return listen<ChatContextUsage>(CHAT_CONTEXT_USAGE_EVENT_NAME, (event) => handler(event.payload));
 }
 
 export function onAgentTimeline(
   handler: (e: AgentTimelineEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentTimelineEvent>("agent:timeline", (event) => handler(event.payload));
+  return listen<AgentTimelineEvent>(AGENT_TIMELINE_EVENT_NAME, (event) => handler(event.payload));
 }
 
 export function onAgentTimelineBatch(
   handler: (e: AgentTimelineBatchEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentTimelineBatchEvent>("agent:timeline-batch", (event) => handler(event.payload));
+  return listen<AgentTimelineBatchEvent>(AGENT_TIMELINE_BATCH_EVENT_NAME, (event) => handler(event.payload));
 }
 
-const AGENT_INTERACTION_KINDS = new Set([
-  "plan_approval",
-  "tool_consent",
-  "ask_user",
-  "mcp_elicitation",
-  "permission_approval",
-  "architecture_change",
-]);
+export type AgentTimelineEventsSource = "single" | "batch";
 
-function normalizeAgentInteractionRequest(value: AgentInteractionRequest): AgentInteractionRequest | null {
-  const row = value as unknown as Record<string, unknown>;
-  const payload = row.payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const taskId = stringField(row, "taskId");
-  const turnId = stringField(row, "turnId");
-  const requestId = stringField(row, "requestId");
-  const backend = stringField(row, "backend");
-  const kind = stringField(row, "kind");
-  if (!taskId || !requestId) return null;
-  if (!AGENT_INTERACTION_KINDS.has(kind)) return null;
-  return {
-    taskId,
-    turnId,
-    backend: backend === "codex" ? "codex" : "claude",
-    requestId,
-    kind,
-    payload,
-  } as AgentInteractionRequest;
+export async function onAgentTimelineEvents(
+  handler: (events: AgentTimelineEvent[], source: AgentTimelineEventsSource) => void,
+): Promise<UnlistenFn> {
+  return await installCombinedUnlisten([
+    () => onAgentTimeline((event) => handler([event], "single")),
+    () => onAgentTimelineBatch((event) => handler(event.events, "batch")),
+  ]);
 }
 
 export function onAgentInteractionRequest(
   handler: (e: AgentInteractionRequest) => void,
 ): Promise<UnlistenFn> {
-  return listen<AgentInteractionRequest>("chat:agent-interaction-request", (event) => {
+  return listen<unknown>(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, (event) => {
     const req = normalizeAgentInteractionRequest(event.payload);
     if (req) handler(req);
   });
 }
 
-function stringField(row: Record<string, unknown>, key: string): string {
-  const value = row[key];
-  return typeof value === "string" ? value : "";
-}
-
 export function respondAgentInteraction(response: AgentInteractionResponse): Promise<void> {
-  return invoke<void>("chat_respond_agent_interaction", {
+  return invoke<void>(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
     taskId: response.taskId,
     requestId: response.requestId,
     kind: response.kind,
@@ -562,5 +647,5 @@ export function respondTitleUpdate(
   requestId: string,
   decision: "accept" | "decline",
 ): Promise<void> {
-  return invoke<void>("chat_respond_title_update", { taskId, requestId, decision });
+  return invoke<void>(CHAT_RESPOND_TITLE_UPDATE_COMMAND, { taskId, requestId, decision });
 }

@@ -1,7 +1,29 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AutomationNode } from "@lilia/contracts";
-import { PRIORITY_OPTIONS } from "./constants";
+import {
+  AUTOMATION_LOGIC_KINDS,
+  AUTOMATION_LOGIC_KIND_LABELS,
+  AUTOMATION_TRIGGER_KIND_LABELS,
+  AUTOMATION_TRIGGER_KINDS,
+  AUTOMATION_TOOL_ACTIONS,
+  AUTOMATION_TOOL_ACTION_LABELS,
+  AUTOMATION_TOOL_PRIORITIES,
+  CHAT_BACKENDS,
+  CHAT_BACKEND_LABELS,
+  DEFAULT_CHAT_BACKEND,
+  DEFAULT_AUTOMATION_LOGIC_KIND,
+  DEFAULT_AUTOMATION_LOGIC_PATH,
+  DEFAULT_AUTOMATION_TOOL_ACTION,
+  DEFAULT_AUTOMATION_TOOL_PRIORITY,
+  DEFAULT_MODEL_BY_BACKEND,
+  PERMISSION_MODES,
+  automationToolActionUsesField,
+  normalizeAutomationLogicKind,
+  normalizeAutomationToolAction,
+  normalizePermissionMode,
+  type AutomationNode,
+  type AutomationToolConfigField,
+} from "@lilia/contracts";
 import type { AutomationFlowNode } from "./types";
 
 const props = defineProps<{
@@ -15,46 +37,19 @@ const emit = defineEmits<{
   "update-config": [key: string, value: unknown];
 }>();
 
-const TOOL_ACTIONS_WITH_TITLE = new Set(["record_timeline", "create_task"]);
-const TOOL_ACTIONS_WITH_TEXT = new Set(["add_todo", "send_guide"]);
-const TOOL_ACTIONS_WITH_STATUS = new Set([
-  "record_timeline",
-  "create_task",
-  "update_task_status",
-]);
-
 const selectedAutomationNode = computed<AutomationNode | null>(() => props.selectedNode?.data.node ?? null);
+const chatBackendOptions = CHAT_BACKENDS.map((backend) => ({
+  value: backend,
+  label: CHAT_BACKEND_LABELS[backend],
+}));
+const modelPlaceholder = CHAT_BACKENDS.map((backend) => DEFAULT_MODEL_BY_BACKEND[backend]).join(" / ");
 
 function selectedToolAction() {
-  return props.configString("action") || "record_timeline";
+  return normalizeAutomationToolAction(props.configString("action"));
 }
 
-function selectedToolUsesTaskId() {
-  return selectedToolAction() !== "create_task";
-}
-
-function selectedToolUsesProjectId() {
-  return selectedToolAction() === "create_task";
-}
-
-function selectedToolUsesTimelineFields() {
-  return selectedToolAction() === "record_timeline";
-}
-
-function selectedToolUsesGuidePriority() {
-  return selectedToolAction() === "send_guide";
-}
-
-function selectedToolUsesTitle() {
-  return TOOL_ACTIONS_WITH_TITLE.has(selectedToolAction());
-}
-
-function selectedToolUsesText() {
-  return TOOL_ACTIONS_WITH_TEXT.has(selectedToolAction());
-}
-
-function selectedToolUsesStatus() {
-  return TOOL_ACTIONS_WITH_STATUS.has(selectedToolAction());
+function selectedToolUsesField(field: AutomationToolConfigField) {
+  return automationToolActionUsesField(selectedToolAction(), field);
 }
 </script>
 
@@ -74,11 +69,9 @@ function selectedToolUsesStatus() {
           :value="configString('triggerKind') || 'manual'"
           @change="emit('update-config', 'triggerKind', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="manual">手动触发</option>
-          <option value="task_changed">任务变化</option>
-          <option value="timeline_event">时间线事件</option>
-          <option value="todo_changed">Todo 变化</option>
-          <option value="interaction_request">Agent 交互请求</option>
+          <option v-for="kind in AUTOMATION_TRIGGER_KINDS" :key="kind" :value="kind">
+            {{ AUTOMATION_TRIGGER_KIND_LABELS[kind] }}
+          </option>
         </select>
       </div>
     </template>
@@ -118,11 +111,12 @@ function selectedToolUsesStatus() {
       <div class="automations-page__field">
         <label>后端</label>
         <select
-          :value="configString('backend') || 'claude'"
+          :value="configString('backend') || DEFAULT_CHAT_BACKEND"
           @change="emit('update-config', 'backend', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
+          <option v-for="option in chatBackendOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
         </select>
       </div>
       <div class="automations-page__field">
@@ -130,7 +124,7 @@ function selectedToolUsesStatus() {
         <input
           id="automation-agent-model"
           :value="configString('model')"
-          placeholder="claude-sonnet-4-6 / gpt-5.5"
+          :placeholder="modelPlaceholder"
           @input="emit('update-config', 'model', ($event.target as HTMLInputElement).value)"
         />
       </div>
@@ -154,12 +148,10 @@ function selectedToolUsesStatus() {
       <div class="automations-page__field">
         <label>权限</label>
         <select
-          :value="configString('permission') || 'ask'"
+          :value="normalizePermissionMode(configString('permission'))"
           @change="emit('update-config', 'permission', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="ask">ask</option>
-          <option value="readonly">readonly</option>
-          <option value="full">full</option>
+          <option v-for="mode in PERMISSION_MODES" :key="mode" :value="mode">{{ mode }}</option>
         </select>
       </div>
     </template>
@@ -167,19 +159,19 @@ function selectedToolUsesStatus() {
       <div class="automations-page__field">
         <label>逻辑</label>
         <select
-          :value="configString('logic') || 'condition'"
+          :value="normalizeAutomationLogicKind(configString('logic'))"
           @change="emit('update-config', 'logic', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="condition">条件</option>
-          <option value="switch">Switch</option>
-          <option value="stop">停止运行</option>
+          <option v-for="kind in AUTOMATION_LOGIC_KINDS" :key="kind" :value="kind">
+            {{ AUTOMATION_LOGIC_KIND_LABELS[kind] }}
+          </option>
         </select>
       </div>
       <div class="automations-page__field">
         <label>路径</label>
         <input
           :value="configString('path')"
-          placeholder="trigger.kind"
+          :placeholder="DEFAULT_AUTOMATION_LOGIC_PATH"
           @input="emit('update-config', 'path', ($event.target as HTMLInputElement).value)"
         />
       </div>
@@ -192,7 +184,7 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="configString('logic') === 'switch'"
+        v-if="normalizeAutomationLogicKind(configString('logic'), DEFAULT_AUTOMATION_LOGIC_KIND) === 'switch'"
         class="automations-page__field"
       >
         <label>分支值</label>
@@ -208,18 +200,16 @@ function selectedToolUsesStatus() {
         <label for="automation-tool-action">动作</label>
         <select
           id="automation-tool-action"
-          :value="configString('action') || 'record_timeline'"
+          :value="configString('action') || DEFAULT_AUTOMATION_TOOL_ACTION"
           @change="emit('update-config', 'action', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="record_timeline">记录运行</option>
-          <option value="create_task">创建任务</option>
-          <option value="update_task_status">更新任务状态</option>
-          <option value="add_todo">添加 Todo</option>
-          <option value="send_guide">发送引导</option>
+          <option v-for="action in AUTOMATION_TOOL_ACTIONS" :key="action" :value="action">
+            {{ AUTOMATION_TOOL_ACTION_LABELS[action] }}
+          </option>
         </select>
       </div>
       <div
-        v-if="selectedToolUsesTaskId()"
+        v-if="selectedToolUsesField('taskId')"
         class="automations-page__field"
       >
         <label>Task ID</label>
@@ -230,7 +220,7 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesProjectId()"
+        v-if="selectedToolUsesField('projectId')"
         class="automations-page__field"
       >
         <label>项目 ID</label>
@@ -241,7 +231,7 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesTitle()"
+        v-if="selectedToolUsesField('title')"
         class="automations-page__field"
       >
         <label>标题</label>
@@ -252,10 +242,10 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesText()"
+        v-if="selectedToolUsesField('text')"
         class="automations-page__field"
       >
-        <label for="automation-tool-text">{{ selectedToolUsesGuidePriority() ? '引导内容' : 'Todo 内容' }}</label>
+        <label for="automation-tool-text">{{ selectedToolUsesField('priority') ? '引导内容' : 'Todo 内容' }}</label>
         <textarea
           id="automation-tool-text"
           class="ui-input ui-textarea"
@@ -265,7 +255,7 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesTimelineFields()"
+        v-if="selectedToolUsesField('summary')"
         class="automations-page__field"
       >
         <label>摘要</label>
@@ -277,7 +267,7 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesStatus()"
+        v-if="selectedToolUsesField('status')"
         class="automations-page__field"
       >
         <label>状态</label>
@@ -288,29 +278,30 @@ function selectedToolUsesStatus() {
         />
       </div>
       <div
-        v-if="selectedToolUsesTimelineFields()"
+        v-if="selectedToolUsesField('backend')"
         class="automations-page__field"
       >
         <label>记录后端</label>
         <select
-          :value="configString('backend') || 'claude'"
+          :value="configString('backend') || DEFAULT_CHAT_BACKEND"
           @change="emit('update-config', 'backend', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
+          <option v-for="option in chatBackendOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
         </select>
       </div>
       <div
-        v-if="selectedToolUsesGuidePriority()"
+        v-if="selectedToolUsesField('priority')"
         class="automations-page__field"
       >
         <label for="automation-tool-priority">优先级</label>
         <select
           id="automation-tool-priority"
-          :value="configString('priority') || 'normal'"
+          :value="configString('priority') || DEFAULT_AUTOMATION_TOOL_PRIORITY"
           @change="emit('update-config', 'priority', ($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="priority in PRIORITY_OPTIONS" :key="priority" :value="priority">
+          <option v-for="priority in AUTOMATION_TOOL_PRIORITIES" :key="priority" :value="priority">
             {{ priority }}
           </option>
         </select>

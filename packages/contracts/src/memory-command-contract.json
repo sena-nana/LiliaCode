@@ -1,0 +1,13 @@
+{
+  "commands": {
+    "list": "memory_list",
+    "upsert": "memory_upsert",
+    "setEnabled": "memory_set_enabled",
+    "delete": "memory_delete",
+    "getSettings": "memory_get_settings",
+    "setSettings": "memory_set_settings",
+    "getInjectionState": "memory_get_injection_state",
+    "setTaskEnabled": "memory_set_task_enabled",
+    "resetTaskCooldown": "memory_reset_task_cooldown"
+  }
+}

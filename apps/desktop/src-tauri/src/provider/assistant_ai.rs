@@ -6,11 +6,11 @@ use serde_json::json;
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime};
 
-use crate::chat::types::{ChatAttachment, ChatConversationReference};
 use super::codex_spark::{codex_account_spark_enabled, request_codex_account_spark};
 use super::config::{assistant_ai_secret, load_assistant_ai_config};
 use super::credentials::normalize_secret;
 use super::types::{AssistantAIConfig, AssistantAITestResult};
+use crate::chat::types::{ChatAttachment, ChatConversationReference};
 
 const PROMPT_OPTIMIZE_INSTRUCTION: &str = "你是 Lilia 的提示词优化助手。只输出优化后的提示词正文，不要解释，不要 Markdown 包装。目标：简单定位问题或入口，明确任务范围、边界、预期输出，保留用户原意、语言和关键约束。";
 const PROMPT_OPTIMIZE_TIMEOUT: Duration = Duration::from_secs(12);
@@ -136,10 +136,7 @@ fn assistant_ai_model_request<R: Runtime>(app: &AppHandle<R>) -> Result<Assistan
     Ok(cfg)
 }
 
-fn request_openai_compatible(
-    model: &AssistantAIConfig,
-    prompt: &str,
-) -> Result<String, String> {
+fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<String, String> {
     let base_url = model
         .base_url
         .as_deref()

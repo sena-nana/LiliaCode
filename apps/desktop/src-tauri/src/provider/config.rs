@@ -2,25 +2,27 @@ use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use tauri::{AppHandle, Runtime};
 
-use crate::chat::state::normalize_backend;
+use crate::chat::state::{default_backend, normalize_backend, try_normalize_backend};
+use crate::chat_backends_contract::chat_backends_contract;
 use crate::settings_store::{load_store_value, save_store_value};
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::BACKEND_CODEX;
 
+use super::config_contract;
 use super::credentials::{
     assistant_ai_account, has_secret, normalize_secret, provider_account, read_secret, write_secret,
 };
 use super::subagents::{claude_managed_subagents, codex_subagent_instructions};
 use super::types::{
-    AgentInteractionSettings, AssistantAIConfig, CodexProfileSettings, ProviderConfig,
-    SubagentModeSettings,
+    AgentInteractionSettings, AssistantAIConfig, CodexProfileSettings, ConnectionMode,
+    ProviderConfig, SubagentModeSettings,
 };
 
+fn manifest_contains(values: &[String], value: &str) -> bool {
+    values.iter().any(|item| item == value)
+}
+
 pub(crate) const PROVIDER_ACTIVE_BACKEND_KEY: &str = "provider.activeBackend";
-pub(crate) const PROVIDER_KEY_CLAUDE: &str = "provider.claude";
-pub(crate) const PROVIDER_KEY_CODEX: &str = "provider.codex";
 pub(crate) const CC_SWITCH_KEY: &str = "cc-switch.config";
-pub(crate) const ROUTER_KEY_CLAUDE: &str = "router.claude";
-pub(crate) const ROUTER_KEY_CODEX: &str = "router.codex";
 pub(crate) const ASSISTANT_AI_KEY: &str = "assistant-ai.config";
 pub(crate) const AGENT_INTERACTION_KEY: &str = "agent-interaction.config";
 pub(crate) const ROUTER_API: &str = "api";
@@ -50,40 +52,57 @@ struct LegacyApiSourceConfig {
 }
 
 pub(crate) fn provider_key_for_backend(backend: &str) -> &'static str {
-    match backend {
-        BACKEND_CODEX => PROVIDER_KEY_CODEX,
-        _ => PROVIDER_KEY_CLAUDE,
-    }
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .provider_store_keys
+        .get(backend)
+        .map(String::as_str)
+        .expect("chat-backends.json missing providerStoreKeys backend")
 }
 
 pub(crate) fn known_provider_key_for_backend(backend: &str) -> Result<&'static str, String> {
-    match backend {
-        BACKEND_CODEX => Ok(PROVIDER_KEY_CODEX),
-        BACKEND_CLAUDE => Ok(PROVIDER_KEY_CLAUDE),
-        other => Err(format!("未知 backend: {other}")),
+    match try_normalize_backend(backend) {
+        Some(backend) => Ok(provider_key_for_backend(backend)),
+        None => Err(format!("未知 backend: {backend}")),
     }
 }
 
 pub(crate) fn router_key_for_backend(backend: &str) -> Result<&'static str, String> {
-    match backend {
-        BACKEND_CODEX => Ok(ROUTER_KEY_CODEX),
-        BACKEND_CLAUDE => Ok(ROUTER_KEY_CLAUDE),
-        other => Err(format!("未知 backend: {other}")),
+    match try_normalize_backend(backend) {
+        Some(backend) => chat_backends_contract()
+            .router_store_keys
+            .get(backend)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                format!("chat-backends.json missing routerStoreKeys backend: {backend}")
+            }),
+        None => Err(format!("未知 backend: {backend}")),
     }
 }
 
-pub(crate) fn backend_api_key_env(backend: &str) -> &'static str {
-    match backend {
-        BACKEND_CODEX => "OPENAI_API_KEY",
-        _ => "ANTHROPIC_API_KEY",
-    }
+fn backend_for_provider_key(key: &str) -> Option<&'static str> {
+    chat_backends_contract()
+        .provider_store_keys
+        .iter()
+        .find_map(|(backend, provider_key)| (provider_key == key).then_some(backend.as_str()))
+}
+
+pub(crate) fn backend_api_key_env(backend: &str) -> String {
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .api_key_env
+        .get(backend)
+        .cloned()
+        .expect("chat-backends.json missing apiKeyEnv backend")
 }
 
 pub(crate) fn backend_direct_url(backend: &str) -> &'static str {
-    match backend {
-        BACKEND_CODEX => "https://api.openai.com/v1",
-        _ => "https://api.anthropic.com",
-    }
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .direct_urls
+        .get(backend)
+        .map(String::as_str)
+        .expect("chat-backends.json missing directUrls backend")
 }
 
 pub(crate) fn load_provider_config<R: Runtime>(
@@ -160,7 +179,7 @@ pub(crate) fn assistant_ai_has_api_key() -> Result<bool, String> {
 pub(crate) fn load_active_backend<R: Runtime>(app: &AppHandle<R>) -> String {
     load_store_value::<String, _>(app, PROVIDER_ACTIVE_BACKEND_KEY)
         .map(|s| normalize_backend(&s).to_string())
-        .unwrap_or_else(|| BACKEND_CLAUDE.to_string())
+        .unwrap_or_else(|| default_backend().to_string())
 }
 
 pub(crate) fn load_legacy_cc_switch_base_url<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
@@ -170,7 +189,7 @@ pub(crate) fn load_legacy_cc_switch_base_url<R: Runtime>(app: &AppHandle<R>) -> 
 
 pub(crate) fn uses_legacy_cc_switch_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> bool {
     let backend = normalize_backend(backend);
-    let key = router_key_for_backend(backend).unwrap_or(ROUTER_KEY_CLAUDE);
+    let key = router_key_for_backend(backend).expect("normalized backend must have a router key");
     load_store_value::<String, _>(app, key).as_deref() == Some(ROUTER_CC_SWITCH_LEGACY)
 }
 
@@ -199,10 +218,8 @@ pub(crate) fn save_assistant_ai_config_metadata<R: Runtime>(
 }
 
 fn migrate_provider_config<R: Runtime>(app: &AppHandle<R>, key: &str) -> Result<(), String> {
-    let backend = match key {
-        PROVIDER_KEY_CODEX => BACKEND_CODEX,
-        PROVIDER_KEY_CLAUDE => BACKEND_CLAUDE,
-        _ => return Ok(()),
+    let Some(backend) = backend_for_provider_key(key) else {
+        return Ok(());
     };
     let Some(config) = load_store_value::<ProviderConfig, _>(app, key) else {
         return Ok(());
@@ -256,9 +273,10 @@ pub(crate) fn normalize_agent_interaction_settings(
 }
 
 pub(crate) fn normalize_permission_mode(value: &str) -> String {
-    match value {
-        "full" | "readonly" | "free" => value.to_string(),
-        _ => "ask".to_string(),
+    if manifest_contains(config_contract::permission_modes(), value) {
+        value.to_string()
+    } else {
+        config_contract::default_permission_mode().to_string()
     }
 }
 
@@ -276,9 +294,13 @@ pub(crate) fn normalize_codex_profile_settings(
     settings: CodexProfileSettings,
 ) -> CodexProfileSettings {
     CodexProfileSettings {
-        profile: match settings.profile.as_str() {
-            "fast" | "balanced" | "deep" => settings.profile,
-            _ => "default".to_string(),
+        profile: if manifest_contains(
+            config_contract::codex_settings_profiles(),
+            &settings.profile,
+        ) {
+            settings.profile
+        } else {
+            config_contract::default_codex_settings_profile().to_string()
         },
         model: normalize_optional_string(settings.model),
         reasoning_effort: normalize_reasoning_effort(settings.reasoning_effort),
@@ -315,10 +337,20 @@ pub(crate) fn normalize_optional_string(value: Option<String>) -> Option<String>
 
 pub(crate) fn normalize_reasoning_effort(value: Option<String>) -> Option<String> {
     let value = normalize_optional_string(value)?;
-    match value.as_str() {
-        "low" | "medium" | "high" | "xhigh" => Some(value),
-        _ => None,
+    if chat_backends_contract()
+        .backend_reasoning_efforts
+        .get(BACKEND_CODEX)
+        .is_some_and(|efforts| manifest_contains(efforts, &value))
+    {
+        Some(value)
+    } else {
+        None
     }
+}
+
+pub(crate) fn normalize_codex_settings_profile(value: Option<String>) -> Option<String> {
+    let value = normalize_optional_string(value)?;
+    manifest_contains(config_contract::codex_settings_profiles(), &value).then_some(value)
 }
 
 pub(crate) fn normalize_runtime_workspace_roots(roots: Vec<String>) -> Vec<String> {
@@ -384,27 +416,103 @@ pub(crate) fn build_effective_codex_subagent_settings<R: Runtime>(
 
 pub(crate) fn load_router_mode<R: Runtime>(app: &AppHandle<R>, backend: &str) -> String {
     let backend = normalize_backend(backend);
-    let key = router_key_for_backend(backend).unwrap_or(ROUTER_KEY_CLAUDE);
+    let key = router_key_for_backend(backend).expect("normalized backend must have a router key");
     normalize_router_mode_value(backend, load_store_value::<String, _>(app, key).as_deref())
-        .to_string()
 }
 
-fn normalize_router_mode_value(backend: &str, value: Option<&str>) -> &'static str {
-    match value {
-        Some(ROUTER_API | ROUTER_DIRECT_LEGACY | ROUTER_CC_SWITCH_LEGACY) => ROUTER_API,
-        Some(ROUTER_CODEX_ACCOUNT) if backend == BACKEND_CODEX => ROUTER_CODEX_ACCOUNT,
-        Some(ROUTER_CODEX_ACCOUNT) => ROUTER_API,
-        _ if backend == BACKEND_CODEX => ROUTER_CODEX_ACCOUNT,
-        _ => ROUTER_API,
+pub(crate) fn router_mode_supported_for_backend(backend: &str, mode: &str) -> bool {
+    let backend = normalize_backend(backend);
+    chat_backends_contract()
+        .backend_router_modes
+        .get(backend)
+        .is_some_and(|modes| manifest_contains(modes, mode))
+}
+
+pub(crate) fn connection_mode_uses_api_key(mode: ConnectionMode) -> bool {
+    manifest_contains(
+        &chat_backends_contract().connection_modes_using_api_key,
+        mode.as_contract_value(),
+    )
+}
+
+pub(crate) fn connection_mode_uses_default_api(mode: ConnectionMode) -> bool {
+    manifest_contains(
+        &chat_backends_contract().connection_modes_using_default_api,
+        mode.as_contract_value(),
+    )
+}
+
+pub(crate) fn connection_mode_uses_custom_url(mode: ConnectionMode) -> bool {
+    manifest_contains(
+        &chat_backends_contract().connection_modes_using_custom_url,
+        mode.as_contract_value(),
+    )
+}
+
+pub(crate) fn connection_mode_uses_codex_account(mode: ConnectionMode) -> bool {
+    manifest_contains(
+        &chat_backends_contract().connection_modes_using_codex_account,
+        mode.as_contract_value(),
+    )
+}
+
+fn normalize_router_mode_value(backend: &str, value: Option<&str>) -> String {
+    let backend = normalize_backend(backend);
+    let value = match value {
+        Some(ROUTER_DIRECT_LEGACY | ROUTER_CC_SWITCH_LEGACY) => Some(ROUTER_API),
+        other => other,
+    };
+    let manifest = chat_backends_contract();
+    if let Some(value) = value {
+        if manifest
+            .backend_router_modes
+            .get(backend)
+            .is_some_and(|modes| manifest_contains(modes, value))
+        {
+            return value.to_string();
+        }
     }
+    manifest
+        .default_router_modes
+        .get(backend)
+        .cloned()
+        .unwrap_or_else(|| ROUTER_API.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BACKEND_CLAUDE;
 
     #[test]
     fn codex_profile_settings_are_normalized_to_controlled_values() {
+        assert_eq!(
+            config_contract::permission_modes(),
+            ["full", "ask", "readonly", "free"]
+        );
+        assert_eq!(config_contract::default_permission_mode(), "ask");
+        assert_eq!(normalize_permission_mode("free"), "free");
+        assert_eq!(normalize_permission_mode("danger"), "ask");
+        assert_eq!(
+            chat_backends_contract()
+                .backend_reasoning_efforts
+                .get(BACKEND_CODEX),
+            Some(&vec![
+                "low".to_string(),
+                "medium".to_string(),
+                "high".to_string(),
+                "xhigh".to_string()
+            ])
+        );
+        assert_eq!(
+            config_contract::codex_settings_profiles(),
+            ["default", "fast", "balanced", "deep"]
+        );
+        assert_eq!(config_contract::default_codex_settings_profile(), "default");
+        assert_eq!(
+            normalize_reasoning_effort(Some(" xhigh ".to_string())).as_deref(),
+            Some("xhigh")
+        );
         let normalized = normalize_codex_profile_settings(CodexProfileSettings {
             profile: "unknown".to_string(),
             model: Some("  gpt-5.5  ".to_string()),
@@ -440,6 +548,14 @@ mod tests {
         assert_eq!(normalized.persist_extended_history, Some(true));
         assert_eq!(normalized.initial_turns_page, None);
         assert_eq!(normalized.exclude_turns, vec!["turn-1"]);
+        assert_eq!(
+            normalize_codex_settings_profile(Some(" balanced ".to_string())).as_deref(),
+            Some("balanced")
+        );
+        assert_eq!(
+            normalize_codex_settings_profile(Some("bad".to_string())),
+            None
+        );
     }
 
     #[test]
@@ -501,6 +617,89 @@ mod tests {
     #[test]
     fn router_mode_defaults_and_legacy_values_normalize_to_current_modes() {
         assert_eq!(
+            crate::chat::state::chat_backends(),
+            &[BACKEND_CLAUDE.to_string(), BACKEND_CODEX.to_string()]
+        );
+        assert!(crate::chat::state::chat_backend_supported(BACKEND_CLAUDE));
+        assert!(crate::chat::state::chat_backend_supported(BACKEND_CODEX));
+        assert!(!crate::chat::state::chat_backend_supported("unknown"));
+        assert_eq!(
+            provider_key_for_backend("unknown"),
+            provider_key_for_backend(default_backend())
+        );
+        assert_eq!(
+            normalize_router_mode_value("unknown", None),
+            normalize_router_mode_value(default_backend(), None)
+        );
+        assert_eq!(
+            backend_direct_url(BACKEND_CLAUDE),
+            "https://api.anthropic.com"
+        );
+        assert_eq!(
+            backend_direct_url(BACKEND_CODEX),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(backend_api_key_env(BACKEND_CLAUDE), "ANTHROPIC_API_KEY");
+        assert_eq!(backend_api_key_env(BACKEND_CODEX), "OPENAI_API_KEY");
+        assert_eq!(provider_key_for_backend(BACKEND_CLAUDE), "provider.claude");
+        assert_eq!(provider_key_for_backend(BACKEND_CODEX), "provider.codex");
+        assert_eq!(
+            known_provider_key_for_backend(&format!(" {BACKEND_CODEX} ")).unwrap(),
+            "provider.codex"
+        );
+        assert!(known_provider_key_for_backend("unknown").is_err());
+        assert_eq!(
+            router_key_for_backend(BACKEND_CLAUDE).unwrap(),
+            "router.claude"
+        );
+        assert_eq!(
+            router_key_for_backend(BACKEND_CODEX).unwrap(),
+            "router.codex"
+        );
+        assert!(router_key_for_backend("unknown").is_err());
+        assert_eq!(
+            backend_for_provider_key("provider.claude"),
+            Some(BACKEND_CLAUDE)
+        );
+        assert_eq!(
+            backend_for_provider_key("provider.codex"),
+            Some(BACKEND_CODEX)
+        );
+        assert_eq!(
+            chat_backends_contract()
+                .backend_router_modes
+                .get(BACKEND_CLAUDE),
+            Some(&vec![ROUTER_API.to_string()])
+        );
+        assert_eq!(
+            chat_backends_contract()
+                .backend_router_modes
+                .get(BACKEND_CODEX),
+            Some(&vec![
+                ROUTER_API.to_string(),
+                ROUTER_CODEX_ACCOUNT.to_string()
+            ])
+        );
+        assert_eq!(
+            chat_backends_contract()
+                .default_router_modes
+                .get(BACKEND_CODEX),
+            Some(&ROUTER_CODEX_ACCOUNT.to_string())
+        );
+        assert!(connection_mode_uses_api_key(ConnectionMode::Api));
+        assert!(connection_mode_uses_api_key(ConnectionMode::CustomBaseUrl));
+        assert!(!connection_mode_uses_api_key(ConnectionMode::CodexAccount));
+        assert!(connection_mode_uses_default_api(ConnectionMode::Api));
+        assert!(connection_mode_uses_custom_url(
+            ConnectionMode::CustomBaseUrl
+        ));
+        assert!(connection_mode_uses_codex_account(
+            ConnectionMode::CodexAccount
+        ));
+        assert!(!connection_mode_uses_default_api(
+            ConnectionMode::Unconfigured
+        ));
+        assert_eq!(
             normalize_router_mode_value(BACKEND_CLAUDE, None),
             ROUTER_API
         );
@@ -524,5 +723,14 @@ mod tests {
             normalize_router_mode_value(BACKEND_CODEX, Some(ROUTER_CODEX_ACCOUNT)),
             ROUTER_CODEX_ACCOUNT
         );
+        assert!(router_mode_supported_for_backend(
+            BACKEND_CODEX,
+            ROUTER_CODEX_ACCOUNT
+        ));
+        assert!(!router_mode_supported_for_backend(
+            BACKEND_CLAUDE,
+            ROUTER_CODEX_ACCOUNT
+        ));
+        assert!(!router_mode_supported_for_backend(BACKEND_CODEX, "unknown"));
     }
 }

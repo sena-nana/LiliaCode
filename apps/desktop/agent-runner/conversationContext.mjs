@@ -1,42 +1,26 @@
 import { z } from "zod/v4";
+import {
+  CONVERSATION_CONTEXT_TOOL_NAME,
+  CONVERSATION_CONTEXT_TOOL_NAMES as LILIA_CONVERSATION_CONTEXT_TOOL_NAMES,
+  DEFAULT_CONVERSATION_CONTEXT_INCLUDE_MESSAGES,
+  MAX_CONVERSATION_CONTEXT_MESSAGES,
+  MAX_CONVERSATION_CONTEXT_TEXT,
+  QUERY_CONVERSATION_CONTEXT_INPUT_SCHEMA,
+  isLiliaConversationContextTool,
+} from "@lilia/contracts/conversationContextContract.mjs";
 import { isRecord, shortText, stringOrNull } from "./utils.mjs";
 
-const MAX_MESSAGES = 12;
-const MAX_TEXT = 1200;
-
-export const LILIA_CONVERSATION_CONTEXT_TOOL_NAMES = new Set([
-  "QueryConversationContext",
-  "query_conversation_context",
-  "mcp__lilia__query_conversation_context",
-]);
-
-export function isLiliaConversationContextTool(toolName) {
-  return LILIA_CONVERSATION_CONTEXT_TOOL_NAMES.has(String(toolName || ""));
-}
+export { LILIA_CONVERSATION_CONTEXT_TOOL_NAMES, isLiliaConversationContextTool };
 
 export const queryConversationContextInputSchema = {
   taskId: z.string().optional(),
-  includeMessages: z.boolean().optional().default(true),
+  includeMessages: z.boolean().optional().default(DEFAULT_CONVERSATION_CONTEXT_INCLUDE_MESSAGES),
 };
 
-export const queryConversationContextJsonSchema = {
-  type: "object",
-  properties: {
-    taskId: {
-      type: "string",
-      description: "Conversation task id to query. Defaults to the parent conversation.",
-    },
-    includeMessages: {
-      type: "boolean",
-      default: true,
-      description: "Whether to include clipped readable timeline messages.",
-    },
-  },
-  additionalProperties: false,
-};
+export const queryConversationContextJsonSchema = QUERY_CONVERSATION_CONTEXT_INPUT_SCHEMA;
 
 export const codexQueryConversationContextDynamicTool = {
-  name: "QueryConversationContext",
+  name: CONVERSATION_CONTEXT_TOOL_NAME,
   description:
     "Query Lilia conversation context available to this child conversation, including the parent conversation and readable message summaries.",
   inputSchema: queryConversationContextJsonSchema,
@@ -59,7 +43,7 @@ export function buildConversationContextToolDescription() {
 function normalizeMessage(message) {
   if (!isRecord(message)) return null;
   const role = stringOrNull(message.role);
-  const content = shortText(message.content, MAX_TEXT);
+  const content = shortText(message.content, MAX_CONVERSATION_CONTEXT_TEXT);
   if (!role || !content) return null;
   return {
     role,
@@ -73,7 +57,7 @@ function normalizeTask(task, includeMessages) {
   const taskId = stringOrNull(task.taskId);
   if (!taskId) return null;
   const messages = includeMessages && Array.isArray(task.messages)
-    ? task.messages.map(normalizeMessage).filter(Boolean).slice(0, MAX_MESSAGES)
+    ? task.messages.map(normalizeMessage).filter(Boolean).slice(0, MAX_CONVERSATION_CONTEXT_MESSAGES)
     : [];
   return {
     taskId,

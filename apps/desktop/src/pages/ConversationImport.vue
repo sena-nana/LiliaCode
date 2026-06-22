@@ -15,8 +15,10 @@ import {
 import type {
   AgentTimelineEvent,
   HistoryImportItem,
+  HistoryImportProvider,
   HistoryImportRuntimeState,
 } from "@lilia/contracts";
+import { historyImportProviderDisplay, historyImportProviderUiLabels } from "@lilia/contracts";
 import {
   attachHistoryImport,
   cleanHistoryImportBackgroundTerminals,
@@ -50,9 +52,8 @@ const ChatScrollMap = defineAsyncComponent({
 
 const route = useRoute();
 const router = useRouter();
-type ImportSource = "codex" | "claude";
 
-const source = ref<ImportSource>("codex");
+const source = ref<HistoryImportProvider>("codex");
 const query = ref("");
 const includeArchived = ref(false);
 const loading = ref(false);
@@ -82,6 +83,8 @@ const previewScroller = ref<HTMLElement | null>(null);
 const previewScrollMap = ref<{ show: () => void } | null>(null);
 const previewScrollMapReady = ref(false);
 let previewScrollMapIdleHandle: number | null = null;
+let cancelPreviewScrollMapPaint: (() => void) | null = null;
+let disposed = false;
 
 const routeProjectId = computed(() => {
   const value = route.query.projectId;
@@ -89,8 +92,8 @@ const routeProjectId = computed(() => {
 });
 
 const isCodexSource = computed(() => source.value === "codex");
-const sourceName = computed(() => (isCodexSource.value ? "Codex" : "Claude"));
-const sourceEntity = computed(() => (isCodexSource.value ? "Codex thread" : "Claude session"));
+const sourceDisplay = computed(() => historyImportProviderDisplay(source.value));
+const sourceLabels = computed(() => historyImportProviderUiLabels(source.value));
 
 const importTargetLabel = computed(() =>
   routeProjectId.value ? "导入到当前项目" : "导入到收集箱",
@@ -119,14 +122,14 @@ const importRows = computed(() =>
   }),
 );
 
-const sourceListLabel = computed(() => `${sourceEntity.value} 列表`);
-const sourcePreviewLabel = computed(() => `${sourceEntity.value} 预览`);
-const searchPlaceholder = computed(() => `搜索 ${sourceEntity.value}`);
-const loadingLabel = computed(() => `正在读取 ${sourceName.value} 历史`);
-const emptyListLabel = computed(() => `没有找到 ${sourceEntity.value}`);
-const emptyPreviewLabel = computed(() => `这个 ${sourceEntity.value} 暂无可预览事件。`);
-const choosePreviewLabel = computed(() => `选择一个 ${sourceEntity.value} 后查看摘要并导入。`);
-const showArchivedToggle = computed(() => isCodexSource.value);
+const sourceListLabel = computed(() => sourceLabels.value.list);
+const sourcePreviewLabel = computed(() => sourceLabels.value.preview);
+const searchPlaceholder = computed(() => sourceLabels.value.searchPlaceholder);
+const loadingLabel = computed(() => sourceLabels.value.loading);
+const emptyListLabel = computed(() => sourceLabels.value.emptyList);
+const emptyPreviewLabel = computed(() => sourceLabels.value.emptyPreview);
+const choosePreviewLabel = computed(() => sourceLabels.value.choosePreview);
+const showArchivedToggle = computed(() => sourceDisplay.value.supportsArchived);
 
 const selectedItemMeta = computed(() => {
   const item = selectedItem.value;
@@ -229,11 +232,11 @@ async function loadRuntimeStates(): Promise<HistoryImportRuntimeState[]> {
   if (!isCodexSource.value) return [];
   try {
     const states = await listHistoryImportRuntimeStates();
-    runtimeStates.value = states;
+    if (!disposed) runtimeStates.value = states;
     return states;
   } catch (err) {
     console.error("[conversation-import] Codex runtime states load failed", err);
-    runtimeStates.value = [];
+    if (!disposed) runtimeStates.value = [];
     return [];
   }
 }
@@ -298,11 +301,20 @@ async function loadHistoryImports(cursor: string | null = null) {
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
+    searchTimer = null;
+    if (disposed) return;
     resetPreviewState();
     rowMessages.value = {};
     importError.value = "";
     void loadHistoryImports();
   }, 240);
+}
+
+function cancelSearchSchedule() {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
 }
 
 function resetPreviewState() {
@@ -318,6 +330,7 @@ function resetPreviewState() {
 }
 
 async function selectHistoryImport(item: HistoryImportItem) {
+  if (disposed) return;
   selectedItemId.value = item.id;
   previewEventCount.value = null;
   fullPreviewEvents.value = [];
@@ -334,18 +347,18 @@ async function selectHistoryImport(item: HistoryImportItem) {
       itemId: item.id,
       detail: "lite",
     });
-    if (seq !== previewSeq) return;
+    if (disposed || seq !== previewSeq) return;
     previewEventCount.value = result.hasFullPreview ? null : result.eventCount;
     if (result.hasFullPreview) void loadFullPreview(item.id);
   } catch (err) {
-    if (seq === previewSeq) previewError.value = String(err);
+    if (!disposed && seq === previewSeq) previewError.value = String(err);
   } finally {
-    if (seq === previewSeq) previewLoading.value = false;
+    if (!disposed && seq === previewSeq) previewLoading.value = false;
   }
 }
 
 async function loadFullPreview(itemId: string = selectedItem.value?.id ?? "") {
-  if (!itemId || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
+  if (disposed || !itemId || fullPreviewLoading.value || fullPreviewEvents.value.length > 0) return;
   fullPreviewLoading.value = true;
   fullPreviewError.value = "";
   const seq = ++fullPreviewSeq;
@@ -355,14 +368,14 @@ async function loadFullPreview(itemId: string = selectedItem.value?.id ?? "") {
       itemId,
       detail: "full",
     });
-    if (seq === fullPreviewSeq) {
+    if (!disposed && seq === fullPreviewSeq) {
       fullPreviewEvents.value = result.events;
       previewEventCount.value = result.eventCount;
     }
   } catch (err) {
-    if (seq === fullPreviewSeq) fullPreviewError.value = String(err);
+    if (!disposed && seq === fullPreviewSeq) fullPreviewError.value = String(err);
   } finally {
-    if (seq === fullPreviewSeq) fullPreviewLoading.value = false;
+    if (!disposed && seq === fullPreviewSeq) fullPreviewLoading.value = false;
   }
 }
 
@@ -371,9 +384,12 @@ function showPreviewScrollbar() {
 }
 
 function cancelPreviewScrollMapSchedule() {
-  if (previewScrollMapIdleHandle === null) return;
-  cancelIdleRun(previewScrollMapIdleHandle);
-  previewScrollMapIdleHandle = null;
+  cancelPreviewScrollMapPaint?.();
+  cancelPreviewScrollMapPaint = null;
+  if (previewScrollMapIdleHandle !== null) {
+    cancelIdleRun(previewScrollMapIdleHandle);
+    previewScrollMapIdleHandle = null;
+  }
 }
 
 function schedulePreviewScrollMap() {
@@ -382,9 +398,12 @@ function schedulePreviewScrollMap() {
     previewScrollMapReady.value = false;
     return;
   }
-  scheduleAfterPaint(() => {
+  cancelPreviewScrollMapPaint = scheduleAfterPaint(() => {
+    cancelPreviewScrollMapPaint = null;
+    if (disposed || !fullPreviewEvents.value.length) return;
     previewScrollMapIdleHandle = runWhenIdle(() => {
       previewScrollMapIdleHandle = null;
+      if (disposed || !fullPreviewEvents.value.length) return;
       previewScrollMapReady.value = true;
     });
   });
@@ -392,7 +411,7 @@ function schedulePreviewScrollMap() {
 
 async function importSelectedItem() {
   const item = selectedItem.value;
-  if (!item || importing.value) return;
+  if (disposed || !item || importing.value) return;
   importing.value = true;
   importError.value = "";
   try {
@@ -404,21 +423,24 @@ async function importSelectedItem() {
       projectId: routeProjectId.value ?? null,
       item,
     });
+    if (disposed) return;
     if (result.projectId) {
       await ensureProjectTasksLoaded(result.projectId, true);
+      if (disposed) return;
       await router.push(`/projects/${result.projectId}/tasks/${result.taskId}`);
     } else {
       await ensureOrphansLoaded(true);
+      if (disposed) return;
       await router.push(`/chats/${result.taskId}`);
     }
   } catch (err) {
-    importError.value = String(err);
+    if (!disposed) importError.value = String(err);
   } finally {
-    importing.value = false;
+    if (!disposed) importing.value = false;
   }
 }
 
-function setSource(next: ImportSource) {
+function setSource(next: HistoryImportProvider) {
   if (source.value === next) return;
   source.value = next;
   if (next === "claude") includeArchived.value = false;
@@ -432,7 +454,7 @@ function setSource(next: ImportSource) {
 }
 
 async function cleanHistoryImport(item: HistoryImportItem) {
-  if (!isCodexSource.value || cleaningThreadId.value) return;
+  if (disposed || !isCodexSource.value || cleaningThreadId.value) return;
   cleaningThreadId.value = item.id;
   rowMessages.value = {
     ...rowMessages.value,
@@ -440,18 +462,19 @@ async function cleanHistoryImport(item: HistoryImportItem) {
   };
   try {
     await cleanHistoryImportBackgroundTerminals(item.id);
+    if (disposed) return;
     rowMessages.value = {
       ...rowMessages.value,
       [item.id]: { kind: "ok", text: "后台终端已清理" },
     };
     await loadRuntimeStates();
   } catch (err) {
-    rowMessages.value = {
+    if (!disposed) rowMessages.value = {
       ...rowMessages.value,
       [item.id]: { kind: "error", text: `清理失败：${String(err)}` },
     };
   } finally {
-    cleaningThreadId.value = null;
+    if (!disposed) cleaningThreadId.value = null;
   }
 }
 
@@ -461,10 +484,16 @@ watch(() => includeArchived.value, () => {
 });
 
 onMounted(() => {
+  disposed = false;
   void loadHistoryImports();
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  searchSeq += 1;
+  previewSeq += 1;
+  fullPreviewSeq += 1;
+  cancelSearchSchedule();
   cancelPreviewScrollMapSchedule();
 });
 

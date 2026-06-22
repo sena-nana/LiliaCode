@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
 import type { ChatImageViewerSource } from "./imageViewer";
+import { addDomEventListener } from "../../utils/eventListeners";
 
 const props = defineProps<{
   image: ChatImageViewerSource;
@@ -30,6 +31,10 @@ const drag = ref<{
   originY: number;
 } | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+let unlistenWindowResize: (() => void) | null = null;
+let stageMeasureSeq = 0;
+let disposed = false;
+const measureCurrentStage = () => updateStageSize();
 
 const fitScale = computed(() => {
   const width = naturalWidth.value;
@@ -72,6 +77,7 @@ const metadataText = computed(() => {
 watch(
   () => props.image.src,
   () => {
+    stageMeasureSeq += 1;
     naturalWidth.value = null;
     naturalHeight.value = null;
     zoom.value = MIN_ZOOM;
@@ -93,17 +99,21 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   updateStageSize();
   if (typeof ResizeObserver === "function" && stageRef.value) {
-    resizeObserver = new ResizeObserver(updateStageSize);
+    resizeObserver = new ResizeObserver(measureCurrentStage);
     resizeObserver.observe(stageRef.value);
   }
-  window.addEventListener("resize", updateStageSize);
+  unlistenWindowResize = addDomEventListener(window, "resize", measureCurrentStage);
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  stageMeasureSeq += 1;
   resizeObserver?.disconnect();
-  window.removeEventListener("resize", updateStageSize);
+  unlistenWindowResize?.();
+  unlistenWindowResize = null;
 });
 
 function clamp(value: number, min: number, max: number): number {
@@ -130,7 +140,8 @@ function normalizeOffset() {
   offset.value = clampOffset(offset.value);
 }
 
-function updateStageSize() {
+function updateStageSize(seq = stageMeasureSeq) {
+  if (disposed || seq !== stageMeasureSeq) return;
   const stage = stageRef.value;
   if (!stage) {
     stageSize.value = { width: 0, height: 0 };
@@ -143,12 +154,14 @@ function updateStageSize() {
 }
 
 function onImageLoad(event: Event) {
+  if (disposed) return;
   const image = event.currentTarget;
   if (!(image instanceof HTMLImageElement)) return;
   naturalWidth.value = image.naturalWidth || null;
   naturalHeight.value = image.naturalHeight || null;
   updateStageSize();
-  void nextTick(updateStageSize);
+  const seq = ++stageMeasureSeq;
+  void nextTick(() => updateStageSize(seq));
 }
 
 function onWheel(event: WheelEvent) {

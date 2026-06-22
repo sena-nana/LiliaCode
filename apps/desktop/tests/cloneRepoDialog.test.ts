@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { describe, expect, it } from "vitest";
+import { GITHUB_CLONE_REPO_COMMAND } from "@lilia/contracts";
 import CloneRepoDialog from "../src/components/sidebar/CloneRepoDialog.vue";
 import {
   mockInvoke,
@@ -60,7 +61,7 @@ describe("CloneRepoDialog", () => {
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "github_clone_repo" &&
+          cmd === GITHUB_CLONE_REPO_COMMAND &&
           typeof args === "object" &&
           args !== null &&
           "repo" in args &&
@@ -126,7 +127,7 @@ describe("CloneRepoDialog", () => {
     await waitFor(() => {
       expect(
         mockInvoke.mock.calls.some(([cmd, args]) =>
-          cmd === "github_clone_repo" &&
+          cmd === GITHUB_CLONE_REPO_COMMAND &&
           typeof args === "object" &&
           args !== null &&
           "repo" in args &&

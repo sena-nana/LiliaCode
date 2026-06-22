@@ -1,3 +1,5 @@
+import { RUNNER_DONE_EVENT_TYPE } from "@lilia/contracts/runnerProtocolContract.mjs";
+
 export async function runDryRun(cmd, context) {
   const { protocol } = context;
   const backend = cmd.backend === "codex" ? "codex" : "claude";
@@ -92,5 +94,5 @@ export async function runDryRun(cmd, context) {
     },
     sourceId: `${sid}:turn:done`,
   });
-  protocol.emit({ type: "done", sessionId: sid, subtype: "success" });
+  protocol.emit({ type: RUNNER_DONE_EVENT_TYPE, sessionId: sid, subtype: "success" });
 }

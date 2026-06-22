@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME,
+  CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
+  PROJECT_ARCHITECTURE_APPLY_COMMAND,
+} from "@lilia/contracts";
+import {
   emitTauriEvent,
+  failNextMockListen,
   mockInvoke,
+  mockListenerCount,
 } from "./tauriMock";
 import {
   getAgentInteractionSettings,
@@ -18,11 +25,26 @@ import {
 import { usePendingProjectArchitectureChangesForTask } from "../src/composables/useProjectArchitectureInteractions";
 
 describe("chat AskUser bridge service", () => {
+  it("bridge listener registration failure does not poison future installs", async () => {
+    failNextMockListen(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, "interaction listener failed");
+
+    await expect(installAgentInteractionBridge()).rejects.toThrow("interaction listener failed");
+    expect(mockListenerCount(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME)).toBe(0);
+
+    const unlisten = await installAgentInteractionBridge();
+    try {
+      expect(mockListenerCount(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME)).toBe(1);
+    } finally {
+      unlisten();
+    }
+    expect(mockListenerCount(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME)).toBe(0);
+  });
+
   it("订阅统一 Agent interaction 并把响应写回 runner", async () => {
     const handler = vi.fn<(event: AgentInteractionRequest) => void>();
     await onAgentInteractionRequest(handler);
 
-    emitTauriEvent("chat:agent-interaction-request", {
+    emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
       taskId: "task-1",
       turnId: "turn-1",
       backend: "codex",
@@ -61,7 +83,7 @@ describe("chat AskUser bridge service", () => {
       },
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
       taskId: "task-1",
       requestId: "ask-1",
       kind: "plan_approval",
@@ -77,7 +99,7 @@ describe("chat AskUser bridge service", () => {
   it("统一 Agent interaction bridge 把工具授权事件转入 pending 并写回 runner", async () => {
     const unlisten = await installAgentInteractionBridge();
     try {
-      emitTauriEvent("chat:agent-interaction-request", {
+      emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
         taskId: "task-1",
         turnId: "turn-1",
         backend: "codex",
@@ -113,7 +135,7 @@ describe("chat AskUser bridge service", () => {
       );
 
       expect(useToolConsentForTask("task-1").value).toBeNull();
-      expect(mockInvoke).toHaveBeenCalledWith("chat_respond_agent_interaction", {
+      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
         taskId: "task-1",
         requestId: "tool-1",
         kind: "tool_consent",
@@ -134,7 +156,7 @@ describe("chat AskUser bridge service", () => {
   it("架构图自动应用请求不进入 pending，并把应用结果写回 runner", async () => {
     const unlisten = await installAgentInteractionBridge();
     try {
-      emitTauriEvent("chat:agent-interaction-request", {
+      emitTauriEvent(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME, {
         taskId: "task-1",
         turnId: "turn-1",
         backend: "claude",
@@ -165,7 +187,7 @@ describe("chat AskUser bridge service", () => {
 
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith(
-          "project_architecture_apply",
+          PROJECT_ARCHITECTURE_APPLY_COMMAND,
           expect.objectContaining({
             input: expect.objectContaining({
               projectId: "lilia",
@@ -176,7 +198,7 @@ describe("chat AskUser bridge service", () => {
           undefined,
         );
         expect(mockInvoke).toHaveBeenCalledWith(
-          "chat_respond_agent_interaction",
+          CHAT_RESPOND_AGENT_INTERACTION_COMMAND,
           expect.objectContaining({
             taskId: "task-1",
             requestId: "architecture-1",

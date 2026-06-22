@@ -70,6 +70,7 @@ describe("SessionsView", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("先渲染加载占位，再在空闲阶段拉取项目对话", async () => {
@@ -101,5 +102,17 @@ describe("SessionsView", () => {
     await waitFor(() => {
       expect(view.getByText("整理窗口快捷键")).toBeInTheDocument();
     });
+  });
+
+  it("卸载时取消项目对话延迟加载的 paint 调度", async () => {
+    vi.useRealTimers();
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 101));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = await renderSessions();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(101);
   });
 });

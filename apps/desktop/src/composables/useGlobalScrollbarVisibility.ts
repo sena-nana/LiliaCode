@@ -2,6 +2,7 @@ import {
   readScrollbarMetrics,
   scrollOffsetForThumbDrag,
 } from "../utils/scrollbarMetrics";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 const DEFAULT_HIDE_DELAY = 480;
 const HOVER_HOT_ZONE = 12;
@@ -34,6 +35,8 @@ const overlays = new Map<Element, { vertical: HTMLDivElement; horizontal: HTMLDi
 const overlayTargets = new WeakMap<HTMLDivElement, { axis: ScrollbarAxis; target: ScrollbarVisibilityTarget }>();
 let hoverTarget: ScrollbarVisibilityTarget | null = null;
 let dragState: DragState | null = null;
+let globalUnlisteners: Array<() => void> = [];
+let dragUnlisteners: Array<() => void> = [];
 
 function isVertical(axis: ScrollbarAxis): boolean {
   return axis === "vertical";
@@ -92,6 +95,14 @@ function removeOverlay(target: Element) {
   overlay.vertical.remove();
   overlay.horizontal.remove();
   overlays.delete(target);
+}
+
+function clearGlobalListeners() {
+  runUnlistenFns(globalUnlisteners.splice(0).reverse());
+}
+
+function clearDragListeners() {
+  runUnlistenFns(dragUnlisteners.splice(0).reverse());
 }
 
 function ensureOverlay(target: Element) {
@@ -329,6 +340,7 @@ function onOverlayPointerDown(event: PointerEvent) {
   event.preventDefault();
   event.stopPropagation();
   show(overlayTarget.target);
+  clearDragListeners();
   dragState = {
     axis: overlayTarget.axis,
     metrics: scrollbar,
@@ -339,8 +351,10 @@ function onOverlayPointerDown(event: PointerEvent) {
     startScrollTop: metrics.scrollTop,
     target: overlayTarget.target,
   };
-  window.addEventListener("pointerup", onDragPointerEnd, true);
-  window.addEventListener("pointercancel", onDragPointerEnd, true);
+  dragUnlisteners = [
+    addDomEventListener(window, "pointerup", onDragPointerEnd, true),
+    addDomEventListener(window, "pointercancel", onDragPointerEnd, true),
+  ];
 }
 
 function onDragPointerMove(event: PointerEvent) {
@@ -363,8 +377,7 @@ function onDragPointerEnd(event: PointerEvent) {
   const target = dragState.target;
   dragState = null;
   hideSoon(target);
-  window.removeEventListener("pointerup", onDragPointerEnd, true);
-  window.removeEventListener("pointercancel", onDragPointerEnd, true);
+  clearDragListeners();
 }
 
 function onScroll(event: Event) {
@@ -409,12 +422,8 @@ function onPointerLeave() {
 export function uninstallGlobalScrollbarVisibility() {
   if (!installed || typeof window === "undefined") return;
   installed = false;
-  window.removeEventListener("scroll", onScroll, true);
-  window.removeEventListener("scrollend", onScrollEnd, true);
-  window.removeEventListener("pointermove", onPointerMove, true);
-  window.removeEventListener("pointerleave", onPointerLeave);
-  window.removeEventListener("pointerup", onDragPointerEnd, true);
-  window.removeEventListener("pointercancel", onDragPointerEnd, true);
+  clearGlobalListeners();
+  clearDragListeners();
   hoverTarget = null;
   dragState = null;
   overlays.forEach((_overlay, target) => {
@@ -427,9 +436,11 @@ export function uninstallGlobalScrollbarVisibility() {
 export function installGlobalScrollbarVisibility() {
   if (installed || typeof window === "undefined") return uninstallGlobalScrollbarVisibility;
   installed = true;
-  window.addEventListener("scroll", onScroll, { capture: true, passive: true });
-  window.addEventListener("scrollend", onScrollEnd, { capture: true });
-  window.addEventListener("pointermove", onPointerMove, { capture: true });
-  window.addEventListener("pointerleave", onPointerLeave);
+  globalUnlisteners = [
+    addDomEventListener(window, "scroll", onScroll, { capture: true, passive: true }),
+    addDomEventListener(window, "scrollend", onScrollEnd, { capture: true }),
+    addDomEventListener(window, "pointermove", onPointerMove, { capture: true }),
+    addDomEventListener(window, "pointerleave", onPointerLeave),
+  ];
   return uninstallGlobalScrollbarVisibility;
 }

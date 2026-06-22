@@ -1,0 +1,25 @@
+{
+  "maxConversationContextMessages": 12,
+  "maxConversationContextText": 1200,
+  "defaultConversationContextIncludeMessages": true,
+  "conversationContextToolNames": [
+    "QueryConversationContext",
+    "query_conversation_context",
+    "mcp__lilia__query_conversation_context"
+  ],
+  "queryConversationContextInputSchema": {
+    "type": "object",
+    "properties": {
+      "taskId": {
+        "type": "string",
+        "description": "Conversation task id to query. Defaults to the parent conversation."
+      },
+      "includeMessages": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to include clipped readable timeline messages."
+      }
+    },
+    "additionalProperties": false
+  }
+}

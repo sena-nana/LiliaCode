@@ -19,6 +19,20 @@ import {
   readRecord,
   shortText,
 } from "./toolUtils.mjs";
+import { ASK_USER_INTERACTION_KIND } from "./agentInteractionContract.mjs";
+import {
+  ASK_USER_CLAUDE_TOOL_NAME,
+  ASK_USER_MCP_TOOL_NAME,
+  ASK_USER_TOOL_NAME,
+} from "./askUserContract.mjs";
+import {
+  TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_ASK_USER_HEADER_TEXT_LIMIT,
+  TIMELINE_DISPLAY_ASK_USER_QUESTION_PREVIEW_TEXT_LIMIT,
+  TIMELINE_DISPLAY_CLAUDE_PLAN_TEXT_LIMIT,
+  TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+  TIMELINE_DISPLAY_TINY_TEXT_LIMIT,
+} from "./timelineContract.mjs";
 
 const FILE_PATH_KEYS = ["file_path", "path"];
 
@@ -27,8 +41,11 @@ function readAskUserQuestions(input) {
 }
 
 function askUserQuestionTitle(question, index) {
-  const header = compactLine(question?.header, 40);
-  const text = compactLine(question?.question, 240);
+  const header = compactLine(question?.header, TIMELINE_DISPLAY_ASK_USER_HEADER_TEXT_LIMIT);
+  const text = compactLine(
+    question?.question,
+    TIMELINE_DISPLAY_ASK_USER_QUESTION_PREVIEW_TEXT_LIMIT,
+  );
   if (header && text) return `${header} · ${text}`;
   return text || header || `问题 ${index + 1}`;
 }
@@ -43,17 +60,17 @@ function askUserPreview(questions) {
 function normalizeAskUserQuestionTool(input) {
   const questions = readAskUserQuestions(input);
   return {
-    kind: "ask_user",
+    kind: ASK_USER_INTERACTION_KIND,
     payload: { questions },
-    summary: shortText(askUserPreview(questions), 200),
+    summary: shortText(askUserPreview(questions), TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
   };
 }
 
 function readPlanAllowedPrompts(input) {
   return readArrayRecords(input?.allowedPrompts)
     .map((item) => ({
-      tool: compactLine(item.tool, 80) || "tool",
-      prompt: compactLine(item.prompt, 400),
+      tool: compactLine(item.tool, TIMELINE_DISPLAY_TINY_TEXT_LIMIT) || "tool",
+      prompt: compactLine(item.prompt, TIMELINE_DISPLAY_ALLOWED_PROMPT_TEXT_LIMIT),
     }))
     .filter((item) => item.prompt);
 }
@@ -70,9 +87,9 @@ function readPlanAllowedPrompts(input) {
  * 适配器只挑感兴趣的字段往 lilia payload 上拷。
  */
 export const CLAUDE_TO_LILIA = {
-  AskUserQuestion: normalizeAskUserQuestionTool,
-  ask_user_question: normalizeAskUserQuestionTool,
-  mcp__lilia__ask_user_question: normalizeAskUserQuestionTool,
+  [ASK_USER_TOOL_NAME]: normalizeAskUserQuestionTool,
+  [ASK_USER_CLAUDE_TOOL_NAME]: normalizeAskUserQuestionTool,
+  [ASK_USER_MCP_TOOL_NAME]: normalizeAskUserQuestionTool,
   Bash: (input) => {
     const command = pickString(input, ["command"]);
     return {
@@ -81,7 +98,7 @@ export const CLAUDE_TO_LILIA = {
         command,
         description: pickString(input, ["description"]) || undefined,
       },
-      summary: shortText(command || pickString(input, ["description"]), 200),
+      summary: shortText(command || pickString(input, ["description"]), TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   Read: (input) => {
@@ -93,7 +110,7 @@ export const CLAUDE_TO_LILIA = {
         offset: pickNumber(input, ["offset"]),
         limit: pickNumber(input, ["limit"]),
       },
-      summary: shortText(path, 200),
+      summary: shortText(path, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   Edit: (input) => {
@@ -102,7 +119,7 @@ export const CLAUDE_TO_LILIA = {
       kind: "file_change",
       subkind: "edit",
       payload: { path },
-      summary: shortText(path, 200),
+      summary: shortText(path, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   MultiEdit: (input) => {
@@ -115,7 +132,7 @@ export const CLAUDE_TO_LILIA = {
         path,
         editCount: edits.length || undefined,
       },
-      summary: shortText(path, 200),
+      summary: shortText(path, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   Write: (input) => {
@@ -124,7 +141,7 @@ export const CLAUDE_TO_LILIA = {
       kind: "file_change",
       subkind: "write",
       payload: { path },
-      summary: shortText(path, 200),
+      summary: shortText(path, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   NotebookEdit: (input) => {
@@ -133,7 +150,7 @@ export const CLAUDE_TO_LILIA = {
       kind: "file_change",
       subkind: "notebook",
       payload: { path },
-      summary: shortText(path, 200),
+      summary: shortText(path, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   Glob: (input) => {
@@ -145,7 +162,7 @@ export const CLAUDE_TO_LILIA = {
         query,
         path: pickString(input, ["path"]) || undefined,
       },
-      summary: shortText(query, 200),
+      summary: shortText(query, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   Grep: (input) => {
@@ -158,7 +175,7 @@ export const CLAUDE_TO_LILIA = {
         path: pickString(input, ["path"]) || undefined,
         glob: pickString(input, ["glob"]) || undefined,
       },
-      summary: shortText(query, 200),
+      summary: shortText(query, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   WebSearch: (input) => {
@@ -167,7 +184,7 @@ export const CLAUDE_TO_LILIA = {
       kind: "search",
       subkind: "web",
       payload: { query },
-      summary: shortText(query, 200),
+      summary: shortText(query, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   WebFetch: (input) => {
@@ -175,7 +192,7 @@ export const CLAUDE_TO_LILIA = {
     return {
       kind: "web_fetch",
       payload: { url },
-      summary: shortText(url, 200),
+      summary: shortText(url, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   TodoWrite: (input) => {
@@ -199,11 +216,15 @@ export const CLAUDE_TO_LILIA = {
         description: description || undefined,
         prompt: prompt || undefined,
       },
-      summary: shortText(agentType || description, 200),
+      summary: shortText(agentType || description, TIMELINE_DISPLAY_SHORT_TEXT_LIMIT),
     };
   },
   ExitPlanMode: (input) => {
-    const plan = readFirstText(input, ["plan", "content", "text", "markdown"], 12000);
+    const plan = readFirstText(
+      input,
+      ["plan", "content", "text", "markdown"],
+      TIMELINE_DISPLAY_CLAUDE_PLAN_TEXT_LIMIT,
+    );
     return {
       kind: "plan",
       payload: {
@@ -211,7 +232,10 @@ export const CLAUDE_TO_LILIA = {
         plan,
         allowedPrompts: readPlanAllowedPrompts(input),
       },
-      summary: shortText(plan.replace(/\s+/g, " ").trim(), 200),
+      summary: shortText(
+        plan.replace(/\s+/g, " ").trim(),
+        TIMELINE_DISPLAY_SHORT_TEXT_LIMIT,
+      ),
     };
   },
 };

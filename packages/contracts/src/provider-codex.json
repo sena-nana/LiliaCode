@@ -1,0 +1,9 @@
+{
+  "codexSettingsProfiles": [
+    "default",
+    "fast",
+    "balanced",
+    "deep"
+  ],
+  "defaultCodexSettingsProfile": "default"
+}

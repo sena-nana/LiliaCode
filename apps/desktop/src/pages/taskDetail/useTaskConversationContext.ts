@@ -43,6 +43,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
   const orphanCwd = ref<string | null>(null);
   let popupContextSeq = 0;
   let contextLoadingTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
 
   const conversationRouteState = computed(() =>
     resolveConversationRouteState(props.projectId, props.taskId),
@@ -85,12 +86,18 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   async function ensureOrphanCwd(): Promise<string> {
     if (orphanCwd.value) return orphanCwd.value;
+    const taskId = props.taskId;
     try {
-      orphanCwd.value = await homeDir();
+      const cwd = await homeDir();
+      if (!disposed && taskId === props.taskId) {
+        orphanCwd.value = cwd;
+      }
     } catch {
-      orphanCwd.value = "";
+      if (!disposed && taskId === props.taskId) {
+        orphanCwd.value = "";
+      }
     }
-    return orphanCwd.value;
+    return orphanCwd.value ?? "";
   }
 
   function summarizeTitle(text: string): string {
@@ -120,9 +127,11 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
   }
 
   async function recreatePopupDraft(projectId: string | undefined) {
+    if (disposed || projectId !== props.projectId) return;
     const query = router.currentRoute.value.query;
     if (projectId) {
       const draft = createDraftTask(projectId);
+      if (disposed || projectId !== props.projectId) return;
       await router.replace({
         path: `/popup/projects/${projectId}/tasks/${draft.id}`,
         query,
@@ -130,6 +139,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
       return;
     }
     const draft = createDraftOrphan();
+    if (disposed || props.projectId) return;
     await router.replace({
       path: `/popup/chats/${draft.id}`,
       query,
@@ -143,6 +153,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
   }
 
   async function hydratePopupContext() {
+    if (disposed) return;
     if (!isPopup.value) {
       popupContextHydrating.value = false;
       popupContextHydrated.value = true;
@@ -166,7 +177,12 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     } catch (err) {
       console.error("[popup] hydrate context failed", err);
     } finally {
-      if (seq === popupContextSeq && taskId === props.taskId && projectId === props.projectId) {
+      if (
+        !disposed &&
+        seq === popupContextSeq &&
+        taskId === props.taskId &&
+        projectId === props.projectId
+      ) {
         popupContextHydrating.value = false;
         popupContextHydrated.value = true;
         const routeState = resolveConversationRouteState(projectId, taskId);
@@ -240,6 +256,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
       contextLoadingVisible.value = false;
       if (!loading) return;
       contextLoadingTimer = setTimeout(() => {
+        if (disposed) return;
         contextLoadingVisible.value = isBlockingLoading.value;
         contextLoadingTimer = null;
       }, POPUP_CONTEXT_LOADING_NOTICE_MS);
@@ -255,7 +272,11 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     { immediate: true },
   );
 
-  onUnmounted(clearContextLoadingTimer);
+  onUnmounted(() => {
+    disposed = true;
+    popupContextSeq += 1;
+    clearContextLoadingTimer();
+  });
 
   return {
     isPopup,

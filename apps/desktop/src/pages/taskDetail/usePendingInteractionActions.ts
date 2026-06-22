@@ -1,7 +1,28 @@
 import type {
   AgentTimelineEvent,
+  AgentTimelinePendingInteraction,
+  AskUserInteractionKind,
   AskUserSpec,
-  ProjectArchitectureInteractionPayload,
+} from "@lilia/contracts";
+import {
+  ARCHITECTURE_INTERACTION_KIND,
+  ASK_USER_INTERACTION_KIND,
+  agentTimelineActionDescriptor,
+  agentTimelinePayloadRecord,
+  createPlanApprovalAskUserSpec,
+  MCP_ELICITATION_INTERACTION_KIND,
+  readAgentTimelinePayloadString,
+  normalizeAgentInteractionRequest,
+  normalizeAskUserSpec,
+  normalizeMcpElicitationPayload,
+  normalizePermissionApprovalPayload,
+  normalizeProjectArchitectureInteractionPayload,
+  normalizeToolConsentRequestFromInteraction,
+  PERMISSION_APPROVAL_INTERACTION_KIND,
+  PLAN_APPROVAL_INTERACTION_KIND,
+  TITLE_UPDATE_ACTION_KIND,
+  TOOL_CONSENT_INTERACTION_KIND,
+  timelineEventScopedKey,
 } from "@lilia/contracts";
 import {
   clearAskUsersForTask,
@@ -20,160 +41,352 @@ import {
   clearToolConsentForTask,
   hydrateToolConsentRequest,
 } from "../../composables/useToolConsentBridge";
-import type { ToolConsentRequest as ContractToolConsentRequest } from "@lilia/contracts";
+import {
+  shouldClearPendingInteraction,
+  type ClearPendingInteractionsOptions,
+} from "../../composables/pendingInteractionClearOptions";
+
+type AskUserHydrationRequest = Parameters<typeof hydrateAgentAskUserRequest>[0];
+type ToolConsentHydrationRequest = Parameters<typeof hydrateToolConsentRequest>[0];
+type AgentPendingInteractionHydrationRequest = Parameters<typeof hydrateAgentPendingInteraction>[0];
+type ProjectArchitectureHydrationRequest = Parameters<typeof hydrateProjectArchitectureInteraction>[0];
+
+export type PendingInteractionHydration =
+  | {
+      target: "ask_user";
+      activeRequestId: string;
+      interactionKind: AskUserInteractionKind;
+      request: AskUserHydrationRequest;
+    }
+  | {
+      target: "tool_consent";
+      activeRequestId: string;
+      request: ToolConsentHydrationRequest;
+    }
+  | {
+      target: "agent_interaction";
+      activeRequestId: string;
+      request: AgentPendingInteractionHydrationRequest;
+    }
+  | {
+      target: "architecture_change";
+      activeRequestId: string;
+      request: ProjectArchitectureHydrationRequest;
+    };
+
+interface RememberedTimelinePendingRequest {
+  taskId: string;
+  turnId: string | null;
+  requestId: string;
+}
+
+const pendingInteractionRequestIdsByTimelineEventId = new Map<
+  string,
+  RememberedTimelinePendingRequest
+>();
+
+interface PendingInteractionRequestIdSource {
+  requestId?: string | null;
+}
+
+export function pendingInteractionRequestIdsForSources(input: {
+  asks: Iterable<PendingInteractionRequestIdSource>;
+  toolConsents: Iterable<PendingInteractionRequestIdSource>;
+  agentInteractions: Iterable<PendingInteractionRequestIdSource>;
+  architectureChanges: Iterable<PendingInteractionRequestIdSource>;
+}): Set<string> {
+  const requestIds = new Set<string>();
+  for (const items of [
+    input.asks,
+    input.toolConsents,
+    input.agentInteractions,
+    input.architectureChanges,
+  ]) {
+    for (const item of items) {
+      if (item.requestId) requestIds.add(item.requestId);
+    }
+  }
+  return requestIds;
+}
+
+export function pendingInteractionRequestIdsToKeepAfterLoad(input: {
+  hydratedRequestIds: Iterable<string>;
+  currentRequestIds: Iterable<string>;
+  pendingBeforeLoadRequestIds: ReadonlySet<string>;
+}): Set<string> {
+  const keepRequestIds = new Set(input.hydratedRequestIds);
+  for (const requestId of input.currentRequestIds) {
+    if (!input.pendingBeforeLoadRequestIds.has(requestId)) {
+      keepRequestIds.add(requestId);
+    }
+  }
+  return keepRequestIds;
+}
+
+export function shouldClearConversationRequiresAction(
+  options: ClearPendingInteractionsOptions,
+): boolean {
+  return !options.keepRequestIds && options.turnId === undefined && options.requestId === undefined;
+}
 
 export function clearPendingInteractionsForTask(
   taskId: string,
-  options: { turnId?: string | null; keepRequestIds?: Set<string> } = {},
+  options: ClearPendingInteractionsOptions = {},
 ) {
   clearAskUsersForTask(taskId, options);
   clearToolConsentForTask(taskId, options);
   clearAgentPendingInteractionsForTask(taskId, options);
   clearProjectArchitectureInteractionsForTask(taskId, options);
-  if (!options.keepRequestIds && options.turnId === undefined) {
+  clearRememberedPendingInteractionRequestIds(taskId, options);
+  if (shouldClearConversationRequiresAction(options)) {
     clearConversationRequiresAction(taskId);
   }
+}
+
+function clearRememberedPendingInteractionRequestIds(
+  taskId: string,
+  options: ClearPendingInteractionsOptions = {},
+) {
+  for (const [eventId, remembered] of pendingInteractionRequestIdsByTimelineEventId) {
+    if (!shouldClearPendingInteraction(remembered, taskId, options)) continue;
+    pendingInteractionRequestIdsByTimelineEventId.delete(eventId);
+  }
+}
+
+function askUserHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  requestId: string,
+): PendingInteractionHydration | null {
+  const payload = agentTimelinePayloadRecord(event);
+  const spec = normalizeAskUserSpec(payload?.spec) ?? normalizeAskUserSpec({
+    title: event.title,
+    questions: Array.isArray(payload?.questions)
+      ? payload.questions as unknown as AskUserSpec["questions"]
+      : [],
+  });
+  if (!spec) return null;
+  return {
+    target: "ask_user",
+    activeRequestId: requestId,
+    interactionKind: ASK_USER_INTERACTION_KIND,
+    request: {
+      taskId: event.taskId,
+      turnId: event.turnId ?? "",
+      backend: event.backend,
+      requestId,
+      spec,
+    },
+  };
+}
+
+function planApprovalHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  requestId: string,
+): PendingInteractionHydration | null {
+  return {
+    target: "ask_user",
+    activeRequestId: requestId,
+    interactionKind: PLAN_APPROVAL_INTERACTION_KIND,
+    request: {
+      taskId: event.taskId,
+      turnId: event.turnId ?? "",
+      backend: event.backend,
+      requestId,
+      spec: createPlanApprovalAskUserSpec({
+        title: event.title,
+        source: "Agent",
+      }),
+    },
+  };
+}
+
+function architectureHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  requestId: string,
+): PendingInteractionHydration | null {
+  const payload = agentTimelinePayloadRecord(event);
+  if (!payload) return null;
+  const architecturePayload = normalizeProjectArchitectureInteractionPayload(payload);
+  if (!architecturePayload) return null;
+  return {
+    target: "architecture_change",
+    activeRequestId: requestId,
+    request: {
+      taskId: event.taskId,
+      turnId: event.turnId,
+      backend: event.backend,
+      requestId,
+      payload: architecturePayload,
+    },
+  };
+}
+
+function toolConsentHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  requestId: string,
+  payload: Record<string, unknown>,
+): PendingInteractionHydration | null {
+  const interactionRequest = normalizeAgentInteractionRequest({
+    taskId: event.taskId,
+    turnId: event.turnId ?? "",
+    backend: event.backend,
+    requestId,
+    kind: TOOL_CONSENT_INTERACTION_KIND,
+    payload,
+  });
+  const request = interactionRequest
+    ? normalizeToolConsentRequestFromInteraction(interactionRequest)
+    : null;
+  return request
+    ? {
+        target: "tool_consent",
+        activeRequestId: requestId,
+        request,
+      }
+    : null;
+}
+
+function runtimeInteractionHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  interaction: AgentTimelinePendingInteraction,
+  requestId: string,
+): PendingInteractionHydration | null {
+  const payload = agentTimelinePayloadRecord(event);
+  if (!interaction || !payload) return null;
+  if (interaction === TOOL_CONSENT_INTERACTION_KIND) {
+    return toolConsentHydrationForTimelineEvent(event, requestId, payload);
+  }
+  if (interaction === MCP_ELICITATION_INTERACTION_KIND) {
+    const mcpPayload = normalizeMcpElicitationPayload(payload);
+    return mcpPayload
+      ? {
+          target: "agent_interaction",
+          activeRequestId: requestId,
+          request: {
+            kind: MCP_ELICITATION_INTERACTION_KIND,
+            taskId: event.taskId,
+            turnId: event.turnId,
+            requestId,
+            payload: mcpPayload,
+          },
+        }
+      : null;
+  }
+  if (interaction === PERMISSION_APPROVAL_INTERACTION_KIND) {
+    const permissionPayload = normalizePermissionApprovalPayload(payload);
+    return permissionPayload
+      ? {
+          target: "agent_interaction",
+          activeRequestId: requestId,
+          request: {
+            kind: PERMISSION_APPROVAL_INTERACTION_KIND,
+            taskId: event.taskId,
+            turnId: event.turnId,
+            requestId,
+            payload: permissionPayload,
+          },
+        }
+      : null;
+  }
+  return null;
+}
+
+export function pendingInteractionHydrationForTimelineEvent(
+  event: AgentTimelineEvent,
+  taskId: string,
+): PendingInteractionHydration | null {
+  if (event.taskId !== taskId) return null;
+  const action = agentTimelineActionDescriptor(event);
+  if (!action) return null;
+  if (action.kind === ASK_USER_INTERACTION_KIND) {
+    return askUserHydrationForTimelineEvent(event, action.requestId);
+  }
+  if (action.kind === PLAN_APPROVAL_INTERACTION_KIND) {
+    return planApprovalHydrationForTimelineEvent(event, action.requestId);
+  }
+  if (action.kind === TITLE_UPDATE_ACTION_KIND) return null;
+  if (action.kind === ARCHITECTURE_INTERACTION_KIND) {
+    return architectureHydrationForTimelineEvent(event, action.requestId);
+  }
+  return runtimeInteractionHydrationForTimelineEvent(event, action.kind, action.requestId);
+}
+
+function applyPendingInteractionHydration(hydration: PendingInteractionHydration) {
+  switch (hydration.target) {
+    case "ask_user":
+      hydrateAgentAskUserRequest(hydration.request, hydration.interactionKind);
+      return;
+    case "tool_consent":
+      hydrateToolConsentRequest(hydration.request);
+      return;
+    case "agent_interaction":
+      hydrateAgentPendingInteraction(hydration.request);
+      return;
+    case "architecture_change":
+      hydrateProjectArchitectureInteraction(hydration.request);
+      return;
+  }
+}
+
+function rememberPendingInteractionHydration(
+  event: AgentTimelineEvent,
+  hydration: PendingInteractionHydration,
+  options: { clearReplacedRequest?: boolean } = {},
+) {
+  const memoryKey = timelineEventScopedKey(event);
+  const previous = pendingInteractionRequestIdsByTimelineEventId.get(memoryKey);
+  if (
+    options.clearReplacedRequest === true &&
+    previous &&
+    previous.taskId === event.taskId &&
+    previous.requestId !== hydration.activeRequestId
+  ) {
+    clearPendingInteractionsForTask(event.taskId, { requestId: previous.requestId });
+  }
+  pendingInteractionRequestIdsByTimelineEventId.set(memoryKey, {
+    taskId: event.taskId,
+    turnId: event.turnId,
+    requestId: hydration.activeRequestId,
+  });
+}
+
+function clearInactivePendingInteractionForTimelineEvent(event: AgentTimelineEvent, taskId: string) {
+  if (event.taskId !== taskId) return;
+  const memoryKey = timelineEventScopedKey(event);
+  const remembered = pendingInteractionRequestIdsByTimelineEventId.get(memoryKey);
+  const requestId = readAgentTimelinePayloadString(event, "requestId") ??
+    remembered?.requestId;
+  pendingInteractionRequestIdsByTimelineEventId.delete(memoryKey);
+  if (!requestId) return;
+  clearPendingInteractionsForTask(taskId, { requestId });
 }
 
 export function hydratePendingInteractions(events: AgentTimelineEvent[], taskId: string): Set<string> {
   const activeRequestIds = new Set<string>();
   for (const event of events) {
-    if (event.taskId !== taskId) continue;
-    if (event.status !== "requires_action") continue;
-    const payload = payloadRecord(event);
-    if (event.kind === "ask_user") {
-      const requestId = payloadString(event, "requestId");
-      if (requestId) activeRequestIds.add(requestId);
-      const spec = ((payload?.spec as AskUserSpec | undefined) ?? null) ?? {
-        title: event.title,
-        questions: Array.isArray(payload?.questions) ? payload.questions as AskUserSpec["questions"] : [],
-      };
-      hydrateAgentAskUserRequest({
-        taskId: event.taskId,
-        turnId: event.turnId ?? "",
-        backend: event.backend,
-        requestId: requestId ?? "",
-        spec,
-      }, "ask_user");
-      continue;
-    }
-    if (event.kind === "plan") {
-      const requestId = payloadString(event, "requestId");
-      if (requestId) activeRequestIds.add(requestId);
-      const spec: AskUserSpec = {
-        title: event.title,
-        source: "Agent",
-        intent: "plan_approval",
-        dismissable: true,
-        questions: [
-          {
-            id: "approve-plan",
-            header: "计划确认",
-            question: "",
-            mode: "confirm",
-            confirmLabel: "按计划执行",
-            cancelLabel: "先不执行",
-          },
-        ],
-      };
-      hydrateAgentAskUserRequest({
-        taskId: event.taskId,
-        turnId: event.turnId ?? "",
-        backend: event.backend,
-        requestId: requestId ?? "",
-        spec,
-      }, "plan_approval");
-      continue;
-    }
-    if (event.kind === "title_update") continue;
-    const interaction = payloadString(event, "interaction");
-    const requestId = payloadString(event, "requestId");
-    if (event.kind === "architecture_change") {
-      if (!requestId || !payload) continue;
-      activeRequestIds.add(requestId);
-      hydrateProjectArchitectureInteraction({
-        taskId: event.taskId,
-        turnId: event.turnId,
-        backend: event.backend,
-        requestId,
-        payload: payload as unknown as ProjectArchitectureInteractionPayload,
-      });
-      continue;
-    }
-    if (!interaction || !requestId || !payload) continue;
-    activeRequestIds.add(requestId);
-    if (interaction === "tool_consent") {
-      const request: ContractToolConsentRequest = {
-        taskId: event.taskId,
-        turnId: event.turnId ?? "",
-        backend: event.backend,
-        requestId,
-        toolName: typeof payload.toolName === "string" ? payload.toolName : "tool",
-        input: payload.input && typeof payload.input === "object" && !Array.isArray(payload.input)
-          ? payload.input as Record<string, unknown>
-          : {},
-        title: typeof payload.title === "string" ? payload.title : null,
-        displayName: typeof payload.displayName === "string" ? payload.displayName : null,
-        description: typeof payload.description === "string" ? payload.description : null,
-        blockedPath: typeof payload.blockedPath === "string" ? payload.blockedPath : null,
-        decisionReason: typeof payload.decisionReason === "string" ? payload.decisionReason : null,
-        toolUseId: typeof payload.toolUseId === "string" ? payload.toolUseId : null,
-        cwd: typeof payload.cwd === "string" ? payload.cwd : null,
-        reason: typeof payload.reason === "string" ? payload.reason : null,
-        commandActions: payload.commandActions,
-      };
-      hydrateToolConsentRequest(request);
-      continue;
-    }
-    if (interaction === "mcp_elicitation") {
-      const requestedSchema = payload.requestedSchema;
-      hydrateAgentPendingInteraction({
-        kind: "mcp_elicitation",
-        taskId: event.taskId,
-        turnId: event.turnId,
-        requestId,
-        payload: {
-          threadId: typeof payload.threadId === "string" ? payload.threadId : "",
-          turnId: typeof payload.turnId === "string" ? payload.turnId : event.turnId,
-          serverName: typeof payload.serverName === "string" ? payload.serverName : "",
-          mode: payload.mode === "url" ? "url" : "form",
-          message: typeof payload.message === "string" ? payload.message : "",
-          requestedSchema,
-          url: typeof payload.url === "string" ? payload.url : undefined,
-          elicitationId: typeof payload.elicitationId === "string" ? payload.elicitationId : undefined,
-          _meta: payload._meta,
-        },
-      });
-      continue;
-    }
-    if (interaction === "permission_approval") {
-      hydrateAgentPendingInteraction({
-        kind: "permission_approval",
-        taskId: event.taskId,
-        turnId: event.turnId,
-        requestId,
-        payload: {
-          reason: typeof payload.reason === "string" ? payload.reason : null,
-          requestedAccess: payload.requestedAccess ?? {},
-          scopeSuggestion: payload.scopeSuggestion,
-          providerContext: payload.providerContext && typeof payload.providerContext === "object" && !Array.isArray(payload.providerContext)
-            ? payload.providerContext as Record<string, unknown>
-            : undefined,
-        },
-      });
-    }
+    const hydration = pendingInteractionHydrationForTimelineEvent(event, taskId);
+    if (!hydration) continue;
+    activeRequestIds.add(hydration.activeRequestId);
+    rememberPendingInteractionHydration(event, hydration);
+    applyPendingInteractionHydration(hydration);
   }
   return activeRequestIds;
 }
 
-function payloadRecord(event: AgentTimelineEvent): Record<string, unknown> | null {
-  return event.payload && typeof event.payload === "object" && !Array.isArray(event.payload)
-    ? event.payload as Record<string, unknown>
-    : null;
-}
-
-function payloadString(event: AgentTimelineEvent, key: string): string | null {
-  const payload = payloadRecord(event);
-  const value = payload?.[key];
-  return typeof value === "string" ? value : null;
+export function syncPendingInteractionsForTimelineEvents(
+  events: readonly AgentTimelineEvent[],
+  taskId: string,
+): Set<string> {
+  const activeRequestIds = new Set<string>();
+  for (const event of events) {
+    const hydration = pendingInteractionHydrationForTimelineEvent(event, taskId);
+    if (!hydration) {
+      clearInactivePendingInteractionForTimelineEvent(event, taskId);
+      continue;
+    }
+    activeRequestIds.add(hydration.activeRequestId);
+    rememberPendingInteractionHydration(event, hydration, { clearReplacedRequest: true });
+    applyPendingInteractionHydration(hydration);
+  }
+  return activeRequestIds;
 }

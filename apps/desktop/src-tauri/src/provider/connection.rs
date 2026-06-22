@@ -2,10 +2,13 @@ use std::env;
 
 use tauri::{AppHandle, Runtime};
 
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::chat::state::normalize_backend;
+use crate::BACKEND_CODEX;
 
 use super::config::{
-    backend_api_key_env, backend_direct_url, load_legacy_cc_switch_base_url, load_provider_config,
+    backend_api_key_env, backend_direct_url, connection_mode_uses_api_key,
+    connection_mode_uses_codex_account, connection_mode_uses_custom_url,
+    connection_mode_uses_default_api, load_legacy_cc_switch_base_url, load_provider_config,
     load_router_mode, provider_api_key, provider_has_api_key, provider_key_for_backend,
     uses_legacy_cc_switch_mode, ROUTER_API, ROUTER_CODEX_ACCOUNT,
 };
@@ -51,11 +54,7 @@ pub(crate) fn resolve_connection_for<R: Runtime>(
     app: &AppHandle<R>,
     backend_str: &str,
 ) -> BackendConnectionPlan {
-    let backend: &'static str = if backend_str == BACKEND_CODEX {
-        BACKEND_CODEX
-    } else {
-        BACKEND_CLAUDE
-    };
+    let backend = normalize_backend(backend_str);
     let mode = load_router_mode(app, backend);
     match mode.as_str() {
         ROUTER_CODEX_ACCOUNT if backend == BACKEND_CODEX => BackendConnectionPlan {
@@ -76,6 +75,7 @@ pub(crate) fn build_backend_env_status<R: Runtime>(
     app: &AppHandle<R>,
     backend: &str,
 ) -> BackendEnvStatus {
+    let backend = normalize_backend(backend);
     let plan = resolve_connection_for(app, backend);
     let key_env = backend_api_key_env(backend);
     let configured_api_key = plan
@@ -85,22 +85,22 @@ pub(crate) fn build_backend_env_status<R: Runtime>(
         .unwrap_or(false)
         || env::var(key_env).map(|v| !v.is_empty()).unwrap_or(false)
         || provider_has_api_key(backend).unwrap_or(false);
-    let has_api_key = match plan.mode {
-        ConnectionMode::CodexAccount => false,
-        _ => configured_api_key,
-    };
+    let has_api_key = connection_mode_uses_api_key(plan.mode)
+        && !connection_mode_uses_codex_account(plan.mode)
+        && configured_api_key;
 
-    let effective_url = match plan.mode {
-        ConnectionMode::CustomBaseUrl => plan.base_url.clone(),
-        ConnectionMode::Api => Some(backend_direct_url(backend).to_string()),
-        ConnectionMode::CodexAccount => None,
-        ConnectionMode::Unconfigured => None,
+    let effective_url = if connection_mode_uses_custom_url(plan.mode) {
+        plan.base_url.clone()
+    } else if connection_mode_uses_default_api(plan.mode) {
+        Some(backend_direct_url(backend).to_string())
+    } else {
+        None
     };
 
     BackendEnvStatus {
         backend: backend.to_string(),
         has_api_key,
-        connection_mode: plan.mode.as_str().to_string(),
+        connection_mode: plan.mode,
         effective_url,
     }
 }

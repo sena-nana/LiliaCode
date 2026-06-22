@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use uuid::Uuid;
 
-use super::{signals::manual_signal, validate_workflow_graph};
+use super::{contract, signals::manual_signal, validate_workflow_graph};
 use crate::automation::types::{
     AutomationDraft, AutomationRun, AutomationRunNodeState, AutomationRunStatus,
     AutomationRunSummary, AutomationSaveDraftInput, AutomationScopeFilter, AutomationWorkflow,
@@ -14,6 +14,32 @@ use crate::util::now_millis;
 
 pub(crate) fn json_text<T: Serialize>(value: &T, label: &str) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| format!("automation: 序列化 {label} 失败：{e}"))
+}
+
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() || out.iter().any(|item| item == value) {
+            continue;
+        }
+        out.push(value.to_string());
+    }
+    out
+}
+
+fn normalize_automation_scope(mut scope: AutomationScopeFilter) -> AutomationScopeFilter {
+    let task_statuses = contract::scope_task_statuses();
+    scope.task_statuses = normalize_string_list(scope.task_statuses)
+        .into_iter()
+        .filter(|status| task_statuses.iter().any(|allowed| allowed == status))
+        .collect();
+    let event_kinds = contract::scope_event_kinds();
+    scope.event_kinds = normalize_string_list(scope.event_kinds)
+        .into_iter()
+        .filter(|kind| event_kinds.iter().any(|allowed| allowed == kind))
+        .collect();
+    scope
 }
 
 pub(crate) fn row_to_workflow(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationWorkflow> {
@@ -93,7 +119,7 @@ impl Default for AutomationRunTriggerSummary {
 }
 
 fn default_manual_trigger_kind() -> String {
-    "manual".to_string()
+    contract::default_trigger_kind().to_string()
 }
 
 fn row_to_run_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationRunSummary> {
@@ -178,7 +204,7 @@ pub(crate) fn save_draft(
     validate_workflow_graph(&input.nodes, &input.edges)?;
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = now_millis();
-    let scope = input.scope;
+    let scope = normalize_automation_scope(input.scope);
     let draft = AutomationDraft {
         nodes: input.nodes,
         edges: input.edges,
@@ -214,15 +240,21 @@ pub(crate) fn delete_workflow(conn: &Connection, id: &str) -> Result<(), String>
         params![id],
     )
     .map_err(|e| format!("automation_delete_workflow: delete run nodes 失败：{e}"))?;
-    conn.execute("DELETE FROM automation_runs WHERE workflow_id = ?1", params![id])
-        .map_err(|e| format!("automation_delete_workflow: delete runs 失败：{e}"))?;
+    conn.execute(
+        "DELETE FROM automation_runs WHERE workflow_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("automation_delete_workflow: delete runs 失败：{e}"))?;
     conn.execute(
         "DELETE FROM automation_workflow_versions WHERE workflow_id = ?1",
         params![id],
     )
     .map_err(|e| format!("automation_delete_workflow: delete versions 失败：{e}"))?;
     let deleted = conn
-        .execute("DELETE FROM automation_workflows WHERE id = ?1", params![id])
+        .execute(
+            "DELETE FROM automation_workflows WHERE id = ?1",
+            params![id],
+        )
         .map_err(|e| format!("automation_delete_workflow: {e}"))?;
     if deleted == 0 {
         return Err("automation_delete_workflow: 自动化不存在".to_string());
@@ -341,4 +373,72 @@ pub(crate) fn node_states_for_run(
         out.push(row.map_err(|e| format!("automation_get_run_nodes: row 失败：{e}"))?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_schema(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE automation_workflows (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              enabled INTEGER NOT NULL,
+              scope_json TEXT NOT NULL,
+              draft_json TEXT NOT NULL,
+              published_version_id TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn save_draft_normalizes_scope_task_statuses_from_contract() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+
+        let workflow = save_draft(
+            &conn,
+            AutomationSaveDraftInput {
+                id: Some("wf-1".to_string()),
+                name: "自动化".to_string(),
+                scope: AutomationScopeFilter {
+                    task_statuses: vec![
+                        " running ".to_string(),
+                        "draft".to_string(),
+                        "cancelled".to_string(),
+                        "unknown".to_string(),
+                        "done".to_string(),
+                        "running".to_string(),
+                    ],
+                    event_kinds: vec![
+                        " task_created ".to_string(),
+                        "unknown".to_string(),
+                        "task_created".to_string(),
+                        "timeline_event".to_string(),
+                    ],
+                    ..AutomationScopeFilter::default()
+                },
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(workflow.scope.task_statuses, vec!["running", "done"]);
+        assert_eq!(workflow.draft.scope.task_statuses, vec!["running", "done"]);
+        assert_eq!(
+            workflow.scope.event_kinds,
+            vec!["task_created", "timeline_event"]
+        );
+        assert_eq!(
+            workflow.draft.scope.event_kinds,
+            vec!["task_created", "timeline_event"]
+        );
+    }
 }

@@ -12,6 +12,7 @@ import {
 export function useAutomationRuns(options: {
   selectedWorkflowId: Ref<string | null>;
   setError: (message: string) => void;
+  isDisposed?: () => boolean;
 }) {
   const running = ref(false);
   const resuming = ref(false);
@@ -19,6 +20,7 @@ export function useAutomationRuns(options: {
   const selectedRunId = ref<string | null>(null);
   const selectedRunDetail = ref<AutomationRunDetail | null>(null);
   const selectedRunNodeId = ref<string | null>(null);
+  const isDisposed = () => options.isDisposed?.() === true;
 
   const selectedRunNodeStates = computed<AutomationRunNodeState[]>(() =>
     selectedRunDetail.value?.nodes ?? [],
@@ -28,16 +30,22 @@ export function useAutomationRuns(options: {
   );
 
   async function refreshRuns() {
-    runs.value = await listAutomationRuns(options.selectedWorkflowId.value);
+    if (isDisposed()) return;
+    const nextRuns = await listAutomationRuns(options.selectedWorkflowId.value);
+    if (isDisposed()) return;
+    runs.value = nextRuns;
     if (selectedRunId.value && !runs.value.some((run) => run.id === selectedRunId.value)) {
       resetRunSelection();
     }
   }
 
   async function refreshSelectedRun() {
-    selectedRunDetail.value = selectedRunId.value
+    if (isDisposed()) return;
+    const nextDetail = selectedRunId.value
       ? await getAutomationRun(selectedRunId.value)
       : null;
+    if (isDisposed()) return;
+    selectedRunDetail.value = nextDetail;
     if (
       !selectedRunNodeId.value ||
       !selectedRunNodeStates.value.some((state) => state.nodeId === selectedRunNodeId.value)
@@ -47,6 +55,7 @@ export function useAutomationRuns(options: {
   }
 
   async function refreshAfterRunEvent(run: AutomationRun) {
+    if (isDisposed()) return;
     applyRunSummary(automationRunToSummary(run));
     if (selectedRunId.value === run.id) {
       await refreshSelectedRun();
@@ -54,22 +63,24 @@ export function useAutomationRuns(options: {
   }
 
   async function runCurrent() {
-    if (!options.selectedWorkflowId.value) return;
+    if (isDisposed() || !options.selectedWorkflowId.value) return;
     running.value = true;
     options.setError("");
     try {
       const run = await runAutomationOnce(options.selectedWorkflowId.value);
+      if (isDisposed()) return;
       applyRunSummary(automationRunToSummary(run));
       selectedRunId.value = run.id;
       await refreshSelectedRun();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      running.value = false;
+      if (!isDisposed()) running.value = false;
     }
   }
 
   async function resumeSelectedRun() {
+    if (isDisposed()) return;
     const runId = selectedRunId.value;
     const nodeId = selectedRunNodeState.value?.nodeId;
     if (!runId || !nodeId) return;
@@ -80,27 +91,31 @@ export function useAutomationRuns(options: {
         nodeId,
         payload: { confirmed: true },
       });
+      if (isDisposed()) return;
       applyRunSummary(automationRunToSummary(run));
       selectedRunId.value = run.id;
       await refreshSelectedRun();
     } catch (err) {
-      options.setError(String(err));
+      if (!isDisposed()) options.setError(String(err));
     } finally {
-      resuming.value = false;
+      if (!isDisposed()) resuming.value = false;
     }
   }
 
   function resetRunSelection() {
+    if (isDisposed()) return;
     selectedRunId.value = null;
     selectedRunDetail.value = null;
     selectedRunNodeId.value = null;
   }
 
   function selectRunNodeState(state: AutomationRunNodeState) {
+    if (isDisposed()) return;
     selectedRunNodeId.value = state.nodeId;
   }
 
   function selectRun(run: AutomationRunSummary) {
+    if (isDisposed()) return;
     if (selectedRunId.value === run.id) return;
     selectedRunId.value = run.id;
     selectedRunDetail.value = null;
@@ -108,6 +123,7 @@ export function useAutomationRuns(options: {
   }
 
   function applyRunSummary(run: AutomationRunSummary) {
+    if (isDisposed()) return;
     if (
       options.selectedWorkflowId.value &&
       run.workflowId !== options.selectedWorkflowId.value

@@ -1,6 +1,10 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
+import {
+  PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
+  QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+} from "@lilia/contracts";
 import SidebarConnectionFooter from "../src/components/sidebar/SidebarConnectionFooter.vue";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { createLiliaRouter } from "../src/router";
@@ -165,7 +169,7 @@ describe("SidebarConnectionFooter provider quota badge", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith(
-        "provider_codex_app_server_install_update",
+        PROVIDER_CODEX_APP_SERVER_INSTALL_UPDATE_COMMAND,
         {},
         undefined,
       );
@@ -242,6 +246,10 @@ describe("SidebarConnectionFooter provider quota badge", () => {
       "Codex 官方额度接口未返回可识别的额度数据。",
     );
     expect(view.container.querySelector(".sb-quota-ring")).not.toBeInTheDocument();
-    expect(mockInvoke).toHaveBeenCalledWith("quota_usage_get_codex_account_status", {}, undefined);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      QUOTA_USAGE_GET_CODEX_ACCOUNT_STATUS_COMMAND,
+      {},
+      undefined,
+    );
   });
 });

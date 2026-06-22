@@ -62,7 +62,10 @@ const { sidebarDisplayMode } = useSidebarDisplayMode();
 const isUnifiedMode = computed(() => sidebarDisplayMode.value === "unified");
 let activityHydrationTimer: number | null = null;
 let deferredActivityHydrationTimer: number | null = null;
+let mountIdleMeasureHandle: number | null = null;
+let cancelDeferredActivityHydrationPaint: (() => void) | null = null;
 let activityHydrationSeq = 0;
+let disposed = false;
 
 function reportProjectError(message: string) {
   projectError.value = message;
@@ -73,6 +76,8 @@ function dismissError() {
 }
 
 function cancelConversationActivityHydration() {
+  cancelDeferredActivityHydrationPaint?.();
+  cancelDeferredActivityHydrationPaint = null;
   if (activityHydrationTimer !== null) {
     cancelIdleRun(activityHydrationTimer);
     activityHydrationTimer = null;
@@ -109,6 +114,7 @@ function treeRowStateClass(
 }
 
 async function loadUnifiedSidebarData() {
+  if (disposed) return;
   unifiedLoaded.value = false;
   try {
     await measurePerfAsync(
@@ -117,8 +123,10 @@ async function loadUnifiedSidebarData() {
       { detail: route.fullPath },
     );
   } catch (err) {
+    if (disposed) return;
     reportProjectError(`加载会话列表失败：${String(err)}`);
   } finally {
+    if (disposed) return;
     unifiedLoaded.value = true;
   }
 }
@@ -178,7 +186,8 @@ watch(
     );
     if (plan.deferredTaskIds.length === 0) return;
     const seq = activityHydrationSeq;
-    scheduleAfterPaint(() => {
+    cancelDeferredActivityHydrationPaint = scheduleAfterPaint(() => {
+      cancelDeferredActivityHydrationPaint = null;
       if (seq !== activityHydrationSeq) return;
       deferredActivityHydrationTimer = runWhenIdle(() => {
         deferredActivityHydrationTimer = null;
@@ -198,12 +207,21 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   installPerfObservers();
   const stage = beginPerfStage("sidebar.mount", { detail: route.fullPath });
-  runWhenIdle(() => stage.end("idle"));
+  mountIdleMeasureHandle = runWhenIdle(() => {
+    mountIdleMeasureHandle = null;
+    stage.end("idle");
+  });
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  if (mountIdleMeasureHandle !== null) {
+    cancelIdleRun(mountIdleMeasureHandle);
+    mountIdleMeasureHandle = null;
+  }
   cancelConversationActivityHydration();
 });
 

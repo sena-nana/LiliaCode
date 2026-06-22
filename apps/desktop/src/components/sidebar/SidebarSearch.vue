@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { FileText, Search, X } from "lucide-vue-next";
 import {
   ensureSessionSearchCorpusLoaded,
@@ -26,6 +26,8 @@ const query = ref("");
 const inputRef = ref<{ focus: () => void } | null>(null);
 const selectedIdx = ref(0);
 const hydrating = ref(false);
+let disposed = false;
+let hydrateSeq = 0;
 
 const results = computed<SearchResult[]>(() =>
   searchSessions(query.value).slice(0, 12),
@@ -36,16 +38,19 @@ watch(results, () => {
 });
 
 async function openSearch() {
+  if (disposed) return;
   active.value = true;
   query.value = "";
   selectedIdx.value = 0;
   void hydrateCorpus();
   await nextTick();
+  if (disposed) return;
   inputRef.value?.focus();
 }
 
 async function hydrateCorpus() {
-  if (hydrating.value) return;
+  if (disposed || hydrating.value) return;
+  const seq = ++hydrateSeq;
   hydrating.value = true;
   try {
     await measurePerfAsync(
@@ -53,17 +58,20 @@ async function hydrateCorpus() {
       () => ensureSessionSearchCorpusLoaded(),
     );
   } finally {
+    if (disposed || seq !== hydrateSeq) return;
     hydrating.value = false;
   }
 }
 
 function closeSearch() {
+  if (disposed) return;
   active.value = false;
   query.value = "";
   selectedIdx.value = 0;
 }
 
 function selectResult(result: SearchResult) {
+  if (disposed) return;
   emit("select", result);
   closeSearch();
 }
@@ -91,6 +99,11 @@ function onKeydown(event: KeyboardEvent) {
     if (result) selectResult(result);
   }
 }
+
+onBeforeUnmount(() => {
+  disposed = true;
+  hydrateSeq += 1;
+});
 
 </script>
 

@@ -1,0 +1,66 @@
+{
+  "autoModels": {
+    "codex": {
+      "light": "gpt-5.4-mini",
+      "normal": "gpt-5.4",
+      "deep": "gpt-5.5"
+    },
+    "claude": {
+      "light": "claude-haiku-4-5",
+      "normal": "claude-sonnet-4-6",
+      "deep": "claude-opus-4-7"
+    }
+  },
+  "autoReasoningEfforts": {
+    "light": "low",
+    "normal": "medium",
+    "deep": "high"
+  },
+  "autoTierRules": {
+    "workflowTiers": {
+      "light": [
+        "lilia_compact",
+        "lilia_background_terminals_clean",
+        "lilia_config_diagnostics",
+        "lilia_memory_mode",
+        "lilia_memory_reset"
+      ],
+      "normal": [],
+      "deep": [
+        "lilia_review",
+        "lilia_fix_suggestion",
+        "lilia_batch_apply"
+      ]
+    },
+    "runtimeCommandTiers": {
+      "light": [
+        "runtime_settings",
+        "remote_environment",
+        "session_management"
+      ],
+      "normal": [],
+      "deep": []
+    },
+    "runtimeCommandSignals": {
+      "runtime_settings": "运行时诊断/设置",
+      "remote_environment": "远程环境管理",
+      "session_management": "会话管理"
+    },
+    "contextThresholds": {
+      "medium": {
+        "contextUsagePercent": 35,
+        "promptLength": 2000,
+        "attachmentCount": 2,
+        "conversationReferenceCount": 1
+      },
+      "large": {
+        "contextUsagePercent": 70,
+        "promptLength": 8000,
+        "attachmentCount": 6,
+        "conversationReferenceCount": 3,
+        "directoryFileCount": 200,
+        "directoryTotalSize": 20971520
+      }
+    }
+  }
+}

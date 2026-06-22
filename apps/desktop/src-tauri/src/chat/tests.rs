@@ -5,7 +5,11 @@ mod agent_event_sink_tests {
     use rusqlite::Connection;
     use serde_json::{json, Value as JsonValue};
 
-    use crate::agent_events::{AgentRuntimeEvent, AgentTurnContext};
+    use crate::agent_events::{
+        runner_interaction_response_control_type, runner_interrupt_turn_control_type,
+        runner_settings_update_control_type, AgentRuntimeEvent, AgentTurnContext,
+    };
+    use crate::agent_interaction_contract;
     use crate::agent_timeline;
     use crate::agent_timeline::AgentTimelineEventInput;
     use crate::chat::commands::{
@@ -175,7 +179,7 @@ mod agent_event_sink_tests {
         assert_eq!(
             agent_interaction_response_payload(
                 "ask-1".to_string(),
-                "plan_approval".to_string(),
+                agent_interaction_contract::plan_approval_interaction_kind().to_string(),
                 json!({
                     "cancelled": false,
                     "answers": {
@@ -187,9 +191,9 @@ mod agent_event_sink_tests {
                 }),
             ),
             json!({
-                "type": "interaction_response",
+                "type": runner_interaction_response_control_type(),
                 "id": "ask-1",
-                "kind": "plan_approval",
+                "kind": agent_interaction_contract::plan_approval_interaction_kind(),
                 "result": {
                     "cancelled": false,
                     "answers": {
@@ -207,7 +211,7 @@ mod agent_event_sink_tests {
     fn interrupt_turn_control_payload_uses_runner_control_message() {
         assert_eq!(
             interrupt_turn_control_payload(),
-            json!({ "type": "interrupt_turn" })
+            json!({ "type": runner_interrupt_turn_control_type() })
         );
     }
 
@@ -228,7 +232,7 @@ mod agent_event_sink_tests {
         assert_eq!(
             composer_runtime_settings_update_payload(Some(&previous), &next),
             Some(json!({
-                "type": "settings_update",
+                "type": runner_settings_update_control_type(),
                 "permission": "readonly",
             }))
         );
@@ -244,7 +248,7 @@ mod agent_event_sink_tests {
         assert_eq!(
             composer_runtime_settings_update_payload(Some(&previous), &next),
             Some(json!({
-                "type": "settings_update",
+                "type": runner_settings_update_control_type(),
                 "model": "gpt-5.1",
             }))
         );
@@ -254,7 +258,7 @@ mod agent_event_sink_tests {
         assert_eq!(
             composer_runtime_settings_update_payload(Some(&previous), &next),
             Some(json!({
-                "type": "settings_update",
+                "type": runner_settings_update_control_type(),
                 "permission": "full",
                 "model": "gpt-5.2",
             }))
@@ -1310,7 +1314,7 @@ mod agent_event_sink_tests {
             BACKEND_CODEX,
         );
         assert_eq!(codex.model_selection_mode, "manual");
-        assert_eq!(codex.reasoning_effort, None);
+        assert_eq!(codex.reasoning_effort.as_deref(), Some("xhigh"));
 
         let claude = normalize_composer_for_backend(
             ChatComposerState {

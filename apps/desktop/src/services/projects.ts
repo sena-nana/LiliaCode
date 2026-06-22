@@ -1,7 +1,7 @@
 /**
  * 项目相关服务：包装「添加项目」入口需要的所有 Tauri command + 系统对话框。
  *
- * `pickFolder` 直接 invoke `plugin:dialog|open` 而非走 @tauri-apps/plugin-dialog wrapper，
+ * `pickFolder` 直接 invoke Tauri dialog 插件命令而非走 @tauri-apps/plugin-dialog wrapper，
  * 保持与 Tauri 端权限申明一致的最小依赖面。
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +12,21 @@ import type {
   GitHubRepoPage,
   GitHubRepoSummary,
   ProjectSettings,
+} from "@lilia/contracts";
+import { TAURI_PLUGIN_DIALOG_OPEN_COMMAND } from "../tauri/pluginCommands";
+import {
+  GIT_CLONE_REPO_COMMAND,
+  GITHUB_CLONE_REPO_COMMAND,
+  GITHUB_GET_BINDING_STATUS_COMMAND,
+  GITHUB_LIST_REPOS_COMMAND,
+  GITHUB_POLL_DEVICE_FLOW_COMMAND,
+  GITHUB_START_DEVICE_FLOW_COMMAND,
+  GITHUB_UNBIND_COMMAND,
+  PROJECT_GET_SETTINGS_COMMAND,
+  PROJECT_SET_SETTINGS_COMMAND,
+  SYSTEM_OPEN_IN_VSCODE_COMMAND,
+  SYSTEM_OPEN_PATH_COMMAND,
+  SYSTEM_OPEN_URL_COMMAND,
 } from "@lilia/contracts";
 
 export type {
@@ -101,7 +116,7 @@ export async function pickFolder(opts: {
   };
   if (opts.defaultPath) options.defaultPath = opts.defaultPath;
   const picked = await invoke<string | string[] | null>(
-    "plugin:dialog|open",
+    TAURI_PLUGIN_DIALOG_OPEN_COMMAND,
     { options },
   );
   if (!picked) return null;
@@ -110,14 +125,14 @@ export async function pickFolder(opts: {
 
 /** `git clone <url> <parentDir>/<derived-name>`，成功后返回克隆出的绝对路径。 */
 export function gitCloneRepo(url: string, parentDir: string): Promise<string> {
-  return invoke<string>("git_clone_repo", { url, parentDir });
+  return invoke<string>(GIT_CLONE_REPO_COMMAND, { url, parentDir });
 }
 
 export function gitHubCloneRepo(
   repo: string,
   parentDir: string,
 ): Promise<string> {
-  return invoke<string>("github_clone_repo", { repo, parentDir });
+  return invoke<string>(GITHUB_CLONE_REPO_COMMAND, { repo, parentDir });
 }
 
 export function isGitHubBindingExpiredError(err: unknown): boolean {
@@ -129,28 +144,28 @@ export function isGitHubBindingExpiredError(err: unknown): boolean {
 }
 
 export function getProjectSettings(): Promise<ProjectSettings> {
-  return invoke<ProjectSettings>("project_get_settings");
+  return invoke<ProjectSettings>(PROJECT_GET_SETTINGS_COMMAND);
 }
 
 export function setProjectSettings(settings: ProjectSettings): Promise<void> {
-  return invoke<void>("project_set_settings", { settings });
+  return invoke<void>(PROJECT_SET_SETTINGS_COMMAND, { settings });
 }
 
 export function openInFileManager(path: string): Promise<void> {
-  return invoke<void>("system_open_path", { path });
+  return invoke<void>(SYSTEM_OPEN_PATH_COMMAND, { path });
 }
 
 export function openUrl(url: string): Promise<void> {
-  return invoke<void>("system_open_url", { url });
+  return invoke<void>(SYSTEM_OPEN_URL_COMMAND, { url });
 }
 
 /** PATH 里没 `code` 时 Rust 端会返回错误。 */
 export function openInVSCode(path: string): Promise<void> {
-  return invoke<void>("system_open_in_vscode", { path });
+  return invoke<void>(SYSTEM_OPEN_IN_VSCODE_COMMAND, { path });
 }
 
 export async function getGitHubBindingStatus(): Promise<GitHubBindingStatus> {
-  const status = await invoke<GitHubBindingStatus>("github_get_binding_status");
+  const status = await invoke<GitHubBindingStatus>(GITHUB_GET_BINDING_STATUS_COMMAND);
   if (status.state === "bound") {
     preloadGitHubReposSilently();
   } else {
@@ -160,21 +175,21 @@ export async function getGitHubBindingStatus(): Promise<GitHubBindingStatus> {
 }
 
 export function startGitHubDeviceFlow(): Promise<GitHubDeviceFlowStart> {
-  return invoke<GitHubDeviceFlowStart>("github_start_device_flow");
+  return invoke<GitHubDeviceFlowStart>(GITHUB_START_DEVICE_FLOW_COMMAND);
 }
 
 export function pollGitHubDeviceFlow(
   deviceCode: string,
   intervalSeconds?: number | null,
 ): Promise<GitHubDeviceFlowPollResult> {
-  return invoke<GitHubDeviceFlowPollResult>("github_poll_device_flow", {
+  return invoke<GitHubDeviceFlowPollResult>(GITHUB_POLL_DEVICE_FLOW_COMMAND, {
     deviceCode,
     intervalSeconds: intervalSeconds ?? null,
   });
 }
 
 export function unbindGitHub(): Promise<void> {
-  return invoke<void>("github_unbind").then(() => {
+  return invoke<void>(GITHUB_UNBIND_COMMAND).then(() => {
     clearGitHubRepoCache();
   });
 }
@@ -185,7 +200,7 @@ export async function listGitHubRepos(page?: number | null): Promise<GitHubRepoP
   const firstPageRequestId = (pageNo ?? 1) === 1
     ? ++githubRepoFirstPageRequestId
     : githubRepoFirstPageRequestId;
-  const result = await invoke<GitHubRepoPage>("github_list_repos", { page: pageNo })
+  const result = await invoke<GitHubRepoPage>(GITHUB_LIST_REPOS_COMMAND, { page: pageNo })
     .catch((err) => {
       if (isGitHubBindingExpiredError(err)) {
         clearGitHubRepoCache();

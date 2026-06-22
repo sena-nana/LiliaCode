@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { SuggestionItem } from "@lilia/contracts";
+import {
+  suggestionSourceLabel,
+  suggestionStatusDisplayText,
+  type SuggestionItem,
+  type SuggestionStatus,
+} from "@lilia/contracts";
 
 const props = defineProps<{
   suggestions?: SuggestionItem[];
-  suggestionsStatus?: "idle" | "loading" | "empty" | "error";
+  suggestionsStatus?: SuggestionStatus;
   suggestionsLoadingText?: string;
   suggestionsVisible?: boolean;
 }>();
@@ -16,67 +21,17 @@ const emit = defineEmits<{
 
 const suggestionRows = computed(() => props.suggestions ?? []);
 const suggestionStatus = computed(() => props.suggestionsStatus ?? "idle");
-const suggestionsLoadingText = computed(() =>
-  props.suggestionsLoadingText?.trim() || "正在寻找灵感",
-);
 const showSuggestions = computed(() =>
   props.suggestionsVisible === true &&
   (suggestionRows.value.length > 0 || suggestionStatus.value !== "idle"),
 );
-const suggestionStatusText = computed(() => {
-  if (suggestionRows.value.length > 0) return "";
-  switch (suggestionStatus.value) {
-    case "loading":
-      return suggestionsLoadingText.value;
-    case "error":
-      return "建议暂时不可用";
-    default:
-      return "";
-  }
-});
-
-type SuggestionGitHubActivity = SuggestionItem["githubActivities"][number];
-
-function githubActivityAnchor(activity: SuggestionGitHubActivity): string {
-  const title = activity.title.trim();
-  if (activity.kind === "pull_request") {
-    const number = title.match(/#(\d+)/)?.[1];
-    return number ? `PR #${number}` : "PR";
-  }
-  if (activity.kind === "issue") {
-    const number = title.match(/#(\d+)/)?.[1];
-    return number ? `Issue #${number}` : "Issue";
-  }
-  if (activity.kind === "push") {
-    const branch = title.match(/^Push\s+([^:]+):/i)?.[1]?.trim();
-    return branch ? `Push ${branch}` : "Push";
-  }
-  return title || activity.kind || "GitHub";
-}
-
-function suggestionGitHubSourceLabel(suggestion: SuggestionItem): string {
-  const githubActivities = suggestion.githubActivities ?? [];
-  const [activity] = githubActivities;
-  if (!activity) return "";
-  const source = [
-    activity.repoFullName.trim(),
-    githubActivityAnchor(activity),
-  ].filter(Boolean).join(" · ");
-  const extraCount = githubActivities.length - 1;
-  return extraCount > 0 ? `${source} +${extraCount}` : source;
-}
-
-function suggestionSourceLabel(suggestion: SuggestionItem): string {
-  const githubLabel = suggestionGitHubSourceLabel(suggestion);
-  if (githubLabel) return githubLabel;
-  const localGitContexts = suggestion.localGitContexts ?? [];
-  const [context] = localGitContexts;
-  if (!context) return "";
-  const branch = context.branch.trim();
-  const source = branch ? `本地 Git · ${branch}` : "本地 Git";
-  const extraCount = localGitContexts.length - 1;
-  return extraCount > 0 ? `${source} +${extraCount}` : source;
-}
+const suggestionStatusText = computed(() =>
+  suggestionStatusDisplayText({
+    hasSuggestions: suggestionRows.value.length > 0,
+    status: suggestionStatus.value,
+    loadingText: props.suggestionsLoadingText,
+  }),
+);
 
 const suggestionViewRows = computed(() =>
   suggestionRows.value.map((suggestion) => {

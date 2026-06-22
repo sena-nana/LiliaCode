@@ -2,15 +2,23 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, type RouteLocationRaw } from "vue-router";
 import { AlertTriangle, Download, Loader2, Sparkles } from "lucide-vue-next";
-import type { CodexAccountQuotaStatus, CodexAccountQuotaWindow } from "@lilia/contracts";
+import {
+  chatBackendLabel,
+  codexAccountQuotaWindowRemainingLine as quotaRemainingLine,
+  codexAccountQuotaWindowRemainingPercent,
+  codexRuntimeIssue,
+  connectionModeIsUnconfigured,
+  connectionModeUsesCodexAccount,
+  type CodexAccountQuotaStatus,
+  type CodexAccountQuotaWindow,
+  routerModeUsesCodexAccount,
+} from "@lilia/contracts";
 import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
 import { useConnectionStatus } from "../composables/useConnectionStatus";
 import { getCodexAccountQuotaStatus } from "../services/chat";
 import {
-  clampPercent,
   codexQuotaUnavailableStatus,
   formatCompactNumber,
-  formatPercent,
   formatUnixSeconds,
   quotaPercentTone,
 } from "../utils/quotaDisplay";
@@ -53,6 +61,8 @@ const closeTimerId = ref<number | null>(null);
 const updateCloseTimerId = ref<number | null>(null);
 let quotaRequestSeq = 0;
 let quotaInflight: Promise<void> | null = null;
+let initialRefreshTimerId: number | null = null;
+let disposed = false;
 const openState = computed(() => quotaTooltipOpen.value);
 const updateOpenState = computed(() => updateTooltipOpen.value);
 const preferredPlacement = computed(() => props.preferredPlacement);
@@ -81,20 +91,13 @@ const {
 void quotaPopoverEl;
 void updatePopoverEl;
 
-const backendLabel = computed(() =>
-  activeBackend.value === "codex" ? "Codex" : "Claude",
-);
+const backendLabel = computed(() => chatBackendLabel(activeBackend.value));
 
 const badgeTag = computed(() => props.to ? RouterLink : "button");
 const badgeAttrs = computed(() => props.to ? { to: props.to } : { type: "button" });
 
 function codexRuntimeIssueText(): string {
-  const status = codexAppServer.value;
-  const issue = status?.issues.join(" ") || "Codex app-server 环境不满足。";
-  if (status?.failureKind === "providerIncompatible") {
-    return `${issue} 请确认当前 API 来源支持 OpenAI Responses API 与 Codex 模型白名单。点击进入设置。`;
-  }
-  return `${issue} 点击进入设置。`;
+  return `${codexRuntimeIssue(codexAppServer.value)} 点击进入设置。`;
 }
 
 const runtimeIssue = computed(() => {
@@ -113,7 +116,7 @@ const runtimeIssue = computed(() => {
 });
 
 const hasConnectionIssue = computed(
-  () => activeStatus.value?.connectionMode === "unconfigured" ||
+  () => connectionModeIsUnconfigured(activeStatus.value?.connectionMode) ||
     activeStatus.value === null,
 );
 
@@ -127,21 +130,23 @@ const connectionTooltip = computed(() => {
   if (runtimeIssue.value) return runtimeIssue.value;
   const s = activeStatus.value;
   if (!s) return "正在检测 agent 连接…";
-  if (s.connectionMode === "unconfigured") {
+  if (connectionModeIsUnconfigured(s.connectionMode)) {
     return `${backendLabel.value} API 未配置。点击进入设置。`;
   }
-  if (s.connectionMode === "codex-account") {
+  if (connectionModeUsesCodexAccount(s.connectionMode)) {
     return "Codex · 官方账号";
   }
   return `${backendLabel.value} · ${s.effectiveUrl ?? "—"}`;
 });
 
-const isCodexOfficialAccount = computed(() =>
-  activeBackend.value === "codex" &&
-  connectionTone.value === "ok" &&
-  routerFor("codex") === "codex-account" &&
-  activeStatus.value?.connectionMode === "codex-account",
-);
+const isCodexOfficialAccount = computed(() => {
+  const codexRouterMode = routerFor("codex");
+  return activeBackend.value === "codex" &&
+    connectionTone.value === "ok" &&
+    codexRouterMode !== null &&
+    routerModeUsesCodexAccount(codexRouterMode) &&
+    connectionModeUsesCodexAccount(activeStatus.value?.connectionMode);
+});
 
 const quotaRows = computed(() => [
   { key: "fiveHour", window: officialQuota.value?.fiveHour, suffix: "" },
@@ -173,7 +178,7 @@ const shouldShowQuotaRings = computed(() =>
 );
 const shouldShowCodexUpdate = computed(() =>
   activeBackend.value === "codex" &&
-  activeStatus.value?.connectionMode === "codex-account" &&
+  connectionModeUsesCodexAccount(activeStatus.value?.connectionMode) &&
   Boolean(codexAppServer.value?.updateAvailable),
 );
 const codexUpdateTarget = computed(() => codexAppServer.value?.latestVersion ?? "最新版本");
@@ -184,7 +189,7 @@ const codexUpdateTitle = computed(() => {
 const codexReleaseNotes = computed(() => codexAppServer.value?.releaseNotes ?? []);
 
 function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
-  const remainingPercent = quotaRemainingPercent(window);
+  const remainingPercent = codexAccountQuotaWindowRemainingPercent(window);
   return {
     "--quota-progress": String(remainingPercent),
   };
@@ -192,24 +197,6 @@ function quotaRingStyle(window: CodexAccountQuotaWindow | null | undefined) {
 
 function quotaRingTone(window: CodexAccountQuotaWindow | null | undefined) {
   return window ? `sb-quota-ring--${quotaPercentTone(window.usedPercent)}` : "sb-quota-ring--empty";
-}
-
-function quotaRemainingPercent(window: CodexAccountQuotaWindow | null | undefined): number {
-  return clampPercent(100 - (window?.usedPercent ?? 0));
-}
-
-function quotaWindowShortLabel(window: CodexAccountQuotaWindow | null | undefined): string {
-  const mins = window?.windowDurationMins;
-  if (!mins || mins <= 0) return "额度";
-  if (mins % 1440 === 0) return `${mins / 1440}d`;
-  if (mins % 60 === 0) return `${mins / 60}h`;
-  return `${mins}m`;
-}
-
-function quotaRemainingLine(window: CodexAccountQuotaWindow | null | undefined, suffix = ""): string {
-  if (!window) return "额度 · 暂无数据";
-  const base = `${quotaWindowShortLabel(window)} · 剩余 ${formatPercent(quotaRemainingPercent(window))}`;
-  return suffix ? `${base} · ${suffix}` : base;
 }
 
 function cancelCloseTimer() {
@@ -223,6 +210,13 @@ function cancelUpdateCloseTimer() {
   if (updateCloseTimerId.value !== null) {
     window.clearTimeout(updateCloseTimerId.value);
     updateCloseTimerId.value = null;
+  }
+}
+
+function cancelInitialRefreshTimer() {
+  if (initialRefreshTimerId !== null) {
+    window.clearTimeout(initialRefreshTimerId);
+    initialRefreshTimerId = null;
   }
 }
 
@@ -249,11 +243,11 @@ async function loadOfficialQuota() {
   quotaInflight = (async () => {
     try {
       const result = await getCodexAccountQuotaStatus();
-      if (seq === quotaRequestSeq) officialQuota.value = result;
+      if (!disposed && seq === quotaRequestSeq) officialQuota.value = result;
     } catch (err) {
-      if (seq === quotaRequestSeq) officialQuota.value = codexQuotaUnavailableStatus(err);
+      if (!disposed && seq === quotaRequestSeq) officialQuota.value = codexQuotaUnavailableStatus(err);
     } finally {
-      if (seq === quotaRequestSeq) quotaLoading.value = false;
+      if (!disposed && seq === quotaRequestSeq) quotaLoading.value = false;
       quotaInflight = null;
     }
   })();
@@ -265,7 +259,9 @@ function openQuotaDetails() {
   cancelCloseTimer();
   quotaTooltipOpen.value = true;
   void loadOfficialQuota();
-  void nextTick(() => updateQuotaPopoverPosition());
+  void nextTick(() => {
+    if (!disposed && quotaTooltipOpen.value) void updateQuotaPopoverPosition();
+  });
 }
 
 function closeQuotaDetails() {
@@ -284,7 +280,9 @@ function openUpdateDetails() {
   if (!shouldShowCodexUpdate.value && !codexAppServerUpdating.value) return;
   cancelUpdateCloseTimer();
   updateTooltipOpen.value = true;
-  void nextTick(() => updatePopoverPosition());
+  void nextTick(() => {
+    if (!disposed && updateTooltipOpen.value) void updatePopoverPosition();
+  });
 }
 
 function closeUpdateDetails() {
@@ -292,6 +290,7 @@ function closeUpdateDetails() {
 }
 
 async function installUpdate() {
+  if (disposed) return;
   await installCodexAppServerUpdate();
 }
 
@@ -344,8 +343,12 @@ watch(
 );
 
 onMounted(() => {
-  window.setTimeout(() => {
+  disposed = false;
+  initialRefreshTimerId = window.setTimeout(() => {
+    initialRefreshTimerId = null;
+    if (disposed) return;
     void refresh(false).then(() => {
+      if (disposed) return;
       void checkCodexAppServerUpdate();
       void loadOfficialQuota();
     });
@@ -353,6 +356,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  quotaRequestSeq += 1;
+  quotaInflight = null;
+  quotaLoading.value = false;
+  cancelInitialRefreshTimer();
   cancelCloseTimer();
   cancelUpdateCloseTimer();
 });

@@ -84,11 +84,39 @@ afterEach(async () => {
     await vi.dynamicImportSettled();
   }
   cleanup();
+  vi.unstubAllGlobals();
   closeChatSidebar();
   localStorage.clear();
 });
 
 describe("TaskDetail sidebar panel activation", () => {
+  it("卸载时取消任务详情入口的 paint 调度", async () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 77));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const router = createLiliaRouter(createMemoryHistory());
+    await router.push("/projects/lilia/tasks/t-002");
+    await router.isReady();
+
+    const view = render(TaskDetail, {
+      props: {
+        projectId: "lilia",
+        taskId: "t-002",
+      },
+      global: {
+        plugins: [router],
+      },
+    });
+
+    if (typeof vi.dynamicImportSettled === "function") {
+      await vi.dynamicImportSettled();
+    }
+    await Promise.resolve();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(77);
+  });
+
   it("关闭状态下不会预注册侧栏 panel，首次打开后才激活注册", async () => {
     await setAgentInteractionSettings({ debug: true });
     const view = await renderTaskDetail();

@@ -1,0 +1,49 @@
+{
+  "suggestionSources": [
+    "provider",
+    "assistant-ai"
+  ],
+  "defaultSuggestionSource": "assistant-ai",
+  "commands": {
+    "get": "conversation_suggestions_get",
+    "getSources": "conversation_suggestions_get_sources",
+    "getSettings": "conversation_suggestions_get_settings",
+    "setSettings": "conversation_suggestions_set_settings"
+  },
+  "suggestionSourceLabels": {
+    "provider": "当前 Provider",
+    "assistant-ai": "辅助模型"
+  },
+  "suggestionSourceSettingOrder": [
+    "assistant-ai",
+    "provider"
+  ],
+  "suggestionItemSources": [
+    "task",
+    "github",
+    "local-git",
+    "claude"
+  ],
+  "suggestionLoadingSourceLabels": {
+    "task": "历史任务",
+    "github": "GitHub 活动",
+    "claude": "Claude 建议"
+  },
+  "suggestionLocalGitLoadingLabels": {
+    "recentCommitsAndChangedFiles": "本地提交和未提交变更",
+    "recentCommits": "本地提交",
+    "changedFiles": "未提交变更",
+    "default": "本地 Git 上下文"
+  },
+  "suggestionStatuses": [
+    "idle",
+    "loading",
+    "empty",
+    "error"
+  ],
+  "defaultSuggestionStatus": "idle",
+  "defaultSuggestionLoadingText": "正在寻找灵感",
+  "suggestionStatusDisplayText": {
+    "error": "建议暂时不可用"
+  }
+}

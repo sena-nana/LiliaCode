@@ -1,38 +1,38 @@
 import { z } from "zod/v4";
+import {
+  DEFAULT_QUOTA_USAGE_QUERY_SCOPE,
+  DEFAULT_QUOTA_USAGE_STATS_DAYS,
+  QUERY_QUOTA_USAGE_INPUT_SCHEMA,
+  QUOTA_USAGE_QUERY_SCOPES,
+  QUOTA_USAGE_TOOL_NAME,
+  QUOTA_USAGE_STATS_BACKEND_FILTERS,
+  QUOTA_USAGE_STATS_DAYS,
+  QUOTA_USAGE_TOOL_NAMES as LILIA_QUOTA_TOOL_NAMES,
+  isLiliaQuotaTool,
+  normalizeQuotaUsageQueryScope,
+  normalizeQuotaUsageStatsBackendFilter,
+  normalizeQuotaUsageStatsDays,
+} from "@lilia/contracts/quotaContract.mjs";
 import { isRecord, stringOrNull } from "./utils.mjs";
 
-export const LILIA_QUOTA_TOOL_NAMES = new Set([
-  "QueryQuotaUsage",
-  "query_quota_usage",
-  "mcp__lilia__query_quota_usage",
-]);
-
-export function isLiliaQuotaTool(toolName) {
-  return LILIA_QUOTA_TOOL_NAMES.has(String(toolName || ""));
+function literalUnion(values) {
+  return z.union(values.map((value) => z.literal(value)));
 }
 
+export { LILIA_QUOTA_TOOL_NAMES, isLiliaQuotaTool };
+
 export const queryQuotaUsageInputSchema = {
-  days: z.union([z.literal(7), z.literal(30)]).optional().default(7),
-  backend: z.enum(["all", "claude", "codex"]).optional().default("all"),
-  scope: z.enum(["summary", "projects", "conversations", "tools", "all"]).optional().default("all"),
+  days: literalUnion(QUOTA_USAGE_STATS_DAYS).optional().default(DEFAULT_QUOTA_USAGE_STATS_DAYS),
+  backend: z.enum(QUOTA_USAGE_STATS_BACKEND_FILTERS).optional().default(
+    QUOTA_USAGE_STATS_BACKEND_FILTERS[0],
+  ),
+  scope: z.enum(QUOTA_USAGE_QUERY_SCOPES).optional().default(DEFAULT_QUOTA_USAGE_QUERY_SCOPE),
 };
 
-export const queryQuotaUsageJsonSchema = {
-  type: "object",
-  properties: {
-    days: { type: "integer", enum: [7, 30], default: 7 },
-    backend: { type: "string", enum: ["all", "claude", "codex"], default: "all" },
-    scope: {
-      type: "string",
-      enum: ["summary", "projects", "conversations", "tools", "all"],
-      default: "all",
-    },
-  },
-  additionalProperties: false,
-};
+export const queryQuotaUsageJsonSchema = QUERY_QUOTA_USAGE_INPUT_SCHEMA;
 
 export const codexQueryQuotaUsageDynamicTool = {
-  name: "QueryQuotaUsage",
+  name: QUOTA_USAGE_TOOL_NAME,
   description: "Query Lilia quota usage summaries through the Lilia internal quota plugin.",
   inputSchema: queryQuotaUsageJsonSchema,
 };
@@ -40,13 +40,9 @@ export const codexQueryQuotaUsageDynamicTool = {
 function normalizeQuotaUsageInput(input) {
   const row = isRecord(input) ? input : {};
   return {
-    days: row.days === 30 ? 30 : 7,
-    backend: ["all", "claude", "codex"].includes(stringOrNull(row.backend))
-      ? stringOrNull(row.backend)
-      : "all",
-    scope: ["summary", "projects", "conversations", "tools", "all"].includes(stringOrNull(row.scope))
-      ? stringOrNull(row.scope)
-      : "all",
+    days: normalizeQuotaUsageStatsDays(row.days),
+    backend: normalizeQuotaUsageStatsBackendFilter(stringOrNull(row.backend)),
+    scope: normalizeQuotaUsageQueryScope(stringOrNull(row.scope)),
   };
 }
 
