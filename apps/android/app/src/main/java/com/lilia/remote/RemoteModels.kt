@@ -1,5 +1,6 @@
 package com.lilia.remote
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class RemotePairingTicket(
@@ -55,6 +56,17 @@ enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
 data class RemoteBranchAnchor(
     val sourceTurnId: String,
     val mode: RemoteSessionForkMode,
+)
+
+data class RemoteSendMessageInput(
+    val taskId: String,
+    val content: String,
+    val composer: JSONObject? = null,
+    val attachments: JSONArray? = null,
+    val conversationReferences: JSONArray? = null,
+    val workflow: JSONObject? = null,
+    val runtimeCommand: JSONObject? = null,
+    val runtimeOptions: JSONObject? = null,
 )
 
 data class PendingInteraction(

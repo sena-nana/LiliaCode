@@ -491,9 +491,11 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                         ) { remoteClient ->
                             remoteClient.sendMessage(
                                 pc,
-                                taskId,
-                                message,
-                                branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                                RemoteSendMessageInput(
+                                    taskId = taskId,
+                                    content = message,
+                                    runtimeCommand = branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                                ),
                             )
                         }
                     },
