@@ -63,6 +63,7 @@ const DRAFT_ORPHANS = new Map<string, OrphanConversation>();
 const DRAFT_TASK_PROMOTIONS = new Map<string, Promise<void>>();
 const DRAFT_ORPHAN_PROMOTIONS = new Map<string, Promise<void>>();
 const projectTaskLoads = new Map<string, Promise<void>>();
+const taskRowLoads = new Map<string, Promise<TaskRow | null>>();
 let orphanLoad: Promise<void> | null = null;
 let tasksChangedListenerInstalled = false;
 let tasksChangedListenerInstallPromise: Promise<void> | null = null;
@@ -80,6 +81,19 @@ function rememberDraftPromotion(
   });
   promotions.set(id, promotion);
   return promotion;
+}
+
+function loadTaskRow(taskId: string): Promise<TaskRow | null> {
+  const existing = taskRowLoads.get(taskId);
+  if (existing) return existing;
+  const load = invoke<TaskRow | null>(TASK_GET_COMMAND, { id: taskId })
+    .finally(() => {
+      if (taskRowLoads.get(taskId) === load) {
+        taskRowLoads.delete(taskId);
+      }
+    });
+  taskRowLoads.set(taskId, load);
+  return load;
 }
 
 async function refreshTasks(projectId: string): Promise<void> {
@@ -267,7 +281,7 @@ export async function ensureTaskLoaded(
     if (existing) return existing;
   }
 
-  const row = await invoke<TaskRow | null>(TASK_GET_COMMAND, { id: taskId });
+  const row = await loadTaskRow(taskId);
   if (!row) return null;
   if (expectedProjectId !== undefined && row.projectId !== expectedProjectId) return null;
   return upsertTaskRow(row);
