@@ -11,18 +11,23 @@ import {
   measurePerfAsync,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
 
 function lazySettingsSection(
   tab: SettingsTabKey,
   loader: () => Promise<{ default: Component }>,
 ): Component {
-  return defineAsyncComponent(() =>
+  const state = createLazyLoadState(() =>
     measurePerfAsync(
       "settings.tab.load",
       async () => (await loader()).default,
       { detail: tab },
     )
   );
+  return defineAsyncComponent({
+    suspensible: false,
+    loader: () => state.load(),
+  });
 }
 
 const SETTINGS_SECTIONS: Record<SettingsTabKey, Component> = {

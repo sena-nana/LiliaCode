@@ -25,6 +25,7 @@ import {
   listProjects,
   registerProjectRemovalHandler,
 } from "./projects";
+import { addDomEventListener } from "../utils/eventListeners";
 import { singleFlight } from "../utils/singleFlight";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
@@ -69,6 +70,7 @@ let orphanLoad: Promise<void> | null = null;
 let tasksChangedListenerInstalled = false;
 let tasksChangedListenerInstallPromise: Promise<void> | null = null;
 let tasksChangedListenerUnlisten: UnlistenFn | null = null;
+let tasksChangedBeforeUnloadUnlisten: UnlistenFn | null = null;
 
 function rememberDraftPromotion(
   promotions: Map<string, Promise<void>>,
@@ -230,10 +232,7 @@ async function refreshChangedTasks(payload: TasksChangedPayload) {
 
 export function installTasksChangedListener(options: { force?: boolean } = {}) {
   if (options.force) {
-    tasksChangedListenerUnlisten?.();
-    tasksChangedListenerUnlisten = null;
-    tasksChangedListenerInstalled = false;
-    tasksChangedListenerInstallPromise = null;
+    disposeTasksChangedListener();
   }
   if (tasksChangedListenerInstalled || tasksChangedListenerInstallPromise) return;
   tasksChangedListenerInstallPromise = listen<TasksChangedPayload>(TASKS_CHANGED_EVENT_NAME, (event) => {
@@ -242,6 +241,7 @@ export function installTasksChangedListener(options: { force?: boolean } = {}) {
     .then((unlisten) => {
       tasksChangedListenerUnlisten = unlisten;
       tasksChangedListenerInstalled = true;
+      installTasksChangedBeforeUnloadCleanup();
     })
     .catch((err) => {
       console.error(`[tasks] listen ${TASKS_CHANGED_EVENT_NAME} failed`, err);
@@ -249,6 +249,25 @@ export function installTasksChangedListener(options: { force?: boolean } = {}) {
     .finally(() => {
       tasksChangedListenerInstallPromise = null;
     });
+}
+
+function installTasksChangedBeforeUnloadCleanup() {
+  if (tasksChangedBeforeUnloadUnlisten || typeof window === "undefined") return;
+  tasksChangedBeforeUnloadUnlisten = addDomEventListener(
+    window,
+    "beforeunload",
+    disposeTasksChangedListener,
+    { once: true },
+  );
+}
+
+export function disposeTasksChangedListener() {
+  tasksChangedListenerUnlisten?.();
+  tasksChangedListenerUnlisten = null;
+  tasksChangedListenerInstalled = false;
+  tasksChangedListenerInstallPromise = null;
+  tasksChangedBeforeUnloadUnlisten?.();
+  tasksChangedBeforeUnloadUnlisten = null;
 }
 
 installTasksChangedListener();

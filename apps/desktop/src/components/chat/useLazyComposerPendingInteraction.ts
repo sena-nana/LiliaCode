@@ -12,6 +12,7 @@ import {
   measurePerfAsync,
   measurePerfSync,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import type {
   ComposerPendingInteractionController,
   ComposerPendingEntryActionsMode,
@@ -28,16 +29,15 @@ type ControllerMethod<K extends ControllerMethodKey> = Extract<
   (...args: any[]) => any
 >;
 
-let pendingInteractionModuleLoad: Promise<ComposerPendingInteractionModule> | null = null;
+const pendingInteractionModuleLoad = createLazyLoadState<ComposerPendingInteractionModule>(() =>
+  measurePerfAsync(
+    "chat-composer.pending-controller.module",
+    () => import("./useComposerPendingInteraction"),
+  )
+);
 
 async function loadPendingInteractionModule(): Promise<ComposerPendingInteractionModule> {
-  if (!pendingInteractionModuleLoad) {
-    pendingInteractionModuleLoad = measurePerfAsync(
-      "chat-composer.pending-controller.module",
-      () => import("./useComposerPendingInteraction"),
-    );
-  }
-  return pendingInteractionModuleLoad;
+  return pendingInteractionModuleLoad.load();
 }
 
 function controllerReadonlyRef<T>(

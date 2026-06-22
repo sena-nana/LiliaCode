@@ -1,7 +1,15 @@
 <script lang="ts">
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+import { measurePerfAsync as measureModulePerfAsync } from "../../utils/perf";
+
 let mermaidConfigured = false;
 let mermaidInstanceSeed = 0;
-let mermaidModuleLoad: Promise<typeof import("mermaid")> | null = null;
+const mermaidModuleLoad = createLazyLoadState(() =>
+  measureModulePerfAsync(
+    "markdown.mermaid.module.load",
+    async () => await import("mermaid"),
+  )
+);
 
 type MermaidApi = typeof import("mermaid")["default"];
 </script>
@@ -46,16 +54,7 @@ function needsExplicitActivation(source: string): boolean {
 }
 
 async function getMermaid(): Promise<MermaidApi> {
-  if (!mermaidModuleLoad) {
-    mermaidModuleLoad = measurePerfAsync(
-      "markdown.mermaid.module.load",
-      async () => await import("mermaid"),
-    ).catch((err) => {
-      mermaidModuleLoad = null;
-      throw err;
-    });
-  }
-  const module = await mermaidModuleLoad;
+  const module = await mermaidModuleLoad.load();
   return module.default;
 }
 

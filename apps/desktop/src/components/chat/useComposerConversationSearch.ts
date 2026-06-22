@@ -2,6 +2,7 @@ import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 import type { ChatConversationReference } from "@lilia/contracts";
 import type { SearchResult } from "../../services/sessionSearch";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { conversationReferencePart, textPart, type MentionRange } from "./composerParts";
 import { readConversationReferenceRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
@@ -14,20 +15,19 @@ type ConversationSearchDeps = {
   searchSessions: typeof import("../../services/sessionSearch").searchSessions;
 };
 
-let conversationSearchDepsLoad: Promise<ConversationSearchDeps> | null = null;
+const conversationSearchDepsLoad = createLazyLoadState<ConversationSearchDeps>(() =>
+  measurePerfAsync(
+    "chat-composer.conversation-search.load",
+    async () => {
+      const { ensureSessionSearchCorpusLoaded, searchSessions } = await import("../../services/sessionSearch");
+      return { ensureSessionSearchCorpusLoaded, searchSessions };
+    },
+  )
+);
 let conversationSearchWarm: Promise<void> | null = null;
 
 async function loadConversationSearchDeps(): Promise<ConversationSearchDeps> {
-  if (!conversationSearchDepsLoad) {
-    conversationSearchDepsLoad = measurePerfAsync(
-      "chat-composer.conversation-search.load",
-      async () => {
-        const { ensureSessionSearchCorpusLoaded, searchSessions } = await import("../../services/sessionSearch");
-        return { ensureSessionSearchCorpusLoaded, searchSessions };
-      },
-    );
-  }
-  return conversationSearchDepsLoad;
+  return conversationSearchDepsLoad.load();
 }
 
 export async function warmComposerConversationSearch(): Promise<void> {

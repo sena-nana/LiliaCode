@@ -42,21 +42,29 @@ import {
   scheduleAfterPaint,
 } from "../../utils/perf";
 import { installUnlistenFns, runUnlistenFns } from "../../utils/eventListeners";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const automationInspectorPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "automations.inspector.load",
+    async () => (await import("./AutomationInspectorPanel.vue")).default as Component,
+  )
+);
+const automationCanvasPaneLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "automations.canvas.load",
+    async () => (await import("./AutomationCanvasPane.vue")).default as Component,
+  )
+);
 
 const AutomationInspectorPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "automations.inspector.load",
-    async () => (await import("./AutomationInspectorPanel.vue")).default as Component,
-  ),
+  loader: () => automationInspectorPanelLoad.load(),
 });
 
 const AutomationCanvasPane = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "automations.canvas.load",
-    async () => (await import("./AutomationCanvasPane.vue")).default as Component,
-  ),
+  loader: () => automationCanvasPaneLoad.load(),
 });
 
 const NODE_ICONS: Record<AutomationNodeKind, unknown> = {

@@ -27,6 +27,7 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import type { PendingAsk } from "../../composables/useAskUser";
 import { useChatSidebar } from "../../composables/useChatSidebar";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
@@ -41,68 +42,86 @@ import type {
 } from "../../services/chat";
 import type { TaskTodo } from "../../services/todos";
 
-const ChatTranscript = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+const chatTranscriptLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.transcript.load",
     async () => (await import("../../components/chat/ChatTranscript.vue")).default,
-  ),
-});
-
-const ChatComposer = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const chatComposerLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.composer.load",
     async () => (await import("../../components/chat/ChatComposer.vue")).default,
-  ),
-});
-
-const ProcessSessionControl = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const processSessionControlLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.process-session-control.load",
     async () => (await import("../../components/chat/ProcessSessionControl.vue")).default,
-  ),
-});
-
-const ChatSuggestions = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const chatSuggestionsLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.chat-suggestions.load",
     async () => (await import("../../components/chat/ChatSuggestions.vue")).default,
-  ),
-});
-
-const ComposerProjectPicker = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const composerProjectPickerLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.project-picker.load",
     async () => (await import("../../components/chat/ComposerProjectPicker.vue")).default,
-  ),
-});
-
-const ImageViewer = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const imageViewerLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.image-viewer.load",
     async () => (await import("../../components/chat/ImageViewer.vue")).default,
-  ),
-});
-
-const TodoFloat = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const todoFloatLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.todo-float.load",
     async () => (await import("../../components/todo/TodoFloat.vue")).default,
-  ),
-});
-
-const ChatSidebarHost = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+  )
+);
+const chatSidebarHostLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.sidebar-host.load",
     async () => (await import("../../components/chat/ChatSidebarHost.vue")).default,
-  ),
+  )
+);
+
+const ChatTranscript = defineAsyncComponent({
+  suspensible: false,
+  loader: () => chatTranscriptLoad.load(),
+});
+const ChatComposer = defineAsyncComponent({
+  suspensible: false,
+  loader: () => chatComposerLoad.load(),
+});
+const ProcessSessionControl = defineAsyncComponent({
+  suspensible: false,
+  loader: () => processSessionControlLoad.load(),
+});
+const ChatSuggestions = defineAsyncComponent({
+  suspensible: false,
+  loader: () => chatSuggestionsLoad.load(),
+});
+const ComposerProjectPicker = defineAsyncComponent({
+  suspensible: false,
+  loader: () => composerProjectPickerLoad.load(),
+});
+const ImageViewer = defineAsyncComponent({
+  suspensible: false,
+  loader: () => imageViewerLoad.load(),
+});
+const TodoFloat = defineAsyncComponent({
+  suspensible: false,
+  loader: () => todoFloatLoad.load(),
+});
+const ChatSidebarHost = defineAsyncComponent({
+  suspensible: false,
+  loader: () => chatSidebarHostLoad.load(),
 });
 
 const props = defineProps<{

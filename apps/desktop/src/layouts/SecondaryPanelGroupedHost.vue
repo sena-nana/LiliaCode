@@ -25,29 +25,40 @@ import {
   measurePerfAsync,
   runWhenIdle,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const sidebarProjectsSectionLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.projects-section.load",
+    async () => (await import("../components/sidebar/SidebarProjectsSection.vue")).default,
+  )
+);
+const sidebarInboxSectionLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.inbox-section.load",
+    async () => (await import("../components/sidebar/SidebarInboxSection.vue")).default,
+  )
+);
+const sidebarProjectAddMenuLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "sidebar.project-add-menu.load",
+    async () => (await import("../components/sidebar/SidebarProjectAddMenu.vue")).default,
+  )
+);
 
 const SidebarProjectsSection = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.projects-section.load",
-    async () => (await import("../components/sidebar/SidebarProjectsSection.vue")).default,
-  ),
+  loader: () => sidebarProjectsSectionLoad.load(),
 });
 
 const SidebarInboxSection = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.inbox-section.load",
-    async () => (await import("../components/sidebar/SidebarInboxSection.vue")).default,
-  ),
+  loader: () => sidebarInboxSectionLoad.load(),
 });
 
 const SidebarProjectAddMenu = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.project-add-menu.load",
-    async () => (await import("../components/sidebar/SidebarProjectAddMenu.vue")).default,
-  ),
+  loader: () => sidebarProjectAddMenuLoad.load(),
 });
 
 const router = useRouter();

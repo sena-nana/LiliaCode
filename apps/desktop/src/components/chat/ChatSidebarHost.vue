@@ -10,6 +10,7 @@ import {
 } from "../../composables/useChatSidebar";
 import { useResizablePane } from "../../composables/useResizablePane";
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
+import { createLazyLoadState, type LazyLoadState } from "../../utils/lazyLoadState";
 import { measurePerfAsync } from "../../utils/perf";
 
 const props = defineProps<ChatSidebarContext>();
@@ -34,23 +35,51 @@ const sidebarContext = computed<ChatSidebarContext>(() => ({
 }));
 
 const panelComponentCache = new Map<string, Component>();
+const panelComponentLoads = new Map<string, LazyLoadState<Component>>();
 const activePanelComponent = shallowRef<Component | null>(null);
 const activePanelLoading = ref(false);
+const activePanelError = ref<string | null>(null);
+const panelLoadRetryKey = ref(0);
 const panelLoadEpoch = withComponentEpoch();
 
+function getPanelComponentLoad(panel: NonNullable<typeof activePanel.value>) {
+  const cached = panelComponentLoads.get(panel.id);
+  if (cached) return cached;
+  const state = createLazyLoadState<Component>(() =>
+    measurePerfAsync(
+      "chat-sidebar.panel.load",
+      () => panel.loader(),
+      { detail: panel.id },
+    )
+  );
+  panelComponentLoads.set(panel.id, state);
+  return state;
+}
+
+function panelLoadErrorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error ?? "加载侧栏失败");
+}
+
+function retryActivePanelLoad() {
+  activePanelError.value = null;
+  panelLoadRetryKey.value += 1;
+}
+
 watch(
-  () => [sidebarState.open, activePanel.value?.id ?? ""] as const,
+  () => [sidebarState.open, activePanel.value?.id ?? "", panelLoadRetryKey.value] as const,
   async ([open, panelId]) => {
     const seq = panelLoadEpoch.nextEpoch();
     if (!open || !panelId) {
       activePanelComponent.value = null;
       activePanelLoading.value = false;
+      activePanelError.value = null;
       return;
     }
     const panel = activePanel.value;
     if (!panel) {
       activePanelComponent.value = null;
       activePanelLoading.value = false;
+      activePanelError.value = null;
       return;
     }
     const cached = panelComponentCache.get(panel.id);
@@ -58,23 +87,23 @@ watch(
       if (!panelLoadEpoch.assertAlive(seq)) return;
       activePanelComponent.value = cached;
       activePanelLoading.value = false;
+      activePanelError.value = null;
       return;
     }
     activePanelLoading.value = true;
+    activePanelError.value = null;
     try {
-      const component = markRaw(await measurePerfAsync(
-        "chat-sidebar.panel.load",
-        () => panel.loader(),
-        { detail: panel.id },
-      ));
+      const component = markRaw(await getPanelComponentLoad(panel).load());
       if (!panelLoadEpoch.assertAlive(seq) || !sidebarState.open || activePanel.value?.id !== panel.id) return;
       panelComponentCache.set(panel.id, component);
       activePanelComponent.value = component;
+      activePanelError.value = null;
     } catch (err) {
       if (!panelLoadEpoch.assertAlive(seq)) return;
       console.error("[chat-sidebar] load panel failed", panel.id, err);
       if (sidebarState.open && activePanel.value?.id === panel.id) {
         activePanelComponent.value = null;
+        activePanelError.value = panelLoadErrorText(err);
       }
     } finally {
       if (panelLoadEpoch.assertAlive(seq) && sidebarState.open && activePanel.value?.id === panel.id) {
@@ -149,6 +178,12 @@ watch(
         <div v-else-if="activePanelLoading" class="chat-sidebar__empty">
           正在加载...
         </div>
+        <div v-else-if="activePanelError" class="chat-sidebar__empty">
+          <span>{{ activePanelError }}</span>
+          <button type="button" class="chat-sidebar__retry" @click="retryActivePanelLoad">
+            重试
+          </button>
+        </div>
         <div v-else class="chat-sidebar__empty">
           暂无内容
         </div>
@@ -156,3 +191,16 @@ watch(
     </div>
   </aside>
 </template>
+
+<style scoped>
+.chat-sidebar__retry {
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+</style>

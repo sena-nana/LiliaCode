@@ -83,107 +83,112 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const composerContextPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.context-panel.load",
+    async () => (await import("./ComposerContextPanel.vue")).default,
+  )
+);
+const composerConversationReferencePanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.conversation-panel.load",
+    async () => (await import("./ComposerConversationReferencePanel.vue")).default,
+  )
+);
+const composerPendingPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.pending-panel.load",
+    async () => (await import("./ComposerPendingPanel.vue")).default,
+  )
+);
+const composerSlashCommandPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.slash-panel.load",
+    async () => (await import("./ComposerSlashCommandPanel.vue")).default,
+  )
+);
 
 const ComposerContextPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.context-panel.load",
-    async () => (await import("./ComposerContextPanel.vue")).default,
-  ),
+  loader: () => composerContextPanelLoad.load(),
 });
 
 const ComposerConversationReferencePanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.conversation-panel.load",
-    async () => (await import("./ComposerConversationReferencePanel.vue")).default,
-  ),
+  loader: () => composerConversationReferencePanelLoad.load(),
 });
 
 const ComposerPendingPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.pending-panel.load",
-    async () => (await import("./ComposerPendingPanel.vue")).default,
-  ),
+  loader: () => composerPendingPanelLoad.load(),
 });
 
 const ComposerSlashCommandPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.slash-panel.load",
-    async () => (await import("./ComposerSlashCommandPanel.vue")).default,
-  ),
+  loader: () => composerSlashCommandPanelLoad.load(),
 });
 
-let composerToolbarLoad: Promise<Component> | null = null;
-let composerPendingEntryActionsLoad: Promise<Component> | null = null;
-let composerConversationSearchModuleLoad:
-  Promise<typeof import("./useComposerConversationSearch")> | null = null;
-let composerContextSearchModuleLoad:
-  Promise<typeof import("./useComposerContextSearch")> | null = null;
-let composerSlashCommandsModuleLoad:
-  Promise<typeof import("./useComposerSlashCommands")> | null = null;
-let composerPasteModuleLoad: Promise<typeof import("./useComposerPaste")> | null = null;
+const composerToolbarLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.toolbar.load",
+    async () => (await import("./ComposerToolbar.vue")).default,
+  )
+);
+const composerPendingEntryActionsLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.pending-entry-actions.load",
+    async () => (await import("./ComposerPendingEntryActions.vue")).default,
+  )
+);
+const composerConversationSearchModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.conversation-search.module.load",
+    async () => await import("./useComposerConversationSearch"),
+  )
+);
+const composerContextSearchModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.context-search.module.load",
+    async () => await import("./useComposerContextSearch"),
+  )
+);
+const composerSlashCommandsModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.slash-search.module.load",
+    async () => await import("./useComposerSlashCommands"),
+  )
+);
+const composerPasteModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.paste.module.load",
+    async () => await import("./useComposerPaste"),
+  )
+);
 
 async function loadComposerToolbar(): Promise<Component> {
-  if (!composerToolbarLoad) {
-    composerToolbarLoad = measurePerfAsync(
-      "chat-composer.toolbar.load",
-      async () => (await import("./ComposerToolbar.vue")).default,
-    );
-  }
-  return composerToolbarLoad;
+  return composerToolbarLoad.load();
 }
 
 async function loadComposerPendingEntryActions(): Promise<Component> {
-  if (!composerPendingEntryActionsLoad) {
-    composerPendingEntryActionsLoad = measurePerfAsync(
-      "chat-composer.pending-entry-actions.load",
-      async () => (await import("./ComposerPendingEntryActions.vue")).default,
-    );
-  }
-  return composerPendingEntryActionsLoad;
+  return composerPendingEntryActionsLoad.load();
 }
 
 async function loadComposerConversationSearchModule() {
-  if (!composerConversationSearchModuleLoad) {
-    composerConversationSearchModuleLoad = measurePerfAsync(
-      "chat-composer.conversation-search.module.load",
-      async () => await import("./useComposerConversationSearch"),
-    );
-  }
-  return composerConversationSearchModuleLoad;
+  return composerConversationSearchModuleLoad.load();
 }
 
 async function loadComposerContextSearchModule() {
-  if (!composerContextSearchModuleLoad) {
-    composerContextSearchModuleLoad = measurePerfAsync(
-      "chat-composer.context-search.module.load",
-      async () => await import("./useComposerContextSearch"),
-    );
-  }
-  return composerContextSearchModuleLoad;
+  return composerContextSearchModuleLoad.load();
 }
 
 async function loadComposerSlashCommandsModule() {
-  if (!composerSlashCommandsModuleLoad) {
-    composerSlashCommandsModuleLoad = measurePerfAsync(
-      "chat-composer.slash-search.module.load",
-      async () => await import("./useComposerSlashCommands"),
-    );
-  }
-  return composerSlashCommandsModuleLoad;
+  return composerSlashCommandsModuleLoad.load();
 }
 
 async function loadComposerPasteModule() {
-  if (!composerPasteModuleLoad) {
-    composerPasteModuleLoad = measurePerfAsync(
-      "chat-composer.paste.module.load",
-      async () => await import("./useComposerPaste"),
-    );
-  }
-  return composerPasteModuleLoad;
+  return composerPasteModuleLoad.load();
 }
 
 const props = defineProps<{

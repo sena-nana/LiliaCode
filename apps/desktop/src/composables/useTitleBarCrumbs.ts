@@ -12,6 +12,20 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const titlebarTasksStoreLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "titlebar.crumbs.tasks-store.load",
+    async () => await import("../services/tasksStore"),
+  )
+);
+const titlebarProjectsStoreLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "titlebar.crumbs.projects-store.load",
+    async () => await import("../services/projectsStore"),
+  )
+);
 
 export interface TitleBarCrumb {
   text: string;
@@ -95,8 +109,8 @@ export function useTitleBarCrumbs() {
             "titlebar.crumbs.fallback",
             async () => {
               const [{ getOrphanConversation, getTask }, projectsStore] = await Promise.all([
-                import("../services/tasksStore"),
-                projectIdValue ? import("../services/projectsStore") : Promise.resolve(null),
+                titlebarTasksStoreLoad.load(),
+                projectIdValue ? titlebarProjectsStoreLoad.load() : Promise.resolve(null),
               ]);
               if (
                 disposed ||

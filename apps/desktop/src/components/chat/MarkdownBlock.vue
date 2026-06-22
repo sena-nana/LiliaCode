@@ -14,21 +14,29 @@ import type { ChatImageViewerSource } from "./imageViewer";
 import type { MarkdownBlockTone } from "./timelineDisplay";
 import { measurePerfAsync, measurePerfSync } from "../../utils/perf";
 import type { InlineToken } from "./markdown/types";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const markdownMathBlockLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "markdown.math-block.load",
+    async () => (await import("./markdown/MarkdownMathBlock.vue")).default,
+  )
+);
+const markdownMermaidLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "markdown.mermaid.load",
+    async () => (await import("./MarkdownMermaid.vue")).default,
+  )
+);
 
 const MarkdownMathBlock = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "markdown.math-block.load",
-    async () => (await import("./markdown/MarkdownMathBlock.vue")).default,
-  ),
+  loader: () => markdownMathBlockLoad.load(),
 });
 
 const MarkdownMermaid = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "markdown.mermaid.load",
-    async () => (await import("./MarkdownMermaid.vue")).default,
-  ),
+  loader: () => markdownMermaidLoad.load(),
 });
 
 const INLINE_CACHE_LIMIT = 200;

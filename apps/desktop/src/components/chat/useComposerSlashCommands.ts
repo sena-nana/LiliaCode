@@ -8,6 +8,7 @@ import {
   type LiliaReviewTarget,
 } from "@lilia/contracts";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { textPart, type MentionRange } from "./composerParts";
 import { readSlashCommandRange } from "./composerTriggerRanges";
 import type { useComposerRichInput } from "./useComposerRichInput";
@@ -20,19 +21,18 @@ type SlashCommandDeps = {
   searchSlashCommands: typeof import("../../services/chat").searchSlashCommands;
 };
 
-let slashCommandDepsLoad: Promise<SlashCommandDeps> | null = null;
+const slashCommandDepsLoad = createLazyLoadState<SlashCommandDeps>(() =>
+  measurePerfAsync(
+    "chat-composer.slash-search.load",
+    async () => {
+      const { searchSlashCommands } = await import("../../services/chat");
+      return { searchSlashCommands };
+    },
+  )
+);
 
 async function loadSlashCommandDeps(): Promise<SlashCommandDeps> {
-  if (!slashCommandDepsLoad) {
-    slashCommandDepsLoad = measurePerfAsync(
-      "chat-composer.slash-search.load",
-      async () => {
-        const { searchSlashCommands } = await import("../../services/chat");
-        return { searchSlashCommands };
-      },
-    );
-  }
-  return slashCommandDepsLoad;
+  return slashCommandDepsLoad.load();
 }
 
 export interface ComposerSlashCommandItem {
