@@ -69,6 +69,7 @@ pub fn task_list_sidebar_conversations(
     store: State<'_, LiliaStore>,
 ) -> Result<Vec<SidebarConversationSummaryRow>, String> {
     let conn = store.conn()?;
+    let deps = load_sidebar_task_deps(&conn)?;
     let mut stmt = conn
         .prepare(
             r#"SELECT
@@ -94,6 +95,7 @@ pub fn task_list_sidebar_conversations(
             let status = row.get::<_, String>(4)?;
             let created_at = row.get::<_, i64>(5)?;
             let pinned = row.get::<_, i64>(6)? != 0;
+            let depends_on = deps.get(&task_id).cloned().unwrap_or_default();
             let route = match project_id.as_deref() {
                 Some(project_id) => format!("/projects/{project_id}/tasks/{task_id}"),
                 None => format!("/chats/{task_id}"),
@@ -104,6 +106,7 @@ pub fn task_list_sidebar_conversations(
                 project_name,
                 title,
                 status,
+                depends_on,
                 created_at,
                 pinned,
                 route,
@@ -113,6 +116,31 @@ pub fn task_list_sidebar_conversations(
     let mut out = Vec::new();
     for row in rows {
         out.push(row.map_err(|e| format!("task_list_sidebar_conversations: row 失败：{e}"))?);
+    }
+    Ok(out)
+}
+
+fn load_sidebar_task_deps(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT d.task_id, d.depends_on_id
+               FROM task_dependencies d
+               INNER JOIN tasks t ON t.id = d.task_id
+               WHERE t.archived = 0"#,
+        )
+        .map_err(|e| format!("task_list_sidebar_conversations: prepare deps 失败：{e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("task_list_sidebar_conversations: query deps 失败：{e}"))?;
+    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for row in rows {
+        let (task_id, depends_on_id) =
+            row.map_err(|e| format!("task_list_sidebar_conversations: dep row 失败：{e}"))?;
+        out.entry(task_id).or_default().push(depends_on_id);
     }
     Ok(out)
 }
