@@ -100,22 +100,10 @@ class RemoteHttpClient(
 
     suspend fun sendMessage(
         pc: SavedPc,
-        taskId: String,
-        content: String,
-        runtimeCommand: JSONObject? = null,
+        input: RemoteSendMessageInput,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val request = JSONObject()
-                .put("type", "chat.send")
-                .put("taskId", taskId)
-                .put("content", content)
-            if (runtimeCommand != null) {
-                request.put("runtimeCommand", runtimeCommand)
-            }
-            dispatch(
-                pc,
-                request,
-            )
+            dispatch(pc, input.toRequestJson())
             Unit
         }
     }
@@ -223,3 +211,18 @@ class RemoteHttpClient(
         return RemoteHttpResponseAdapter.parseJson(statusCode, text)
     }
 }
+
+private fun RemoteSendMessageInput.toRequestJson(): JSONObject =
+    JSONObject()
+        .put("type", "chat.send")
+        .put("taskId", taskId)
+        .put("content", content)
+        .putIfPresent("composer", composer)
+        .putIfPresent("attachments", attachments)
+        .putIfPresent("conversationReferences", conversationReferences)
+        .putIfPresent("workflow", workflow)
+        .putIfPresent("runtimeCommand", runtimeCommand)
+        .putIfPresent("runtimeOptions", runtimeOptions)
+
+private fun JSONObject.putIfPresent(key: String, value: Any?): JSONObject =
+    if (value == null) this else put(key, value)
