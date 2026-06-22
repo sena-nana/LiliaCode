@@ -636,15 +636,30 @@ let routerModes: Record<MockProviderBackend, MockRouterMode> = {
 };
 let nodeAvailable = true;
 const remoteControlBridgeUrl = "http://127.0.0.1:41478";
+const remoteControlRecentSeenMs = 2 * 60 * 1000;
 let remoteControlEnabled = false;
 let remoteControlPcName = "Lilia Test PC";
 let remoteControlTicket: Record<string, unknown> | null = null;
 let remoteControlDevices: Record<string, unknown>[] = [];
 
+function mockRemoteControlState() {
+  if (!remoteControlEnabled) return "disabled";
+  if (remoteControlTicket) return "pairing";
+  const cutoff = Date.now() - remoteControlRecentSeenMs;
+  return remoteControlDevices.some((device) =>
+    device.trusted === true &&
+    device.revokedAt == null &&
+    typeof device.lastSeenAt === "number" &&
+    device.lastSeenAt >= cutoff
+  )
+    ? "connected"
+    : "listening";
+}
+
 function mockRemoteControlStatus() {
   return {
     hostEnabled: remoteControlEnabled,
-    state: remoteControlEnabled ? (remoteControlTicket ? "pairing" : "listening") : "disabled",
+    state: mockRemoteControlState(),
     pcName: remoteControlPcName,
     endpoint: remoteControlEnabled
       ? { endpointId: "mock-pc-endpoint", relayUrl: null, directAddresses: [] }

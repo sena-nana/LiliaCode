@@ -1,7 +1,10 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
 import { toDataURL } from "qrcode";
-import { REMOTE_CONTROL_START_PAIRING_COMMAND } from "@lilia/contracts";
+import {
+  REMOTE_CONTROL_PAIR_DEVICE_COMMAND,
+  REMOTE_CONTROL_START_PAIRING_COMMAND,
+} from "@lilia/contracts";
 import RemoteControlSection from "../src/pages/settings/RemoteControlSection.vue";
 import { mockInvoke } from "./tauriMock";
 
@@ -30,5 +33,63 @@ describe("RemoteControlSection", () => {
     expect(generatedUri).toContain("ticket=mock-ticket");
     expect(generatedUri).toContain("bridge=http%3A%2F%2F127.0.0.1%3A41478");
     expect(view.getByText(generatedUri!)).toBeInTheDocument();
+  });
+
+  it("轮询刷新配对后的连接状态和可信设备", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-22T00:00:00Z"));
+    const view = render(RemoteControlSection);
+    try {
+      await waitFor(() => {
+        expect(view.getByText("未启用")).toBeInTheDocument();
+      });
+
+      await fireEvent.click(view.getByRole("button", { name: "生成二维码" }));
+
+      await waitFor(() => {
+        expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
+      });
+
+      await mockInvoke(REMOTE_CONTROL_PAIR_DEVICE_COMMAND, {
+        input: {
+          ticketId: "mock-ticket",
+          challenge: "mock-challenge",
+          deviceName: "Pixel",
+          androidEndpoint: { endpointId: "mock-android-endpoint" },
+          protocolVersion: 1,
+        },
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await waitFor(() => {
+        expect(view.getByText("已连接")).toBeInTheDocument();
+        expect(view.getByText("Pixel")).toBeInTheDocument();
+        expect(view.queryByAltText("Lilia Android pairing QR code")).not.toBeInTheDocument();
+      });
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("关闭远控后隐藏配对二维码", async () => {
+    const view = render(RemoteControlSection);
+
+    await waitFor(() => {
+      expect(view.getByText("未启用")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "生成二维码" }));
+
+    await waitFor(() => {
+      expect(view.getByAltText("Lilia Android pairing QR code")).toBeInTheDocument();
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "关闭远控" }));
+
+    await waitFor(() => {
+      expect(view.getByText("未启用")).toBeInTheDocument();
+      expect(view.queryByAltText("Lilia Android pairing QR code")).not.toBeInTheDocument();
+    });
   });
 });
