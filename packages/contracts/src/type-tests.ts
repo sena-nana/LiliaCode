@@ -34,6 +34,7 @@ import type {
   AutomationRunSummary,
   HookDocumentUpdateInput,
   HooksOverview,
+  SidebarConversationSummary,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -473,6 +474,23 @@ export type ChatRuntimeSnapshotContextUsageTypeTest = Assert<
       rollback: null;
     },
     ChatRuntimeSnapshot
+  >
+>;
+
+export type SidebarConversationSummaryDependencyTypeTest = Assert<
+  Extends<
+    {
+      taskId: "task-1";
+      projectId: "project-1";
+      projectName: "Lilia";
+      title: "Android remote";
+      status: "blocked";
+      dependsOn: ["dep-1"];
+      createdAt: 1;
+      pinned: false;
+      route: "/projects/project-1/tasks/task-1";
+    },
+    SidebarConversationSummary
   >
 >;
 

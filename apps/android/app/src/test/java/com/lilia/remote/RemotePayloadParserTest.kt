@@ -20,6 +20,7 @@ class RemotePayloadParserTest {
                       "projectName": "Lilia",
                       "title": "Android remote",
                       "status": "running",
+                      "dependsOn": ["task-0"],
                       "createdAt": 1710000000000,
                       "pinned": false,
                       "route": "/projects/project-1/tasks/task-1"
@@ -34,6 +35,7 @@ class RemotePayloadParserTest {
         assertEquals("task-1", tasks[0].taskId)
         assertEquals("Lilia", tasks[0].projectName)
         assertEquals("running", tasks[0].status)
+        assertEquals(listOf("task-0"), tasks[0].dependsOn)
     }
 
     @Test
@@ -111,6 +113,7 @@ class RemotePayloadParserTest {
                     "projectId": null,
                     "title": "Inbox chat",
                     "status": "blocked",
+                    "dependsOn": ["dep-1"],
                     "createdAt": 1710000000000
                   },
                   "runtime": { "phase": "waiting_user", "processSessionId": "jsonl-process-1" }
@@ -157,6 +160,8 @@ class RemotePayloadParserTest {
         )
 
         assertEquals("blocked", detail.task.status)
+        assertEquals(listOf("dep-1"), detail.task.dependsOn)
+        assertEquals("task-1", detail.relatedTasks[0].taskId)
         assertEquals("waiting_user", detail.runtimePhase)
         assertEquals("jsonl-process-1", detail.processSessionId)
         assertEquals("Assistant", detail.timeline[0].title)

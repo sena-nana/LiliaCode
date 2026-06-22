@@ -144,6 +144,7 @@ export interface SidebarConversationSummary {
   projectName: string | null;
   title: string;
   status: TaskStatus;
+  dependsOn: string[];
   createdAt: number;
   pinned: boolean;
   route: string;

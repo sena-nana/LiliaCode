@@ -26,6 +26,7 @@ data class RemoteTaskSummary(
     val title: String,
     val projectName: String?,
     val status: String,
+    val dependsOn: List<String> = emptyList(),
     val lastActivity: String,
     val pendingAction: String?,
 )
@@ -62,6 +63,7 @@ data class PendingInteraction(
 
 data class RemoteTaskDetail(
     val task: RemoteTaskSummary,
+    val relatedTasks: List<RemoteTaskSummary>,
     val runtimePhase: String,
     val processSessionId: String?,
     val timeline: List<RemoteTimelineItem>,

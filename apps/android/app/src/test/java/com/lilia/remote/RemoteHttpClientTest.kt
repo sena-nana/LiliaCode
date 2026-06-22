@@ -317,6 +317,7 @@ class RemoteHttpClientTest {
                         "taskId": "task-1",
                         "title": "Remote task",
                         "status": "running",
+                        "dependsOn": ["dep-1"],
                         "createdAt": 1710000000000
                       },
                       "runtime": { "phase": "running" }
@@ -352,6 +353,7 @@ class RemoteHttpClientTest {
             .getOrThrow()
 
         assertEquals("task-1", detail.task.taskId)
+        assertEquals(listOf("dep-1"), detail.task.dependsOn)
         assertEquals("running", detail.runtimePhase)
         assertEquals(3, requests.size)
         assertEquals("tasks.get", requests[0].getString("type"))
