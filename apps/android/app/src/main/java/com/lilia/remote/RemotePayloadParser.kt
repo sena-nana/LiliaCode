@@ -21,6 +21,7 @@ object RemotePayloadParser {
         if (capabilities == null) return RemoteCapabilities()
         return RemoteCapabilities(
             supportsTaskInbox = capabilities.optBoolean("supportsTaskInbox", true),
+            supportsTimelineSubscription = capabilities.optBoolean("supportsTimelineSubscription", true),
             supportsChatSend = capabilities.optBoolean("supportsChatSend", true),
             supportsInteractionResponse = capabilities.optBoolean("supportsInteractionResponse", true),
             supportsInterrupt = capabilities.optBoolean("supportsInterrupt", true),
@@ -53,15 +54,53 @@ object RemotePayloadParser {
         }
     }
 
+    fun parseTaskState(
+        taskId: String,
+        taskPayload: JSONObject,
+        pendingPayload: JSONObject,
+    ): RemoteTaskState {
+        val task = taskPayload.optJSONObject("task")
+        val runtime = taskPayload.optJSONObject("runtime")
+        val summary = parseTaskSummary(taskId, task)
+        return RemoteTaskState(
+            task = summary,
+            runtimePhase = runtime?.nonBlankString("phase", summary.status) ?: summary.status,
+            pendingInteraction = parsePending(summary.taskId, pendingPayload.optJSONArray("interactions") ?: JSONArray()),
+        )
+    }
+
     fun parseTaskDetail(
         taskId: String,
         taskPayload: JSONObject,
         timelinePayload: JSONObject,
         pendingPayload: JSONObject,
     ): RemoteTaskDetail {
-        val task = taskPayload.optJSONObject("task")
-        val runtime = taskPayload.optJSONObject("runtime")
-        val summary = RemoteTaskSummary(
+        val state = parseTaskState(taskId, taskPayload, pendingPayload)
+        return RemoteTaskDetail(
+            task = state.task,
+            runtimePhase = state.runtimePhase,
+            timeline = parseTimelinePayload(timelinePayload),
+            pendingInteraction = state.pendingInteraction,
+        )
+    }
+
+    fun parseTimelinePayload(payload: JSONObject): List<RemoteTimelineItem> =
+        parseTimeline(payload.optJSONArray("events") ?: JSONArray())
+
+    fun mergeTimeline(
+        existing: List<RemoteTimelineItem>,
+        incoming: List<RemoteTimelineItem>,
+    ): List<RemoteTimelineItem> {
+        if (existing.isEmpty()) return incoming
+        if (incoming.isEmpty()) return existing
+        val merged = LinkedHashMap<String, RemoteTimelineItem>()
+        existing.forEach { item -> merged[item.id] = item }
+        incoming.forEach { item -> merged[item.id] = item }
+        return merged.values.toList()
+    }
+
+    private fun parseTaskSummary(taskId: String, task: JSONObject?): RemoteTaskSummary =
+        RemoteTaskSummary(
             taskId = task?.firstNonBlankString("taskId", "id") ?: taskId,
             title = task?.nonBlankString("title", "Untitled task") ?: "Untitled task",
             projectName = task?.firstNonBlankString("projectName", "projectId"),
@@ -69,13 +108,6 @@ object RemotePayloadParser {
             lastActivity = formatRemoteTime(task?.optLong("createdAt", 0L) ?: 0L),
             pendingAction = null,
         )
-        return RemoteTaskDetail(
-            task = summary,
-            runtimePhase = runtime?.nonBlankString("phase", summary.status) ?: summary.status,
-            timeline = parseTimeline(timelinePayload.optJSONArray("events") ?: JSONArray()),
-            pendingInteraction = parsePending(summary.taskId, pendingPayload.optJSONArray("interactions") ?: JSONArray()),
-        )
-    }
 
     private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> {
         val rows = buildList {

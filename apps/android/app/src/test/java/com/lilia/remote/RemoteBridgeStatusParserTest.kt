@@ -43,6 +43,7 @@ class RemoteBridgeStatusParserTest {
                     "pcName": "Workstation",
                     "capabilities": {
                       "supportsTaskInbox": true,
+                      "supportsTimelineSubscription": false,
                       "supportsChatSend": false,
                       "supportsInteractionResponse": false,
                       "supportsInterrupt": false
@@ -54,6 +55,7 @@ class RemoteBridgeStatusParserTest {
         )
 
         assertTrue(status.capabilities.supportsTaskInbox)
+        assertFalse(status.capabilities.supportsTimelineSubscription)
         assertFalse(status.capabilities.supportsChatSend)
         assertFalse(status.capabilities.supportsInteractionResponse)
         assertFalse(status.capabilities.supportsInterrupt)
@@ -111,6 +113,7 @@ class RemoteBridgeStatusParserTest {
         assertEquals("pairing", status.state)
         assertEquals("Desk", status.pcName)
         assertTrue(status.capabilities.supportsTaskInbox)
+        assertTrue(status.capabilities.supportsTimelineSubscription)
         assertTrue(status.capabilities.supportsChatSend)
         assertTrue(status.capabilities.supportsInteractionResponse)
         assertTrue(status.capabilities.supportsInterrupt)
