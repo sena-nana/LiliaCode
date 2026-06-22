@@ -1051,6 +1051,29 @@
   padding-bottom: 0;
 }
 
+.agent-timeline__window-row {
+  display: flex;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.agent-timeline__window-button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-timeline__window-button:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
 /* 过程子项与其后的最终回复合并为组,内部 padding 收紧 */
 .agent-timeline__list > li.is-process-child {
   padding-bottom: 4px;

@@ -596,6 +596,35 @@ describe("timeline event expansion", () => {
     expect(railLine?.style.webkitMaskImage).toBe("");
   });
 
+  it("大时间线默认只渲染尾部窗口，并可按需显示更早事件", async () => {
+    const view = await renderAgentTimeline({
+      events: Array.from({ length: 170 }, (_, index) =>
+        timelineEvent({
+          id: `message-${index + 1}`,
+          kind: "message",
+          title: "User",
+          summary: `消息 ${index + 1}`,
+          payload: {
+            role: "user",
+            content: `消息 ${index + 1}`,
+          },
+          turnSeq: index + 1,
+          intraTurnOrder: 1,
+          createdAt: index + 1,
+        })
+      ),
+    });
+
+    expect(view.container.querySelector('[data-scroll-anchor-id="message-1"]')).toBeNull();
+    expect(view.container.querySelector('[data-scroll-anchor-id="message-11"]')).toBeInTheDocument();
+    expect(view.container.querySelector('[data-scroll-anchor-id="message-170"]')).toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "显示更早 10 项" }));
+
+    expect(view.container.querySelector('[data-scroll-anchor-id="message-1"]')).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: /显示更早/ })).toBeNull();
+  });
+
   it("有详情事件仍可展开", async () => {
     const view = await renderAgentTimeline({
         events: [

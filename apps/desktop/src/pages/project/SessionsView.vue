@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 项目下默认 tab：列出该项目的所有非草稿 Task，点击进入 TaskDetail。 */
-import { computed, onBeforeUnmount, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import {
   ensureProjectTasksLoaded,
@@ -18,8 +18,11 @@ import {
 
 const props = defineProps<{ projectId: string }>();
 
+const SESSION_PAGE_SIZE = 80;
+
 const tasks = computed<Task[]>(() => listProjectConversations(props.projectId));
 const loaded = computed(() => isProjectTasksLoaded(props.projectId));
+const visibleTaskCount = ref(SESSION_PAGE_SIZE);
 let tasksHydrationHandle: number | null = null;
 let cancelTasksHydrationPaint: (() => void) | null = null;
 let tasksHydrationSeq = 0;
@@ -59,13 +62,45 @@ function scheduleProjectTasksHydration(projectId: string) {
   });
 }
 
+const sessionRows = computed(() =>
+  tasks.value.slice(0, visibleTaskCount.value).map((task) => ({
+    task,
+    route: `/projects/${props.projectId}/tasks/${task.id}`,
+  })),
+);
+
+const hiddenTaskCount = computed(() =>
+  Math.max(0, tasks.value.length - sessionRows.value.length),
+);
+
+function revealMoreSessions() {
+  visibleTaskCount.value = Math.min(
+    tasks.value.length,
+    visibleTaskCount.value + SESSION_PAGE_SIZE,
+  );
+}
+
 watch(
   () => props.projectId,
   (projectId) => {
+    visibleTaskCount.value = SESSION_PAGE_SIZE;
     cancelProjectTasksHydration();
     scheduleProjectTasksHydration(projectId);
   },
   { immediate: true },
+);
+
+watch(
+  () => tasks.value.length,
+  (taskCount, previousTaskCount) => {
+    if (taskCount <= SESSION_PAGE_SIZE) {
+      visibleTaskCount.value = SESSION_PAGE_SIZE;
+      return;
+    }
+    if (previousTaskCount !== undefined && visibleTaskCount.value >= previousTaskCount) {
+      visibleTaskCount.value = taskCount;
+    }
+  },
 );
 
 onBeforeUnmount(() => {
@@ -79,14 +114,19 @@ onBeforeUnmount(() => {
       正在加载对话…
     </div>
     <ul v-else-if="tasks.length" class="sessions-view__list ui-list">
-      <li v-for="t in tasks" :key="t.id" class="sessions-view__row">
+      <li v-for="row in sessionRows" :key="row.task.id" class="sessions-view__row">
         <RouterLink
-          :to="`/projects/${projectId}/tasks/${t.id}`"
+          :to="row.route"
           class="sessions-view__link ui-list-item"
         >
-          <span class="sessions-view__title">{{ t.title }}</span>
-          <span class="sessions-view__status">{{ t.status }}</span>
+          <span class="sessions-view__title">{{ row.task.title }}</span>
+          <span class="sessions-view__status">{{ row.task.status }}</span>
         </RouterLink>
+      </li>
+      <li v-if="hiddenTaskCount > 0" class="sessions-view__row">
+        <button type="button" class="sessions-view__more ui-list-item" @click="revealMoreSessions">
+          加载更多 {{ hiddenTaskCount }}
+        </button>
       </li>
     </ul>
     <div v-else class="sessions-view__empty">

@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/vue";
+import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SessionsView from "../src/pages/project/SessionsView.vue";
@@ -7,13 +7,16 @@ import * as tasksStore from "../src/services/tasksStore";
 vi.mock("../src/services/tasksStore", async () => {
   const { shallowRef } = await import("vue");
   const loadedProjects = shallowRef<Record<string, boolean>>({});
-  const tasksByProject = shallowRef<Record<string, Array<{ id: string; title: string; status: string }>>>({
+  const defaultTasksByProject = {
     lilia: [
       { id: "t-001", title: "接入 Claude Code 会话发现", status: "done" },
     ],
     tools: [
       { id: "t-002", title: "整理窗口快捷键", status: "running" },
     ],
+  };
+  const tasksByProject = shallowRef<Record<string, Array<{ id: string; title: string; status: string }>>>({
+    ...defaultTasksByProject,
   });
   const ensureProjectTasksLoaded = vi.fn(async (projectId: string) => {
     loadedProjects.value = {
@@ -23,18 +26,33 @@ vi.mock("../src/services/tasksStore", async () => {
   });
   const resetSessionsViewMock = () => {
     loadedProjects.value = {};
+    tasksByProject.value = { ...defaultTasksByProject };
     ensureProjectTasksLoaded.mockClear();
+  };
+  const setSessionsViewTasks = (
+    projectId: string,
+    tasks: Array<{ id: string; title: string; status: string }>,
+  ) => {
+    tasksByProject.value = {
+      ...tasksByProject.value,
+      [projectId]: tasks,
+    };
   };
   return {
     ensureProjectTasksLoaded,
     isProjectTasksLoaded: (projectId: string) => loadedProjects.value[projectId] === true,
     listProjectConversations: (projectId: string) => tasksByProject.value[projectId] ?? [],
     __resetSessionsViewMock: resetSessionsViewMock,
+    __setSessionsViewTasks: setSessionsViewTasks,
   };
 });
 
 type SessionsTasksStoreMock = typeof tasksStore & {
   __resetSessionsViewMock: () => void;
+  __setSessionsViewTasks: (
+    projectId: string,
+    tasks: Array<{ id: string; title: string; status: string }>,
+  ) => void;
 };
 
 const mockedTasksStore = tasksStore as SessionsTasksStoreMock;
@@ -102,6 +120,31 @@ describe("SessionsView", () => {
     await waitFor(() => {
       expect(view.getByText("整理窗口快捷键")).toBeInTheDocument();
     });
+  });
+
+  it("项目对话大列表先分页渲染，再按需加载更多", async () => {
+    mockedTasksStore.__setSessionsViewTasks(
+      "lilia",
+      Array.from({ length: 85 }, (_, index) => ({
+        id: `bulk-${index + 1}`,
+        title: `批量任务 ${index + 1}`,
+        status: "todo",
+      })),
+    );
+
+    const view = await renderSessions();
+    await flushDeferredProjectLoad();
+
+    await waitFor(() => {
+      expect(view.getByText("批量任务 1")).toBeInTheDocument();
+    });
+    expect(view.getByText("批量任务 80")).toBeInTheDocument();
+    expect(view.queryByText("批量任务 81")).not.toBeInTheDocument();
+
+    await fireEvent.click(view.getByRole("button", { name: "加载更多 5" }));
+
+    expect(view.getByText("批量任务 85")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: /加载更多/ })).toBeNull();
   });
 
   it("卸载时取消项目对话延迟加载的 paint 调度", async () => {
