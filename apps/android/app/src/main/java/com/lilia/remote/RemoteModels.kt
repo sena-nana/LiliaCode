@@ -35,6 +35,17 @@ data class RemoteTimelineItem(
     val title: String,
     val summary: String,
     val status: String,
+    val branchSourceTurnId: String? = null,
+)
+
+enum class RemoteSessionForkMode(val wireValue: String, val label: String) {
+    CONTINUE("continue", "Continue from selected turn"),
+    FORK("fork", "Fork from selected turn"),
+}
+
+data class RemoteBranchAnchor(
+    val sourceTurnId: String,
+    val mode: RemoteSessionForkMode,
 )
 
 data class PendingInteraction(

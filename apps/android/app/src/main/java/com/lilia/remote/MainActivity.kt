@@ -84,6 +84,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var providerStatus by remember { mutableStateOf<RemoteProviderStatus?>(null) }
     var pairingBusy by remember { mutableStateOf(false) }
     var pairingError by remember { mutableStateOf("") }
+    var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
     fun acceptPairedPc(pc: SavedPc) {
         activePc = pc
@@ -224,6 +225,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         taskId: String,
         failureMessage: String,
         clearError: Boolean = true,
+        onSuccess: () -> Unit = {},
         action: suspend (RemoteHttpClient) -> Result<Unit>,
     ) {
         val remoteClient = client ?: return
@@ -233,6 +235,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             val result = action(remoteClient)
             result.onFailure { handleRemoteFailure(it, failureMessage, pc) }
             if (result.isSuccess) {
+                if (!shouldIgnorePcResult(activePc, pc)) {
+                    onSuccess()
+                }
                 remoteClient.taskDetail(pc, taskId)
                     .onSuccess {
                         if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
@@ -307,6 +312,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                     providerStatus = providerStatus,
                     loading = detailLoading,
                     error = remoteError,
+                    pendingBranchAnchor = pendingBranchAnchor,
                     onBack = { selectedTask = null },
                     onRefresh = { openTask(activePc!!, selectedTask!!.task.taskId) },
                     onInterrupt = {
@@ -329,11 +335,27 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                             )
                         }
                     },
-                    onSend = { message ->
+                    onSelectBranchAnchor = { pendingBranchAnchor = it },
+                    onClearBranchAnchor = { pendingBranchAnchor = null },
+                    onSend = { message, branchAnchor ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
-                        runTaskAction(pc, taskId, "Send failed") { remoteClient ->
-                            remoteClient.sendMessage(pc, taskId, message)
+                        runTaskAction(
+                            pc,
+                            taskId,
+                            "Send failed",
+                            onSuccess = {
+                                if (pendingBranchAnchor == branchAnchor) {
+                                    pendingBranchAnchor = null
+                                }
+                            },
+                        ) { remoteClient ->
+                            remoteClient.sendMessage(
+                                pc,
+                                taskId,
+                                message,
+                                branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                            )
                         }
                     },
                 )
@@ -550,11 +572,14 @@ private fun TaskDetailScreen(
     providerStatus: RemoteProviderStatus?,
     loading: Boolean,
     error: String,
+    pendingBranchAnchor: RemoteBranchAnchor?,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
-    onSend: (String) -> Unit,
+    onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
+    onClearBranchAnchor: () -> Unit,
+    onSend: (String, RemoteBranchAnchor?) -> Unit,
 ) {
     var draft by remember(detail.task.taskId) { mutableStateOf("") }
     val pendingInteraction = detail.pendingInteraction
@@ -680,7 +705,40 @@ private fun TaskDetailScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(detail.timeline, key = { it.id }) { item ->
-                TimelineRow(item)
+                TimelineRow(
+                    item = item,
+                    loading = loading,
+                    onStartBranch = { mode ->
+                        item.branchSourceTurnId?.let { turnId ->
+                            onSelectBranchAnchor(RemoteBranchAnchor(turnId, mode))
+                        }
+                    },
+                )
+            }
+        }
+        pendingBranchAnchor?.let { anchor ->
+            Panel {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            anchor.mode.label,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(anchor.sourceTurnId, color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedButton(
+                        onClick = onClearBranchAnchor,
+                        enabled = !loading,
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("Clear")
+                    }
+                }
             }
         }
         OutlinedTextField(
@@ -694,8 +752,9 @@ private fun TaskDetailScreen(
             onClick = {
                 val message = draft.trim()
                 if (message.isNotEmpty()) {
+                    val branchAnchor = pendingBranchAnchor
                     draft = ""
-                    onSend(message)
+                    onSend(message, branchAnchor)
                 }
             },
             modifier = Modifier.fillMaxWidth(),
@@ -810,7 +869,11 @@ private fun TaskCard(task: RemoteTaskSummary, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TimelineRow(item: RemoteTimelineItem) {
+private fun TimelineRow(
+    item: RemoteTimelineItem,
+    loading: Boolean,
+    onStartBranch: (RemoteSessionForkMode) -> Unit,
+) {
     Panel {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -820,6 +883,24 @@ private fun TimelineRow(item: RemoteTimelineItem) {
             Text(item.status, color = Muted, style = MaterialTheme.typography.labelMedium)
         }
         Text(item.summary, color = Muted, style = MaterialTheme.typography.bodyMedium)
+        if (item.branchSourceTurnId != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { onStartBranch(RemoteSessionForkMode.CONTINUE) },
+                    enabled = !loading,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Continue")
+                }
+                OutlinedButton(
+                    onClick = { onStartBranch(RemoteSessionForkMode.FORK) },
+                    enabled = !loading,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Fork")
+                }
+            }
+        }
     }
 }
 
