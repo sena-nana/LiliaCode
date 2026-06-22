@@ -12,6 +12,7 @@ import {
   LILIA_IAB_OPEN_COMMAND,
   TASK_PROMOTE_COMMAND,
   TODO_CREATE_COMMAND,
+  WORKTREE_GET_FOR_TASK_COMMAND,
 } from "@lilia/contracts";
 import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
@@ -32,8 +33,10 @@ import {
   setMockComposerStateHandler,
   setMockRuntimeSnapshotDelay,
   setMockRuntimeSnapshot,
+  setMockTaskWorktree,
+  setMockTasks,
 } from "./tauriMock";
-import { createDraftTask } from "../src/services/tasksStore";
+import { createDraftTask, ensureProjectTasksLoaded } from "../src/services/tasksStore";
 import { createTodo, updateTodo } from "../src/services/todos";
 import {
   respondConsent,
@@ -278,6 +281,75 @@ describe("chat scheduler", () => {
     });
   });
 
+  it("任务依赖递归未完成时不会发送并写入本地错误", async () => {
+    setMockTasks([
+      {
+        id: "blocked-current",
+        projectId: "lilia",
+        sessionId: "blocked-current",
+        title: "当前任务",
+        titleSource: "auto",
+        status: "waiting",
+        createdAt: 1000,
+        parentId: null,
+        dependsOn: ["ready-dep"],
+        sortOrder: 0,
+        pinned: false,
+      },
+      {
+        id: "ready-dep",
+        projectId: "lilia",
+        sessionId: "ready-dep",
+        title: "已完成依赖",
+        titleSource: "auto",
+        status: "done",
+        createdAt: 1100,
+        parentId: null,
+        dependsOn: ["blocked-dep"],
+        sortOrder: 1,
+        pinned: false,
+      },
+      {
+        id: "blocked-dep",
+        projectId: "lilia",
+        sessionId: "blocked-dep",
+        title: "设计前置任务",
+        titleSource: "auto",
+        status: "waiting",
+        createdAt: 1200,
+        parentId: null,
+        dependsOn: [],
+        sortOrder: 2,
+        pinned: false,
+      },
+    ]);
+    await ensureProjectTasksLoaded("lilia", true);
+    const router = createLiliaRouter(createMemoryHistory());
+    await router.push("/projects/lilia/tasks/blocked-current");
+    await router.isReady();
+    const view = render(TaskDetail, {
+      props: {
+        projectId: "lilia",
+        taskId: "blocked-current",
+      },
+      global: {
+        plugins: [router],
+      },
+    });
+    await flushAfterPaint();
+    await waitFor(() => {
+      expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
+    });
+
+    await sendText(view, "尝试启动被依赖阻塞的任务");
+
+    await waitFor(() => {
+      expect(view.getByText(/任务依赖未完成/)).toBeInTheDocument();
+    });
+    expect(view.getByText(/设计前置任务/)).toBeInTheDocument();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
+  });
+
   it("启动 process session 通过消息入口发送 runtime command", async () => {
     const view = await renderTaskDetail();
 
@@ -299,6 +371,37 @@ describe("chat scheduler", () => {
         command: "npm test -- --watch=false",
         cwd: "D:\\PROJECT\\workspace\\Lilia",
       },
+    });
+  });
+
+  it("绑定 worktree 后发送使用 worktree 路径作为 project cwd", async () => {
+    setMockTaskWorktree("t-002", {
+      taskId: "t-002",
+      projectId: "lilia",
+      baseRepoPath: "D:\\PROJECT\\workspace\\Lilia",
+      worktreePath: "D:\\PROJECT\\workspace\\Lilia-task-worktree",
+      branchName: "lilia/t-002",
+      baseBranch: "main",
+      status: "active",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const view = await renderTaskDetail();
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === WORKTREE_GET_FOR_TASK_COMMAND))
+        .toBe(true);
+    });
+    await flushAfterPaint();
+
+    await sendText(view, "在绑定 worktree 中执行");
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
+    expect(send?.[1]).toMatchObject({
+      projectCwd: "D:\\PROJECT\\workspace\\Lilia-task-worktree",
     });
   });
 

@@ -7,7 +7,9 @@ use crate::agent_events::{
     runner_settings_update_control_type,
 };
 use crate::chat::auto_turn_decision::{prepare_turn_for_start, resolve_resume_session_id};
-use crate::chat::runner::{spawn_agent_turn, write_runner_stdin_for_task};
+use crate::chat::runner::{
+    ensure_task_ready_for_agent_turn, spawn_agent_turn, write_runner_stdin_for_task,
+};
 use crate::chat::slash_commands::{
     emit_slash_command_done, execute_slash_command, persist_and_emit_slash_command_result,
 };
@@ -64,6 +66,7 @@ pub fn chat_send_message(
     validate_backend_ready_for_send(&active_backend)?;
     let mut composer = normalize_composer_for_backend(composer, &task_id, &active_backend);
     let mut runtime_options = runtime_options;
+    ensure_task_ready_for_agent_turn(&app, &task_id)?;
     let slash_command_id = match &workflow {
         Some(ChatWorkflow::SlashCommand { command_id, .. }) => Some(command_id.clone()),
         _ => None,

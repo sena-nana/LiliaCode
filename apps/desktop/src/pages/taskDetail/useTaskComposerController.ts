@@ -8,6 +8,7 @@ import {
   serializeChatAttachmentReference,
   stripSerializedConversationReferences,
   TITLE_UPDATE_ACTION_KIND,
+  taskStatusLabel,
 } from "@lilia/contracts";
 import type {
   AgentTimelineEvent,
@@ -26,6 +27,7 @@ import type {
   LiliaReviewTarget,
   PermissionMode,
   ProviderRuntimeOptions,
+  Task,
   TaskWorktree,
   WorktreeListItem,
 } from "@lilia/contracts";
@@ -72,6 +74,7 @@ import {
   setComposerState,
 } from "../../services/chat";
 import { getProjectSettings } from "../../services/projects";
+import { getTask, listTasks } from "../../services/tasksStore";
 import {
   attachWorktreeToTask,
   clearTaskWorktree,
@@ -109,6 +112,42 @@ type WorktreeOption = { value: string; label: string; hint?: string };
 
 const WORKTREE_CURRENT_VALUE = "__current__";
 const WORKTREE_CREATE_VALUE = "__create__";
+
+function dependencyBlockReason(
+  task: Task,
+  tasksById: Map<string, Task>,
+  visiting: Set<string>,
+  visited: Set<string>,
+): string | null {
+  if (visited.has(task.id)) return null;
+  if (visiting.has(task.id)) return "任务依赖存在循环，暂不能启动会话。";
+  visiting.add(task.id);
+  for (const dependencyId of task.dependsOn) {
+    const dependency = tasksById.get(dependencyId);
+    if (!dependency) continue;
+    if (visiting.has(dependency.id)) return "任务依赖存在循环，暂不能启动会话。";
+    if (dependency.status !== "done") {
+      return `任务依赖未完成，暂不能启动会话：${dependency.title}（${taskStatusLabel(dependency.status)}）`;
+    }
+    const nestedReason = dependencyBlockReason(dependency, tasksById, visiting, visited);
+    if (nestedReason) return nestedReason;
+  }
+  visiting.delete(task.id);
+  visited.add(task.id);
+  return null;
+}
+
+function taskRunBlockReason(projectId: string | undefined, taskId: string): string | null {
+  if (!projectId) return null;
+  const tasks = listTasks(projectId);
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  const task = tasksById.get(taskId) ?? getTask(projectId, taskId);
+  if (!task) return null;
+  if (task.status === "blocked") {
+    return `任务已标记为阻塞，暂不能启动会话：${task.title}`;
+  }
+  return dependencyBlockReason(task, tasksById, new Set(), new Set());
+}
 
 interface GuideDispatchController {
   createGuideFromComposer: (
@@ -258,6 +297,9 @@ export function useTaskComposerController(options: {
   });
   const currentLiliaGoal = computed<LiliaThreadGoal | null>(() =>
     latestLiliaGoalFromTimeline(timeline.timelineEvents.value),
+  );
+  const taskRunBlockingReason = computed(() =>
+    taskRunBlockReason(props.projectId, props.taskId),
   );
   const effectiveProjectCwd = computed(() =>
     taskWorktree.value?.worktreePath ?? context.project.value?.cwd ?? null,
@@ -480,6 +522,13 @@ export function useTaskComposerController(options: {
     await guideDispatch.createGuideFromComposer(content, outgoingAttachments);
   }
 
+  function reportTaskRunBlock(): string | null {
+    const reason = taskRunBlockingReason.value;
+    if (!reason) return null;
+    timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(reason));
+    return reason;
+  }
+
   async function dispatchGuide(todo: TaskTodo) {
     const guideDispatch = await getGuideDispatch();
     await guideDispatch.dispatchGuide(todo);
@@ -506,6 +555,11 @@ export function useTaskComposerController(options: {
       !workflow &&
       !runtimeCommand
     ) return;
+
+    const blockReason = reportTaskRunBlock();
+    if (blockReason) {
+      throw new Error(blockReason);
+    }
 
     let optimisticId: string | null = null;
     try {
@@ -583,6 +637,7 @@ export function useTaskComposerController(options: {
     outgoingConversationReferences: ChatConversationReference[] = [],
   ) {
     if (!context.hasContext.value) return;
+    if (reportTaskRunBlock()) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
       await createGuideFromComposer(content, outgoingAttachments);
       return;
@@ -612,6 +667,7 @@ export function useTaskComposerController(options: {
 
   async function onExecuteSlashCommand(workflow: ChatSlashCommandWorkflow) {
     if (!context.hasContext.value) return;
+    if (reportTaskRunBlock()) return;
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0) {
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent("当前 Agent 正在运行，暂不能执行斜杠命令。"));
       return;
@@ -644,6 +700,11 @@ export function useTaskComposerController(options: {
     if (!context.hasContext.value) return;
     if (!normalized) {
       setProcessSessionError("请输入要启动的进程命令。");
+      return;
+    }
+    const blockReason = reportTaskRunBlock();
+    if (blockReason) {
+      setProcessSessionError(blockReason);
       return;
     }
     if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0 || processSessionBusy.value) {
@@ -1265,6 +1326,7 @@ export function useTaskComposerController(options: {
     pendingToolConsents,
     pendingAgentActions,
     blockingPendingAgentActions,
+    taskRunBlockingReason,
     pendingPlanApproval,
     currentLiliaGoal,
     processSessionBusy,

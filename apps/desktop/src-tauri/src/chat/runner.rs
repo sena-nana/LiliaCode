@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
@@ -369,6 +370,13 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
         return Ok(false);
     };
     let conn = lilia_store.conn()?;
+    if let Err(err) = ensure_task_ready_for_agent_turn_with_conn(&conn, &task_id) {
+        eprintln!(
+            "[chat-runtime] skip persisted queued turn for blocked task {}: {}",
+            task_id, err
+        );
+        return Ok(false);
+    }
     let Some(turn) = take_next_recoverable_pending_turn(&conn, &store, &task_id)? else {
         return Ok(false);
     };
@@ -404,6 +412,17 @@ pub(crate) fn resume_or_dispatch_persisted_pending_turn<R: Runtime>(
         turn.turn_id,
     );
     Ok(true)
+}
+
+pub(crate) fn ensure_task_ready_for_agent_turn<R: Runtime>(
+    app: &AppHandle<R>,
+    task_id: &str,
+) -> Result<(), String> {
+    let Some(lilia_store) = app.try_state::<LiliaStore>() else {
+        return Ok(());
+    };
+    let conn = lilia_store.conn()?;
+    ensure_task_ready_for_agent_turn_with_conn(&conn, task_id)
 }
 
 pub(crate) fn run_node_agent_runner<R: Runtime>(
@@ -1531,6 +1550,87 @@ struct DependencyContextItem {
     summary: String,
 }
 
+fn task_status_label(status: &str) -> &str {
+    match status {
+        "draft" => "草稿",
+        "waiting" => "等待中",
+        "running" => "运行中",
+        "blocked" => "阻塞",
+        "done" => "完成",
+        "cancelled" => "已取消",
+        _ => status,
+    }
+}
+
+fn load_task_run_gate_row(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<Option<DependencyTaskRow>, String> {
+    conn.query_row(
+        r#"SELECT id, title, status
+           FROM tasks
+           WHERE id = ?1 AND archived = 0"#,
+        params![task_id],
+        |row| {
+            Ok(DependencyTaskRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("task run gate: 查询任务失败：{e}"))
+}
+
+fn ensure_task_ready_for_agent_turn_with_conn(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+) -> Result<(), String> {
+    let Some(task) = load_task_run_gate_row(conn, task_id)? else {
+        return Ok(());
+    };
+    if task.status == "blocked" {
+        return Err(format!("任务已标记为阻塞，暂不能启动会话：{}", task.title));
+    }
+
+    let mut visiting = HashSet::new();
+    let mut visited = HashSet::new();
+    ensure_dependency_chain_done(conn, &task.id, &mut visiting, &mut visited)
+}
+
+fn ensure_dependency_chain_done(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    visiting: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+) -> Result<(), String> {
+    if visited.contains(task_id) {
+        return Ok(());
+    }
+    if !visiting.insert(task_id.to_string()) {
+        return Err("任务依赖存在循环，暂不能启动会话".to_string());
+    }
+
+    for dependency in load_dependency_tasks(conn, task_id)? {
+        if visiting.contains(&dependency.id) {
+            return Err("任务依赖存在循环，暂不能启动会话".to_string());
+        }
+        if dependency.status != "done" {
+            return Err(format!(
+                "任务依赖未完成，暂不能启动会话：{}（{}）",
+                dependency.title,
+                task_status_label(&dependency.status)
+            ));
+        }
+        ensure_dependency_chain_done(conn, &dependency.id, visiting, visited)?;
+    }
+
+    visiting.remove(task_id);
+    visited.insert(task_id.to_string());
+    Ok(())
+}
+
 fn apply_dependency_context_to_runtime_options<R: Runtime>(
     app: &AppHandle<R>,
     task_id: &str,
@@ -2140,6 +2240,76 @@ mod tests {
             .expect("dependency context");
 
         assert!(context.contains("Summary fallback text"));
+    }
+
+    #[test]
+    fn task_run_gate_rejects_blocked_current_task() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Blocked task", "blocked", 1, false);
+
+        let err = ensure_task_ready_for_agent_turn_with_conn(&conn, "task-1").unwrap_err();
+
+        assert!(err.contains("任务已标记为阻塞"));
+        assert!(err.contains("Blocked task"));
+    }
+
+    #[test]
+    fn task_run_gate_rejects_direct_unfinished_dependency() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "waiting", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Design pass", "waiting", 2, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+
+        let err = ensure_task_ready_for_agent_turn_with_conn(&conn, "task-1").unwrap_err();
+
+        assert!(err.contains("任务依赖未完成"));
+        assert!(err.contains("Design pass"));
+        assert!(err.contains("等待中"));
+    }
+
+    #[test]
+    fn task_run_gate_rejects_transitive_unfinished_dependency() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "waiting", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Implementation", "done", 2, false);
+        insert_dependency_task(&conn, "dep-2", "Design pass", "running", 3, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+        insert_dependency_link(&conn, "dep-1", "dep-2");
+
+        let err = ensure_task_ready_for_agent_turn_with_conn(&conn, "task-1").unwrap_err();
+
+        assert!(err.contains("Design pass"));
+        assert!(err.contains("运行中"));
+    }
+
+    #[test]
+    fn task_run_gate_allows_completed_dependency_chain() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "running", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Implementation", "done", 2, false);
+        insert_dependency_task(&conn, "dep-2", "Design pass", "done", 3, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+        insert_dependency_link(&conn, "dep-1", "dep-2");
+
+        ensure_task_ready_for_agent_turn_with_conn(&conn, "task-1").unwrap();
+    }
+
+    #[test]
+    fn task_run_gate_rejects_dependency_cycles() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        create_dependency_context_schema(&conn);
+        insert_dependency_task(&conn, "task-1", "Current", "waiting", 1, false);
+        insert_dependency_task(&conn, "dep-1", "Dependency", "done", 2, false);
+        insert_dependency_link(&conn, "task-1", "dep-1");
+        insert_dependency_link(&conn, "dep-1", "task-1");
+
+        let err = ensure_task_ready_for_agent_turn_with_conn(&conn, "task-1").unwrap_err();
+
+        assert!(err.contains("依赖存在循环"));
     }
 
     #[test]

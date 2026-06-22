@@ -128,6 +128,7 @@ const props = defineProps<{
   pendingBranchAnchor: ChatBranchAnchor | null;
   pendingAgentActions: PendingAgentAction[];
   hasBlockingPendingAction: boolean;
+  taskRunBlockingReason: string | null;
   currentLiliaGoal: LiliaThreadGoal | null;
   processSessionBusy: boolean;
   processSessionError: string | null;
@@ -453,8 +454,8 @@ function selectSuggestion(suggestion: SuggestionItem) {
             :pending-agent-actions="pendingAgentActions"
             :show-expired-pending-actions="showExpiredPendingActions"
             :can-retry-event="canRetryEvent"
-            :can-start-lilia-batch-apply="!isTurnRunning && !hasBlockingPendingAction"
-            :can-start-session-fork="!isTurnRunning && !hasBlockingPendingAction"
+            :can-start-lilia-batch-apply="!isTurnRunning && !hasBlockingPendingAction && !taskRunBlockingReason"
+            :can-start-session-fork="!isTurnRunning && !hasBlockingPendingAction && !taskRunBlockingReason"
             @resolve-pending-agent-action="emit('resolve-pending-agent-action', $event)"
             @retry-event="emit('retry-event', $event)"
             @open-image="emit('open-image', $event)"
@@ -488,7 +489,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                 <ProcessSessionControl
                   :running="isTurnRunning"
                   :busy="processSessionBusy"
-                  :disabled="hasBlockingPendingAction"
+                  :disabled="hasBlockingPendingAction || !!taskRunBlockingReason"
                   :error="processSessionError"
                   @start="emit('start-process-session', $event)"
                   @send-stdin="emit('send-process-session-stdin', $event)"
@@ -507,7 +508,7 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   :append-attachments-to-end-key="appendAttachmentsToEndKey"
                   :project-cwd="contextSearchCwd"
                   :sending="isTurnRunning"
-                  :compact-disabled="hasBlockingPendingAction"
+                  :compact-disabled="hasBlockingPendingAction || !!taskRunBlockingReason"
                   :context-usage="contextUsage"
                   :pending-ask="pendingAsk"
                   :tool-consent="toolConsent"
