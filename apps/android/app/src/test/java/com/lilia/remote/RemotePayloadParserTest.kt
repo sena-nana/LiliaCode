@@ -363,4 +363,92 @@ class RemotePayloadParserTest {
         assertEquals("Tool result", detail.timeline[2].title)
         assertEquals("Tests passed", detail.timeline[2].summary)
     }
+
+    @Test
+    fun timelineMarksCompletedAssistantMessagesAsBranchable() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "event-1",
+                      "kind": "message",
+                      "turnId": "turn-1",
+                      "status": "success",
+                      "payload": {
+                        "role": "assistant",
+                        "content": "Ready"
+                      }
+                    },
+                    {
+                      "id": "event-2",
+                      "kind": "message",
+                      "turnId": "turn-2",
+                      "status": "completed",
+                      "payload": {
+                        "role": "assistant",
+                        "content": "Done"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        assertEquals("turn-1", detail.timeline[0].branchSourceTurnId)
+        assertEquals("turn-2", detail.timeline[1].branchSourceTurnId)
+    }
+
+    @Test
+    fun timelineOnlyMarksFinalAssistantMessageTurnsAsBranchable() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "user-message",
+                      "kind": "message",
+                      "turnId": "turn-user",
+                      "status": "success",
+                      "payload": { "role": "user", "content": "Continue" }
+                    },
+                    {
+                      "id": "running-assistant",
+                      "kind": "message",
+                      "turnId": "turn-running",
+                      "status": "running",
+                      "payload": { "role": "assistant", "content": "Working" }
+                    },
+                    {
+                      "id": "missing-turn",
+                      "kind": "message",
+                      "status": "success",
+                      "payload": { "role": "assistant", "content": "Done" }
+                    },
+                    {
+                      "id": "reasoning",
+                      "kind": "reasoning",
+                      "turnId": "turn-reasoning",
+                      "status": "success",
+                      "payload": { "role": "assistant", "content": "Done" }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        detail.timeline.forEach { item ->
+            assertEquals(null, item.branchSourceTurnId)
+        }
+    }
 }

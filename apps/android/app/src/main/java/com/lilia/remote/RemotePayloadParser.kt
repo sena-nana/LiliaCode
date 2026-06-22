@@ -4,6 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object RemotePayloadParser {
+    private val branchableTimelineStatuses = setOf("success", "completed", "done")
+
     fun parseBridgeStatus(response: JSONObject): RemoteBridgeStatus {
         RemoteEnvelopeAdapter.throwIfError(response, "Bridge status failed")
         val status = response.optJSONObject("status") ?: error("Bridge status missing status")
@@ -84,9 +86,18 @@ object RemotePayloadParser {
                     title = timelineTitle(event),
                     summary = timelineSummary(event),
                     status = event.optString("status").ifBlank { "info" },
+                    branchSourceTurnId = timelineBranchSourceTurnId(event),
                 ),
             )
         }
+    }
+
+    private fun timelineBranchSourceTurnId(event: JSONObject): String? {
+        if (event.optString("kind") != "message") return null
+        val payload = event.optJSONObject("payload") ?: return null
+        if (payload.optString("role") != "assistant") return null
+        if (event.optString("status") !in branchableTimelineStatuses) return null
+        return event.optString("turnId").takeIf { it.isNotBlank() }
     }
 
     private fun timelineTitle(event: JSONObject): String =

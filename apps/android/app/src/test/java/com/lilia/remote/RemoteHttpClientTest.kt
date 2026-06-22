@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -389,6 +390,40 @@ class RemoteHttpClientTest {
         assertEquals("chat.send", request.getString("type"))
         assertEquals("task-1", request.getString("taskId"))
         assertEquals("Continue from Android", request.getString("content"))
+        assertFalse(request.has("runtimeCommand"))
+    }
+
+    @Test
+    fun sendMessageDispatchesRuntimeCommandWhenPresent() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.send",
+                    "result": { "accepted": true }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+        val runtimeCommand = RemoteRuntimeCommandAdapter.sessionFork(
+            RemoteBranchAnchor("turn-source", RemoteSessionForkMode.FORK),
+        )
+
+        RemoteHttpClient(FakeDeviceStore())
+            .sendMessage(savedPc(server), "task-1", "Continue from Android", runtimeCommand)
+            .getOrThrow()
+
+        val command = requestBody.get()
+            .getJSONObject("request")
+            .getJSONObject("runtimeCommand")
+        assertSessionForkCommand(command, "turn-source", "fork")
     }
 
     @Test
@@ -629,6 +664,13 @@ class RemoteHttpClientTest {
 
     private fun bridgeUrl(server: HttpServer): String =
         "http://127.0.0.1:${server.address.port}"
+
+    private fun assertSessionForkCommand(command: JSONObject, sourceTurnId: String, mode: String) {
+        assertEquals("session_fork", command.getString("type"))
+        assertEquals(true, command.getBoolean("excludeTurns"))
+        assertEquals(sourceTurnId, command.getString("sourceTurnId"))
+        assertEquals(mode, command.getString("mode"))
+    }
 
     private class FakeDeviceStore : RemoteDeviceStore {
         val seenEndpointIds = mutableListOf<String>()
