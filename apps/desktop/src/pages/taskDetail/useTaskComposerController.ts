@@ -189,14 +189,55 @@ interface LiliaWorkflowActionHandlers {
   onClearLiliaGoal: () => Promise<void>;
 }
 
-interface TaskLoadCycle {
-  seq: number;
+interface TaskContextSnapshot {
   taskId: string;
   projectId?: string;
+  contextSnapshotVersion: number;
+}
+
+interface TaskLoadCycle extends TaskContextSnapshot {
+  seq: number;
   pendingBeforeLoad: Set<string>;
   timelineEventIdsBeforeLoad: Set<string>;
   liveTimelineEventsDuringLoad: Map<string, AgentTimelineEvent>;
   runtimeSeqBeforeLoad: number;
+}
+
+const composerStateLoads = new Map<string, Promise<ChatComposerState>>();
+const taskWorktreeLoads = new Map<string, Promise<TaskWorktree | null>>();
+const worktreeListLoads = new Map<string, Promise<WorktreeListItem[]>>();
+const runtimeSnapshotLoads = new Map<string, Promise<Awaited<ReturnType<typeof getRuntimeSnapshot>>>>();
+
+function singleFlight<T>(
+  loads: Map<string, Promise<T>>,
+  key: string,
+  load: () => Promise<T>,
+): Promise<T> {
+  const existing = loads.get(key);
+  if (existing) return existing;
+  const pending = load().finally(() => {
+    if (loads.get(key) === pending) {
+      loads.delete(key);
+    }
+  });
+  loads.set(key, pending);
+  return pending;
+}
+
+function loadComposerState(taskId: string): Promise<ChatComposerState> {
+  return singleFlight(composerStateLoads, taskId, () => getComposerState(taskId));
+}
+
+function loadTaskWorktree(taskId: string): Promise<TaskWorktree | null> {
+  return singleFlight(taskWorktreeLoads, taskId, () => getTaskWorktree(taskId));
+}
+
+function loadWorktreeList(base: string): Promise<WorktreeListItem[]> {
+  return singleFlight(worktreeListLoads, base, () => listWorktrees(base));
+}
+
+function loadRuntimeSnapshot(taskId: string): Promise<Awaited<ReturnType<typeof getRuntimeSnapshot>>> {
+  return singleFlight(runtimeSnapshotLoads, taskId, () => getRuntimeSnapshot(taskId));
 }
 
 export function useTaskComposerController(options: {
@@ -257,6 +298,7 @@ export function useTaskComposerController(options: {
   });
   let loadSeq = 0;
   let runtimeEventSeq = 0;
+  let composerStateWriteSeq = 0;
   let activeLoadCycle: TaskLoadCycle | null = null;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
   let cancelRuntimeSnapshotHydrationPaint: (() => void) | null = null;
@@ -383,78 +425,123 @@ export function useTaskComposerController(options: {
     };
   }
 
-  async function refreshTaskWorktree() {
+  function captureTaskSnapshot(): TaskContextSnapshot {
+    return {
+      taskId: props.taskId,
+      projectId: props.projectId,
+      contextSnapshotVersion: context.captureContextSnapshot(),
+    };
+  }
+
+  function isCurrentTaskSnapshot(snapshot: TaskContextSnapshot): boolean {
+    return context.isCurrentContextSnapshot(
+      snapshot.contextSnapshotVersion,
+      snapshot.projectId,
+      snapshot.taskId,
+    );
+  }
+
+  function assertCurrentTaskSnapshot(snapshot: TaskContextSnapshot) {
+    context.assertContextSnapshotCurrent(
+      snapshot.contextSnapshotVersion,
+      snapshot.projectId,
+      snapshot.taskId,
+    );
+  }
+
+  async function refreshTaskWorktree(
+    snapshot = captureTaskSnapshot(),
+  ): Promise<TaskWorktree | null> {
     try {
-      taskWorktree.value = await getTaskWorktree(props.taskId);
-      if (!taskWorktree.value && !worktreeBusy.value && context.project.value?.cwd) {
+      const loaded = await loadTaskWorktree(snapshot.taskId);
+      if (!isCurrentTaskSnapshot(snapshot)) return null;
+      taskWorktree.value = loaded;
+      if (!loaded && !worktreeBusy.value && context.project.value?.cwd) {
         const settings = await getProjectSettings();
+        if (!isCurrentTaskSnapshot(snapshot)) return taskWorktree.value;
         if (settings.worktree?.defaultMode === "create") {
           await onSelectWorktree(WORKTREE_CREATE_VALUE);
         }
       }
+      return taskWorktree.value;
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return null;
       taskWorktree.value = null;
       worktreeError.value = `读取工作树失败：${String(err)}`;
+      return null;
     }
   }
 
-  async function refreshWorktreeOptions() {
+  async function refreshWorktreeOptions(
+    snapshot = captureTaskSnapshot(),
+  ) {
     const base = context.project.value?.cwd;
     const current: WorktreeOption[] = [
       { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: base || "使用当前项目目录" },
       { value: WORKTREE_CREATE_VALUE, label: "新建工作树", hint: "为当前对话创建独立 worktree" },
     ];
     if (!base) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       worktreeOptions.value = current;
       return;
     }
     try {
-      const items = await listWorktrees(base);
+      const items = await loadWorktreeList(base);
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       const existing = items
         .map(worktreeOptionFromItem)
         .filter((item): item is WorktreeOption => Boolean(item));
       worktreeOptions.value = [...current, ...existing];
       worktreeError.value = null;
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       worktreeOptions.value = current;
       worktreeError.value = `读取工作树列表失败：${String(err)}`;
     }
   }
 
   async function onSelectWorktree(value: string) {
+    const snapshot = captureTaskSnapshot();
     const base = context.project.value?.cwd;
     if (!base || worktreeBusy.value) return;
     worktreeBusy.value = true;
     worktreeError.value = null;
     try {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       if (value === WORKTREE_CURRENT_VALUE) {
-        await clearTaskWorktree(props.taskId);
+        await clearTaskWorktree(snapshot.taskId);
+        if (!isCurrentTaskSnapshot(snapshot)) return;
         taskWorktree.value = null;
         return;
       }
       const settings = await getProjectSettings();
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       taskWorktree.value = value === WORKTREE_CREATE_VALUE
         ? await createWorktreeForTask({
-          taskId: props.taskId,
-          projectId: props.projectId ?? null,
+          taskId: snapshot.taskId,
+          projectId: snapshot.projectId ?? null,
           baseRepoPath: base,
           parentDir: settings.worktree?.parentDir ?? null,
         })
         : await attachWorktreeToTask({
-          taskId: props.taskId,
-          projectId: props.projectId ?? null,
+          taskId: snapshot.taskId,
+          projectId: snapshot.projectId ?? null,
           baseRepoPath: base,
           worktreePath: value,
         });
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       const nextComposer = withActiveBackend(composerForView.value);
       composer.value = nextComposer;
-      await setComposerState(nextComposer);
-      await refreshWorktreeOptions();
+      await persistComposerState(nextComposer, snapshot);
+      await refreshWorktreeOptions(snapshot);
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       worktreeError.value = `切换工作树失败：${String(err)}`;
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(worktreeError.value));
     } finally {
-      worktreeBusy.value = false;
+      if (isCurrentTaskSnapshot(snapshot)) {
+        worktreeBusy.value = false;
+      }
     }
   }
 
@@ -541,6 +628,7 @@ export function useTaskComposerController(options: {
 
   async function sendAgentMessage(input: SendAgentMessageInput) {
     if (!context.hasContext.value) return;
+    const snapshot = captureTaskSnapshot();
     const outgoingAttachments = input.turn.outgoingAttachments ?? [];
     const outgoingConversationReferences = input.turn.outgoingConversationReferences ?? [];
     const workflow = input.workflow ?? null;
@@ -563,12 +651,16 @@ export function useTaskComposerController(options: {
 
     let optimisticId: string | null = null;
     try {
+      assertCurrentTaskSnapshot(snapshot);
       await ensureComposerLoaded();
+      assertCurrentTaskSnapshot(snapshot);
       const currentComposer = composerForView.value;
       await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
+      assertCurrentTaskSnapshot(snapshot);
       const cwd = taskWorktree.value?.worktreePath ??
         context.project.value?.cwd ??
         (await context.ensureOrphanCwd());
+      assertCurrentTaskSnapshot(snapshot);
       if (
         runtimeCommand?.type === "process_session" &&
         runtimeCommand.action === "spawn" &&
@@ -577,6 +669,7 @@ export function useTaskComposerController(options: {
         runtimeCommand = { ...runtimeCommand, cwd };
       }
       runtimeOptions = await runtimeOptionsWithWorktreeContext(currentComposer, runtimeOptions);
+      assertCurrentTaskSnapshot(snapshot);
 
       const optimistic = timeline.createOptimisticMessageEvent({
         content,
@@ -587,7 +680,7 @@ export function useTaskComposerController(options: {
       timeline.upsertTimelineEvent(optimistic);
       userSendScrollKey.value += 1;
       const sendInput: SendMessageInput = {
-        taskId: props.taskId,
+        taskId: snapshot.taskId,
         turn: {
           content,
           composer: currentComposer,
@@ -600,9 +693,12 @@ export function useTaskComposerController(options: {
         runtimeCommand,
         runtimeOptions,
       };
+      assertCurrentTaskSnapshot(snapshot);
       await sendMessage(sendInput);
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       timeline.removeTimelineEvent(optimistic.id);
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       if (optimisticId) timeline.removeTimelineEvent(optimisticId);
       isTurnRunning.value = false;
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(`发送失败：${String(err)}`, {
@@ -625,8 +721,9 @@ export function useTaskComposerController(options: {
   watch(
     () => [props.taskId, context.project.value?.cwd ?? ""] as const,
     () => {
-      void refreshTaskWorktree();
-      void refreshWorktreeOptions();
+      const snapshot = captureTaskSnapshot();
+      void refreshTaskWorktree(snapshot);
+      void refreshWorktreeOptions(snapshot);
     },
     { immediate: true },
   );
@@ -696,6 +793,7 @@ export function useTaskComposerController(options: {
   }
 
   async function onStartProcessSession(command: string) {
+    const snapshot = captureTaskSnapshot();
     const normalized = command.trim();
     if (!context.hasContext.value) return;
     if (!normalized) {
@@ -724,13 +822,17 @@ export function useTaskComposerController(options: {
         runtimeCommand: createProcessSessionCommand("spawn", { command: normalized }),
       });
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       setProcessSessionError(`启动进程失败：${String(err)}`);
     } finally {
-      processSessionBusy.value = false;
+      if (isCurrentTaskSnapshot(snapshot)) {
+        processSessionBusy.value = false;
+      }
     }
   }
 
   async function onSendProcessSessionStdin(stdin: string) {
+    const snapshot = captureTaskSnapshot();
     if (!context.hasContext.value) return;
     if (!isTurnRunning.value) {
       setProcessSessionError("当前没有运行中的进程会话。");
@@ -744,20 +846,25 @@ export function useTaskComposerController(options: {
     processSessionBusy.value = true;
     clearProcessSessionError();
     try {
+      assertCurrentTaskSnapshot(snapshot);
       await sendProcessSessionCommand(
-        props.taskId,
+        snapshot.taskId,
         createProcessSessionCommand("write_stdin", { stdin }),
       );
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       const message = `发送 stdin 失败：${String(err)}`;
       setProcessSessionError(message);
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
     } finally {
-      processSessionBusy.value = false;
+      if (isCurrentTaskSnapshot(snapshot)) {
+        processSessionBusy.value = false;
+      }
     }
   }
 
   async function onStopProcessSession() {
+    const snapshot = captureTaskSnapshot();
     if (!context.hasContext.value) return;
     if (!isTurnRunning.value) {
       setProcessSessionError("当前没有运行中的进程会话。");
@@ -767,16 +874,20 @@ export function useTaskComposerController(options: {
     processSessionBusy.value = true;
     clearProcessSessionError();
     try {
+      assertCurrentTaskSnapshot(snapshot);
       await sendProcessSessionCommand(
-        props.taskId,
+        snapshot.taskId,
         createProcessSessionCommand("kill"),
       );
     } catch (err) {
+      if (!isCurrentTaskSnapshot(snapshot)) return;
       const message = `停止进程失败：${String(err)}`;
       setProcessSessionError(message);
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
     } finally {
-      processSessionBusy.value = false;
+      if (isCurrentTaskSnapshot(snapshot)) {
+        processSessionBusy.value = false;
+      }
     }
   }
 
@@ -944,7 +1055,22 @@ export function useTaskComposerController(options: {
     await resolvers.onResolvePendingAgentAction(resolution);
   }
 
+  async function persistComposerState(
+    state: ChatComposerState,
+    snapshot = captureTaskSnapshot(),
+  ) {
+    const writeSeq = ++composerStateWriteSeq;
+    await Promise.resolve();
+    if (
+      writeSeq !== composerStateWriteSeq ||
+      state.taskId !== snapshot.taskId ||
+      !isCurrentTaskSnapshot(snapshot)
+    ) return;
+    await setComposerState(state);
+  }
+
   async function onComposerUpdate(next: ChatComposerState) {
+    const snapshot = captureTaskSnapshot();
     const requestedPermission = next.permission;
     const normalized = withActiveBackend(next, requestedPermission);
     composer.value = normalized;
@@ -952,7 +1078,7 @@ export function useTaskComposerController(options: {
       void agentInteractionSettings.update({ permissionMode: requestedPermission });
     }
     try {
-      await setComposerState(normalized);
+      await persistComposerState(normalized, snapshot);
     } catch (err) {
       console.error("[chat] setComposerState failed", err);
     }
@@ -975,29 +1101,32 @@ export function useTaskComposerController(options: {
   }
 
   async function loadComposerForCurrentTask(
-    taskId: string,
-    seq: number,
+    cycle: TaskLoadCycle,
   ): Promise<ChatComposerState | null> {
-    const comp = await getComposerState(taskId);
-    if (seq !== loadSeq || taskId !== props.taskId) return null;
-    await refreshTaskWorktree();
+    const comp = await loadComposerState(cycle.taskId);
+    if (!isCurrentLoadCycle(cycle)) return null;
+    await refreshTaskWorktree(cycle);
+    if (!isCurrentLoadCycle(cycle)) return null;
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
 
-  async function loadComposerForSend(taskId: string): Promise<ChatComposerState | null> {
-    const comp = await getComposerState(taskId);
-    if (taskId !== props.taskId) return null;
-    await refreshTaskWorktree();
+  async function loadComposerForSend(
+    snapshot: TaskContextSnapshot,
+  ): Promise<ChatComposerState | null> {
+    const comp = await loadComposerState(snapshot.taskId);
+    if (!isCurrentTaskSnapshot(snapshot)) return null;
+    await refreshTaskWorktree(snapshot);
+    if (!isCurrentTaskSnapshot(snapshot)) return null;
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
 
   async function ensureComposerLoaded(): Promise<ChatComposerState> {
     if (composer.value) return composer.value;
-    const taskId = props.taskId;
+    const snapshot = captureTaskSnapshot();
     if (!composerLoad) {
-      const directLoad = loadComposerForSend(taskId).catch((err) => {
+      const directLoad = loadComposerForSend(snapshot).catch((err) => {
         console.error("[chat] getComposerState failed", err);
         return null;
       });
@@ -1006,8 +1135,8 @@ export function useTaskComposerController(options: {
     const pending = composerLoad;
     let loaded = await pending;
     if (composerLoad === pending) composerLoad = null;
-    if (!loaded && taskId === props.taskId) {
-      loaded = await loadComposerForSend(taskId);
+    if (!loaded && isCurrentTaskSnapshot(snapshot)) {
+      loaded = await loadComposerForSend(snapshot);
     }
     if (!loaded) throw new Error("Composer 尚未就绪");
     return loaded;
@@ -1049,61 +1178,45 @@ export function useTaskComposerController(options: {
     });
   }
 
-  function applyRuntimeSnapshotForCurrentLoad(options: {
-    taskId: string;
-    projectId?: string;
-    seq: number;
-    runtimeSeqBeforeLoad: number;
-    runtimeSnapshot: Awaited<ReturnType<typeof getRuntimeSnapshot>> | null;
-  }) {
-    const { taskId, projectId, seq, runtimeSeqBeforeLoad, runtimeSnapshot } = options;
-    if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
-    if (runtimeSeqBeforeLoad !== runtimeEventSeq) return;
+  function applyRuntimeSnapshotForCurrentLoad(
+    cycle: TaskLoadCycle,
+    runtimeSnapshot: Awaited<ReturnType<typeof getRuntimeSnapshot>> | null,
+  ) {
+    if (!isCurrentLoadCycle(cycle)) return;
+    if (cycle.runtimeSeqBeforeLoad !== runtimeEventSeq) return;
     contextUsage.value = runtimeSnapshot?.contextUsage ?? null;
     isTurnRunning.value = runtimeSnapshot
       ? runtimePhaseKeepsTurnRunning(runtimeSnapshot.phase)
       : false;
     if (runtimeSnapshot?.phase === "abandoned") {
-      clearPendingInteractionsForTask(taskId);
+      clearPendingInteractionsForTask(cycle.taskId);
       timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(
         runtimeAbandonedMessage(runtimeSnapshot),
       ));
     }
     if (runtimeSnapshot?.rollback?.rolledBack) {
       restoreDraftFromRollback(runtimeSnapshot.rollback);
-      void ackRestoredRollback(taskId);
+      void ackRestoredRollback(cycle.taskId);
     }
   }
 
-  function scheduleRuntimeSnapshotHydration(options: {
-    taskId: string;
-    projectId?: string;
-    seq: number;
-    runtimeSeqBeforeLoad: number;
-  }) {
-    const { taskId, projectId, seq, runtimeSeqBeforeLoad } = options;
+  function scheduleRuntimeSnapshotHydration(cycle: TaskLoadCycle) {
     cancelRuntimeSnapshotHydrationPaint?.();
     const cancelPaint = scheduleAfterPaint(() => {
       if (cancelRuntimeSnapshotHydrationPaint === cancelPaint) {
         cancelRuntimeSnapshotHydrationPaint = null;
       }
-      if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
+      if (!isCurrentLoadCycle(cycle)) return;
       void measurePerfAsync(
         "task-detail.runtime-snapshot",
         async () => {
-          const runtimeSnapshot = await getRuntimeSnapshot(taskId).catch((err) => {
+          const runtimeSnapshot = await loadRuntimeSnapshot(cycle.taskId).catch((err) => {
             console.error("[chat] getRuntimeSnapshot failed", err);
             return null;
           });
-          applyRuntimeSnapshotForCurrentLoad({
-            taskId,
-            projectId,
-            seq,
-            runtimeSeqBeforeLoad,
-            runtimeSnapshot,
-          });
+          applyRuntimeSnapshotForCurrentLoad(cycle, runtimeSnapshot);
         },
-        { detail: taskId },
+        { detail: cycle.taskId },
       );
     });
     cancelRuntimeSnapshotHydrationPaint = cancelPaint;
@@ -1115,6 +1228,7 @@ export function useTaskComposerController(options: {
       seq: ++loadSeq,
       taskId: props.taskId,
       projectId: props.projectId,
+      contextSnapshotVersion: context.captureContextSnapshot(),
       pendingBeforeLoad: currentPendingRequestIds(),
       timelineEventIdsBeforeLoad: new Set(
         timeline.persistedTimelineEvents.value.map((event) => event.id),
@@ -1131,14 +1245,19 @@ export function useTaskComposerController(options: {
     return cycle;
   }
 
+  function isCurrentLoadCycle(cycle: TaskLoadCycle): boolean {
+    return cycle.seq === loadSeq &&
+      cycle.taskId === props.taskId &&
+      cycle.projectId === props.projectId &&
+      isCurrentTaskSnapshot(cycle);
+  }
+
   function finalizeLoadCycle(cycle: TaskLoadCycle) {
     if (activeLoadCycle?.seq === cycle.seq) {
       activeLoadCycle = null;
     }
     if (
-      cycle.seq === loadSeq &&
-      cycle.taskId === props.taskId &&
-      cycle.projectId === props.projectId &&
+      isCurrentLoadCycle(cycle) &&
       context.isPopup.value
     ) {
       context.popupContentReady.value = true;
@@ -1149,9 +1268,7 @@ export function useTaskComposerController(options: {
     const cycle = activeLoadCycle;
     if (
       !cycle ||
-      cycle.seq !== loadSeq ||
-      cycle.taskId !== props.taskId ||
-      cycle.projectId !== props.projectId
+      !isCurrentLoadCycle(cycle)
     ) {
       return;
     }
@@ -1169,16 +1286,14 @@ export function useTaskComposerController(options: {
         cancelComposerStateHydrationPaint = null;
       }
       if (
-        cycle.seq !== loadSeq ||
-        cycle.taskId !== props.taskId ||
-        cycle.projectId !== props.projectId ||
+        !isCurrentLoadCycle(cycle) ||
         composer.value
       ) {
         return;
       }
       const pending = composerLoad ?? measurePerfAsync(
         "task-detail.composer-state.load",
-        () => loadComposerForCurrentTask(cycle.taskId, cycle.seq),
+        () => loadComposerForCurrentTask(cycle),
         { detail: cycle.taskId },
       ).catch((err) => {
         console.error("[chat] getComposerState failed", err);
@@ -1201,9 +1316,7 @@ export function useTaskComposerController(options: {
         { detail: cycle.taskId },
       );
       if (
-        cycle.seq !== loadSeq ||
-        cycle.taskId !== props.taskId ||
-        cycle.projectId !== props.projectId
+        !isCurrentLoadCycle(cycle)
       ) {
         return;
       }
@@ -1225,12 +1338,7 @@ export function useTaskComposerController(options: {
         pendingBeforeLoadRequestIds: cycle.pendingBeforeLoad,
       });
       clearPendingInteractionsForTask(cycle.taskId, { keepRequestIds });
-      scheduleRuntimeSnapshotHydration({
-        taskId: cycle.taskId,
-        projectId: cycle.projectId,
-        seq: cycle.seq,
-        runtimeSeqBeforeLoad: cycle.runtimeSeqBeforeLoad,
-      });
+      scheduleRuntimeSnapshotHydration(cycle);
     } finally {
       finalizeLoadCycle(cycle);
     }
@@ -1286,6 +1394,10 @@ export function useTaskComposerController(options: {
 
   function resetForRouteChange() {
     cancelScheduledHydration();
+    loadSeq += 1;
+    composerStateWriteSeq += 1;
+    activeLoadCycle = null;
+    composerLoad = null;
     isTurnRunning.value = false;
     interruptInFlight.value = false;
     processSessionBusy.value = false;

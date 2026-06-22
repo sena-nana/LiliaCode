@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
 import { measurePerfAsync } from "../utils/perf";
 
@@ -171,6 +172,7 @@ function mainRouteForPopup(): string {
 
 async function onClose() {
   if (disposed) return;
+  invalidateConversationContextSnapshot("popup-close");
   await appWindow.close();
 }
 
@@ -189,6 +191,7 @@ async function onFocusMain() {
     }
   }
   if (disposed) return;
+  invalidateConversationContextSnapshot("popup-close");
   await focusMainWindow(mainRouteForPopup());
   if (disposed) return;
   await appWindow.close();

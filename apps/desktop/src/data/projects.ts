@@ -27,6 +27,7 @@ interface ProjectRow {
 export const PROJECTS = ref<Project[]>([]);
 const projectsLoaded = ref(false);
 let projectLoad: Promise<void> | null = null;
+const projectLoads = new Map<string, Promise<Project | null>>();
 let onProjectRemoved:
   | ((projectId: string) => void | Promise<void>)
   | null = null;
@@ -90,9 +91,17 @@ export function getProject(id: string): Project | undefined {
 export async function ensureProjectLoaded(id: string): Promise<Project | null> {
   const existing = getProject(id);
   if (existing) return existing;
-  const row = await invoke<ProjectRow | null>(PROJECT_GET_COMMAND, { id });
-  if (!row) return null;
-  return upsertProject(projectRowToProject(row));
+  const pending = projectLoads.get(id);
+  if (pending) return pending;
+  const load = invoke<ProjectRow | null>(PROJECT_GET_COMMAND, { id })
+    .then((row) => row ? upsertProject(projectRowToProject(row)) : null)
+    .finally(() => {
+      if (projectLoads.get(id) === load) {
+        projectLoads.delete(id);
+      }
+    });
+  projectLoads.set(id, load);
+  return load;
 }
 
 /**

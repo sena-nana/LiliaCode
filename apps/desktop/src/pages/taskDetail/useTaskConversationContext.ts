@@ -13,6 +13,13 @@ import {
 } from "../../services/tasksStore";
 import { ensureProjectLoaded, getProject } from "../../services/projectsStore";
 import { rememberPopupLastProject } from "../../services/popupWindows";
+import {
+  getConversationContextSnapshotVersion,
+  invalidateConversationContextSnapshot,
+  isConversationContextSnapshotCurrent,
+  onConversationContextSnapshotInvalidated,
+  type ConversationContextInvalidationReason,
+} from "../../services/conversationContextInvalidation";
 import type { ChatAttachment } from "@lilia/contracts";
 import { measurePerfAsync } from "../../utils/perf";
 
@@ -43,6 +50,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
   const orphanCwd = ref<string | null>(null);
   let popupContextSeq = 0;
   let contextLoadingTimer: ReturnType<typeof setTimeout> | null = null;
+  let contextSnapshotVersion = getConversationContextSnapshotVersion();
   let disposed = false;
 
   const conversationRouteState = computed(() =>
@@ -84,16 +92,54 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
   );
   const contextSearchCwd = computed(() => project.value?.cwd ?? orphanCwd.value ?? null);
 
+  function markContextSnapshotInvalidated(version: number) {
+    if (version === contextSnapshotVersion) return;
+    contextSnapshotVersion = version;
+    popupContextSeq += 1;
+    clearContextLoadingTimer();
+  }
+
+  function invalidateContextSnapshot(reason: ConversationContextInvalidationReason) {
+    markContextSnapshotInvalidated(invalidateConversationContextSnapshot(reason));
+  }
+
+  function captureContextSnapshot(): number {
+    return contextSnapshotVersion;
+  }
+
+  function isCurrentContextSnapshot(
+    snapshotVersion: number,
+    projectId = props.projectId,
+    taskId = props.taskId,
+  ): boolean {
+    return !disposed &&
+      snapshotVersion === contextSnapshotVersion &&
+      isConversationContextSnapshotCurrent(snapshotVersion) &&
+      projectId === props.projectId &&
+      taskId === props.taskId;
+  }
+
+  function assertContextSnapshotCurrent(
+    snapshotVersion: number,
+    projectId = props.projectId,
+    taskId = props.taskId,
+  ) {
+    if (!isCurrentContextSnapshot(snapshotVersion, projectId, taskId)) {
+      throw new Error("会话上下文已失效，请重新操作");
+    }
+  }
+
   async function ensureOrphanCwd(): Promise<string> {
     if (orphanCwd.value) return orphanCwd.value;
     const taskId = props.taskId;
+    const snapshotVersion = captureContextSnapshot();
     try {
       const cwd = await homeDir();
-      if (!disposed && taskId === props.taskId) {
+      if (isCurrentContextSnapshot(snapshotVersion, undefined, taskId)) {
         orphanCwd.value = cwd;
       }
     } catch {
-      if (!disposed && taskId === props.taskId) {
+      if (isCurrentContextSnapshot(snapshotVersion, undefined, taskId)) {
         orphanCwd.value = "";
       }
     }
@@ -116,22 +162,28 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     content: string,
     outgoingAttachments: ChatAttachment[],
   ) {
-    const routeState = resolveConversationRouteState(props.projectId, props.taskId);
+    const snapshotVersion = captureContextSnapshot();
+    const projectId = props.projectId;
+    const taskId = props.taskId;
+    const routeState = resolveConversationRouteState(projectId, taskId);
     if (!routeState.isDraftRoute) return;
     if (routeState.isLostDraft) throw new Error("草稿已失效，请重新创建对话");
     if (!routeState.isLiveDraft) return;
 
     const title = titleForMessage(content, outgoingAttachments);
-    if (props.projectId) await promoteDraftTask(props.taskId, title);
-    else await promoteDraftOrphan(props.taskId, title);
+    assertContextSnapshotCurrent(snapshotVersion, projectId, taskId);
+    if (projectId) await promoteDraftTask(taskId, title);
+    else await promoteDraftOrphan(taskId, title);
+    assertContextSnapshotCurrent(snapshotVersion, projectId, taskId);
   }
 
   async function recreatePopupDraft(projectId: string | undefined) {
-    if (disposed || projectId !== props.projectId) return;
+    const snapshotVersion = captureContextSnapshot();
+    if (!isCurrentContextSnapshot(snapshotVersion, projectId, props.taskId)) return;
     const query = router.currentRoute.value.query;
     if (projectId) {
       const draft = createDraftTask(projectId);
-      if (disposed || projectId !== props.projectId) return;
+      if (!isCurrentContextSnapshot(snapshotVersion, projectId, props.taskId)) return;
       await router.replace({
         path: `/popup/projects/${projectId}/tasks/${draft.id}`,
         query,
@@ -139,7 +191,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
       return;
     }
     const draft = createDraftOrphan();
-    if (disposed || props.projectId) return;
+    if (!isCurrentContextSnapshot(snapshotVersion, undefined, props.taskId)) return;
     await router.replace({
       path: `/popup/chats/${draft.id}`,
       query,
@@ -163,6 +215,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     const seq = ++popupContextSeq;
     const projectId = props.projectId;
     const taskId = props.taskId;
+    const snapshotVersion = captureContextSnapshot();
     popupContextHydrating.value = true;
     popupContextHydrated.value = false;
     try {
@@ -179,6 +232,7 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     } finally {
       if (
         !disposed &&
+        isCurrentContextSnapshot(snapshotVersion, projectId, taskId) &&
         seq === popupContextSeq &&
         taskId === props.taskId &&
         projectId === props.projectId
@@ -195,24 +249,28 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   async function hydrateMainContext() {
     if (isPopup.value) return;
+    const snapshotVersion = captureContextSnapshot();
+    const projectId = props.projectId;
+    const taskId = props.taskId;
     try {
-      if (props.projectId) {
+      if (projectId) {
         await measurePerfAsync(
           "task-detail.main-context.project",
           async () => {
-            await ensureProjectLoaded(props.projectId!);
+            await ensureProjectLoaded(projectId);
           },
-          { detail: `${props.projectId}:${props.taskId}` },
+          { detail: `${projectId}:${taskId}` },
         );
       } else {
         await measurePerfAsync(
           "task-detail.main-context.orphan",
           async () => {
-            await ensureTaskLoaded(props.taskId, null);
+            await ensureTaskLoaded(taskId, null);
           },
-          { detail: props.taskId },
+          { detail: taskId },
         );
       }
+      if (!isCurrentContextSnapshot(snapshotVersion, projectId, taskId)) return;
     } catch (err) {
       console.error("[chat] hydrate context failed", err);
     }
@@ -220,22 +278,31 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   async function hydrateMainTaskRecord() {
     if (isPopup.value || !props.projectId) return;
+    const snapshotVersion = captureContextSnapshot();
+    const projectId = props.projectId;
+    const taskId = props.taskId;
     try {
       await measurePerfAsync(
         "task-detail.main-context.task-record",
         async () => {
-          await ensureTaskLoaded(props.taskId, props.projectId);
+          await ensureTaskLoaded(taskId, projectId);
         },
-        { detail: `${props.projectId}:${props.taskId}` },
+        { detail: `${projectId}:${taskId}` },
       );
+      if (!isCurrentContextSnapshot(snapshotVersion, projectId, taskId)) return;
     } catch (err) {
       console.error("[chat] hydrate task record failed", err);
     }
   }
 
   function prepareForRouteChange() {
+    invalidateContextSnapshot("route-change");
     popupContentReady.value = !isPopup.value || conversationRouteState.value.isLiveDraft;
   }
+
+  const stopContextInvalidationListener = onConversationContextSnapshotInvalidated((version) => {
+    markContextSnapshotInvalidated(version);
+  });
 
   watch(
     () => [props.variant, props.projectId, props.taskId] as const,
@@ -274,7 +341,8 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   onUnmounted(() => {
     disposed = true;
-    popupContextSeq += 1;
+    invalidateContextSnapshot("unmount");
+    stopContextInvalidationListener();
     clearContextLoadingTimer();
   });
 
@@ -300,6 +368,10 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
     contextSearchCwd,
     ensureOrphanCwd,
     ensureTaskReadyForMessage,
+    captureContextSnapshot,
+    isCurrentContextSnapshot,
+    assertContextSnapshotCurrent,
+    invalidateContextSnapshot,
     hydratePopupContext,
     hydrateMainContext,
     hydrateMainTaskRecord,
