@@ -15,14 +15,28 @@ import {
   type CliProjectOpenPayload,
 } from "./services/cliProjectOpen";
 import { installCombinedUnlisten } from "./utils/eventListeners";
+import { createLazyLoadState } from "./utils/lazyLoadState";
 import { measurePerfAsync, scheduleAfterPaint } from "./utils/perf";
 
-const ContextMenuHost = defineAsyncComponent({
-  loader: () => measurePerfAsync(
+const contextMenuHostLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "app.context-menu-host.load",
     async () => (await import("./components/ContextMenuHost.vue")).default,
     { detail: "ContextMenuHost" },
-  ),
+  )
+);
+const deferredBridgeLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app.bridge.import",
+    () => Promise.all([
+      import("./composables/useAgentInteractionBridge"),
+      import("./composables/useConversationActivity"),
+    ]),
+  )
+);
+
+const ContextMenuHost = defineAsyncComponent({
+  loader: () => contextMenuHostLoad.load(),
   suspensible: false,
 });
 
@@ -52,14 +66,7 @@ function handleCliProjectOpen(payload: CliProjectOpenPayload, source: string) {
 
 async function installDeferredBridges() {
   const [{ installAgentInteractionBridge }, { installConversationActivityBridge }] =
-    await measurePerfAsync(
-      "app.bridge.import",
-      () => Promise.all([
-        import("./composables/useAgentInteractionBridge"),
-        import("./composables/useConversationActivity"),
-      ]),
-      { detail: appWindow.label },
-    );
+    await deferredBridgeLoad.load();
   if (disposed) return;
 
   unlistenDeferredBridges = keepCleanup(await installCombinedUnlisten([

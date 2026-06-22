@@ -41,13 +41,18 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const projectTreeConversationListLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "sidebar.project-conversation-list.load",
+    async () => (await import("./ProjectTreeConversationList.vue")).default as Component,
+  )
+);
 
 const ProjectTreeConversationList = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "sidebar.project-conversation-list.load",
-    async () => (await import("./ProjectTreeConversationList.vue")).default as Component,
-  ),
+  loader: () => projectTreeConversationListLoad.load(),
 });
 
 const props = defineProps<{

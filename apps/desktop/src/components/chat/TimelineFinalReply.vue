@@ -10,14 +10,19 @@ import {
 } from "@lilia/contracts";
 import type { ChatImageViewerSource } from "./imageViewer";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 import { isTimelineMessageEvent, timelineFinalText } from "./timelineDisplay";
+
+const markdownBlockLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.markdown.load",
+    async () => (await import("./MarkdownBlock.vue")).default,
+  )
+);
 
 const MarkdownBlock = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.markdown.load",
-    async () => (await import("./MarkdownBlock.vue")).default,
-  ),
+  loader: () => markdownBlockLoad.load(),
 });
 
 const props = withDefaults(defineProps<{

@@ -22,13 +22,18 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const subagentCatalogSectionLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "settings.agent.subagents.load",
+    async () => (await import("./SubagentCatalogSection.vue")).default as Component,
+  )
+);
 
 const SubagentCatalogSection = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "settings.agent.subagents.load",
-    async () => (await import("./SubagentCatalogSection.vue")).default as Component,
-  ),
+  loader: () => subagentCatalogSectionLoad.load(),
 });
 
 const agentInteractionStore = useAgentInteractionSettings();

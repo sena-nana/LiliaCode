@@ -7,13 +7,18 @@ import type {
 } from "@lilia/contracts";
 import type { TimelineMarkdownView } from "./timelineDisplay";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const markdownBlockLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "timeline.markdown.load",
+    async () => (await import("./MarkdownBlock.vue")).default,
+  )
+);
 
 const MarkdownBlock = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "timeline.markdown.load",
-    async () => (await import("./MarkdownBlock.vue")).default,
-  ),
+  loader: () => markdownBlockLoad.load(),
 });
 
 defineProps<{

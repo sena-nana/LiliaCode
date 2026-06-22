@@ -10,21 +10,29 @@ import {
   measurePerfAsync,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const secondaryPanelLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app-shell.secondary-panel.load",
+    async () => (await import("./SecondaryPanel.vue")).default,
+  )
+);
+const settingsSidebarLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "app-shell.settings-sidebar.load",
+    async () => (await import("./SettingsSidebar.vue")).default,
+  )
+);
 
 const SecondaryPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "app-shell.secondary-panel.load",
-    async () => (await import("./SecondaryPanel.vue")).default,
-  ),
+  loader: () => secondaryPanelLoad.load(),
 });
 
 const SettingsSidebar = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "app-shell.settings-sidebar.load",
-    async () => (await import("./SettingsSidebar.vue")).default,
-  ),
+  loader: () => settingsSidebarLoad.load(),
 });
 
 /** 侧栏宽度的硬约束：太窄项目名糊成一团，太宽主区被挤掉。 */

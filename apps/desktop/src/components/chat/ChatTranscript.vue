@@ -25,21 +25,29 @@ import {
   scheduleAfterPaint,
 } from "../../utils/perf";
 import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const agentTimelineLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat.timeline.load",
+    async () => (await import("./AgentTimeline.vue")).default,
+  )
+);
+const chatScrollMapLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat.scroll-map.load",
+    async () => (await import("./ChatScrollMap.vue")).default,
+  )
+);
 
 const AgentTimeline = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat.timeline.load",
-    async () => (await import("./AgentTimeline.vue")).default,
-  ),
+  loader: () => agentTimelineLoad.load(),
 });
 
 const ChatScrollMap = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat.scroll-map.load",
-    async () => (await import("./ChatScrollMap.vue")).default,
-  ),
+  loader: () => chatScrollMapLoad.load(),
 });
 
 const props = defineProps<{

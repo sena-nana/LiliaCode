@@ -272,7 +272,7 @@ describe("chat sidebar host", () => {
     expect(loadDebug).toHaveBeenCalledTimes(1);
   });
 
-  it("关闭侧栏后忽略仍在返回的异步 panel 加载", async () => {
+  it("关闭侧栏后缓存仍在返回的异步 panel 加载", async () => {
     let resolveStaleLoad: (component: typeof FirstPanel) => void = () => {};
     const loadDebug = vi.fn()
       .mockReturnValueOnce(
@@ -302,7 +302,7 @@ describe("chat sidebar host", () => {
     openChatSidebar("debug");
 
     await waitFor(() => {
-      expect(loadDebug).toHaveBeenCalledTimes(2);
+      expect(loadDebug).toHaveBeenCalledTimes(1);
       expect(view.getByTestId("first-panel")).toBeInTheDocument();
     });
   });

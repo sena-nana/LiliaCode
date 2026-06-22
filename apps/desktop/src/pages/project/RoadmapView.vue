@@ -30,16 +30,20 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 
 const props = defineProps<{ projectId: string }>();
-
-const RoadmapMilestoneInsights = defineAsyncComponent({
-  suspensible: false,
-  loader: () => measurePerfAsync(
+const roadmapMilestoneInsightsLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
     "project.roadmap.insights.load",
     async () => (await import("./RoadmapMilestoneInsights.vue")).default as Component,
     { detail: "RoadmapMilestoneInsights" },
-  ),
+  )
+);
+
+const RoadmapMilestoneInsights = defineAsyncComponent({
+  suspensible: false,
+  loader: () => roadmapMilestoneInsightsLoad.load(),
 });
 
 const milestoneStatusOptions = MILESTONE_STATUSES.map((value) => ({

@@ -33,21 +33,29 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../utils/perf";
+import { createLazyLoadState } from "../utils/lazyLoadState";
+
+const agentTimelineLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "import.timeline.load",
+    async () => (await import("../components/chat/AgentTimeline.vue")).default,
+  )
+);
+const chatScrollMapLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "import.scroll-map.load",
+    async () => (await import("../components/chat/ChatScrollMap.vue")).default,
+  )
+);
 
 const AgentTimeline = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "import.timeline.load",
-    async () => (await import("../components/chat/AgentTimeline.vue")).default,
-  ),
+  loader: () => agentTimelineLoad.load(),
 });
 
 const ChatScrollMap = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "import.scroll-map.load",
-    async () => (await import("../components/chat/ChatScrollMap.vue")).default,
-  ),
+  loader: () => chatScrollMapLoad.load(),
 });
 
 const route = useRoute();

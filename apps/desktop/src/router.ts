@@ -12,13 +12,17 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "./utils/perf";
+import { createLazyLoadState } from "./utils/lazyLoadState";
 
 function loadRouteComponent<T>(name: string, loader: () => Promise<T>): () => Promise<T> {
-  return () => measurePerfAsync(
-    "router.component.load",
-    loader,
-    { detail: name },
+  const state = createLazyLoadState(() =>
+    measurePerfAsync(
+      "router.component.load",
+      loader,
+      { detail: name },
+    )
   );
+  return () => state.load();
 }
 
 const AppShell = loadRouteComponent(
