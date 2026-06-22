@@ -22,6 +22,7 @@ const HOST_ENABLED_KEY: &str = "host_enabled";
 const PC_NAME_KEY: &str = "pc_name";
 const ENDPOINT_ID_KEY: &str = "endpoint_id";
 const PAIRING_TTL_MS: i64 = 10 * 60 * 1000;
+const RECENT_ANDROID_SEEN_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_HTTP_BRIDGE_PORT: u16 = 41478;
 
 static HTTP_BRIDGE: OnceLock<Mutex<Option<RemoteHttpBridge>>> = OnceLock::new();
@@ -269,6 +270,23 @@ fn trusted_devices(conn: &Connection) -> Result<Vec<RemotePeerSummary>, String> 
     Ok(out)
 }
 
+fn has_recent_connected_device(conn: &Connection) -> Result<bool, String> {
+    let cutoff = now_millis() - RECENT_ANDROID_SEEN_MS;
+    conn.query_row(
+        r#"SELECT EXISTS(
+             SELECT 1 FROM remote_control_trusted_devices
+             WHERE trusted = 1
+               AND revoked_at IS NULL
+               AND last_seen_at IS NOT NULL
+               AND last_seen_at >= ?1
+           )"#,
+        params![cutoff],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value != 0)
+    .map_err(|e| format!("remote_control: 查询在线设备失败：{e}"))
+}
+
 fn remote_status(conn: &Connection) -> Result<RemoteControlStatus, String> {
     remote_status_with_bridge(conn, None)
 }
@@ -278,15 +296,21 @@ fn remote_status_with_bridge(
     bridge_url: Option<&str>,
 ) -> Result<RemoteControlStatus, String> {
     let enabled = host_enabled(conn)?;
-    let active_ticket = active_ticket(conn)?.map(|ticket| match bridge_url {
-        Some(bridge_url) => ticket_with_bridge_url(ticket, bridge_url),
-        None => ticket,
-    });
+    let active_ticket = if enabled {
+        active_ticket(conn)?.map(|ticket| match bridge_url {
+            Some(bridge_url) => ticket_with_bridge_url(ticket, bridge_url),
+            None => ticket,
+        })
+    } else {
+        None
+    };
     let endpoint = enabled.then(|| endpoint(conn)).transpose()?;
     let state = if !enabled {
         "disabled"
     } else if active_ticket.is_some() {
         "pairing"
+    } else if has_recent_connected_device(conn)? {
+        "connected"
     } else {
         "listening"
     };
@@ -359,10 +383,15 @@ pub fn remote_control_set_host_enabled(
         let _ = endpoint_id(&conn)?;
         remote_status_with_bridge(&conn, Some(&bridge_url))
     } else {
-        set_setting(&conn, HOST_ENABLED_KEY, "false")?;
+        disable_host(&conn)?;
         let _ = endpoint_id(&conn)?;
         remote_status_with_bridge(&conn, None)
     }
+}
+
+fn disable_host(conn: &Connection) -> Result<(), String> {
+    set_setting(conn, HOST_ENABLED_KEY, "false")?;
+    cancel_active_pairing_tickets(conn)
 }
 
 #[tauri::command]
@@ -430,6 +459,10 @@ pub fn remote_control_start_pairing(
 #[tauri::command]
 pub fn remote_control_cancel_pairing(store: State<'_, LiliaStore>) -> Result<(), String> {
     let conn = store.conn()?;
+    cancel_active_pairing_tickets(&conn)
+}
+
+fn cancel_active_pairing_tickets(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "UPDATE remote_control_pairing_tickets SET consumed_at = ?1 WHERE consumed_at IS NULL",
         params![now_millis()],
@@ -1396,15 +1429,26 @@ mod tests {
     }
 
     fn insert_trusted_device(conn: &Connection, endpoint_id: &str, trusted: bool, revoked: bool) {
+        insert_trusted_device_with_seen_at(conn, endpoint_id, trusted, revoked, None);
+    }
+
+    fn insert_trusted_device_with_seen_at(
+        conn: &Connection,
+        endpoint_id: &str,
+        trusted: bool,
+        revoked: bool,
+        last_seen_at: Option<i64>,
+    ) {
         conn.execute(
             r#"INSERT INTO remote_control_trusted_devices
                (id, display_name, endpoint_id, protocol_version, trusted, first_paired_at, last_seen_at, revoked_at)
-               VALUES (?1, 'Pixel', ?2, 1, ?3, ?4, NULL, ?5)"#,
+               VALUES (?1, 'Pixel', ?2, 1, ?3, ?4, ?5, ?6)"#,
             params![
                 format!("device-{endpoint_id}"),
                 endpoint_id,
                 if trusted { 1 } else { 0 },
                 now_millis(),
+                last_seen_at,
                 revoked.then(now_millis)
             ],
         )
@@ -1476,6 +1520,12 @@ mod tests {
         assert_eq!(peer.display_name, "Pixel");
         assert_eq!(peer.endpoint_id, "android-endpoint");
         assert!(peer.trusted);
+        assert_eq!(
+            remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478"))
+                .unwrap()
+                .state,
+            "connected"
+        );
         let consumed: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM remote_control_pairing_tickets WHERE id = 'ticket-1' AND consumed_at IS NOT NULL",
@@ -1529,6 +1579,96 @@ mod tests {
         .unwrap_err();
 
         assert!(err.contains("未启用"));
+    }
+
+    #[test]
+    fn remote_status_returns_connected_for_recent_trusted_device() {
+        let conn = conn();
+        enable_host(&conn);
+        insert_trusted_device_with_seen_at(
+            &conn,
+            "android-recent",
+            true,
+            false,
+            Some(now_millis()),
+        );
+
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+
+        assert_eq!(status.state, "connected");
+    }
+
+    #[test]
+    fn remote_status_returns_listening_for_stale_trusted_device() {
+        let conn = conn();
+        enable_host(&conn);
+        insert_trusted_device_with_seen_at(
+            &conn,
+            "android-stale",
+            true,
+            false,
+            Some(now_millis() - RECENT_ANDROID_SEEN_MS - 1_000),
+        );
+
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+
+        assert_eq!(status.state, "listening");
+    }
+
+    #[test]
+    fn remote_status_ignores_revoked_and_untrusted_recent_devices() {
+        let conn = conn();
+        enable_host(&conn);
+        insert_trusted_device_with_seen_at(
+            &conn,
+            "android-revoked",
+            true,
+            true,
+            Some(now_millis()),
+        );
+        insert_trusted_device_with_seen_at(
+            &conn,
+            "android-untrusted",
+            false,
+            false,
+            Some(now_millis()),
+        );
+
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+
+        assert_eq!(status.state, "listening");
+    }
+
+    #[test]
+    fn disable_host_consumes_active_pairing_tickets() {
+        let conn = conn();
+        enable_host(&conn);
+        insert_ticket(&conn);
+
+        disable_host(&conn).unwrap();
+
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+        assert_eq!(status.state, "disabled");
+        assert!(status.active_ticket.is_none());
+        let unconsumed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM remote_control_pairing_tickets WHERE consumed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unconsumed, 0);
+    }
+
+    #[test]
+    fn disabled_status_hides_legacy_active_pairing_ticket() {
+        let conn = conn();
+        insert_ticket(&conn);
+
+        let status = remote_status_with_bridge(&conn, Some("http://192.168.1.12:41478")).unwrap();
+
+        assert_eq!(status.state, "disabled");
+        assert!(status.active_ticket.is_none());
     }
 
     #[test]

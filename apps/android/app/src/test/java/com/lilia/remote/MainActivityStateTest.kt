@@ -27,6 +27,23 @@ class MainActivityStateTest {
     }
 
     @Test
+    fun unauthorizedRemoteFailureRequiresPairAgain() {
+        val revoked = RemoteBridgeException(
+            code = "unauthorized",
+            message = "Android device is no longer trusted",
+        )
+        val offline = RemoteBridgeException(
+            code = "unavailable",
+            message = "Bridge offline",
+            retryable = true,
+        )
+
+        assertTrue(shouldClearActivePcForFailure(revoked))
+        assertFalse(shouldClearActivePcForFailure(offline))
+        assertEquals("This PC no longer trusts this phone. Pair again.", UNTRUSTED_PC_MESSAGE)
+    }
+
+    @Test
     fun sessionForkRuntimeCommandUsesDesktopWireShape() {
         val command = RemoteRuntimeCommandAdapter.sessionFork(
             RemoteBranchAnchor("turn-source", RemoteSessionForkMode.CONTINUE),

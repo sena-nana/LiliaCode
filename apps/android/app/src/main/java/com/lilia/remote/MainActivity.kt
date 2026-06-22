@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 
+internal const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
+
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
 
@@ -143,8 +145,8 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         if (pc != null && shouldIgnorePcResult(activePc, pc)) {
             return
         }
-        if (err is RemoteBridgeException && err.code == "unauthorized") {
-            clearUntrustedPc(pc, "This PC no longer trusts this phone. Pair again.")
+        if (shouldClearActivePcForFailure(err)) {
+            clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
             return
         }
         remoteError = err.message ?: fallback
@@ -171,7 +173,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         }
         if (shouldIgnorePcResult(activePc, pc)) return
         if (!accepted) {
-            clearUntrustedPc(pc, "This PC no longer trusts this phone. Pair again.")
+            clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
             return
         }
         val status = remoteClient.bridgeStatus(pc)
@@ -384,6 +386,9 @@ internal fun savedPcConnectionMatches(current: SavedPc?, candidate: SavedPc): Bo
 
 internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolean =
     current == null || !savedPcConnectionMatches(current, candidate)
+
+internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
+    err is RemoteBridgeException && err.code == "unauthorized"
 
 @Composable
 private fun PairingScreen(

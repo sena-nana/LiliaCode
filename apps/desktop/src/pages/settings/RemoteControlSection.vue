@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   MonitorSmartphone,
   QrCode,
@@ -9,7 +9,7 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import { toDataURL } from "qrcode";
-import type { RemoteControlStatus, RemotePairingTicket } from "@lilia/contracts";
+import type { RemoteControlStatus } from "@lilia/contracts";
 import {
   cancelRemoteControlPairing,
   getRemoteControlStatus,
@@ -19,8 +19,9 @@ import {
   startRemoteControlPairing,
 } from "../../services/chat";
 
+const REMOTE_CONTROL_POLL_INTERVAL_MS = 5_000;
+
 const status = ref<RemoteControlStatus | null>(null);
-const pairingTicket = ref<RemotePairingTicket | null>(null);
 const qrDataUrl = ref("");
 const pcNameDraft = ref("");
 const loading = ref(false);
@@ -30,7 +31,8 @@ const errorText = ref("");
 
 const hostEnabled = computed(() => status.value?.hostEnabled ?? false);
 const trustedDevices = computed(() => status.value?.trustedDevices ?? []);
-const activeTicket = computed(() => pairingTicket.value ?? status.value?.activeTicket ?? null);
+const activeTicket = computed(() => status.value?.activeTicket ?? null);
+const shouldPollRemoteControl = computed(() => hostEnabled.value || activeTicket.value !== null);
 const connectionLabel = computed(() => {
   switch (status.value?.state) {
     case "pairing":
@@ -63,27 +65,60 @@ watch(
   { immediate: true },
 );
 
-async function refreshRemoteControl() {
-  loading.value = true;
+let refreshInFlight = false;
+let pollTimer: number | null = null;
+
+function applyRemoteControlStatus(nextStatus: RemoteControlStatus) {
+  status.value = nextStatus;
+  pcNameDraft.value = nextStatus.pcName;
+}
+
+async function refreshRemoteControl(options: { silent?: boolean } = {}) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  if (!options.silent) loading.value = true;
   errorText.value = "";
   try {
-    status.value = await getRemoteControlStatus();
-    pcNameDraft.value = status.value.pcName;
-    pairingTicket.value = status.value.activeTicket;
+    applyRemoteControlStatus(await getRemoteControlStatus());
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
-    loading.value = false;
+    if (!options.silent) loading.value = false;
+    refreshInFlight = false;
   }
 }
+
+function startRemoteControlPolling() {
+  if (pollTimer !== null) return;
+  pollTimer = window.setInterval(() => {
+    void refreshRemoteControl({ silent: true });
+  }, REMOTE_CONTROL_POLL_INTERVAL_MS);
+}
+
+function stopRemoteControlPolling() {
+  if (pollTimer === null) return;
+  window.clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+watch(
+  shouldPollRemoteControl,
+  (shouldPoll) => {
+    if (shouldPoll) {
+      startRemoteControlPolling();
+    } else {
+      stopRemoteControlPolling();
+    }
+  },
+  { immediate: true },
+);
 
 async function toggleHost() {
   const next = !hostEnabled.value;
   loading.value = true;
   errorText.value = "";
   try {
-    status.value = await setRemoteControlHostEnabled(next);
-    pairingTicket.value = status.value.activeTicket;
+    applyRemoteControlStatus(await setRemoteControlHostEnabled(next));
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -95,8 +130,7 @@ async function savePcName() {
   savingName.value = true;
   errorText.value = "";
   try {
-    status.value = await setRemoteControlPcName(pcNameDraft.value);
-    pcNameDraft.value = status.value.pcName;
+    applyRemoteControlStatus(await setRemoteControlPcName(pcNameDraft.value));
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -108,8 +142,8 @@ async function beginPairing() {
   pairing.value = true;
   errorText.value = "";
   try {
-    pairingTicket.value = await startRemoteControlPairing();
-    status.value = await getRemoteControlStatus();
+    await startRemoteControlPairing();
+    applyRemoteControlStatus(await getRemoteControlStatus());
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -122,8 +156,7 @@ async function cancelPairing() {
   errorText.value = "";
   try {
     await cancelRemoteControlPairing();
-    pairingTicket.value = null;
-    status.value = await getRemoteControlStatus();
+    applyRemoteControlStatus(await getRemoteControlStatus());
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -135,7 +168,7 @@ async function revokeDevice(deviceId: string) {
   loading.value = true;
   errorText.value = "";
   try {
-    status.value = await revokeRemoteControlDevice(deviceId);
+    applyRemoteControlStatus(await revokeRemoteControlDevice(deviceId));
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -149,6 +182,7 @@ function formatTime(value: number | null | undefined): string {
 }
 
 onMounted(refreshRemoteControl);
+onBeforeUnmount(stopRemoteControlPolling);
 </script>
 
 <template>
