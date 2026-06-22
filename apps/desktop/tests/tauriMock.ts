@@ -75,6 +75,7 @@ import {
   PROJECT_GET_SETTINGS_COMMAND,
   PROJECT_LIST_COMMAND,
   PROJECT_REMOVE_COMMAND,
+  PROJECT_RENAME_COMMAND,
   PROJECT_REORDER_COMMAND,
   PROJECT_SET_SETTINGS_COMMAND,
   PROJECT_TOGGLE_PIN_COMMAND,
@@ -2572,6 +2573,16 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
       const id = String(args.id);
       refreshSessionCounts();
       return projects.find((project) => project.id === id) ?? null;
+    }
+
+    case PROJECT_RENAME_COMMAND: {
+      const id = String(args.id ?? "");
+      const nextName = String(args.nextName ?? "").trim();
+      if (!id || !nextName) return false;
+      const index = projects.findIndex((project) => project.id === id);
+      if (index < 0) return false;
+      projects[index] = { ...projects[index], name: nextName };
+      return true;
     }
 
     case CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND: {

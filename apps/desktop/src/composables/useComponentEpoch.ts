@@ -6,6 +6,13 @@ export interface ComponentEpoch {
   nextEpoch: () => number;
 }
 
+/**
+ * Guards async UI continuations against stale component state.
+ *
+ * The epoch replaces scattered `seq` counters; the alive flag replaces local
+ * `disposed` booleans. Any delayed focus, hydration, or lazy mount should
+ * capture `nextEpoch()` and only mutate state when `assertAlive(epoch)` passes.
+ */
 export function withComponentEpoch(): ComponentEpoch {
   let alive = true;
   let epoch = 0;
