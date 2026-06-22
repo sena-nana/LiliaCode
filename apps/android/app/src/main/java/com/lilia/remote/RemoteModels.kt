@@ -36,6 +36,7 @@ data class RemoteTimelineItem(
     val summary: String,
     val status: String,
     val branchSourceTurnId: String? = null,
+    val retryable: Boolean = false,
 )
 
 enum class RemoteSessionForkMode(val wireValue: String, val label: String) {

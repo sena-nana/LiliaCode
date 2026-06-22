@@ -2,7 +2,9 @@ package com.lilia.remote
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemotePayloadParserTest {
@@ -192,6 +194,65 @@ class RemotePayloadParserTest {
         assertEquals("Lilia", detail.task.projectName)
         assertEquals("Android remote", detail.task.title)
         assertEquals("running", detail.task.status)
+    }
+
+    @Test
+    fun taskDetailMarksRetryableTimelineErrors() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "user-1",
+                      "kind": "message",
+                      "turnId": "turn-1",
+                      "status": "success",
+                      "payload": {
+                        "role": "user",
+                        "content": "Retry source"
+                      }
+                    },
+                    {
+                      "id": "error-1",
+                      "kind": "error",
+                      "turnId": "turn-1",
+                      "status": "error",
+                      "payload": {
+                        "message": "Failed"
+                      }
+                    },
+                    {
+                      "id": "error-2",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "retryContext": {
+                          "content": "Explicit retry"
+                        }
+                      }
+                    },
+                    {
+                      "id": "error-3",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "message": "Detached"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        assertFalse(detail.timeline[0].retryable)
+        assertTrue(detail.timeline[1].retryable)
+        assertTrue(detail.timeline[2].retryable)
+        assertFalse(detail.timeline[3].retryable)
     }
 
     @Test

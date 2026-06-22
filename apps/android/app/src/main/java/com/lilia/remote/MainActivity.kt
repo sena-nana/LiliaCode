@@ -324,6 +324,13 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                             remoteClient.interrupt(pc, taskId)
                         }
                     },
+                    onRetry = {
+                        val pc = activePc!!
+                        val taskId = selectedTask!!.task.taskId
+                        runTaskAction(pc, taskId, "Retry failed") { remoteClient ->
+                            remoteClient.retry(pc, taskId)
+                        }
+                    },
                     onResolveInteraction = { interaction, approve, responseText, selectedOptions ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
@@ -581,6 +588,7 @@ private fun TaskDetailScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
+    onRetry: () -> Unit,
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
@@ -589,6 +597,7 @@ private fun TaskDetailScreen(
     var draft by remember(detail.task.taskId) { mutableStateOf("") }
     val pendingInteraction = detail.pendingInteraction
     val providerReady = providerStatus?.ready != false
+    val hasRetryableError = detail.timeline.any { it.retryable }
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
     Column(
@@ -611,6 +620,13 @@ private fun TaskDetailScreen(
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text("Interrupt")
+            }
+            OutlinedButton(
+                onClick = onRetry,
+                enabled = !loading && providerReady && capabilities.supportsChatSend && hasRetryableError,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Retry")
             }
         }
         providerStatus?.let {

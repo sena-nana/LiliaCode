@@ -77,19 +77,45 @@ object RemotePayloadParser {
         )
     }
 
-    private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> = buildList {
-        for (index in 0 until events.length()) {
-            val event = events.getJSONObject(index)
-            add(
-                RemoteTimelineItem(
-                    id = event.optString("id", "event-$index"),
-                    title = timelineTitle(event),
-                    summary = timelineSummary(event),
-                    status = event.optString("status").ifBlank { "info" },
-                    branchSourceTurnId = timelineBranchSourceTurnId(event),
-                ),
+    private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> {
+        val rows = buildList {
+            for (index in 0 until events.length()) {
+                add(events.getJSONObject(index))
+            }
+        }
+        return rows.mapIndexed { index, event ->
+            RemoteTimelineItem(
+                id = event.optString("id", "event-$index"),
+                title = timelineTitle(event),
+                summary = timelineSummary(event),
+                status = event.optString("status").ifBlank { "info" },
+                branchSourceTurnId = timelineBranchSourceTurnId(event),
+                retryable = timelineRetryableError(event, rows),
             )
         }
+    }
+
+    private fun timelineRetryableError(event: JSONObject, events: List<JSONObject>): Boolean {
+        if (event.optString("kind") != "error") return false
+        if (retryContextHasPayload(event.optJSONObject("payload")?.optJSONObject("retryContext"))) {
+            return true
+        }
+        val turnId = event.optString("turnId").takeIf { it.isNotBlank() } ?: return false
+        return events.any { candidate ->
+            candidate.optString("kind") == "message" &&
+                candidate.optString("turnId") == turnId &&
+                candidate.optJSONObject("payload")?.optString("role") == "user" &&
+                retryContextHasPayload(candidate.optJSONObject("payload"))
+        }
+    }
+
+    private fun retryContextHasPayload(payload: JSONObject?): Boolean {
+        if (payload == null) return false
+        if (payload.optString("content").isNotBlank()) return true
+        val attachments = payload.optJSONArray("attachments")
+        if (attachments != null && attachments.length() > 0) return true
+        val conversationReferences = payload.optJSONArray("conversationReferences")
+        return conversationReferences != null && conversationReferences.length() > 0
     }
 
     private fun timelineBranchSourceTurnId(event: JSONObject): String? {
