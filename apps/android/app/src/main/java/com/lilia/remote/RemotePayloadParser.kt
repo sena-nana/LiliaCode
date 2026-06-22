@@ -5,6 +5,8 @@ import org.json.JSONObject
 
 object RemotePayloadParser {
     private val branchableTimelineStatuses = setOf("success", "completed", "done")
+    private val timelineDetailWhitespace = Regex("\\s+")
+    private const val TIMELINE_DETAIL_VALUE_MAX_LENGTH = 600
 
     fun parseBridgeStatus(response: JSONObject): RemoteBridgeStatus {
         RemoteEnvelopeAdapter.throwIfError(response, "Bridge status failed")
@@ -118,9 +120,12 @@ object RemotePayloadParser {
         return rows.mapIndexed { index, event ->
             RemoteTimelineItem(
                 id = event.optString("id", "event-$index"),
+                kind = event.optString("kind").ifBlank { "event" },
                 title = timelineTitle(event),
                 summary = timelineSummary(event),
                 status = event.optString("status").ifBlank { "info" },
+                role = timelineRole(event),
+                details = timelineDetails(event),
                 branchSourceTurnId = timelineBranchSourceTurnId(event),
                 retryable = timelineRetryableError(event, rows),
             )
@@ -158,18 +163,101 @@ object RemotePayloadParser {
         return event.optString("turnId").takeIf { it.isNotBlank() }
     }
 
-    private fun timelineTitle(event: JSONObject): String =
-        event.optString("title")
-            .ifBlank { timelineKindLabel(event.optString("kind")) }
+    private fun timelineTitle(event: JSONObject): String {
+        val title = event.optString("title").takeIf { it.isNotBlank() }
+        if (title != null) return title
+        if (event.optString("kind") == "message") {
+            when (timelineRole(event)) {
+                "assistant" -> return "Assistant"
+                "user" -> return "User"
+            }
+        }
+        return timelineKindLabel(event.optString("kind"))
+    }
+
+    private fun timelineRole(event: JSONObject): String? =
+        event.optJSONObject("payload")
+            ?.optString("role")
+            ?.takeIf { it.isNotBlank() }
 
     private fun timelineSummary(event: JSONObject): String {
         val payload = event.optJSONObject("payload")
         return event.optString("summary")
             .takeUnless { event.isNull("summary") }
             ?.takeIf { it.isNotBlank() }
-            ?: payload?.firstNonBlankString("content", "text", "summary", "message", "command", "path", "query", "url")
+            ?: payload?.firstNonBlankString(
+                "content",
+                "text",
+                "summary",
+                "message",
+                "error",
+                "reason",
+                "details",
+                "command",
+                "cmd",
+                "path",
+                "query",
+                "url",
+                "result",
+                "response",
+                "output",
+                "stdout",
+                "stderr",
+            )
             ?: ""
     }
+
+    private fun timelineDetails(event: JSONObject): List<RemoteTimelineDetail> {
+        val payload = event.optJSONObject("payload") ?: JSONObject()
+        return listOfNotNull(
+            timelineDetail(
+                "tool",
+                payload.firstNonBlankString("toolName", "name", "tool", "function", "hookName"),
+            ),
+            timelineDetail("command", payload.firstNonBlankString("command", "cmd", "shellCommand")),
+            timelineDetail("path", payload.firstNonBlankString("file", "filePath", "path")),
+            timelineDetail("query", payload.firstNonBlankString("query", "url")),
+            timelineDetail(
+                "input",
+                payload.timelineValueString("input", "arguments", "args", "parameters", "params", "request"),
+            ),
+            timelineDetail(
+                if (isFailureStatus(event.optString("status"))) "error" else "output",
+                payload.timelineValueString("result", "response", "output", "stdout", "stderr"),
+            ),
+            timelineDetail("code", payload.firstNonBlankString("code", "exitCode", "statusCode")),
+            timelineDetail("turn", event.optString("turnId").takeIf { it.isNotBlank() }),
+        )
+    }
+
+    private fun timelineDetail(
+        label: String,
+        value: String?,
+    ): RemoteTimelineDetail? {
+        val normalized = value?.replace(timelineDetailWhitespace, " ")?.trim().orEmpty()
+        if (normalized.isBlank()) return null
+        return RemoteTimelineDetail(
+            label = label,
+            value = normalized.truncate(TIMELINE_DETAIL_VALUE_MAX_LENGTH),
+        )
+    }
+
+    private fun JSONObject.timelineValueString(vararg names: String): String? {
+        for (name in names) {
+            if (!has(name) || isNull(name)) continue
+            val value = opt(name) ?: continue
+            val text = when (value) {
+                is JSONObject -> value.toString()
+                is JSONArray -> value.toString()
+                else -> value.toString()
+            }.takeIf { it.isNotBlank() }
+            if (text != null) return text
+        }
+        return null
+    }
+
+    private fun isFailureStatus(status: String): Boolean =
+        status == "failed" || status == "error" || status == "cancelled"
 
     private fun timelineKindLabel(kind: String): String =
         when (kind) {
@@ -314,6 +402,11 @@ object RemotePayloadParser {
             if (value != null) return value
         }
         return null
+    }
+
+    private fun String.truncate(maxLength: Int): String {
+        if (length <= maxLength) return this
+        return take(maxLength).trimEnd() + "..."
     }
 
     private fun formatRemoteTime(value: Long): String {

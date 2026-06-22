@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -859,6 +861,15 @@ private fun TaskDetailScreen(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (detail.timeline.isEmpty()) {
+                item {
+                    Text(
+                        "No timeline events yet.",
+                        color = Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             items(detail.timeline, key = { it.id }) { item ->
                 TimelineRow(
                     item = item,
@@ -1029,15 +1040,54 @@ private fun TimelineRow(
     loading: Boolean,
     onStartBranch: (RemoteSessionForkMode) -> Unit,
 ) {
+    val statusColor = timelineStatusColor(item.status)
     Panel {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(item.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(item.status, color = Muted, style = MaterialTheme.typography.labelMedium)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    item.title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TimelineChip(text = item.kind, color = Muted)
+                    item.role?.let { role ->
+                        TimelineChip(text = role.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            TimelineChip(text = item.status, color = statusColor)
         }
-        Text(item.summary, color = Muted, style = MaterialTheme.typography.bodyMedium)
+        if (item.summary.isNotBlank()) {
+            Text(
+                item.summary,
+                color = if (item.role == "assistant" || item.role == "user") {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    Muted
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        item.details.forEach { detail ->
+            TimelineDetailRow(detail)
+        }
+        if (item.retryable) {
+            Text(
+                "Retry available",
+                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         if (item.branchSourceTurnId != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
@@ -1058,6 +1108,53 @@ private fun TimelineRow(
         }
     }
 }
+
+@Composable
+private fun TimelineChip(text: String, color: Color) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        color = color,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun TimelineDetailRow(detail: RemoteTimelineDetail) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            detail.label.replaceFirstChar { it.uppercase() },
+            modifier = Modifier.width(72.dp),
+            color = Color(0xFF87918B),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text(
+            detail.value,
+            modifier = Modifier.weight(1f),
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun timelineStatusColor(status: String): Color =
+    when (status) {
+        "success", "completed", "done" -> MaterialTheme.colorScheme.primary
+        "failed", "error", "cancelled" -> Danger
+        "requires_action" -> MaterialTheme.colorScheme.secondary
+        "running", "started", "in_progress", "pending" -> Color(0xFF8DBBE8)
+        else -> Muted
+    }
 
 private val Muted = Color(0xFFB8C2BC)
 private val Danger = Color(0xFFE07A6F)

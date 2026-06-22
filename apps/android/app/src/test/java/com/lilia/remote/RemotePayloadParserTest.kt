@@ -464,6 +464,66 @@ class RemotePayloadParserTest {
     }
 
     @Test
+    fun timelineParsesMessageRoleAndDetails() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "message-1",
+                      "kind": "message",
+                      "turnId": "turn-1",
+                      "status": "success",
+                      "createdAt": 1710000000000,
+                      "payload": {
+                        "role": "assistant",
+                        "content": "Ready"
+                      }
+                    },
+                    {
+                      "id": "tool-1",
+                      "kind": "tool",
+                      "status": "success",
+                      "payload": {
+                        "toolName": "shell",
+                        "input": { "cmd": "yarn test" },
+                        "output": "passed"
+                      }
+                    },
+                    {
+                      "id": "error-1",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "message": "Failed",
+                        "code": "E_RUN",
+                        "stderr": "boom"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        assertEquals("Assistant", detail.timeline[0].title)
+        assertEquals("assistant", detail.timeline[0].role)
+        assertEquals("turn", detail.timeline[0].details.single().label)
+        assertEquals("turn-1", detail.timeline[0].details.single().value)
+        assertEquals(listOf("tool", "input", "output"), detail.timeline[1].details.map { it.label })
+        assertEquals("shell", detail.timeline[1].details[0].value)
+        assertEquals("""{"cmd":"yarn test"}""", detail.timeline[1].details[1].value)
+        assertEquals("passed", detail.timeline[1].details[2].value)
+        assertEquals(listOf("error", "code"), detail.timeline[2].details.map { it.label })
+        assertEquals("boom", detail.timeline[2].details[0].value)
+        assertEquals("E_RUN", detail.timeline[2].details[1].value)
+    }
+
+    @Test
     fun timelineMarksCompletedAssistantMessagesAsBranchable() {
         val detail = RemotePayloadParser.parseTaskDetail(
             taskId = "task-1",
