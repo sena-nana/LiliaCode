@@ -52,6 +52,22 @@ class MainActivityStateTest {
         assertSessionForkCommand(command, "turn-source", "continue")
     }
 
+    @Test
+    fun processSessionRuntimeCommandsUseDesktopWireShape() {
+        val spawn = RemoteRuntimeCommandAdapter.processSpawn("npm test")
+        val stdin = RemoteRuntimeCommandAdapter.processWriteStdin("q")
+        val kill = RemoteRuntimeCommandAdapter.processKill()
+
+        assertEquals("process_session", spawn.getString("type"))
+        assertEquals("spawn", spawn.getString("action"))
+        assertEquals("npm test", spawn.getString("command"))
+        assertEquals("process_session", stdin.getString("type"))
+        assertEquals("write_stdin", stdin.getString("action"))
+        assertEquals("q", stdin.getString("stdin"))
+        assertEquals("process_session", kill.getString("type"))
+        assertEquals("kill", kill.getString("action"))
+    }
+
     private fun savedPc(endpointId: String, bridgeUrl: String): SavedPc =
         SavedPc(
             endpointId = endpointId,

@@ -72,6 +72,7 @@ object RemotePayloadParser {
         return RemoteTaskDetail(
             task = summary,
             runtimePhase = runtime?.nonBlankString("phase", summary.status) ?: summary.status,
+            processSessionId = runtime?.optNullableString("processSessionId"),
             timeline = parseTimeline(timelinePayload.optJSONArray("events") ?: JSONArray()),
             pendingInteraction = parsePending(summary.taskId, pendingPayload.optJSONArray("interactions") ?: JSONArray()),
         )

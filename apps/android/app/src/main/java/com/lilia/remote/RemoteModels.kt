@@ -63,6 +63,7 @@ data class PendingInteraction(
 data class RemoteTaskDetail(
     val task: RemoteTaskSummary,
     val runtimePhase: String,
+    val processSessionId: String?,
     val timeline: List<RemoteTimelineItem>,
     val pendingInteraction: PendingInteraction?,
 )

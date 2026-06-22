@@ -253,6 +253,14 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         }
     }
 
+    fun sendProcessCommand(command: org.json.JSONObject, failureMessage: String, clearError: Boolean = true) {
+        val pc = activePc ?: return
+        val taskId = selectedTask?.task?.taskId ?: return
+        runTaskAction(pc, taskId, failureMessage, clearError) { remoteClient ->
+            remoteClient.sendMessage(pc, taskId, "", command)
+        }
+    }
+
     fun refreshInbox(pc: SavedPc) {
         val remoteClient = client ?: return
         inboxLoading = true
@@ -359,6 +367,26 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                                 branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
                             )
                         }
+                    },
+                    onStartProcess = { command ->
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processSpawn(command),
+                            "Start process failed",
+                        )
+                    },
+                    onSendProcessStdin = { stdin ->
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processWriteStdin(stdin),
+                            "Send stdin failed",
+                            clearError = false,
+                        )
+                    },
+                    onStopProcess = {
+                        sendProcessCommand(
+                            RemoteRuntimeCommandAdapter.processKill(),
+                            "Stop process failed",
+                            clearError = false,
+                        )
                     },
                 )
                 else -> InboxScreen(
@@ -585,10 +613,16 @@ private fun TaskDetailScreen(
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
     onSend: (String, RemoteBranchAnchor?) -> Unit,
+    onStartProcess: (String) -> Unit,
+    onSendProcessStdin: (String) -> Unit,
+    onStopProcess: () -> Unit,
 ) {
     var draft by remember(detail.task.taskId) { mutableStateOf("") }
+    var processCommand by remember(detail.task.taskId) { mutableStateOf("") }
+    var processStdin by remember(detail.processSessionId) { mutableStateOf("") }
     val pendingInteraction = detail.pendingInteraction
     val providerReady = providerStatus?.ready != false
+    val processRunning = detail.processSessionId != null
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
     Column(
@@ -623,6 +657,30 @@ private fun TaskDetailScreen(
         if (error.isNotBlank()) {
             Text(error, color = Danger, style = MaterialTheme.typography.bodySmall)
         }
+        ProcessSessionPanel(
+            running = processRunning,
+            processSessionId = detail.processSessionId,
+            command = processCommand,
+            stdin = processStdin,
+            loading = loading,
+            onCommandChange = { processCommand = it },
+            onStdinChange = { processStdin = it },
+            onStart = {
+                val command = processCommand.trim()
+                if (command.isNotEmpty()) {
+                    processCommand = ""
+                    onStartProcess(command)
+                }
+            },
+            onSendStdin = {
+                if (processStdin.isNotEmpty()) {
+                    val value = processStdin
+                    processStdin = ""
+                    onSendProcessStdin(value)
+                }
+            },
+            onStop = onStopProcess,
+        )
         pendingInteraction?.let { interaction ->
             val optionQuestion = interactionOptionQuestion(interaction)
             val canResolveInteraction = interactionCanSubmit(
@@ -778,6 +836,72 @@ private fun TaskDetailScreen(
                     else -> "Send"
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun ProcessSessionPanel(
+    running: Boolean,
+    processSessionId: String?,
+    command: String,
+    stdin: String,
+    loading: Boolean,
+    onCommandChange: (String) -> Unit,
+    onStdinChange: (String) -> Unit,
+    onStart: () -> Unit,
+    onSendStdin: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Panel {
+        Text("Process session", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = if (running) "Running ${processSessionId.orEmpty()}" else "Idle",
+            color = if (running) MaterialTheme.colorScheme.primary else Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (running) {
+            OutlinedTextField(
+                value = stdin,
+                onValueChange = onStdinChange,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                label = { Text("stdin") },
+                placeholder = { Text("q") },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSendStdin,
+                    enabled = !loading && stdin.isNotEmpty(),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Send stdin")
+                }
+                OutlinedButton(
+                    onClick = onStop,
+                    enabled = !loading,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text("Stop")
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = command,
+                onValueChange = onCommandChange,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                label = { Text("Command") },
+                placeholder = { Text("npm test -- --watch") },
+            )
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !loading && command.trim().isNotEmpty(),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(if (loading) "Working..." else "Start process")
+            }
         }
     }
 }

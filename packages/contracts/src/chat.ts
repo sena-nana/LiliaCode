@@ -1557,6 +1557,7 @@ export interface ChatRuntimeSnapshot {
   phase: ChatRuntimePhase;
   backend: ChatBackendKind | null;
   turnId: string | null;
+  processSessionId?: string | null;
   queuedCount: number;
   pendingRollback: boolean;
   pendingResetCleanup: boolean;

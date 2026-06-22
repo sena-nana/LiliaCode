@@ -427,6 +427,45 @@ class RemoteHttpClientTest {
     }
 
     @Test
+    fun sendMessageDispatchesProcessSessionRuntimeCommand() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.send",
+                    "result": { "accepted": true }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        RemoteHttpClient(FakeDeviceStore())
+            .sendMessage(
+                savedPc(server),
+                "task-1",
+                "",
+                RemoteRuntimeCommandAdapter.processWriteStdin("q"),
+            )
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("chat.send", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("", request.getString("content"))
+        val command = request.getJSONObject("runtimeCommand")
+        assertEquals("process_session", command.getString("type"))
+        assertEquals("write_stdin", command.getString("action"))
+        assertEquals("q", command.getString("stdin"))
+    }
+
+    @Test
     fun interruptDispatchesChatInterruptRequest() = runBlocking {
         val requestBody = AtomicReference<JSONObject>()
         val server = startBridge { exchange ->
