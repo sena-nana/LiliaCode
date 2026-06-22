@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  TaskWorktree,
+import {
   WORKTREE_ATTACH_TASK_COMMAND,
   WORKTREE_CLEANUP_ARCHIVE_COMMAND,
   WORKTREE_CLEAR_TASK_COMMAND,
@@ -8,6 +7,9 @@ import type {
   WORKTREE_GET_FOR_TASK_COMMAND,
   WORKTREE_LIST_COMMAND,
   WORKTREE_MERGE_DELETE_ARCHIVE_COMMAND,
+} from "@lilia/contracts";
+import type {
+  TaskWorktree,
   WorktreeAttachInput,
   WorktreeCreateInput,
   WorktreeListItem,

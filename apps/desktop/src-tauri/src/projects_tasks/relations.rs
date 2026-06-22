@@ -24,6 +24,7 @@ pub(super) fn normalize_dependency_ids(
         if dep_project_id.as_deref() != project_id {
             return Err(format!("{context}: 依赖任务必须属于同一项目"));
         }
+        ensure_dependency_does_not_create_cycle(conn, task_id, &dep, context)?;
         out.push(dep);
     }
     Ok(out)
@@ -130,6 +131,34 @@ fn ensure_parent_does_not_create_cycle(
     Ok(())
 }
 
+fn ensure_dependency_does_not_create_cycle(
+    conn: &Connection,
+    task_id: &str,
+    dependency_id: &str,
+    context: &str,
+) -> Result<(), String> {
+    let mut stack = vec![dependency_id.to_string()];
+    let mut seen = HashSet::new();
+    while let Some(current_id) = stack.pop() {
+        if current_id == task_id {
+            return Err(format!("{context}: 依赖关系不能形成循环"));
+        }
+        if !seen.insert(current_id.clone()) {
+            continue;
+        }
+        let mut stmt = conn
+            .prepare("SELECT depends_on_id FROM task_dependencies WHERE task_id = ?1")
+            .map_err(|e| format!("{context}: 查询依赖链失败：{e}"))?;
+        let rows = stmt
+            .query_map(params![current_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("{context}: 查询依赖链失败：{e}"))?;
+        for row in rows {
+            stack.push(row.map_err(|e| format!("{context}: 读取依赖链失败：{e}"))?);
+        }
+    }
+    Ok(())
+}
+
 fn descendant_ids(conn: &Connection, task_id: &str, context: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let mut stack = vec![task_id.to_string()];
@@ -227,6 +256,31 @@ mod tests {
             normalize_dependency_ids("task", Some("p1"), vec!["other".into()], &conn, "test")
                 .unwrap_err()
                 .contains("同一项目")
+        );
+    }
+
+    #[test]
+    fn normalize_dependency_ids_rejects_dependency_cycles() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+        insert_task(&conn, "task", Some("p1"));
+        insert_task(&conn, "dep-a", Some("p1"));
+        insert_task(&conn, "dep-b", Some("p1"));
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
+            params!["dep-a", "dep-b"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?1, ?2)",
+            params!["dep-b", "task"],
+        )
+        .unwrap();
+
+        assert!(
+            normalize_dependency_ids("task", Some("p1"), vec!["dep-a".into()], &conn, "test")
+                .unwrap_err()
+                .contains("形成循环")
         );
     }
 }

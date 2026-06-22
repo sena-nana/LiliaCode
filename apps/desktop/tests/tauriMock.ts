@@ -2181,6 +2181,14 @@ export function setMockTasks(nextTasks: TaskRow[]) {
   refreshSessionCounts();
 }
 
+export function setMockTaskWorktree(taskId: string, worktree: Record<string, unknown> | null) {
+  if (!worktree) {
+    delete taskWorktrees[taskId];
+    return;
+  }
+  taskWorktrees[taskId] = { ...worktree };
+}
+
 export function setMockRoadmap(
   nextMilestones: MilestoneRow[],
   nextLinks: TaskMilestoneLinkRow[] = [],

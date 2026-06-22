@@ -845,6 +845,7 @@ watch(
     :pending-branch-anchor="composerController.pendingBranchAnchor.value"
     :pending-agent-actions="pendingAgentActions"
     :has-blocking-pending-action="blockingPendingAgentActions.length > 0"
+    :task-run-blocking-reason="composerController.taskRunBlockingReason.value"
     :current-lilia-goal="composerController.currentLiliaGoal.value"
     :process-session-busy="processSessionBusy"
     :process-session-error="processSessionError"

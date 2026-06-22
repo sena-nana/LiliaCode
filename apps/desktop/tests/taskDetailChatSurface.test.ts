@@ -123,6 +123,7 @@ function surfaceProps(overrides: Record<string, unknown> = {}) {
     pendingBranchAnchor: null,
     pendingAgentActions: [],
     hasBlockingPendingAction: false,
+    taskRunBlockingReason: null,
     currentLiliaGoal: null,
     processSessionBusy: false,
     processSessionError: null,
