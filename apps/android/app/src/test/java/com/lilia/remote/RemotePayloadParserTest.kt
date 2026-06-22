@@ -57,6 +57,44 @@ class RemotePayloadParserTest {
     }
 
     @Test
+    fun mergeTimelineDeduplicatesByIdAndPreservesOrder() {
+        val merged = RemotePayloadParser.mergeTimeline(
+            existing = listOf(
+                RemoteTimelineItem(
+                    id = "event-1",
+                    title = "First",
+                    summary = "Original first",
+                    status = "completed",
+                ),
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Original second",
+                    status = "running",
+                ),
+            ),
+            incoming = listOf(
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Updated second",
+                    status = "completed",
+                ),
+                RemoteTimelineItem(
+                    id = "event-3",
+                    title = "Third",
+                    summary = "New third",
+                    status = "running",
+                ),
+            ),
+        )
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), merged.map { it.id })
+        assertEquals("Updated second", merged[1].summary)
+        assertEquals("completed", merged[1].status)
+    }
+
+    @Test
     fun taskListFallsBackForBlankTitleAndStatus() {
         val tasks = RemotePayloadParser.parseTaskList(
             JSONObject(

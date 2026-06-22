@@ -46,9 +46,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
+private const val DETAIL_LIVE_UPDATE_ERROR_MESSAGE = "Live update temporarily unavailable; showing the last loaded task."
+private const val DETAIL_SUBSCRIBE_INTERVAL_MS = 1_500L
+private const val DETAIL_SNAPSHOT_FALLBACK_BASE_MS = 5_000L
+private const val DETAIL_SNAPSHOT_FALLBACK_MAX_MS = 15_000L
 
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
@@ -150,6 +155,97 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             return
         }
         remoteError = err.message ?: fallback
+    }
+
+    fun clearLiveUpdateError() {
+        if (remoteError == DETAIL_LIVE_UPDATE_ERROR_MESSAGE) {
+            remoteError = ""
+        }
+    }
+
+    fun handleLiveUpdateFailure(err: Throwable, pc: SavedPc) {
+        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldClearActivePcForFailure(err)) {
+            clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
+            return
+        }
+        remoteError = DETAIL_LIVE_UPDATE_ERROR_MESSAGE
+    }
+
+    suspend fun refreshTaskSnapshot(
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        val result = remoteClient.taskDetail(pc, taskId)
+        val detail = result.getOrElse {
+            handleLiveUpdateFailure(it, pc)
+            return false
+        }
+        if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+            return false
+        }
+        selectedTask = detail
+        clearLiveUpdateError()
+        return true
+    }
+
+    suspend fun recoverLiveTaskUpdate(
+        err: Throwable,
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        if (shouldClearActivePcForFailure(err)) {
+            handleLiveUpdateFailure(err, pc)
+            return false
+        }
+        return refreshTaskSnapshot(pc, remoteClient, taskId)
+    }
+
+    suspend fun refreshTaskSubscription(
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        val current = selectedTask
+        if (current == null || current.task.taskId != taskId) return false
+        val timelineResult = remoteClient.subscribeTimeline(
+            pc,
+            taskId,
+            current.timeline.lastOrNull()?.id,
+        )
+        if (timelineResult.isFailure) {
+            return recoverLiveTaskUpdate(
+                timelineResult.exceptionOrNull() ?: RuntimeException("Timeline subscription failed"),
+                pc,
+                remoteClient,
+                taskId,
+            )
+        }
+        val timeline = timelineResult.getOrThrow()
+        val stateResult = remoteClient.taskState(pc, taskId)
+        if (stateResult.isFailure) {
+            return recoverLiveTaskUpdate(
+                stateResult.exceptionOrNull() ?: RuntimeException("Task state refresh failed"),
+                pc,
+                remoteClient,
+                taskId,
+            )
+        }
+        val state = stateResult.getOrThrow()
+        if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+            return false
+        }
+        val latest = selectedTask ?: return false
+        selectedTask = latest.copy(
+            task = state.task,
+            runtimePhase = state.runtimePhase,
+            timeline = RemotePayloadParser.mergeTimeline(latest.timeline, timeline),
+            pendingInteraction = state.pendingInteraction,
+        )
+        clearLiveUpdateError()
+        return true
     }
 
     suspend fun refreshProviderStatus(pc: SavedPc, remoteClient: RemoteHttpClient) {
@@ -283,6 +379,38 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         inboxLoading = false
     }
 
+    LaunchedEffect(
+        activePc?.endpointId,
+        activePc?.bridgeUrl,
+        selectedTask?.task?.taskId,
+        bridgeStatus?.capabilities?.supportsTimelineSubscription,
+    ) {
+        val pc = activePc ?: return@LaunchedEffect
+        val remoteClient = client ?: return@LaunchedEffect
+        val taskId = selectedTask?.task?.taskId ?: return@LaunchedEffect
+        var fallbackDelayMs: Long? = null
+        while (true) {
+            val supportsTimelineSubscription =
+                bridgeStatus?.capabilities?.supportsTimelineSubscription != false
+            delay(
+                if (supportsTimelineSubscription && fallbackDelayMs == null) {
+                    DETAIL_SUBSCRIBE_INTERVAL_MS
+                } else {
+                    fallbackDelayMs ?: DETAIL_SNAPSHOT_FALLBACK_BASE_MS
+                },
+            )
+            if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+                return@LaunchedEffect
+            }
+            val updated = if (supportsTimelineSubscription) {
+                refreshTaskSubscription(pc, remoteClient, taskId)
+            } else {
+                refreshTaskSnapshot(pc, remoteClient, taskId)
+            }
+            fallbackDelayMs = if (updated) null else nextLiveUpdateDelay(fallbackDelayMs)
+        }
+    }
+
     MaterialTheme(
         colorScheme = MaterialTheme.colorScheme.copy(
             background = Color(0xFF151716),
@@ -396,6 +524,12 @@ internal fun shouldIgnorePcResult(current: SavedPc?, candidate: SavedPc): Boolea
 
 internal fun shouldClearActivePcForFailure(err: Throwable): Boolean =
     err is RemoteBridgeException && err.code == "unauthorized"
+
+private fun nextLiveUpdateDelay(currentDelayMs: Long?): Long =
+    minOf(
+        (currentDelayMs ?: 0L) + DETAIL_SNAPSHOT_FALLBACK_BASE_MS,
+        DETAIL_SNAPSHOT_FALLBACK_MAX_MS,
+    )
 
 @Composable
 private fun PairingScreen(

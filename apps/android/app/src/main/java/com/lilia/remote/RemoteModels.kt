@@ -68,6 +68,12 @@ data class RemoteTaskDetail(
     val pendingInteraction: PendingInteraction?,
 )
 
+data class RemoteTaskState(
+    val task: RemoteTaskSummary,
+    val runtimePhase: String,
+    val pendingInteraction: PendingInteraction?,
+)
+
 data class RemoteBridgeStatus(
     val hostEnabled: Boolean,
     val state: String,
@@ -77,6 +83,7 @@ data class RemoteBridgeStatus(
 
 data class RemoteCapabilities(
     val supportsTaskInbox: Boolean = true,
+    val supportsTimelineSubscription: Boolean = true,
     val supportsChatSend: Boolean = true,
     val supportsInteractionResponse: Boolean = true,
     val supportsInterrupt: Boolean = true,

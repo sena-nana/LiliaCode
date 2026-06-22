@@ -73,6 +73,31 @@ class RemoteHttpClient(
         }
     }
 
+    suspend fun taskState(pc: SavedPc, taskId: String): Result<RemoteTaskState> = withContext(Dispatchers.IO) {
+        runCatching {
+            val taskPayload = dispatch(pc, JSONObject().put("type", "tasks.get").put("taskId", taskId))
+            val pendingPayload = dispatch(pc, JSONObject().put("type", "interaction.pending.read").put("taskId", taskId))
+            RemotePayloadParser.parseTaskState(taskId, taskPayload, pendingPayload)
+        }
+    }
+
+    suspend fun subscribeTimeline(
+        pc: SavedPc,
+        taskId: String,
+        afterEventId: String?,
+    ): Result<List<RemoteTimelineItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = JSONObject()
+                .put("type", "timeline.subscribe")
+                .put("taskId", taskId)
+            if (afterEventId != null) {
+                request.put("afterEventId", afterEventId)
+            }
+            val payload = dispatch(pc, request)
+            RemotePayloadParser.parseTimelinePayload(payload)
+        }
+    }
+
     suspend fun sendMessage(
         pc: SavedPc,
         taskId: String,

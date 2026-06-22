@@ -363,6 +363,47 @@ class RemoteHttpClientTest {
     }
 
     @Test
+    fun subscribeTimelineDispatchesAfterEventId() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "timeline.subscribe",
+                    "taskId": "task-1",
+                    "events": [
+                      {
+                        "id": "event-2",
+                        "kind": "assistant_message",
+                        "summary": "Updated",
+                        "status": "completed"
+                      }
+                    ]
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        val timeline = RemoteHttpClient(FakeDeviceStore())
+            .subscribeTimeline(savedPc(server), "task-1", "event-1")
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("timeline.subscribe", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("event-1", request.getString("afterEventId"))
+        assertEquals(1, timeline.size)
+        assertEquals("event-2", timeline[0].id)
+        assertEquals("Updated", timeline[0].summary)
+    }
+
+    @Test
     fun sendMessageDispatchesChatSendRequest() = runBlocking {
         val requestBody = AtomicReference<JSONObject>()
         val server = startBridge { exchange ->
