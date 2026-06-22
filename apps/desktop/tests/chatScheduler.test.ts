@@ -8,6 +8,7 @@ import {
   CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
   CHAT_INTERRUPT_TURN_COMMAND,
   CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_SEND_PROCESS_SESSION_COMMAND,
   LILIA_IAB_OPEN_COMMAND,
   TASK_PROMOTE_COMMAND,
   TODO_CREATE_COMMAND,
@@ -16,12 +17,14 @@ import TaskDetail from "../src/pages/TaskDetail.vue";
 import { createLiliaRouter } from "../src/router";
 import {
   completeMockAgentTurn,
+  clearMockProcessSessionCommands,
   emitMockTimelineEvent,
   emitMockTurnCompleted,
   emitTauriEvent,
   emitWebviewDragDropEvent,
   failNextMockChatSend,
   mockInvoke,
+  mockProcessSessionCommands,
   replaceMockTimelineEvents,
   seedMockChatMessages,
   setMockActiveBackend,
@@ -139,9 +142,20 @@ async function setComposerText(view: ReturnType<typeof render>, text: string) {
   return input;
 }
 
+function getComposerTextbox(view: ReturnType<typeof render>) {
+  const element = view.container.querySelector(".chat-composer [role='textbox']");
+  expect(element).toBeInstanceOf(HTMLElement);
+  return element as HTMLElement;
+}
+
 async function sendText(view: ReturnType<typeof render>, text: string) {
   await setComposerText(view, text);
-  await fireEvent.click(view.getByRole("button", { name: /发送|加入调度队列/ }));
+  const sendButton = await waitFor(() => {
+    const element = view.container.querySelector(".chat-composer .chat-composer__send");
+    expect(element).toBeInstanceOf(HTMLButtonElement);
+    return element as HTMLButtonElement;
+  });
+  await fireEvent.click(sendButton);
 }
 
 async function setActiveBackendForTest(backend: "claude" | "codex") {
@@ -262,6 +276,88 @@ describe("chat scheduler", () => {
     expect(send?.[1].composer).toMatchObject({
       modelSelectionMode: "auto",
     });
+  });
+
+  it("启动 process session 通过消息入口发送 runtime command", async () => {
+    const view = await renderTaskDetail();
+
+    const input = await waitFor(() => view.getByLabelText("进程命令"));
+    await fireEvent.update(input, "npm test -- --watch=false");
+    await fireEvent.click(view.getByRole("button", { name: "启动进程会话" }));
+
+    await waitFor(() => {
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND))
+        .toBe(true);
+    });
+    const send = mockInvoke.mock.calls.find(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND);
+    expect(send?.[1]).toMatchObject({
+      content: "",
+      projectCwd: "D:\\PROJECT\\workspace\\Lilia",
+      runtimeCommand: {
+        type: "process_session",
+        action: "spawn",
+        command: "npm test -- --watch=false",
+        cwd: "D:\\PROJECT\\workspace\\Lilia",
+      },
+    });
+  });
+
+  it("运行中的 process session 控制通过专用 IPC 发送 stdin 和 kill", async () => {
+    setMockChatRunning("t-002", true);
+    const view = await renderTaskDetail();
+    clearMockProcessSessionCommands();
+    mockInvoke.mockClear();
+
+    const stdin = await waitFor(() => view.getByLabelText("stdin"));
+    await fireEvent.update(stdin, "q");
+    await fireEvent.click(view.getByRole("button", { name: "发送 stdin" }));
+    await waitFor(() => {
+      expect(mockProcessSessionCommands()).toContainEqual({
+        taskId: "t-002",
+        command: {
+          type: "process_session",
+          action: "write_stdin",
+          stdin: "q",
+        },
+      });
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "停止进程" }));
+    await waitFor(() => {
+      expect(mockProcessSessionCommands()).toContainEqual({
+        taskId: "t-002",
+        command: {
+          type: "process_session",
+          action: "kill",
+        },
+      });
+    });
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_PROCESS_SESSION_COMMAND))
+      .toBe(true);
+  });
+
+  it("process session 空输入只显示本地错误，不触发 IPC", async () => {
+    const view = await renderTaskDetail();
+    mockInvoke.mockClear();
+
+    await fireEvent.click(await waitFor(() => view.getByRole("button", { name: "启动进程会话" })));
+
+    expect(view.getByText("请输入要启动的进程命令。")).toBeInTheDocument();
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
+  });
+
+  it("process session 空 stdin 只显示本地错误，不触发 IPC", async () => {
+    setMockChatRunning("t-002", true);
+    const view = await renderTaskDetail();
+    clearMockProcessSessionCommands();
+    mockInvoke.mockClear();
+
+    await fireEvent.click(await waitFor(() => view.getByRole("button", { name: "发送 stdin" })));
+
+    expect(view.getByText("请输入要发送到 stdin 的内容。")).toBeInTheDocument();
+    expect(mockProcessSessionCommands()).toEqual([]);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_PROCESS_SESSION_COMMAND))
+      .toBe(false);
   });
 
   it("手动选择 Claude thinking 强度会随消息发送", async () => {
@@ -587,7 +683,7 @@ describe("chat scheduler", () => {
 
     await waitFor(() => {
       expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
-      expect(view.getByRole("textbox")).toBeInTheDocument();
+      expect(getComposerTextbox(view)).toBeInTheDocument();
       expect(view.getByText("先别发出去")).toBeInTheDocument();
     });
     expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === CHAT_INTERRUPT_TURN_COMMAND)).toHaveLength(1);
@@ -638,7 +734,7 @@ describe("chat scheduler", () => {
 
     const view = await renderTaskDetail();
 
-    expect(view.getByRole("textbox")).toBeInTheDocument();
+    expect(getComposerTextbox(view)).toBeInTheDocument();
     expect(view.queryByRole("button", { name: "打断 Agent" })).toBeNull();
 
     await waitFor(() => {

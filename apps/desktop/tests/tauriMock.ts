@@ -33,6 +33,7 @@ import {
   CHAT_SEARCH_CONTEXT_ATTACHMENTS_COMMAND,
   CHAT_SEARCH_SLASH_COMMANDS_COMMAND,
   CHAT_SEND_MESSAGE_COMMAND,
+  CHAT_SEND_PROCESS_SESSION_COMMAND,
   CHAT_SET_COMPOSER_STATE_COMMAND,
   CHAT_TURN_STARTED_EVENT_NAME,
   CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND,
@@ -609,6 +610,7 @@ let chatRunning: Record<string, boolean> = {};
 let chatQueued: Record<string, Array<Record<string, unknown>>> = {};
 let chatInterruptRollbacks: Record<string, Record<string, unknown> | null> = {};
 let runtimeSnapshotOverrides: Record<string, Record<string, unknown>> = {};
+let processSessionCommands: Array<{ taskId: string; command: Record<string, unknown> }> = [];
 let nextChatSendError: string | null = null;
 let nextAgentInteractionResponseError: string | null = null;
 let clipboardFilePaths: string[] = [];
@@ -1821,6 +1823,7 @@ export function resetTauriMockData() {
   chatQueued = {};
   chatInterruptRollbacks = {};
   runtimeSnapshotOverrides = {};
+  processSessionCommands = [];
   nextChatSendError = null;
   nextAgentInteractionResponseError = null;
   clipboardFilePaths = [];
@@ -2040,6 +2043,17 @@ export function setMockRuntimeSnapshot(
   snapshot: Record<string, unknown>,
 ) {
   runtimeSnapshotOverrides[taskId] = snapshot;
+}
+
+export function mockProcessSessionCommands() {
+  return processSessionCommands.map((item) => ({
+    taskId: item.taskId,
+    command: { ...item.command },
+  }));
+}
+
+export function clearMockProcessSessionCommands() {
+  processSessionCommands = [];
 }
 
 export function failNextMockChatSend(message: string) {
@@ -4461,6 +4475,26 @@ export const mockInvoke = vi.fn(async (cmd: string, args: Record<string, unknown
         queuedCount: 0,
         turnId,
       };
+    }
+
+    case CHAT_SEND_PROCESS_SESSION_COMMAND: {
+      const taskId = String(args.taskId);
+      const command = args.command && typeof args.command === "object" && !Array.isArray(args.command)
+        ? args.command as Record<string, unknown>
+        : {};
+      processSessionCommands.push({ taskId, command: { ...command } });
+      if (command.action === "kill" && chatRunning[taskId] === true) {
+        chatRunning[taskId] = false;
+        queueMicrotask(() => {
+          emitTauriEvent(CHAT_DONE_EVENT_NAME, createChatDoneEvent({
+            taskId,
+            sessionId: `mock-${taskId}`,
+            subtype: null,
+            rollback: null,
+          }));
+        });
+      }
+      return undefined;
     }
 
     case LILIA_IAB_OPEN_COMMAND:

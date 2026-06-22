@@ -2,6 +2,7 @@ import { computed, ref, watch, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   createChatBackendRecord,
+  createProcessSessionCommand,
   isAgentTimelineToolWindowKind,
   latestLiliaGoalFromTimeline,
   serializeChatAttachmentReference,
@@ -67,6 +68,7 @@ import {
   onDone,
   onTurnStarted,
   sendMessage,
+  sendProcessSessionCommand,
   setComposerState,
 } from "../../services/chat";
 import { getProjectSettings } from "../../services/projects";
@@ -179,6 +181,8 @@ export function useTaskComposerController(options: {
   const insertDraftTextKey = ref(0);
   const insertDraftTextContent = ref("");
   const pendingBranchAnchor = ref<ChatBranchAnchor | null>(null);
+  const processSessionBusy = ref(false);
+  const processSessionError = ref<string | null>(null);
   const taskWorktree = ref<TaskWorktree | null>(null);
   const worktreeOptions = ref<WorktreeOption[]>([
     { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: "使用项目目录" },
@@ -491,7 +495,7 @@ export function useTaskComposerController(options: {
     const outgoingAttachments = input.turn.outgoingAttachments ?? [];
     const outgoingConversationReferences = input.turn.outgoingConversationReferences ?? [];
     const workflow = input.workflow ?? null;
-    const runtimeCommand = input.runtimeCommand ?? null;
+    let runtimeCommand = input.runtimeCommand ?? null;
     let runtimeOptions = input.runtimeOptions ?? null;
     const titleContent = input.turn.titleContent;
     const content = input.turn.content;
@@ -511,6 +515,13 @@ export function useTaskComposerController(options: {
       const cwd = taskWorktree.value?.worktreePath ??
         context.project.value?.cwd ??
         (await context.ensureOrphanCwd());
+      if (
+        runtimeCommand?.type === "process_session" &&
+        runtimeCommand.action === "spawn" &&
+        !runtimeCommand.cwd
+      ) {
+        runtimeCommand = { ...runtimeCommand, cwd };
+      }
       runtimeOptions = await runtimeOptionsWithWorktreeContext(currentComposer, runtimeOptions);
 
       const optimistic = timeline.createOptimisticMessageEvent({
@@ -617,6 +628,94 @@ export function useTaskComposerController(options: {
       });
     } catch {
       // sendAgentMessage 已写入本地错误 timeline。
+    }
+  }
+
+  function setProcessSessionError(message: string) {
+    processSessionError.value = message;
+  }
+
+  function clearProcessSessionError() {
+    processSessionError.value = null;
+  }
+
+  async function onStartProcessSession(command: string) {
+    const normalized = command.trim();
+    if (!context.hasContext.value) return;
+    if (!normalized) {
+      setProcessSessionError("请输入要启动的进程命令。");
+      return;
+    }
+    if (isTurnRunning.value || blockingPendingAgentActions.value.length > 0 || processSessionBusy.value) {
+      setProcessSessionError("当前 Agent 正在运行，暂不能启动新的进程会话。");
+      return;
+    }
+    processSessionBusy.value = true;
+    clearProcessSessionError();
+    try {
+      await sendAgentMessage({
+        turn: {
+          content: "",
+          outgoingAttachments: [],
+          outgoingConversationReferences: [],
+          titleContent: normalized,
+        },
+        runtimeCommand: createProcessSessionCommand("spawn", { command: normalized }),
+      });
+    } catch (err) {
+      setProcessSessionError(`启动进程失败：${String(err)}`);
+    } finally {
+      processSessionBusy.value = false;
+    }
+  }
+
+  async function onSendProcessSessionStdin(stdin: string) {
+    if (!context.hasContext.value) return;
+    if (!isTurnRunning.value) {
+      setProcessSessionError("当前没有运行中的进程会话。");
+      return;
+    }
+    if (!stdin) {
+      setProcessSessionError("请输入要发送到 stdin 的内容。");
+      return;
+    }
+    if (processSessionBusy.value) return;
+    processSessionBusy.value = true;
+    clearProcessSessionError();
+    try {
+      await sendProcessSessionCommand(
+        props.taskId,
+        createProcessSessionCommand("write_stdin", { stdin }),
+      );
+    } catch (err) {
+      const message = `发送 stdin 失败：${String(err)}`;
+      setProcessSessionError(message);
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
+    } finally {
+      processSessionBusy.value = false;
+    }
+  }
+
+  async function onStopProcessSession() {
+    if (!context.hasContext.value) return;
+    if (!isTurnRunning.value) {
+      setProcessSessionError("当前没有运行中的进程会话。");
+      return;
+    }
+    if (processSessionBusy.value) return;
+    processSessionBusy.value = true;
+    clearProcessSessionError();
+    try {
+      await sendProcessSessionCommand(
+        props.taskId,
+        createProcessSessionCommand("kill"),
+      );
+    } catch (err) {
+      const message = `停止进程失败：${String(err)}`;
+      setProcessSessionError(message);
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(message));
+    } finally {
+      processSessionBusy.value = false;
     }
   }
 
@@ -1128,6 +1227,8 @@ export function useTaskComposerController(options: {
     cancelScheduledHydration();
     isTurnRunning.value = false;
     interruptInFlight.value = false;
+    processSessionBusy.value = false;
+    processSessionError.value = null;
     composer.value = null;
     taskWorktree.value = null;
     contextUsage.value = null;
@@ -1166,6 +1267,8 @@ export function useTaskComposerController(options: {
     blockingPendingAgentActions,
     pendingPlanApproval,
     currentLiliaGoal,
+    processSessionBusy,
+    processSessionError,
     taskWorktree,
     worktreeOptions,
     worktreeSelectionValue,
@@ -1178,6 +1281,9 @@ export function useTaskComposerController(options: {
     sendAgentMessage,
     onSend,
     onExecuteSlashCommand,
+    onStartProcessSession,
+    onSendProcessSessionStdin,
+    onStopProcessSession,
     onStartLiliaReview,
     onStartLiliaFixSuggestion,
     onStartLiliaCompact,
