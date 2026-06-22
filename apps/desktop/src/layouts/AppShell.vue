@@ -102,7 +102,12 @@ const sidebarReturnTo = computed(() =>
     ? previousSidebarReplacementRoute.value
     : "/",
 );
-let cancelRoutePaintMeasure: (() => void) | null = null;
+type PendingRoutePaintMeasure = {
+  cancelPaint: () => void;
+  stage: ReturnType<typeof beginPerfStage>;
+};
+let pendingRoutePaintMeasure: PendingRoutePaintMeasure | null = null;
+let routePaintSeq = 0;
 
 const removeBeforeEach = router.beforeEach((to, from) => {
   if (
@@ -119,25 +124,37 @@ function goBackFromAutomation() {
 
 installPerfObservers();
 
+function cancelPendingRoutePaintMeasure(stage: "cancelled" | "replaced") {
+  pendingRoutePaintMeasure?.cancelPaint();
+  pendingRoutePaintMeasure?.stage.end(stage);
+  pendingRoutePaintMeasure = null;
+}
+
 watch(
   () => route.fullPath,
   (path) => {
-    cancelRoutePaintMeasure?.();
-    const stage = beginPerfStage("route.paint", { detail: path });
+    cancelPendingRoutePaintMeasure("replaced");
+    const seq = ++routePaintSeq;
+    const stage = beginPerfStage("route.paint", {
+      detail: path,
+      feature: "route.paint",
+      id: path,
+      route: path,
+      seq,
+    });
     const cancelPaint = scheduleAfterPaint(() => {
-      if (cancelRoutePaintMeasure === cancelPaint) {
-        cancelRoutePaintMeasure = null;
+      if (pendingRoutePaintMeasure?.cancelPaint === cancelPaint) {
+        pendingRoutePaintMeasure = null;
       }
       stage.end("paint");
     });
-    cancelRoutePaintMeasure = cancelPaint;
+    pendingRoutePaintMeasure = { cancelPaint, stage };
   },
   { immediate: true },
 );
 
 onBeforeUnmount(() => {
-  cancelRoutePaintMeasure?.();
-  cancelRoutePaintMeasure = null;
+  cancelPendingRoutePaintMeasure("cancelled");
   removeBeforeEach();
 });
 </script>
