@@ -232,7 +232,7 @@ export type RemoteResponsePayload =
   | { type: "timeline.subscribe"; taskId: string; events: AgentTimelineEvent[] }
   | { type: "chat.send"; result: ChatSendResult }
   | { type: "chat.interrupt"; result: ChatInterruptResult }
-  | { type: "chat.retry"; unsupported: true }
+  | { type: "chat.retry"; result: ChatSendResult }
   | { type: "interaction.pending"; interactions: AgentInteractionRequest[] }
   | { type: "interaction.respond"; accepted: true }
   | { type: "provider.status"; backend: string; ready: boolean; report?: unknown };

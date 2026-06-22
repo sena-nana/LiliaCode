@@ -684,7 +684,38 @@ fn dispatch_request(
                 .map_err(RemoteDispatchError::unavailable)?;
             Ok(json!({ "type": "chat.interrupt", "result": result }))
         }
-        "chat.retry" => Ok(json!({ "type": "chat.retry", "unsupported": true })),
+        "chat.retry" => {
+            let task_id = string_field(&envelope.request, "taskId")?;
+            let events =
+                agent_timeline::list(&conn, &task_id).map_err(RemoteDispatchError::internal)?;
+            let retry_context = latest_retry_context(&events)
+                .ok_or_else(|| RemoteDispatchError::conflict("没有可重试的远控消息"))?;
+            let project_cwd = load_task_project_cwd(&conn, &task_id).unwrap_or_default();
+            let chat_store = app.state::<chat::state::ChatStore>();
+            let composer = {
+                let composers = chat_store.composers.lock().unwrap();
+                composers
+                    .get(&task_id)
+                    .cloned()
+                    .unwrap_or_else(|| chat::state::default_composer(&task_id))
+            };
+            let result = chat::commands::chat_send_message(
+                app.clone(),
+                task_id,
+                retry_context.content,
+                composer,
+                project_cwd,
+                retry_context.attachments,
+                retry_context.conversation_references,
+                None,
+                None,
+                None,
+                None,
+                chat_store,
+            )
+            .map_err(RemoteDispatchError::unavailable)?;
+            Ok(json!({ "type": "chat.retry", "result": result }))
+        }
         "interaction.pending.read" => Ok(json!({
             "type": "interaction.pending",
             "interactions": pending_interactions_for_task(
@@ -1005,6 +1036,88 @@ fn parse_optional_field<T: for<'de> Deserialize<'de>>(
     }
 }
 
+#[derive(Debug, Clone)]
+struct RemoteTimelineRetryContext {
+    content: String,
+    attachments: Vec<chat::types::ChatAttachment>,
+    conversation_references: Vec<chat::types::ChatConversationReference>,
+}
+
+fn latest_retry_context(
+    events: &[agent_timeline::AgentTimelineEvent],
+) -> Option<RemoteTimelineRetryContext> {
+    events
+        .iter()
+        .rev()
+        .find_map(|event| retry_context_for_timeline_event(event, events))
+}
+
+fn retry_context_for_timeline_event(
+    event: &agent_timeline::AgentTimelineEvent,
+    events: &[agent_timeline::AgentTimelineEvent],
+) -> Option<RemoteTimelineRetryContext> {
+    if event.kind != "error" {
+        return None;
+    }
+    if let Some(embedded) = read_timeline_retry_context(event.payload.get("retryContext")) {
+        return Some(embedded);
+    }
+    let turn_id = event.turn_id.as_deref()?;
+    let source = events.iter().find(|candidate| {
+        candidate.kind == "message"
+            && candidate.turn_id.as_deref() == Some(turn_id)
+            && candidate.payload.get("role").and_then(JsonValue::as_str) == Some("user")
+    })?;
+    let content = source
+        .payload
+        .get("content")
+        .and_then(JsonValue::as_str)
+        .or(source.summary.as_deref())
+        .unwrap_or_default();
+    read_timeline_retry_context_from_parts(
+        content,
+        source.payload.get("attachments"),
+        source.payload.get("conversationReferences"),
+    )
+}
+
+fn read_timeline_retry_context(value: Option<&JsonValue>) -> Option<RemoteTimelineRetryContext> {
+    let payload = value?.as_object()?;
+    let content = payload
+        .get("content")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    read_timeline_retry_context_from_parts(
+        content,
+        payload.get("attachments"),
+        payload.get("conversationReferences"),
+    )
+}
+
+fn read_timeline_retry_context_from_parts(
+    content: &str,
+    attachments: Option<&JsonValue>,
+    conversation_references: Option<&JsonValue>,
+) -> Option<RemoteTimelineRetryContext> {
+    let attachments = parse_retry_context_array(attachments);
+    let conversation_references = parse_retry_context_array(conversation_references);
+    if content.trim().is_empty() && attachments.is_empty() && conversation_references.is_empty() {
+        return None;
+    }
+    Some(RemoteTimelineRetryContext {
+        content: content.to_string(),
+        attachments,
+        conversation_references,
+    })
+}
+
+fn parse_retry_context_array<T: for<'de> Deserialize<'de>>(value: Option<&JsonValue>) -> Vec<T> {
+    value
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
 #[derive(Debug)]
 struct RemoteDispatchError {
     code: &'static str,
@@ -1024,6 +1137,14 @@ impl RemoteDispatchError {
     fn unsupported(message: impl Into<String>) -> Self {
         Self {
             code: "unsupported",
+            message: message.into(),
+            retryable: false,
+        }
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            code: "conflict",
             message: message.into(),
             retryable: false,
         }
@@ -1763,6 +1884,83 @@ mod tests {
     }
 
     #[test]
+    fn latest_retry_context_prefers_embedded_error_context() {
+        let events = vec![timeline_event(
+            "error-1",
+            "error",
+            None,
+            None,
+            json!({
+                "retryContext": {
+                    "content": "Retry this",
+                    "attachments": [{
+                        "id": "att-1",
+                        "name": "file.rs",
+                        "path": "C:/repo/file.rs",
+                        "kind": "file",
+                        "size": null
+                    }],
+                    "conversationReferences": []
+                }
+            }),
+        )];
+
+        let context = latest_retry_context(&events).unwrap();
+
+        assert_eq!(context.content, "Retry this");
+        assert_eq!(context.attachments.len(), 1);
+        assert_eq!(context.attachments[0].path, "C:/repo/file.rs");
+    }
+
+    #[test]
+    fn latest_retry_context_falls_back_to_same_turn_user_message() {
+        let events = vec![
+            timeline_event(
+                "message-1",
+                "message",
+                Some("turn-1"),
+                Some("Original prompt"),
+                json!({
+                    "role": "user",
+                    "content": "Original prompt",
+                    "attachments": [],
+                    "conversationReferences": [{
+                        "taskId": "task-other",
+                        "title": "Other task",
+                        "route": "/chats/task-other"
+                    }]
+                }),
+            ),
+            timeline_event(
+                "error-1",
+                "error",
+                Some("turn-1"),
+                Some("Failed"),
+                json!({ "message": "Failed" }),
+            ),
+        ];
+
+        let context = latest_retry_context(&events).unwrap();
+
+        assert_eq!(context.content, "Original prompt");
+        assert_eq!(context.conversation_references.len(), 1);
+        assert_eq!(context.conversation_references[0].task_id, "task-other");
+    }
+
+    #[test]
+    fn latest_retry_context_ignores_unlocatable_errors() {
+        let events = vec![timeline_event(
+            "error-1",
+            "error",
+            None,
+            Some("Failed"),
+            json!({ "message": "Failed" }),
+        )];
+
+        assert!(latest_retry_context(&events).is_none());
+    }
+
+    #[test]
     fn active_ticket_restores_bridge_url_from_pairing_uri() {
         let conn = conn();
         insert_ticket(&conn);
@@ -1773,6 +1971,30 @@ mod tests {
             ticket.bridge_url.as_deref(),
             Some("http://192.168.1.12:41478")
         );
+    }
+
+    fn timeline_event(
+        id: &str,
+        kind: &str,
+        turn_id: Option<&str>,
+        summary: Option<&str>,
+        payload: JsonValue,
+    ) -> agent_timeline::AgentTimelineEvent {
+        agent_timeline::AgentTimelineEvent {
+            id: id.to_string(),
+            task_id: "task-1".to_string(),
+            turn_id: turn_id.map(ToString::to_string),
+            backend: "codex".to_string(),
+            kind: kind.to_string(),
+            status: if kind == "error" { "error" } else { "success" }.to_string(),
+            title: kind.to_string(),
+            summary: summary.map(ToString::to_string),
+            payload,
+            created_at: now_millis(),
+            updated_at: now_millis(),
+            turn_seq: 0,
+            intra_turn_order: 0,
+        }
     }
 
     #[test]

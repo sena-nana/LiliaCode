@@ -102,6 +102,13 @@ class RemoteHttpClient(
         }
     }
 
+    suspend fun retry(pc: SavedPc, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            dispatch(pc, JSONObject().put("type", "chat.retry").put("taskId", taskId))
+            Unit
+        }
+    }
+
     suspend fun resolveInteraction(
         pc: SavedPc,
         interaction: PendingInteraction,
