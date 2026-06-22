@@ -101,6 +101,7 @@ import {
 } from "./usePendingInteractionActions";
 import { installUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
+import { singleFlight } from "../../utils/singleFlight";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
 
@@ -207,22 +208,6 @@ const composerStateLoads = new Map<string, Promise<ChatComposerState>>();
 const taskWorktreeLoads = new Map<string, Promise<TaskWorktree | null>>();
 const worktreeListLoads = new Map<string, Promise<WorktreeListItem[]>>();
 const runtimeSnapshotLoads = new Map<string, Promise<Awaited<ReturnType<typeof getRuntimeSnapshot>>>>();
-
-function singleFlight<T>(
-  loads: Map<string, Promise<T>>,
-  key: string,
-  load: () => Promise<T>,
-): Promise<T> {
-  const existing = loads.get(key);
-  if (existing) return existing;
-  const pending = load().finally(() => {
-    if (loads.get(key) === pending) {
-      loads.delete(key);
-    }
-  });
-  loads.set(key, pending);
-  return pending;
-}
 
 function loadComposerState(taskId: string): Promise<ChatComposerState> {
   return singleFlight(composerStateLoads, taskId, () => getComposerState(taskId));

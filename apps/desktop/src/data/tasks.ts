@@ -25,6 +25,7 @@ import {
   listProjects,
   registerProjectRemovalHandler,
 } from "./projects";
+import { singleFlight } from "../utils/singleFlight";
 
 // OrphanConversation 形状沿用 Task 的子集，project_id 为 null。
 export interface OrphanConversation {
@@ -84,16 +85,9 @@ function rememberDraftPromotion(
 }
 
 function loadTaskRow(taskId: string): Promise<TaskRow | null> {
-  const existing = taskRowLoads.get(taskId);
-  if (existing) return existing;
-  const load = invoke<TaskRow | null>(TASK_GET_COMMAND, { id: taskId })
-    .finally(() => {
-      if (taskRowLoads.get(taskId) === load) {
-        taskRowLoads.delete(taskId);
-      }
-    });
-  taskRowLoads.set(taskId, load);
-  return load;
+  return singleFlight(taskRowLoads, taskId, () =>
+    invoke<TaskRow | null>(TASK_GET_COMMAND, { id: taskId })
+  );
 }
 
 async function refreshTasks(projectId: string): Promise<void> {

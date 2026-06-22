@@ -231,11 +231,8 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
       console.error("[popup] hydrate context failed", err);
     } finally {
       if (
-        !disposed &&
         isCurrentContextSnapshot(snapshotVersion, projectId, taskId) &&
-        seq === popupContextSeq &&
-        taskId === props.taskId &&
-        projectId === props.projectId
+        seq === popupContextSeq
       ) {
         popupContextHydrating.value = false;
         popupContextHydrated.value = true;
@@ -249,7 +246,6 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   async function hydrateMainContext() {
     if (isPopup.value) return;
-    const snapshotVersion = captureContextSnapshot();
     const projectId = props.projectId;
     const taskId = props.taskId;
     try {
@@ -270,7 +266,6 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
           { detail: taskId },
         );
       }
-      if (!isCurrentContextSnapshot(snapshotVersion, projectId, taskId)) return;
     } catch (err) {
       console.error("[chat] hydrate context failed", err);
     }
@@ -278,7 +273,6 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
 
   async function hydrateMainTaskRecord() {
     if (isPopup.value || !props.projectId) return;
-    const snapshotVersion = captureContextSnapshot();
     const projectId = props.projectId;
     const taskId = props.taskId;
     try {
@@ -289,7 +283,6 @@ export function useTaskConversationContext(props: TaskDetailRouteProps) {
         },
         { detail: `${projectId}:${taskId}` },
       );
-      if (!isCurrentContextSnapshot(snapshotVersion, projectId, taskId)) return;
     } catch (err) {
       console.error("[chat] hydrate task record failed", err);
     }
