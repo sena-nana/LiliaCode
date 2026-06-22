@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 use crate::agent_timeline::{AgentTimelineEvent, AgentTimelineEventInput};
+use crate::chat::contract;
 use crate::chat::timeline_sink::persist_and_emit_input;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
@@ -314,7 +315,7 @@ const HISTORY_EMIT_BATCH_SIZE: usize = 80;
 fn emit_history_event_batches(app: &AppHandle, task_id: &str, events: Vec<AgentTimelineEvent>) {
     for chunk in events.chunks(HISTORY_EMIT_BATCH_SIZE) {
         let _ = app.emit(
-            "agent:timeline-batch",
+            contract::agent_timeline_batch_event_name(),
             AgentTimelineBatchPayload {
                 task_id: task_id.to_string(),
                 events: chunk.to_vec(),

@@ -9,9 +9,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use uuid::Uuid;
 
-use crate::{store::LiliaStore, util::now_millis, MAIN_WINDOW_LABEL};
-
-const CLI_PROJECT_OPEN_EVENT: &str = "lilia:cli-project-open";
+use crate::{app_events_contract, store::LiliaStore, util::now_millis, MAIN_WINDOW_LABEL};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,7 +75,10 @@ fn publish_cli_project_open<R: Runtime>(
     emit_immediately: bool,
 ) {
     if emit_immediately {
-        if let Err(err) = app.emit(CLI_PROJECT_OPEN_EVENT, payload.clone()) {
+        if let Err(err) = app.emit(
+            app_events_contract::cli_project_open_event_name(),
+            payload.clone(),
+        ) {
             eprintln!("[liliacode] emit project open failed: {err}");
         }
         return;

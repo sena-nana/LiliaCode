@@ -5,6 +5,10 @@ import type {
   ChatModelOption,
   ProviderRuntimeOptions,
 } from "@lilia/contracts";
+import {
+  LILIA_COMPACT_WORKFLOW_TYPE,
+  LILIA_REVIEW_WORKFLOW_TYPE,
+} from "@lilia/contracts";
 import { previewAutoModelSelection, selectModelForTurn } from "../src/services/modelSelection";
 
 const codexModels: ChatModelOption[] = [
@@ -95,7 +99,7 @@ describe("model selection", () => {
       modelOptions: claudeModels,
       composer: composer({ backend: "claude", model: "claude-sonnet-4-6" }),
       prompt: "",
-      workflow: { type: "lilia_review", target: { type: "uncommittedChanges" } },
+      workflow: { type: LILIA_REVIEW_WORKFLOW_TYPE, target: { type: "uncommittedChanges" } },
     }).explanation.model).toBe("claude-opus-4-7");
 
     expect(selectModelForTurn({
@@ -103,7 +107,7 @@ describe("model selection", () => {
       modelOptions: claudeModels,
       composer: composer({ backend: "claude", model: "claude-sonnet-4-6" }),
       prompt: "",
-      workflow: { type: "lilia_compact" },
+      workflow: { type: LILIA_COMPACT_WORKFLOW_TYPE },
     }).explanation).toMatchObject({
       model: "claude-haiku-4-5",
       reasoningEffort: "low",
@@ -152,6 +156,34 @@ describe("model selection", () => {
       reasoningEffort: "medium",
       source: "runtimeOptions",
     });
+
+    const customCodexModel = selectModelForTurn({
+      backend: "codex",
+      modelOptions: codexModels,
+      composer: composer({
+        model: "gpt-6-preview",
+        modelSelectionMode: "manual",
+      }),
+      prompt: "short",
+    });
+    expect(customCodexModel.explanation).toMatchObject({
+      model: "gpt-6-preview",
+      source: "manual",
+    });
+
+    const incompatibleModel = selectModelForTurn({
+      backend: "codex",
+      modelOptions: codexModels,
+      composer: composer({
+        model: "claude-sonnet-4-6",
+        modelSelectionMode: "manual",
+      }),
+      prompt: "short",
+    });
+    expect(incompatibleModel.explanation.model).toBe("gpt-5.4-mini");
+    expect(incompatibleModel.explanation.signals).toContain(
+      "模型 claude-sonnet-4-6 不属于当前后端，已回退自动档位",
+    );
   });
 
   it("maps provider options for Claude and downgrades Codex max", () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
+import { defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Archive,
@@ -74,14 +74,21 @@ const editingValue = ref("");
 const editingInput = ref<HTMLInputElement | null>(null);
 const conversationListReady = ref(false);
 let conversationListRevealHandle: number | null = null;
+let cancelConversationListRevealPaint: (() => void) | null = null;
 let conversationListRevealSeq = 0;
+let renameSeq = 0;
+let disposed = false;
 
 async function startRename() {
+  if (disposed) return;
+  const seq = ++renameSeq;
   editingId.value = props.project.id;
   editingValue.value = props.project.name;
   await nextTick();
-  editingInput.value?.focus();
-  editingInput.value?.select();
+  if (disposed || seq !== renameSeq || editingId.value !== props.project.id) return;
+  const input = editingInput.value;
+  input?.focus();
+  input?.select();
 }
 
 function commitRename() {
@@ -91,11 +98,13 @@ function commitRename() {
   if (next) renameProject(id, next);
   editingId.value = null;
   editingValue.value = "";
+  renameSeq += 1;
 }
 
 function cancelRename() {
   editingId.value = null;
   editingValue.value = "";
+  renameSeq += 1;
 }
 
 function onEditingKeydown(e: KeyboardEvent) {
@@ -114,26 +123,28 @@ function bindEditingInput(el: unknown) {
 }
 
 async function openInExplorer() {
-  if (!props.project.cwd) return;
+  if (disposed || !props.project.cwd) return;
   try {
     await openInFileManager(props.project.cwd);
   } catch (err) {
-    emit("error", `在资源管理器中打开失败：${String(err)}`);
+    if (!disposed) emit("error", `在资源管理器中打开失败：${String(err)}`);
   }
 }
 
 async function openWithVSCode() {
-  if (!props.project.cwd) return;
+  if (disposed || !props.project.cwd) return;
   try {
     await openInVSCode(props.project.cwd);
   } catch (err) {
-    emit("error", `用 VSCode 打开失败：${String(err)}`);
+    if (!disposed) emit("error", `用 VSCode 打开失败：${String(err)}`);
   }
 }
 
 async function archiveAllConversations() {
+  if (disposed) return;
   try {
     await archiveProjectConversations(props.project.id);
+    if (disposed) return;
     if (
       route.params.projectId &&
       route.params.taskId &&
@@ -142,16 +153,19 @@ async function archiveAllConversations() {
       emit("archived");
     }
   } catch (err) {
-    emit("error", `归档所有对话失败：${String(err)}`);
+    if (!disposed) emit("error", `归档所有对话失败：${String(err)}`);
   }
 }
 
 async function togglePin() {
+  if (disposed) return;
   await toggleProjectPin(props.project.id);
 }
 
 async function deleteProject() {
+  if (disposed) return;
   await removeProject(props.project.id);
+  if (disposed) return;
   if (
     route.params.projectId &&
     String(route.params.projectId) === props.project.id
@@ -161,10 +175,11 @@ async function deleteProject() {
 }
 
 async function openProjectChatInPopup() {
+  if (disposed) return;
   try {
     await openPopupNewChat(props.project.id);
   } catch (err) {
-    emit("error", `创建弹出窗口对话失败：${String(err)}`);
+    if (!disposed) emit("error", `创建弹出窗口对话失败：${String(err)}`);
   }
 }
 
@@ -176,18 +191,21 @@ function onProjectAuxClick(e: MouseEvent) {
 }
 
 async function archiveProjectTask(taskId: string): Promise<boolean> {
+  if (disposed) return false;
   try {
     const archived = await archiveTask(taskId);
-    if (
-      archived &&
-      route.path === `/projects/${props.project.id}/tasks/${taskId}`
-    ) {
-      emit("archived");
-    }
+    if (disposed) return false;
+    if (archived) onProjectTaskArchived(taskId);
     return archived;
   } catch (err) {
-    emit("error", `归档对话失败：${String(err)}`);
+    if (!disposed) emit("error", `归档对话失败：${String(err)}`);
     return false;
+  }
+}
+
+function onProjectTaskArchived(taskId: string) {
+  if (route.path === `/projects/${props.project.id}/tasks/${taskId}`) {
+    emit("archived");
   }
 }
 
@@ -303,19 +321,22 @@ function onMoreClick(e: MouseEvent) {
 }
 
 function scheduleConversationListReveal() {
-  if (conversationListReady.value || !props.isExpanded) return;
+  if (disposed || conversationListReady.value || !props.isExpanded) return;
+  cancelConversationListRevealPaint?.();
+  cancelConversationListRevealPaint = null;
   const seq = ++conversationListRevealSeq;
   const stage = beginPerfStage("sidebar.project-conversations.reveal", {
     detail: props.project.id,
   });
-  scheduleAfterPaint(() => {
-    if (seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
+  cancelConversationListRevealPaint = scheduleAfterPaint(() => {
+    cancelConversationListRevealPaint = null;
+    if (disposed || seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
       stage.end("cancelled");
       return;
     }
     conversationListRevealHandle = runWhenIdle(() => {
       conversationListRevealHandle = null;
-      if (seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
+      if (disposed || seq !== conversationListRevealSeq || conversationListReady.value || !props.isExpanded) {
         stage.end("cancelled");
         return;
       }
@@ -333,6 +354,8 @@ watch(
       return;
     }
     conversationListRevealSeq += 1;
+    cancelConversationListRevealPaint?.();
+    cancelConversationListRevealPaint = null;
     if (conversationListRevealHandle !== null) {
       cancelIdleRun(conversationListRevealHandle);
       conversationListRevealHandle = null;
@@ -345,6 +368,10 @@ if (props.isExpanded) {
 }
 
 onBeforeUnmount(() => {
+  disposed = true;
+  renameSeq += 1;
+  cancelConversationListRevealPaint?.();
+  cancelConversationListRevealPaint = null;
   if (conversationListRevealHandle !== null) {
     cancelIdleRun(conversationListRevealHandle);
     conversationListRevealHandle = null;
@@ -417,6 +444,7 @@ onBeforeUnmount(() => {
           :archive="archiveProjectTask"
           :open="openTask"
           :tree-row-state-class="treeRowStateClass"
+          @archived="onProjectTaskArchived"
           @error="emit('error', $event)"
         />
         <p v-else-if="isExpanded" class="sb-tree__empty">

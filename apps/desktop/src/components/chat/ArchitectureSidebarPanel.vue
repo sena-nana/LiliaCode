@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import type {
-  ProjectArchitectureChange,
-  ProjectArchitectureChangeRecord,
-  ProjectArchitectureGraph,
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  projectArchitectureChangeText,
+  type ProjectArchitectureChangeRecord,
+  type ProjectArchitectureGraph,
 } from "@lilia/contracts";
 import {
   getProjectArchitecture,
@@ -25,6 +25,8 @@ const changes = ref<ProjectArchitectureChangeRecord[]>([]);
 const loading = ref(false);
 const error = ref("");
 const rollingBack = ref(false);
+let disposed = false;
+let loadSeq = 0;
 
 const hasGraphContent = computed(() =>
   Boolean(graph.value && (graph.value.nodes.length > 0 || graph.value.edges.length > 0 || graph.value.summary)),
@@ -39,37 +41,50 @@ const changeTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 async function loadArchitecture() {
+  if (disposed) return;
+  const seq = ++loadSeq;
   if (!props.projectId) {
     graph.value = null;
     changes.value = [];
+    loading.value = false;
+    error.value = "";
     return;
   }
   loading.value = true;
   error.value = "";
+  const projectId = props.projectId;
   try {
     const [nextGraph, nextChanges] = await Promise.all([
-      getProjectArchitecture(props.projectId),
-      listProjectArchitectureChanges(props.projectId, 20),
+      getProjectArchitecture(projectId),
+      listProjectArchitectureChanges(projectId, 20),
     ]);
+    if (disposed || seq !== loadSeq) return;
     graph.value = nextGraph;
     changes.value = nextChanges;
   } catch (err) {
+    if (disposed || seq !== loadSeq) return;
     error.value = String(err);
   } finally {
+    if (disposed || seq !== loadSeq) return;
     loading.value = false;
   }
 }
 
 async function rollbackPreviousVersion() {
-  if (!props.projectId || rollingBack.value) return;
+  if (disposed || !props.projectId || rollingBack.value) return;
   rollingBack.value = true;
   error.value = "";
+  const projectId = props.projectId;
+  const taskId = props.taskId;
   try {
-    await rollbackProjectArchitecture(props.projectId, props.taskId, activeBackend.value);
+    await rollbackProjectArchitecture(projectId, taskId, activeBackend.value);
+    if (disposed || projectId !== props.projectId || taskId !== props.taskId) return;
     await loadArchitecture();
   } catch (err) {
+    if (disposed) return;
     error.value = String(err);
   } finally {
+    if (disposed) return;
     rollingBack.value = false;
   }
 }
@@ -100,16 +115,10 @@ function escapeMermaid(value: string): string {
   return value.replace(/"/g, "'").replace(/\n/g, " ");
 }
 
-function changeText(change: ProjectArchitectureChange): string {
-  if (change.type === "upsert_node") return `更新节点：${change.node.label || change.node.id}`;
-  if (change.type === "remove_node") return `移除节点：${change.nodeId}`;
-  if (change.type === "upsert_edge") return `更新关系：${change.edge.label || change.edge.id}`;
-  if (change.type === "remove_edge") return `移除关系：${change.edgeId}`;
-  return "更新摘要";
-}
-
 function eventSummary(event: ProjectArchitectureChangeRecord): string {
-  return event.reason || event.changes.map(changeText).slice(0, 2).join("；") || event.status;
+  return event.reason ||
+    event.changes.map((change) => projectArchitectureChangeText(change)).slice(0, 2).join("；") ||
+    event.status;
 }
 
 function eventVersionLabel(event: ProjectArchitectureChangeRecord): string {
@@ -125,6 +134,10 @@ function eventTimeLabel(event: ProjectArchitectureChangeRecord): string {
 
 onMounted(loadArchitecture);
 watch(() => props.projectId, loadArchitecture);
+onBeforeUnmount(() => {
+  disposed = true;
+  loadSeq += 1;
+});
 </script>
 
 <template>

@@ -66,21 +66,25 @@ function validateJsonField(value: string, label: string) {
 export function useHookSourceEditor({
   refresh,
   onSaved,
+  isDisposed,
 }: {
   refresh: () => Promise<void>;
   onSaved?: (document: HookDocumentView) => void;
+  isDisposed?: () => boolean;
 }) {
   const showHookEditor = ref(false);
   const editingSource = ref<HookSourceSummary | null>(null);
   const hookHandlerRows = ref<HookHandlerDraftRow[]>([]);
   const hookSaving = ref(false);
   const hookError = ref<string | null>(null);
+  const disposed = () => isDisposed?.() === true;
 
   const hookEditorTitle = computed(() =>
     editingSource.value ? `编辑 Hooks 来源：${editingSource.value.name}` : "编辑 Hooks 来源",
   );
 
   function openHookEditor(document: HookDocumentView) {
+    if (disposed()) return;
     editingSource.value = document.source;
     hookHandlerRows.value = document.handlers.length
       ? document.handlers.map((handler) => draftFromHandler(handler))
@@ -90,10 +94,12 @@ export function useHookSourceEditor({
   }
 
   function addHookHandler() {
+    if (disposed()) return;
     hookHandlerRows.value.push(createDraftRow());
   }
 
   function removeHookHandler(index: number) {
+    if (disposed()) return;
     hookHandlerRows.value.splice(index, 1);
     if (hookHandlerRows.value.length === 0) {
       hookHandlerRows.value.push(createDraftRow());
@@ -146,20 +152,21 @@ export function useHookSourceEditor({
   }
 
   async function saveHookSource() {
-    if (hookSaving.value || !editingSource.value) return;
+    if (disposed() || hookSaving.value || !editingSource.value) return;
     hookError.value = null;
     hookSaving.value = true;
     try {
       const saved = await updateHookSource(editingSource.value, {
         handlers: buildHookHandlersInput(),
       });
+      if (disposed()) return;
       onSaved?.(saved);
       showHookEditor.value = false;
       await refresh();
     } catch (err) {
-      hookError.value = err instanceof Error ? err.message : String(err);
+      if (!disposed()) hookError.value = err instanceof Error ? err.message : String(err);
     } finally {
-      hookSaving.value = false;
+      if (!disposed()) hookSaving.value = false;
     }
   }
 

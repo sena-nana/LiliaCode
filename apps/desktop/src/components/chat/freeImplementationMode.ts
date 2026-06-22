@@ -1,5 +1,13 @@
 import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
-import type { AskUserAnswer, AskUserOption, AskUserResult, AskUserSpec } from "@lilia/contracts";
+import {
+  ASK_USER_CONFIRM_ANSWER_VALUE,
+  ASK_USER_SINGLE_SELECT_MODE,
+  DEFAULT_ASK_USER_MODE,
+  type AskUserAnswer,
+  type AskUserOption,
+  type AskUserResult,
+  type AskUserSpec,
+} from "@lilia/contracts";
 
 export const FREE_IMPLEMENTATION_COUNTDOWN_MS = 8000;
 export const FREE_IMPLEMENTATION_COUNTDOWN_SECONDS = FREE_IMPLEMENTATION_COUNTDOWN_MS / 1000;
@@ -17,12 +25,12 @@ function recommendedOptions(options: AskUserOption[] | undefined): string[] {
 function recommendedAnswerForQuestion(
   question: AskUserSpec["questions"][number],
 ): AskUserAnswer | null {
-  if (question.mode === "confirm") {
-    return { questionId: question.id, value: "yes" };
+  if (question.mode === DEFAULT_ASK_USER_MODE) {
+    return { questionId: question.id, value: ASK_USER_CONFIRM_ANSWER_VALUE };
   }
 
   const recommended = recommendedOptions(question.options);
-  if (question.mode === "single") {
+  if (question.mode === ASK_USER_SINGLE_SELECT_MODE) {
     const value = recommended[0];
     return value ? { questionId: question.id, value } : null;
   }

@@ -1,20 +1,26 @@
 use std::collections::BTreeMap;
 use std::process::Command;
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Runtime, State};
 
+use crate::agent_interaction_contract;
 use crate::agent_timeline::AgentTimelineEvent;
+use crate::agent_timeline_contract;
 use crate::chat::runner::locate_agent_runner;
+use crate::chat::state::try_normalize_backend;
 use crate::provider::{resolve_connection_for, validate_backend_ready_for_send, ConnectionMode};
+use crate::quota_usage_contract::{
+    default_usage_stats_days, is_rate_limit_reset_credit_consume_outcome,
+    usage_stats_backend_filters, usage_stats_days,
+};
 use crate::store::LiliaStore;
 use crate::util::now_millis;
-use crate::{BACKEND_CLAUDE, BACKEND_CODEX};
+use crate::BACKEND_CODEX;
 
 const DAY_MS: i64 = 86_400_000;
-const DEFAULT_DAYS: i64 = 7;
 const RECENT_LIMIT: i64 = 20;
 
 #[derive(Debug, Clone)]
@@ -226,7 +232,7 @@ pub struct CodexAccountUsage {
 #[serde(rename_all = "camelCase")]
 pub struct CodexAccountQuotaStatus {
     pub available: bool,
-    pub connection_mode: String,
+    pub connection_mode: ConnectionMode,
     pub limit_id: Option<String>,
     pub limit_name: Option<String>,
     pub plan_type: Option<String>,
@@ -289,12 +295,12 @@ impl AggregatedUsage {
 }
 
 fn codex_account_quota_unavailable(
-    connection_mode: &str,
+    connection_mode: ConnectionMode,
     error: Option<String>,
 ) -> CodexAccountQuotaStatus {
     CodexAccountQuotaStatus {
         available: false,
-        connection_mode: connection_mode.to_string(),
+        connection_mode,
         limit_id: None,
         limit_name: None,
         plan_type: None,
@@ -350,23 +356,23 @@ fn run_codex_account_quota_utility_output<R: Runtime>(
 fn run_codex_account_quota_utility<R: Runtime>(app: &AppHandle<R>) -> CodexAccountQuotaStatus {
     let line = match run_codex_account_quota_utility_output(app, &[]) {
         Ok(line) => line,
-        Err(err) => return codex_account_quota_unavailable("codex-account", Some(err)),
+        Err(err) => {
+            return codex_account_quota_unavailable(ConnectionMode::CodexAccount, Some(err));
+        }
     };
 
     match serde_json::from_str::<CodexAccountQuotaStatus>(&line) {
         Ok(mut status) => {
-            status.connection_mode = "codex-account".to_string();
+            status.connection_mode = ConnectionMode::CodexAccount;
             if status.fetched_at <= 0 {
                 status.fetched_at = now_millis();
             }
             status
         }
-        Err(err) => {
-            codex_account_quota_unavailable(
-                "codex-account",
-                Some(format!("解析 Codex 官方额度查询输出失败：{err}")),
-            )
-        }
+        Err(err) => codex_account_quota_unavailable(
+            ConnectionMode::CodexAccount,
+            Some(format!("解析 Codex 官方额度查询输出失败：{err}")),
+        ),
     }
 }
 
@@ -385,8 +391,21 @@ fn run_codex_account_quota_reset_utility<R: Runtime>(
             idempotency_key.to_string(),
         ],
     )?;
-    serde_json::from_str::<CodexRateLimitResetCreditConsumeResult>(&line)
-        .map_err(|err| format!("解析 Codex 官方额度重置输出失败：{err}"))
+    parse_codex_rate_limit_reset_credit_consume_result(&line)
+}
+
+fn parse_codex_rate_limit_reset_credit_consume_result(
+    line: &str,
+) -> Result<CodexRateLimitResetCreditConsumeResult, String> {
+    let result = serde_json::from_str::<CodexRateLimitResetCreditConsumeResult>(line)
+        .map_err(|err| format!("解析 Codex 官方额度重置输出失败：{err}"))?;
+    if !is_rate_limit_reset_credit_consume_outcome(&result.outcome) {
+        return Err(format!(
+            "Codex 官方额度重置输出包含未知 outcome：{}",
+            result.outcome
+        ));
+    }
+    Ok(result)
 }
 
 fn usage_daily_bucket(day_start: i64, bucket: AggregatedUsage) -> QuotaUsageDailyBucket {
@@ -644,25 +663,30 @@ fn string_field(value: &JsonValue, keys: &[&str]) -> Option<String> {
 }
 
 fn normalize_backend(value: &str) -> Option<String> {
-    match value {
-        BACKEND_CLAUDE => Some(BACKEND_CLAUDE.to_string()),
-        BACKEND_CODEX => Some(BACKEND_CODEX.to_string()),
-        _ => None,
-    }
+    try_normalize_backend(value).map(str::to_string)
 }
 
 fn normalize_days(value: Option<i64>) -> i64 {
-    match value {
-        Some(30) => 30,
-        _ => DEFAULT_DAYS,
+    if let Some(days) = value {
+        if usage_stats_days().contains(&days) {
+            return days;
+        }
     }
+    default_usage_stats_days()
 }
 
 fn normalize_backend_filter(value: Option<String>) -> String {
-    match value.as_deref() {
-        Some(BACKEND_CLAUDE) => BACKEND_CLAUDE.to_string(),
-        Some(BACKEND_CODEX) => BACKEND_CODEX.to_string(),
-        _ => "all".to_string(),
+    let value = value.as_deref().map(str::trim).unwrap_or_default();
+    let backend_filters = usage_stats_backend_filters();
+    if backend_filters.iter().any(|filter| filter == value) {
+        value.to_string()
+    } else if let Some(backend) = try_normalize_backend(value) {
+        backend.to_string()
+    } else {
+        backend_filters
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "all".to_string())
     }
 }
 
@@ -749,7 +773,13 @@ fn load_task_contexts(
         if contexts.contains_key(&record.task_id) {
             continue;
         }
-        let row: Option<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
+        let row: Option<(
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> = stmt
             .query_row(params![&record.task_id], |row| {
                 Ok((
                     row.get(0)?,
@@ -761,8 +791,13 @@ fn load_task_contexts(
             })
             .optional()
             .map_err(|e| format!("quota_usage_get_stats: task context 失败：{e}"))?;
-        let (title, status, project_id, project_name, project_cwd) =
-            row.unwrap_or(("未知对话".to_string(), "waiting".to_string(), None, None, None));
+        let (title, status, project_id, project_name, project_cwd) = row.unwrap_or((
+            "未知对话".to_string(),
+            "waiting".to_string(),
+            None,
+            None,
+            None,
+        ));
         contexts.insert(
             record.task_id.clone(),
             TaskUsageContext {
@@ -900,29 +935,34 @@ fn load_tool_summaries(
     range_end: i64,
     backend: &str,
 ) -> Result<Vec<QuotaUsageToolSummary>, String> {
-    let mut sql = String::from(
+    let timeline_kinds = agent_timeline_contract::agent_timeline_tool_window_kinds();
+    let kind_placeholders = vec!["?"; timeline_kinds.len()].join(",");
+    let mut sql = format!(
         r#"SELECT kind, payload, COUNT(*)
            FROM agent_timeline_events
            WHERE created_at >= ?1 AND created_at < ?2
-             AND kind IN (
-               'command','file_read','file_change','search','web_fetch',
-               'subagent','plan','todo_list','ask_user','architecture_change','tool','mcp'
-             )"#,
+             AND kind IN ({kind_placeholders})"#,
     );
     if backend != "all" {
-        sql.push_str(" AND backend = ?3");
+        sql.push_str(&format!(" AND backend = ?{}", timeline_kinds.len() + 3));
     }
     sql.push_str(" GROUP BY kind, payload");
 
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|e| format!("quota_usage_get_stats: prepare tool stats 失败：{e}"))?;
-    let mut rows = if backend == "all" {
-        stmt.query(params![range_start, range_end])
-    } else {
-        stmt.query(params![range_start, range_end, backend])
+    let mut query_params: Vec<&dyn ToSql> = Vec::with_capacity(timeline_kinds.len() + 3);
+    query_params.push(&range_start);
+    query_params.push(&range_end);
+    for kind in timeline_kinds {
+        query_params.push(kind);
     }
-    .map_err(|e| format!("quota_usage_get_stats: query tool stats 失败：{e}"))?;
+    if backend != "all" {
+        query_params.push(&backend);
+    }
+    let mut rows = stmt
+        .query(query_params.as_slice())
+        .map_err(|e| format!("quota_usage_get_stats: query tool stats 失败：{e}"))?;
 
     let mut counts: BTreeMap<String, (String, Option<String>, Option<String>, i64)> =
         BTreeMap::new();
@@ -987,6 +1027,12 @@ fn quota_tool_label(kind: &str, subkind: Option<&str>, tool_name: Option<&str>) 
     if let Some(tool) = tool_name.filter(|value| !value.trim().is_empty()) {
         return tool.to_string();
     }
+    if kind == agent_interaction_contract::ask_user_interaction_kind() {
+        return "询问用户".to_string();
+    }
+    if kind == agent_interaction_contract::architecture_interaction_kind() {
+        return "架构变更".to_string();
+    }
     match (kind, subkind) {
         ("command", Some("lilia_edit_exec")) => "执行已编辑命令".to_string(),
         ("command", _) => "命令".to_string(),
@@ -1002,8 +1048,6 @@ fn quota_tool_label(kind: &str, subkind: Option<&str>, tool_name: Option<&str>) 
         ("subagent", _) => "子代理".to_string(),
         ("plan", _) => "计划".to_string(),
         ("todo_list", _) => "待办".to_string(),
-        ("ask_user", _) => "询问用户".to_string(),
-        ("architecture_change", _) => "架构变更".to_string(),
         ("mcp", _) => "MCP 工具".to_string(),
         ("tool", Some("hook")) => "Hook".to_string(),
         ("tool", _) => "工具".to_string(),
@@ -1212,10 +1256,10 @@ pub fn quota_usage_get_stats(
 pub fn quota_usage_get_codex_account_status(app: AppHandle) -> CodexAccountQuotaStatus {
     let connection = resolve_connection_for(&app, BACKEND_CODEX);
     if connection.mode != ConnectionMode::CodexAccount {
-        return codex_account_quota_unavailable(connection.mode.as_str(), None);
+        return codex_account_quota_unavailable(connection.mode, None);
     }
     if let Err(err) = validate_backend_ready_for_send(BACKEND_CODEX) {
-        return codex_account_quota_unavailable("codex-account", Some(err));
+        return codex_account_quota_unavailable(ConnectionMode::CodexAccount, Some(err));
     }
     run_codex_account_quota_utility(&app)
 }
@@ -1236,6 +1280,7 @@ pub fn quota_usage_consume_codex_rate_limit_reset_credit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BACKEND_CLAUDE;
     use serde_json::json;
 
     fn create_usage_schema(conn: &Connection) {
@@ -1329,6 +1374,28 @@ mod tests {
         }
     }
 
+    fn codex_quota_status_json() -> JsonValue {
+        json!({
+            "available": true,
+            "connectionMode": "codex-account",
+            "limitId": null,
+            "limitName": null,
+            "planType": null,
+            "rateLimitReachedType": null,
+            "fiveHour": null,
+            "weekly": null,
+            "sparkFiveHour": null,
+            "sparkWeekly": null,
+            "credits": null,
+            "sparkCredits": null,
+            "rateLimitResetCredits": null,
+            "accountUsage": null,
+            "usageError": null,
+            "fetchedAt": 1,
+            "error": null,
+        })
+    }
+
     #[test]
     fn extracts_claude_snake_case_usage_and_cost() {
         let event = timeline_event(
@@ -1382,6 +1449,50 @@ mod tests {
         assert_eq!(record.cache_read_tokens, 20);
         assert_eq!(record.total_tokens, 270);
         assert_eq!(record.known_cost_usd, None);
+    }
+
+    #[test]
+    fn backend_normalization_uses_chat_backend_contract() {
+        assert_eq!(usage_stats_days(), &[7, 30]);
+        assert!(is_rate_limit_reset_credit_consume_outcome("reset"));
+        assert!(!is_rate_limit_reset_credit_consume_outcome("unknown"));
+        assert_eq!(normalize_days(None), default_usage_stats_days());
+        assert_eq!(normalize_days(Some(30)), 30);
+        assert_eq!(normalize_days(Some(90)), default_usage_stats_days());
+        assert_eq!(
+            normalize_backend(&format!(" {BACKEND_CODEX} ")).as_deref(),
+            Some(BACKEND_CODEX)
+        );
+        assert_eq!(normalize_backend("unknown"), None);
+        assert_eq!(
+            normalize_backend_filter(Some(format!(" {BACKEND_CLAUDE} "))),
+            BACKEND_CLAUDE
+        );
+        assert_eq!(normalize_backend_filter(Some(" all ".to_string())), "all");
+        assert_eq!(normalize_backend_filter(Some("unknown".to_string())), "all");
+    }
+
+    #[test]
+    fn reset_credit_consume_result_rejects_unknown_contract_outcome() {
+        let ok = parse_codex_rate_limit_reset_credit_consume_result(
+            &json!({
+                "outcome": "reset",
+                "status": codex_quota_status_json()
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(ok.outcome, "reset");
+
+        let err = parse_codex_rate_limit_reset_credit_consume_result(
+            &json!({
+                "outcome": "unknown",
+                "status": codex_quota_status_json()
+            })
+            .to_string(),
+        )
+        .unwrap_err();
+        assert!(err.contains("未知 outcome"));
     }
 
     #[test]

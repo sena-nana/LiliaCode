@@ -2,7 +2,16 @@
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-vue-next";
-import type { Milestone, MilestoneStatus, Task, TaskMilestoneLink, TaskStatus } from "@lilia/contracts";
+import {
+  PROJECT_ROADMAP_STATUS_ORDER,
+  countProjectTaskStatuses,
+  taskStatusLabel,
+  type Milestone,
+  type MilestoneStatus,
+  type Task,
+  type TaskMilestoneLink,
+  type TaskStatus,
+} from "@lilia/contracts";
 
 const props = defineProps<{
   projectId: string;
@@ -13,7 +22,6 @@ const props = defineProps<{
   savingMilestoneId: string | null;
   milestoneStatusOptions: Array<{ value: MilestoneStatus; label: string }>;
   formatDateInput: (timestamp: number | null) => string;
-  statusLabel: (status: TaskStatus) => string;
 }>();
 
 const emit = defineEmits<{
@@ -50,16 +58,7 @@ const linkedTasks = computed(() => {
 });
 
 const statusCounts = computed(() => {
-  const next: Record<TaskStatus, number> = {
-    draft: 0,
-    waiting: 0,
-    running: 0,
-    blocked: 0,
-    done: 0,
-    cancelled: 0,
-  };
-  for (const task of linkedTasks.value) next[task.status] += 1;
-  return next;
+  return countProjectTaskStatuses(linkedTasks.value);
 });
 
 const totalLinkedCount = computed(() => linkedTasks.value.length);
@@ -68,13 +67,13 @@ const totalProgress = computed(() =>
   totalLinkedCount.value === 0 ? 0 : Math.round((doneLinkedCount.value / totalLinkedCount.value) * 100),
 );
 
-const statusItems = computed(() => [
-  { key: "running", label: "运行中", count: statusCounts.value.running },
-  { key: "waiting", label: "等待", count: statusCounts.value.waiting },
-  { key: "blocked", label: "阻塞", count: statusCounts.value.blocked },
-  { key: "done", label: "已完成", count: statusCounts.value.done },
-  { key: "cancelled", label: "已取消", count: statusCounts.value.cancelled },
-] satisfies Array<{ key: TaskStatus; label: string; count: number }>);
+const statusItems = computed(() =>
+  PROJECT_ROADMAP_STATUS_ORDER.map((key) => ({
+    key,
+    label: taskStatusLabel(key, "state"),
+    count: statusCounts.value[key],
+  })) satisfies Array<{ key: TaskStatus; label: string; count: number }>,
+);
 
 const milestoneViews = computed(() =>
   props.milestones.map((milestone, index) => {
@@ -258,7 +257,7 @@ function taskRelationMeta(task: Task): string {
                   <span class="roadmap-task__title">{{ task.title }}</span>
                   <span class="roadmap-task__meta">
                     <span :class="`roadmap-task__status roadmap-task__status--${task.status}`">
-                      {{ statusLabel(task.status) }}
+                      {{ taskStatusLabel(task.status, "state") }}
                     </span>
                     <span v-if="taskRelationMeta(task)" class="roadmap-task__relation">
                       {{ taskRelationMeta(task) }}
@@ -285,7 +284,7 @@ function taskRelationMeta(task: Task): string {
                   />
                   <span class="roadmap-task-choice__title">{{ task.title }}</span>
                   <span :class="`roadmap-task__status roadmap-task__status--${task.status}`">
-                    {{ statusLabel(task.status) }}
+                    {{ taskStatusLabel(task.status, "state") }}
                   </span>
                   <span v-if="taskRelationMeta(task)" class="roadmap-task__relation">
                     {{ taskRelationMeta(task) }}

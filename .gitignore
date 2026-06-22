@@ -53,6 +53,13 @@ dist/
 **/dist/
 *.local
 
+# ---------- Android / Gradle ----------
+.gradle/
+**/.gradle/
+**/build/
+**/local.properties
+captures/
+
 # ---------- TypeScript ----------
 *.tsbuildinfo
 packages/*/src/**/*.js

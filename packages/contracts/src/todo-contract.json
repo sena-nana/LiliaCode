@@ -1,0 +1,33 @@
+{
+  "taskTodoSources": [
+    "lilia",
+    "agent"
+  ],
+  "taskTodoPriorities": [
+    "high",
+    "normal",
+    "low"
+  ],
+  "defaultTaskTodoPriority": "normal",
+  "taskTodoPriorityLabels": {
+    "high": "高",
+    "normal": "中",
+    "low": "低"
+  },
+  "taskTodoGuideStatuses": [
+    "pending",
+    "queued",
+    "sent"
+  ],
+  "pendingTaskTodoGuideStatus": "pending",
+  "queuedTaskTodoGuideStatus": "queued",
+  "sentTaskTodoGuideStatus": "sent",
+  "commands": {
+    "list": "todo_list",
+    "create": "todo_create",
+    "update": "todo_update",
+    "delete": "todo_delete",
+    "applyAgentEvent": "todo_apply_agent_event"
+  },
+  "todoChangedEventName": "todo-changed"
+}

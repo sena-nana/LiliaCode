@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { ChatAttachment } from "@lilia/contracts";
+import { isChatImageAttachment, type ChatAttachment } from "@lilia/contracts";
 
 export interface ChatImageViewerSource {
   src: string;
@@ -10,7 +10,7 @@ export interface ChatImageViewerSource {
 }
 
 export function isImageAttachment(attachment: ChatAttachment): boolean {
-  return attachment.exists !== false && !!attachment.mime?.startsWith("image/");
+  return isChatImageAttachment(attachment);
 }
 
 export function attachmentImageSrc(attachment: ChatAttachment): string | null {

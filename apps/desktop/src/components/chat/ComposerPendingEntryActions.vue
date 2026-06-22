@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { ArrowLeft, ArrowRight, ArrowUp, Square } from "lucide-vue-next";
 import type { ToolConsentDecision } from "../../services/chat";
+import type { ComposerPendingEntryActionsMode } from "./useComposerPendingInteraction";
 
 defineProps<{
-  askUsesInputActions: boolean;
+  mode: ComposerPendingEntryActionsMode;
   askQuestionSkippable: boolean;
   askTotal: number;
   canGoPrev: boolean;
   canAskSubmit: boolean;
   askIsLast: boolean;
-  askIsPlanApproval: boolean;
   autoDecisionText: string;
   hasPendingInputText: boolean;
-  hasToolConsent: boolean;
   toolSubmitting: ToolConsentDecision | null;
   isEditingToolCommand: boolean;
   toolDanger: boolean;
@@ -46,7 +45,7 @@ const emit = defineEmits<{
     </div>
 
     <button
-      v-if="askUsesInputActions && askQuestionSkippable && askTotal > 1"
+      v-if="mode === 'ask-input' && askQuestionSkippable && askTotal > 1"
       type="button"
       class="ui-button ui-button--ghost composer-inline__skip composer-inline__btn"
       :disabled="actionsBlocked"
@@ -55,7 +54,7 @@ const emit = defineEmits<{
       跳过
     </button>
 
-    <div v-if="askUsesInputActions" class="chat-composer__pending-actions">
+    <div v-if="mode === 'ask-input'" class="chat-composer__pending-actions">
       <button
         v-if="canGoPrev"
         type="button"
@@ -77,7 +76,7 @@ const emit = defineEmits<{
       </button>
     </div>
 
-    <div v-else-if="askIsPlanApproval" class="chat-composer__pending-actions">
+    <div v-else-if="mode === 'ask-plan'" class="chat-composer__pending-actions">
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
@@ -96,7 +95,7 @@ const emit = defineEmits<{
       </button>
     </div>
 
-    <div v-else-if="hasToolConsent" class="chat-composer__pending-actions">
+    <div v-else-if="mode === 'tool'" class="chat-composer__pending-actions">
       <button
         type="button"
         class="ui-button ui-button--ghost composer-inline__btn"
@@ -117,7 +116,7 @@ const emit = defineEmits<{
     </div>
 
     <button
-      v-if="!askUsesInputActions && !askIsPlanApproval && !hasToolConsent"
+      v-if="mode === 'ask-confirm' || mode === 'none'"
       type="button"
       class="chat-composer__send"
       :class="{ 'chat-composer__send--interrupt': canInterrupt }"

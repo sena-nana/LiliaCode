@@ -1,7 +1,15 @@
 import { computed, ref, watch, type Ref } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { isAgentTimelineToolWindowKind } from "@lilia/contracts";
+import {
+  createChatBackendRecord,
+  isAgentTimelineToolWindowKind,
+  latestLiliaGoalFromTimeline,
+  serializeChatAttachmentReference,
+  stripSerializedConversationReferences,
+  TITLE_UPDATE_ACTION_KIND,
+} from "@lilia/contracts";
 import type {
+  AgentTimelineEvent,
   AskUserResult,
   ChatBranchAnchor,
   ChatAttachment,
@@ -10,20 +18,29 @@ import type {
   ChatComposerState,
   ChatConversationReference,
   ChatModelOption,
+  ChatRuntimePhase,
   ChatSlashCommandWorkflow,
+  LiliaBatchApplyInput,
   LiliaThreadGoal,
   LiliaReviewTarget,
   PermissionMode,
+  ProviderRuntimeOptions,
+  TaskWorktree,
+  WorktreeListItem,
 } from "@lilia/contracts";
-import type { LiliaBatchApplyInput } from "../../components/chat/liliaBatchApply";
 import {
+  findPlanApprovalAsk,
+  isPlanApprovalAsk,
   useAskUserForTask,
   usePendingAsksForTask,
 } from "../../composables/useAskUser";
 import {
   usePendingAgentActionsForTask,
-  type PendingAgentActionResolution,
 } from "../../composables/usePendingAgentActions";
+import {
+  pendingAgentActionBuckets,
+  type PendingAgentActionResolution,
+} from "../../composables/pendingAgentActions";
 import {
   usePendingAgentInteractionsForTask,
 } from "../../composables/useAgentPendingInteractions";
@@ -45,34 +62,51 @@ import {
   getRuntimeSnapshot,
   ackRestoredRollback,
   interruptTurn,
-  onAgentTimeline,
-  onAgentTimelineBatch,
+  onAgentTimelineEvents,
   onContextUsage,
   onDone,
   onTurnStarted,
   sendMessage,
   setComposerState,
 } from "../../services/chat";
+import { getProjectSettings } from "../../services/projects";
+import {
+  attachWorktreeToTask,
+  clearTaskWorktree,
+  createWorktreeForTask,
+  getTaskWorktree,
+  listWorktrees,
+} from "../../services/worktrees";
 import type {
   SendMessageInput,
   ToolConsentDecision,
   ToolConsentUpdatedInput,
 } from "../../services/chat";
-import { serializeAttachmentReference } from "../../components/chat/composerParts";
-import { stripSerializedConversationReferences } from "../../services/chatConversationReferences";
 import type { TaskTodo } from "../../services/todos";
 import type { TaskDetailRouteProps, useTaskConversationContext } from "./useTaskConversationContext";
 import type { useTaskTimeline } from "./useTaskTimeline";
 import type { LiliaWorkflowSendAgentMessageInput } from "./useLiliaWorkflowActions";
+import { taskTimelineLoadMergePlan } from "./taskTimelineLoadMerge";
 import {
   clearPendingInteractionsForTask,
   hydratePendingInteractions,
+  pendingInteractionRequestIdsForSources,
+  pendingInteractionRequestIdsToKeepAfterLoad,
+  syncPendingInteractionsForTimelineEvents,
 } from "./usePendingInteractionActions";
-import type { ChatRuntimePhase } from "@lilia/contracts";
+import { installUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync, scheduleAfterPaint } from "../../utils/perf";
 
 type SendAgentMessageInput = LiliaWorkflowSendAgentMessageInput;
+
+function emptyModelOptionsByBackend(): Record<ChatBackendKind, ChatModelOption[]> {
+  return createChatBackendRecord(() => []);
+}
 type GuideDispatchWindow = "tool" | "user" | "idle";
+type WorktreeOption = { value: string; label: string; hint?: string };
+
+const WORKTREE_CURRENT_VALUE = "__current__";
+const WORKTREE_CREATE_VALUE = "__create__";
 
 interface GuideDispatchController {
   createGuideFromComposer: (
@@ -84,7 +118,7 @@ interface GuideDispatchController {
 }
 
 interface PendingInteractionResolvers {
-  onResolveAskUser: (result: AskUserResult) => void;
+  onResolveAskUser: (result: AskUserResult) => Promise<void>;
   onResolveToolConsent: (
     decision: ToolConsentDecision,
     message?: string,
@@ -120,6 +154,7 @@ interface TaskLoadCycle {
   projectId?: string;
   pendingBeforeLoad: Set<string>;
   timelineEventIdsBeforeLoad: Set<string>;
+  liveTimelineEventsDuringLoad: Map<string, AgentTimelineEvent>;
   runtimeSeqBeforeLoad: number;
 }
 
@@ -131,10 +166,9 @@ export function useTaskComposerController(options: {
 }) {
   const { props, context, timeline, attachments } = options;
   const composer = ref<ChatComposerState | null>(null);
-  const modelOptionsByBackend = ref<Record<ChatBackendKind, ChatModelOption[]>>({
-    claude: [],
-    codex: [],
-  });
+  const modelOptionsByBackend = ref<Record<ChatBackendKind, ChatModelOption[]>>(
+    emptyModelOptionsByBackend(),
+  );
   const contextUsage = ref<ChatContextUsage | null>(null);
   const isTurnRunning = ref(false);
   const interruptInFlight = ref(false);
@@ -145,6 +179,13 @@ export function useTaskComposerController(options: {
   const insertDraftTextKey = ref(0);
   const insertDraftTextContent = ref("");
   const pendingBranchAnchor = ref<ChatBranchAnchor | null>(null);
+  const taskWorktree = ref<TaskWorktree | null>(null);
+  const worktreeOptions = ref<WorktreeOption[]>([
+    { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: "使用项目目录" },
+    { value: WORKTREE_CREATE_VALUE, label: "新建工作树", hint: "为当前对话创建独立 worktree" },
+  ]);
+  const worktreeBusy = ref(false);
+  const worktreeError = ref<string | null>(null);
   const pendingAskUser = useAskUserForTask(() => props.taskId);
   const pendingAskUsers = usePendingAsksForTask(() => props.taskId);
   const pendingToolConsent = useToolConsentForTask(() => props.taskId);
@@ -158,6 +199,13 @@ export function useTaskComposerController(options: {
     timeline.timelineEvents,
     pendingArchitectureChanges,
   );
+  const pendingTitleUpdateRequestIds = computed(() => {
+    const requestIds = new Set<string>();
+    for (const action of runtimePendingAgentActions.value) {
+      if (action.kind === TITLE_UPDATE_ACTION_KIND) requestIds.add(action.requestId);
+    }
+    return requestIds;
+  });
   const agentInteractionSettings = useAgentInteractionSettings();
   const nonInterruptMode = agentInteractionSettings.nonInterruptMode;
   const permissionMode = agentInteractionSettings.permissionMode;
@@ -166,7 +214,10 @@ export function useTaskComposerController(options: {
   });
   let loadSeq = 0;
   let runtimeEventSeq = 0;
+  let activeLoadCycle: TaskLoadCycle | null = null;
   let composerLoad: Promise<ChatComposerState | null> | null = null;
+  let cancelRuntimeSnapshotHydrationPaint: (() => void) | null = null;
+  let cancelComposerStateHydrationPaint: (() => void) | null = null;
   const modelOptionsLoads: Partial<Record<ChatBackendKind, Promise<ChatModelOption[]>>> = {};
   let guideDispatchLoad: Promise<GuideDispatchController> | null = null;
   let pendingInteractionResolversLoad: Promise<PendingInteractionResolvers> | null = null;
@@ -185,29 +236,30 @@ export function useTaskComposerController(options: {
     }),
   );
   const modelOptionsForView = computed(() => modelOptionsByBackend.value[activeBackend.value]);
-  const pendingAgentActions = computed(() =>
-    runtimePendingAgentActions.value.filter((action) =>
-      nonInterruptMode.value ||
-      action.kind === "title_update" ||
-      action.kind === "mcp_elicitation" ||
-      action.kind === "permission_approval" ||
-      action.kind === "architecture_change"
-    ),
+  const classifiedPendingAgentActions = computed(() =>
+    pendingAgentActionBuckets(runtimePendingAgentActions.value, {
+      nonInterruptMode: nonInterruptMode.value,
+    })
   );
-  const blockingPendingAgentActions = computed(() =>
-    pendingAgentActions.value.filter((action) => action.kind !== "title_update"),
-  );
+  const pendingAgentActions = computed(() => classifiedPendingAgentActions.value.visible);
+  const blockingPendingAgentActions = computed(() => classifiedPendingAgentActions.value.blocking);
   const pendingPlanApproval = computed(() => {
     const ask = nonInterruptMode.value
-      ? pendingAskUsers.value.find((item) => item.spec.intent === "plan_approval") ?? null
+      ? findPlanApprovalAsk(pendingAskUsers.value)
       : pendingAskUser.value;
     if (!ask) return null;
-    if (ask.spec.intent !== "plan_approval") return null;
+    if (!isPlanApprovalAsk(ask)) return null;
     const question = ask.spec.questions[0];
     return question ? { questionId: question.id, turnId: ask.turnId } : null;
   });
   const currentLiliaGoal = computed<LiliaThreadGoal | null>(() =>
     latestLiliaGoalFromTimeline(timeline.timelineEvents.value),
+  );
+  const effectiveProjectCwd = computed(() =>
+    taskWorktree.value?.worktreePath ?? context.project.value?.cwd ?? null,
+  );
+  const worktreeSelectionValue = computed(() =>
+    taskWorktree.value?.worktreePath ?? WORKTREE_CURRENT_VALUE,
   );
 
   function withActiveBackend(
@@ -222,6 +274,142 @@ export function useTaskComposerController(options: {
       reasoningEffort: state.reasoningEffort ?? null,
       permission: permissionOverride ?? permissionMode.value,
     };
+  }
+
+  function mergeAdditionalContext(
+    runtimeOptions: ProviderRuntimeOptions | null,
+    backend: ChatBackendKind,
+    contextText: string,
+  ): ProviderRuntimeOptions {
+    const current = runtimeOptions ?? {};
+    const provider = current.provider ?? {};
+    if (backend === "codex") {
+      const codex = provider.codex ?? {};
+      const previous = codex.additionalContext?.trim();
+      return {
+        ...current,
+        provider: {
+          ...provider,
+          codex: {
+            ...codex,
+            additionalContext: previous ? `${previous}\n\n${contextText}` : contextText,
+          },
+        },
+      };
+    }
+    const claude = provider.claude ?? {};
+    const previous = claude.additionalContext?.trim();
+    return {
+      ...current,
+      provider: {
+        ...provider,
+        claude: {
+          ...claude,
+          additionalContext: previous ? `${previous}\n\n${contextText}` : contextText,
+        },
+      },
+    };
+  }
+
+  async function runtimeOptionsWithWorktreeContext(
+    currentComposer: ChatComposerState,
+    runtimeOptions: ProviderRuntimeOptions | null,
+  ): Promise<ProviderRuntimeOptions | null> {
+    if (!taskWorktree.value) return runtimeOptions;
+    try {
+      const settings = await getProjectSettings();
+      const text = settings.worktree?.autoInstructions?.trim();
+      if (!text) return runtimeOptions;
+      return mergeAdditionalContext(runtimeOptions, currentComposer.backend, text);
+    } catch (err) {
+      console.error("[worktree] load settings failed", err);
+      return runtimeOptions;
+    }
+  }
+
+  function worktreeOptionFromItem(item: WorktreeListItem): WorktreeOption | null {
+    if (item.isMain || item.bare || item.prunable) return null;
+    const branch = item.branch ? ` · ${item.branch}` : "";
+    return {
+      value: item.path,
+      label: item.branch || item.path.split(/[\\/]/).pop() || item.path,
+      hint: `${item.path}${branch}`,
+    };
+  }
+
+  async function refreshTaskWorktree() {
+    try {
+      taskWorktree.value = await getTaskWorktree(props.taskId);
+      if (!taskWorktree.value && !worktreeBusy.value && context.project.value?.cwd) {
+        const settings = await getProjectSettings();
+        if (settings.worktree?.defaultMode === "create") {
+          await onSelectWorktree(WORKTREE_CREATE_VALUE);
+        }
+      }
+    } catch (err) {
+      taskWorktree.value = null;
+      worktreeError.value = `读取工作树失败：${String(err)}`;
+    }
+  }
+
+  async function refreshWorktreeOptions() {
+    const base = context.project.value?.cwd;
+    const current: WorktreeOption[] = [
+      { value: WORKTREE_CURRENT_VALUE, label: "当前环境", hint: base || "使用当前项目目录" },
+      { value: WORKTREE_CREATE_VALUE, label: "新建工作树", hint: "为当前对话创建独立 worktree" },
+    ];
+    if (!base) {
+      worktreeOptions.value = current;
+      return;
+    }
+    try {
+      const items = await listWorktrees(base);
+      const existing = items
+        .map(worktreeOptionFromItem)
+        .filter((item): item is WorktreeOption => Boolean(item));
+      worktreeOptions.value = [...current, ...existing];
+      worktreeError.value = null;
+    } catch (err) {
+      worktreeOptions.value = current;
+      worktreeError.value = `读取工作树列表失败：${String(err)}`;
+    }
+  }
+
+  async function onSelectWorktree(value: string) {
+    const base = context.project.value?.cwd;
+    if (!base || worktreeBusy.value) return;
+    worktreeBusy.value = true;
+    worktreeError.value = null;
+    try {
+      if (value === WORKTREE_CURRENT_VALUE) {
+        await clearTaskWorktree(props.taskId);
+        taskWorktree.value = null;
+        return;
+      }
+      const settings = await getProjectSettings();
+      taskWorktree.value = value === WORKTREE_CREATE_VALUE
+        ? await createWorktreeForTask({
+          taskId: props.taskId,
+          projectId: props.projectId ?? null,
+          baseRepoPath: base,
+          parentDir: settings.worktree?.parentDir ?? null,
+        })
+        : await attachWorktreeToTask({
+          taskId: props.taskId,
+          projectId: props.projectId ?? null,
+          baseRepoPath: base,
+          worktreePath: value,
+        });
+      const nextComposer = withActiveBackend(composerForView.value);
+      composer.value = nextComposer;
+      await setComposerState(nextComposer);
+      await refreshWorktreeOptions();
+    } catch (err) {
+      worktreeError.value = `切换工作树失败：${String(err)}`;
+      timeline.upsertTimelineEvent(timeline.createLocalErrorTimelineEvent(worktreeError.value));
+    } finally {
+      worktreeBusy.value = false;
+    }
   }
 
   async function ensureModelOptions(backend: ChatBackendKind): Promise<ChatModelOption[]> {
@@ -260,8 +448,8 @@ export function useTaskComposerController(options: {
             ensureDispatchReady: async () => {
               await ensureComposerLoaded();
             },
-            hasPendingAgentAction: () =>
-              pendingAskUsers.value.length > 0 || pendingToolConsents.value.length > 0,
+            hasBlockingPendingAgentAction: () =>
+              blockingPendingAgentActions.value.length > 0,
             isTurnRunning: () => isTurnRunning.value,
             clearAttachments: () => {
               attachments.value = [];
@@ -304,7 +492,7 @@ export function useTaskComposerController(options: {
     const outgoingConversationReferences = input.turn.outgoingConversationReferences ?? [];
     const workflow = input.workflow ?? null;
     const runtimeCommand = input.runtimeCommand ?? null;
-    const runtimeOptions = input.runtimeOptions ?? null;
+    let runtimeOptions = input.runtimeOptions ?? null;
     const titleContent = input.turn.titleContent;
     const content = input.turn.content;
     if (
@@ -320,7 +508,10 @@ export function useTaskComposerController(options: {
       await ensureComposerLoaded();
       const currentComposer = composerForView.value;
       await context.ensureTaskReadyForMessage(titleContent ?? content, outgoingAttachments);
-      const cwd = context.project.value?.cwd ?? (await context.ensureOrphanCwd());
+      const cwd = taskWorktree.value?.worktreePath ??
+        context.project.value?.cwd ??
+        (await context.ensureOrphanCwd());
+      runtimeOptions = await runtimeOptionsWithWorktreeContext(currentComposer, runtimeOptions);
 
       const optimistic = timeline.createOptimisticMessageEvent({
         content,
@@ -362,6 +553,15 @@ export function useTaskComposerController(options: {
     activeBackend,
     (backend) => {
       void ensureModelOptions(backend);
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => [props.taskId, context.project.value?.cwd ?? ""] as const,
+    () => {
+      void refreshTaskWorktree();
+      void refreshWorktreeOptions();
     },
     { immediate: true },
   );
@@ -546,6 +746,8 @@ export function useTaskComposerController(options: {
           return usePendingInteractionResolvers({
             taskId: () => props.taskId,
             pendingAskUser,
+            pendingAskUsers,
+            pendingTitleUpdateRequestIds,
             pendingToolConsent,
             pendingToolConsents,
             pendingAgentInteractions,
@@ -563,7 +765,7 @@ export function useTaskComposerController(options: {
 
   async function onResolveAskUser(result: AskUserResult) {
     const resolvers = await getPendingInteractionResolvers();
-    resolvers.onResolveAskUser(result);
+    await resolvers.onResolveAskUser(result);
   }
 
   async function onResolveToolConsent(
@@ -618,6 +820,7 @@ export function useTaskComposerController(options: {
   ): Promise<ChatComposerState | null> {
     const comp = await getComposerState(taskId);
     if (seq !== loadSeq || taskId !== props.taskId) return null;
+    await refreshTaskWorktree();
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
@@ -625,6 +828,7 @@ export function useTaskComposerController(options: {
   async function loadComposerForSend(taskId: string): Promise<ChatComposerState | null> {
     const comp = await getComposerState(taskId);
     if (taskId !== props.taskId) return null;
+    await refreshTaskWorktree();
     composer.value = withActiveBackend(comp);
     return composer.value;
   }
@@ -677,20 +881,12 @@ export function useTaskComposerController(options: {
   }
 
   function currentPendingRequestIds(): Set<string> {
-    const ids = new Set<string>();
-    for (const ask of pendingAskUsers.value) {
-      if (ask.requestId) ids.add(ask.requestId);
-    }
-    for (const consent of pendingToolConsents.value) {
-      ids.add(consent.requestId);
-    }
-    for (const interaction of pendingAgentInteractions.value) {
-      ids.add(interaction.requestId);
-    }
-    for (const change of pendingArchitectureChanges.value) {
-      ids.add(change.requestId);
-    }
-    return ids;
+    return pendingInteractionRequestIdsForSources({
+      asks: pendingAskUsers.value,
+      toolConsents: pendingToolConsents.value,
+      agentInteractions: pendingAgentInteractions.value,
+      architectureChanges: pendingArchitectureChanges.value,
+    });
   }
 
   function applyRuntimeSnapshotForCurrentLoad(options: {
@@ -726,7 +922,11 @@ export function useTaskComposerController(options: {
     runtimeSeqBeforeLoad: number;
   }) {
     const { taskId, projectId, seq, runtimeSeqBeforeLoad } = options;
-    scheduleAfterPaint(() => {
+    cancelRuntimeSnapshotHydrationPaint?.();
+    const cancelPaint = scheduleAfterPaint(() => {
+      if (cancelRuntimeSnapshotHydrationPaint === cancelPaint) {
+        cancelRuntimeSnapshotHydrationPaint = null;
+      }
       if (seq !== loadSeq || taskId !== props.taskId || projectId !== props.projectId) return;
       void measurePerfAsync(
         "task-detail.runtime-snapshot",
@@ -746,9 +946,11 @@ export function useTaskComposerController(options: {
         { detail: taskId },
       );
     });
+    cancelRuntimeSnapshotHydrationPaint = cancelPaint;
   }
 
   function beginLoadCycle(): TaskLoadCycle {
+    cancelScheduledHydration();
     const cycle: TaskLoadCycle = {
       seq: ++loadSeq,
       taskId: props.taskId,
@@ -757,8 +959,10 @@ export function useTaskComposerController(options: {
       timelineEventIdsBeforeLoad: new Set(
         timeline.persistedTimelineEvents.value.map((event) => event.id),
       ),
+      liveTimelineEventsDuringLoad: new Map(),
       runtimeSeqBeforeLoad: runtimeEventSeq,
     };
+    activeLoadCycle = cycle;
     if (context.isPopup.value && !context.conversationRouteState.value.isLiveDraft) {
       context.popupContentReady.value = false;
     }
@@ -768,6 +972,9 @@ export function useTaskComposerController(options: {
   }
 
   function finalizeLoadCycle(cycle: TaskLoadCycle) {
+    if (activeLoadCycle?.seq === cycle.seq) {
+      activeLoadCycle = null;
+    }
     if (
       cycle.seq === loadSeq &&
       cycle.taskId === props.taskId &&
@@ -778,8 +985,29 @@ export function useTaskComposerController(options: {
     }
   }
 
+  function rememberLiveTimelineEventsDuringLoad(events: readonly AgentTimelineEvent[]) {
+    const cycle = activeLoadCycle;
+    if (
+      !cycle ||
+      cycle.seq !== loadSeq ||
+      cycle.taskId !== props.taskId ||
+      cycle.projectId !== props.projectId
+    ) {
+      return;
+    }
+    for (const event of events) {
+      if (event.taskId === cycle.taskId) {
+        cycle.liveTimelineEventsDuringLoad.set(event.id, event);
+      }
+    }
+  }
+
   function scheduleComposerStateHydration(cycle: TaskLoadCycle) {
-    scheduleAfterPaint(() => {
+    cancelComposerStateHydrationPaint?.();
+    const cancelPaint = scheduleAfterPaint(() => {
+      if (cancelComposerStateHydrationPaint === cancelPaint) {
+        cancelComposerStateHydrationPaint = null;
+      }
       if (
         cycle.seq !== loadSeq ||
         cycle.taskId !== props.taskId ||
@@ -801,6 +1029,7 @@ export function useTaskComposerController(options: {
         if (composerLoad === pending) composerLoad = null;
       });
     });
+    cancelComposerStateHydrationPaint = cancelPaint;
   }
 
   async function loadAll() {
@@ -818,17 +1047,24 @@ export function useTaskComposerController(options: {
       ) {
         return;
       }
-      const timelineEventIdsToPreserve = new Set(
-        timeline.persistedTimelineEvents.value
-          .filter((event) => !cycle.timelineEventIdsBeforeLoad.has(event.id))
-          .map((event) => event.id),
-      );
-      timeline.applyLoadedTimelineEvents(events, timelineEventIdsToPreserve);
-      const activeRequestIds = hydratePendingInteractions(events, props.taskId);
-      for (const requestId of currentPendingRequestIds()) {
-        if (!cycle.pendingBeforeLoad.has(requestId)) activeRequestIds.add(requestId);
+      const mergePlan = taskTimelineLoadMergePlan({
+        loadedEvents: events,
+        currentEvents: timeline.persistedTimelineEvents.value,
+        eventIdsBeforeLoad: cycle.timelineEventIdsBeforeLoad,
+        liveEventsDuringLoad: cycle.liveTimelineEventsDuringLoad,
+      });
+      timeline.applyLoadedTimelineEvents(events, mergePlan.preserveEventIds);
+      const liveEventsToReplay = mergePlan.liveEventsToReplay;
+      if (liveEventsToReplay.length > 0) {
+        timeline.upsertTimelineEvents(liveEventsToReplay);
       }
-      clearPendingInteractionsForTask(cycle.taskId, { keepRequestIds: activeRequestIds });
+      const hydratedRequestIds = hydratePendingInteractions(events, props.taskId);
+      const keepRequestIds = pendingInteractionRequestIdsToKeepAfterLoad({
+        hydratedRequestIds,
+        currentRequestIds: currentPendingRequestIds(),
+        pendingBeforeLoadRequestIds: cycle.pendingBeforeLoad,
+      });
+      clearPendingInteractionsForTask(cycle.taskId, { keepRequestIds });
       scheduleRuntimeSnapshotHydration({
         taskId: cycle.taskId,
         projectId: cycle.projectId,
@@ -842,31 +1078,29 @@ export function useTaskComposerController(options: {
   }
 
   async function installRuntimeListeners(): Promise<UnlistenFn[]> {
-    return await Promise.all([
-      onAgentTimeline((e) => {
-        if (e.taskId !== props.taskId) return;
-        timeline.upsertTimelineEvent(e);
-        hydratePendingInteractions([e], props.taskId);
-        if (isAgentTimelineToolWindowKind(e.kind)) {
+    return await installUnlistenFns([
+      () => onAgentTimelineEvents((events, source) => {
+        const taskEvents = events.filter((event) => event.taskId === props.taskId);
+        if (taskEvents.length === 0) return;
+        rememberLiveTimelineEventsDuringLoad(taskEvents);
+        if (source === "batch") {
+          timeline.queueTimelineEvents(taskEvents);
+        } else {
+          for (const event of taskEvents) timeline.upsertTimelineEvent(event);
+        }
+        syncPendingInteractionsForTimelineEvents(taskEvents, props.taskId);
+        if (taskEvents.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
           void scheduleGuideInsertion("tool");
         }
       }),
-      onAgentTimelineBatch((e) => {
-        if (e.taskId !== props.taskId) return;
-        timeline.queueTimelineEvents(e.events);
-        hydratePendingInteractions(e.events, props.taskId);
-        if (e.events.some((event) => isAgentTimelineToolWindowKind(event.kind))) {
-          void scheduleGuideInsertion("tool");
-        }
-      }),
-      onTurnStarted((e) => {
+      () => onTurnStarted((e) => {
         if (e.taskId !== props.taskId) return;
         runtimeEventSeq += 1;
         interruptInFlight.value = false;
         isTurnRunning.value = true;
         timeline.markQueuedUserMessageSuccessful();
       }),
-      onDone((e) => {
+      () => onDone((e) => {
         if (e.taskId !== props.taskId) return;
         runtimeEventSeq += 1;
         interruptInFlight.value = false;
@@ -891,11 +1125,20 @@ export function useTaskComposerController(options: {
   }
 
   function resetForRouteChange() {
+    cancelScheduledHydration();
     isTurnRunning.value = false;
     interruptInFlight.value = false;
     composer.value = null;
+    taskWorktree.value = null;
     contextUsage.value = null;
     restoreDraftConversationReferences.value = [];
+  }
+
+  function cancelScheduledHydration() {
+    cancelRuntimeSnapshotHydrationPaint?.();
+    cancelRuntimeSnapshotHydrationPaint = null;
+    cancelComposerStateHydrationPaint?.();
+    cancelComposerStateHydrationPaint = null;
   }
 
   function canAcceptInteractiveDrop(): boolean {
@@ -923,6 +1166,12 @@ export function useTaskComposerController(options: {
     blockingPendingAgentActions,
     pendingPlanApproval,
     currentLiliaGoal,
+    taskWorktree,
+    worktreeOptions,
+    worktreeSelectionValue,
+    worktreeBusy,
+    worktreeError,
+    effectiveProjectCwd,
     agentInteractionSettings,
     nonInterruptMode,
     activeBackend,
@@ -945,12 +1194,14 @@ export function useTaskComposerController(options: {
     onResolveToolConsent,
     onResolvePendingAgentAction,
     onComposerUpdate,
+    onSelectWorktree,
     onRetryTimelineEvent,
     loadAll,
     loadAgentInteractionSettings,
     installRuntimeListeners,
     installContextUsageListener,
     resetForRouteChange,
+    cancelScheduledHydration,
     canAcceptInteractiveDrop,
     scheduleUserGuideInsertion: () => scheduleGuideInsertion("user"),
   };
@@ -963,26 +1214,8 @@ function stripRestoredReferences(
 ): string {
   let next = content;
   for (const attachment of attachments) {
-    next = next.split(serializeAttachmentReference(attachment)).join("");
+    next = next.split(serializeChatAttachmentReference(attachment)).join("");
   }
   next = stripSerializedConversationReferences(next, conversationReferences);
   return next.replace(/[ \t]{2,}/g, " ").trim();
-}
-
-function latestLiliaGoalFromTimeline(
-  events: readonly { kind: string; payload: unknown; updatedAt: number }[],
-): LiliaThreadGoal | null {
-  let latest: { payload: unknown; updatedAt: number } | null = null;
-  for (const event of events) {
-    if (event.kind !== "goal") continue;
-    if (!latest || event.updatedAt >= latest.updatedAt) latest = event;
-  }
-  if (!latest) return null;
-  const payload = latest.payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const row = payload as Record<string, unknown>;
-  if (row.cleared === true) return null;
-  const goal = row.goal;
-  if (!goal || typeof goal !== "object" || Array.isArray(goal)) return null;
-  return goal as LiliaThreadGoal;
 }

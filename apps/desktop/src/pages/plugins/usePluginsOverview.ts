@@ -1,4 +1,4 @@
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   hooksOverview,
   type HookSourceSummary,
@@ -17,7 +17,9 @@ export type PluginsTab =
   | "codex-hooks"
   | "codex-mcp";
 
-export function usePluginsOverview() {
+export function usePluginsOverview(options: {
+  isDisposed?: () => boolean;
+} = {}) {
   const tab = ref<PluginsTab>("claude-skills");
   const projects = computed(() => listProjects());
   const projectsWithCwd = computed(() =>
@@ -40,8 +42,13 @@ export function usePluginsOverview() {
   const warnings = ref<string[]>([]);
   const loading = ref(false);
   const errorText = ref<string | null>(null);
+  let refreshSeq = 0;
+  let disposed = false;
+  const isDisposed = () => disposed || options.isDisposed?.() === true;
 
   async function refresh() {
+    if (isDisposed()) return;
+    const seq = ++refreshSeq;
     loading.value = true;
     errorText.value = null;
     try {
@@ -49,6 +56,7 @@ export function usePluginsOverview() {
         pluginsOverview(projectCwd.value),
         hooksOverview(projectCwd.value),
       ]);
+      if (isDisposed() || seq !== refreshSeq) return;
       userSkills.value = pluginsData.skills.filter(
         (skill) => skill.backend === "claude" && skill.scope === "user",
       );
@@ -64,15 +72,20 @@ export function usePluginsOverview() {
       codexHookSources.value = hooksData.sources.filter((source) => source.backend === "codex");
       warnings.value = [...pluginsData.warnings, ...hooksData.warnings];
     } catch (err) {
-      errorText.value = String(err);
+      if (!isDisposed() && seq === refreshSeq) errorText.value = String(err);
     } finally {
-      loading.value = false;
+      if (!isDisposed() && seq === refreshSeq) loading.value = false;
     }
   }
 
   onMounted(() => refresh());
   watch(projectCwd, () => {
     void refresh();
+  });
+
+  onBeforeUnmount(() => {
+    disposed = true;
+    refreshSeq += 1;
   });
 
   return {

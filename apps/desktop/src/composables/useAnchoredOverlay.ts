@@ -15,6 +15,7 @@ import {
   type AnchoredMenuPlacement,
   type AnchoredRect,
 } from "./menuMotion";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 export interface OverlayAnchorPoint {
   x: number;
@@ -38,6 +39,9 @@ export function useAnchoredOverlay(options: {
   const overlayStyle = ref<Record<string, string>>({});
   const resolvedPlacement = ref<AnchoredMenuPlacement>(options.preferredPlacement.value);
   const anchorPoint = ref<OverlayAnchorPoint | null>(null);
+  let viewportUnlisteners: Array<() => void> = [];
+  let positionSeq = 0;
+  let disposed = false;
 
   const activeAnchorRect = computed<AnchoredRect | null>(() => {
     if (options.anchorEl?.value) return rectFromDomRect(options.anchorEl.value.getBoundingClientRect());
@@ -46,6 +50,7 @@ export function useAnchoredOverlay(options: {
   });
 
   function setAnchorPoint(point: OverlayAnchorPoint | null) {
+    positionSeq += 1;
     anchorPoint.value = point;
   }
 
@@ -59,8 +64,10 @@ export function useAnchoredOverlay(options: {
   }
 
   async function updatePosition() {
-    if (!options.open.value) return;
+    if (disposed || !options.open.value) return;
+    const seq = ++positionSeq;
     await nextTick();
+    if (disposed || seq !== positionSeq || !options.open.value) return;
     const anchorRect = activeAnchorRect.value;
     const overlay = overlayEl.value;
     if (!anchorRect || !overlay) return;
@@ -92,6 +99,18 @@ export function useAnchoredOverlay(options: {
     void updatePosition();
   }
 
+  function clearViewportListeners() {
+    runUnlistenFns(viewportUnlisteners.splice(0).reverse());
+  }
+
+  function installViewportListeners() {
+    clearViewportListeners();
+    viewportUnlisteners = [
+      addDomEventListener(window, "resize", onViewportChange),
+      addDomEventListener(window, "scroll", onViewportChange, true),
+    ];
+  }
+
   watch(
     () => [
       options.open.value,
@@ -102,6 +121,7 @@ export function useAnchoredOverlay(options: {
     ] as const,
     ([open]) => {
       if (!open) {
+        positionSeq += 1;
         overlayStyle.value = {};
         return;
       }
@@ -114,19 +134,18 @@ export function useAnchoredOverlay(options: {
     () => options.open.value,
     (open) => {
       if (open) {
-        window.addEventListener("resize", onViewportChange);
-        window.addEventListener("scroll", onViewportChange, true);
+        installViewportListeners();
       } else {
-        window.removeEventListener("resize", onViewportChange);
-        window.removeEventListener("scroll", onViewportChange, true);
+        clearViewportListeners();
       }
     },
     { immediate: true },
   );
 
   onBeforeUnmount(() => {
-    window.removeEventListener("resize", onViewportChange);
-    window.removeEventListener("scroll", onViewportChange, true);
+    disposed = true;
+    positionSeq += 1;
+    clearViewportListeners();
   });
 
   return {

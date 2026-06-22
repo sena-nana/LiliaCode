@@ -1,14 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Router } from "vue-router";
+import type { CliProjectOpenEvent } from "@lilia/contracts";
+import { CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND } from "@lilia/contracts";
 import { ensureProjectLoaded } from "./projectsStore";
 
-export interface CliProjectOpenPayload {
-  projectId: string;
-  cwd: string;
-}
+export type CliProjectOpenPayload = CliProjectOpenEvent;
 
 export function consumePendingCliProjectOpen(): Promise<CliProjectOpenPayload | null> {
-  return invoke<CliProjectOpenPayload | null>("cli_project_open_consume_pending");
+  return invoke<CliProjectOpenPayload | null>(CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND);
 }
 
 export async function openCliProject(payload: CliProjectOpenPayload, router: Router): Promise<void> {

@@ -21,9 +21,12 @@ const props = defineProps<{ projectId: string }>();
 const tasks = computed<Task[]>(() => listProjectConversations(props.projectId));
 const loaded = computed(() => isProjectTasksLoaded(props.projectId));
 let tasksHydrationHandle: number | null = null;
+let cancelTasksHydrationPaint: (() => void) | null = null;
 let tasksHydrationSeq = 0;
 
 function cancelProjectTasksHydration() {
+  cancelTasksHydrationPaint?.();
+  cancelTasksHydrationPaint = null;
   if (tasksHydrationHandle !== null) {
     cancelIdleRun(tasksHydrationHandle);
     tasksHydrationHandle = null;
@@ -34,7 +37,8 @@ function cancelProjectTasksHydration() {
 function scheduleProjectTasksHydration(projectId: string) {
   const seq = ++tasksHydrationSeq;
   const stage = beginPerfStage("project.sessions.switch", { detail: projectId });
-  scheduleAfterPaint(() => {
+  cancelTasksHydrationPaint = scheduleAfterPaint(() => {
+    cancelTasksHydrationPaint = null;
     if (seq !== tasksHydrationSeq) {
       stage.end("cancelled");
       return;

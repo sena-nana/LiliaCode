@@ -8,12 +8,15 @@ use std::time::Duration;
 
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
-use serde_json::Value as JsonValue;
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::agent_events::{AgentEventHost, AgentRuntimeEvent, AgentTurnContext};
+use crate::agent_events::{
+    runner_quota_usage_result_control_type, AgentEventHost, AgentRuntimeEvent, AgentTurnContext,
+};
 use crate::agent_extensions::TodoMirrorExtension;
 use crate::chat::auto_turn_decision::{prepare_turn_for_start, resolve_resume_session_id};
+use crate::chat::contract;
 use crate::chat::process_registry::{
     JsonlProcessPoll, JsonlProcessRegistry, JsonlProcessStdinStatus,
 };
@@ -43,8 +46,11 @@ use crate::chat::types::{
 use crate::chat::workflow::{automation_run_id, runtime_command_kind, workflow_kind};
 use crate::provider::{
     build_effective_claude_settings, build_effective_codex_subagent_settings,
-    load_agent_interaction_settings, resolve_connection_for, CodexProfileSettings, ConnectionMode,
+    load_agent_interaction_settings, normalize_codex_settings_profile, normalize_json_object,
+    normalize_optional_string, normalize_reasoning_effort, normalize_runtime_workspace_roots,
+    normalize_string_list, resolve_connection_for, CodexProfileSettings, ConnectionMode,
 };
+use crate::runner_protocol_contract;
 use crate::store::LiliaStore;
 use crate::{plugins, BACKEND_CLAUDE, BACKEND_CODEX};
 
@@ -613,7 +619,7 @@ pub(crate) fn start_runner_session<R: Runtime>(
     );
 
     let _ = app_handle.emit(
-        "chat:turn-started",
+        contract::turn_started_event_name(),
         TurnStartedEvent {
             task_id: task_id_for_thread.clone(),
             queued_count,
@@ -777,7 +783,7 @@ fn handle_runner_runtime_event<R: Runtime>(
                 }),
             );
             let _ = app_handle.emit(
-                "chat:agent-interaction-request",
+                contract::agent_interaction_request_event_name(),
                 AgentInteractionRequestEvent {
                     task_id: session.task_id.clone(),
                     turn_id: session.turn_id.clone(),
@@ -786,6 +792,14 @@ fn handle_runner_runtime_event<R: Runtime>(
                     kind: kind.clone(),
                     payload: payload.clone(),
                 },
+            );
+            crate::remote_control::record_pending_interaction(
+                session.task_id.clone(),
+                session.turn_id.clone(),
+                backend.clone().unwrap_or_else(|| session.backend.clone()),
+                id.clone(),
+                kind.clone(),
+                payload.clone(),
             );
             crate::automation::emit_interaction_signal(
                 app_handle,
@@ -809,13 +823,13 @@ fn handle_runner_runtime_event<R: Runtime>(
             let result = handle_quota_usage_request(app_handle, payload.clone());
             let response = match result {
                 Ok(value) => serde_json::json!({
-                    "type": "quota_usage_result",
+                    "type": runner_quota_usage_result_control_type(),
                     "id": id,
                     "ok": true,
                     "result": value,
                 }),
                 Err(err) => serde_json::json!({
-                    "type": "quota_usage_result",
+                    "type": runner_quota_usage_result_control_type(),
                     "id": id,
                     "ok": false,
                     "error": err,
@@ -869,7 +883,7 @@ fn handle_runner_runtime_event<R: Runtime>(
             );
             let store = app_handle.state::<ChatStore>();
             set_context_usage(&store, usage.clone());
-            let _ = app_handle.emit("chat:context-usage", usage);
+            let _ = app_handle.emit(contract::context_usage_event_name(), usage);
         }
         AgentRuntimeEvent::Done { session_id, .. } => {
             if let Some(sid) = session_id {
@@ -1107,17 +1121,7 @@ fn handle_quota_usage_request<R: Runtime>(
 }
 
 fn runner_event_kind(event: &AgentRuntimeEvent) -> &'static str {
-    match event {
-        AgentRuntimeEvent::ToolUse { .. } => "tool_use",
-        AgentRuntimeEvent::TodoList { .. } => "todo_list",
-        AgentRuntimeEvent::Timeline { .. } => "timeline",
-        AgentRuntimeEvent::InteractionRequest { .. } => "interaction_request",
-        AgentRuntimeEvent::QuotaUsageRequest { .. } => "quota_usage_request",
-        AgentRuntimeEvent::ContextUsage { .. } => "context_usage",
-        AgentRuntimeEvent::Done { .. } => "done",
-        AgentRuntimeEvent::PromptSuggestion { .. } => "prompt_suggestion",
-        AgentRuntimeEvent::Error { .. } => "error",
-    }
+    event.event_type()
 }
 
 pub(crate) fn build_runner_stdin_payload<T: Serialize>(
@@ -1133,25 +1137,55 @@ pub(crate) fn build_runner_stdin_payload<T: Serialize>(
     resume_session_id: Option<&str>,
     extensions: &T,
 ) -> JsonValue {
-    let turn = serde_json::json!({
-        "cwd": project_cwd,
-        "prompt": prompt,
-        "attachments": attachments,
-        "conversationReferences": conversation_references_payload(conversation_references),
-        "model": composer.model,
-        "resumeSessionId": resume_session_id,
-        "planMode": composer.plan_mode,
-        "goalMode": composer.goal_mode,
-        "permission": composer.permission,
-    });
-    serde_json::json!({
-        "backend": backend,
-        "turn": turn,
-        "workflow": workflow,
-        "runtimeCommand": runtime_command,
-        "runtimeOptions": runtime_options,
-        "extensions": extensions,
-    })
+    let turn_keys = runner_protocol_contract::runner_stdin_turn_keys();
+    let payload_keys = runner_protocol_contract::runner_stdin_payload_keys();
+
+    let mut turn = JsonMap::new();
+    turn.insert(turn_keys.cwd.clone(), serde_json::json!(project_cwd));
+    turn.insert(turn_keys.prompt.clone(), serde_json::json!(prompt));
+    turn.insert(
+        turn_keys.attachments.clone(),
+        serde_json::json!(attachments),
+    );
+    turn.insert(
+        turn_keys.conversation_references.clone(),
+        serde_json::json!(conversation_references_payload(conversation_references)),
+    );
+    turn.insert(turn_keys.model.clone(), serde_json::json!(composer.model));
+    turn.insert(
+        turn_keys.resume_session_id.clone(),
+        serde_json::json!(resume_session_id),
+    );
+    turn.insert(
+        turn_keys.plan_mode.clone(),
+        serde_json::json!(composer.plan_mode),
+    );
+    turn.insert(
+        turn_keys.goal_mode.clone(),
+        serde_json::json!(composer.goal_mode),
+    );
+    turn.insert(
+        turn_keys.permission.clone(),
+        serde_json::json!(composer.permission),
+    );
+
+    let mut payload = JsonMap::new();
+    payload.insert(payload_keys.backend.clone(), serde_json::json!(backend));
+    payload.insert(payload_keys.turn.clone(), JsonValue::Object(turn));
+    payload.insert(payload_keys.workflow.clone(), serde_json::json!(workflow));
+    payload.insert(
+        payload_keys.runtime_command.clone(),
+        serde_json::json!(runtime_command),
+    );
+    payload.insert(
+        payload_keys.runtime_options.clone(),
+        serde_json::json!(runtime_options),
+    );
+    payload.insert(
+        payload_keys.extensions.clone(),
+        serde_json::json!(extensions),
+    );
+    JsonValue::Object(payload)
 }
 
 fn runtime_state_context_json(
@@ -1360,60 +1394,6 @@ fn effective_string_list(
     }
 }
 
-fn normalize_json_object(value: Option<serde_json::Value>) -> Option<serde_json::Value> {
-    match value {
-        Some(serde_json::Value::Object(map)) if !map.is_empty() => {
-            Some(serde_json::Value::Object(map))
-        }
-        _ => None,
-    }
-}
-
-fn normalize_optional_string(value: Option<String>) -> Option<String> {
-    value.and_then(|s| {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    })
-}
-
-fn normalize_reasoning_effort(value: Option<String>) -> Option<String> {
-    let value = normalize_optional_string(value)?;
-    match value.as_str() {
-        "low" | "medium" | "high" | "xhigh" => Some(value),
-        _ => None,
-    }
-}
-
-fn normalize_runtime_workspace_roots(roots: Vec<String>) -> Vec<String> {
-    normalize_string_list(roots)
-}
-
-fn normalize_string_list(values: Vec<String>) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for value in values {
-        let trimmed = value.trim();
-        if trimmed.is_empty() || normalized.iter().any(|seen| seen == trimmed) {
-            continue;
-        }
-        normalized.push(trimmed.to_string());
-    }
-    normalized
-}
-
-fn normalize_codex_settings_profile(value: Option<String>) -> Option<String> {
-    match normalize_optional_string(value).as_deref() {
-        Some("fast") => Some("fast".to_string()),
-        Some("balanced") => Some("balanced".to_string()),
-        Some("deep") => Some("deep".to_string()),
-        Some("default") => Some("default".to_string()),
-        _ => None,
-    }
-}
-
 pub(crate) fn finish_agent_turn<R: Runtime>(
     app_handle: AppHandle<R>,
     task_id: String,
@@ -1453,7 +1433,7 @@ pub(crate) fn finish_agent_turn<R: Runtime>(
         pending_reset_cleanup,
     );
 
-    let _ = app_handle.emit("chat:done", completion.done_event);
+    let _ = app_handle.emit(contract::done_event_name(), completion.done_event);
 
     if completion.reset_cleanup_requested {
         let store = app_handle.state::<ChatStore>();
@@ -2189,7 +2169,8 @@ mod tests {
         assert_eq!(
             runner_event_kind(&AgentRuntimeEvent::InteractionRequest {
                 id: "ask-1".to_string(),
-                kind: "tool_consent".to_string(),
+                kind: crate::agent_interaction_contract::tool_consent_interaction_kind()
+                    .to_string(),
                 backend: Some(BACKEND_CODEX.to_string()),
                 payload: JsonValue::Null,
             }),

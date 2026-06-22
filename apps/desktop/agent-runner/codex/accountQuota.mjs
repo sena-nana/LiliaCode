@@ -1,3 +1,4 @@
+import { isCodexRateLimitResetCreditConsumeOutcome } from "@lilia/contracts/quotaContract.mjs";
 import { createCodexAppServer } from "./appServer.mjs";
 import { initializeCodexAppServer } from "./runCodex.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
@@ -8,12 +9,6 @@ const FIVE_HOUR_TOLERANCE = 90;
 const WEEKLY_TOLERANCE = 1440;
 const RATE_LIMIT_READ_RETRIES = 2;
 const RATE_LIMIT_READ_RETRY_DELAY_MS = 500;
-const RESET_CREDIT_OUTCOMES = new Set([
-  "reset",
-  "alreadyRedeemed",
-  "nothingToReset",
-  "noCredit",
-]);
 
 function numberOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -253,7 +248,7 @@ export async function consumeCodexRateLimitResetCredit(
       idempotencyKey: key,
     });
     const outcome = stringOrNull(result?.outcome);
-    if (!RESET_CREDIT_OUTCOMES.has(outcome)) {
+    if (!isCodexRateLimitResetCreditConsumeOutcome(outcome)) {
       throw new Error("Codex 官方额度重置接口返回了未知结果。");
     }
     const status = await readQuotaStatusFromServer(server, { retries, retryDelayMs });

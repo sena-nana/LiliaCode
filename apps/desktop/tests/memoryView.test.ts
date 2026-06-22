@@ -118,4 +118,27 @@ describe("MemoryView", () => {
     await fireEvent.click(deleteButtons[0]);
     expect(memoryService.deleteMemory).toHaveBeenCalledWith("memory-1");
   });
+
+  it("normalizes memory settings through the shared contract rules", async () => {
+    memoryService.getMemorySettings.mockResolvedValueOnce({
+      enabled: true,
+      baselineInjectionEnabled: true,
+      cooldownTurns: 0,
+    });
+
+    render(MemoryView, { props: { projectId: "project-1" } });
+    await screen.findByText("迁移检查");
+
+    const cooldownInput = screen.getByLabelText("冷却 turn");
+    await fireEvent.update(cooldownInput, "2.8");
+    await fireEvent.change(cooldownInput);
+
+    await waitFor(() => {
+      expect(memoryService.setMemorySettings).toHaveBeenCalledWith({
+        enabled: true,
+        baselineInjectionEnabled: true,
+        cooldownTurns: 2,
+      });
+    });
+  });
 });

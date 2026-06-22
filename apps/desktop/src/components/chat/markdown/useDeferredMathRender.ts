@@ -33,6 +33,7 @@ export function useDeferredMathRender(options: {
   const renderedHtml = ref<string | null>(null);
   let renderSeq = 0;
   let idleHandle: number | null = null;
+  let cancelPaintRender: (() => void) | null = null;
   const { activated } = useDeferredVisibility({
     target: options.target,
     perfName: options.visibilityPerfName,
@@ -40,6 +41,8 @@ export function useDeferredMathRender(options: {
   });
 
   function cancelScheduledRender() {
+    cancelPaintRender?.();
+    cancelPaintRender = null;
     if (idleHandle === null) return;
     cancelIdleRun(idleHandle);
     idleHandle = null;
@@ -76,7 +79,8 @@ export function useDeferredMathRender(options: {
       void renderNow(seq);
       return;
     }
-    scheduleAfterPaint(() => {
+    cancelPaintRender = scheduleAfterPaint(() => {
+      cancelPaintRender = null;
       if (seq !== renderSeq) return;
       idleHandle = runWhenIdle(() => {
         idleHandle = null;

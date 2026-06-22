@@ -1,0 +1,59 @@
+{
+  "agentInteractionKinds": [
+    "plan_approval",
+    "tool_consent",
+    "ask_user",
+    "architecture_change",
+    "mcp_elicitation",
+    "permission_approval"
+  ],
+  "askUserInteractionKind": "ask_user",
+  "planApprovalInteractionKind": "plan_approval",
+  "toolConsentInteractionKind": "tool_consent",
+  "architectureInteractionKind": "architecture_change",
+  "mcpElicitationInteractionKind": "mcp_elicitation",
+  "permissionApprovalInteractionKind": "permission_approval",
+  "commands": {
+    "getSettings": "agent_interaction_get_settings",
+    "setSettings": "agent_interaction_set_settings",
+    "listSubagents": "agent_interaction_list_subagents",
+    "upsertSubagent": "agent_interaction_upsert_subagent",
+    "deleteSubagent": "agent_interaction_delete_subagent"
+  },
+  "runtimeInteractionKinds": [
+    "mcp_elicitation",
+    "permission_approval"
+  ],
+  "agentTimelinePendingInteractions": [
+    "tool_consent",
+    "mcp_elicitation",
+    "permission_approval"
+  ],
+  "pendingAutoDecisionKinds": [
+    "ask_user",
+    "plan_approval",
+    "tool_consent",
+    "title_update",
+    "mcp_elicitation",
+    "architecture_change",
+    "permission_approval"
+  ],
+  "pendingAutoDecisionLabels": {
+    "ask_user": "选择推荐项",
+    "plan_approval": "同意计划",
+    "tool_consent": "同意工具调用",
+    "title_update": "同意标题",
+    "mcp_elicitation": "提交 MCP 表单",
+    "architecture_change": "应用架构变更",
+    "permission_approval": "同意权限请求"
+  },
+  "planApprovalSpecDefaults": {
+    "questionId": "approve-plan",
+    "questionHeader": "计划确认",
+    "confirmLabel": "按计划执行",
+    "cancelLabel": "先不执行",
+    "dismissable": true,
+    "titleTemplate": "确认 {backend} 计划",
+    "sourceTemplate": "{backend} Plan"
+  }
+}

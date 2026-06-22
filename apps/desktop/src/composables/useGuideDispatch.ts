@@ -5,7 +5,14 @@ import {
   type TaskTodo,
   type TaskTodoPriority,
 } from "../services/todos";
-import type { ChatAttachment } from "@lilia/contracts";
+import {
+  DEFAULT_TASK_TODO_PRIORITY,
+  PENDING_TASK_TODO_GUIDE_STATUS,
+  TASK_TODO_PRIORITIES,
+  serializeChatAttachmentReference,
+  taskTodoPriorityLabel,
+  type ChatAttachment,
+} from "@lilia/contracts";
 
 export type GuideDispatchWindow = "tool" | "user" | "idle";
 
@@ -14,20 +21,14 @@ export interface GuideDispatchOptions {
   ensureDispatchReady: () => Promise<void>;
   ensureReady: (content: string, attachments: ChatAttachment[]) => Promise<void>;
   sendAgentMessage: (content: string, attachments: ChatAttachment[], guideId?: string) => Promise<void>;
-  hasPendingAgentAction: () => boolean;
+  hasBlockingPendingAgentAction: () => boolean;
   isTurnRunning: () => boolean;
   clearAttachments: () => void;
   reportError: (message: string) => void;
 }
 
 const LILIA_GUIDE_PREFIX = "[Lilia 引导]";
-const guidePriorityOrder: TaskTodoPriority[] = ["high", "normal", "low"];
-
-function priorityLabel(priority: TaskTodoPriority): string {
-  if (priority === "high") return "高";
-  if (priority === "low") return "低";
-  return "中";
-}
+const guidePriorityOrder: TaskTodoPriority[] = [...TASK_TODO_PRIORITIES];
 
 function guideTextForComposer(
   content: string,
@@ -36,22 +37,13 @@ function guideTextForComposer(
   const text = content.trim();
   if (text) return text;
   if (outgoingAttachments.length === 0) return "";
-  return outgoingAttachments.map(attachmentReferenceText).join("\n");
-}
-
-function attachmentReferenceText(attachment: ChatAttachment): string {
-  const kind = attachment.mime?.startsWith("image/")
-    ? "图片引用"
-    : attachment.kind === "directory"
-      ? "目录引用"
-      : "文件引用";
-  return `[${kind}: ${attachment.name} | ${attachment.path}]`;
+  return outgoingAttachments.map(serializeChatAttachmentReference).join("\n");
 }
 
 function guideMessage(todo: TaskTodo): string {
   return [
     LILIA_GUIDE_PREFIX,
-    `优先级：${priorityLabel(todo.priority)}`,
+    `优先级：${taskTodoPriorityLabel(todo.priority)}`,
     "",
     todo.text,
   ].join("\n");
@@ -73,7 +65,7 @@ export function useGuideDispatch(options: GuideDispatchOptions) {
     const candidates = (await listTodos(options.taskId()))
       .filter((todo) =>
         todo.source === "lilia" &&
-        todo.guideStatus === "pending" &&
+        todo.guideStatus === PENDING_TASK_TODO_GUIDE_STATUS &&
         !dispatchingGuideIds.has(todo.id) &&
         allowed.has(todo.priority)
       );
@@ -91,7 +83,7 @@ export function useGuideDispatch(options: GuideDispatchOptions) {
     try {
       await options.sendAgentMessage(guideMessage(todo), todo.attachments ?? [], todo.id);
     } catch (err) {
-      await updateTodo(todo.id, { guideStatus: "pending" }).catch(() => undefined);
+      await updateTodo(todo.id, { guideStatus: PENDING_TASK_TODO_GUIDE_STATUS }).catch(() => undefined);
       options.reportError(`插入引导失败：${String(err)}`);
     } finally {
       dispatchingGuideIds.delete(todo.id);
@@ -126,9 +118,9 @@ export function useGuideDispatch(options: GuideDispatchOptions) {
       await options.ensureDispatchReady();
       const guideText = guideTextForComposer(content, outgoingAttachments);
       await options.ensureReady(guideText, outgoingAttachments);
-      await createTodo(options.taskId(), guideText, "normal", outgoingAttachments);
+      await createTodo(options.taskId(), guideText, DEFAULT_TASK_TODO_PRIORITY, outgoingAttachments);
       options.clearAttachments();
-      if (options.hasPendingAgentAction()) {
+      if (options.hasBlockingPendingAgentAction()) {
         void scheduleGuideInsertion("user");
       } else if (!options.isTurnRunning()) {
         void scheduleGuideInsertion("idle");

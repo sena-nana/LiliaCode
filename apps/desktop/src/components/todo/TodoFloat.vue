@@ -21,9 +21,17 @@ import {
   deleteTodo,
   listTodos,
   onTodoChanged,
-  type TaskTodoPriority,
 } from "../../services/todos";
-import type { LiliaThreadGoal, TaskTodo } from "@lilia/contracts";
+import { runUnlistenFns } from "../../utils/eventListeners";
+import {
+  PENDING_TASK_TODO_GUIDE_STATUS,
+  QUEUED_TASK_TODO_GUIDE_STATUS,
+  SENT_TASK_TODO_GUIDE_STATUS,
+  liliaGoalStatusLabel,
+  taskTodoPriorityLabel,
+  type LiliaThreadGoal,
+  type TaskTodo,
+} from "@lilia/contracts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const props = withDefaults(defineProps<{
@@ -49,13 +57,17 @@ const error = ref<string | null>(null);
 const savingId = ref<string | null>(null);
 
 let unlistenTodoChanged: UnlistenFn | null = null;
+let disposed = false;
+let refreshSeq = 0;
 
 const agentTodos = computed(() =>
   todos.value.filter((todo) => todo.source === "agent" && !todo.done),
 );
 
 const guides = computed(() =>
-  todos.value.filter((todo) => todo.source === "lilia" && todo.guideStatus !== "sent"),
+  todos.value.filter((todo) =>
+    todo.source === "lilia" && todo.guideStatus !== SENT_TASK_TODO_GUIDE_STATUS
+  ),
 );
 
 const visibleGoal = computed(() =>
@@ -73,7 +85,7 @@ const goalText = computed(() =>
 const goalMeta = computed(() => {
   const goal = visibleGoal.value;
   if (!goal) return "";
-  const status = goalStatusLabel(goal.status);
+  const status = liliaGoalStatusLabel(goal.status);
   const used = Number.isFinite(goal.tokensUsed) ? goal.tokensUsed : 0;
   const budget = goal.tokenBudget;
   const tokenText = typeof budget === "number" && Number.isFinite(budget)
@@ -82,49 +94,40 @@ const goalMeta = computed(() => {
   return `${status} · ${tokenText} tokens`;
 });
 
-const GOAL_STATUS_LABELS: Record<LiliaThreadGoal["status"], string> = {
-  active: "进行中",
-  paused: "已暂停",
-  blocked: "受阻",
-  usageLimited: "用量受限",
-  budgetLimited: "预算受限",
-  complete: "已完成",
-};
-
-function priorityLabel(priority: TaskTodoPriority): string {
-  if (priority === "high") return "高";
-  if (priority === "low") return "低";
-  return "中";
-}
-
-function goalStatusLabel(status: LiliaThreadGoal["status"]): string {
-  return GOAL_STATUS_LABELS[status] ?? status;
-}
-
 async function refresh() {
-  if (!props.taskId) return;
+  const taskId = props.taskId;
+  if (!taskId) return;
+  const seq = ++refreshSeq;
   try {
-    todos.value = await listTodos(props.taskId);
+    const nextTodos = await listTodos(taskId);
+    if (disposed || seq !== refreshSeq || taskId !== props.taskId) return;
+    todos.value = nextTodos;
     error.value = null;
   } catch (e) {
+    if (disposed || seq !== refreshSeq || taskId !== props.taskId) return;
     error.value = String(e);
   }
 }
 
 async function onDelete(todo: TaskTodo) {
-  if (todo.source !== "lilia" || todo.guideStatus === "queued" || savingId.value) return;
+  if (todo.source !== "lilia" || todo.guideStatus === QUEUED_TASK_TODO_GUIDE_STATUS || savingId.value) {
+    return;
+  }
+  const taskId = props.taskId;
   savingId.value = todo.id;
   try {
     await deleteTodo(todo.id);
   } catch (e) {
-    error.value = String(e);
+    if (!disposed && taskId === props.taskId) error.value = String(e);
   } finally {
-    savingId.value = null;
+    if (!disposed && taskId === props.taskId && savingId.value === todo.id) savingId.value = null;
   }
 }
 
 function onInsertGuide(todo: TaskTodo) {
-  if (todo.source !== "lilia" || todo.guideStatus !== "pending" || savingId.value) return;
+  if (todo.source !== "lilia" || todo.guideStatus !== PENDING_TASK_TODO_GUIDE_STATUS || savingId.value) {
+    return;
+  }
   emit("insert-guide", todo);
 }
 
@@ -148,20 +151,32 @@ function onClearGoal() {
 watch(
   () => props.taskId,
   () => {
-    refresh();
+    void refresh();
   },
 );
 
 onMounted(async () => {
-  unlistenTodoChanged = await onTodoChanged((e) => {
-    if (e.taskId === props.taskId) refresh();
-  });
+  disposed = false;
+  try {
+    const unlisten = await onTodoChanged((e) => {
+      if (e.taskId === props.taskId) void refresh();
+    });
+    if (disposed) {
+      runUnlistenFns([unlisten]);
+      return;
+    }
+    unlistenTodoChanged = unlisten;
+  } catch (e) {
+    if (!disposed) error.value = String(e);
+  }
   await refresh();
 });
 
-onUnmounted(async () => {
+onUnmounted(() => {
+  disposed = true;
+  refreshSeq += 1;
   if (unlistenTodoChanged) {
-    try { await unlistenTodoChanged(); } catch { /* ignore */ }
+    runUnlistenFns([unlistenTodoChanged]);
     unlistenTodoChanged = null;
   }
 });
@@ -228,7 +243,7 @@ onUnmounted(async () => {
             class="todo-float__priority"
             :class="`todo-float__priority--${todo.priority}`"
           >
-            {{ priorityLabel(todo.priority) }}
+            {{ taskTodoPriorityLabel(todo.priority) }}
           </span>
         </li>
       </ul>
@@ -240,7 +255,7 @@ onUnmounted(async () => {
           v-for="todo in guides"
           :key="todo.id"
           class="todo-float__row todo-float__row--guide"
-          :class="`is-${todo.guideStatus ?? 'pending'}`"
+          :class="`is-${todo.guideStatus ?? PENDING_TASK_TODO_GUIDE_STATUS}`"
         >
           <span class="todo-float__source" title="Lilia 引导">
             <Sparkles :size="12" aria-hidden="true" />
@@ -252,13 +267,13 @@ onUnmounted(async () => {
             class="todo-float__priority"
             :class="`todo-float__priority--${todo.priority}`"
           >
-            {{ priorityLabel(todo.priority) }}
+            {{ taskTodoPriorityLabel(todo.priority) }}
           </span>
           <div class="todo-float__actions">
             <button
               type="button"
               class="todo-float__icon-btn"
-              :disabled="todo.guideStatus !== 'pending'"
+              :disabled="todo.guideStatus !== PENDING_TASK_TODO_GUIDE_STATUS"
               title="立即插入"
               :aria-label="`立即插入引导：${todo.text}`"
               @click="onInsertGuide(todo)"
@@ -268,7 +283,7 @@ onUnmounted(async () => {
             <button
               type="button"
               class="todo-float__icon-btn todo-float__icon-btn--danger"
-              :disabled="todo.guideStatus === 'queued'"
+              :disabled="todo.guideStatus === QUEUED_TASK_TODO_GUIDE_STATUS"
               title="删除引导"
               :aria-label="`删除引导：${todo.text}`"
               @click="onDelete(todo)"

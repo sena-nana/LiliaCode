@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { TASK_UPDATE_COMMAND } from "@lilia/contracts";
 import { ensureSessionSearchCorpusLoaded, searchSessions } from "../src/services/sessionSearch";
 import { mockInvoke, resetTauriMockData } from "./tauriMock";
 
@@ -33,7 +34,7 @@ describe("sessionSearch", () => {
   });
 
   it("强制刷新 sidebar summary 后会更新搜索结果", async () => {
-    await mockInvoke("task_update", {
+    await mockInvoke(TASK_UPDATE_COMMAND, {
       id: "t-002",
       title: "新的统一侧栏标题",
     });

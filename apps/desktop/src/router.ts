@@ -7,6 +7,7 @@ import {
 import { defineComponent, h } from "vue";
 import {
   beginPerfStage,
+  cancelIdleRun,
   measurePerfAsync,
   runWhenIdle,
   scheduleAfterPaint,
@@ -39,6 +40,8 @@ const loadTaskDetail = loadRouteComponent(
 const TaskDetail = loadTaskDetail;
 let taskDetailPreloadPromise: Promise<unknown> | null = null;
 let taskDetailPreloadScheduled = false;
+let cancelTaskDetailPreloadPaint: (() => void) | null = null;
+let taskDetailPreloadIdleHandle: number | null = null;
 const PopupDraftBoot = loadRouteComponent(
   "PopupDraftBoot",
   async () => (await import("./pages/PopupDraftBoot.vue")).default,
@@ -224,12 +227,16 @@ export function preloadTaskDetailPage(): Promise<unknown> {
 export function scheduleTaskDetailPreload(detail = "intent"): void {
   if (taskDetailPreloadPromise || taskDetailPreloadScheduled) return;
   taskDetailPreloadScheduled = true;
-  scheduleAfterPaint(() => {
+  const cancelPaint = scheduleAfterPaint(() => {
+    if (cancelTaskDetailPreloadPaint === cancelPaint) {
+      cancelTaskDetailPreloadPaint = null;
+    }
     if (taskDetailPreloadPromise) {
       taskDetailPreloadScheduled = false;
       return;
     }
-    runWhenIdle(() => {
+    taskDetailPreloadIdleHandle = runWhenIdle(() => {
+      taskDetailPreloadIdleHandle = null;
       taskDetailPreloadScheduled = false;
       void measurePerfAsync(
         "task-detail.preload.intent",
@@ -238,6 +245,17 @@ export function scheduleTaskDetailPreload(detail = "intent"): void {
       );
     });
   });
+  cancelTaskDetailPreloadPaint = cancelPaint;
+}
+
+export function cancelTaskDetailPreloadSchedule(): void {
+  cancelTaskDetailPreloadPaint?.();
+  cancelTaskDetailPreloadPaint = null;
+  if (taskDetailPreloadIdleHandle !== null) {
+    cancelIdleRun(taskDetailPreloadIdleHandle);
+    taskDetailPreloadIdleHandle = null;
+  }
+  taskDetailPreloadScheduled = false;
 }
 
 export const router = createLiliaRouter();

@@ -1,11 +1,29 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
-import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, vi } from "vitest";
+import { createMemoryHistory, createRouter } from "vue-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AUTOMATION_CHANGED_EVENT_NAME,
+  AUTOMATION_GET_RUN_COMMAND,
+  AUTOMATION_RUN_FINISHED_EVENT_NAME,
+  AUTOMATION_RUN_STARTED_EVENT_NAME,
+  AUTOMATION_RUN_UPDATED_EVENT_NAME,
+  AGENT_TIMELINE_LIST_COMMAND,
+  CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME,
+  CHAT_GET_RUNTIME_SNAPSHOT_COMMAND,
+  CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND,
+  CLI_PROJECT_OPEN_EVENT_NAME,
+  MAIN_NAVIGATE_EVENT_NAME,
+  POPUP_NAVIGATE_EVENT_NAME,
+  PROJECT_LIST_COMMAND,
+  createAppNavigateEvent,
+  createCliProjectOpenEvent,
+} from "@lilia/contracts";
 import App from "../src/App.vue";
 import { createDraftOrphan } from "../src/data/tasks";
 import { createLiliaRouter } from "../src/router";
 import {
   emitTauriEvent,
+  failNextMockListen,
   mockInvoke,
   mockListenerCount,
   seedMockAutomationRun,
@@ -52,11 +70,11 @@ async function renderApp(windowLabel: string, initialRoute = "/") {
   });
 
   await waitFor(() => {
-    expect(mockListenerCount("chat:agent-interaction-request")).toBe(1);
+    expect(mockListenerCount(CHAT_AGENT_INTERACTION_REQUEST_EVENT_NAME)).toBe(1);
   });
   await waitFor(() => {
     expect(mockListenerCount(
-      windowLabel === "main" ? "lilia:main:navigate" : "lilia:popup:navigate",
+      windowLabel === "main" ? MAIN_NAVIGATE_EVENT_NAME : POPUP_NAVIGATE_EVENT_NAME,
     )).toBe(1);
   });
   await Promise.resolve();
@@ -67,27 +85,97 @@ async function renderApp(windowLabel: string, initialRoute = "/") {
   };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("App main navigation events", () => {
+  it("卸载时取消 deferred bridge paint 安装调度", async () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 61));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    setMockCurrentWindowLabel("main");
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/:pathMatch(.*)*", component: { template: "<div />" } }],
+    });
+    await router.push("/");
+    await router.isReady();
+
+    const view = render(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+    await Promise.resolve();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(61);
+  });
+
+  it("主窗口导航 listener 注册失败时会回滚已注册的监听", async () => {
+    failNextMockListen(CLI_PROJECT_OPEN_EVENT_NAME, "cli listener failed");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setMockCurrentWindowLabel("main");
+    const router = createLiliaRouter(createMemoryHistory());
+    await router.push("/");
+    await router.isReady();
+
+    const view = render(App, {
+      global: {
+        plugins: [router],
+      },
+    });
+
+    try {
+      await waitFor(() => {
+        expect(errorSpy).toHaveBeenCalledWith(
+          "[app] install window navigation listeners failed",
+          expect.any(Error),
+        );
+      });
+      expect(mockListenerCount(MAIN_NAVIGATE_EVENT_NAME)).toBe(0);
+      expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(0);
+    } finally {
+      view.unmount();
+      errorSpy.mockRestore();
+    }
+  });
+
   it("自动化页面只在进入路由后加载重 UI 并注册事件监听", async () => {
     const view = await renderApp("main");
 
     expect(view.router.currentRoute.value.fullPath).toBe("/");
     expect(vueFlowImportState.loaded).toBe(false);
-    expect(mockListenerCount("automation:changed")).toBe(0);
-    expect(mockListenerCount("automation:run-started")).toBe(0);
-    expect(mockListenerCount("automation:run-updated")).toBe(0);
-    expect(mockListenerCount("automation:run-finished")).toBe(0);
+    expect(mockListenerCount(AUTOMATION_CHANGED_EVENT_NAME)).toBe(0);
+    expect(mockListenerCount(AUTOMATION_RUN_STARTED_EVENT_NAME)).toBe(0);
+    expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(0);
+    expect(mockListenerCount(AUTOMATION_RUN_FINISHED_EVENT_NAME)).toBe(0);
 
     await view.router.push("/automations");
 
     await waitFor(() => {
       expect(vueFlowImportState.loaded).toBe(true);
-      expect(mockListenerCount("automation:changed")).toBe(1);
-      expect(mockListenerCount("automation:run-started")).toBe(1);
-      expect(mockListenerCount("automation:run-updated")).toBe(1);
-      expect(mockListenerCount("automation:run-finished")).toBe(1);
+      expect(mockListenerCount(AUTOMATION_CHANGED_EVENT_NAME)).toBe(1);
+      expect(mockListenerCount(AUTOMATION_RUN_STARTED_EVENT_NAME)).toBe(1);
+      expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(1);
+      expect(mockListenerCount(AUTOMATION_RUN_FINISHED_EVENT_NAME)).toBe(1);
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(false);
+  });
+
+  it("自动化 listener 注册失败时会回滚已注册的 changed listener", async () => {
+    failNextMockListen(AUTOMATION_RUN_STARTED_EVENT_NAME, "automation run listener failed");
+    const view = await renderApp("main");
+
+    await view.router.push("/automations");
+
+    await waitFor(() => {
+      expect(mockListenerCount(AUTOMATION_CHANGED_EVENT_NAME)).toBe(0);
+      expect(mockListenerCount(AUTOMATION_RUN_STARTED_EVENT_NAME)).toBe(0);
+      expect(mockListenerCount(AUTOMATION_RUN_UPDATED_EVENT_NAME)).toBe(0);
+      expect(mockListenerCount(AUTOMATION_RUN_FINISHED_EVENT_NAME)).toBe(0);
+    });
   });
 
   it("自动化页已有运行记录时首屏只拉摘要，点击运行后才加载详情", async () => {
@@ -97,12 +185,12 @@ describe("App main navigation events", () => {
     await waitFor(() => {
       expect(view.getByRole("button", { name: /manual/ })).toBeInTheDocument();
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(false);
 
     await fireEvent.click(view.getByRole("button", { name: /manual/ }));
 
     await waitFor(() => {
-      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "automation_get_run")).toBe(true);
+      expect(mockInvoke.mock.calls.some(([cmd]) => cmd === AUTOMATION_GET_RUN_COMMAND)).toBe(true);
       expect(view.getByText("trigger-1")).toBeInTheDocument();
     });
   });
@@ -122,14 +210,14 @@ describe("App main navigation events", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.path).toMatch(/^\/chats\/o-draft-/);
       expect(view.getByText("今天想做什么？")).toBeInTheDocument();
-      expect(view.getByRole("textbox")).toBeInTheDocument();
-    });
+      expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInTheDocument();
+    }, { timeout: 3000 });
 
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "agent_timeline_list" && args?.taskId === draft.id
+      cmd === AGENT_TIMELINE_LIST_COMMAND && args?.taskId === draft.id
     )).toBe(false);
     expect(mockInvoke.mock.calls.some(([cmd, args]) =>
-      cmd === "chat_get_runtime_snapshot" && args?.taskId === draft.id
+      cmd === CHAT_GET_RUNTIME_SNAPSHOT_COMMAND && args?.taskId === draft.id
     )).toBe(false);
   });
 
@@ -137,12 +225,10 @@ describe("App main navigation events", () => {
     const view = await renderApp("main");
 
     await waitFor(() => {
-      expect(mockListenerCount("lilia:main:navigate")).toBe(1);
+      expect(mockListenerCount(MAIN_NAVIGATE_EVENT_NAME)).toBe(1);
     });
 
-    emitTauriEvent("lilia:main:navigate", {
-      route: "/projects/lilia/tasks/t-001",
-    });
+    emitTauriEvent(MAIN_NAVIGATE_EVENT_NAME, createAppNavigateEvent("/projects/lilia/tasks/t-001"));
 
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe(
@@ -155,19 +241,19 @@ describe("App main navigation events", () => {
     const view = await renderApp("main");
 
     await waitFor(() => {
-      expect(mockListenerCount("lilia:cli-project-open")).toBe(1);
+      expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(1);
     });
     mockInvoke.mockClear();
 
-    emitTauriEvent("lilia:cli-project-open", {
-      projectId: "lilia",
-      cwd: "D:\\PROJECT\\workspace\\Lilia",
-    });
+    emitTauriEvent(
+      CLI_PROJECT_OPEN_EVENT_NAME,
+      createCliProjectOpenEvent("lilia", "D:\\PROJECT\\workspace\\Lilia"),
+    );
 
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe("/projects/lilia");
     });
-    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "project_list")).toBe(false);
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === PROJECT_LIST_COMMAND)).toBe(false);
   });
 
   it("主窗口挂载后会消费首启 CLI 项目打开请求", async () => {
@@ -181,18 +267,19 @@ describe("App main navigation events", () => {
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe("/projects/tools");
     });
-    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === "cli_project_open_consume_pending"))
+    expect(mockInvoke.mock.calls.filter(([cmd]) => cmd === CLI_PROJECT_OPEN_CONSUME_PENDING_COMMAND))
       .toHaveLength(1);
   });
 
   it("主窗口不会订阅弹窗导航事件", async () => {
     const view = await renderApp("main");
 
-    expect(mockListenerCount("lilia:popup:navigate")).toBe(0);
+    expect(mockListenerCount(POPUP_NAVIGATE_EVENT_NAME)).toBe(0);
 
-    emitTauriEvent("lilia:popup:navigate", {
-      route: "/popup/projects/lilia/tasks/t-001",
-    });
+    emitTauriEvent(
+      POPUP_NAVIGATE_EVENT_NAME,
+      createAppNavigateEvent("/popup/projects/lilia/tasks/t-001"),
+    );
 
     await Promise.resolve();
     expect(view.router.currentRoute.value.fullPath).toBe("/");
@@ -202,12 +289,13 @@ describe("App main navigation events", () => {
     const view = await renderApp("popup-task-t-001", "/popup/chats/o-001");
 
     await waitFor(() => {
-      expect(mockListenerCount("lilia:popup:navigate")).toBe(1);
+      expect(mockListenerCount(POPUP_NAVIGATE_EVENT_NAME)).toBe(1);
     });
 
-    emitTauriEvent("lilia:popup:navigate", {
-      route: "/popup/projects/lilia/tasks/t-001",
-    });
+    emitTauriEvent(
+      POPUP_NAVIGATE_EVENT_NAME,
+      createAppNavigateEvent("/popup/projects/lilia/tasks/t-001"),
+    );
 
     await waitFor(() => {
       expect(view.router.currentRoute.value.fullPath).toBe(
@@ -222,9 +310,9 @@ describe("App main navigation events", () => {
       "/popup/projects/lilia/tasks/t-001",
     );
 
-    expect(mockListenerCount("lilia:main:navigate")).toBe(0);
-    expect(mockListenerCount("lilia:cli-project-open")).toBe(0);
-    expect(mockListenerCount("lilia:popup:navigate")).toBe(1);
+    expect(mockListenerCount(MAIN_NAVIGATE_EVENT_NAME)).toBe(0);
+    expect(mockListenerCount(CLI_PROJECT_OPEN_EVENT_NAME)).toBe(0);
+    expect(mockListenerCount(POPUP_NAVIGATE_EVENT_NAME)).toBe(1);
     expect(view.router.currentRoute.value.fullPath).toBe(
       "/popup/projects/lilia/tasks/t-001",
     );

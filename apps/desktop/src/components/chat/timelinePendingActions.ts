@@ -1,14 +1,20 @@
-import type { AgentTimelineEvent } from "@lilia/contracts";
+import {
+  agentTimelineActionDescriptor,
+  type AgentTimelineEvent,
+} from "@lilia/contracts";
 import {
   pendingActionForTimelineEvent,
-  timelineEventRequiresAgentAction,
   type PendingAgentAction,
-} from "../../composables/usePendingAgentActions";
+} from "../../composables/pendingAgentActions";
 
 export interface TimelinePendingActionState {
   action: PendingAgentAction | null;
   expired: boolean;
 }
+
+export type TimelinePendingActionStateReader = (
+  event: AgentTimelineEvent,
+) => TimelinePendingActionState;
 
 export function timelinePendingActionState(
   event: AgentTimelineEvent,
@@ -18,7 +24,7 @@ export function timelinePendingActionState(
   const action = pendingActionForTimelineEvent(event, actions);
   return {
     action,
-    expired: !action && showExpired === true && timelineEventRequiresAgentAction(event),
+    expired: !action && showExpired === true && agentTimelineActionDescriptor(event) !== null,
   };
 }
 

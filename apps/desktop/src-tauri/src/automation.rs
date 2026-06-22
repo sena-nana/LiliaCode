@@ -10,11 +10,15 @@ use crate::store::LiliaStore;
 use crate::util::now_millis;
 
 pub(crate) mod commands;
+mod contract;
 mod node_handlers;
 mod repository;
 mod signals;
 mod types;
 
+pub(crate) use contract::{
+    task_created_event_kind, task_status_changed_event_kind, task_updated_event_kind,
+};
 use node_handlers::execute_node;
 use repository::{json_text, node_states_for_run, run_by_id, version_by_id, workflow_by_id};
 pub use signals::{
@@ -37,7 +41,10 @@ fn merge_json_objects(base: JsonValue, patch: JsonValue) -> JsonValue {
 }
 
 fn emit_changed<R: Runtime>(app: &AppHandle<R>, workflow_id: Option<String>) {
-    let _ = app.emit("automation:changed", AutomationChangedEvent { workflow_id });
+    let _ = app.emit(
+        contract::changed_event_name(),
+        AutomationChangedEvent { workflow_id },
+    );
 }
 
 fn emit_run<R: Runtime>(app: &AppHandle<R>, event: &str, run: AutomationRun) {
@@ -402,7 +409,7 @@ fn run_workflow<R: Runtime>(
         return create_skipped_run(&conn, app, &workflow, &version, signal);
     }
     let run = create_run(&conn, app, &workflow, &version, signal)?;
-    emit_run(app, "automation:run-started", run.clone());
+    emit_run(app, contract::run_started_event_name(), run.clone());
     let result = execute_graph(
         app,
         chat_store,
@@ -469,7 +476,7 @@ fn create_skipped_run<R: Runtime>(
         params![run.finished_at, run.id],
     )
     .map_err(|e| format!("automation_skipped_run: update 失败：{e}"))?;
-    emit_run(app, "automation:run-finished", run.clone());
+    emit_run(app, contract::run_finished_event_name(), run.clone());
     Ok(run)
 }
 
@@ -500,7 +507,7 @@ fn create_run<R: Runtime>(
             None,
         )?;
     }
-    emit_run(app, "automation:run-updated", run.clone());
+    emit_run(app, contract::run_updated_event_name(), run.clone());
     Ok(run)
 }
 
@@ -575,9 +582,9 @@ fn update_run_status<R: Runtime>(
     emit_run(
         app,
         if finished {
-            "automation:run-finished"
+            contract::run_finished_event_name()
         } else {
-            "automation:run-updated"
+            contract::run_updated_event_name()
         },
         run.clone(),
     );
@@ -948,6 +955,8 @@ fn topological_order(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_interaction_contract;
+    use crate::agent_timeline::AgentTimelineEvent;
     use crate::automation::types::{AutomationNodePosition, AutomationScopeFilter};
     use crate::chat::state::{ChatStore, RunningTurn};
     use crate::BACKEND_CODEX;
@@ -1112,6 +1121,70 @@ mod tests {
     }
 
     #[test]
+    fn automation_tool_contract_matches_rust_dispatch_defaults() {
+        let rust_scope_event_kinds = vec![
+            "task_created",
+            "task_status_changed",
+            "task_updated",
+            "timeline_event",
+            "todo_changed",
+            "interaction_request",
+        ];
+        let rust_run_statuses = vec![
+            "pending",
+            "running",
+            "succeeded",
+            "failed",
+            "skipped",
+            "waiting_user",
+        ];
+        assert_eq!(contract::default_trigger_kind(), "manual");
+        assert_eq!(contract::task_changed_trigger_kind(), "task_changed");
+        assert_eq!(contract::timeline_trigger_kind(), "timeline_event");
+        assert_eq!(contract::todo_trigger_kind(), "todo_changed");
+        assert_eq!(contract::interaction_trigger_kind(), "interaction_request");
+        assert_eq!(
+            contract::scope_event_kinds()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            rust_scope_event_kinds
+        );
+        assert_eq!(contract::task_created_event_kind(), "task_created");
+        assert_eq!(
+            contract::task_status_changed_event_kind(),
+            "task_status_changed"
+        );
+        assert_eq!(contract::task_updated_event_kind(), "task_updated");
+        assert_eq!(
+            contract::run_statuses()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            rust_run_statuses
+        );
+        assert_eq!(contract::default_run_status(), "pending");
+        assert_eq!(contract::changed_event_name(), "automation:changed");
+        assert_eq!(contract::run_started_event_name(), "automation:run-started");
+        assert_eq!(contract::run_updated_event_name(), "automation:run-updated");
+        assert_eq!(
+            contract::run_finished_event_name(),
+            "automation:run-finished"
+        );
+        assert_eq!(
+            AutomationRunStatus::from_str("waiting_user"),
+            AutomationRunStatus::WaitingUser
+        );
+        assert_eq!(
+            AutomationRunStatus::from_str("unknown"),
+            AutomationRunStatus::Pending
+        );
+        assert_eq!(node_handlers::normalize_task_priority("high"), "high");
+        assert_eq!(node_handlers::normalize_task_priority("low"), "low");
+        assert_eq!(node_handlers::normalize_task_priority("urgent"), "normal");
+    }
+
+    #[test]
     fn list_runs_returns_lightweight_summaries_sorted_and_filtered() {
         let conn = Connection::open_in_memory().unwrap();
         create_workflow_tables(&conn);
@@ -1122,7 +1195,7 @@ mod tests {
             project_id: Some("project-1".to_string()),
             task_id: Some("task-1".to_string()),
             backend: Some("claude".to_string()),
-            event_kind: Some("tool".to_string()),
+            event_kind: Some("timeline_event".to_string()),
             automation_run_id: None,
             payload: serde_json::json!({ "largePayload": "x".repeat(1024) }),
             created_at: 1,
@@ -1161,7 +1234,7 @@ mod tests {
         assert_eq!(summaries[0].project_id.as_deref(), Some("project-1"));
         assert_eq!(summaries[0].task_id.as_deref(), Some("task-1"));
         assert_eq!(summaries[0].backend.as_deref(), Some("claude"));
-        assert_eq!(summaries[0].event_kind.as_deref(), Some("tool"));
+        assert_eq!(summaries[0].event_kind.as_deref(), Some("timeline_event"));
         let summary_json = serde_json::to_value(&summaries[0]).unwrap();
         assert!(summary_json.get("trigger").is_none());
         assert!(summary_json.get("scope").is_none());
@@ -1174,7 +1247,7 @@ mod tests {
             include_inbox: true,
             task_statuses: Vec::new(),
             backends: vec!["codex".to_string()],
-            event_kinds: vec!["tool".to_string()],
+            event_kinds: vec!["timeline_event".to_string()],
         };
         let signal = AutomationSignalEnvelope {
             id: "s1".to_string(),
@@ -1182,7 +1255,7 @@ mod tests {
             project_id: None,
             task_id: Some("task-1".to_string()),
             backend: Some("codex".to_string()),
-            event_kind: Some("tool".to_string()),
+            event_kind: Some("timeline_event".to_string()),
             automation_run_id: None,
             payload: serde_json::json!({}),
             created_at: 1,
@@ -1208,6 +1281,53 @@ mod tests {
 
         let fallback = signals::task_changed_signal(None, None, None, " ", None);
         assert_eq!(fallback.event_kind.as_deref(), Some("task_changed"));
+    }
+
+    #[test]
+    fn timeline_signal_uses_scope_filter_event_kind_and_keeps_specific_kind_in_payload() {
+        let event = AgentTimelineEvent {
+            id: "event-1".to_string(),
+            task_id: "task-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            backend: BACKEND_CODEX.to_string(),
+            kind: "tool".to_string(),
+            status: "completed".to_string(),
+            title: "Tool".to_string(),
+            summary: None,
+            payload: serde_json::json!({ "automationRunId": "run-1" }),
+            created_at: 1,
+            updated_at: 2,
+            turn_seq: 1,
+            intra_turn_order: 1,
+        };
+
+        let signal = signals::timeline_signal(&event);
+
+        assert_eq!(signal.kind, "timeline_event");
+        assert_eq!(signal.event_kind.as_deref(), Some("timeline_event"));
+        assert_eq!(signal.automation_run_id.as_deref(), Some("run-1"));
+        assert_eq!(signal.payload["timelineEventKind"], "tool");
+        assert_eq!(signal.payload["timelineEvent"]["kind"], "tool");
+    }
+
+    #[test]
+    fn interaction_signal_uses_scope_filter_event_kind_and_keeps_interaction_kind_in_payload() {
+        let signal = signals::interaction_signal(
+            "task-1".to_string(),
+            "turn-1".to_string(),
+            BACKEND_CODEX.to_string(),
+            "request-1".to_string(),
+            agent_interaction_contract::ask_user_interaction_kind().to_string(),
+            serde_json::json!({ "prompt": "确认？" }),
+            None,
+        );
+
+        assert_eq!(signal.kind, "interaction_request");
+        assert_eq!(signal.event_kind.as_deref(), Some("interaction_request"));
+        assert_eq!(
+            signal.payload["interactionKind"],
+            agent_interaction_contract::ask_user_interaction_kind()
+        );
     }
 
     #[test]

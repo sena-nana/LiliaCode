@@ -1,0 +1,8 @@
+{
+  "chatTurnStartedEventName": "chat:turn-started",
+  "chatDoneEventName": "chat:done",
+  "chatContextUsageEventName": "chat:context-usage",
+  "chatAgentInteractionRequestEventName": "chat:agent-interaction-request",
+  "agentTimelineEventName": "agent:timeline",
+  "agentTimelineBatchEventName": "agent:timeline-batch"
+}

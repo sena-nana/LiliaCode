@@ -1,6 +1,6 @@
 import { fireEvent, render, waitFor } from "@testing-library/vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell from "../src/layouts/AppShell.vue";
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -61,7 +61,22 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("AppShell left sidebar collapse", () => {
+  it("卸载时取消路由 paint 打点调度", async () => {
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 31));
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+
+    const view = await renderAppShell();
+    view.unmount();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(31);
+  });
+
   it("左上角按钮切换左侧栏折叠状态并写回本地存储", async () => {
     const view = await renderAppShell();
     const shell = shellElement(view.container);

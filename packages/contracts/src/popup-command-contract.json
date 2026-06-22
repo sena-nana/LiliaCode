@@ -1,0 +1,13 @@
+{
+  "commands": {
+    "getWindowSettings": "popup_get_window_settings",
+    "setWindowSettings": "popup_set_window_settings",
+    "rememberLastProject": "popup_remember_last_project",
+    "openNewChat": "popup_open_new_chat",
+    "openTask": "popup_open_task",
+    "openChildQuestion": "popup_open_child_question",
+    "openConversationStatus": "popup_open_conversation_status",
+    "toggleConversationStatus": "popup_toggle_conversation_status",
+    "focusMain": "popup_focus_main"
+  }
+}

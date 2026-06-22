@@ -1,11 +1,5 @@
+import { isRuntimePermissionMode } from "@lilia/contracts/permissionModes.mjs";
+
 export function normalizeRuntimePermission(permission) {
-  switch (permission) {
-    case "full":
-    case "readonly":
-    case "ask":
-    case "free":
-      return permission;
-    default:
-      return null;
-  }
+  return isRuntimePermissionMode(permission) ? permission : null;
 }

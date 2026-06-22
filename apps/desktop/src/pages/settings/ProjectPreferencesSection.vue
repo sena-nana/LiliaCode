@@ -6,6 +6,7 @@ import {
   Copy,
   FolderOpen,
   FolderTree,
+  GitBranch,
   Github,
   Link2,
   LoaderCircle,
@@ -15,6 +16,7 @@ import type {
   GitHubBindingStatus,
   GitHubDeviceFlowStart,
   ProjectSettings,
+  WorktreeSettings,
 } from "@lilia/contracts";
 import {
   getGitHubBindingStatus,
@@ -37,6 +39,31 @@ const bindingError = ref<string | null>(null);
 const deviceFlow = ref<GitHubDeviceFlowStart | null>(null);
 const copiedCode = ref(false);
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollSeq = 0;
+let disposed = false;
+
+const DEFAULT_WORKTREE_SETTINGS: WorktreeSettings = {
+  defaultMode: "current",
+  parentDir: null,
+  autoInstructions: [
+    "This task is running inside a dedicated git worktree managed by Lilia.",
+    "Keep changes scoped to this task and create commits in the worktree before requesting merge/archive.",
+  ].join("\n"),
+  cleanupOnArchive: true,
+};
+
+function normalizeWorktreeSettings(settings?: WorktreeSettings | null): WorktreeSettings {
+  return {
+    ...DEFAULT_WORKTREE_SETTINGS,
+    ...(settings ?? {}),
+    defaultMode: settings?.defaultMode === "create" || settings?.defaultMode === "existing"
+      ? settings.defaultMode
+      : "current",
+    parentDir: settings?.parentDir ?? null,
+    autoInstructions: settings?.autoInstructions ?? DEFAULT_WORKTREE_SETTINGS.autoInstructions,
+    cleanupOnArchive: settings?.cleanupOnArchive !== false,
+  };
+}
 
 const isBound = computed(() => bindingStatus.value?.state === "bound");
 const boundLogin = computed(() => bindingStatus.value?.binding?.login ?? "");
@@ -83,49 +110,105 @@ function clearPollTimer() {
 
 async function loadProjectSettings() {
   try {
-    projectSettings.value = await getProjectSettings();
+    const settings = await getProjectSettings();
+    if (!disposed) projectSettings.value = {
+      ...settings,
+      worktree: normalizeWorktreeSettings(settings.worktree),
+    };
   } catch (err) {
-    projectError.value = `读取项目偏好失败：${String(err)}`;
+    if (!disposed) projectError.value = `读取项目偏好失败：${String(err)}`;
   }
 }
 
 async function loadBindingStatus() {
   try {
-    bindingStatus.value = await getGitHubBindingStatus();
+    const status = await getGitHubBindingStatus();
+    if (!disposed) bindingStatus.value = status;
   } catch (err) {
-    bindingError.value = `读取 GitHub 绑定状态失败：${String(err)}`;
+    if (!disposed) bindingError.value = `读取 GitHub 绑定状态失败：${String(err)}`;
   }
 }
 
 async function persistProjectSettings() {
+  if (disposed) return;
   savingProject.value = true;
   try {
     await setProjectSettings(projectSettings.value);
   } catch (err) {
-    projectError.value = `保存项目偏好失败：${String(err)}`;
+    if (!disposed) projectError.value = `保存项目偏好失败：${String(err)}`;
   } finally {
-    savingProject.value = false;
+    if (!disposed) savingProject.value = false;
   }
 }
 
 async function pickCloneParent() {
+  if (disposed) return;
   projectError.value = null;
   try {
     const picked = await pickFolder({
       title: "选择默认 clone 父目录",
       defaultPath: projectSettings.value.cloneParentDir,
     });
-    if (!picked) return;
+    if (disposed || !picked) return;
     projectSettings.value = { ...projectSettings.value, cloneParentDir: picked };
     await persistProjectSettings();
   } catch (err) {
-    projectError.value = `选择文件夹失败：${String(err)}`;
+    if (!disposed) projectError.value = `选择文件夹失败：${String(err)}`;
   }
+}
+
+async function pickWorktreeParent() {
+  projectError.value = null;
+  try {
+    const worktree = normalizeWorktreeSettings(projectSettings.value.worktree);
+    const picked = await pickFolder({
+      title: "选择工作树父目录",
+      defaultPath: worktree.parentDir,
+    });
+    if (!picked) return;
+    projectSettings.value = {
+      ...projectSettings.value,
+      worktree: { ...worktree, parentDir: picked },
+    };
+    await persistProjectSettings();
+  } catch (err) {
+    projectError.value = `选择工作树父目录失败：${String(err)}`;
+  }
+}
+
+async function setWorktreeDefaultMode(mode: WorktreeSettings["defaultMode"]) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: { ...normalizeWorktreeSettings(projectSettings.value.worktree), defaultMode: mode },
+  };
+  await persistProjectSettings();
+}
+
+async function setWorktreeCleanup(value: boolean) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: { ...normalizeWorktreeSettings(projectSettings.value.worktree), cleanupOnArchive: value },
+  };
+  await persistProjectSettings();
+}
+
+async function saveWorktreeInstructions(event: Event) {
+  projectSettings.value = {
+    ...projectSettings.value,
+    worktree: {
+      ...normalizeWorktreeSettings(projectSettings.value.worktree),
+      autoInstructions: (event.target as HTMLTextAreaElement).value,
+    },
+  };
+  await persistProjectSettings();
 }
 
 async function schedulePoll(intervalSeconds: number) {
   clearPollTimer();
+  const seq = ++pollSeq;
   pollTimer = setTimeout(() => {
+    pollTimer = null;
+    if (disposed || seq !== pollSeq) return;
     void continuePolling(intervalSeconds);
   }, Math.max(intervalSeconds, 1) * 1000);
 }
@@ -141,10 +224,12 @@ async function continuePolling(intervalSeconds?: number) {
   }
 
   try {
+    const seq = pollSeq;
     const result = await pollGitHubDeviceFlow(
       deviceFlow.value.deviceCode,
       intervalSeconds ?? deviceFlow.value.intervalSeconds,
     );
+    if (disposed || seq !== pollSeq) return;
     if (result.status === "authorized") {
       bindingStatus.value = result.bindingStatus;
       bindingBusy.value = false;
@@ -166,6 +251,7 @@ async function continuePolling(intervalSeconds?: number) {
     }
     await schedulePoll(result.intervalSeconds);
   } catch (err) {
+    if (disposed) return;
     bindingBusy.value = false;
     bindingError.value = `轮询 GitHub 授权失败：${String(err)}`;
     clearPollTimer();
@@ -173,53 +259,65 @@ async function continuePolling(intervalSeconds?: number) {
 }
 
 async function startBinding() {
+  if (disposed) return;
   bindingError.value = null;
   copiedCode.value = false;
   bindingBusy.value = true;
   clearPollTimer();
   try {
-    deviceFlow.value = await startGitHubDeviceFlow();
+    const nextDeviceFlow = await startGitHubDeviceFlow();
+    if (disposed) return;
+    deviceFlow.value = nextDeviceFlow;
     await schedulePoll(deviceFlow.value.intervalSeconds);
   } catch (err) {
-    bindingBusy.value = false;
-    bindingError.value = `启动 GitHub 绑定失败：${String(err)}`;
+    if (!disposed) {
+      bindingBusy.value = false;
+      bindingError.value = `启动 GitHub 绑定失败：${String(err)}`;
+    }
   }
 }
 
 async function copyCodeAndOpenBrowser() {
-  if (!deviceFlow.value) return;
+  if (disposed || !deviceFlow.value) return;
   bindingError.value = null;
   try {
     await navigator.clipboard.writeText(deviceFlow.value.userCode);
+    if (disposed || !deviceFlow.value) return;
     copiedCode.value = true;
     await openUrl(deviceFlow.value.verificationUri);
   } catch (err) {
-    bindingError.value = `复制设备码或打开浏览器失败：${String(err)}`;
+    if (!disposed) bindingError.value = `复制设备码或打开浏览器失败：${String(err)}`;
   }
 }
 
 async function handleUnbind() {
+  if (disposed) return;
   bindingBusy.value = true;
   bindingError.value = null;
   clearPollTimer();
   try {
     await unbindGitHub();
+    if (disposed) return;
     bindingStatus.value = await getGitHubBindingStatus();
+    if (disposed) return;
     deviceFlow.value = null;
     copiedCode.value = false;
     await loadProjectSettings();
   } catch (err) {
-    bindingError.value = `解绑 GitHub 失败：${String(err)}`;
+    if (!disposed) bindingError.value = `解绑 GitHub 失败：${String(err)}`;
   } finally {
-    bindingBusy.value = false;
+    if (!disposed) bindingBusy.value = false;
   }
 }
 
 onMounted(async () => {
+  disposed = false;
   await Promise.all([loadProjectSettings(), loadBindingStatus()]);
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  pollSeq += 1;
   clearPollTimer();
 });
 </script>
@@ -244,6 +342,79 @@ onBeforeUnmount(() => {
           选择
         </button>
       </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">
+        <div class="settings-row__label-with-icon">
+          <GitBranch :size="14" aria-hidden="true" />
+          工作树
+        </div>
+      </div>
+      <div class="settings-row__control settings-row__control--loose">
+        <div class="ui-segmented" role="group" aria-label="工作树默认行为">
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'current' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('current')"
+          >
+            当前环境
+          </button>
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'create' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('create')"
+          >
+            自动新建
+          </button>
+          <button
+            type="button"
+            class="ui-segmented__item"
+            :class="{ 'is-active': normalizeWorktreeSettings(projectSettings.worktree).defaultMode === 'existing' }"
+            :disabled="savingProject"
+            @click="setWorktreeDefaultMode('existing')"
+          >
+            已有工作树
+          </button>
+        </div>
+        <label class="ui-checkbox">
+          <input
+            type="checkbox"
+            :checked="normalizeWorktreeSettings(projectSettings.worktree).cleanupOnArchive"
+            :disabled="savingProject"
+            @change="setWorktreeCleanup(($event.target as HTMLInputElement).checked)"
+          />
+          <span>归档时自动清理工作树</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="settings-row__label">工作树父目录</div>
+      <div class="settings-row__control">
+        <span class="settings-row__value muted">
+          {{ normalizeWorktreeSettings(projectSettings.worktree).parentDir || "未设置（使用主仓库同级目录）" }}
+        </span>
+        <button type="button" class="ui-button ui-button--ghost" :disabled="savingProject" @click="pickWorktreeParent">
+          <FolderOpen :size="12" aria-hidden="true" />
+          选择
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-row settings-row--stacked">
+      <div class="settings-row__label">创建后自动指令</div>
+      <textarea
+        class="ui-input ui-textarea"
+        rows="4"
+        :value="normalizeWorktreeSettings(projectSettings.worktree).autoInstructions"
+        :disabled="savingProject"
+        @change="saveWorktreeInstructions"
+      />
     </div>
 
     <div class="settings-row">

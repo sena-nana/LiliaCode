@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ChevronRight,
@@ -33,6 +33,8 @@ interface PopupStoreBindings {
 
 const popupStores = shallowRef<PopupStoreBindings | null>(null);
 let popupStoresPromise: Promise<PopupStoreBindings> | null = null;
+let disposed = false;
+let popupStoresSeq = 0;
 
 function paramAsString(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
@@ -66,6 +68,7 @@ function inferDraftRouteState(
 function ensurePopupStoresLoaded(): Promise<PopupStoreBindings> {
   if (popupStores.value) return Promise.resolve(popupStores.value);
   if (popupStoresPromise) return popupStoresPromise;
+  const seq = ++popupStoresSeq;
   popupStoresPromise = measurePerfAsync(
     "popup-titlebar.stores.load",
     async () => {
@@ -79,12 +82,16 @@ function ensurePopupStoresLoaded(): Promise<PopupStoreBindings> {
         getTask: tasksStore.getTask,
         resolveConversationRouteState: tasksStore.resolveConversationRouteState,
       };
-      popupStores.value = bindings;
+      if (!disposed && seq === popupStoresSeq) {
+        popupStores.value = bindings;
+      }
       return bindings;
     },
     { detail: route.fullPath },
   ).finally(() => {
-    popupStoresPromise = null;
+    if (seq === popupStoresSeq) {
+      popupStoresPromise = null;
+    }
   });
   return popupStoresPromise;
 }
@@ -163,14 +170,17 @@ function mainRouteForPopup(): string {
 }
 
 async function onClose() {
+  if (disposed) return;
   await appWindow.close();
 }
 
 async function onNewChat() {
+  if (disposed) return;
   await router.replace(popupNewRoute());
 }
 
 async function onFocusMain() {
+  if (disposed) return;
   if (taskId.value) {
     try {
       await ensurePopupStoresLoaded();
@@ -178,9 +188,17 @@ async function onFocusMain() {
       console.error("[popup-titlebar] ensure stores before focus main failed", err);
     }
   }
+  if (disposed) return;
   await focusMainWindow(mainRouteForPopup());
+  if (disposed) return;
   await appWindow.close();
 }
+
+onBeforeUnmount(() => {
+  disposed = true;
+  popupStoresSeq += 1;
+  popupStoresPromise = null;
+});
 </script>
 
 <template>

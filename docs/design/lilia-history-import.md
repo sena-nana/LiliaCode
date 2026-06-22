@@ -41,4 +41,4 @@ provider 专属字段只允许出现在 facade 内部的转换结构里。返回
 
 导入页可以在展示文案中使用 `Codex thread` / `Claude session` 帮助用户识别来源；业务函数、状态变量、测试断言和服务调用应使用 `HistoryImport*` 语义。
 
-如果后续需要让 agent runner 主动执行历史查询或导入，必须新增独立协议设计，不能直接把现有 History Import command 塞进 `lilia-agent-protocol.json`。
+如果后续需要让 agent runner 主动执行历史查询或导入，必须新增独立协议设计，并通过 `liliaAgentProtocol.mjs` 所依赖的 contract manifest 声明，不要直接把现有 History Import command 塞进 agent runtime 协议。

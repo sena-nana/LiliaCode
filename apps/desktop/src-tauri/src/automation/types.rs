@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use super::contract;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AutomationRunStatus {
@@ -25,12 +27,20 @@ impl AutomationRunStatus {
     }
 
     pub(crate) fn from_str(value: &str) -> Self {
+        let value = if contract::run_statuses()
+            .iter()
+            .any(|status| status == value)
+        {
+            value
+        } else {
+            contract::default_run_status()
+        };
         match value {
-            "running" => Self::Running,
-            "succeeded" => Self::Succeeded,
-            "failed" => Self::Failed,
-            "skipped" => Self::Skipped,
-            "waiting_user" => Self::WaitingUser,
+            status if status == Self::Running.as_str() => Self::Running,
+            status if status == Self::Succeeded.as_str() => Self::Succeeded,
+            status if status == Self::Failed.as_str() => Self::Failed,
+            status if status == Self::Skipped.as_str() => Self::Skipped,
+            status if status == Self::WaitingUser.as_str() => Self::WaitingUser,
             _ => Self::Pending,
         }
     }

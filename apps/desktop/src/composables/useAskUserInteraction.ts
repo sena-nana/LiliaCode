@@ -1,11 +1,18 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
-import type {
-  AskUserAnswer,
-  AskUserOption,
-  AskUserQuestion,
-  AskUserResult,
+import {
+  ASK_USER_CANCEL_ANSWER_VALUE,
+  ASK_USER_CONFIRM_ANSWER_VALUE,
+  ASK_USER_MULTI_SELECT_MODE,
+  ASK_USER_SINGLE_SELECT_MODE,
+  DEFAULT_ASK_USER_MODE,
+  isPlanApprovalConfirmAskUserSpec,
+  PLAN_APPROVAL_REVISION_REQUEST_ANSWER_VALUE,
+  type AskUserAnswer,
+  type AskUserOption,
+  type AskUserQuestion,
+  type AskUserResult,
 } from "@lilia/contracts";
-import type { PendingAsk } from "./useAskUser";
+import { pendingAskInteractionKey, type PendingAsk } from "./useAskUser";
 
 export const OTHER_ANSWER_VALUE = "other";
 
@@ -23,7 +30,9 @@ export function useAskUserInteraction(
   const singlePick = ref<string | null>(null);
   const multiPicks = ref<Set<string>>(new Set());
 
-  const askKey = computed(() => activeAsk.value ? `ask:${activeAsk.value.id}` : "ask:none");
+  const askKey = computed(() =>
+    activeAsk.value ? pendingAskInteractionKey(activeAsk.value) : "ask:none",
+  );
   const askTotal = computed(() => activeAsk.value?.spec.questions.length ?? 0);
   const askQuestion = computed<AskUserQuestion | null>(() =>
     activeAsk.value?.spec.questions[askIndex.value] ?? null,
@@ -38,13 +47,11 @@ export function useAskUserInteraction(
     return askTotal.value > 1 ? `Lilia 想确认 ${askTotal.value} 件事` : "Lilia 想确认一下";
   });
   const askIsPlanApproval = computed(() =>
-    activeAsk.value?.spec.intent === "plan_approval" &&
-    askTotal.value === 1 &&
-    askQuestion.value?.mode === "confirm",
+    Boolean(activeAsk.value && isPlanApprovalConfirmAskUserSpec(activeAsk.value.spec)),
   );
   const askAllowsOther = computed(() => {
     const q = askQuestion.value;
-    return q?.mode !== "confirm" && q?.allowOther === true;
+    return q?.mode !== DEFAULT_ASK_USER_MODE && q?.allowOther === true;
   });
   const askOptionsWithId = computed<AskUserOptionWithId[]>(() => {
     const q = askQuestion.value;
@@ -70,16 +77,16 @@ export function useAskUserInteraction(
   const askOtherSelected = computed(() => {
     const q = askQuestion.value;
     if (!q || !askAllowsOther.value) return false;
-    if (q.mode === "single") return singlePick.value === OTHER_ANSWER_VALUE;
-    if (q.mode === "multi") return multiPicks.value.has(OTHER_ANSWER_VALUE);
+    if (q.mode === ASK_USER_SINGLE_SELECT_MODE) return singlePick.value === OTHER_ANSWER_VALUE;
+    if (q.mode === ASK_USER_MULTI_SELECT_MODE) return multiPicks.value.has(OTHER_ANSWER_VALUE);
     return false;
   });
   const canAskSubmit = computed(() => {
     const q = askQuestion.value;
     if (!q) return false;
-    if (q.mode === "confirm") return true;
+    if (q.mode === DEFAULT_ASK_USER_MODE) return true;
     const hasFreeform = freeformText.value.trim().length > 0;
-    if (q.mode === "single") {
+    if (q.mode === ASK_USER_SINGLE_SELECT_MODE) {
       if (singlePick.value === OTHER_ANSWER_VALUE) return askAllowsOther.value && hasFreeform;
       return !!singlePick.value;
     }
@@ -132,8 +139,8 @@ export function useAskUserInteraction(
   function buildAskAnswer(): AskUserAnswer | null {
     const q = askQuestion.value;
     if (!q) return null;
-    if (q.mode === "confirm") return { questionId: q.id, value: "yes" };
-    if (q.mode === "single") {
+    if (q.mode === DEFAULT_ASK_USER_MODE) return { questionId: q.id, value: ASK_USER_CONFIRM_ANSWER_VALUE };
+    if (q.mode === ASK_USER_SINGLE_SELECT_MODE) {
       const id = singlePick.value;
       if (id === OTHER_ANSWER_VALUE) {
         const notes = freeformText.value.trim();
@@ -157,11 +164,11 @@ export function useAskUserInteraction(
     const q = askQuestion.value;
     if (!q || !value) return null;
     if (askIsPlanApproval.value) {
-      return { questionId: q.id, value: "revision_request", notes: value };
+      return { questionId: q.id, value: PLAN_APPROVAL_REVISION_REQUEST_ANSWER_VALUE, notes: value };
     }
-    if (q.mode === "confirm") return { questionId: q.id, value: "no", notes: value };
+    if (q.mode === DEFAULT_ASK_USER_MODE) return { questionId: q.id, value: ASK_USER_CANCEL_ANSWER_VALUE, notes: value };
     if (!askAllowsOther.value) return null;
-    if (q.mode === "single") {
+    if (q.mode === ASK_USER_SINGLE_SELECT_MODE) {
       return { questionId: q.id, value: OTHER_ANSWER_VALUE, notes: value };
     }
     const picked = new Set(multiPicks.value);
@@ -172,7 +179,7 @@ export function useAskUserInteraction(
 
   function saveNavigableAnswer() {
     const q = askQuestion.value;
-    if (!q || q.mode === "confirm" || !canAskSubmit.value) return;
+    if (!q || q.mode === DEFAULT_ASK_USER_MODE || !canAskSubmit.value) return;
     const ans = buildAskAnswer();
     if (ans) askAnswers.value[ans.questionId] = ans;
   }
@@ -195,7 +202,7 @@ export function useAskUserInteraction(
     const notes = freeformText.value.trim();
     askAnswers.value[q.id] = {
       questionId: q.id,
-      value: "no",
+      value: ASK_USER_CANCEL_ANSWER_VALUE,
       notes: notes || undefined,
     };
     resolveIfDone(advanceAsk());
@@ -259,7 +266,7 @@ export function useAskUserInteraction(
       singlePick.value = null;
       freeformText.value = "";
 
-      if (q.mode === "single") {
+      if (q.mode === ASK_USER_SINGLE_SELECT_MODE) {
         if (prior && typeof prior.value === "string") {
           if (prior.value === OTHER_ANSWER_VALUE) {
             if (askAllowsOther.value) {
@@ -272,7 +279,7 @@ export function useAskUserInteraction(
             singlePick.value = prior.value;
           }
         }
-      } else if (q.mode === "multi") {
+      } else if (q.mode === ASK_USER_MULTI_SELECT_MODE) {
         if (prior && Array.isArray(prior.value)) {
           if (prior.value.includes(OTHER_ANSWER_VALUE)) {
             multiPicks.value = new Set(

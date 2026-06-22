@@ -20,6 +20,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  archived: [taskId: string];
   error: [message: string];
 }>();
 
@@ -146,6 +147,7 @@ function isActiveTask(taskId: string) {
     :active="isActiveTask(conversation.task.id)"
     :archive="archive"
     :tree-row-state-class="treeRowStateClass"
+    @archived="emit('archived', $event)"
     @open="open"
     @error="emit('error', $event)"
   />

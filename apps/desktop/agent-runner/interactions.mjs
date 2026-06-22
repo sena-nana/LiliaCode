@@ -1,3 +1,31 @@
+import {
+  AGENT_INTERACTION_KINDS,
+  ARCHITECTURE_INTERACTION_KIND,
+  ASK_USER_INTERACTION_KIND,
+  MCP_ELICITATION_INTERACTION_KIND,
+  PERMISSION_APPROVAL_INTERACTION_KIND,
+  PLAN_APPROVAL_INTERACTION_KIND,
+  RUNTIME_INTERACTION_KINDS,
+  TOOL_CONSENT_INTERACTION_KIND,
+  normalizeRuntimeInteractionResult,
+} from "@lilia/contracts/agentInteractionContract.mjs";
+import {
+  PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS,
+  PROJECT_ARCHITECTURE_DEFAULT_INTERACTION_STATUS,
+} from "@lilia/contracts/architectureContract.mjs";
+import {
+  ASK_USER_TOOL_NAME,
+  PLAN_APPROVAL_INTENT,
+} from "@lilia/contracts/askUserContract.mjs";
+import {
+  RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE,
+  RUNNER_INTERACTION_REQUEST_EVENT_TYPE,
+  RUNNER_INTERRUPT_TURN_CONTROL_TYPE,
+  RUNNER_LILIA_IAB_RESULT_CONTROL_TYPE,
+  RUNNER_QUOTA_USAGE_RESULT_CONTROL_TYPE,
+  RUNNER_QUOTA_USAGE_REQUEST_EVENT_TYPE,
+  RUNNER_SETTINGS_UPDATE_CONTROL_TYPE,
+} from "@lilia/contracts/runnerProtocolContract.mjs";
 import { normalizeAskUserResult } from "./askUser.mjs";
 import { emitArchitectureTimeline } from "./architecture.mjs";
 import { isRecord, oneLineSummary, stringOrNull } from "./utils.mjs";
@@ -14,57 +42,11 @@ export function normalizeToolConsentResult(value) {
   };
 }
 
-function normalizeMcpElicitationResult(value) {
-  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const action = row.action === "accept" || row.action === "decline" ? row.action : "cancel";
-  const content = row.content && typeof row.content === "object" && !Array.isArray(row.content)
-    ? row.content
-    : null;
-  return {
-    action,
-    content,
-    _meta: row._meta ?? null,
-  };
-}
-
-function normalizePermissionApprovalResult(value) {
-  const row = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const grantedAccess = isRecord(row.grantedAccess) ? row.grantedAccess : {};
-  const action =
-    row.action === "approve" || row.action === "decline" || row.action === "cancel"
-      ? row.action
-      : row.strictAutoReview === true
-        ? "cancel"
-        : Object.keys(grantedAccess).length > 0
-          ? "approve"
-          : "decline";
-  return {
-    action,
-    grantedAccess,
-    scope: row.scope || "turn",
-    ...(typeof row.strictAutoReview === "boolean"
-      ? { strictAutoReview: row.strictAutoReview }
-      : {}),
-  };
-}
-
-const INTERACTION_RESPONSE_KINDS = new Set([
-  "tool_consent",
-  "plan_approval",
-  "ask_user",
-  "mcp_elicitation",
-  "permission_approval",
-  "architecture_change",
-]);
+const INTERACTION_RESPONSE_KINDS = new Set(AGENT_INTERACTION_KINDS);
+const RUNTIME_INTERACTION_KIND_SET = new Set(RUNTIME_INTERACTION_KINDS);
 
 function isRuntimeInteractionKind(kind) {
-  return kind === "mcp_elicitation" || kind === "permission_approval";
-}
-
-function normalizeRuntimeInteractionResult(kind, result) {
-  return kind === "mcp_elicitation"
-    ? normalizeMcpElicitationResult(result)
-    : normalizePermissionApprovalResult(result);
+  return RUNTIME_INTERACTION_KIND_SET.has(kind);
 }
 
 export function createInteractionBroker({
@@ -89,7 +71,7 @@ export function createInteractionBroker({
 
   function emitInteractionRequest(id, kind, payload, backend = "claude") {
     protocol.emit({
-      type: "interaction_request",
+      type: RUNNER_INTERACTION_REQUEST_EVENT_TYPE,
       id,
       kind,
       backend,
@@ -101,10 +83,10 @@ export function createInteractionBroker({
     const id = `consent-${consentSeq++}`;
     emitToolConsentTimeline(id, payload, "requires_action");
     const backend = payload?.backend === "codex" ? "codex" : "claude";
-    emitInteractionRequest(id, "tool_consent", payload, backend);
+    emitInteractionRequest(id, TOOL_CONSENT_INTERACTION_KIND, payload, backend);
     return new Promise((resolve) => {
       consentPending.set(id, {
-        kind: "tool_consent",
+        kind: TOOL_CONSENT_INTERACTION_KIND,
         resolve: (response) => resolve({ id, ...response }),
       });
     });
@@ -112,9 +94,11 @@ export function createInteractionBroker({
 
   function requestAskUser(spec, options = {}) {
     const id = `ask-${askUserSeq++}`;
-    const kind = spec?.intent === "plan_approval" ? "plan_approval" : "ask_user";
+    const kind = spec?.intent === PLAN_APPROVAL_INTENT
+      ? PLAN_APPROVAL_INTERACTION_KIND
+      : ASK_USER_INTERACTION_KIND;
     const emitTimelineEvent =
-      options.emitTimelineEvent !== false && spec?.intent !== "plan_approval";
+      options.emitTimelineEvent !== false && spec?.intent !== PLAN_APPROVAL_INTENT;
     const backend = options.backend === "codex" ? "codex" : "claude";
     if (emitTimelineEvent) emitAskUserTimeline(id, spec, "requires_action", null, backend);
     return new Promise((resolve) => {
@@ -138,7 +122,7 @@ export function createInteractionBroker({
   }
 
   function emitRuntimeInteractionTimeline(id, kind, payload, status, result = null, backend = "codex") {
-    const isMcp = kind === "mcp_elicitation";
+    const isMcp = kind === MCP_ELICITATION_INTERACTION_KIND;
     const accepted = result?.action === "accept";
     const label = backend === "claude" ? "Claude" : "Codex";
     protocol.emitTimeline({
@@ -156,7 +140,7 @@ export function createInteractionBroker({
         requestId: id,
         ...(isMcp
           ? {
-              subkind: "mcp_elicitation",
+              subkind: MCP_ELICITATION_INTERACTION_KIND,
               serverName: stringOrNull(payload?.serverName),
               mode: stringOrNull(payload?.mode),
               message: stringOrNull(payload?.message),
@@ -164,7 +148,7 @@ export function createInteractionBroker({
               requestedSchema: payload?.requestedSchema ?? null,
             }
           : {
-              subkind: "permission_approval",
+              subkind: PERMISSION_APPROVAL_INTERACTION_KIND,
               reason: stringOrNull(payload?.reason),
               requestedAccess: payload?.requestedAccess ?? null,
               scopeSuggestion: payload?.scopeSuggestion ?? null,
@@ -187,7 +171,7 @@ export function createInteractionBroker({
 
   function requestMcpElicitation(payload, options = {}) {
     const backend = options.backend === "codex" ? "codex" : "claude";
-    return requestRuntimeInteraction("mcp_elicitation", payload, backend);
+    return requestRuntimeInteraction(MCP_ELICITATION_INTERACTION_KIND, payload, backend);
   }
 
   function requestRuntimeInteraction(kind, payload, backend = "codex") {
@@ -219,14 +203,16 @@ export function createInteractionBroker({
     const requestPayload = {
       ...payload,
       requestId: id,
-      status: autoApply ? "applied" : "pending",
+      status: autoApply
+        ? PROJECT_ARCHITECTURE_APPLIED_INTERACTION_STATUS
+        : PROJECT_ARCHITECTURE_DEFAULT_INTERACTION_STATUS,
       requiresConfirmation: !autoApply,
     };
     emitArchitectureTimeline({ protocol }, id, requestPayload, autoApply ? "info" : "requires_action");
-    emitInteractionRequest(id, "architecture_change", requestPayload, backend);
+    emitInteractionRequest(id, ARCHITECTURE_INTERACTION_KIND, requestPayload, backend);
     return new Promise((resolve) => {
       architecturePending.set(id, {
-        kind: "architecture_change",
+        kind: ARCHITECTURE_INTERACTION_KIND,
         resolve: (result) => {
           emitArchitectureTimeline(
             { protocol },
@@ -244,7 +230,7 @@ export function createInteractionBroker({
   function requestQuotaUsage(payload = {}) {
     const id = `quota-${quotaUsageSeq++}`;
     protocol.emit({
-      type: "quota_usage_request",
+      type: RUNNER_QUOTA_USAGE_REQUEST_EVENT_TYPE,
       id,
       payload,
     });
@@ -261,11 +247,11 @@ export function createInteractionBroker({
       return;
     }
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
-    if (msg.type === "interaction_response") {
+    if (msg.type === RUNNER_INTERACTION_RESPONSE_CONTROL_TYPE) {
       if (typeof msg.id !== "string") return;
       const kind = msg.kind;
       if (!INTERACTION_RESPONSE_KINDS.has(kind)) return;
-      if (kind === "tool_consent") {
+      if (kind === TOOL_CONSENT_INTERACTION_KIND) {
         const pending = consentPending.get(msg.id);
         if (!pending || pending.kind !== kind) return;
         consentPending.delete(msg.id);
@@ -279,7 +265,7 @@ export function createInteractionBroker({
         pending.resolve(normalizeRuntimeInteractionResult(kind, msg.result));
         return;
       }
-      if (kind === "architecture_change") {
+      if (kind === ARCHITECTURE_INTERACTION_KIND) {
         const pending = architecturePending.get(msg.id);
         if (!pending || pending.kind !== kind) return;
         architecturePending.delete(msg.id);
@@ -292,17 +278,17 @@ export function createInteractionBroker({
       pending.resolve(normalizeAskUserResult(msg.result));
       return;
     }
-    if (msg.type === "settings_update") {
+    if (msg.type === RUNNER_SETTINGS_UPDATE_CONTROL_TYPE) {
       settingsUpdateHandler?.(msg);
       return;
     }
-    if (msg.type === "interrupt_turn") {
+    if (msg.type === RUNNER_INTERRUPT_TURN_CONTROL_TYPE) {
       for (const handler of interruptHandlers) {
         handler?.();
       }
       return;
     }
-    if (msg.type === "quota_usage_result") {
+    if (msg.type === RUNNER_QUOTA_USAGE_RESULT_CONTROL_TYPE) {
       if (typeof msg.id !== "string") return;
       const resolve = quotaUsagePending.get(msg.id);
       if (!resolve) return;
@@ -314,7 +300,7 @@ export function createInteractionBroker({
       });
       return;
     }
-    if (msg.type === "lilia_iab_result") {
+    if (msg.type === RUNNER_LILIA_IAB_RESULT_CONTROL_TYPE) {
       liliaIabResultHandler?.(msg.snapshot);
       return;
     }
@@ -370,10 +356,10 @@ function normalizeArchitectureChangeResult(value) {
 }
 
 function codexInteractionCompletedStatus(kind, result) {
-  if (kind === "mcp_elicitation") {
+  if (kind === MCP_ELICITATION_INTERACTION_KIND) {
     return result?.action === "accept" ? "success" : "cancelled";
   }
-  if (kind === "permission_approval") {
+  if (kind === PERMISSION_APPROVAL_INTERACTION_KIND) {
     return result?.action === "approve" ? "success" : "cancelled";
   }
   return "success";
@@ -390,13 +376,13 @@ export function askUserTimelineSummary(spec) {
 export function emitAskUserTimeline(protocol, id, spec, status, result = null, backend = "claude") {
   const questions = Array.isArray(spec?.questions) ? spec.questions : [];
   protocol.emitTimeline({
-    kind: "ask_user",
+    kind: ASK_USER_INTERACTION_KIND,
     status,
-    title: stringOrNull(spec?.title) || "AskUserQuestion",
+    title: stringOrNull(spec?.title) || ASK_USER_TOOL_NAME,
     summary: askUserTimelineSummary(spec),
     payload: {
       backend,
-      interaction: "ask_user",
+      interaction: ASK_USER_INTERACTION_KIND,
       requestId: id,
       title: stringOrNull(spec?.title),
       source: stringOrNull(spec?.source),

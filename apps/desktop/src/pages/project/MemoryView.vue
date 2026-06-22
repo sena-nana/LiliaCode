@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { Check, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-vue-next";
-import type {
-  Memory,
-  MemoryScope,
-  MemorySettings,
-  MemoryUpsertInput,
+import {
+  DEFAULT_MEMORY_SETTINGS,
+  MEMORY_SCOPE_DISPLAY_SPECS,
+  createMemoryUpsertInput,
+  normalizeMemoryCooldownTurns,
+  normalizeMemorySettings,
+  type Memory,
+  type MemoryScope,
+  type MemorySettings,
 } from "@lilia/contracts";
 import {
   deleteMemory,
@@ -27,18 +31,14 @@ type FormState = {
   enabled: boolean;
 };
 
-const defaultSettings: MemorySettings = {
-  enabled: true,
-  baselineInjectionEnabled: true,
-  cooldownTurns: 5,
-};
-
 const memories = ref<Memory[]>([]);
-const settings = reactive<MemorySettings>({ ...defaultSettings });
+const settings = reactive<MemorySettings>({ ...DEFAULT_MEMORY_SETTINGS });
 const loading = ref(false);
 const saving = ref(false);
 const settingsSaving = ref(false);
 const errorMessage = ref("");
+let disposed = false;
+let loadSeq = 0;
 
 const form = reactive<FormState>({
   id: null,
@@ -50,12 +50,8 @@ const form = reactive<FormState>({
 });
 
 const memorySections = computed(() =>
-  [
-    { scope: "user", title: "用户级", empty: "暂无用户级记忆" },
-    { scope: "project", title: "项目级", empty: "暂无项目级记忆" },
-  ].map((section) => ({
+  MEMORY_SCOPE_DISPLAY_SPECS.map((section) => ({
     ...section,
-    scope: section.scope as MemoryScope,
     items: memories.value.filter((memory) => memory.scope === section.scope),
   })),
 );
@@ -82,10 +78,6 @@ function editMemory(memory: Memory) {
   form.enabled = memory.enabled;
 }
 
-function tagsFromInput(value: string): string[] {
-  return [...new Set(value.split(",").map((tag) => tag.trim()).filter(Boolean))];
-}
-
 function formatTime(timestamp: number): string {
   if (!timestamp) return "未记录";
   return new Intl.DateTimeFormat(undefined, {
@@ -97,6 +89,8 @@ function formatTime(timestamp: number): string {
 }
 
 async function loadMemoryView() {
+  if (disposed) return;
+  const seq = ++loadSeq;
   loading.value = true;
   errorMessage.value = "";
   try {
@@ -104,82 +98,87 @@ async function loadMemoryView() {
       listMemories(props.projectId),
       getMemorySettings(),
     ]);
+    if (disposed || seq !== loadSeq) return;
     memories.value = items;
-    Object.assign(settings, {
-      ...defaultSettings,
-      ...nextSettings,
-      cooldownTurns: Math.max(1, Math.trunc(nextSettings.cooldownTurns || 5)),
-    });
+    Object.assign(settings, normalizeMemorySettings(nextSettings));
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed && seq === loadSeq) {
+      errorMessage.value = err instanceof Error ? err.message : String(err);
+    }
   } finally {
-    loading.value = false;
+    if (!disposed && seq === loadSeq) loading.value = false;
   }
 }
 
 async function saveSettings() {
+  if (disposed) return;
   settingsSaving.value = true;
   errorMessage.value = "";
   try {
-    settings.cooldownTurns = Math.max(1, Math.trunc(Number(settings.cooldownTurns) || 5));
+    settings.cooldownTurns = normalizeMemoryCooldownTurns(settings.cooldownTurns);
     await setMemorySettings({ ...settings });
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   } finally {
-    settingsSaving.value = false;
+    if (!disposed) settingsSaving.value = false;
   }
 }
 
 async function saveMemory() {
   const title = form.title.trim();
   const body = form.body.trim();
-  if (!title || !body || saving.value) return;
+  if (disposed || !title || !body || saving.value) return;
   saving.value = true;
   errorMessage.value = "";
   try {
-    const input: MemoryUpsertInput = {
+    const input = createMemoryUpsertInput({
       id: form.id,
       scope: form.scope,
-      projectId: form.scope === "project" ? props.projectId : null,
+      projectId: props.projectId,
       title,
       body,
-      tags: tagsFromInput(form.tags),
+      tags: form.tags,
       enabled: form.enabled,
       sourceTaskId: activeMemory.value?.sourceTaskId ?? null,
-    };
+    });
     const saved = await upsertMemory(input);
+    if (disposed) return;
     memories.value = memories.value.some((memory) => memory.id === saved.id)
       ? memories.value.map((memory) => memory.id === saved.id ? saved : memory)
       : [saved, ...memories.value];
     editMemory(saved);
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   } finally {
-    saving.value = false;
+    if (!disposed) saving.value = false;
   }
 }
 
 async function toggleMemory(memory: Memory) {
+  if (disposed) return;
   errorMessage.value = "";
   try {
     const saved = await setMemoryEnabled(memory.id, !memory.enabled);
+    if (disposed) return;
     memories.value = memories.value.map((item) => item.id === saved.id ? saved : item);
     if (form.id === saved.id) editMemory(saved);
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   }
 }
 
 async function removeMemory(memory: Memory) {
+  if (disposed) return;
   errorMessage.value = "";
   try {
     const deleted = await deleteMemory(memory.id);
+    if (disposed) return;
     if (deleted) {
       memories.value = memories.value.filter((item) => item.id !== memory.id);
       if (form.id === memory.id) resetForm(memory.scope);
     }
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    if (!disposed) errorMessage.value = err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -196,7 +195,13 @@ watch(
 );
 
 onMounted(() => {
+  disposed = false;
   void loadMemoryView();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  loadSeq += 1;
 });
 </script>
 

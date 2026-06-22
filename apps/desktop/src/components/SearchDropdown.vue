@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from "vue";
 import { useAnchoredOverlay } from "../composables/useAnchoredOverlay";
+import { addDomEventListener, runUnlistenFns } from "../utils/eventListeners";
 
 interface Segment {
   text: string;
@@ -33,6 +34,9 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLInputElement | null>(null);
 const suppressNextFocusOpen = ref(false);
+let listenerSeq = 0;
+let documentUnlisteners: Array<() => void> = [];
+let disposed = false;
 const openState = computed(() => props.open);
 const preferredPlacement = computed(() => "bottom-start" as const);
 const {
@@ -47,6 +51,7 @@ const {
   offset: 0,
   matchAnchorWidth: true,
 });
+void menuEl;
 const menuPlacementClass = computed(() =>
   resolvedPlacement.value.startsWith("top")
     ? "search-dropdown__menu--top"
@@ -81,6 +86,10 @@ function onDocKey(event: KeyboardEvent) {
     }
     event.stopPropagation();
   }
+}
+
+function setMenuEl(el: Element | ComponentPublicInstance | null) {
+  menuEl.value = el instanceof HTMLElement ? el : null;
 }
 
 function highlightQuerySegments(text: string, query = props.modelValue.trim()): Segment[] {
@@ -134,33 +143,47 @@ function highlightRangeSegments(text: string, ranges: Array<[number, number]>): 
   return segments;
 }
 
+function clearDocumentListeners() {
+  runUnlistenFns(documentUnlisteners.splice(0).reverse());
+}
+
+function installDocumentListeners() {
+  clearDocumentListeners();
+  const unlisteners: Array<() => void> = [];
+  if (props.closeOnOutside) {
+    unlisteners.push(addDomEventListener(document, "pointerdown", onDocPointer, true));
+  }
+  if (props.closeOnEscape) {
+    unlisteners.push(addDomEventListener(document, "keydown", onDocKey));
+  }
+  documentUnlisteners = unlisteners;
+}
+
 watch(() => props.open, async (open) => {
+  const seq = ++listenerSeq;
+  clearDocumentListeners();
   if (open) {
     await nextTick();
-    if (props.closeOnOutside) {
-      document.addEventListener("pointerdown", onDocPointer, true);
-    }
-    if (props.closeOnEscape) {
-      document.addEventListener("keydown", onDocKey);
-    }
-  } else {
-    document.removeEventListener("pointerdown", onDocPointer, true);
-    document.removeEventListener("keydown", onDocKey);
+    if (seq !== listenerSeq || !props.open) return;
+    installDocumentListeners();
   }
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointer, true);
-  document.removeEventListener("keydown", onDocKey);
+  disposed = true;
+  listenerSeq += 1;
+  clearDocumentListeners();
 });
 
 defineExpose({
   focus: (options?: FocusOptions & { open?: boolean }) => {
+    if (disposed) return;
     if (options?.open === false) {
       suppressNextFocusOpen.value = true;
     }
     inputRef.value?.focus(options);
     void nextTick(() => {
+      if (disposed) return;
       suppressNextFocusOpen.value = false;
     });
   },
@@ -196,7 +219,7 @@ defineExpose({
     <Teleport to="body">
       <div
         v-if="open"
-        ref="menuEl"
+        :ref="setMenuEl"
         class="search-dropdown__menu"
         :class="menuPlacementClass"
         role="listbox"

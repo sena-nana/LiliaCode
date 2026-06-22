@@ -7,9 +7,25 @@ import type {
   AutomationResumeRunInput,
   AutomationSaveDraftInput,
   AutomationRunSummary,
+  AutomationChangedEvent,
+  AutomationRunEvent,
   AutomationWorkflow,
   AutomationWorkflowVersion,
 } from "@lilia/contracts";
+import {
+  AUTOMATION_CHANGED_EVENT_NAME,
+  AUTOMATION_DELETE_WORKFLOW_COMMAND,
+  AUTOMATION_GET_RUN_COMMAND,
+  AUTOMATION_LIST_RUNS_COMMAND,
+  AUTOMATION_LIST_WORKFLOWS_COMMAND,
+  AUTOMATION_PUBLISH_COMMAND,
+  AUTOMATION_RESUME_RUN_COMMAND,
+  AUTOMATION_RUN_ONCE_COMMAND,
+  AUTOMATION_RUN_EVENT_NAMES,
+  AUTOMATION_SAVE_DRAFT_COMMAND,
+  AUTOMATION_SET_ENABLED_COMMAND,
+} from "@lilia/contracts";
+import { installUnlistenFns } from "../utils/eventListeners";
 
 export type {
   AutomationRun,
@@ -18,6 +34,8 @@ export type {
   AutomationResumeRunInput,
   AutomationSaveDraftInput,
   AutomationRunSummary,
+  AutomationChangedEvent,
+  AutomationRunEvent,
   AutomationWorkflow,
   AutomationWorkflowVersion,
 };
@@ -27,66 +45,58 @@ export interface AutomationRunDetail {
   nodes: AutomationRunNodeState[];
 }
 
-interface AutomationChangedEvent {
-  workflowId: string | null;
-}
-
-interface AutomationRunEvent {
-  run: AutomationRun;
-}
-
 export function listAutomations(): Promise<AutomationWorkflow[]> {
-  return invoke<AutomationWorkflow[]>("automation_list_workflows");
+  return invoke<AutomationWorkflow[]>(AUTOMATION_LIST_WORKFLOWS_COMMAND);
 }
 
 export function saveAutomationDraft(
   input: AutomationSaveDraftInput,
 ): Promise<AutomationWorkflow> {
-  return invoke<AutomationWorkflow>("automation_save_draft", { input });
+  return invoke<AutomationWorkflow>(AUTOMATION_SAVE_DRAFT_COMMAND, { input });
 }
 
 export function publishAutomation(id: string): Promise<AutomationWorkflowVersion> {
-  return invoke<AutomationWorkflowVersion>("automation_publish", { id });
+  return invoke<AutomationWorkflowVersion>(AUTOMATION_PUBLISH_COMMAND, { id });
 }
 
 export function deleteAutomation(id: string): Promise<void> {
-  return invoke<void>("automation_delete_workflow", { id });
+  return invoke<void>(AUTOMATION_DELETE_WORKFLOW_COMMAND, { id });
 }
 
 export function setAutomationEnabled(id: string, enabled: boolean): Promise<void> {
-  return invoke<void>("automation_set_enabled", { id, enabled });
+  return invoke<void>(AUTOMATION_SET_ENABLED_COMMAND, { id, enabled });
 }
 
 export function runAutomationOnce(
   id: string,
   input: AutomationRunOnceInput = {},
 ): Promise<AutomationRun> {
-  return invoke<AutomationRun>("automation_run_once", { id, input });
+  return invoke<AutomationRun>(AUTOMATION_RUN_ONCE_COMMAND, { id, input });
 }
 
 export function resumeAutomationRun(
   runId: string,
   input: AutomationResumeRunInput = {},
 ): Promise<AutomationRun> {
-  return invoke<AutomationRun>("automation_resume_run", { runId, input });
+  return invoke<AutomationRun>(AUTOMATION_RESUME_RUN_COMMAND, { runId, input });
 }
 
 export function listAutomationRuns(
   workflowId?: string | null,
 ): Promise<AutomationRunSummary[]> {
-  return invoke<AutomationRunSummary[]>("automation_list_runs", {
+  return invoke<AutomationRunSummary[]>(AUTOMATION_LIST_RUNS_COMMAND, {
     workflowId: workflowId ?? null,
   });
 }
 
 export function getAutomationRun(runId: string): Promise<AutomationRunDetail | null> {
-  return invoke<AutomationRunDetail | null>("automation_get_run", { runId });
+  return invoke<AutomationRunDetail | null>(AUTOMATION_GET_RUN_COMMAND, { runId });
 }
 
 export function onAutomationChanged(
   handler: (event: AutomationChangedEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<AutomationChangedEvent>("automation:changed", (event) => {
+  return listen<AutomationChangedEvent>(AUTOMATION_CHANGED_EVENT_NAME, (event) => {
     handler(event.payload);
   });
 }
@@ -94,11 +104,11 @@ export function onAutomationChanged(
 export function onAutomationRunUpdated(
   handler: (event: AutomationRunEvent) => void,
 ): Promise<UnlistenFn[]> {
-  return Promise.all([
-    listen<AutomationRunEvent>("automation:run-started", (event) => handler(event.payload)),
-    listen<AutomationRunEvent>("automation:run-updated", (event) => handler(event.payload)),
-    listen<AutomationRunEvent>("automation:run-finished", (event) => handler(event.payload)),
-  ]);
+  return installUnlistenFns(
+    AUTOMATION_RUN_EVENT_NAMES.map((eventName) => () =>
+      listen<AutomationRunEvent>(eventName, (event) => handler(event.payload))
+    ),
+  );
 }
 
 export function automationRunToSummary(run: AutomationRun): AutomationRunSummary {

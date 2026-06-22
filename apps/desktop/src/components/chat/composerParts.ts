@@ -1,6 +1,9 @@
-import type { ChatAttachment, ChatConversationReference } from "@lilia/contracts";
-import { isImageAttachment } from "./imageViewer";
-import { serializeConversationReference } from "../../services/chatConversationReferences";
+import {
+  serializeChatAttachmentReference,
+  serializeConversationReference,
+  type ChatAttachment,
+  type ChatConversationReference,
+} from "@lilia/contracts";
 
 export const ATTACHMENT_OBJECT_CHAR = "\uFFFC";
 export const CONVERSATION_REFERENCE_OBJECT_CHAR = "\uFFFD";
@@ -153,21 +156,11 @@ export function replaceComposerPartsRange(
   };
 }
 
-export function referenceKindLabel(attachment: ChatAttachment): string {
-  if (isImageAttachment(attachment)) return "图片引用";
-  if (attachment.kind === "directory") return "目录引用";
-  return "文件引用";
-}
-
-export function serializeAttachmentReference(attachment: ChatAttachment): string {
-  return `[${referenceKindLabel(attachment)}: ${attachment.name} | ${attachment.path}]`;
-}
-
 export function serializeComposerParts(parts: ComposerPart[]): string {
   return parts
     .map((part) => {
       if (part.type === "text") return part.text;
-      if (part.type === "attachment") return serializeAttachmentReference(part.attachment);
+      if (part.type === "attachment") return serializeChatAttachmentReference(part.attachment);
       return serializeConversationReference(part.reference);
     })
     .join("");

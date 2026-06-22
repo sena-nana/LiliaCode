@@ -1,0 +1,79 @@
+{
+  "taskStatuses": [
+    "draft",
+    "waiting",
+    "running",
+    "blocked",
+    "done",
+    "cancelled"
+  ],
+  "taskStatusLabels": {
+    "draft": "草稿",
+    "waiting": "等待",
+    "running": "运行",
+    "blocked": "阻塞",
+    "done": "完成",
+    "cancelled": "取消"
+  },
+  "taskStatusStateLabels": {
+    "draft": "草稿",
+    "waiting": "等待",
+    "running": "运行中",
+    "blocked": "阻塞",
+    "done": "已完成",
+    "cancelled": "已取消"
+  },
+  "projectDashboardStatusOrder": [
+    "blocked",
+    "running",
+    "waiting",
+    "draft",
+    "done",
+    "cancelled"
+  ],
+  "projectDashboardActiveStatuses": [
+    "waiting",
+    "running"
+  ],
+  "projectDashboardBlockedStatuses": [
+    "blocked"
+  ],
+  "projectRoadmapStatusOrder": [
+    "running",
+    "waiting",
+    "blocked",
+    "done",
+    "cancelled"
+  ],
+  "milestoneStatuses": [
+    "upcoming",
+    "in-progress",
+    "done",
+    "abandoned"
+  ],
+  "defaultMilestoneStatus": "upcoming",
+  "milestoneStatusLabels": {
+    "upcoming": "待开始",
+    "in-progress": "进行中",
+    "done": "完成",
+    "abandoned": "已放弃"
+  },
+  "memoryScopes": [
+    "user",
+    "project"
+  ],
+  "defaultMemoryScope": "project",
+  "memoryScopeTitles": {
+    "user": "用户级",
+    "project": "项目级"
+  },
+  "memoryScopeEmptyLabels": {
+    "user": "暂无用户级记忆",
+    "project": "暂无项目级记忆"
+  },
+  "defaultMemorySettings": {
+    "enabled": true,
+    "baselineInjectionEnabled": true,
+    "cooldownTurns": 5
+  }
+}

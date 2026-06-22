@@ -42,3 +42,46 @@ export function handleExperimentalProviderOptions(cmd, context, backend) {
     emitExperimentalProviderDiagnostic(context.protocol, backend, option, "info");
   }
 }
+
+export function readProviderRuntimeOptions(runtimeOptions, backend) {
+  const normalizedRuntimeOptions = isRecord(runtimeOptions) ? runtimeOptions : {};
+  const common = isRecord(normalizedRuntimeOptions.common)
+    ? normalizedRuntimeOptions.common
+    : {};
+  const provider = isRecord(normalizedRuntimeOptions.provider)
+    ? normalizedRuntimeOptions.provider
+    : {};
+  const settings = isRecord(provider[backend]) ? provider[backend] : {};
+  const ignoredProviderKeys = Object.entries(provider)
+    .filter(([providerName]) => providerName !== backend)
+    .flatMap(([, value]) => isRecord(value) ? Object.keys(value) : []);
+  return {
+    runtimeOptions: normalizedRuntimeOptions,
+    common,
+    provider,
+    settings,
+    ignoredProviderKeys,
+  };
+}
+
+export function ensureProviderRuntimeOptions(cmd, backend) {
+  if (!isRecord(cmd.runtimeOptions)) cmd.runtimeOptions = {};
+  if (!isRecord(cmd.runtimeOptions.provider)) cmd.runtimeOptions.provider = {};
+  if (!isRecord(cmd.runtimeOptions.provider[backend])) cmd.runtimeOptions.provider[backend] = {};
+  return cmd.runtimeOptions.provider[backend];
+}
+
+export function withProviderRuntimeOptions(cmd, backend, settings) {
+  const runtimeOptions = isRecord(cmd?.runtimeOptions) ? cmd.runtimeOptions : {};
+  const provider = isRecord(runtimeOptions.provider) ? runtimeOptions.provider : {};
+  return {
+    ...cmd,
+    runtimeOptions: {
+      ...runtimeOptions,
+      provider: {
+        ...provider,
+        [backend]: settings,
+      },
+    },
+  };
+}

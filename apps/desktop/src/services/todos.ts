@@ -1,5 +1,5 @@
 /**
- * Todo 服务层：把 Tauri `todo_*` 命令 + `todo-changed` 事件包成 typed 函数。
+ * Todo 服务层：把 Tauri `todo_*` 命令 + TODO_CHANGED_EVENT_NAME 事件包成 typed 函数。
  *
  * Rust 端字段已 `rename_all = "camelCase"`，前端不需要再做 key 映射。
  */
@@ -9,8 +9,18 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ChatAttachment,
   TaskTodo,
+  TodoChangedEvent,
   TaskTodoGuideStatus,
   TaskTodoPriority,
+} from "@lilia/contracts";
+import {
+  DEFAULT_TASK_TODO_PRIORITY,
+  TODO_APPLY_AGENT_EVENT_COMMAND,
+  TODO_CHANGED_EVENT_NAME,
+  TODO_CREATE_COMMAND,
+  TODO_DELETE_COMMAND,
+  TODO_LIST_COMMAND,
+  TODO_UPDATE_COMMAND,
 } from "@lilia/contracts";
 
 export type { TaskTodo };
@@ -28,16 +38,16 @@ export interface AgentTodoInput {
 }
 
 export function listTodos(taskId: string): Promise<TaskTodo[]> {
-  return invoke<TaskTodo[]>("todo_list", { taskId });
+  return invoke<TaskTodo[]>(TODO_LIST_COMMAND, { taskId });
 }
 
 export function createTodo(
   taskId: string,
   text: string,
-  priority: TaskTodoPriority = "normal",
+  priority: TaskTodoPriority = DEFAULT_TASK_TODO_PRIORITY,
   attachments: ChatAttachment[] = [],
 ): Promise<TaskTodo> {
-  return invoke<TaskTodo>("todo_create", { taskId, text, priority, attachments });
+  return invoke<TaskTodo>(TODO_CREATE_COMMAND, { taskId, text, priority, attachments });
 }
 
 export interface TodoPatch {
@@ -52,7 +62,7 @@ export interface TodoPatch {
  * 部分字段更新。未传的字段保持原样；text/done/order 任一传入都会刷新 updatedAt。
  */
 export function updateTodo(id: string, patch: TodoPatch): Promise<void> {
-  return invoke<void>("todo_update", {
+  return invoke<void>(TODO_UPDATE_COMMAND, {
     id,
     text: patch.text ?? null,
     done: patch.done ?? null,
@@ -63,26 +73,22 @@ export function updateTodo(id: string, patch: TodoPatch): Promise<void> {
 }
 
 export function deleteTodo(id: string): Promise<void> {
-  return invoke<void>("todo_delete", { id });
+  return invoke<void>(TODO_DELETE_COMMAND, { id });
 }
 
 export function applyAgentTodoEvent(
   taskId: string,
   todos: AgentTodoInput[],
 ): Promise<TaskTodo[]> {
-  return invoke<TaskTodo[]>("todo_apply_agent_event", { taskId, todos });
-}
-
-export interface TodoChangedEvent {
-  taskId: string;
+  return invoke<TaskTodo[]>(TODO_APPLY_AGENT_EVENT_COMMAND, { taskId, todos });
 }
 
 /**
- * 后端在 SDK 的 TodoWrite 工具事件落库后会 emit `todo-changed`，
+ * 后端在 SDK 的 TodoWrite 工具事件落库后会 emit TODO_CHANGED_EVENT_NAME，
  * 这里订阅以让 TodoFloat 自动 refresh。
  */
 export function onTodoChanged(
   handler: (e: TodoChangedEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<TodoChangedEvent>("todo-changed", (event) => handler(event.payload));
+  return listen<TodoChangedEvent>(TODO_CHANGED_EVENT_NAME, (event) => handler(event.payload));
 }

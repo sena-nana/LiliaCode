@@ -1,0 +1,17 @@
+{
+  "commands": {
+    "list": "task_list",
+    "listSidebarConversations": "task_list_sidebar_conversations",
+    "get": "task_get",
+    "create": "task_create",
+    "update": "task_update",
+    "delete": "task_delete",
+    "promote": "task_promote",
+    "archiveProject": "task_archive_project",
+    "archive": "task_archive",
+    "togglePin": "task_toggle_pin",
+    "reorder": "task_reorder",
+    "reparent": "task_reparent",
+    "updateDependencies": "task_update_dependencies"
+  }
+}

@@ -1,15 +1,21 @@
+import {
+  ASK_USER_MULTI_SELECT_MODE,
+  ASK_USER_QUESTION_INPUT_SCHEMA,
+  ASK_USER_SINGLE_SELECT_MODE,
+  ASK_USER_TOOL_NAME,
+  ASK_USER_TOOL_NAMES as LILIA_ASK_USER_TOOL_NAMES,
+  MAX_ASK_USER_HEADER_TEXT,
+  MAX_ASK_USER_QUESTION_TEXT,
+  MAX_ASK_USER_TOOL_OPTIONS,
+  MAX_ASK_USER_TOOL_QUESTIONS,
+  MAX_CODEX_REQUEST_USER_INPUT_OPTIONS,
+  MIN_ASK_USER_TOOL_OPTIONS,
+  isLiliaAskUserTool,
+} from "@lilia/contracts/askUserContract.mjs";
 import { z } from "zod/v4";
 import { isRecord, shortText, stringOrNull } from "./utils.mjs";
 
-export const LILIA_ASK_USER_TOOL_NAMES = new Set([
-  "AskUserQuestion",
-  "ask_user_question",
-  "mcp__lilia__ask_user_question",
-]);
-
-export function isLiliaAskUserTool(toolName) {
-  return LILIA_ASK_USER_TOOL_NAMES.has(String(toolName || ""));
-}
+export { LILIA_ASK_USER_TOOL_NAMES, isLiliaAskUserTool };
 
 export function normalizeAskUserResult(value) {
   if (!isRecord(value)) return { answers: {}, cancelled: true };
@@ -24,11 +30,15 @@ export function stableOptionId(index) {
 }
 
 export function normalizeClaudeAskUserQuestions(input) {
-  const rawQuestions = Array.isArray(input?.questions) ? input.questions.slice(0, 4) : [];
+  const rawQuestions = Array.isArray(input?.questions)
+    ? input.questions.slice(0, MAX_ASK_USER_TOOL_QUESTIONS)
+    : [];
   return rawQuestions
     .map((question, questionIndex) => {
       if (!isRecord(question)) return null;
-      const options = Array.isArray(question.options) ? question.options.slice(0, 4) : [];
+      const options = Array.isArray(question.options)
+        ? question.options.slice(0, MAX_ASK_USER_TOOL_OPTIONS)
+        : [];
       const normalizedOptions = options
         .map((option, optionIndex) => {
           if (!isRecord(option)) return null;
@@ -45,12 +55,12 @@ export function normalizeClaudeAskUserQuestions(input) {
           return normalized;
         })
         .filter(Boolean);
-      if (normalizedOptions.length < 2) return null;
+      if (normalizedOptions.length < MIN_ASK_USER_TOOL_OPTIONS) return null;
       return {
         id: `q-${questionIndex + 1}`,
-        header: shortText(question.header, 12) || `问题 ${questionIndex + 1}`,
-        question: shortText(question.question, 1200) || "请选择一个选项。",
-        mode: question.multiSelect === true ? "multi" : "single",
+        header: shortText(question.header, MAX_ASK_USER_HEADER_TEXT) || `问题 ${questionIndex + 1}`,
+        question: shortText(question.question, MAX_ASK_USER_QUESTION_TEXT) || "请选择一个选项。",
+        mode: question.multiSelect === true ? ASK_USER_MULTI_SELECT_MODE : ASK_USER_SINGLE_SELECT_MODE,
         options: normalizedOptions,
         allowOther: true,
         skippable: false,
@@ -145,55 +155,19 @@ export const askUserQuestionInputSchema = {
               preview: z.string().optional(),
             }),
           )
-          .min(2)
-          .max(4),
+          .min(MIN_ASK_USER_TOOL_OPTIONS)
+          .max(MAX_ASK_USER_TOOL_OPTIONS),
         multiSelect: z.boolean().optional().default(false),
       }),
     )
     .min(1)
-    .max(4),
+    .max(MAX_ASK_USER_TOOL_QUESTIONS),
 };
 
-export const askUserQuestionJsonSchema = {
-  type: "object",
-  properties: {
-    questions: {
-      type: "array",
-      minItems: 1,
-      maxItems: 4,
-      items: {
-        type: "object",
-        properties: {
-          question: { type: "string" },
-          header: { type: "string" },
-          options: {
-            type: "array",
-            minItems: 2,
-            maxItems: 4,
-            items: {
-              type: "object",
-              properties: {
-                label: { type: "string" },
-                description: { type: "string" },
-                preview: { type: "string" },
-              },
-              required: ["label"],
-              additionalProperties: false,
-            },
-          },
-          multiSelect: { type: "boolean", default: false },
-        },
-        required: ["question", "header", "options"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["questions"],
-  additionalProperties: false,
-};
+export const askUserQuestionJsonSchema = ASK_USER_QUESTION_INPUT_SCHEMA;
 
 export const codexAskUserDynamicTool = {
-  name: "AskUserQuestion",
+  name: ASK_USER_TOOL_NAME,
   description: "Ask the human user one or more multiple-choice questions through Lilia.",
   inputSchema: askUserQuestionJsonSchema,
 };
@@ -229,11 +203,15 @@ export function createCodexAskUserHandler(requestAskUser) {
 }
 
 export function codexRequestUserInputQuestionsToSpec(params) {
-  const rawQuestions = Array.isArray(params?.questions) ? params.questions.slice(0, 4) : [];
+  const rawQuestions = Array.isArray(params?.questions)
+    ? params.questions.slice(0, MAX_ASK_USER_TOOL_QUESTIONS)
+    : [];
   const questions = rawQuestions
     .map((question, questionIndex) => {
       if (!isRecord(question)) return null;
-      const options = Array.isArray(question.options) ? question.options.slice(0, 10) : [];
+      const options = Array.isArray(question.options)
+        ? question.options.slice(0, MAX_CODEX_REQUEST_USER_INPUT_OPTIONS)
+        : [];
       const normalizedOptions = options
         .map((option, optionIndex) => {
           if (!isRecord(option)) return null;
@@ -249,13 +227,13 @@ export function codexRequestUserInputQuestionsToSpec(params) {
         })
         .filter(Boolean);
       const allowOther = question.isOther === true;
-      const hasOptions = normalizedOptions.length >= 2;
+      const hasOptions = normalizedOptions.length >= MIN_ASK_USER_TOOL_OPTIONS;
       if (!hasOptions && !allowOther) return null;
       return {
         id: stringOrNull(question.id) || `q-${questionIndex + 1}`,
-        header: shortText(question.header, 12) || `问题 ${questionIndex + 1}`,
-        question: shortText(question.question, 1200) || "请补充信息。",
-        mode: "single",
+        header: shortText(question.header, MAX_ASK_USER_HEADER_TEXT) || `问题 ${questionIndex + 1}`,
+        question: shortText(question.question, MAX_ASK_USER_QUESTION_TEXT) || "请补充信息。",
+        mode: ASK_USER_SINGLE_SELECT_MODE,
         options: hasOptions ? normalizedOptions : [{ id: "other", label: "其他" }, { id: "skip", label: "跳过" }],
         allowOther,
         skippable: false,
