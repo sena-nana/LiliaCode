@@ -14,6 +14,7 @@ import {
   PROJECT_TOGGLE_PIN_COMMAND,
   type Project,
 } from "@lilia/contracts";
+import { singleFlight } from "../utils/singleFlight";
 
 interface ProjectRow {
   id: string;
@@ -91,17 +92,10 @@ export function getProject(id: string): Project | undefined {
 export async function ensureProjectLoaded(id: string): Promise<Project | null> {
   const existing = getProject(id);
   if (existing) return existing;
-  const pending = projectLoads.get(id);
-  if (pending) return pending;
-  const load = invoke<ProjectRow | null>(PROJECT_GET_COMMAND, { id })
-    .then((row) => row ? upsertProject(projectRowToProject(row)) : null)
-    .finally(() => {
-      if (projectLoads.get(id) === load) {
-        projectLoads.delete(id);
-      }
-    });
-  projectLoads.set(id, load);
-  return load;
+  return singleFlight(projectLoads, id, () =>
+    invoke<ProjectRow | null>(PROJECT_GET_COMMAND, { id })
+      .then((row) => row ? upsertProject(projectRowToProject(row)) : null)
+  );
 }
 
 /**
