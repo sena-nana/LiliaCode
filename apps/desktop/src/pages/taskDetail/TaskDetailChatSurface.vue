@@ -56,6 +56,14 @@ const ChatComposer = defineAsyncComponent({
   ),
 });
 
+const ProcessSessionControl = defineAsyncComponent({
+  suspensible: false,
+  loader: () => measurePerfAsync(
+    "task-detail.process-session-control.load",
+    async () => (await import("../../components/chat/ProcessSessionControl.vue")).default,
+  ),
+});
+
 const ChatSuggestions = defineAsyncComponent({
   suspensible: false,
   loader: () => measurePerfAsync(
@@ -121,6 +129,8 @@ const props = defineProps<{
   pendingAgentActions: PendingAgentAction[];
   hasBlockingPendingAction: boolean;
   currentLiliaGoal: LiliaThreadGoal | null;
+  processSessionBusy: boolean;
+  processSessionError: string | null;
   showExpiredPendingActions: boolean;
   canRetryEvent: (event: AgentTimelineEvent) => boolean;
   composerState: ChatComposerState;
@@ -154,6 +164,9 @@ const emit = defineEmits<{
   "clear-lilia-goal": [];
   "insert-draft-text": [text: string];
   "clear-branch-anchor": [];
+  "start-process-session": [command: string];
+  "send-process-session-stdin": [stdin: string];
+  "stop-process-session": [];
   send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
   "start-lilia-review": [
     content: string,
@@ -471,6 +484,15 @@ function selectSuggestion(suggestion: SuggestionItem) {
                   @set-lilia-goal="emit('set-lilia-goal', $event)"
                   @refresh-lilia-goal="emit('refresh-lilia-goal')"
                   @clear-lilia-goal="emit('clear-lilia-goal')"
+                />
+                <ProcessSessionControl
+                  :running="isTurnRunning"
+                  :busy="processSessionBusy"
+                  :disabled="hasBlockingPendingAction"
+                  :error="processSessionError"
+                  @start="emit('start-process-session', $event)"
+                  @send-stdin="emit('send-process-session-stdin', $event)"
+                  @stop="emit('stop-process-session')"
                 />
                 <ChatComposer
                   v-if="composerActivated"

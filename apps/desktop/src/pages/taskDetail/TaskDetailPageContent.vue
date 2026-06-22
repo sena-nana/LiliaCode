@@ -160,6 +160,8 @@ const {
   blockingPendingAgentActions,
   pendingPlanApproval,
   nonInterruptMode,
+  processSessionBusy,
+  processSessionError,
 } = composerController;
 
 function queryString(value: unknown): string | null {
@@ -844,6 +846,8 @@ watch(
     :pending-agent-actions="pendingAgentActions"
     :has-blocking-pending-action="blockingPendingAgentActions.length > 0"
     :current-lilia-goal="composerController.currentLiliaGoal.value"
+    :process-session-busy="processSessionBusy"
+    :process-session-error="processSessionError"
     :show-expired-pending-actions="nonInterruptMode"
     :can-retry-event="canRetryEvent"
     :composer-state="composerForView"
@@ -874,6 +878,9 @@ watch(
     @clear-lilia-goal="composerController.onClearLiliaGoal"
     @insert-draft-text="composerController.onInsertDraftText"
     @clear-branch-anchor="composerController.onClearBranchAnchor"
+    @start-process-session="composerController.onStartProcessSession"
+    @send-process-session-stdin="composerController.onSendProcessSessionStdin"
+    @stop-process-session="composerController.onStopProcessSession"
     @send="composerController.onSend"
     @start-lilia-review="composerController.onStartLiliaReview"
     @start-lilia-fix-suggestion="composerController.onStartLiliaFixSuggestion"
