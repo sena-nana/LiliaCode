@@ -513,11 +513,11 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                             remoteClient.interrupt(pc, taskId)
                         }
                     },
-                    onRetry = {
+                    onRetry = { eventId ->
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
                         runTaskAction(pc, taskId, "Retry failed") { remoteClient ->
-                            remoteClient.retry(pc, taskId)
+                            remoteClient.retry(pc, taskId, eventId)
                         }
                     },
                     onResolveInteraction = { interaction, approve, responseText, selectedOptions ->
@@ -854,7 +854,7 @@ private fun TaskDetailScreen(
     onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
-    onRetry: () -> Unit,
+    onRetry: (String?) -> Unit,
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
@@ -870,6 +870,7 @@ private fun TaskDetailScreen(
     val providerReady = providerStatus?.ready != false
     val processRunning = detail.processSessionId != null
     val hasRetryableError = detail.timeline.any { it.retryable }
+    val retryEnabled = !loading && providerReady && capabilities.supportsChatSend
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
     Column(
@@ -901,8 +902,8 @@ private fun TaskDetailScreen(
                 Text("Interrupt")
             }
             OutlinedButton(
-                onClick = onRetry,
-                enabled = !loading && providerReady && capabilities.supportsChatSend && hasRetryableError,
+                onClick = { onRetry(null) },
+                enabled = retryEnabled && hasRetryableError,
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text("Retry")
@@ -1045,6 +1046,8 @@ private fun TaskDetailScreen(
                 TimelineRow(
                     item = item,
                     loading = loading,
+                    retryEnabled = retryEnabled,
+                    onRetry = { onRetry(item.id) },
                     onStartBranch = { mode ->
                         item.branchSourceTurnId?.let { turnId ->
                             onSelectBranchAnchor(RemoteBranchAnchor(turnId, mode))
@@ -1367,6 +1370,8 @@ private fun TaskCard(task: RemoteTaskSummary, blockInfo: TaskRunBlockInfo?, onCl
 private fun TimelineRow(
     item: RemoteTimelineItem,
     loading: Boolean,
+    retryEnabled: Boolean,
+    onRetry: () -> Unit,
     onStartBranch: (RemoteSessionForkMode) -> Unit,
     blockReason: String?,
 ) {
@@ -1412,11 +1417,13 @@ private fun TimelineRow(
             TimelineDetailRow(detail)
         }
         if (item.retryable) {
-            Text(
-                "Retry available",
-                color = MaterialTheme.colorScheme.secondary,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            OutlinedButton(
+                onClick = onRetry,
+                enabled = retryEnabled,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Retry")
+            }
         }
         if (item.branchSourceTurnId != null) {
             if (blockReason != null) {
