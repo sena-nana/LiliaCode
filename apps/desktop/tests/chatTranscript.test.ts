@@ -3,6 +3,7 @@ import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import ChatTranscript from "../src/components/chat/ChatTranscript.vue";
+import { domRect } from "./domTestHelpers";
 
 function transcriptElement(container: HTMLElement): HTMLElement {
   const element = container.querySelector(".chat-transcript");
@@ -29,17 +30,7 @@ function transcriptFrameElement(container: HTMLElement): HTMLElement {
 }
 
 function mockTranscriptRect(element: HTMLElement) {
-  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
-    x: 0,
-    y: 0,
-    left: 0,
-    top: 0,
-    right: 100,
-    bottom: 240,
-    width: 100,
-    height: 240,
-    toJSON: () => ({}),
-  });
+  vi.spyOn(element, "getBoundingClientRect").mockReturnValue(domRect(0, 0, 100, 240));
 }
 
 function mockElementRect(element: HTMLElement, rect: Partial<DOMRect>) {
@@ -441,17 +432,7 @@ describe("ChatTranscript agent selection toolbar", () => {
     range.setEnd(textNode!, start + "可操作文本".length);
     Object.defineProperty(range, "getBoundingClientRect", {
       configurable: true,
-      value: vi.fn(() => ({
-        x: 40,
-        y: 80,
-        left: 40,
-        top: 80,
-        right: 160,
-        bottom: 100,
-        width: 120,
-        height: 20,
-        toJSON: () => ({}),
-      })),
+      value: vi.fn(() => domRect(40, 80, 120, 20)),
     });
     mockElementRect(view.container.querySelector(".chat-transcript-frame") as HTMLElement, {
       left: 0,

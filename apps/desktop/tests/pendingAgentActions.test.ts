@@ -6,7 +6,6 @@ import {
   TITLE_UPDATE_ACTION_KIND,
   TOOL_CONSENT_INTERACTION_KIND,
   agentTimelineEventRequiresAction,
-  type AgentTimelineEvent,
 } from "@lilia/contracts";
 import {
   isPendingAskUserAgentAction,
@@ -27,44 +26,121 @@ import {
 } from "../src/composables/pendingAgentActions";
 import { usePendingAgentActionsForTask } from "../src/composables/usePendingAgentActions";
 import { computed, ref } from "vue";
+import { toolConsentRequestFixture as toolConsentRequest } from "./interactionTestHelpers";
+import { pendingPlanTimelineEvent as timelineEvent } from "./timelineTestHelpers";
 
-function timelineEvent(
-  overrides: Partial<AgentTimelineEvent>,
-): AgentTimelineEvent {
+function askFixture(overrides: Record<string, unknown> = {}) {
   return {
-    id: "event-1",
+    id: 11,
     taskId: "task-1",
     turnId: "turn-1",
-    backend: "codex",
-    kind: "plan",
-    status: "requires_action",
-    title: "Codex plan",
-    summary: "改代码",
-    payload: { backend: "codex", approved: null },
-    createdAt: 1,
-    updatedAt: 1,
-    turnSeq: 0,
-    intraTurnOrder: 0,
+    requestId: "ask-1",
+    spec: {
+      title: "确认",
+      questions: [{ id: "q-1", question: "继续？", mode: "confirm" as const }],
+    },
+    resolve: () => {},
     ...overrides,
+  };
+}
+
+function createAskAction(): PendingAgentAction {
+  const ask = askFixture();
+  return {
+    kind: "ask_user",
+    taskId: ask.taskId,
+    turnId: ask.turnId,
+    requestId: ask.requestId,
+    ask,
+  };
+}
+
+function createToolAction(): PendingAgentAction {
+  const request = toolConsentRequest({ requestId: "consent-1" });
+  return {
+    kind: TOOL_CONSENT_INTERACTION_KIND,
+    taskId: request.taskId,
+    turnId: request.turnId,
+    requestId: request.requestId,
+    request,
+  };
+}
+
+function createMcpAction(): PendingAgentAction {
+  return {
+    kind: MCP_ELICITATION_INTERACTION_KIND,
+    taskId: "task-1",
+    turnId: "turn-1",
+    requestId: "mcp-1",
+    payload: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      serverName: "linear",
+      mode: "form",
+      message: "选择项目",
+    },
+  };
+}
+
+function createTitleAction(): PendingAgentAction {
+  return {
+    kind: TITLE_UPDATE_ACTION_KIND,
+    taskId: "task-1",
+    turnId: "turn-1",
+    requestId: "title-1",
+    proposedTitle: "新标题",
+    previousTitle: "旧标题",
+  };
+}
+
+function createPermissionAction(): PendingAgentAction {
+  return {
+    kind: "permission_approval",
+    taskId: "task-1",
+    turnId: "turn-1",
+    requestId: "permission-1",
+    payload: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "item-1",
+      startedAtMs: 1,
+      cwd: "C:/repo",
+      reason: "need network",
+      permissions: { network: { domains: [{ domain: "example.com" }] } },
+    },
+  };
+}
+
+function createArchitectureAction(): PendingAgentAction {
+  return {
+    kind: ARCHITECTURE_INTERACTION_KIND,
+    taskId: "task-1",
+    turnId: "turn-1",
+    requestId: "architecture-1",
+    id: "architecture-1",
+    title: "更新架构",
+    summary: "改架构文档",
+    draft: "draft",
+    response: { status: "pending" },
+  };
+}
+
+function createPendingActionFixtures() {
+  return {
+    askAction: createAskAction(),
+    toolAction: createToolAction(),
+    mcpAction: createMcpAction(),
+    titleAction: createTitleAction(),
+    permissionAction: createPermissionAction(),
+    architectureAction: createArchitectureAction(),
   };
 }
 
 describe("pending agent actions", () => {
   it("combines pending sources into the unified action model", () => {
-    const ask = {
-      id: 11,
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      spec: {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" as const }],
-      },
-      resolve: () => {},
-    };
-    const planAsk = {
+    const ask = askFixture();
+    const planAsk = askFixture({
       id: 12,
-      taskId: "task-1",
       turnId: "turn-2",
       requestId: "plan-1",
       spec: {
@@ -72,46 +148,10 @@ describe("pending agent actions", () => {
         intent: "plan_approval" as const,
         questions: [{ id: "approve-plan", question: "", mode: "confirm" as const }],
       },
-      resolve: () => {},
-    };
-    const toolConsent = {
-      taskId: "task-1",
-      turnId: "turn-1",
-      backend: "claude" as const,
-      requestId: "tool-1",
-      toolName: "Bash",
-      input: { command: "pwd" },
-      title: null,
-      displayName: null,
-      description: null,
-      blockedPath: null,
-      decisionReason: null,
-      toolUseId: null,
-    };
-    const mcpAction: PendingAgentAction = {
-      kind: MCP_ELICITATION_INTERACTION_KIND,
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "mcp-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        serverName: "linear",
-        mode: "form",
-        message: "选择项目",
-      },
-    };
-    const architectureAction: PendingAgentAction = {
-      kind: ARCHITECTURE_INTERACTION_KIND,
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "architecture-1",
-      id: "architecture-1",
-      title: "更新架构",
-      summary: "改架构文档",
-      draft: "draft",
-      response: { status: "pending" },
-    };
+    });
+    const toolConsent = toolConsentRequest({ requestId: "tool-1" });
+    const mcpAction = createMcpAction();
+    const architectureAction = createArchitectureAction();
     const titleEvent = timelineEvent({
       id: "title-update:task-1:title-1",
       kind: TITLE_UPDATE_ACTION_KIND,
@@ -150,23 +190,20 @@ describe("pending agent actions", () => {
   });
 
   it("only attaches plan approval controls to actionable plan events", () => {
+    const ask = askFixture({
+      id: 1,
+      spec: {
+        title: "确认 Codex 计划",
+        intent: "plan_approval",
+        questions: [{ id: "approve-plan", question: "", mode: "confirm" }],
+      },
+    });
     const action: PendingAgentAction = {
       kind: "plan_approval",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      ask: {
-        id: 1,
-        taskId: "task-1",
-        turnId: "turn-1",
-        requestId: "ask-1",
-        spec: {
-          title: "确认 Codex 计划",
-          intent: "plan_approval",
-          questions: [{ id: "approve-plan", question: "", mode: "confirm" }],
-        },
-        resolve: () => {},
-      },
+      taskId: ask.taskId,
+      turnId: ask.turnId,
+      requestId: ask.requestId,
+      ask,
     };
 
     expect(pendingActionForTimelineEvent(
@@ -198,26 +235,7 @@ describe("pending agent actions", () => {
   });
 
   it("does not mark completed tool consent timeline events as pending", () => {
-    const action: PendingAgentAction = {
-      kind: "tool_consent",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "consent-1",
-      request: {
-        taskId: "task-1",
-        turnId: "turn-1",
-        backend: "claude",
-        requestId: "consent-1",
-        toolName: "Bash",
-        input: { command: "pwd" },
-        title: null,
-        displayName: null,
-        description: null,
-        blockedPath: null,
-        decisionReason: null,
-        toolUseId: null,
-      },
-    };
+    const action = createToolAction();
     const completed = timelineEvent({
       kind: "command",
       status: "success",
@@ -229,87 +247,29 @@ describe("pending agent actions", () => {
   });
 
   it("classifies visible and blocking pending actions", () => {
-    const askAction: PendingAgentAction = {
-      kind: "ask_user",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      ask: {
-        id: 11,
-        taskId: "task-1",
-        turnId: "turn-1",
-        requestId: "ask-1",
-        spec: {
-          title: "确认",
-          questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-        },
-        resolve: () => {},
-      },
-    };
-    const titleAction: PendingAgentAction = {
-      kind: "title_update",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "title-1",
-      proposedTitle: "新标题",
-      previousTitle: "旧标题",
-    };
-    const toolAction: PendingAgentAction = {
-      kind: "tool_consent",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "consent-1",
-      request: {
-        taskId: "task-1",
-        turnId: "turn-1",
-        backend: "claude",
-        requestId: "consent-1",
-        toolName: "Bash",
-        input: { command: "pwd" },
-        title: null,
-        displayName: null,
-        description: null,
-        blockedPath: null,
-        decisionReason: null,
-        toolUseId: null,
-      },
-    };
-    const mcpAction: PendingAgentAction = {
-      kind: "mcp_elicitation",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "mcp-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        serverName: "linear",
-        mode: "form",
-        message: "选择项目",
-      },
-    };
+    const askAction = createAskAction();
+    const titleAction = createTitleAction();
+    const toolAction = createToolAction();
+    const mcpAction = createMcpAction();
 
     expect(isPendingAskUserAgentAction(askAction)).toBe(true);
     expect(isPendingAskUserAgentAction(toolAction)).toBe(false);
-    expect(pendingAgentActionKey(askAction)).toBe("ask_user:ask-1");
-    expect(pendingAgentActionKey(titleAction)).toBe("title:title-1");
-    expect(pendingAgentActionKey(toolAction)).toBe("tool:consent-1");
-    expect(pendingAgentActionKey(mcpAction)).toBe("mcp:mcp-1");
-    expect(pendingAgentActionAutoDecisionLabel(askAction)).toBe("选择推荐项");
-    expect(pendingAgentActionAutoDecisionLabel(titleAction)).toBe("同意标题");
-    expect(pendingAgentActionAutoDecisionLabel(toolAction)).toBe("同意工具调用");
-    expect(pendingAgentActionAutoDecisionLabel(mcpAction)).toBe("提交 MCP 表单");
-    expect(pendingAgentActionTraits(titleAction)).toEqual({
-      blocksComposer: false,
-      visibleInTimelineWithoutInterrupt: true,
-    });
-    expect(pendingAgentActionTraits(mcpAction)).toEqual({
-      blocksComposer: true,
-      visibleInTimelineWithoutInterrupt: true,
-    });
-    expect(pendingAgentActionTraits(toolAction)).toEqual({
-      blocksComposer: true,
-      visibleInTimelineWithoutInterrupt: false,
-    });
+    for (const [action, key, label] of [
+      [askAction, "ask_user:ask-1", "选择推荐项"],
+      [titleAction, "title:title-1", "同意标题"],
+      [toolAction, "tool:consent-1", "同意工具调用"],
+      [mcpAction, "mcp:mcp-1", "提交 MCP 表单"],
+    ] as const) {
+      expect(pendingAgentActionKey(action)).toBe(key);
+      expect(pendingAgentActionAutoDecisionLabel(action)).toBe(label);
+    }
+    for (const [action, traits] of [
+      [titleAction, { blocksComposer: false, visibleInTimelineWithoutInterrupt: true }],
+      [mcpAction, { blocksComposer: true, visibleInTimelineWithoutInterrupt: true }],
+      [toolAction, { blocksComposer: true, visibleInTimelineWithoutInterrupt: false }],
+    ] as const) {
+      expect(pendingAgentActionTraits(action)).toEqual(traits);
+    }
     expect(pendingAgentActionBuckets([askAction, titleAction, toolAction, mcpAction], {
       nonInterruptMode: false,
     })).toEqual({
@@ -325,112 +285,23 @@ describe("pending agent actions", () => {
   });
 
   it("derives free-mode auto-decision keys from eligible pending actions", () => {
-    const askAction: PendingAgentAction = {
-      kind: "ask_user",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      ask: {
-        id: 11,
-        taskId: "task-1",
-        turnId: "turn-1",
-        requestId: "ask-1",
-        spec: {
-          title: "确认",
-          questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-        },
-        resolve: () => {},
-      },
-    };
-    const toolAction: PendingAgentAction = {
-      kind: "tool_consent",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "consent-1",
-      request: {
-        taskId: "task-1",
-        turnId: "turn-1",
-        backend: "claude",
-        requestId: "consent-1",
-        toolName: "Bash",
-        input: { command: "pwd" },
-        title: null,
-        displayName: null,
-        description: null,
-        blockedPath: null,
-        decisionReason: null,
-        toolUseId: null,
-      },
-    };
-    const mcpAction: PendingAgentAction = {
-      kind: "mcp_elicitation",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "mcp-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        serverName: "linear",
-        mode: "form",
-        message: "选择项目",
-      },
-    };
-    const titleAction: PendingAgentAction = {
-      kind: "title_update",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "title-1",
-      proposedTitle: "新标题",
-      previousTitle: "旧标题",
-    };
-    const permissionAction: PendingAgentAction = {
-      kind: "permission_approval",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "permission-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        startedAtMs: 1,
-        cwd: "C:/repo",
-        reason: "need network",
-        permissions: { network: { domains: [{ domain: "example.com" }] } },
-      },
-    };
-    const architectureAction: PendingAgentAction = {
-      kind: "architecture_change",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "architecture-1",
-      id: "architecture-1",
-      title: "更新架构",
-      summary: "改架构文档",
-      draft: "draft",
-      response: { status: "pending" },
-    };
+    const { askAction, toolAction, mcpAction, titleAction, permissionAction, architectureAction } =
+      createPendingActionFixtures();
 
-    expect(pendingAgentActionAutoDecisionKey(askAction, {
-      askHasRecommendedResult: true,
-      askQuestionId: "q-1",
-    })).toBe("ask_user:ask-1:q-1");
-    expect(pendingAgentActionAutoDecisionKey(askAction, {
-      askHasRecommendedResult: false,
-      askQuestionId: "q-1",
-    })).toBe("");
-    expect(pendingAgentActionAutoDecisionKey(toolAction, {
-      toolCommandIsEmpty: false,
-    })).toBe("tool:consent-1");
-    expect(pendingAgentActionAutoDecisionKey(toolAction, {
-      editingToolCommand: true,
-      toolCommandIsEmpty: false,
-    })).toBe("");
-    expect(pendingAgentActionAutoDecisionKey(titleAction, {})).toBe("title:title-1");
-    expect(pendingAgentActionAutoDecisionKey(mcpAction, { mcpCanSubmit: true })).toBe("mcp:mcp-1");
-    expect(pendingAgentActionAutoDecisionKey(mcpAction, { mcpCanSubmit: false })).toBe("");
-    expect(pendingAgentActionAutoDecisionKey(permissionAction, {})).toBe("permission:permission-1");
-    expect(pendingAgentActionAutoDecisionKey(permissionAction, { submitting: true })).toBe("");
-    expect(pendingAgentActionAutoDecisionKey(architectureAction, {})).toBe("architecture:architecture-1");
+    for (const [action, input, key] of [
+      [askAction, { askHasRecommendedResult: true, askQuestionId: "q-1" }, "ask_user:ask-1:q-1"],
+      [askAction, { askHasRecommendedResult: false, askQuestionId: "q-1" }, ""],
+      [toolAction, { toolCommandIsEmpty: false }, "tool:consent-1"],
+      [toolAction, { editingToolCommand: true, toolCommandIsEmpty: false }, ""],
+      [titleAction, {}, "title:title-1"],
+      [mcpAction, { mcpCanSubmit: true }, "mcp:mcp-1"],
+      [mcpAction, { mcpCanSubmit: false }, ""],
+      [permissionAction, {}, "permission:permission-1"],
+      [permissionAction, { submitting: true }, ""],
+      [architectureAction, {}, "architecture:architecture-1"],
+    ] as const) {
+      expect(pendingAgentActionAutoDecisionKey(action, input)).toBe(key);
+    }
     expect(pendingAskAgentAction(askAction.ask)).toMatchObject({
       kind: "ask_user",
       requestId: "ask-1",
@@ -452,90 +323,8 @@ describe("pending agent actions", () => {
   });
 
   it("builds typed resolutions from pending actions", () => {
-    const askAction: PendingAgentAction = {
-      kind: "ask_user",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      ask: {
-        id: 11,
-        taskId: "task-1",
-        turnId: "turn-1",
-        requestId: "ask-1",
-        spec: {
-          title: "确认",
-          questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-        },
-        resolve: () => {},
-      },
-    };
-    const toolAction: PendingAgentAction = {
-      kind: "tool_consent",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "consent-1",
-      request: {
-        taskId: "task-1",
-        turnId: "turn-1",
-        backend: "claude",
-        requestId: "consent-1",
-        toolName: "Bash",
-        input: { command: "pwd" },
-        title: null,
-        displayName: null,
-        description: null,
-        blockedPath: null,
-        decisionReason: null,
-        toolUseId: null,
-      },
-    };
-    const mcpAction: PendingAgentAction = {
-      kind: "mcp_elicitation",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "mcp-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        serverName: "linear",
-        mode: "form",
-        message: "选择项目",
-      },
-    };
-    const titleAction: PendingAgentAction = {
-      kind: "title_update",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "title-1",
-      proposedTitle: "新标题",
-      previousTitle: "旧标题",
-    };
-    const permissionAction: PendingAgentAction = {
-      kind: "permission_approval",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "permission-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        startedAtMs: 1,
-        cwd: "C:/repo",
-        reason: "need network",
-        permissions: { network: { domains: [{ domain: "example.com" }] } },
-      },
-    };
-    const architectureAction: PendingAgentAction = {
-      kind: "architecture_change",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "architecture-1",
-      id: "architecture-1",
-      title: "更新架构",
-      summary: "改架构文档",
-      draft: "draft",
-      response: { status: "pending" },
-    };
+    const { askAction, toolAction, mcpAction, titleAction, permissionAction, architectureAction } =
+      createPendingActionFixtures();
 
     expect(pendingAgentActionResolution(askAction, {
       askResult: { answers: {}, cancelled: false },
@@ -588,114 +377,19 @@ describe("pending agent actions", () => {
   });
 
   it("classifies which resolutions should enter a submitting state", () => {
-    expect(pendingAgentActionResolutionSubmittingTarget({
-      kind: TOOL_CONSENT_INTERACTION_KIND,
-      requestId: "tool-1",
-      decision: "allow",
-    })).toBe("tool");
-    expect(pendingAgentActionResolutionSubmittingTarget({
-      kind: MCP_ELICITATION_INTERACTION_KIND,
-      requestId: "mcp-1",
-      action: "accept",
-      content: {},
-    })).toBe("codex");
-    expect(pendingAgentActionResolutionSubmittingTarget({
-      kind: ARCHITECTURE_INTERACTION_KIND,
-      requestId: "architecture-1",
-      decision: "allow",
-    })).toBe("codex");
-    expect(pendingAgentActionResolutionSubmittingTarget({
-      kind: TITLE_UPDATE_ACTION_KIND,
-      requestId: "title-1",
-      decision: "accept",
-    })).toBeNull();
+    for (const [resolution, target] of [
+      [{ kind: TOOL_CONSENT_INTERACTION_KIND, requestId: "tool-1", decision: "allow" }, "tool"],
+      [{ kind: MCP_ELICITATION_INTERACTION_KIND, requestId: "mcp-1", action: "accept", content: {} }, "codex"],
+      [{ kind: ARCHITECTURE_INTERACTION_KIND, requestId: "architecture-1", decision: "allow" }, "codex"],
+      [{ kind: TITLE_UPDATE_ACTION_KIND, requestId: "title-1", decision: "accept" }, null],
+    ] as const) {
+      expect(pendingAgentActionResolutionSubmittingTarget(resolution)).toBe(target);
+    }
   });
 
   it("builds auto resolutions only when the action is eligible", () => {
-    const askAction: PendingAgentAction = {
-      kind: "ask_user",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      ask: {
-        id: 11,
-        taskId: "task-1",
-        turnId: "turn-1",
-        requestId: "ask-1",
-        spec: {
-          title: "确认",
-          questions: [{ id: "q-1", question: "继续？", mode: "confirm" }],
-        },
-        resolve: () => {},
-      },
-    };
-    const toolAction: PendingAgentAction = {
-      kind: "tool_consent",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "consent-1",
-      request: {
-        taskId: "task-1",
-        turnId: "turn-1",
-        backend: "claude",
-        requestId: "consent-1",
-        toolName: "Bash",
-        input: { command: "pwd" },
-        title: null,
-        displayName: null,
-        description: null,
-        blockedPath: null,
-        decisionReason: null,
-        toolUseId: null,
-      },
-    };
-    const mcpAction: PendingAgentAction = {
-      kind: "mcp_elicitation",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "mcp-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        serverName: "linear",
-        mode: "form",
-        message: "选择项目",
-      },
-    };
-    const titleAction: PendingAgentAction = {
-      kind: "title_update",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "title-1",
-      proposedTitle: "新标题",
-      previousTitle: "旧标题",
-    };
-    const permissionAction: PendingAgentAction = {
-      kind: "permission_approval",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "permission-1",
-      payload: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        itemId: "item-1",
-        startedAtMs: 1,
-        cwd: "C:/repo",
-        reason: "need network",
-        permissions: { network: { domains: [{ domain: "example.com" }] } },
-      },
-    };
-    const architectureAction: PendingAgentAction = {
-      kind: "architecture_change",
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "architecture-1",
-      id: "architecture-1",
-      title: "更新架构",
-      summary: "改架构文档",
-      draft: "draft",
-      response: { status: "pending" },
-    };
+    const { askAction, toolAction, mcpAction, titleAction, permissionAction, architectureAction } =
+      createPendingActionFixtures();
 
     expect(pendingAgentActionAutoResolution(askAction, {
       askHasRecommendedResult: true,
@@ -816,25 +510,14 @@ describe("pending agent actions", () => {
   });
 
   it("deduplicates ask actions by request id when a backend request is rehydrated", () => {
-    const firstAsk = {
-      id: 11,
-      taskId: "task-1",
-      turnId: "turn-1",
-      requestId: "ask-1",
-      spec: {
-        title: "确认",
-        questions: [{ id: "q-1", question: "继续？", mode: "confirm" as const }],
-      },
-      resolve: () => {},
-    };
-    const latestAsk = {
-      ...firstAsk,
+    const firstAsk = askFixture();
+    const latestAsk = askFixture({
       id: 12,
       spec: {
         title: "确认更新",
         questions: [{ id: "q-1", question: "继续执行？", mode: "confirm" as const }],
       },
-    };
+    });
 
     const actions = pendingAgentActionsForTask({
       asks: [firstAsk, latestAsk],
@@ -853,36 +536,7 @@ describe("pending agent actions", () => {
     const actions = usePendingAgentActionsForTask(
       computed(() => []),
       computed(() => []),
-      ref([
-        {
-          kind: "mcp_elicitation",
-          taskId: "task-1",
-          turnId: "turn-1",
-          requestId: "mcp-1",
-          payload: {
-            threadId: "thread-1",
-            turnId: "turn-1",
-            serverName: "linear",
-            mode: "form",
-            message: "选择项目",
-          },
-        },
-        {
-          kind: "permission_approval",
-          taskId: "task-1",
-          turnId: "turn-1",
-          requestId: "permission-1",
-          payload: {
-            threadId: "thread-1",
-            turnId: "turn-1",
-            itemId: "item-1",
-            startedAtMs: 1,
-            cwd: "C:/repo",
-            reason: "need network",
-            permissions: { network: { domains: [{ domain: "example.com" }] } },
-          },
-        },
-      ]),
+      ref([createMcpAction(), createPermissionAction()]),
       ref([]),
     );
     const mcpEvent = timelineEvent({

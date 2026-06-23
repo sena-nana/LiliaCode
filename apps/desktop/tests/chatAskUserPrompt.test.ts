@@ -31,6 +31,7 @@ import {
   setMockComposerStateHandler,
   setMockRuntimeSnapshot,
 } from "./tauriMock";
+import { placeEditableCaret } from "./domTestHelpers";
 
 const askUserSpec: AskUserSpec = {
   title: "Claude 想确认一下",
@@ -73,20 +74,6 @@ async function renderTaskDetail(taskId = "t-002") {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
   }, { timeout: 3000 });
   return Object.assign(view, { router });
-}
-
-function placeEditableCaret(element: HTMLElement, offset: number) {
-  const selection = window.getSelection();
-  const range = document.createRange();
-  const textNode = element.firstChild;
-  if (textNode?.nodeType === Node.TEXT_NODE) {
-    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
-  } else {
-    range.selectNodeContents(element);
-    range.collapse(false);
-  }
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 function getComposerTextbox(view: ReturnType<typeof render>): HTMLElement {
@@ -331,34 +318,36 @@ function emitBashToolConsentRequest(taskId: string) {
 }
 
 async function expectAskUserResponse(taskId: string) {
+  await expectAgentInteractionResponse(taskId, `ask-${taskId}`, "ask_user", {
+    cancelled: false,
+    answers: {
+      "q-1": { questionId: "q-1", value: "o-2" },
+    },
+  });
+}
+
+async function expectAgentInteractionResponse(
+  taskId: string,
+  requestId: string,
+  kind: string,
+  result: unknown,
+) {
   await waitFor(() => {
     expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
       taskId,
-      requestId: `ask-${taskId}`,
-      kind: "ask_user",
-      result: {
-        cancelled: false,
-        answers: {
-          "q-1": { questionId: "q-1", value: "o-2" },
-        },
-      },
+      requestId,
+      kind,
+      result,
     }, undefined);
   });
 }
 
 async function expectUnifiedAskUserResponse(taskId: string, kind: "ask_user" | "plan_approval" = "ask_user") {
-  await waitFor(() => {
-    expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-      taskId,
-      requestId: `unified-${taskId}`,
-      kind,
-      result: {
-        cancelled: false,
-        answers: {
-          "q-1": { questionId: "q-1", value: "o-2" },
-        },
-      },
-    }, undefined);
+  await expectAgentInteractionResponse(taskId, `unified-${taskId}`, kind, {
+    cancelled: false,
+    answers: {
+      "q-1": { questionId: "q-1", value: "o-2" },
+    },
   });
 }
 
@@ -487,22 +476,15 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(input, "请把测试计划拆细");
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "ask-t-002",
-        kind: "plan_approval",
-        result: {
-          cancelled: false,
-          answers: {
-            "approve-plan": {
-              questionId: "approve-plan",
-              value: "revision_request",
-              notes: "请把测试计划拆细",
-            },
-          },
+    await expectAgentInteractionResponse("t-002", "ask-t-002", "plan_approval", {
+      cancelled: false,
+      answers: {
+        "approve-plan": {
+          questionId: "approve-plan",
+          value: "revision_request",
+          notes: "请把测试计划拆细",
         },
-      }, undefined);
+      },
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
     expect(view.queryByText("请把测试计划拆细")).toBeNull();
@@ -527,18 +509,11 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(input, "先不要写这个文件");
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "tool-t-002",
-        kind: "tool_consent",
-        result: {
-          taskId: "t-002",
-          requestId: "tool-t-002",
-          decision: "deny",
-          message: "先不要写这个文件",
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "tool-t-002", "tool_consent", {
+      taskId: "t-002",
+      requestId: "tool-t-002",
+      decision: "deny",
+      message: "先不要写这个文件",
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
   });
@@ -557,18 +532,11 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(input, "先不跑测试");
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "unified-tool-t-002",
-        kind: "tool_consent",
-        result: {
-          taskId: "t-002",
-          requestId: "unified-tool-t-002",
-          decision: "deny",
-          message: "先不跑测试",
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "unified-tool-t-002", "tool_consent", {
+      taskId: "t-002",
+      requestId: "unified-tool-t-002",
+      decision: "deny",
+      message: "先不跑测试",
     });
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === CHAT_SEND_MESSAGE_COMMAND)).toBe(false);
   });
@@ -620,18 +588,11 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(input, "先不要写这个文件");
     await fireEvent.click(view.getByRole("button", { name: "修改" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "tool-t-002",
-        kind: "tool_consent",
-        result: {
-          taskId: "t-002",
-          requestId: "tool-t-002",
-          decision: "deny",
-          message: "先不要写这个文件",
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "tool-t-002", "tool_consent", {
+      taskId: "t-002",
+      requestId: "tool-t-002",
+      decision: "deny",
+      message: "先不要写这个文件",
     });
   });
 
@@ -700,16 +661,9 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(promptView.getByRole("combobox"), "B");
     await fireEvent.click(promptView.getByRole("button", { name: "同意" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "mcp-t-002",
-        kind: "mcp_elicitation",
-        result: {
-          action: "accept",
-          content: { project: "B" },
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "mcp-t-002", "mcp_elicitation", {
+      action: "accept",
+      content: { project: "B" },
     });
   });
 
@@ -755,31 +709,24 @@ describe("chat AskUser prompt", () => {
     const prompt = await view.findByRole("region", { name: "权限确认" });
     await fireEvent.click(within(prompt).getByRole("button", { name: "同意" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "permission-t-002",
-        kind: "permission_approval",
-        result: {
-          action: "approve",
-          grantedAccess: {
+    await expectAgentInteractionResponse("t-002", "permission-t-002", "permission_approval", {
+      action: "approve",
+      grantedAccess: {
+        network: { domains: [{ domain: "example.com" }] },
+      },
+      providerContext: {
+        codex: {
+          threadId: "thread-1",
+          turnId: "turn-permission",
+          itemId: "item-1",
+          startedAtMs: 123,
+          cwd: "C:/repo",
+          permissions: {
             network: { domains: [{ domain: "example.com" }] },
           },
-          providerContext: {
-            codex: {
-              threadId: "thread-1",
-              turnId: "turn-permission",
-              itemId: "item-1",
-              startedAtMs: 123,
-              cwd: "C:/repo",
-              permissions: {
-                network: { domains: [{ domain: "example.com" }] },
-              },
-            },
-          },
-          scope: "turn",
         },
-      }, undefined);
+      },
+      scope: "turn",
     });
   });
 
@@ -819,19 +766,12 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "yarn test --runInBand");
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "unified-tool-t-002",
-        kind: "tool_consent",
-        result: {
-          taskId: "t-002",
-          requestId: "unified-tool-t-002",
-          decision: "allow",
-          message: null,
-          updatedInput: { command: "yarn test --runInBand" },
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "unified-tool-t-002", "tool_consent", {
+      taskId: "t-002",
+      requestId: "unified-tool-t-002",
+      decision: "allow",
+      message: null,
+      updatedInput: { command: "yarn test --runInBand" },
     });
   });
 
@@ -983,19 +923,12 @@ describe("chat AskUser prompt", () => {
     await fireEvent.update(promptView.getByRole("textbox", { name: "编辑命令" }), "pwd && echo ok");
     await fireEvent.click(view.getByRole("button", { name: "同意" }));
 
-    await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith(CHAT_RESPOND_AGENT_INTERACTION_COMMAND, {
-        taskId: "t-002",
-        requestId: "bash-tool-t-002",
-        kind: "tool_consent",
-        result: {
-          taskId: "t-002",
-          requestId: "bash-tool-t-002",
-          decision: "allow",
-          message: null,
-          updatedInput: { command: "pwd && echo ok" },
-        },
-      }, undefined);
+    await expectAgentInteractionResponse("t-002", "bash-tool-t-002", "tool_consent", {
+      taskId: "t-002",
+      requestId: "bash-tool-t-002",
+      decision: "allow",
+      message: null,
+      updatedInput: { command: "pwd && echo ok" },
     });
   });
 

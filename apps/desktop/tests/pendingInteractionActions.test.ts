@@ -6,7 +6,6 @@ import {
   PLAN_APPROVAL_INTERACTION_KIND,
   TITLE_UPDATE_ACTION_KIND,
   TOOL_CONSENT_INTERACTION_KIND,
-  type AgentTimelineEvent,
 } from "@lilia/contracts";
 import {
   pendingInteractionRequestIdsForSources,
@@ -20,26 +19,15 @@ import {
 import { shouldClearPendingInteraction } from "../src/composables/pendingInteractionClearOptions";
 import { usePendingAsksForTask } from "../src/composables/useAskUser";
 import { conversationActivityForTask } from "../src/composables/useConversationActivity";
+import { timelineEventFixture } from "./timelineTestHelpers";
 
-function timelineEvent(
-  overrides: Partial<AgentTimelineEvent>,
-): AgentTimelineEvent {
-  return {
-    id: "event-1",
-    taskId: "task-1",
-    turnId: "turn-1",
-    backend: "codex",
+function timelineEvent(overrides: Parameters<typeof timelineEventFixture>[0]) {
+  return timelineEventFixture(overrides, {
     kind: "diagnostic",
     status: "requires_action",
     title: "待处理事件",
-    summary: null,
     payload: {},
-    createdAt: 1,
-    updatedAt: 1,
-    turnSeq: 1,
-    intraTurnOrder: 1,
-    ...overrides,
-  };
+  });
 }
 
 describe("pending interaction hydration", () => {

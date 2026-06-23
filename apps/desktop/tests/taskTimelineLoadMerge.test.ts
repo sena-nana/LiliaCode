@@ -1,24 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTimelineEvent } from "@lilia/contracts";
 import { taskTimelineLoadMergePlan } from "../src/pages/taskDetail/taskTimelineLoadMerge";
+import { timelineEventFixture } from "./timelineTestHelpers";
 
 function event(overrides: Partial<AgentTimelineEvent>): AgentTimelineEvent {
-  return {
-    id: "event-1",
-    taskId: "task-1",
-    turnId: "turn-1",
-    backend: "codex",
-    kind: "command",
+  return timelineEventFixture(overrides, {
     status: "running",
     title: "命令",
-    summary: null,
-    payload: null,
-    createdAt: 1,
-    updatedAt: 1,
-    turnSeq: 1,
-    intraTurnOrder: 1,
-    ...overrides,
-  };
+  });
 }
 
 describe("taskTimelineLoadMergePlan", () => {

@@ -44,6 +44,7 @@ import {
 } from "../src/composables/useToolConsentBridge";
 import { useConnectionStatus } from "../src/composables/useConnectionStatus";
 import { closeChatSidebar, openChatSidebar } from "../src/composables/useChatSidebar";
+import { domRect, placeEditableCaret } from "./domTestHelpers";
 
 const LEGACY_IGNORED_CHAT_ERROR_EVENT_NAME = "chat:error";
 
@@ -59,32 +60,7 @@ async function flushAfterPaint() {
   await Promise.resolve();
 }
 
-async function renderTaskDetail() {
-  const router = createLiliaRouter(createMemoryHistory());
-  await router.push("/projects/lilia/tasks/t-002");
-  await router.isReady();
-
-  const view = render(TaskDetail, {
-    props: {
-      projectId: "lilia",
-      taskId: "t-002",
-    },
-    global: {
-      plugins: [router],
-    },
-  });
-  await flushAfterPaint();
-  await waitFor(() => {
-    expect(view.container.querySelector(".chat-controls")).not.toBeNull();
-  }, { timeout: 3000 });
-  await flushAfterPaint();
-  await waitFor(() => {
-    expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
-  }, { timeout: 3000 });
-  return view;
-}
-
-async function renderProjectDraftTaskDetail(taskId: string) {
+async function renderTaskDetailForTask(taskId: string, timeout?: number) {
   const router = createLiliaRouter(createMemoryHistory());
   await router.push(`/projects/lilia/tasks/${taskId}`);
   await router.isReady();
@@ -101,26 +77,20 @@ async function renderProjectDraftTaskDetail(taskId: string) {
   await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-controls")).not.toBeNull();
-  });
+  }, timeout ? { timeout } : undefined);
   await flushAfterPaint();
   await waitFor(() => {
     expect(view.container.querySelector(".chat-composer [role='textbox']")).toBeInstanceOf(HTMLElement);
-  });
+  }, timeout ? { timeout } : undefined);
   return view;
 }
 
-function placeEditableCaret(element: HTMLElement, offset: number) {
-  const selection = window.getSelection();
-  const range = document.createRange();
-  const textNode = element.firstChild;
-  if (textNode?.nodeType === Node.TEXT_NODE) {
-    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
-  } else {
-    range.selectNodeContents(element);
-    range.collapse(false);
-  }
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+async function renderTaskDetail() {
+  return renderTaskDetailForTask("t-002", 3000);
+}
+
+async function renderProjectDraftTaskDetail(taskId: string) {
+  return renderTaskDetailForTask(taskId);
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {
@@ -169,17 +139,7 @@ async function setActiveBackendForTest(backend: "claude" | "codex") {
 function setChatDropBounds(view: ReturnType<typeof render>) {
   const page = view.container.querySelector(".chat-page") as HTMLElement | null;
   if (!page) throw new Error("未找到聊天页面");
-  page.getBoundingClientRect = () => ({
-    x: 0,
-    y: 0,
-    left: 0,
-    top: 0,
-    right: 800,
-    bottom: 800,
-    width: 800,
-    height: 800,
-    toJSON: () => ({}),
-  });
+  page.getBoundingClientRect = () => domRect(0, 0, 800, 800);
 }
 
 async function expectInitialReasoningHidden(view: ReturnType<typeof render>) {

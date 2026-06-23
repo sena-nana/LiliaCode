@@ -16,6 +16,7 @@ import { setAgentInteractionSettings } from "../src/services/chat";
 import { createTodo } from "../src/services/todos";
 import { resolveAskUserById, useAskUser } from "../src/composables/useAskUser";
 import { mockInvoke } from "./tauriMock";
+import { placeEditableCaret } from "./domTestHelpers";
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
@@ -119,20 +120,6 @@ async function renderTaskDetail() {
     expect(sidebarElement(view.container)).toBeInstanceOf(HTMLElement);
   }, { timeout: 4000 });
   return view;
-}
-
-function placeEditableCaret(element: HTMLElement, offset: number) {
-  const selection = window.getSelection();
-  const range = document.createRange();
-  const textNode = element.firstChild;
-  if (textNode?.nodeType === Node.TEXT_NODE) {
-    range.setStart(textNode, Math.min(offset, textNode.textContent?.length ?? 0));
-  } else {
-    range.selectNodeContents(element);
-    range.collapse(false);
-  }
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 async function setComposerText(view: ReturnType<typeof render>, text: string) {

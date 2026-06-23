@@ -734,6 +734,7 @@ pub fn memory_reset_task_cooldown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_timeline;
 
     fn conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -752,21 +753,6 @@ mod tests {
               title TEXT NOT NULL,
               status TEXT NOT NULL,
               created_at INTEGER NOT NULL
-            );
-            CREATE TABLE agent_timeline_events (
-              id TEXT PRIMARY KEY,
-              task_id TEXT NOT NULL,
-              turn_id TEXT,
-              backend TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              status TEXT NOT NULL,
-              title TEXT NOT NULL,
-              summary TEXT,
-              payload TEXT NOT NULL,
-              created_at INTEGER NOT NULL,
-              updated_at INTEGER NOT NULL,
-              turn_seq INTEGER NOT NULL,
-              intra_turn_order INTEGER NOT NULL
             );
             CREATE TABLE memories (
               id TEXT PRIMARY KEY,
@@ -793,6 +779,7 @@ mod tests {
             "#,
         )
         .unwrap();
+        agent_timeline::create_timeline_schema(&conn).unwrap();
         conn.execute(
             "INSERT INTO projects (id, name, cwd, created_at) VALUES ('project-1', 'Lilia', 'C:/repo', 1)",
             [],

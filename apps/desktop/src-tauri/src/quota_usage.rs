@@ -1280,6 +1280,7 @@ pub fn quota_usage_consume_codex_rate_limit_reset_credit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_timeline;
     use crate::BACKEND_CLAUDE;
     use serde_json::json;
 
@@ -1306,21 +1307,6 @@ mod tests {
               archived    INTEGER NOT NULL DEFAULT 0,
               sort_order  INTEGER NOT NULL DEFAULT 0,
               pinned      INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL,
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
             );
             CREATE TABLE agent_usage_records (
               event_id              TEXT PRIMARY KEY,
@@ -1349,6 +1335,13 @@ mod tests {
             "#,
         )
         .unwrap();
+        agent_timeline::create_timeline_schema(conn).unwrap();
+    }
+
+    fn usage_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        create_usage_schema(&conn);
+        conn
     }
 
     fn timeline_event(
@@ -1394,6 +1387,24 @@ mod tests {
             "fetchedAt": 1,
             "error": null,
         })
+    }
+
+    fn insert_tool_event(
+        conn: &Connection,
+        id: &str,
+        kind: &str,
+        title: &str,
+        payload: JsonValue,
+        created_at: i64,
+        order: i64,
+    ) {
+        conn.execute(
+            r#"INSERT INTO agent_timeline_events
+               (id, task_id, turn_id, backend, kind, status, title, payload, created_at, updated_at, turn_seq, intra_turn_order)
+               VALUES (?1, 'task-1', 'turn-1', 'claude', ?2, 'success', ?3, ?4, ?5, ?5, 0, ?6)"#,
+            params![id, kind, title, payload.to_string(), created_at, order],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1497,8 +1508,7 @@ mod tests {
 
     #[test]
     fn upserts_usage_record_for_same_event() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_usage_schema(&conn);
+        let conn = usage_conn();
 
         let first = timeline_event(
             "event-1",
@@ -1527,8 +1537,7 @@ mod tests {
 
     #[test]
     fn stats_aggregate_range_backend_filter_and_cost_coverage() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_usage_schema(&conn);
+        let conn = usage_conn();
         let day = DAY_MS;
         for event in [
             timeline_event(
@@ -1592,37 +1601,26 @@ mod tests {
 
     #[test]
     fn stats_counts_tool_activity_without_token_attribution() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_usage_schema(&conn);
+        let conn = usage_conn();
         let day = DAY_MS;
-        conn.execute(
-            r#"INSERT INTO agent_timeline_events
-               (id, task_id, turn_id, backend, kind, status, title, payload, created_at, updated_at, turn_seq, intra_turn_order)
-               VALUES (?1, 'task-1', 'turn-1', 'claude', ?2, 'success', ?3, ?4, ?5, ?5, 0, ?6)"#,
-            params![
-                "tool-1",
-                "command",
-                "Bash",
-                json!({ "toolName": "Bash" }).to_string(),
-                day * 10 + 2,
-                0
-            ],
-        )
-        .unwrap();
-        conn.execute(
-            r#"INSERT INTO agent_timeline_events
-               (id, task_id, turn_id, backend, kind, status, title, payload, created_at, updated_at, turn_seq, intra_turn_order)
-               VALUES (?1, 'task-1', 'turn-1', 'claude', ?2, 'success', ?3, ?4, ?5, ?5, 0, ?6)"#,
-            params![
-                "tool-2",
-                "search",
-                "Grep",
-                json!({ "subkind": "grep" }).to_string(),
-                day * 10 + 3,
-                1
-            ],
-        )
-        .unwrap();
+        insert_tool_event(
+            &conn,
+            "tool-1",
+            "command",
+            "Bash",
+            json!({ "toolName": "Bash" }),
+            day * 10 + 2,
+            0,
+        );
+        insert_tool_event(
+            &conn,
+            "tool-2",
+            "search",
+            "Grep",
+            json!({ "subkind": "grep" }),
+            day * 10 + 3,
+            1,
+        );
 
         let all = stats(
             &conn,
@@ -1648,8 +1646,7 @@ mod tests {
 
     #[test]
     fn query_usage_scope_returns_requested_slice() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_usage_schema(&conn);
+        let conn = usage_conn();
         let day = DAY_MS;
         record_from_timeline_event(
             &conn,
@@ -1680,8 +1677,7 @@ mod tests {
 
     #[test]
     fn stats_empty_range_returns_full_daily_buckets() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_usage_schema(&conn);
+        let conn = usage_conn();
 
         let result = stats(
             &conn,

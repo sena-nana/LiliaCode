@@ -2031,6 +2031,7 @@ fn clip_context_text(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_timeline;
 
     #[derive(Default)]
     struct CollectingLifecycleObserver {
@@ -2058,24 +2059,10 @@ mod tests {
               depends_on_id TEXT NOT NULL,
               PRIMARY KEY (task_id, depends_on_id)
             );
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
-            );
             "#,
         )
         .unwrap();
+        agent_timeline::create_timeline_schema(conn).unwrap();
     }
 
     fn insert_dependency_task(
