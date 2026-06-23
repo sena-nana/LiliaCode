@@ -23,6 +23,7 @@ class RemoteRepositoryTest {
         val saved = RemoteRepository(preferences).savePairing(ticket())
 
         val restored = RemoteRepository(preferences).activePc()
+        val savedPcs = RemoteRepository(preferences).savedPcs()
 
         assertNotNull(restored)
         assertEquals("pc-endpoint", saved.endpointId)
@@ -32,6 +33,70 @@ class RemoteRepositoryTest {
         assertEquals("lilia-remote://pair?v=1", restored?.pairingUri)
         assertEquals("http://192.168.1.12:41478", restored?.bridgeUrl)
         assertTrue((restored?.lastActiveAt ?: 0L) > 0L)
+        assertEquals(listOf("pc-endpoint"), savedPcs.map { it.endpointId })
+    }
+
+    @Test
+    fun savePairingPersistsMultipleSavedPcsAndActivatesLatestPairing() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+
+        repository.savePairing(ticket(endpointId = "pc-desk", pcName = "Desk"))
+        repository.savePairing(
+            ticket(
+                endpointId = "pc-studio",
+                pcName = "Studio",
+                bridgeUrl = "http://192.168.1.44:41478",
+                rawUri = "lilia-remote://pair?v=1&pc=studio",
+            ),
+        )
+
+        val restored = RemoteRepository(preferences)
+
+        assertEquals("pc-studio", restored.activePc()?.endpointId)
+        assertEquals(setOf("pc-desk", "pc-studio"), restored.savedPcs().map { it.endpointId }.toSet())
+    }
+
+    @Test
+    fun switchActivePcPersistsSelectedSavedPcAndUpdatesSeenAt() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+        repository.savePairing(ticket(endpointId = "pc-desk", pcName = "Desk"))
+        repository.savePairing(
+            ticket(
+                endpointId = "pc-studio",
+                pcName = "Studio",
+                bridgeUrl = "http://192.168.1.44:41478",
+            ),
+        )
+
+        val selected = repository.switchActivePc("pc-desk", now = 1710000004321)
+        val restored = RemoteRepository(preferences)
+
+        assertEquals("pc-desk", selected?.endpointId)
+        assertEquals("pc-desk", restored.activePc()?.endpointId)
+        assertEquals(1710000004321, restored.activePc()?.lastActiveAt)
+        assertEquals(1710000004321, restored.savedPcs().first { it.endpointId == "pc-desk" }.lastActiveAt)
+    }
+
+    @Test
+    fun forgetPcRemovesOnlySelectedSavedPcAndClearsActiveWhenItMatches() {
+        val preferences = InMemoryRemotePreferences()
+        val repository = RemoteRepository(preferences)
+        repository.savePairing(ticket(endpointId = "pc-desk", pcName = "Desk"))
+        val studio = repository.savePairing(
+            ticket(
+                endpointId = "pc-studio",
+                pcName = "Studio",
+                bridgeUrl = "http://192.168.1.44:41478",
+            ),
+        )
+
+        repository.forgetPc(studio)
+        val restored = RemoteRepository(preferences)
+
+        assertNull(restored.activePc())
+        assertEquals(listOf("pc-desk"), restored.savedPcs().map { it.endpointId })
     }
 
     @Test
@@ -102,15 +167,20 @@ class RemoteRepositoryTest {
         assertTrue((RemoteRepository(preferences).activePc()?.lastActiveAt ?: 0L) != 1710000001234L)
     }
 
-    private fun ticket(bridgeUrl: String = "http://192.168.1.12:41478"): RemotePairingTicket =
+    private fun ticket(
+        endpointId: String = "pc-endpoint",
+        pcName: String = "Desk",
+        bridgeUrl: String = "http://192.168.1.12:41478",
+        rawUri: String = "lilia-remote://pair?v=1",
+    ): RemotePairingTicket =
         RemotePairingTicket(
             protocolVersion = 1,
             ticketId = "ticket-1",
             challenge = "challenge-1",
-            endpointId = "pc-endpoint",
-            pcName = "Desk",
+            endpointId = endpointId,
+            pcName = pcName,
             bridgeUrl = bridgeUrl,
-            rawUri = "lilia-remote://pair?v=1",
+            rawUri = rawUri,
         )
 }
 

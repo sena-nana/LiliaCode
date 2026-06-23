@@ -27,6 +27,15 @@ class MainActivityStateTest {
     }
 
     @Test
+    fun switchingActivePcResetsDerivedStateAndMakesOldResultsStale() {
+        val oldPc = savedPc(endpointId = "pc-1", bridgeUrl = "http://192.168.1.12:41478")
+        val newPc = savedPc(endpointId = "pc-2", bridgeUrl = "http://192.168.1.13:41478")
+
+        assertTrue(shouldIgnorePcResult(newPc, oldPc))
+        assertFalse(shouldIgnorePcResult(newPc, newPc))
+    }
+
+    @Test
     fun unauthorizedRemoteFailureRequiresPairAgain() {
         val revoked = RemoteBridgeException(
             code = "unauthorized",

@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -81,7 +83,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     val fallbackRepository = remember { repository }
     val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
     val scope = rememberCoroutineScope()
+    val initialSavedPcs = remember { fallbackRepository?.savedPcs().orEmpty() }
     val initialPc = remember { fallbackRepository?.activePc() }
+    var savedPcs by remember { mutableStateOf(initialSavedPcs) }
     var activePc by remember { mutableStateOf(initialPc) }
     var selectedTask by remember { mutableStateOf<RemoteTaskDetail?>(null) }
     var inboxTasks by remember { mutableStateOf<List<RemoteTaskSummary>>(emptyList()) }
@@ -95,10 +99,31 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var pairingError by remember { mutableStateOf("") }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
-    fun acceptPairedPc(pc: SavedPc) {
-        activePc = pc
+    fun resetActivePcDerivedState() {
         selectedTask = null
         inboxTasks = emptyList()
+        inboxLoading = false
+        detailLoading = false
+        bridgeStatus = null
+        providerStatus = null
+        pendingBranchAnchor = null
+    }
+
+    fun acceptPairedPc(pc: SavedPc) {
+        savedPcs = fallbackRepository?.savedPcs() ?: listOf(pc)
+        activePc = pc
+        resetActivePcDerivedState()
+        bridgeTone = "Listening"
+        pairingError = ""
+    }
+
+    fun selectActivePc(pc: SavedPc) {
+        val selected = fallbackRepository?.switchActivePc(pc.endpointId) ?: pc
+        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
+        activePc = selected
+        resetActivePcDerivedState()
+        bridgeTone = "Listening"
+        remoteError = ""
         pairingError = ""
     }
 
@@ -138,11 +163,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             return
         }
         fallbackRepository?.clearActivePc()
+        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = null
-        selectedTask = null
-        inboxTasks = emptyList()
-        bridgeStatus = null
-        providerStatus = null
+        resetActivePcDerivedState()
         bridgeTone = "Pair again"
         remoteError = message
         pairingError = message
@@ -357,7 +380,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteError = ""
         scope.launch {
             loadInbox(pc, remoteClient)
-            inboxLoading = false
+            if (!shouldIgnorePcResult(activePc, pc)) {
+                inboxLoading = false
+            }
         }
     }
 
@@ -378,7 +403,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         inboxLoading = true
         remoteError = ""
         loadInbox(pc, remoteClient)
-        inboxLoading = false
+        if (!shouldIgnorePcResult(activePc, pc)) {
+            inboxLoading = false
+        }
     }
 
     LaunchedEffect(
@@ -440,12 +467,14 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 selectedTask != null -> TaskDetailScreen(
                     pc = activePc!!,
                     detail = selectedTask!!,
+                    savedPcs = savedPcs,
                     capabilities = bridgeStatus?.capabilities ?: RemoteCapabilities(),
                     providerStatus = providerStatus,
                     loading = detailLoading,
                     error = remoteError,
                     pendingBranchAnchor = pendingBranchAnchor,
                     onBack = { selectedTask = null },
+                    onSelectPc = { selectActivePc(it) },
                     onRefresh = { openTask(activePc!!, selectedTask!!.task.taskId) },
                     onInterrupt = {
                         val pc = activePc!!
@@ -502,17 +531,22 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 )
                 else -> InboxScreen(
                     pc = activePc!!,
+                    savedPcs = savedPcs,
                     tasks = inboxTasks,
                     loading = inboxLoading,
                     error = remoteError,
                     bridgeTone = bridgeTone,
+                    onSelectPc = { selectActivePc(it) },
                     onRefresh = { refreshInbox(activePc!!) },
                     onOpenTask = { openTask(activePc!!, it.taskId) },
                     onForgetPc = {
-                        fallbackRepository?.clearActivePc()
+                        val pc = activePc!!
+                        fallbackRepository?.forgetPc(pc)
+                        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs.filterNot {
+                            activePcConnectionMatches(it, pc)
+                        }
                         activePc = null
-                        bridgeStatus = null
-                        providerStatus = null
+                        resetActivePcDerivedState()
                     },
                 )
             }
@@ -666,10 +700,12 @@ private fun PairingScreen(
 @Composable
 private fun InboxScreen(
     pc: SavedPc,
+    savedPcs: List<SavedPc>,
     tasks: List<RemoteTaskSummary>,
     loading: Boolean,
     error: String,
     bridgeTone: String,
+    onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onOpenTask: (RemoteTaskSummary) -> Unit,
     onForgetPc: () -> Unit,
@@ -680,7 +716,14 @@ private fun InboxScreen(
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        RemoteHeader(title = "Active PC", subtitle = pc.displayName, tone = bridgeTone)
+        RemoteHeader(
+            title = "Active PC",
+            subtitle = pc.displayName,
+            tone = bridgeTone,
+            activePc = pc,
+            savedPcs = savedPcs,
+            onSelectPc = onSelectPc,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onForgetPc, shape = RoundedCornerShape(8.dp)) {
                 Text("Forget PC")
@@ -718,12 +761,14 @@ private fun InboxScreen(
 private fun TaskDetailScreen(
     pc: SavedPc,
     detail: RemoteTaskDetail,
+    savedPcs: List<SavedPc>,
     capabilities: RemoteCapabilities,
     providerStatus: RemoteProviderStatus?,
     loading: Boolean,
     error: String,
     pendingBranchAnchor: RemoteBranchAnchor?,
     onBack: () -> Unit,
+    onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
     onRetry: () -> Unit,
@@ -744,7 +789,14 @@ private fun TaskDetailScreen(
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RemoteHeader(title = pc.displayName, subtitle = detail.task.title, tone = detail.runtimePhase)
+        RemoteHeader(
+            title = pc.displayName,
+            subtitle = detail.task.title,
+            tone = detail.runtimePhase,
+            activePc = pc,
+            savedPcs = savedPcs,
+            onSelectPc = onSelectPc,
+        )
         OutlinedButton(onClick = onBack, shape = RoundedCornerShape(8.dp)) {
             Text("Back")
         }
@@ -946,22 +998,70 @@ private fun TaskDetailScreen(
 }
 
 @Composable
-private fun RemoteHeader(title: String, subtitle: String, tone: String) {
+private fun RemoteHeader(
+    title: String,
+    subtitle: String,
+    tone: String,
+    activePc: SavedPc? = null,
+    savedPcs: List<SavedPc> = emptyList(),
+    onSelectPc: (SavedPc) -> Unit = {},
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val switchablePcs = savedPcs.filter { pc ->
+        activePc == null || !activePcConnectionMatches(activePc, pc)
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = Muted)
             Text(
                 subtitle,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (switchablePcs.isNotEmpty()) {
+                Box {
+                    OutlinedButton(
+                        onClick = { menuExpanded = true },
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("Switch")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        switchablePcs.forEach { pc ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(pc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            pc.bridgeUrl,
+                                            color = Muted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onSelectPc(pc)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(8.dp)
