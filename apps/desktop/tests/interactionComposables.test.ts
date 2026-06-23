@@ -5,24 +5,7 @@ import type { ToolConsentRequest } from "@lilia/contracts";
 import { useFocusOnActivation } from "../src/composables/useFocusOnActivation";
 import { useInlineRename } from "../src/composables/useInlineRename";
 import { useEditableToolCommand } from "../src/composables/useEditableToolCommand";
-
-function toolConsentRequest(overrides: Partial<ToolConsentRequest> = {}): ToolConsentRequest {
-  return {
-    taskId: "task-1",
-    turnId: "turn-1",
-    backend: "claude",
-    requestId: "tool-1",
-    toolName: "Bash",
-    input: { command: "pwd" },
-    title: null,
-    displayName: null,
-    description: null,
-    blockedPath: null,
-    decisionReason: null,
-    toolUseId: null,
-    ...overrides,
-  };
-}
+import { toolConsentRequestFixture as toolConsentRequest } from "./interactionTestHelpers";
 
 describe("interaction composables", () => {
   it("focuses and selects the active input after the DOM has updated", async () => {

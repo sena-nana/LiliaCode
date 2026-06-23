@@ -1,31 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTimelineEvent } from "@lilia/contracts";
 import {
   hasTimelinePendingActionState,
   timelinePendingActionState,
 } from "../src/components/chat/timelinePendingActions";
 import type { PendingAgentAction } from "../src/composables/pendingAgentActions";
-
-function timelineEvent(
-  overrides: Partial<AgentTimelineEvent>,
-): AgentTimelineEvent {
-  return {
-    id: "event-1",
-    taskId: "task-1",
-    turnId: "turn-1",
-    backend: "codex",
-    kind: "plan",
-    status: "requires_action",
-    title: "Codex plan",
-    summary: "改代码",
-    payload: { backend: "codex", approved: null },
-    createdAt: 1,
-    updatedAt: 1,
-    turnSeq: 0,
-    intraTurnOrder: 0,
-    ...overrides,
-  };
-}
+import { pendingPlanTimelineEvent as timelineEvent } from "./timelineTestHelpers";
 
 function planApprovalAction(): PendingAgentAction {
   return {
