@@ -151,7 +151,7 @@ pub fn assistant_ai_test_connection(config: AssistantAIConfig) -> AssistantAITes
 pub(crate) fn assistant_ai_optimize_prompt(
     app: AppHandle,
     input: assistant_ai::PromptOptimizeInput,
-) -> Result<String, String> {
+) -> Result<assistant_ai::PromptOptimizeResult, String> {
     assistant_ai::optimize_prompt(app, input)
 }
 

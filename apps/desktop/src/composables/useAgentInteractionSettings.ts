@@ -81,6 +81,7 @@ export async function updateAgentInteractionSettings(
     next.nonInterruptMode === previous.nonInterruptMode &&
     next.debug === previous.debug &&
     next.permissionMode === previous.permissionMode &&
+    next.mainAgentPromptMode === previous.mainAgentPromptMode &&
     sameCodexProfile(next.codexProfile, previous.codexProfile) &&
     sameSubagentMode(next.subagentMode, previous.subagentMode) &&
     sameJsonValue(next.autoTurnDecision, previous.autoTurnDecision)
@@ -104,6 +105,7 @@ export function useAgentInteractionSettings() {
     nonInterruptMode: computed(() => settings.value.nonInterruptMode),
     debug: computed(() => settings.value.debug),
     permissionMode: computed(() => settings.value.permissionMode),
+    mainAgentPromptMode: computed(() => settings.value.mainAgentPromptMode),
     load: loadAgentInteractionSettings,
     loadSubagents: loadCustomSubagentDefinitions,
     saveSubagent: saveCustomSubagentDefinition,

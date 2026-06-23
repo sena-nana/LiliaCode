@@ -488,6 +488,11 @@ pub(crate) fn start_runner_session<R: Runtime>(
         runtime_command_for_thread.as_ref(),
         runtime_options_for_thread.as_ref(),
     );
+    let runtime_options = apply_main_agent_prompt_to_runtime_options(
+        app_handle,
+        &backend_for_thread,
+        runtime_options,
+    );
     let runtime_options = crate::memory::apply_memory_baseline_to_runtime_options(
         app_handle,
         &task_id_for_thread,
@@ -1631,6 +1636,31 @@ fn ensure_dependency_chain_done(
     Ok(())
 }
 
+fn apply_main_agent_prompt_to_runtime_options<R: Runtime>(
+    app: &AppHandle<R>,
+    backend: &str,
+    runtime_options: Option<JsonValue>,
+) -> Option<JsonValue> {
+    let settings = load_agent_interaction_settings(app);
+    append_main_agent_prompt_to_runtime_options(
+        backend,
+        runtime_options,
+        &settings.main_agent_prompt_mode,
+    )
+}
+
+fn append_main_agent_prompt_to_runtime_options(
+    backend: &str,
+    runtime_options: Option<JsonValue>,
+    mode: &str,
+) -> Option<JsonValue> {
+    crate::memory::append_context_to_runtime_options(
+        backend,
+        runtime_options,
+        &crate::prompt_contract::build_main_agent_prompt(mode),
+    )
+}
+
 fn apply_dependency_context_to_runtime_options<R: Runtime>(
     app: &AppHandle<R>,
     task_id: &str,
@@ -1676,6 +1706,55 @@ fn build_dependency_context_core(
         });
     }
     Ok(format_dependency_context(&items))
+}
+
+#[cfg(test)]
+mod main_agent_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn main_agent_prompt_appends_to_existing_codex_context() {
+        let value = append_main_agent_prompt_to_runtime_options(
+            BACKEND_CODEX,
+            Some(serde_json::json!({
+                "provider": {
+                    "codex": {
+                        "additionalContext": "existing context"
+                    }
+                }
+            })),
+            "aggressive",
+        )
+        .unwrap();
+        let context = value["provider"]["codex"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let aggressive = crate::prompt_contract::main_agent_prompt_mode("aggressive");
+        let first_skill_title = crate::prompt_contract::main_agent_prompts()
+            .skill_order
+            .first()
+            .and_then(|key| crate::prompt_contract::main_agent_prompts().skills.get(key))
+            .map(|skill| skill.title.as_str())
+            .unwrap();
+
+        assert!(context.starts_with("existing context\n\n"));
+        assert!(context.contains(aggressive));
+        assert!(context.contains(first_skill_title));
+    }
+
+    #[test]
+    fn main_agent_prompt_unknown_mode_uses_conservative_context() {
+        let value =
+            append_main_agent_prompt_to_runtime_options(BACKEND_CLAUDE, None, "unknown").unwrap();
+        let context = value["provider"]["claude"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        let conservative = crate::prompt_contract::main_agent_prompt_mode("conservative");
+        let aggressive = crate::prompt_contract::main_agent_prompt_mode("aggressive");
+
+        assert!(context.contains(conservative));
+        assert!(!context.contains(aggressive));
+    }
 }
 
 fn load_dependency_tasks(

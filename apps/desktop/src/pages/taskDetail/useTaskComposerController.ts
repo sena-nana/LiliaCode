@@ -22,6 +22,7 @@ import type {
   ChatModelOption,
   ChatRuntimePhase,
   ChatSlashCommandWorkflow,
+  ChatWorkflow,
   LiliaBatchApplyInput,
   LiliaThreadGoal,
   LiliaReviewTarget,
@@ -747,6 +748,7 @@ export function useTaskComposerController(options: {
     content: string,
     outgoingAttachments: ChatAttachment[] = [],
     outgoingConversationReferences: ChatConversationReference[] = [],
+    workflow: ChatWorkflow | null = null,
   ) {
     if (!context.hasContext.value) return;
     if (reportTaskRunBlock()) return;
@@ -759,6 +761,7 @@ export function useTaskComposerController(options: {
       const branchAnchor = pendingBranchAnchor.value;
       await sendAgentMessage({
         turn: { content, outgoingAttachments, outgoingConversationReferences },
+        workflow,
         runtimeCommand: branchAnchor
           ? {
             type: "session_fork",
