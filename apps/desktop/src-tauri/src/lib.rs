@@ -36,6 +36,7 @@ mod project_architecture_contract;
 mod project_contract;
 mod project_shell;
 mod projects_tasks;
+mod prompt_contract;
 mod provider;
 mod quota_usage;
 mod quota_usage_contract;

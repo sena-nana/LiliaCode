@@ -31,6 +31,10 @@ import {
   readRunnerWorkflow,
 } from "../runnerCommand.mjs";
 import {
+  buildCodexPlanPrompt,
+  buildCodexWorkflowPrompt,
+} from "../promptManager.mjs";
+import {
   ensureProviderRuntimeOptions,
   handleExperimentalProviderOptions,
   readProviderRuntimeOptions,
@@ -360,21 +364,11 @@ export async function startCodexAppServerThread(server, cmd, cwdFn = process.cwd
 }
 
 export function buildCodexPlanRevisionPrompt(revisionRequest) {
-  return [
-    "用户要求修改上一版计划，暂不执行当前计划。",
-    `修改要求：${revisionRequest}`,
-    "请根据这条修改要求更新计划，并再次等待 Lilia 的计划确认；在计划确认前不要执行文件修改或命令。",
-  ].join("\n");
+  return buildCodexPlanPrompt("revision", revisionRequest);
 }
 
 export function buildCodexPlanExecutionPrompt(plan) {
-  return [
-    "用户已确认上一版计划。",
-    "请按以下已确认计划继续执行；不要再次请求计划确认，除非用户提出新的计划修改要求。",
-    "",
-    "已确认计划：",
-    plan,
-  ].join("\n");
+  return buildCodexPlanPrompt("execution", plan);
 }
 
 function codexTurnIdFromStartResult(result) {
@@ -626,58 +620,16 @@ function codexReviewTargetDescription(target) {
 }
 
 export function buildCodexFixSuggestionPrompt(workflow, cmd) {
-  const prompt = stringOrNull(cmd?.prompt)?.trim() || "";
-  const instructions = workflow.instructions || "";
-  const extraContext = prompt && prompt !== instructions ? prompt : "";
-  const applying = workflow.mode === "apply";
-  return [
-    "Lilia Codex fix suggestion workflow.",
-    "",
-    `Target: ${codexReviewTargetSummary(workflow.target)}`,
-    `Target details: ${codexReviewTargetDescription(workflow.target)}`,
-    `Workspace cwd: ${stringOrNull(cmd?.cwd) || ""}`,
-    `Mode: ${workflow.mode}`,
-    "",
-    applying
-      ? "Goal: identify the concrete fixes needed for the target and apply them when safe."
-      : "Goal: identify the concrete fixes needed for the target and provide actionable suggestions only.",
-    applying
-      ? "You may edit files and run commands as needed, subject to Lilia/Codex approval prompts."
-      : "Do not edit files or run modifying commands. Read, inspect, and propose the patch intent or exact changes for the user to review.",
-    "Use existing Lilia approval and AskUser flows whenever user confirmation is needed.",
-    "",
-    "User instructions:",
-    instructions || "(none)",
-    "",
-    "Additional composer context:",
-    extraContext || "(none)",
-  ].join("\n");
+  return buildCodexWorkflowPrompt("fixSuggestion", {
+    workflow,
+    cmd,
+    targetSummary: codexReviewTargetSummary(workflow.target),
+    targetDescription: codexReviewTargetDescription(workflow.target),
+  });
 }
 
 export function buildCodexBatchApplyPrompt(workflow, cmd) {
-  const prompt = stringOrNull(cmd?.prompt)?.trim() || "";
-  const instructions = workflow.instructions || "";
-  const extraContext = prompt && prompt !== instructions ? prompt : "";
-  return [
-    "Lilia Codex batch apply workflow.",
-    "",
-    `Source kind: ${workflow.sourceKind}`,
-    `Source turn id: ${workflow.sourceTurnId}`,
-    `Workspace cwd: ${stringOrNull(cmd?.cwd) || ""}`,
-    "",
-    "Goal: turn the review or fix suggestions below into a concrete batch of safe code changes.",
-    "First produce a clear implementation plan and wait for Lilia plan approval before editing files or running modifying commands.",
-    "After approval, apply the changes in the current workspace, keep the patch focused on the source suggestions, and use existing Lilia/Codex approval prompts whenever user confirmation is needed.",
-    "",
-    "Source suggestions:",
-    workflow.sourceSummary,
-    "",
-    "User instructions:",
-    instructions || "(none)",
-    "",
-    "Additional composer context:",
-    extraContext || "(none)",
-  ].join("\n");
+  return buildCodexWorkflowPrompt("batchApply", { workflow, cmd });
 }
 
 function readCollaborationModes(result) {

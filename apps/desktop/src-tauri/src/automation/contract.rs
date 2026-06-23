@@ -14,8 +14,6 @@ struct AutomationContract {
     default_automation_trigger_kind: String,
     default_automation_logic_kind: String,
     default_automation_logic_path: String,
-    default_automation_agent_prompt: String,
-    default_automation_human_prompt: String,
     automation_run_statuses: Vec<String>,
     automation_changed_event_name: String,
     automation_run_started_event_name: String,
@@ -110,11 +108,11 @@ pub(crate) fn default_logic_path() -> &'static str {
 }
 
 pub(crate) fn default_agent_prompt() -> &'static str {
-    &automation_contract().default_automation_agent_prompt
+    crate::prompt_contract::default_automation_agent_prompt()
 }
 
 pub(crate) fn default_human_prompt() -> &'static str {
-    &automation_contract().default_automation_human_prompt
+    crate::prompt_contract::default_automation_human_prompt()
 }
 
 pub(crate) fn scope_event_kinds() -> &'static [String] {

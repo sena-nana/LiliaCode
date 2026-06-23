@@ -31,6 +31,7 @@
     "./permissionModes.mjs": "./src/permissionModes.mjs",
     "./pluginsContract.mjs": "./src/pluginsContract.mjs",
     "./popupCommandsContract.mjs": "./src/popupCommandsContract.mjs",
+    "./promptContract.mjs": "./src/promptContract.mjs",
     "./provider.mjs": "./src/providerRuntime.mjs",
     "./providerCommandsContract.mjs": "./src/providerCommandsContract.mjs",
     "./projectCommandsContract.mjs": "./src/projectCommandsContract.mjs",

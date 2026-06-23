@@ -11,8 +11,8 @@ use super::config::{assistant_ai_secret, load_assistant_ai_config};
 use super::credentials::normalize_secret;
 use super::types::{AssistantAIConfig, AssistantAITestResult};
 use crate::chat::types::{ChatAttachment, ChatConversationReference};
+use crate::prompt_contract;
 
-const PROMPT_OPTIMIZE_INSTRUCTION: &str = "你是 Lilia 的提示词优化助手。只输出优化后的提示词正文，不要解释，不要 Markdown 包装。目标：简单定位问题或入口，明确任务范围、边界、预期输出，保留用户原意、语言和关键约束。";
 const PROMPT_OPTIMIZE_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,8 +110,12 @@ pub(crate) fn optimize_prompt<R: Runtime>(
     }
     let request_prompt = build_prompt_optimize_request(prompt, &input);
     let text = if codex_account_spark_enabled(&app) {
-        request_codex_account_spark(&app, &request_prompt, PROMPT_OPTIMIZE_INSTRUCTION)
-            .map_err(|err| format!("提示词优化失败：{err}"))?
+        request_codex_account_spark(
+            &app,
+            &request_prompt,
+            prompt_contract::prompt_optimize_system_instruction(),
+        )
+        .map_err(|err| format!("提示词优化失败：{err}"))?
     } else {
         let model = assistant_ai_model_request(&app)?;
         request_openai_compatible(&model, &request_prompt)?
@@ -153,7 +157,7 @@ fn request_openai_compatible(model: &AssistantAIConfig, prompt: &str) -> Result<
         .json(&json!({
             "model": model.model,
             "messages": [
-                { "role": "system", "content": PROMPT_OPTIMIZE_INSTRUCTION },
+                { "role": "system", "content": prompt_contract::prompt_optimize_system_instruction() },
                 { "role": "user", "content": prompt }
             ],
             "temperature": 0.2,
@@ -205,16 +209,11 @@ fn build_prompt_optimize_request(prompt: &str, input: &PromptOptimizeInput) -> S
         })
         .collect::<Vec<_>>();
     json!({
-        "instruction": "优化用户准备发送给编程 Agent 的提示词。只返回优化后的提示词正文。",
+        "instruction": prompt_contract::prompt_optimize_request_instruction(),
         "originalPrompt": prompt,
         "attachments": attachments,
         "conversationReferences": conversation_references,
-        "requirements": [
-            "简单定位：指出应从哪些模块、文件、功能入口或现象开始查。",
-            "明确范围：写清本次要做什么、不做什么、需要保持哪些契约。",
-            "保留原意：不要扩大任务，不要替用户新增未表达的目标。",
-            "输出应可直接替换输入框内容。"
-        ]
+        "requirements": prompt_contract::prompt_optimize_requirements()
     })
     .to_string()
 }

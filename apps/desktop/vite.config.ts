@@ -68,6 +68,9 @@ export default defineConfig(async ({ command, mode }) => ({
       "@lilia/contracts/permissionModes.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/permissionModes.vite.mjs", import.meta.url),
       ),
+      "@lilia/contracts/promptContract.mjs": fileURLToPath(
+        new URL("../../packages/contracts/src/promptContract.mjs", import.meta.url),
+      ),
       "@lilia/contracts/provider.mjs": fileURLToPath(
         new URL("../../packages/contracts/src/providerRuntime.mjs", import.meta.url),
       ),
