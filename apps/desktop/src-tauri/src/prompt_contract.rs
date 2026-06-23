@@ -257,7 +257,35 @@ mod tests {
         assert!(!main_agent.skill_order.is_empty());
         assert!(!main_agent_prompt_mode("conservative").trim().is_empty());
         assert!(!main_agent_prompt_mode("aggressive").trim().is_empty());
-        assert!(build_main_agent_prompt("aggressive").len() > main_agent.base_prompt.len());
+        assert_eq!(
+            main_agent.skill_order.len(),
+            main_agent.skills.len(),
+            "mainAgent.skillOrder must list every configured skill"
+        );
+        let built_main_agent_prompt = build_main_agent_prompt("aggressive");
+        assert!(built_main_agent_prompt.len() > main_agent.base_prompt.len());
+        for key in main_agent.skills.keys() {
+            assert!(main_agent.skill_order.contains(key));
+        }
+        for key in &main_agent.skill_order {
+            let skill = main_agent
+                .skills
+                .get(key)
+                .unwrap_or_else(|| panic!("mainAgent.skillOrder references missing skill: {key}"));
+            assert!(
+                !skill.title.trim().is_empty(),
+                "mainAgent skill {key} must have a title"
+            );
+            assert!(
+                !skill.prompt.trim().is_empty(),
+                "mainAgent skill {key} must have a prompt"
+            );
+            assert!(
+                built_main_agent_prompt.contains(&format!("## {}", skill.title.trim())),
+                "mainAgent prompt must include skill title: {}",
+                skill.title
+            );
+        }
         assert!(!title_system_instruction().trim().is_empty());
         assert!(!prompt_router_system_instruction().trim().is_empty());
         assert!(!prompt_router_request_instruction().trim().is_empty());
