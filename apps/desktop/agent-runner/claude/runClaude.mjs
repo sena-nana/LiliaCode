@@ -88,6 +88,10 @@ import {
   readProviderRuntimeOptions,
 } from "../providerOptions.mjs";
 import {
+  buildClaudeSystemPrompt,
+  buildClaudeWorkflowPrompt as buildManagedClaudeWorkflowPrompt,
+} from "../promptManager.mjs";
+import {
   readRunnerRuntimeCommand,
   readRunnerWorkflow,
 } from "../runnerCommand.mjs";
@@ -107,36 +111,10 @@ import {
 } from "./timeline.mjs";
 import { isRecord, stringOrNull } from "../utils.mjs";
 
-export function buildClaudePlatformAppend(platform = process.platform) {
-  if (platform !== "win32") return "";
-  return [
-    "运行平台：Windows（win32）。",
-    "Bash 工具在 Windows 上走 Git Bash 的 /usr/bin/bash，仅认 POSIX 命令，不认 PowerShell cmdlet（Get-ChildItem / Select-Object / Format-Table 等）。",
-    "- 默认使用 POSIX 命令：ls / cat / grep / find / awk / sed / head / tail …",
-    '- 必须用 PowerShell 时显式包装：powershell.exe -NoProfile -Command "<原 PS 命令> | Out-String"。',
-    "- 路径用正斜杠或在双引号内用反斜杠都可。",
-  ].join("\n");
-}
-
-export function buildClaudeSystemPrompt(platform = process.platform) {
-  const append = buildClaudePlatformAppend(platform);
-  const base = { type: "preset", preset: "claude_code" };
-  return append ? { ...base, append } : base;
-}
-
-export function appendClaudeAdditionalContext(systemPrompt, additionalContext) {
-  const context = stringOrNull(additionalContext)?.trim();
-  if (!context) return systemPrompt;
-  if (isRecord(systemPrompt)) {
-    const append = stringOrNull(systemPrompt.append)?.trim();
-    return {
-      ...systemPrompt,
-      append: append ? `${append}\n\n${context}` : context,
-    };
-  }
-  const prompt = stringOrNull(systemPrompt)?.trim();
-  return prompt ? `${prompt}\n\n${context}` : context;
-}
+export {
+  buildClaudePlatformAppend,
+  buildClaudeSystemPrompt,
+} from "../promptManager.mjs";
 
 export async function* singleClaudePromptStream(prompt) {
   yield {
@@ -368,53 +346,16 @@ function readLiliaBatchApplyWorkflow(cmd) {
 
 function buildClaudeWorkflowPrompt(cmd, providerSettings = null) {
   const review = readLiliaReviewWorkflow(cmd);
-  if (review) {
-    return [
-      "Lilia code review workflow.",
-      `Review target: ${liliaReviewTargetText(review.target)}.`,
-      "Focus on bugs, regressions, risky behavior, and missing tests. Put findings first with file and line references where possible.",
-      review.instructions ? `User instructions: ${review.instructions}` : null,
-      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
-    ].filter(Boolean).join("\n");
-  }
   const fix = readLiliaFixSuggestionWorkflow(cmd);
-  if (fix) {
-    return [
-      "Lilia fix suggestion workflow.",
-      `Target: ${liliaReviewTargetText(fix.target)}.`,
-      fix.mode === "apply"
-        ? "Apply the smallest correct fix for the target. Keep changes scoped."
-        : "Suggest a concrete fix plan without editing files unless explicitly necessary.",
-      fix.instructions ? `User instructions: ${fix.instructions}` : null,
-      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
-    ].filter(Boolean).join("\n");
-  }
   const batch = readLiliaBatchApplyWorkflow(cmd);
-  if (batch) {
-    return [
-      "Lilia batch apply workflow.",
-      `Source kind: ${batch.sourceKind}.`,
-      `Source turn: ${batch.sourceTurnId}.`,
-      "Apply the following reviewed suggestion with the smallest correct code changes.",
-      "",
-      batch.sourceSummary,
-      batch.instructions ? `\nUser instructions: ${batch.instructions}` : null,
-      cmd.prompt?.trim() ? `\nAdditional user message: ${cmd.prompt.trim()}` : null,
-    ].filter(Boolean).join("\n");
-  }
-  if (providerSettings) {
-    const optionKeys = Object.keys(providerSettings.options);
-    const supportedKeys = Object.keys(providerSettings.supported);
-    return [
-      "Lilia Claude runtime settings command.",
-      `Action: ${providerSettings.action}.`,
-      "Use the supplied Claude SDK options for this turn and report the effective setting summary briefly.",
-      optionKeys.length > 0 ? `Claude option keys: ${optionKeys.join(", ")}.` : null,
-      supportedKeys.length > 0 ? `Common setting keys: ${supportedKeys.join(", ")}.` : null,
-      cmd.prompt?.trim() ? `Additional user message: ${cmd.prompt.trim()}` : null,
-    ].filter(Boolean).join("\n");
-  }
-  return null;
+  return buildManagedClaudeWorkflowPrompt({
+    review,
+    fix,
+    batch,
+    providerSettings,
+    prompt: cmd.prompt,
+    reviewTargetText: liliaReviewTargetText,
+  });
 }
 
 const CLAUDE_PROVIDER_SETTING_KEYS = new Set([
@@ -1051,10 +992,7 @@ async function runClaudeQueryTurn(cmd, context, workingDir, overrides = {}) {
     canUseTool: createClaudeCanUseTool(ctx),
     hooks: mergeClaudeHookMap(runtimeExtensions.hooks, createClaudeHooks(ctx)),
     onElicitation: (request) => requestClaudeMcpElicitation(request, ctx),
-    systemPrompt: appendClaudeAdditionalContext(
-      buildClaudeSystemPrompt(context.platform || process.platform),
-      additionalContext,
-    ),
+    systemPrompt: buildClaudeSystemPrompt(context.platform || process.platform, additionalContext),
     mcpServers: {
       lilia: liliaAskUserServer,
       ...runtimeExtensions.mcpServers,

@@ -18,6 +18,7 @@ export * from "./suggestions";
 export * from "./automation";
 export * from "./architecture";
 export * from "./remote-control";
+export * from "./prompt";
 
 export {
   deriveTimelineDisplay,

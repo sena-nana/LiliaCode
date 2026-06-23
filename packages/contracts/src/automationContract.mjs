@@ -1,6 +1,14 @@
 import automationContract from "./automation-contract.json" with { type: "json" };
+import {
+  DEFAULT_AUTOMATION_AGENT_PROMPT as PROMPT_DEFAULT_AUTOMATION_AGENT_PROMPT,
+  DEFAULT_AUTOMATION_HUMAN_PROMPT as PROMPT_DEFAULT_AUTOMATION_HUMAN_PROMPT,
+} from "./promptContract.mjs";
 
-const manifest = Object.freeze(automationContract);
+const manifest = Object.freeze({
+  ...automationContract,
+  defaultAutomationAgentPrompt: PROMPT_DEFAULT_AUTOMATION_AGENT_PROMPT,
+  defaultAutomationHumanPrompt: PROMPT_DEFAULT_AUTOMATION_HUMAN_PROMPT,
+});
 
 export const AUTOMATION_CONTRACT = manifest;
 export const AUTOMATION_TRIGGER_KINDS = manifest.automationTriggerKinds;

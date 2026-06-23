@@ -4,6 +4,7 @@ import {
   normalizeCodexAppServerEvent,
   pickCodexAssistantText,
 } from "./timeline.mjs";
+import { PROMPT_CODEX } from "@lilia/contracts/promptContract.mjs";
 
 export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -51,7 +52,7 @@ export function updateCodexSparkPromptState(state, msg) {
 export async function runCodexSparkPrompt(cmd, context = {}) {
   const prompt = stringOrNull(cmd?.prompt);
   if (!prompt) throw new Error("Codex Spark prompt is empty");
-  const instruction = stringOrNull(cmd?.instruction) || "只输出结果正文。";
+  const instruction = stringOrNull(cmd?.instruction) || PROMPT_CODEX.sparkDefaultInstruction;
   const timeoutMs = Number.isFinite(cmd?.timeoutMs)
     ? Math.max(1, Number(cmd.timeoutMs))
     : DEFAULT_TIMEOUT_MS;
