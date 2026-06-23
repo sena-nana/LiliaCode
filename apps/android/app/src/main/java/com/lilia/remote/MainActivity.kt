@@ -61,14 +61,29 @@ private const val DETAIL_SNAPSHOT_FALLBACK_MAX_MS = 15_000L
 
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
+    private var foregroundResumeToken by mutableStateOf(0L)
+    private var didLeaveForeground = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val repository = RemoteRepository(applicationContext)
         pairingIntentUri = intent?.dataString
         setContent {
-            LiliaRemoteApp(repository, pairingIntentUri)
+            LiliaRemoteApp(repository, pairingIntentUri, foregroundResumeToken)
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (didLeaveForeground) {
+            didLeaveForeground = false
+            foregroundResumeToken += 1
+        }
+    }
+
+    override fun onStop() {
+        didLeaveForeground = true
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -79,7 +94,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: String? = null) {
+fun LiliaRemoteApp(
+    repository: RemoteRepository? = null,
+    initialPairingUri: String? = null,
+    foregroundResumeToken: Long = 0L,
+) {
     val fallbackRepository = remember { repository }
     val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
     val scope = rememberCoroutineScope()
@@ -294,17 +313,17 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             }
     }
 
-    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient) {
+    suspend fun loadInbox(pc: SavedPc, remoteClient: RemoteHttpClient): Boolean {
         val accepted = remoteClient.resume(pc).getOrElse {
-            if (shouldIgnorePcResult(activePc, pc)) return
+            if (shouldIgnorePcResult(activePc, pc)) return false
             bridgeTone = "Offline"
             handleRemoteFailure(it, "Failed to resume remote session", pc)
-            return
+            return false
         }
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         if (!accepted) {
             clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
-            return
+            return false
         }
         val status = remoteClient.bridgeStatus(pc)
             .onSuccess {
@@ -318,13 +337,13 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 bridgeTone = "Offline"
             }
             .getOrNull()
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         refreshProviderStatus(pc, remoteClient)
-        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldIgnorePcResult(activePc, pc)) return false
         if (status?.capabilities?.supportsTaskInbox == false) {
             inboxTasks = emptyList()
             remoteError = taskInboxUnsupportedMessage()
-            return
+            return true
         }
         remoteClient.listTasks(pc)
             .onSuccess {
@@ -333,6 +352,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 inboxTasks = if (detail == null) it else syncInboxTaskStatus(it, detail)
             }
             .onFailure { handleRemoteFailure(it, "Failed to load tasks", pc) }
+        return true
     }
 
     fun openTask(pc: SavedPc, taskId: String) {
@@ -418,6 +438,37 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         }
     }
 
+    fun resumeActivePcFromForeground(pc: SavedPc) {
+        val remoteClient = client ?: return
+        val taskId = selectedTask?.task?.taskId
+        inboxLoading = true
+        detailLoading = taskId != null
+        remoteError = ""
+        scope.launch {
+            val resumed = loadInbox(pc, remoteClient)
+            if (
+                resumed &&
+                taskId != null &&
+                !shouldIgnorePcResult(activePc, pc) &&
+                selectedTask?.task?.taskId == taskId
+            ) {
+                remoteClient.taskDetail(pc, taskId)
+                    .onSuccess {
+                        if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
+                        applyTaskDetail(it.withRelatedTasks(inboxTasks))
+                        clearLiveUpdateError()
+                    }
+                    .onFailure { handleRemoteFailure(it, "Failed to refresh task", pc) }
+            }
+            if (!shouldIgnorePcResult(activePc, pc)) {
+                inboxLoading = false
+                if (taskId != null) {
+                    detailLoading = false
+                }
+            }
+        }
+    }
+
     LaunchedEffect(initialPairingUri) {
         val uri = initialPairingUri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         PairingUriParser.parse(uri)
@@ -442,6 +493,12 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         pendingPcSwitchTaskId = null
         if (shouldIgnorePcResult(activePc, pc)) return@LaunchedEffect
         openTask(pc, taskIdToRefresh)
+    }
+
+    LaunchedEffect(foregroundResumeToken) {
+        if (foregroundResumeToken == 0L) return@LaunchedEffect
+        val pc = activePc ?: return@LaunchedEffect
+        resumeActivePcFromForeground(pc)
     }
 
     LaunchedEffect(
