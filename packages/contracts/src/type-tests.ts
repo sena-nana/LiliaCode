@@ -35,6 +35,7 @@ import type {
   HookDocumentUpdateInput,
   HooksOverview,
   SidebarConversationSummary,
+  RemoteRetryChatRequest,
 } from "./index";
 import { deriveTimelineDisplay } from "./index";
 
@@ -220,6 +221,31 @@ export type SessionManagementRuntimeCommandTypeTest = Assert<
       includeSystemMessages: true;
     },
     ChatRuntimeCommand
+  >
+>;
+
+export type RemoteRetryChatRequestWithoutEventTypeTest = Assert<
+  Extends<
+    {
+      type: "chat.retry";
+      taskId: "task-1";
+    },
+    RemoteRetryChatRequest
+  >
+>;
+
+export type RemoteRetryChatRequestWithEventTypeTest = Assert<
+  Extends<
+    {
+      type: "chat.retry";
+      taskId: "task-1";
+      eventId: "error-1";
+    } | {
+      type: "chat.retry";
+      taskId: "task-1";
+      eventId: null;
+    },
+    RemoteRetryChatRequest
   >
 >;
 

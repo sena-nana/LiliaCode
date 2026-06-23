@@ -698,7 +698,16 @@ fn dispatch_request(
             let task_id = string_field(&envelope.request, "taskId")?;
             let events =
                 agent_timeline::list(&conn, &task_id).map_err(RemoteDispatchError::internal)?;
-            let retry_context = latest_retry_context(&events)
+            let event_id = envelope
+                .request
+                .get("eventId")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let retry_context = match event_id {
+                Some(event_id) => retry_context_for_timeline_event_id(&events, event_id),
+                None => latest_retry_context(&events),
+            }
                 .ok_or_else(|| RemoteDispatchError::conflict("没有可重试的远控消息"))?;
             let project_cwd = load_task_project_cwd(&conn, &task_id).unwrap_or_default();
             let chat_store = app.state::<chat::state::ChatStore>();
@@ -1105,6 +1114,14 @@ fn latest_retry_context(
         .iter()
         .rev()
         .find_map(|event| retry_context_for_timeline_event(event, events))
+}
+
+fn retry_context_for_timeline_event_id(
+    events: &[agent_timeline::AgentTimelineEvent],
+    event_id: &str,
+) -> Option<RemoteTimelineRetryContext> {
+    let event = events.iter().find(|event| event.id == event_id)?;
+    retry_context_for_timeline_event(event, events)
 }
 
 fn retry_context_for_timeline_event(
@@ -2038,6 +2055,40 @@ mod tests {
         )];
 
         assert!(latest_retry_context(&events).is_none());
+    }
+
+    #[test]
+    fn retry_context_for_timeline_event_id_selects_requested_error_without_fallback() {
+        let events = vec![
+            timeline_event(
+                "message-1",
+                "message",
+                Some("turn-1"),
+                Some("Original prompt"),
+                json!({ "role": "user", "content": "Original prompt" }),
+            ),
+            timeline_event(
+                "error-1",
+                "error",
+                Some("turn-1"),
+                Some("Old failure"),
+                json!({ "message": "Old failure" }),
+            ),
+            timeline_event(
+                "error-2",
+                "error",
+                None,
+                Some("New failure"),
+                json!({ "retryContext": { "content": "Retry new" } }),
+            ),
+        ];
+
+        let selected = retry_context_for_timeline_event_id(&events, "error-1").unwrap();
+
+        assert_eq!(selected.content, "Original prompt");
+        assert_eq!(latest_retry_context(&events).unwrap().content, "Retry new");
+        assert!(retry_context_for_timeline_event_id(&events, "missing").is_none());
+        assert!(retry_context_for_timeline_event_id(&events, "message-1").is_none());
     }
 
     #[test]

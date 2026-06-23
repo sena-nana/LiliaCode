@@ -183,6 +183,7 @@ export interface RemoteInterruptChatRequest {
 export interface RemoteRetryChatRequest {
   type: "chat.retry";
   taskId: string;
+  eventId?: string | null;
 }
 
 export interface RemoteGetPendingInteractionRequest {
