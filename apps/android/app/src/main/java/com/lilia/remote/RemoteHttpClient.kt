@@ -73,24 +73,37 @@ class RemoteHttpClient(
         }
     }
 
-    suspend fun sendMessage(
+    suspend fun taskState(pc: SavedPc, taskId: String): Result<RemoteTaskState> = withContext(Dispatchers.IO) {
+        runCatching {
+            val taskPayload = dispatch(pc, JSONObject().put("type", "tasks.get").put("taskId", taskId))
+            val pendingPayload = dispatch(pc, JSONObject().put("type", "interaction.pending.read").put("taskId", taskId))
+            RemotePayloadParser.parseTaskState(taskId, taskPayload, pendingPayload)
+        }
+    }
+
+    suspend fun subscribeTimeline(
         pc: SavedPc,
         taskId: String,
-        content: String,
-        runtimeCommand: JSONObject? = null,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
+        afterEventId: String?,
+    ): Result<List<RemoteTimelineItem>> = withContext(Dispatchers.IO) {
         runCatching {
             val request = JSONObject()
-                .put("type", "chat.send")
+                .put("type", "timeline.subscribe")
                 .put("taskId", taskId)
-                .put("content", content)
-            if (runtimeCommand != null) {
-                request.put("runtimeCommand", runtimeCommand)
+            if (afterEventId != null) {
+                request.put("afterEventId", afterEventId)
             }
-            dispatch(
-                pc,
-                request,
-            )
+            val payload = dispatch(pc, request)
+            RemotePayloadParser.parseTimelinePayload(payload)
+        }
+    }
+
+    suspend fun sendMessage(
+        pc: SavedPc,
+        input: RemoteSendMessageInput,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            dispatch(pc, input.toRequestJson())
             Unit
         }
     }
@@ -98,6 +111,13 @@ class RemoteHttpClient(
     suspend fun interrupt(pc: SavedPc, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             dispatch(pc, JSONObject().put("type", "chat.interrupt").put("taskId", taskId))
+            Unit
+        }
+    }
+
+    suspend fun retry(pc: SavedPc, taskId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            dispatch(pc, JSONObject().put("type", "chat.retry").put("taskId", taskId))
             Unit
         }
     }
@@ -191,3 +211,18 @@ class RemoteHttpClient(
         return RemoteHttpResponseAdapter.parseJson(statusCode, text)
     }
 }
+
+private fun RemoteSendMessageInput.toRequestJson(): JSONObject =
+    JSONObject()
+        .put("type", "chat.send")
+        .put("taskId", taskId)
+        .put("content", content)
+        .putIfPresent("composer", composer)
+        .putIfPresent("attachments", attachments)
+        .putIfPresent("conversationReferences", conversationReferences)
+        .putIfPresent("workflow", workflow)
+        .putIfPresent("runtimeCommand", runtimeCommand)
+        .putIfPresent("runtimeOptions", runtimeOptions)
+
+private fun JSONObject.putIfPresent(key: String, value: Any?): JSONObject =
+    if (value == null) this else put(key, value)

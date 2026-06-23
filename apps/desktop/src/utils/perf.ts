@@ -1,9 +1,22 @@
 type PerfStageHandle = {
   end: (stage?: string) => void;
+  context: PerfLogContext;
 };
 
 type PerfMeasureOptions = {
   detail?: string | null;
+  feature?: string | null;
+  id?: number | string | null;
+  route?: string | null;
+  seq?: number | string | null;
+};
+
+type PerfLogContext = {
+  feature: string;
+  id: string;
+  route: string;
+  seq: string;
+  detail?: string;
 };
 
 let perfSeq = 0;
@@ -22,10 +35,66 @@ function isPerfEnabled(): boolean {
   }
 }
 
-function logPerf(name: string, duration: number, detail?: string | null) {
+function stringValue(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  return String(value);
+}
+
+function currentRoute(): string {
+  try {
+    const location = globalThis.location;
+    if (!location) return "-";
+    const path = `${location.pathname}${location.search}${location.hash}`;
+    return path || location.href || "-";
+  } catch {
+    return "-";
+  }
+}
+
+function createPerfContext(
+  name: string,
+  options: PerfMeasureOptions,
+  generatedSeq: number,
+): PerfLogContext {
+  const detail = stringValue(options.detail);
+  const seq = stringValue(options.seq) ?? String(generatedSeq);
+  const route = stringValue(options.route) ??
+    (detail?.startsWith("/") ? detail : null) ??
+    currentRoute();
+  const id = stringValue(options.id) ?? detail ?? `${name}:${seq}`;
+  return {
+    feature: stringValue(options.feature) ?? name,
+    id,
+    route,
+    seq,
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function formatPerfContext(context: PerfLogContext): string {
+  const parts: Array<[string, string]> = [
+    ["feature", context.feature],
+    ["route", context.route],
+    ["id", context.id],
+    ["seq", context.seq],
+  ];
+  if (context.detail && context.detail !== context.id && context.detail !== context.route) {
+    parts.push(["detail", context.detail]);
+  }
+  return parts
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(" ");
+}
+
+function logPerf(name: string, duration: number, context: PerfLogContext) {
   if (!isPerfEnabled()) return;
-  const suffix = detail ? ` ${detail}` : "";
-  console.info(`[perf] ${name} ${duration.toFixed(1)}ms${suffix}`);
+  console.info(
+    `[perf] ${name} ${duration.toFixed(1)}ms ${formatPerfContext(context)}`,
+  );
+}
+
+function logPerfFailure(name: string, context: PerfLogContext, err: unknown) {
+  console.error(`[perf] ${name}:failed ${formatPerfContext(context)}`, err);
 }
 
 function createMeasureName(name: string, stage: string) {
@@ -37,7 +106,7 @@ function recordMeasure(
   stage: string,
   startMark: string,
   endMark: string,
-  detail?: string | null,
+  context: PerfLogContext,
 ) {
   const perf = currentPerformance();
   if (!perf) return;
@@ -49,30 +118,36 @@ function recordMeasure(
   }
   const entry = perf.getEntriesByName(measureName, "measure").at(-1);
   if (entry) {
-    logPerf(measureName, entry.duration, detail);
+    logPerf(measureName, entry.duration, context);
   }
   perf.clearMeasures(measureName);
 }
 
 export function beginPerfStage(name: string, options: PerfMeasureOptions = {}): PerfStageHandle {
   const perf = currentPerformance();
-  const detail = options.detail ?? null;
+  const seq = ++perfSeq;
+  const context = createPerfContext(name, options, seq);
   if (!perf) {
-    return { end: () => {} };
+    return { context, end: () => {} };
   }
-  const token = `${name}:${++perfSeq}`;
+  const activePerf = perf;
+  const token = `${name}:${seq}`;
   const startMark = `${token}:start`;
   let ended = false;
-  perf.mark(startMark);
+  activePerf.mark(startMark);
+  function finish(stage: string) {
+    if (ended) return;
+    ended = true;
+    const endMark = `${token}:${stage}`;
+    activePerf.mark(endMark);
+    recordMeasure(name, stage, startMark, endMark, context);
+    activePerf.clearMarks(startMark);
+    activePerf.clearMarks(endMark);
+  }
   return {
+    context,
     end(stage = "done") {
-      if (ended) return;
-      ended = true;
-      const endMark = `${token}:${stage}`;
-      perf.mark(endMark);
-      recordMeasure(name, stage, startMark, endMark, detail);
-      perf.clearMarks(startMark);
-      perf.clearMarks(endMark);
+      finish(stage);
     },
   };
 }
@@ -84,9 +159,13 @@ export async function measurePerfAsync<T>(
 ): Promise<T> {
   const stage = beginPerfStage(name, options);
   try {
-    return await run();
-  } finally {
+    const result = await run();
     stage.end();
+    return result;
+  } catch (err) {
+    stage.end("failed");
+    logPerfFailure(name, stage.context, err);
+    throw err;
   }
 }
 
@@ -97,9 +176,13 @@ export function measurePerfSync<T>(
 ): T {
   const stage = beginPerfStage(name, options);
   try {
-    return run();
-  } finally {
+    const result = run();
     stage.end();
+    return result;
+  } catch (err) {
+    stage.end("failed");
+    logPerfFailure(name, stage.context, err);
+    throw err;
   }
 }
 
@@ -170,7 +253,17 @@ export function installPerfObservers() {
   try {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        logPerf("longtask", entry.duration, entry.name || "main-thread");
+        const detail = entry.name || "main-thread";
+        logPerf(
+          "longtask",
+          entry.duration,
+          createPerfContext("longtask", {
+            detail,
+            feature: "longtask",
+            id: detail,
+            seq: "observer",
+          }, 0),
+        );
       }
     });
     observer.observe({ entryTypes: ["longtask"] });

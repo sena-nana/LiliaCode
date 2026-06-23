@@ -40,6 +40,7 @@ import {
   type ChatContextUsage,
   type ChatModelOption,
   type ChatSlashCommandWorkflow,
+  type ChatWorkflow,
   type LiliaReviewTarget,
   type PermissionMode,
 } from "@lilia/contracts";
@@ -50,6 +51,7 @@ import {
 import { withComponentEpoch } from "../../composables/useComponentEpoch";
 import type { SearchResult } from "../../services/sessionSearch";
 import type {
+  PromptOptimizeRoute,
   ToolConsentDecision,
   ToolConsentRequest,
   ToolConsentUpdatedInput,
@@ -83,107 +85,112 @@ import {
   runWhenIdle,
   scheduleAfterPaint,
 } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const composerContextPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.context-panel.load",
+    async () => (await import("./ComposerContextPanel.vue")).default,
+  )
+);
+const composerConversationReferencePanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.conversation-panel.load",
+    async () => (await import("./ComposerConversationReferencePanel.vue")).default,
+  )
+);
+const composerPendingPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.pending-panel.load",
+    async () => (await import("./ComposerPendingPanel.vue")).default,
+  )
+);
+const composerSlashCommandPanelLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.slash-panel.load",
+    async () => (await import("./ComposerSlashCommandPanel.vue")).default,
+  )
+);
 
 const ComposerContextPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.context-panel.load",
-    async () => (await import("./ComposerContextPanel.vue")).default,
-  ),
+  loader: () => composerContextPanelLoad.load(),
 });
 
 const ComposerConversationReferencePanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.conversation-panel.load",
-    async () => (await import("./ComposerConversationReferencePanel.vue")).default,
-  ),
+  loader: () => composerConversationReferencePanelLoad.load(),
 });
 
 const ComposerPendingPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.pending-panel.load",
-    async () => (await import("./ComposerPendingPanel.vue")).default,
-  ),
+  loader: () => composerPendingPanelLoad.load(),
 });
 
 const ComposerSlashCommandPanel = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.slash-panel.load",
-    async () => (await import("./ComposerSlashCommandPanel.vue")).default,
-  ),
+  loader: () => composerSlashCommandPanelLoad.load(),
 });
 
-let composerToolbarLoad: Promise<Component> | null = null;
-let composerPendingEntryActionsLoad: Promise<Component> | null = null;
-let composerConversationSearchModuleLoad:
-  Promise<typeof import("./useComposerConversationSearch")> | null = null;
-let composerContextSearchModuleLoad:
-  Promise<typeof import("./useComposerContextSearch")> | null = null;
-let composerSlashCommandsModuleLoad:
-  Promise<typeof import("./useComposerSlashCommands")> | null = null;
-let composerPasteModuleLoad: Promise<typeof import("./useComposerPaste")> | null = null;
+const composerToolbarLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.toolbar.load",
+    async () => (await import("./ComposerToolbar.vue")).default,
+  )
+);
+const composerPendingEntryActionsLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.pending-entry-actions.load",
+    async () => (await import("./ComposerPendingEntryActions.vue")).default,
+  )
+);
+const composerConversationSearchModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.conversation-search.module.load",
+    async () => await import("./useComposerConversationSearch"),
+  )
+);
+const composerContextSearchModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.context-search.module.load",
+    async () => await import("./useComposerContextSearch"),
+  )
+);
+const composerSlashCommandsModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.slash-search.module.load",
+    async () => await import("./useComposerSlashCommands"),
+  )
+);
+const composerPasteModuleLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "chat-composer.paste.module.load",
+    async () => await import("./useComposerPaste"),
+  )
+);
 
 async function loadComposerToolbar(): Promise<Component> {
-  if (!composerToolbarLoad) {
-    composerToolbarLoad = measurePerfAsync(
-      "chat-composer.toolbar.load",
-      async () => (await import("./ComposerToolbar.vue")).default,
-    );
-  }
-  return composerToolbarLoad;
+  return composerToolbarLoad.load();
 }
 
 async function loadComposerPendingEntryActions(): Promise<Component> {
-  if (!composerPendingEntryActionsLoad) {
-    composerPendingEntryActionsLoad = measurePerfAsync(
-      "chat-composer.pending-entry-actions.load",
-      async () => (await import("./ComposerPendingEntryActions.vue")).default,
-    );
-  }
-  return composerPendingEntryActionsLoad;
+  return composerPendingEntryActionsLoad.load();
 }
 
 async function loadComposerConversationSearchModule() {
-  if (!composerConversationSearchModuleLoad) {
-    composerConversationSearchModuleLoad = measurePerfAsync(
-      "chat-composer.conversation-search.module.load",
-      async () => await import("./useComposerConversationSearch"),
-    );
-  }
-  return composerConversationSearchModuleLoad;
+  return composerConversationSearchModuleLoad.load();
 }
 
 async function loadComposerContextSearchModule() {
-  if (!composerContextSearchModuleLoad) {
-    composerContextSearchModuleLoad = measurePerfAsync(
-      "chat-composer.context-search.module.load",
-      async () => await import("./useComposerContextSearch"),
-    );
-  }
-  return composerContextSearchModuleLoad;
+  return composerContextSearchModuleLoad.load();
 }
 
 async function loadComposerSlashCommandsModule() {
-  if (!composerSlashCommandsModuleLoad) {
-    composerSlashCommandsModuleLoad = measurePerfAsync(
-      "chat-composer.slash-search.module.load",
-      async () => await import("./useComposerSlashCommands"),
-    );
-  }
-  return composerSlashCommandsModuleLoad;
+  return composerSlashCommandsModuleLoad.load();
 }
 
 async function loadComposerPasteModule() {
-  if (!composerPasteModuleLoad) {
-    composerPasteModuleLoad = measurePerfAsync(
-      "chat-composer.paste.module.load",
-      async () => await import("./useComposerPaste"),
-    );
-  }
-  return composerPasteModuleLoad;
+  return composerPasteModuleLoad.load();
 }
 
 const props = defineProps<{
@@ -211,7 +218,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  send: [content: string, attachments: ChatAttachment[], conversationReferences: ChatConversationReference[]];
+  send: [
+    content: string,
+    attachments: ChatAttachment[],
+    conversationReferences: ChatConversationReference[],
+    workflow?: ChatWorkflow | null,
+  ];
   "start-lilia-review": [
     content: string,
     attachments: ChatAttachment[],
@@ -350,6 +362,8 @@ const composerToolbarComponent: ShallowRef<Component | null> = shallowRef(null);
 const composerPendingEntryActionsComponent: ShallowRef<Component | null> = shallowRef(null);
 const promptOptimizing = ref(false);
 const promptOptimizeError = ref<string | null>(null);
+const promptRoute = ref<PromptOptimizeRoute | null>(null);
+const promptRouteWorkflowApplied = ref(false);
 let conversationSearchScope: EffectScope | null = null;
 let contextSearchScope: EffectScope | null = null;
 let slashCommandsScope: EffectScope | null = null;
@@ -799,8 +813,33 @@ const canOptimizePrompt = computed(() =>
   !promptOptimizing.value &&
   richInput.plainText.value.trim().length > 0
 );
+const promptRouteWorkflow = computed(() => promptRoute.value?.workflow ?? null);
+const promptRouteWorkflowLabel = computed(() =>
+  promptRouteWorkflow.value ? workflowSuggestionLabel(promptRouteWorkflow.value) : ""
+);
 const hasPendingComposerUi = computed(() => hasPending.value && pendingInteractionReady.value);
 const toolIconForPanel = computed<Component>(() => toolIcon.value ?? FileText);
+
+function workflowSuggestionLabel(workflow: ChatWorkflow): string {
+  if (workflow.type === "lilia_review") return "代码审查";
+  if (workflow.type === "lilia_fix_suggestion") return "修复建议";
+  if (workflow.type === "lilia_batch_apply") return "批量应用";
+  if (workflow.type === "lilia_compact") return "压缩上下文";
+  if (workflow.type === "lilia_config_diagnostics") return "配置诊断";
+  if (workflow.type === "lilia_goal") return "长期目标";
+  return "工作流";
+}
+
+function applyPromptRouteWorkflow() {
+  if (!promptRouteWorkflow.value) return;
+  promptRouteWorkflowApplied.value = true;
+  blockActionsBriefly();
+}
+
+function dismissPromptRouteWorkflow() {
+  promptRoute.value = null;
+  promptRouteWorkflowApplied.value = false;
+}
 
 async function ensureComposerToolbarLoaded() {
   if (composerToolbarComponent.value) return composerToolbarComponent.value;
@@ -1047,12 +1086,16 @@ async function optimizeCurrentPrompt() {
       prompt,
       attachments: attachmentsForView.value,
       conversationReferences: richInput.conversationReferences.value,
+      projectCwd: props.projectCwd ?? null,
+      taskId: props.state.taskId,
     });
-    const nextPrompt = optimized.trim();
+    const nextPrompt = optimized.optimizedPrompt.trim();
     if (!nextPrompt) {
       promptOptimizeError.value = "辅助模型返回空提示词";
       return;
     }
+    promptRoute.value = optimized.route.workflow ? optimized.route : null;
+    promptRouteWorkflowApplied.value = false;
     richInput.replaceWithText(
       nextPrompt,
       attachmentsForView.value,
@@ -1084,9 +1127,16 @@ function send() {
 
   if (!value && unsuppressedAttachmentsForSend.value.length === 0) return;
   suppressedAttachmentIds.value = new Set(outgoingAttachments.map((attachment) => attachment.id));
-  emit("send", value, outgoingAttachments, outgoingConversationReferences);
+  emit(
+    "send",
+    value,
+    outgoingAttachments,
+    outgoingConversationReferences,
+    promptRouteWorkflowApplied.value ? promptRouteWorkflow.value : null,
+  );
   richInput.resetInput();
   clearComposerContextState();
+  dismissPromptRouteWorkflow();
 }
 
 function submitEntry() {
@@ -1664,6 +1714,34 @@ defineExpose({ focusInput, getDraftSnapshot, fillSuggestionPrompt, triggerConver
         </div>
       </Transition>
     </div>
+
+    <Transition name="chat-composer-stack">
+      <div
+        v-if="promptRouteWorkflow"
+        class="chat-composer__route-suggestion"
+        role="status"
+      >
+        <span class="chat-composer__route-suggestion-text">
+          建议作为 {{ promptRouteWorkflowLabel }} 发送
+        </span>
+        <button
+          type="button"
+          class="ui-button ui-button--ghost composer-inline__btn"
+          :disabled="actionsBlocked || promptRouteWorkflowApplied"
+          @click="applyPromptRouteWorkflow"
+        >
+          {{ promptRouteWorkflowApplied ? "已应用" : "应用" }}
+        </button>
+        <button
+          type="button"
+          class="ui-button ui-button--ghost composer-inline__btn"
+          :disabled="actionsBlocked"
+          @click="dismissPromptRouteWorkflow"
+        >
+          忽略
+        </button>
+      </div>
+    </Transition>
 
     <Transition name="chat-composer-stack">
       <component

@@ -200,6 +200,7 @@ import {
   type AutoTurnDecisionPermissionOption as ContractAutoTurnDecisionPermissionOption,
   type AutoTurnDecisionSettings as ContractAutoTurnDecisionSettings,
   type ClaudeSubagentModeSettings as ContractClaudeSubagentModeSettings,
+  type MainAgentPromptMode as ContractMainAgentPromptMode,
 } from "./agentInteractionDefaults.mjs";
 
 export type ChatBackendKind = (typeof CHAT_BACKENDS)[number];
@@ -1764,6 +1765,7 @@ export interface CustomSubagentUpsertInput {
 export { DEFAULT_AGENT_INTERACTION_SETTINGS };
 
 export type AgentInteractionSettings = ContractAgentInteractionSettings;
+export type MainAgentPromptMode = ContractMainAgentPromptMode;
 
 export const normalizeAgentInteractionSettings =
   normalizeAgentInteractionSettingsImpl as (

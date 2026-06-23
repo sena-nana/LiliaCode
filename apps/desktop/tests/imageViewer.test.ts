@@ -1,6 +1,7 @@
 import { fireEvent, render } from "@testing-library/vue";
 import { describe, expect, it } from "vitest";
 import ImageViewer from "../src/components/chat/ImageViewer.vue";
+import { domRect } from "./domTestHelpers";
 
 interface Size {
   width: number;
@@ -12,17 +13,7 @@ function setStageSize(container: HTMLElement, { width, height }: Size) {
   if (!stage) throw new Error("image viewer stage not found");
   Object.defineProperty(stage, "clientWidth", { configurable: true, value: width });
   Object.defineProperty(stage, "clientHeight", { configurable: true, value: height });
-  stage.getBoundingClientRect = () => ({
-    x: 0,
-    y: 0,
-    top: 0,
-    left: 0,
-    right: width,
-    bottom: height,
-    width,
-    height,
-    toJSON: () => ({}),
-  });
+  stage.getBoundingClientRect = () => domRect(0, 0, width, height);
 }
 
 function setNaturalSize(image: HTMLImageElement, { width, height }: Size) {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
 import { defineComponent, ref } from "vue";
 import Dropdown from "../src/components/Dropdown.vue";
+import { domRect } from "./domTestHelpers";
 
 const options = [
   { value: "readonly", label: "只读", hint: "禁止写操作" },
@@ -34,6 +35,65 @@ function renderDropdown() {
       },
     },
   });
+}
+
+function installDropdownGeometryMock({
+  menuTop = 238,
+  innerHeight,
+  mockMenuSize = false,
+}: {
+  menuTop?: number;
+  innerHeight?: number;
+  mockMenuSize?: boolean;
+} = {}) {
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+  const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  const originalInnerHeight = window.innerHeight;
+  if (innerHeight !== undefined) {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: innerHeight });
+  }
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+      value: function mockRect(this: HTMLElement) {
+      if (this.classList.contains("dd") || this.classList.contains("chat-chip")) {
+        return domRect(100, 200, 120, 32);
+      }
+      if (this.classList.contains("dd__menu")) {
+        return domRect(100, menuTop, 180, 80);
+      }
+      return originalGetBoundingClientRect.call(this);
+    },
+  });
+  if (mockMenuSize) {
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      get() {
+        return this.classList.contains("dd__menu") ? 180 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.classList.contains("dd__menu") ? 80 : 0;
+      },
+    });
+  }
+  return () => {
+    if (innerHeight !== undefined) {
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+    }
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: originalGetBoundingClientRect,
+    });
+    if (originalOffsetWidth) {
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
+    }
+    if (originalOffsetHeight) {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+    }
+  };
 }
 
 describe("Dropdown", () => {
@@ -102,52 +162,7 @@ describe("Dropdown", () => {
   });
 
   it("会从触发点击位置展开", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: function mockRect(this: HTMLElement) {
-        if (this.classList.contains("dd")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-chip")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("dd__menu")) {
-          return {
-            x: 100,
-            y: 238,
-            left: 100,
-            top: 238,
-            right: 280,
-            bottom: 318,
-            width: 180,
-            height: 80,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      },
-    });
+    const restoreGeometry = installDropdownGeometryMock();
 
     try {
       renderDropdown();
@@ -162,74 +177,12 @@ describe("Dropdown", () => {
         "--sb-menu-origin-y": "0px",
       });
     } finally {
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-        configurable: true,
-        value: originalGetBoundingClientRect,
-      });
+      restoreGeometry();
     }
   });
 
   it("向上展开时会从触发边缘缩放", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: function mockRect(this: HTMLElement) {
-        if (this.classList.contains("dd")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-chip")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("dd__menu")) {
-          return {
-            x: 100,
-            y: 114,
-            left: 100,
-            top: 114,
-            right: 280,
-            bottom: 194,
-            width: 180,
-            height: 80,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      get() {
-        return this.classList.contains("dd__menu") ? 180 : 0;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("dd__menu") ? 80 : 0;
-      },
-    });
+    const restoreGeometry = installDropdownGeometryMock({ menuTop: 114, mockMenuSize: true });
 
     try {
       render(defineComponent({
@@ -265,84 +218,15 @@ describe("Dropdown", () => {
         });
       });
     } finally {
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-        configurable: true,
-        value: originalGetBoundingClientRect,
-      });
-      if (originalOffsetWidth) {
-        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
-      }
-      if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
-      }
+      restoreGeometry();
     }
   });
 
   it("底部空间不足时会翻转为向上展开语义", async () => {
-    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
-    const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    const originalInnerHeight = window.innerHeight;
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 260,
-    });
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value: function mockRect(this: HTMLElement) {
-        if (this.classList.contains("dd")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("chat-chip")) {
-          return {
-            x: 100,
-            y: 200,
-            left: 100,
-            top: 200,
-            right: 220,
-            bottom: 232,
-            width: 120,
-            height: 32,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        if (this.classList.contains("dd__menu")) {
-          return {
-            x: 100,
-            y: 114,
-            left: 100,
-            top: 114,
-            right: 280,
-            bottom: 194,
-            width: 180,
-            height: 80,
-            toJSON: () => ({}),
-          } as DOMRect;
-        }
-        return originalGetBoundingClientRect.call(this);
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      get() {
-        return this.classList.contains("dd__menu") ? 180 : 0;
-      },
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get() {
-        return this.classList.contains("dd__menu") ? 80 : 0;
-      },
+    const restoreGeometry = installDropdownGeometryMock({
+      menuTop: 114,
+      innerHeight: 260,
+      mockMenuSize: true,
     });
 
     try {
@@ -358,20 +242,7 @@ describe("Dropdown", () => {
         expect(listbox).toHaveStyle({ top: "114px" });
       });
     } finally {
-      Object.defineProperty(window, "innerHeight", {
-        configurable: true,
-        value: originalInnerHeight,
-      });
-      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
-        configurable: true,
-        value: originalGetBoundingClientRect,
-      });
-      if (originalOffsetWidth) {
-        Object.defineProperty(HTMLElement.prototype, "offsetWidth", originalOffsetWidth);
-      }
-      if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
-      }
+      restoreGeometry();
     }
   });
 });

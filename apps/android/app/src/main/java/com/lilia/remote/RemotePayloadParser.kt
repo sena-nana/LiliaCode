@@ -5,6 +5,8 @@ import org.json.JSONObject
 
 object RemotePayloadParser {
     private val branchableTimelineStatuses = setOf("success", "completed", "done")
+    private val timelineDetailWhitespace = Regex("\\s+")
+    private const val TIMELINE_DETAIL_VALUE_MAX_LENGTH = 600
 
     fun parseBridgeStatus(response: JSONObject): RemoteBridgeStatus {
         RemoteEnvelopeAdapter.throwIfError(response, "Bridge status failed")
@@ -21,6 +23,7 @@ object RemotePayloadParser {
         if (capabilities == null) return RemoteCapabilities()
         return RemoteCapabilities(
             supportsTaskInbox = capabilities.optBoolean("supportsTaskInbox", true),
+            supportsTimelineSubscription = capabilities.optBoolean("supportsTimelineSubscription", true),
             supportsChatSend = capabilities.optBoolean("supportsChatSend", true),
             supportsInteractionResponse = capabilities.optBoolean("supportsInteractionResponse", true),
             supportsInterrupt = capabilities.optBoolean("supportsInterrupt", true),
@@ -43,45 +46,67 @@ object RemotePayloadParser {
         }
     }
 
+    fun parseTaskState(
+        taskId: String,
+        taskPayload: JSONObject,
+        pendingPayload: JSONObject,
+    ): RemoteTaskState {
+        val task = taskPayload.optJSONObject("task")
+        val runtime = taskPayload.optJSONObject("runtime")
+        val summary = parseTaskSummary(taskId, task)
+        return RemoteTaskState(
+            task = summary,
+            runtimePhase = runtime?.nonBlankString("phase", summary.status) ?: summary.status,
+            pendingInteraction = parsePending(summary.taskId, pendingPayload.optJSONArray("interactions") ?: JSONArray()),
+        )
+    }
+
     fun parseTaskDetail(
         taskId: String,
         taskPayload: JSONObject,
         timelinePayload: JSONObject,
         pendingPayload: JSONObject,
     ): RemoteTaskDetail {
-        val task = taskPayload.optJSONObject("task")
+        val state = parseTaskState(taskId, taskPayload, pendingPayload)
         val runtime = taskPayload.optJSONObject("runtime")
-        val summary = task?.let { parseTaskSummary(it, taskId) } ?: fallbackTaskSummary(taskId)
         return RemoteTaskDetail(
-            task = summary,
-            relatedTasks = listOf(summary),
-            runtimePhase = runtime?.nonBlankString("phase", summary.status) ?: summary.status,
+            task = state.task,
+            relatedTasks = listOf(state.task),
+            runtimePhase = state.runtimePhase,
             processSessionId = runtime?.optNullableString("processSessionId"),
-            timeline = parseTimeline(timelinePayload.optJSONArray("events") ?: JSONArray()),
-            pendingInteraction = parsePending(summary.taskId, pendingPayload.optJSONArray("interactions") ?: JSONArray()),
+            timeline = parseTimelinePayload(timelinePayload),
+            pendingInteraction = state.pendingInteraction,
         )
+    }
+
+    fun parseTimelinePayload(payload: JSONObject): List<RemoteTimelineItem> =
+        parseTimeline(payload.optJSONArray("events") ?: JSONArray())
+
+    fun mergeTimeline(
+        existing: List<RemoteTimelineItem>,
+        incoming: List<RemoteTimelineItem>,
+    ): List<RemoteTimelineItem> {
+        if (existing.isEmpty()) return incoming
+        if (incoming.isEmpty()) return existing
+        val merged = LinkedHashMap<String, RemoteTimelineItem>()
+        existing.forEach { item -> merged[item.id] = item }
+        incoming.forEach { item -> merged[item.id] = item }
+        return merged.values.toList()
     }
 
     private fun parseTaskSummary(task: JSONObject, fallbackTaskId: String? = null): RemoteTaskSummary? {
         val taskId = task.firstNonBlankString("taskId", "id") ?: fallbackTaskId ?: return null
-        return RemoteTaskSummary(
-            taskId = taskId,
-            title = task.nonBlankString("title", "Untitled task"),
-            projectName = task.firstNonBlankString("projectName", "projectId"),
-            status = task.nonBlankString("status", "waiting"),
-            dependsOn = parseStringArray(task.optJSONArray("dependsOn")),
-            lastActivity = formatRemoteTime(task.optLong("createdAt", 0L)),
-            pendingAction = null,
-        )
+        return parseTaskSummary(taskId, task)
     }
 
-    private fun fallbackTaskSummary(taskId: String): RemoteTaskSummary =
+    private fun parseTaskSummary(taskId: String, task: JSONObject?): RemoteTaskSummary =
         RemoteTaskSummary(
-            taskId = taskId,
-            title = "Untitled task",
-            projectName = null,
-            status = "waiting",
-            lastActivity = formatRemoteTime(0L),
+            taskId = task?.firstNonBlankString("taskId", "id") ?: taskId,
+            title = task?.nonBlankString("title", "Untitled task") ?: "Untitled task",
+            projectName = task?.firstNonBlankString("projectName", "projectId"),
+            status = task?.nonBlankString("status", "waiting") ?: "waiting",
+            dependsOn = parseStringArray(task?.optJSONArray("dependsOn")),
+            lastActivity = formatRemoteTime(task?.optLong("createdAt", 0L) ?: 0L),
             pendingAction = null,
         )
 
@@ -95,19 +120,48 @@ object RemotePayloadParser {
         }
     }
 
-    private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> = buildList {
-        for (index in 0 until events.length()) {
-            val event = events.getJSONObject(index)
-            add(
-                RemoteTimelineItem(
-                    id = event.optString("id", "event-$index"),
-                    title = timelineTitle(event),
-                    summary = timelineSummary(event),
-                    status = event.optString("status").ifBlank { "info" },
-                    branchSourceTurnId = timelineBranchSourceTurnId(event),
-                ),
+    private fun parseTimeline(events: JSONArray): List<RemoteTimelineItem> {
+        val rows = buildList {
+            for (index in 0 until events.length()) {
+                add(events.getJSONObject(index))
+            }
+        }
+        return rows.mapIndexed { index, event ->
+            RemoteTimelineItem(
+                id = event.optString("id", "event-$index"),
+                kind = event.optString("kind").ifBlank { "event" },
+                title = timelineTitle(event),
+                summary = timelineSummary(event),
+                status = event.optString("status").ifBlank { "info" },
+                role = timelineRole(event),
+                details = timelineDetails(event),
+                branchSourceTurnId = timelineBranchSourceTurnId(event),
+                retryable = timelineRetryableError(event, rows),
             )
         }
+    }
+
+    private fun timelineRetryableError(event: JSONObject, events: List<JSONObject>): Boolean {
+        if (event.optString("kind") != "error") return false
+        if (retryContextHasPayload(event.optJSONObject("payload")?.optJSONObject("retryContext"))) {
+            return true
+        }
+        val turnId = event.optString("turnId").takeIf { it.isNotBlank() } ?: return false
+        return events.any { candidate ->
+            candidate.optString("kind") == "message" &&
+                candidate.optString("turnId") == turnId &&
+                candidate.optJSONObject("payload")?.optString("role") == "user" &&
+                retryContextHasPayload(candidate.optJSONObject("payload"))
+        }
+    }
+
+    private fun retryContextHasPayload(payload: JSONObject?): Boolean {
+        if (payload == null) return false
+        if (payload.optString("content").isNotBlank()) return true
+        val attachments = payload.optJSONArray("attachments")
+        if (attachments != null && attachments.length() > 0) return true
+        val conversationReferences = payload.optJSONArray("conversationReferences")
+        return conversationReferences != null && conversationReferences.length() > 0
     }
 
     private fun timelineBranchSourceTurnId(event: JSONObject): String? {
@@ -118,18 +172,101 @@ object RemotePayloadParser {
         return event.optString("turnId").takeIf { it.isNotBlank() }
     }
 
-    private fun timelineTitle(event: JSONObject): String =
-        event.optString("title")
-            .ifBlank { timelineKindLabel(event.optString("kind")) }
+    private fun timelineTitle(event: JSONObject): String {
+        val title = event.optString("title").takeIf { it.isNotBlank() }
+        if (title != null) return title
+        if (event.optString("kind") == "message") {
+            when (timelineRole(event)) {
+                "assistant" -> return "Assistant"
+                "user" -> return "User"
+            }
+        }
+        return timelineKindLabel(event.optString("kind"))
+    }
+
+    private fun timelineRole(event: JSONObject): String? =
+        event.optJSONObject("payload")
+            ?.optString("role")
+            ?.takeIf { it.isNotBlank() }
 
     private fun timelineSummary(event: JSONObject): String {
         val payload = event.optJSONObject("payload")
         return event.optString("summary")
             .takeUnless { event.isNull("summary") }
             ?.takeIf { it.isNotBlank() }
-            ?: payload?.firstNonBlankString("content", "text", "summary", "message", "command", "path", "query", "url")
+            ?: payload?.firstNonBlankString(
+                "content",
+                "text",
+                "summary",
+                "message",
+                "error",
+                "reason",
+                "details",
+                "command",
+                "cmd",
+                "path",
+                "query",
+                "url",
+                "result",
+                "response",
+                "output",
+                "stdout",
+                "stderr",
+            )
             ?: ""
     }
+
+    private fun timelineDetails(event: JSONObject): List<RemoteTimelineDetail> {
+        val payload = event.optJSONObject("payload") ?: JSONObject()
+        return listOfNotNull(
+            timelineDetail(
+                "tool",
+                payload.firstNonBlankString("toolName", "name", "tool", "function", "hookName"),
+            ),
+            timelineDetail("command", payload.firstNonBlankString("command", "cmd", "shellCommand")),
+            timelineDetail("path", payload.firstNonBlankString("file", "filePath", "path")),
+            timelineDetail("query", payload.firstNonBlankString("query", "url")),
+            timelineDetail(
+                "input",
+                payload.timelineValueString("input", "arguments", "args", "parameters", "params", "request"),
+            ),
+            timelineDetail(
+                if (isFailureStatus(event.optString("status"))) "error" else "output",
+                payload.timelineValueString("result", "response", "output", "stdout", "stderr"),
+            ),
+            timelineDetail("code", payload.firstNonBlankString("code", "exitCode", "statusCode")),
+            timelineDetail("turn", event.optString("turnId").takeIf { it.isNotBlank() }),
+        )
+    }
+
+    private fun timelineDetail(
+        label: String,
+        value: String?,
+    ): RemoteTimelineDetail? {
+        val normalized = value?.replace(timelineDetailWhitespace, " ")?.trim().orEmpty()
+        if (normalized.isBlank()) return null
+        return RemoteTimelineDetail(
+            label = label,
+            value = normalized.truncate(TIMELINE_DETAIL_VALUE_MAX_LENGTH),
+        )
+    }
+
+    private fun JSONObject.timelineValueString(vararg names: String): String? {
+        for (name in names) {
+            if (!has(name) || isNull(name)) continue
+            val value = opt(name) ?: continue
+            val text = when (value) {
+                is JSONObject -> value.toString()
+                is JSONArray -> value.toString()
+                else -> value.toString()
+            }.takeIf { it.isNotBlank() }
+            if (text != null) return text
+        }
+        return null
+    }
+
+    private fun isFailureStatus(status: String): Boolean =
+        status == "failed" || status == "error" || status == "cancelled"
 
     private fun timelineKindLabel(kind: String): String =
         when (kind) {
@@ -274,6 +411,11 @@ object RemotePayloadParser {
             if (value != null) return value
         }
         return null
+    }
+
+    private fun String.truncate(maxLength: Int): String {
+        if (length <= maxLength) return this
+        return take(maxLength).trimEnd() + "..."
     }
 
     private fun formatRemoteTime(value: Long): String {

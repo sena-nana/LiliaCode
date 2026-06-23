@@ -360,31 +360,6 @@ mod tests {
     use super::*;
     use crate::agent_timeline;
 
-    fn create_timeline_schema(conn: &rusqlite::Connection) {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
-            );
-            CREATE INDEX idx_agent_timeline_events_task_id_turn
-              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
-            "#,
-        )
-        .unwrap();
-    }
-
     fn session_anchor_input(task_id: &str, thread_id: &str, now: i64) -> AgentTimelineEventInput {
         AgentTimelineEventInput {
             id: Some(format!("{task_id}:codex-thread-attach:{thread_id}")),
@@ -439,7 +414,7 @@ mod tests {
     #[test]
     fn bulk_history_events_insert_before_anchor_with_single_shift() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        agent_timeline::create_timeline_schema(&conn).unwrap();
         agent_timeline::insert(&conn, session_anchor_input("task-1", "thread-1", 10_000)).unwrap();
 
         let saved = bulk_history_events(
@@ -477,7 +452,7 @@ mod tests {
     #[test]
     fn bulk_history_events_repeated_sync_keeps_stable_positions() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        agent_timeline::create_timeline_schema(&conn).unwrap();
         agent_timeline::insert(&conn, session_anchor_input("task-1", "thread-1", 10_000)).unwrap();
         let events = vec![
             history_input("turn-old-1", "msg-1", 1_000),

@@ -459,10 +459,35 @@ export interface PromptOptimizeInput {
   prompt: string;
   attachments?: ChatAttachment[];
   conversationReferences?: ChatConversationReference[];
+  projectCwd?: string | null;
+  taskId?: string | null;
 }
 
-export function optimizePrompt(input: PromptOptimizeInput): Promise<string> {
-  return invoke<string>(ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND, { input });
+export type PromptOptimizeScenario =
+  | "review"
+  | "fix_suggestion"
+  | "batch_apply"
+  | "bug_localization"
+  | "context_compact"
+  | "config_diagnostics"
+  | "goal_update"
+  | "general_task_optimize";
+
+export interface PromptOptimizeRoute {
+  scenario: PromptOptimizeScenario;
+  workflow: ChatWorkflow | null;
+  confidence: number;
+  reason: string;
+  signals: string[];
+}
+
+export interface PromptOptimizeResult {
+  optimizedPrompt: string;
+  route: PromptOptimizeRoute;
+}
+
+export function optimizePrompt(input: PromptOptimizeInput): Promise<PromptOptimizeResult> {
+  return invoke<PromptOptimizeResult>(ASSISTANT_AI_OPTIMIZE_PROMPT_COMMAND, { input });
 }
 
 export function getConversationSuggestions(

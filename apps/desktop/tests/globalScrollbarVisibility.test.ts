@@ -3,6 +3,7 @@ import {
   installGlobalScrollbarVisibility,
   uninstallGlobalScrollbarVisibility,
 } from "../src/composables/useGlobalScrollbarVisibility";
+import { domRect } from "./domTestHelpers";
 
 function createScroller(input: {
   overflowX?: string;
@@ -37,17 +38,7 @@ function createScroller(input: {
       },
     },
   });
-  scroller.getBoundingClientRect = () => ({
-    top: 10,
-    right: 210,
-    bottom: 110,
-    left: 10,
-    width: 200,
-    height: 100,
-    x: 10,
-    y: 10,
-    toJSON: () => ({}),
-  });
+  scroller.getBoundingClientRect = () => domRect(10, 10, 200, 100);
   document.body.appendChild(scroller);
   return {
     element: scroller,

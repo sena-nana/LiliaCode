@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, type Component } from "vue";
+import { createLazyLoadState } from "../utils/lazyLoadState";
 import { measurePerfAsync } from "../utils/perf";
 
 const props = withDefaults(defineProps<{
@@ -19,14 +20,18 @@ function taskDetailPerfDetail() {
   return `${props.projectId ?? "orphan"}:${props.taskId}:${props.variant ?? "main"}`;
 }
 
-const TaskDetailPageContent = defineAsyncComponent({
-  suspensible: false,
-  loadingComponent: TaskDetailLoading,
-  loader: () => measurePerfAsync(
+const taskDetailPageContentLoad = createLazyLoadState(() =>
+  measurePerfAsync(
     "task-detail.page-content.load",
     async () => (await import("./taskDetail/TaskDetailPageContent.vue")).default,
     { detail: taskDetailPerfDetail() },
-  ),
+  )
+);
+
+const TaskDetailPageContent = defineAsyncComponent({
+  suspensible: false,
+  loadingComponent: TaskDetailLoading,
+  loader: () => taskDetailPageContentLoad.load(),
 });
 </script>
 

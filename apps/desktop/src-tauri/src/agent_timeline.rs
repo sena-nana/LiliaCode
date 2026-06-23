@@ -25,6 +25,30 @@ use crate::agent_timeline_contract;
 use crate::store::LiliaStore;
 use crate::util::now_millis;
 
+pub(crate) const AGENT_TIMELINE_SCHEMA_SQL: &str = r#"
+CREATE TABLE agent_timeline_events (
+  id                TEXT PRIMARY KEY,
+  task_id           TEXT NOT NULL,
+  turn_id           TEXT,
+  backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
+  kind              TEXT NOT NULL,
+  status            TEXT NOT NULL,
+  title             TEXT NOT NULL,
+  summary           TEXT,
+  payload           TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  turn_seq          INTEGER NOT NULL,
+  intra_turn_order  INTEGER NOT NULL
+);
+CREATE INDEX idx_agent_timeline_events_task_id_turn
+  ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
+"#;
+
+pub(crate) fn create_timeline_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(AGENT_TIMELINE_SCHEMA_SQL)
+}
+
 pub(crate) fn default_timeline_status() -> &'static str {
     agent_timeline_contract::default_timeline_status()
 }
@@ -365,31 +389,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn create_timeline_schema(conn: &Connection) {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
-            );
-            CREATE INDEX idx_agent_timeline_events_task_id_turn
-              ON agent_timeline_events(task_id, turn_seq, intra_turn_order);
-            "#,
-        )
-        .unwrap();
-    }
-
     fn input(
         id: &str,
         task_id: &str,
@@ -415,7 +414,7 @@ mod tests {
     #[test]
     fn first_event_in_task_gets_turn_seq_0_intra_order_0() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         let saved = insert(
             &conn,
@@ -430,7 +429,7 @@ mod tests {
     #[test]
     fn events_within_same_turn_share_turn_seq_and_increment_intra_order() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         let a = insert(
             &conn,
@@ -451,7 +450,7 @@ mod tests {
     #[test]
     fn new_turn_id_allocates_next_turn_seq() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         insert(
             &conn,
@@ -474,7 +473,7 @@ mod tests {
     #[test]
     fn upsert_same_id_keeps_position_even_across_status_changes() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         // 流式 reasoning：先 running 一条，再用同 id 推一条 success。位置必须稳定，
         // 否则 turn 末尾 finalize 时事件会被推到 turn 最后。
@@ -498,7 +497,7 @@ mod tests {
     #[test]
     fn turn_seq_isolation_prevents_cross_turn_sourceid_collision() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         // 模拟 bug 场景：两个不同 turn 误用同一 sourceId（=> 同一 DB id）。
         // 老 schema 下第二 turn 会"继承"第一 turn 的最小 order 被排到时间线最前；
@@ -548,7 +547,7 @@ mod tests {
     #[test]
     fn list_orders_by_turn_seq_then_intra_order() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         // turn_seq 是按 turn_id 首次出现的顺序分配的。下面 turn-2 先入库 → turn_seq=0；
         // turn-1 后入库 → turn_seq=1。最终列表完全按 (turn_seq, intra_turn_order) 排，
@@ -586,7 +585,7 @@ mod tests {
     #[test]
     fn history_event_with_older_created_at_is_inserted_before_current_turn() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         insert(
             &conn,
@@ -634,7 +633,7 @@ mod tests {
     #[test]
     fn latest_session_id_reads_recent_turn_payload() {
         let conn = Connection::open_in_memory().unwrap();
-        create_timeline_schema(&conn);
+        create_timeline_schema(&conn).unwrap();
 
         let mut a = input("turn-old", "task-1", Some("turn-1"), "turn", 100);
         a.payload = json!({ "sessionId": "old-session" });

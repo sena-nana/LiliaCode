@@ -3,13 +3,18 @@ import { defineAsyncComponent } from "vue";
 import type { ChatImageViewerSource } from "../imageViewer";
 import type { InlineToken } from "./markdownParser";
 import { measurePerfAsync } from "../../../utils/perf";
+import { createLazyLoadState } from "../../../utils/lazyLoadState";
+
+const markdownMathInlineLoad = createLazyLoadState(() =>
+  measurePerfAsync(
+    "markdown.math-inline.load",
+    async () => (await import("./MarkdownMathInline.vue")).default,
+  )
+);
 
 const MarkdownMathInline = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "markdown.math-inline.load",
-    async () => (await import("./MarkdownMathInline.vue")).default,
-  ),
+  loader: () => markdownMathInlineLoad.load(),
 });
 
 withDefaults(defineProps<{

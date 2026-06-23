@@ -3,6 +3,7 @@ package com.lilia.remote
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -365,6 +366,47 @@ class RemoteHttpClientTest {
     }
 
     @Test
+    fun subscribeTimelineDispatchesAfterEventId() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "timeline.subscribe",
+                    "taskId": "task-1",
+                    "events": [
+                      {
+                        "id": "event-2",
+                        "kind": "assistant_message",
+                        "summary": "Updated",
+                        "status": "completed"
+                      }
+                    ]
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        val timeline = RemoteHttpClient(FakeDeviceStore())
+            .subscribeTimeline(savedPc(server), "task-1", "event-1")
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("timeline.subscribe", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("event-1", request.getString("afterEventId"))
+        assertEquals(1, timeline.size)
+        assertEquals("event-2", timeline[0].id)
+        assertEquals("Updated", timeline[0].summary)
+    }
+
+    @Test
     fun sendMessageDispatchesChatSendRequest() = runBlocking {
         val requestBody = AtomicReference<JSONObject>()
         val server = startBridge { exchange ->
@@ -385,14 +427,27 @@ class RemoteHttpClientTest {
         }
 
         RemoteHttpClient(FakeDeviceStore())
-            .sendMessage(savedPc(server), "task-1", "Continue from Android")
+            .sendMessage(
+                savedPc(server),
+                RemoteSendMessageInput(
+                    taskId = "task-1",
+                    content = "Continue from Android",
+                ),
+            )
             .getOrThrow()
 
         val request = requestBody.get().getJSONObject("request")
         assertEquals("chat.send", request.getString("type"))
         assertEquals("task-1", request.getString("taskId"))
         assertEquals("Continue from Android", request.getString("content"))
-        assertFalse(request.has("runtimeCommand"))
+        listOf(
+            "composer",
+            "attachments",
+            "conversationReferences",
+            "workflow",
+            "runtimeCommand",
+            "runtimeOptions",
+        ).forEach { key -> assertFalse(request.has(key)) }
     }
 
     @Test
@@ -419,13 +474,86 @@ class RemoteHttpClientTest {
         )
 
         RemoteHttpClient(FakeDeviceStore())
-            .sendMessage(savedPc(server), "task-1", "Continue from Android", runtimeCommand)
+            .sendMessage(
+                savedPc(server),
+                RemoteSendMessageInput(
+                    taskId = "task-1",
+                    content = "Continue from Android",
+                    runtimeCommand = runtimeCommand,
+                ),
+            )
             .getOrThrow()
 
         val command = requestBody.get()
             .getJSONObject("request")
             .getJSONObject("runtimeCommand")
         assertSessionForkCommand(command, "turn-source", "fork")
+    }
+
+    @Test
+    fun sendMessageDispatchesCompleteOptionalInputShape() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.send",
+                    "result": { "accepted": true }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+        val composer = JSONObject()
+            .put("taskId", "task-1")
+            .put("text", "Continue from Android")
+        val attachments = JSONArray()
+            .put(JSONObject().put("kind", "file").put("path", "README.md"))
+        val conversationReferences = JSONArray()
+            .put(JSONObject().put("taskId", "task-0").put("eventId", "event-0"))
+        val workflow = JSONObject()
+            .put("kind", "lilia_review")
+            .put("scope", "changed")
+        val runtimeCommand = RemoteRuntimeCommandAdapter.sessionFork(
+            RemoteBranchAnchor("turn-source", RemoteSessionForkMode.CONTINUE),
+        )
+        val runtimeOptions = JSONObject()
+            .put("common", JSONObject().put("model", "auto"))
+
+        RemoteHttpClient(FakeDeviceStore())
+            .sendMessage(
+                savedPc(server),
+                RemoteSendMessageInput(
+                    taskId = "task-1",
+                    content = "Continue from Android",
+                    composer = composer,
+                    attachments = attachments,
+                    conversationReferences = conversationReferences,
+                    workflow = workflow,
+                    runtimeCommand = runtimeCommand,
+                    runtimeOptions = runtimeOptions,
+                ),
+            )
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("chat.send", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+        assertEquals("Continue from Android", request.getString("content"))
+        assertEquals("Continue from Android", request.getJSONObject("composer").getString("text"))
+        assertEquals("README.md", request.getJSONArray("attachments").getJSONObject(0).getString("path"))
+        assertEquals(
+            "task-0",
+            request.getJSONArray("conversationReferences").getJSONObject(0).getString("taskId"),
+        )
+        assertEquals("lilia_review", request.getJSONObject("workflow").getString("kind"))
+        assertSessionForkCommand(request.getJSONObject("runtimeCommand"), "turn-source", "continue")
+        assertEquals("auto", request.getJSONObject("runtimeOptions").getJSONObject("common").getString("model"))
     }
 
     @Test
@@ -451,9 +579,11 @@ class RemoteHttpClientTest {
         RemoteHttpClient(FakeDeviceStore())
             .sendMessage(
                 savedPc(server),
-                "task-1",
-                "",
-                RemoteRuntimeCommandAdapter.processWriteStdin("q"),
+                RemoteSendMessageInput(
+                    taskId = "task-1",
+                    content = "",
+                    runtimeCommand = RemoteRuntimeCommandAdapter.processWriteStdin("q"),
+                ),
             )
             .getOrThrow()
 
@@ -493,6 +623,35 @@ class RemoteHttpClientTest {
 
         val request = requestBody.get().getJSONObject("request")
         assertEquals("chat.interrupt", request.getString("type"))
+        assertEquals("task-1", request.getString("taskId"))
+    }
+
+    @Test
+    fun retryDispatchesChatRetryRequest() = runBlocking {
+        val requestBody = AtomicReference<JSONObject>()
+        val server = startBridge { exchange ->
+            assertEquals("POST", exchange.requestMethod)
+            assertEquals("/dispatch", exchange.requestURI.path)
+            requestBody.set(JSONObject(exchange.requestBody.reader(Charsets.UTF_8).readText()))
+            exchange.respond(
+                """
+                {
+                  "ok": true,
+                  "payload": {
+                    "type": "chat.retry",
+                    "result": { "dispatch": "started" }
+                  }
+                }
+                """.trimIndent(),
+            )
+        }
+
+        RemoteHttpClient(FakeDeviceStore())
+            .retry(savedPc(server), "task-1")
+            .getOrThrow()
+
+        val request = requestBody.get().getJSONObject("request")
+        assertEquals("chat.retry", request.getString("type"))
         assertEquals("task-1", request.getString("taskId"))
     }
 

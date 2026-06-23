@@ -2,7 +2,9 @@ package com.lilia.remote
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemotePayloadParserTest {
@@ -54,6 +56,44 @@ class RemotePayloadParserTest {
 
         assertEquals("codex", status.backend)
         assertEquals(true, status.ready)
+    }
+
+    @Test
+    fun mergeTimelineDeduplicatesByIdAndPreservesOrder() {
+        val merged = RemotePayloadParser.mergeTimeline(
+            existing = listOf(
+                RemoteTimelineItem(
+                    id = "event-1",
+                    title = "First",
+                    summary = "Original first",
+                    status = "completed",
+                ),
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Original second",
+                    status = "running",
+                ),
+            ),
+            incoming = listOf(
+                RemoteTimelineItem(
+                    id = "event-2",
+                    title = "Second",
+                    summary = "Updated second",
+                    status = "completed",
+                ),
+                RemoteTimelineItem(
+                    id = "event-3",
+                    title = "Third",
+                    summary = "New third",
+                    status = "running",
+                ),
+            ),
+        )
+
+        assertEquals(listOf("event-1", "event-2", "event-3"), merged.map { it.id })
+        assertEquals("Updated second", merged[1].summary)
+        assertEquals("completed", merged[1].status)
     }
 
     @Test
@@ -198,6 +238,65 @@ class RemotePayloadParserTest {
         assertEquals("Lilia", detail.task.projectName)
         assertEquals("Android remote", detail.task.title)
         assertEquals("running", detail.task.status)
+    }
+
+    @Test
+    fun taskDetailMarksRetryableTimelineErrors() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "user-1",
+                      "kind": "message",
+                      "turnId": "turn-1",
+                      "status": "success",
+                      "payload": {
+                        "role": "user",
+                        "content": "Retry source"
+                      }
+                    },
+                    {
+                      "id": "error-1",
+                      "kind": "error",
+                      "turnId": "turn-1",
+                      "status": "error",
+                      "payload": {
+                        "message": "Failed"
+                      }
+                    },
+                    {
+                      "id": "error-2",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "retryContext": {
+                          "content": "Explicit retry"
+                        }
+                      }
+                    },
+                    {
+                      "id": "error-3",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "message": "Detached"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        assertFalse(detail.timeline[0].retryable)
+        assertTrue(detail.timeline[1].retryable)
+        assertTrue(detail.timeline[2].retryable)
+        assertFalse(detail.timeline[3].retryable)
     }
 
     @Test
@@ -369,6 +468,66 @@ class RemotePayloadParserTest {
         assertEquals("Continue", detail.timeline[1].summary)
         assertEquals("Tool result", detail.timeline[2].title)
         assertEquals("Tests passed", detail.timeline[2].summary)
+    }
+
+    @Test
+    fun timelineParsesMessageRoleAndDetails() {
+        val detail = RemotePayloadParser.parseTaskDetail(
+            taskId = "task-1",
+            taskPayload = JSONObject("""{ "task": { "id": "task-1" } }"""),
+            timelinePayload = JSONObject(
+                """
+                {
+                  "events": [
+                    {
+                      "id": "message-1",
+                      "kind": "message",
+                      "turnId": "turn-1",
+                      "status": "success",
+                      "createdAt": 1710000000000,
+                      "payload": {
+                        "role": "assistant",
+                        "content": "Ready"
+                      }
+                    },
+                    {
+                      "id": "tool-1",
+                      "kind": "tool",
+                      "status": "success",
+                      "payload": {
+                        "toolName": "shell",
+                        "input": { "cmd": "yarn test" },
+                        "output": "passed"
+                      }
+                    },
+                    {
+                      "id": "error-1",
+                      "kind": "error",
+                      "status": "error",
+                      "payload": {
+                        "message": "Failed",
+                        "code": "E_RUN",
+                        "stderr": "boom"
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+            pendingPayload = JSONObject("""{ "interactions": [] }"""),
+        )
+
+        assertEquals("Assistant", detail.timeline[0].title)
+        assertEquals("assistant", detail.timeline[0].role)
+        assertEquals("turn", detail.timeline[0].details.single().label)
+        assertEquals("turn-1", detail.timeline[0].details.single().value)
+        assertEquals(listOf("tool", "input", "output"), detail.timeline[1].details.map { it.label })
+        assertEquals("shell", detail.timeline[1].details[0].value)
+        assertEquals("""{"cmd":"yarn test"}""", detail.timeline[1].details[1].value)
+        assertEquals("passed", detail.timeline[1].details[2].value)
+        assertEquals(listOf("error", "code"), detail.timeline[2].details.map { it.label })
+        assertEquals("boom", detail.timeline[2].details[0].value)
+        assertEquals("E_RUN", detail.timeline[2].details[1].value)
     }
 
     @Test

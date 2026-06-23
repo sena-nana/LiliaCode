@@ -5,11 +5,13 @@ import {
   ChevronRight,
   ExternalLink,
   MessageSquarePlus,
+  RefreshCw,
   X,
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invalidateConversationContextSnapshot } from "../services/conversationContextInvalidation";
 import { focusMainWindow } from "../services/popupWindows";
+import { createLazyLoadState } from "../utils/lazyLoadState";
 import { measurePerfAsync } from "../utils/perf";
 
 const route = useRoute();
@@ -33,7 +35,6 @@ interface PopupStoreBindings {
 }
 
 const popupStores = shallowRef<PopupStoreBindings | null>(null);
-let popupStoresPromise: Promise<PopupStoreBindings> | null = null;
 let disposed = false;
 let popupStoresSeq = 0;
 
@@ -44,6 +45,25 @@ function paramAsString(value: string | string[] | undefined): string | undefined
 
 const projectId = computed(() => paramAsString(route.params.projectId));
 const taskId = computed(() => paramAsString(route.params.taskId));
+const popupStoresLoad = createLazyLoadState<PopupStoreBindings>(() =>
+  measurePerfAsync(
+    "popup-titlebar.stores.load",
+    async () => {
+      const [projectsStore, tasksStore] = await Promise.all([
+        import("../services/projectsStore"),
+        import("../services/tasksStore"),
+      ]);
+      return {
+        getProject: projectsStore.getProject,
+        getOrphanConversation: tasksStore.getOrphanConversation,
+        getTask: tasksStore.getTask,
+        resolveConversationRouteState: tasksStore.resolveConversationRouteState,
+      };
+    },
+    { detail: route.fullPath },
+  )
+);
+const popupStoresStatus = popupStoresLoad.status;
 
 function inferDraftRouteState(
   projectIdValue: string | undefined,
@@ -68,33 +88,20 @@ function inferDraftRouteState(
 
 function ensurePopupStoresLoaded(): Promise<PopupStoreBindings> {
   if (popupStores.value) return Promise.resolve(popupStores.value);
-  if (popupStoresPromise) return popupStoresPromise;
   const seq = ++popupStoresSeq;
-  popupStoresPromise = measurePerfAsync(
-    "popup-titlebar.stores.load",
-    async () => {
-      const [projectsStore, tasksStore] = await Promise.all([
-        import("../services/projectsStore"),
-        import("../services/tasksStore"),
-      ]);
-      const bindings: PopupStoreBindings = {
-        getProject: projectsStore.getProject,
-        getOrphanConversation: tasksStore.getOrphanConversation,
-        getTask: tasksStore.getTask,
-        resolveConversationRouteState: tasksStore.resolveConversationRouteState,
-      };
-      if (!disposed && seq === popupStoresSeq) {
-        popupStores.value = bindings;
-      }
-      return bindings;
-    },
-    { detail: route.fullPath },
-  ).finally(() => {
-    if (seq === popupStoresSeq) {
-      popupStoresPromise = null;
+  return popupStoresLoad.load().then((bindings) => {
+    if (!disposed && seq === popupStoresSeq) {
+      popupStores.value = bindings;
     }
+    return bindings;
   });
-  return popupStoresPromise;
+}
+
+function retryPopupStoresLoad() {
+  if (disposed) return;
+  void ensurePopupStoresLoaded().catch((err) => {
+    console.error("[popup-titlebar] retry load stores failed", err);
+  });
 }
 
 watch(
@@ -200,7 +207,6 @@ async function onFocusMain() {
 onBeforeUnmount(() => {
   disposed = true;
   popupStoresSeq += 1;
-  popupStoresPromise = null;
 });
 </script>
 
@@ -249,6 +255,16 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="popup-titlebar__controls popup-titlebar__controls--right">
+      <button
+        v-if="popupStoresStatus === 'error'"
+        type="button"
+        class="titlebar__btn"
+        aria-label="重试加载弹窗数据"
+        title="重试加载弹窗数据"
+        @click="retryPopupStoresLoad"
+      >
+        <RefreshCw :size="14" aria-hidden="true" />
+      </button>
       <button
         type="button"
         class="titlebar__btn titlebar__btn--danger"

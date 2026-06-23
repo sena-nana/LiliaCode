@@ -19,12 +19,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -43,12 +46,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal const val UNTRUSTED_PC_MESSAGE = "This PC no longer trusts this phone. Pair again."
+private const val DETAIL_LIVE_UPDATE_ERROR_MESSAGE = "Live update temporarily unavailable; showing the last loaded task."
+private const val DETAIL_SUBSCRIBE_INTERVAL_MS = 1_500L
+private const val DETAIL_SNAPSHOT_FALLBACK_BASE_MS = 5_000L
+private const val DETAIL_SNAPSHOT_FALLBACK_MAX_MS = 15_000L
 
 class MainActivity : ComponentActivity() {
     private var pairingIntentUri by mutableStateOf<String?>(null)
@@ -74,7 +83,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     val fallbackRepository = remember { repository }
     val client = remember(fallbackRepository) { fallbackRepository?.let { RemoteHttpClient(it) } }
     val scope = rememberCoroutineScope()
+    val initialSavedPcs = remember { fallbackRepository?.savedPcs().orEmpty() }
     val initialPc = remember { fallbackRepository?.activePc() }
+    var savedPcs by remember { mutableStateOf(initialSavedPcs) }
     var activePc by remember { mutableStateOf(initialPc) }
     var selectedTask by remember { mutableStateOf<RemoteTaskDetail?>(null) }
     var inboxTasks by remember { mutableStateOf<List<RemoteTaskSummary>>(emptyList()) }
@@ -88,10 +99,31 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
     var pairingError by remember { mutableStateOf("") }
     var pendingBranchAnchor by remember(selectedTask?.task?.taskId) { mutableStateOf<RemoteBranchAnchor?>(null) }
 
-    fun acceptPairedPc(pc: SavedPc) {
-        activePc = pc
+    fun resetActivePcDerivedState() {
         selectedTask = null
         inboxTasks = emptyList()
+        inboxLoading = false
+        detailLoading = false
+        bridgeStatus = null
+        providerStatus = null
+        pendingBranchAnchor = null
+    }
+
+    fun acceptPairedPc(pc: SavedPc) {
+        savedPcs = fallbackRepository?.savedPcs() ?: listOf(pc)
+        activePc = pc
+        resetActivePcDerivedState()
+        bridgeTone = "Listening"
+        pairingError = ""
+    }
+
+    fun selectActivePc(pc: SavedPc) {
+        val selected = fallbackRepository?.switchActivePc(pc.endpointId) ?: pc
+        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
+        activePc = selected
+        resetActivePcDerivedState()
+        bridgeTone = "Listening"
+        remoteError = ""
         pairingError = ""
     }
 
@@ -131,11 +163,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             return
         }
         fallbackRepository?.clearActivePc()
+        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs
         activePc = null
-        selectedTask = null
-        inboxTasks = emptyList()
-        bridgeStatus = null
-        providerStatus = null
+        resetActivePcDerivedState()
         bridgeTone = "Pair again"
         remoteError = message
         pairingError = message
@@ -150,6 +180,103 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             return
         }
         remoteError = err.message ?: fallback
+    }
+
+    fun clearLiveUpdateError() {
+        if (remoteError == DETAIL_LIVE_UPDATE_ERROR_MESSAGE) {
+            remoteError = ""
+        }
+    }
+
+    fun handleLiveUpdateFailure(err: Throwable, pc: SavedPc) {
+        if (shouldIgnorePcResult(activePc, pc)) return
+        if (shouldClearActivePcForFailure(err)) {
+            clearUntrustedPc(pc, UNTRUSTED_PC_MESSAGE)
+            return
+        }
+        remoteError = DETAIL_LIVE_UPDATE_ERROR_MESSAGE
+    }
+
+    fun applyTaskDetail(detail: RemoteTaskDetail) {
+        selectedTask = detail
+        inboxTasks = syncInboxTaskStatus(inboxTasks, detail)
+    }
+
+    suspend fun refreshTaskSnapshot(
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        val result = remoteClient.taskDetail(pc, taskId)
+        val detail = result.getOrElse {
+            handleLiveUpdateFailure(it, pc)
+            return false
+        }
+        if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+            return false
+        }
+        applyTaskDetail(detail)
+        clearLiveUpdateError()
+        return true
+    }
+
+    suspend fun recoverLiveTaskUpdate(
+        err: Throwable,
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        if (shouldClearActivePcForFailure(err)) {
+            handleLiveUpdateFailure(err, pc)
+            return false
+        }
+        return refreshTaskSnapshot(pc, remoteClient, taskId)
+    }
+
+    suspend fun refreshTaskSubscription(
+        pc: SavedPc,
+        remoteClient: RemoteHttpClient,
+        taskId: String,
+    ): Boolean {
+        val current = selectedTask
+        if (current == null || current.task.taskId != taskId) return false
+        val timelineResult = remoteClient.subscribeTimeline(
+            pc,
+            taskId,
+            current.timeline.lastOrNull()?.id,
+        )
+        if (timelineResult.isFailure) {
+            return recoverLiveTaskUpdate(
+                timelineResult.exceptionOrNull() ?: RuntimeException("Timeline subscription failed"),
+                pc,
+                remoteClient,
+                taskId,
+            )
+        }
+        val timeline = timelineResult.getOrThrow()
+        val stateResult = remoteClient.taskState(pc, taskId)
+        if (stateResult.isFailure) {
+            return recoverLiveTaskUpdate(
+                stateResult.exceptionOrNull() ?: RuntimeException("Task state refresh failed"),
+                pc,
+                remoteClient,
+                taskId,
+            )
+        }
+        val state = stateResult.getOrThrow()
+        if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+            return false
+        }
+        val latest = selectedTask ?: return false
+        val detail = latest.copy(
+            task = state.task,
+            runtimePhase = state.runtimePhase,
+            timeline = RemotePayloadParser.mergeTimeline(latest.timeline, timeline),
+            pendingInteraction = state.pendingInteraction,
+        )
+        applyTaskDetail(detail)
+        clearLiveUpdateError()
+        return true
     }
 
     suspend fun refreshProviderStatus(pc: SavedPc, remoteClient: RemoteHttpClient) {
@@ -199,7 +326,8 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteClient.listTasks(pc)
             .onSuccess {
                 if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                inboxTasks = it
+                val detail = selectedTask
+                inboxTasks = if (detail == null) it else syncInboxTaskStatus(it, detail)
             }
             .onFailure { handleRemoteFailure(it, "Failed to load tasks", pc) }
     }
@@ -213,7 +341,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             remoteClient.taskDetail(pc, taskId)
                 .onSuccess {
                     if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                    selectedTask = it.withRelatedTasks(inboxTasks)
+                    applyTaskDetail(it.withRelatedTasks(inboxTasks))
                 }
                 .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             if (!shouldIgnorePcResult(activePc, pc)) {
@@ -243,7 +371,7 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 remoteClient.taskDetail(pc, taskId)
                     .onSuccess {
                         if (shouldIgnorePcResult(activePc, pc)) return@onSuccess
-                        selectedTask = it.withRelatedTasks(inboxTasks)
+                        applyTaskDetail(it.withRelatedTasks(inboxTasks))
                     }
                     .onFailure { handleRemoteFailure(it, "Failed to load task", pc) }
             }
@@ -264,7 +392,14 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
             }
         }
         runTaskAction(pc, taskId, failureMessage, clearError) { remoteClient ->
-            remoteClient.sendMessage(pc, taskId, "", command)
+            remoteClient.sendMessage(
+                pc,
+                RemoteSendMessageInput(
+                    taskId = taskId,
+                    content = "",
+                    runtimeCommand = command,
+                ),
+            )
         }
     }
 
@@ -274,7 +409,9 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         remoteError = ""
         scope.launch {
             loadInbox(pc, remoteClient)
-            inboxLoading = false
+            if (!shouldIgnorePcResult(activePc, pc)) {
+                inboxLoading = false
+            }
         }
     }
 
@@ -295,7 +432,41 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
         inboxLoading = true
         remoteError = ""
         loadInbox(pc, remoteClient)
-        inboxLoading = false
+        if (!shouldIgnorePcResult(activePc, pc)) {
+            inboxLoading = false
+        }
+    }
+
+    LaunchedEffect(
+        activePc?.endpointId,
+        activePc?.bridgeUrl,
+        selectedTask?.task?.taskId,
+        bridgeStatus?.capabilities?.supportsTimelineSubscription,
+    ) {
+        val pc = activePc ?: return@LaunchedEffect
+        val remoteClient = client ?: return@LaunchedEffect
+        val taskId = selectedTask?.task?.taskId ?: return@LaunchedEffect
+        var fallbackDelayMs: Long? = null
+        while (true) {
+            val supportsTimelineSubscription =
+                bridgeStatus?.capabilities?.supportsTimelineSubscription != false
+            delay(
+                if (supportsTimelineSubscription && fallbackDelayMs == null) {
+                    DETAIL_SUBSCRIBE_INTERVAL_MS
+                } else {
+                    fallbackDelayMs ?: DETAIL_SNAPSHOT_FALLBACK_BASE_MS
+                },
+            )
+            if (shouldIgnorePcResult(activePc, pc) || selectedTask?.task?.taskId != taskId) {
+                return@LaunchedEffect
+            }
+            val updated = if (supportsTimelineSubscription) {
+                refreshTaskSubscription(pc, remoteClient, taskId)
+            } else {
+                refreshTaskSnapshot(pc, remoteClient, taskId)
+            }
+            fallbackDelayMs = if (updated) null else nextLiveUpdateDelay(fallbackDelayMs)
+        }
     }
 
     MaterialTheme(
@@ -326,18 +497,27 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                     pc = activePc!!,
                     detail = selectedTask!!,
                     taskRunBlockInfo = taskRunBlockInfo(selectedTask!!.task, selectedTask!!.relatedTasks),
+                    savedPcs = savedPcs,
                     capabilities = bridgeStatus?.capabilities ?: RemoteCapabilities(),
                     providerStatus = providerStatus,
                     loading = detailLoading,
                     error = remoteError,
                     pendingBranchAnchor = pendingBranchAnchor,
                     onBack = { selectedTask = null },
+                    onSelectPc = { selectActivePc(it) },
                     onRefresh = { openTask(activePc!!, selectedTask!!.task.taskId) },
                     onInterrupt = {
                         val pc = activePc!!
                         val taskId = selectedTask!!.task.taskId
                         runTaskAction(pc, taskId, "Interrupt failed", clearError = false) { remoteClient ->
                             remoteClient.interrupt(pc, taskId)
+                        }
+                    },
+                    onRetry = {
+                        val pc = activePc!!
+                        val taskId = selectedTask!!.task.taskId
+                        runTaskAction(pc, taskId, "Retry failed") { remoteClient ->
+                            remoteClient.retry(pc, taskId)
                         }
                     },
                     onResolveInteraction = { interaction, approve, responseText, selectedOptions ->
@@ -375,9 +555,11 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                             ) { remoteClient ->
                                 remoteClient.sendMessage(
                                     pc,
-                                    taskId,
-                                    message,
-                                    branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                                    RemoteSendMessageInput(
+                                        taskId = taskId,
+                                        content = message,
+                                        runtimeCommand = branchAnchor?.let(RemoteRuntimeCommandAdapter::sessionFork),
+                                    ),
                                 )
                             }
                         }
@@ -405,17 +587,22 @@ fun LiliaRemoteApp(repository: RemoteRepository? = null, initialPairingUri: Stri
                 )
                 else -> InboxScreen(
                     pc = activePc!!,
+                    savedPcs = savedPcs,
                     tasks = inboxTasks,
                     loading = inboxLoading,
                     error = remoteError,
                     bridgeTone = bridgeTone,
+                    onSelectPc = { selectActivePc(it) },
                     onRefresh = { refreshInbox(activePc!!) },
                     onOpenTask = { openTask(activePc!!, it.taskId) },
                     onForgetPc = {
-                        fallbackRepository?.clearActivePc()
+                        val pc = activePc!!
+                        fallbackRepository?.forgetPc(pc)
+                        savedPcs = fallbackRepository?.savedPcs() ?: savedPcs.filterNot {
+                            activePcConnectionMatches(it, pc)
+                        }
                         activePc = null
-                        bridgeStatus = null
-                        providerStatus = null
+                        resetActivePcDerivedState()
                     },
                 )
             }
@@ -438,6 +625,27 @@ private fun RemoteTaskDetail.withRelatedTasks(tasks: List<RemoteTaskSummary>): R
     byId[task.taskId] = task
     return copy(relatedTasks = byId.values.toList())
 }
+
+internal fun syncInboxTaskStatus(
+    tasks: List<RemoteTaskSummary>,
+    detail: RemoteTaskDetail,
+): List<RemoteTaskSummary> =
+    tasks.map { task ->
+        if (task.taskId == detail.task.taskId) {
+            task.copy(
+                status = detail.task.status,
+                pendingAction = detail.pendingInteraction?.title,
+            )
+        } else {
+            task
+        }
+    }
+
+private fun nextLiveUpdateDelay(currentDelayMs: Long?): Long =
+    minOf(
+        (currentDelayMs ?: 0L) + DETAIL_SNAPSHOT_FALLBACK_BASE_MS,
+        DETAIL_SNAPSHOT_FALLBACK_MAX_MS,
+    )
 
 @Composable
 private fun PairingScreen(
@@ -570,10 +778,12 @@ private fun PairingScreen(
 @Composable
 private fun InboxScreen(
     pc: SavedPc,
+    savedPcs: List<SavedPc>,
     tasks: List<RemoteTaskSummary>,
     loading: Boolean,
     error: String,
     bridgeTone: String,
+    onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onOpenTask: (RemoteTaskSummary) -> Unit,
     onForgetPc: () -> Unit,
@@ -584,7 +794,14 @@ private fun InboxScreen(
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        RemoteHeader(title = "Active PC", subtitle = pc.displayName, tone = bridgeTone)
+        RemoteHeader(
+            title = "Active PC",
+            subtitle = pc.displayName,
+            tone = bridgeTone,
+            activePc = pc,
+            savedPcs = savedPcs,
+            onSelectPc = onSelectPc,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onForgetPc, shape = RoundedCornerShape(8.dp)) {
                 Text("Forget PC")
@@ -627,14 +844,17 @@ private fun TaskDetailScreen(
     pc: SavedPc,
     detail: RemoteTaskDetail,
     taskRunBlockInfo: TaskRunBlockInfo?,
+    savedPcs: List<SavedPc>,
     capabilities: RemoteCapabilities,
     providerStatus: RemoteProviderStatus?,
     loading: Boolean,
     error: String,
     pendingBranchAnchor: RemoteBranchAnchor?,
     onBack: () -> Unit,
+    onSelectPc: (SavedPc) -> Unit,
     onRefresh: () -> Unit,
     onInterrupt: () -> Unit,
+    onRetry: () -> Unit,
     onResolveInteraction: (PendingInteraction, Boolean, String, Map<String, List<String>>) -> Unit,
     onSelectBranchAnchor: (RemoteBranchAnchor) -> Unit,
     onClearBranchAnchor: () -> Unit,
@@ -649,6 +869,7 @@ private fun TaskDetailScreen(
     val pendingInteraction = detail.pendingInteraction
     val providerReady = providerStatus?.ready != false
     val processRunning = detail.processSessionId != null
+    val hasRetryableError = detail.timeline.any { it.retryable }
     var interactionResponse by remember(pendingInteraction?.requestId) { mutableStateOf("") }
     var selectedInteractionOptions by remember(pendingInteraction?.requestId) { mutableStateOf<Set<String>>(emptySet()) }
     Column(
@@ -657,7 +878,14 @@ private fun TaskDetailScreen(
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RemoteHeader(title = pc.displayName, subtitle = detail.task.title, tone = detail.runtimePhase)
+        RemoteHeader(
+            title = pc.displayName,
+            subtitle = detail.task.title,
+            tone = detail.runtimePhase,
+            activePc = pc,
+            savedPcs = savedPcs,
+            onSelectPc = onSelectPc,
+        )
         OutlinedButton(onClick = onBack, shape = RoundedCornerShape(8.dp)) {
             Text("Back")
         }
@@ -671,6 +899,13 @@ private fun TaskDetailScreen(
                 shape = RoundedCornerShape(8.dp),
             ) {
                 Text("Interrupt")
+            }
+            OutlinedButton(
+                onClick = onRetry,
+                enabled = !loading && providerReady && capabilities.supportsChatSend && hasRetryableError,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("Retry")
             }
         }
         providerStatus?.let {
@@ -797,6 +1032,15 @@ private fun TaskDetailScreen(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (detail.timeline.isEmpty()) {
+                item {
+                    Text(
+                        "No timeline events yet.",
+                        color = Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             items(detail.timeline, key = { it.id }) { item ->
                 TimelineRow(
                     item = item,
@@ -970,22 +1214,70 @@ private fun BlockedTaskPanel(info: TaskRunBlockInfo) {
 }
 
 @Composable
-private fun RemoteHeader(title: String, subtitle: String, tone: String) {
+private fun RemoteHeader(
+    title: String,
+    subtitle: String,
+    tone: String,
+    activePc: SavedPc? = null,
+    savedPcs: List<SavedPc> = emptyList(),
+    onSelectPc: (SavedPc) -> Unit = {},
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val switchablePcs = savedPcs.filter { pc ->
+        activePc == null || !activePcConnectionMatches(activePc, pc)
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = Muted)
             Text(
                 subtitle,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (switchablePcs.isNotEmpty()) {
+                Box {
+                    OutlinedButton(
+                        onClick = { menuExpanded = true },
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("Switch")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                        switchablePcs.forEach { pc ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(pc.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            pc.bridgeUrl,
+                                            color = Muted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onSelectPc(pc)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(8.dp)
@@ -1078,15 +1370,54 @@ private fun TimelineRow(
     onStartBranch: (RemoteSessionForkMode) -> Unit,
     blockReason: String?,
 ) {
+    val statusColor = timelineStatusColor(item.status)
     Panel {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(item.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(item.status, color = Muted, style = MaterialTheme.typography.labelMedium)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    item.title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TimelineChip(text = item.kind, color = Muted)
+                    item.role?.let { role ->
+                        TimelineChip(text = role.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            TimelineChip(text = item.status, color = statusColor)
         }
-        Text(item.summary, color = Muted, style = MaterialTheme.typography.bodyMedium)
+        if (item.summary.isNotBlank()) {
+            Text(
+                item.summary,
+                color = if (item.role == "assistant" || item.role == "user") {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    Muted
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        item.details.forEach { detail ->
+            TimelineDetailRow(detail)
+        }
+        if (item.retryable) {
+            Text(
+                "Retry available",
+                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         if (item.branchSourceTurnId != null) {
             if (blockReason != null) {
                 Text(blockReason, color = Danger, style = MaterialTheme.typography.bodySmall)
@@ -1177,6 +1508,53 @@ internal fun taskStatusLabel(status: String): String =
         "done" -> "Done"
         "cancelled" -> "Cancelled"
         else -> status.ifBlank { "Waiting" }.replaceFirstChar { it.uppercase() }
+    }
+
+@Composable
+private fun TimelineChip(text: String, color: Color) {
+    Text(
+        text = text,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        color = color,
+        style = MaterialTheme.typography.labelSmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun TimelineDetailRow(detail: RemoteTimelineDetail) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            detail.label.replaceFirstChar { it.uppercase() },
+            modifier = Modifier.width(72.dp),
+            color = Color(0xFF87918B),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text(
+            detail.value,
+            modifier = Modifier.weight(1f),
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun timelineStatusColor(status: String): Color =
+    when (status) {
+        "success", "completed", "done" -> MaterialTheme.colorScheme.primary
+        "failed", "error", "cancelled" -> Danger
+        "requires_action" -> MaterialTheme.colorScheme.secondary
+        "running", "started", "in_progress", "pending" -> Color(0xFF8DBBE8)
+        else -> Muted
     }
 
 private val Muted = Color(0xFFB8C2BC)

@@ -3,6 +3,8 @@ package com.lilia.remote
 import android.content.Context
 import android.content.SharedPreferences
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 interface RemoteDeviceStore {
     fun deviceEndpointId(): String
@@ -28,6 +30,76 @@ class RemoteRepository internal constructor(
     }
 
     fun activePc(): SavedPc? {
+        return readActivePcFromPrefs()
+    }
+
+    fun savedPcs(): List<SavedPc> {
+        val saved = readSavedPcs()
+        if (saved.isNotEmpty()) return saved
+        return readActivePcFromPrefs()?.let(::listOf).orEmpty()
+    }
+
+    override fun savePairing(ticket: RemotePairingTicket): SavedPc {
+        val pc = SavedPc(
+            endpointId = ticket.endpointId,
+            displayName = ticket.pcName,
+            protocolVersion = ticket.protocolVersion,
+            pairingUri = ticket.rawUri,
+            bridgeUrl = ticket.bridgeUrl,
+            lastActiveAt = System.currentTimeMillis(),
+        )
+        val updatedSavedPcs = upsertSavedPc(savedPcs(), pc)
+        prefs.edit {
+            putSavedPcList(updatedSavedPcs)
+            putActivePc(pc)
+        }
+        return pc
+    }
+
+    fun switchActivePc(endpointId: String, now: Long = System.currentTimeMillis()): SavedPc? {
+        val saved = savedPcs()
+        val selected = saved.firstOrNull { it.endpointId == endpointId } ?: return null
+        val updated = selected.copy(lastActiveAt = now)
+        val updatedSavedPcs = upsertSavedPc(saved, updated)
+        prefs.edit {
+            putSavedPcList(updatedSavedPcs)
+            putActivePc(updated)
+        }
+        return updated
+    }
+
+    override fun markActivePcSeen(pc: SavedPc, now: Long): SavedPc {
+        val current = activePc()
+        if (current == null || !activePcConnectionMatches(current, pc)) return pc
+        val updated = current.copy(lastActiveAt = now)
+        val updatedSavedPcs = upsertSavedPc(savedPcs(), updated)
+        prefs.edit {
+            putSavedPcList(updatedSavedPcs)
+            putActivePc(updated)
+        }
+        return updated
+    }
+
+    fun clearActivePc() {
+        prefs.edit {
+            clearActivePcFields()
+        }
+    }
+
+    fun forgetPc(pc: SavedPc) {
+        val remaining = savedPcs().filterNot {
+            it.endpointId == pc.endpointId && it.bridgeUrl == pc.bridgeUrl
+        }
+        val active = activePc()
+        prefs.edit {
+            putSavedPcList(remaining)
+            if (active != null && activePcConnectionMatches(active, pc)) {
+                clearActivePcFields()
+            }
+        }
+    }
+
+    private fun readActivePcFromPrefs(): SavedPc? {
         val endpointId = prefs.getString("active.endpointId", null) ?: return null
         val displayName = prefs.getString("active.displayName", null) ?: "Lilia PC"
         val pairingUri = prefs.getString("active.pairingUri", null) ?: ""
@@ -48,50 +120,71 @@ class RemoteRepository internal constructor(
         )
     }
 
-    override fun savePairing(ticket: RemotePairingTicket): SavedPc {
-        val pc = SavedPc(
-            endpointId = ticket.endpointId,
-            displayName = ticket.pcName,
-            protocolVersion = ticket.protocolVersion,
-            pairingUri = ticket.rawUri,
-            bridgeUrl = ticket.bridgeUrl,
-            lastActiveAt = System.currentTimeMillis(),
-        )
-        prefs.edit {
-            putString("active.endpointId", pc.endpointId)
-            putString("active.displayName", pc.displayName)
-            putString("active.pairingUri", pc.pairingUri)
-            putString("active.bridgeUrl", pc.bridgeUrl)
-            putInt("active.protocolVersion", pc.protocolVersion)
-            putLong("active.lastActiveAt", pc.lastActiveAt)
-        }
-        return pc
-    }
-
-    override fun markActivePcSeen(pc: SavedPc, now: Long): SavedPc {
-        val current = activePc()
-        if (current == null || !activePcConnectionMatches(current, pc)) return pc
-        val updated = current.copy(lastActiveAt = now)
-        prefs.edit {
-            putLong("active.lastActiveAt", updated.lastActiveAt)
-        }
-        return updated
-    }
-
-    fun clearActivePc() {
-        prefs.edit {
-            remove("active.endpointId")
-            remove("active.displayName")
-            remove("active.pairingUri")
-            remove("active.bridgeUrl")
-            remove("active.protocolVersion")
-            remove("active.lastActiveAt")
-        }
+    private fun readSavedPcs(): List<SavedPc> {
+        val raw = prefs.getString("saved.pcs", null)?.takeIf { it.isNotBlank() } ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val endpointId = item.optString("endpointId").takeIf { it.isNotBlank() } ?: continue
+                    val bridgeUrl = item.optString("bridgeUrl").takeIf { it.isNotBlank() } ?: continue
+                    add(
+                        SavedPc(
+                            endpointId = endpointId,
+                            displayName = item.optString("displayName", "Lilia PC"),
+                            protocolVersion = item.optInt("protocolVersion", 1),
+                            pairingUri = item.optString("pairingUri", ""),
+                            bridgeUrl = bridgeUrl,
+                            lastActiveAt = item.optLong("lastActiveAt", 0L),
+                        ),
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 }
 
 internal fun activePcConnectionMatches(current: SavedPc, candidate: SavedPc): Boolean =
     current.endpointId == candidate.endpointId && current.bridgeUrl == candidate.bridgeUrl
+
+private fun upsertSavedPc(savedPcs: List<SavedPc>, pc: SavedPc): List<SavedPc> =
+    (savedPcs.filterNot { it.endpointId == pc.endpointId } + pc)
+        .sortedByDescending { it.lastActiveAt }
+
+private fun RemotePreferencesEditor.putActivePc(pc: SavedPc) {
+    putString("active.endpointId", pc.endpointId)
+    putString("active.displayName", pc.displayName)
+    putString("active.pairingUri", pc.pairingUri)
+    putString("active.bridgeUrl", pc.bridgeUrl)
+    putInt("active.protocolVersion", pc.protocolVersion)
+    putLong("active.lastActiveAt", pc.lastActiveAt)
+}
+
+private fun RemotePreferencesEditor.clearActivePcFields() {
+    remove("active.endpointId")
+    remove("active.displayName")
+    remove("active.pairingUri")
+    remove("active.bridgeUrl")
+    remove("active.protocolVersion")
+    remove("active.lastActiveAt")
+}
+
+private fun RemotePreferencesEditor.putSavedPcList(savedPcs: List<SavedPc>) {
+    val array = JSONArray()
+    savedPcs.forEach { pc ->
+        array.put(
+            JSONObject()
+                .put("endpointId", pc.endpointId)
+                .put("displayName", pc.displayName)
+                .put("protocolVersion", pc.protocolVersion)
+                .put("pairingUri", pc.pairingUri)
+                .put("bridgeUrl", pc.bridgeUrl)
+                .put("lastActiveAt", pc.lastActiveAt),
+        )
+    }
+    putString("saved.pcs", array.toString())
+}
 
 internal interface RemotePreferences {
     fun getString(key: String, defaultValue: String?): String?

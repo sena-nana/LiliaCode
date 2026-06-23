@@ -17,6 +17,7 @@ import {
   type AnchoredMenuPosition,
 } from "../../composables/menuMotion";
 import { useAnchoredOverlay } from "../../composables/useAnchoredOverlay";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
 
 const props = defineProps<{
   open: boolean;
@@ -29,8 +30,11 @@ const emit = defineEmits<{
   error: [message: string];
 }>();
 
+const cloneRepoDialogLoad = createLazyLoadState(
+  async () => (await import("./CloneRepoDialog.vue")).default,
+);
 const CloneRepoDialog = defineAsyncComponent(
-  () => import("./CloneRepoDialog.vue"),
+  () => cloneRepoDialogLoad.load(),
 );
 
 const cloneOpen = ref(false);

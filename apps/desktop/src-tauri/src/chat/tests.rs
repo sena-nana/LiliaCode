@@ -268,13 +268,7 @@ mod agent_event_sink_tests {
     #[test]
     fn clearing_runtime_state_removes_persisted_runtime_state() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         let running_turn = RunningTurn {
             turn_id: "turn-1".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -296,13 +290,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn pending_turns_roundtrip_through_persistent_queue() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         let turn = PendingChatTurn {
             workflow: Some(ChatWorkflow::Automation {
                 automation_run_id: "run-1".to_string(),
@@ -1912,13 +1900,7 @@ mod agent_event_sink_tests {
     #[test]
     fn runtime_snapshot_falls_back_to_current_epoch_persisted_state() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         let running_turn = RunningTurn {
             turn_id: "turn-persisted".to_string(),
             backend: BACKEND_CODEX.to_string(),
@@ -1951,13 +1933,7 @@ mod agent_event_sink_tests {
     #[test]
     fn persisted_runtime_state_reports_stale_epoch_as_abandoned() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
@@ -1976,13 +1952,7 @@ mod agent_event_sink_tests {
     #[test]
     fn pending_turn_recovery_clears_abandoned_runtime_state() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
@@ -1998,13 +1968,7 @@ mod agent_event_sink_tests {
     #[test]
     fn recoverable_pending_turn_drains_queue_after_clearing_abandoned_runtime_state() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         conn.execute(
             r#"INSERT INTO task_runtime_states
                (task_id, turn_id, backend, phase, runtime_epoch, updated_at)
@@ -2033,13 +1997,7 @@ mod agent_event_sink_tests {
     #[test]
     fn pending_turn_recovery_keeps_live_runtime_state_blocking() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         persist_runtime_state(
             &conn,
             &store,
@@ -2061,8 +2019,7 @@ mod agent_event_sink_tests {
     #[test]
     fn runtime_state_phase_update_preserves_live_process_session() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
+        let conn = resume_conn();
         insert_resume_task(&conn);
         let running_turn = RunningTurn {
             turn_id: "turn-live".to_string(),
@@ -2102,13 +2059,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn queued_user_message_recovery_updates_existing_timeline_row() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
         let message = ChatMessage {
             id: "msg-recover".to_string(),
             task_id: "task-1".to_string(),
@@ -2174,13 +2125,7 @@ mod agent_event_sink_tests {
     #[test]
     fn persisted_runtime_state_with_live_process_session_survives_epoch_change() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
 
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
         let child = match std::process::Command::new(python)
@@ -2232,13 +2177,7 @@ mod agent_event_sink_tests {
     #[test]
     fn restore_active_runtime_sessions_rehydrates_running_turns_from_live_process_session() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
 
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
         let child = match std::process::Command::new(python)
@@ -2306,13 +2245,7 @@ mod agent_event_sink_tests {
     #[test]
     fn restore_active_runtime_sessions_skips_dead_process_session() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
 
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
         let child = match std::process::Command::new(python)
@@ -2369,18 +2302,8 @@ mod agent_event_sink_tests {
     #[test]
     fn restore_active_runtime_sessions_preserves_backend_for_resume_dispatch() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-2', 'session-2')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
+        insert_task_with_id(&conn, "task-2", "session-2");
 
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
         let child_1 = std::process::Command::new(&python)
@@ -2436,13 +2359,7 @@ mod agent_event_sink_tests {
     #[test]
     fn restore_active_runtime_sessions_only_returns_still_reattachable_sessions() {
         let store = ChatStore::default();
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            r#"INSERT INTO tasks (id, session_id) VALUES ('task-1', 'session-1')"#,
-            [],
-        )
-        .unwrap();
+        let conn = resume_conn_with_task();
 
         let python = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
         let child = std::process::Command::new(python)
@@ -2571,30 +2488,42 @@ mod agent_event_sink_tests {
               guide_id        TEXT,
               created_at      INTEGER NOT NULL
             );
-            CREATE TABLE agent_timeline_events (
-              id                TEXT PRIMARY KEY,
-              task_id           TEXT NOT NULL,
-              turn_id           TEXT,
-              backend           TEXT NOT NULL CHECK (backend IN ('claude','codex')),
-              kind              TEXT NOT NULL,
-              status            TEXT NOT NULL,
-              title             TEXT NOT NULL,
-              summary           TEXT,
-              payload           TEXT NOT NULL,
-              created_at        INTEGER NOT NULL,
-              updated_at        INTEGER NOT NULL,
-              turn_seq          INTEGER NOT NULL,
-              intra_turn_order  INTEGER NOT NULL
-            );
             "#,
         )
         .unwrap();
+        agent_timeline::create_timeline_schema(conn).unwrap();
+    }
+
+    fn resume_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        create_resume_schema(&conn);
+        conn
+    }
+
+    fn resume_conn_with_task() -> Connection {
+        let conn = resume_conn();
+        insert_task(&conn, "session-1");
+        conn
+    }
+
+    fn resume_conn_with_legacy_task() -> Connection {
+        let conn = resume_conn();
+        insert_resume_task(&conn);
+        conn
     }
 
     fn insert_resume_task(conn: &Connection) {
+        insert_task(conn, "legacy-session");
+    }
+
+    fn insert_task(conn: &Connection, session_id: &str) {
+        insert_task_with_id(conn, "task-1", session_id);
+    }
+
+    fn insert_task_with_id(conn: &Connection, task_id: &str, session_id: &str) {
         conn.execute(
-            "INSERT INTO tasks (id, session_id) VALUES ('task-1', 'legacy-session')",
-            [],
+            "INSERT INTO tasks (id, session_id) VALUES (?1, ?2)",
+            [task_id, session_id],
         )
         .unwrap();
     }
@@ -2628,30 +2557,9 @@ mod agent_event_sink_tests {
 
     #[test]
     fn persisted_resume_session_id_ignores_unscoped_task_session_id() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        conn.execute(
-            "INSERT INTO tasks (id, session_id) VALUES ('task-1', 'claude-session')",
-            [],
-        )
-        .unwrap();
-        agent_timeline::insert(
-            &conn,
-            AgentTimelineEventInput {
-                id: Some("codex-turn".to_string()),
-                task_id: "task-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                backend: BACKEND_CODEX.to_string(),
-                kind: "turn".to_string(),
-                status: "success".to_string(),
-                title: "Codex done".to_string(),
-                summary: None,
-                payload: json!({ "sessionId": "codex-thread" }),
-                created_at: Some(200),
-                updated_at: Some(200),
-            },
-        )
-        .unwrap();
+        let conn = resume_conn();
+        insert_task(&conn, "claude-session");
+        insert_codex_timeline_session(&conn, "codex-turn", "codex-thread", 200);
 
         assert_eq!(
             load_persisted_resume_session_id(&conn, "task-1", BACKEND_CODEX),
@@ -2665,9 +2573,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn persisted_resume_session_id_reads_backend_scoped_checkpoint() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        insert_resume_task(&conn);
+        let conn = resume_conn_with_legacy_task();
 
         persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
         persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
@@ -2678,9 +2584,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn persisted_resume_session_id_uses_latest_backend_checkpoint() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        insert_resume_task(&conn);
+        let conn = resume_conn_with_legacy_task();
         insert_codex_timeline_session(&conn, "codex-turn", "timeline-thread", 200);
 
         persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "builtin-thread").unwrap();
@@ -2698,9 +2602,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn persisted_resume_session_id_prefers_checkpoint_over_timeline() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        insert_resume_task(&conn);
+        let conn = resume_conn_with_legacy_task();
         insert_codex_timeline_session(&conn, "codex-turn-old", "timeline-thread", 100);
         persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "checkpoint-thread").unwrap();
 
@@ -2709,9 +2611,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn persisted_resume_session_id_falls_back_to_timeline_without_checkpoint() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        insert_resume_task(&conn);
+        let conn = resume_conn_with_legacy_task();
         insert_codex_timeline_session(&conn, "codex-turn", "timeline-thread", 200);
 
         assert_resume_session(&conn, BACKEND_CODEX, Some("timeline-thread"));
@@ -2719,9 +2619,7 @@ mod agent_event_sink_tests {
 
     #[test]
     fn clear_agent_sessions_for_task_removes_backend_checkpoints() {
-        let conn = Connection::open_in_memory().unwrap();
-        create_resume_schema(&conn);
-        insert_resume_task(&conn);
+        let conn = resume_conn_with_legacy_task();
         persist_agent_session_id(&conn, "task-1", BACKEND_CLAUDE, "claude-session").unwrap();
         persist_agent_session_id(&conn, "task-1", BACKEND_CODEX, "codex-thread").unwrap();
 

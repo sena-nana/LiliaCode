@@ -2,6 +2,7 @@ import { render } from "@testing-library/vue";
 import { defineComponent, nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTimelineRailMask } from "../src/components/chat/useTimelineRailMask";
+import { domRect } from "./domTestHelpers";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -20,28 +21,8 @@ describe("useTimelineRailMask", () => {
     const node = document.createElement("li");
     node.className = "agent-timeline__node";
     timeline.append(node);
-    timeline.getBoundingClientRect = vi.fn(() => ({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 0,
-      bottom: 100,
-      left: 0,
-      width: 10,
-      height: 100,
-      toJSON: () => ({}),
-    }));
-    node.getBoundingClientRect = vi.fn(() => ({
-      x: 0,
-      y: 12,
-      top: 12,
-      right: 10,
-      bottom: 32,
-      left: 0,
-      width: 10,
-      height: 20,
-      toJSON: () => ({}),
-    }));
+    timeline.getBoundingClientRect = vi.fn(() => domRect(0, 0, 10, 100));
+    node.getBoundingClientRect = vi.fn(() => domRect(0, 12, 10, 20));
 
     let railStyle: ReturnType<typeof useTimelineRailMask>["railLineStyle"] | null = null;
     const Harness = defineComponent({

@@ -33,13 +33,18 @@ import {
 import { useAnchoredMenuMotion } from "../../composables/useAnchoredMenuMotion";
 import { addDomEventListener, runUnlistenFns } from "../../utils/eventListeners";
 import { measurePerfAsync } from "../../utils/perf";
+import { createLazyLoadState } from "../../utils/lazyLoadState";
+
+const composerModelPickerLoad = createLazyLoadState<Component>(() =>
+  measurePerfAsync(
+    "chat-composer.model-picker.load",
+    async () => (await import("./ComposerModelPicker.vue")).default,
+  )
+);
 
 const ComposerModelPicker = defineAsyncComponent({
   suspensible: false,
-  loader: () => measurePerfAsync(
-    "chat-composer.model-picker.load",
-    async () => (await import("./ComposerModelPicker.vue")).default,
-  ),
+  loader: () => composerModelPickerLoad.load(),
 });
 
 const props = defineProps<{

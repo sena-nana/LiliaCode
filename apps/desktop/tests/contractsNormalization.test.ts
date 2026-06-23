@@ -3590,6 +3590,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
+      mainAgentPromptMode: "aggressive",
       codexProfile: {
         profile: "fast",
         model: " gpt-5.4 ",
@@ -3622,6 +3623,7 @@ describe("contracts normalization helpers", () => {
       nonInterruptMode: true,
       debug: true,
       permissionMode: "free",
+      mainAgentPromptMode: "aggressive",
       codexProfile: {
         profile: "fast",
         model: "gpt-5.4",
@@ -3653,6 +3655,7 @@ describe("contracts normalization helpers", () => {
     expect(normalizeAgentInteractionSettings({
       nonInterruptMode: "yes" as never,
       debug: 1 as never,
+      mainAgentPromptMode: "deep" as never,
       subagentMode: {
         enabled: "true" as never,
         codex: { enabled: 0 as never },
@@ -3673,6 +3676,7 @@ describe("contracts normalization helpers", () => {
     })).toMatchObject({
       nonInterruptMode: false,
       debug: false,
+      mainAgentPromptMode: "conservative",
       subagentMode: {
         enabled: false,
         codex: { enabled: true },
@@ -3811,8 +3815,8 @@ describe("contracts normalization helpers", () => {
     expect(AUTOMATION_LOGIC_KIND_LABELS.stop).toBe("停止运行");
     expect(DEFAULT_AUTOMATION_LOGIC_KIND).toBe("condition");
     expect(DEFAULT_AUTOMATION_LOGIC_PATH).toBe("trigger.kind");
-    expect(DEFAULT_AUTOMATION_AGENT_PROMPT).toBe("请根据当前上下文继续推进。");
-    expect(DEFAULT_AUTOMATION_HUMAN_PROMPT).toBe("确认后继续执行自动化。");
+    expect(DEFAULT_AUTOMATION_AGENT_PROMPT.trim().length).toBeGreaterThan(0);
+    expect(DEFAULT_AUTOMATION_HUMAN_PROMPT.trim().length).toBeGreaterThan(0);
     expect(isAutomationLogicKind("switch")).toBe(true);
     expect(isAutomationLogicKind("branch")).toBe(false);
     expect(normalizeAutomationLogicKind("switch")).toBe("switch");

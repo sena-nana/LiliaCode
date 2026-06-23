@@ -3277,6 +3277,28 @@ button.chat-composer__context-action:active:not(:disabled) {
   transition: gap 0.18s ease;
 }
 
+.chat-composer__route-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.chat-composer__route-suggestion-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-composer__entry-row .chat-composer__input,
 .chat-composer__entry-row .chat-composer__rich-input {
   flex: 1 1 auto;
